@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { DomainService } from './services/domainService';
 import { DomainTreeProvider } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
+import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 
 export function activate(context: vscode.ExtensionContext): void {
   console.log('dbt Semantic Designer is now active');
@@ -15,11 +16,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const domainService = new DomainService();
   const treeProvider = new DomainTreeProvider(domainService, workspaceRoot);
   const editorProvider = new SemanticEditorProvider(context, domainService);
+  const decorationProvider = new SemanticFileDecorationProvider();
 
   context.subscriptions.push(
     treeProvider,
+    decorationProvider,
     vscode.window.registerTreeDataProvider('dbtSemantic.domainTree', treeProvider),
     vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
+    vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.commands.registerCommand('dbtSemantic.openDomain', (filePath: string) => {
       vscode.commands.executeCommand(
         'vscode.openWith',

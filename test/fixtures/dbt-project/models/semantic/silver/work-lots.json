@@ -83,10 +83,22 @@
       "elk.direction": "RIGHT"
     },
     "positions": {
-      "dim_work_lot": { "x": 350, "y": 100 },
-      "dim_project": { "x": 50, "y": 100 },
-      "dim_work_lot_status": { "x": 350, "y": 400 },
-      "brg_lot_contractor": { "x": 700, "y": 250 }
+      "dim_work_lot": {
+        "x": 372,
+        "y": 34
+      },
+      "dim_project": {
+        "x": 732,
+        "y": 34
+      },
+      "dim_work_lot_status": {
+        "x": 12,
+        "y": 160
+      },
+      "brg_lot_contractor": {
+        "x": 12,
+        "y": 12
+      }
     }
   }
 }

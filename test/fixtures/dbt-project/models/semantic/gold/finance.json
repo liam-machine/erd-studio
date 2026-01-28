@@ -10,5 +10,12 @@
     }
   ],
   "relationships": [],
-  "viewConfig": {}
+  "viewConfig": {
+    "positions": {
+      "fct_transactions": {
+        "x": 12,
+        "y": 12
+      }
+    }
+  }
 }
