@@ -4,3 +4,4 @@ out/
 out-webview/
 *.vsix
 .vscode-test/
+dev-preview.html

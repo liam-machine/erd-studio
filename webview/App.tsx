@@ -15,15 +15,20 @@ import {
   BackgroundVariant,
   Controls,
   type Viewport,
+  type NodeTypes,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { useEditorStore } from './store/editorStore';
+import { ModelNode } from './components/Graph/ModelNode';
 
 // ---------------------------------------------------------------------------
 // Inner component (must be inside ReactFlowProvider)
 // ---------------------------------------------------------------------------
+
+/** Custom node types for React Flow — must be memoised or stable. */
+const nodeTypes: NodeTypes = { model: ModelNode };
 
 function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
@@ -82,6 +87,7 @@ function EditorCanvas() {
       <ReactFlow
         nodes={[]}
         edges={[]}
+        nodeTypes={nodeTypes}
         onMoveEnd={onMoveEnd}
         fitView
         proOptions={{ hideAttribution: true }}

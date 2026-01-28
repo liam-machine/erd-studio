@@ -1,0 +1,180 @@
+/**
+ * ModelNode styles.
+ *
+ * Uses design tokens from webview/styles/theme.css for VS Code theme
+ * compatibility. Status colours (built/design/missing) are defined there.
+ */
+
+/* -----------------------------------------------------------------------
+   Card
+   ----------------------------------------------------------------------- */
+
+.model-node {
+  min-width: 200px;
+  max-width: 320px;
+  background: var(--editor-bg);
+  border: 2px solid var(--panel-border);
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+/* -----------------------------------------------------------------------
+   Status variants
+   ----------------------------------------------------------------------- */
+
+.model-node--built {
+  border-color: var(--model-built);
+}
+
+.model-node--design {
+  border-color: var(--model-design);
+}
+
+.model-node--design .model-node__header {
+  background: var(--model-design);
+  color: #fff;
+}
+
+.model-node--missing {
+  border-color: var(--model-missing);
+  opacity: 0.8;
+}
+
+/* -----------------------------------------------------------------------
+   Header
+   ----------------------------------------------------------------------- */
+
+.model-node__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--panel-border);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.model-node__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-node__badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* Keep badge readable on the orange design header */
+.model-node--design .model-node__badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* -----------------------------------------------------------------------
+   Columns
+   ----------------------------------------------------------------------- */
+
+.model-node__columns {
+  padding: 2px 0;
+}
+
+.model-node__column {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  line-height: 1.4;
+}
+
+.model-node__column:hover {
+  background: var(--selection-bg);
+}
+
+.model-node__col-indicators {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.model-node__pk,
+.model-node__fk {
+  display: inline-block;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.3px;
+}
+
+.model-node__pk {
+  background: rgba(234, 179, 8, 0.2);
+  color: #ca8a04;
+}
+
+.model-node__fk {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+
+.model-node__col-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-node__col-type {
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.model-node__empty {
+  padding: 8px 10px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-style: italic;
+  text-align: center;
+}
+
+/* -----------------------------------------------------------------------
+   Footer
+   ----------------------------------------------------------------------- */
+
+.model-node__footer {
+  padding: 4px 10px;
+  border-top: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  text-align: center;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+/* -----------------------------------------------------------------------
+   Handles (per-column connection points)
+   ----------------------------------------------------------------------- */
+
+/* Size and colour are set via inline style to avoid !important overrides
+   against React Flow's default handle styles. Only opacity/transition live
+   here so the hover reveal works via pure CSS. */
+.model-node__handle {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.model-node:hover .model-node__handle {
+  opacity: 1;
+}

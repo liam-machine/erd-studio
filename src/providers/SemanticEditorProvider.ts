@@ -111,6 +111,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'),
     );
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'),
+    );
 
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -122,6 +125,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       script-src ${webview.cspSource} 'nonce-${nonce}';
       style-src ${webview.cspSource} 'unsafe-inline';">
   <title>Semantic Domain Editor</title>
+  <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
   <div id="root"></div>
