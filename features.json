@@ -234,7 +234,7 @@
       "name": "Implement node position persistence",
       "description": "Enable drag-to-reposition of model nodes with debounced persistence. When a user drags a node, update that model's entry in viewConfig.positions immediately in the webview state, then debounce the write to the semantic domain JSON file via the extension host. Positions are loaded from viewConfig.positions on open. Auto Layout overwrites all positions.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F108", "F104"],
       "validation_criteria": [

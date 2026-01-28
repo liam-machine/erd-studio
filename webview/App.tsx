@@ -21,6 +21,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
+import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
@@ -59,6 +60,9 @@ function EditorCanvas() {
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
+
+  // Position persistence: debounced writes on node drag.
+  const { onNodesChange } = usePositionPersistence();
 
   const onMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
@@ -103,6 +107,7 @@ function EditorCanvas() {
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        onNodesChange={onNodesChange}
         onMoveEnd={onMoveEnd}
         fitView
         proOptions={{ hideAttribution: true }}
