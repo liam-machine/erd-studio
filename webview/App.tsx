@@ -17,6 +17,7 @@ import {
   type Viewport,
   type NodeTypes,
   type EdgeTypes,
+  type OnSelectionChangeFunc,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -27,7 +28,9 @@ import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { StatusBar } from './components/Toolbar/StatusBar';
+import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { transformDomain } from './lib/graphTransformer';
+import type { ModelFlowNode } from './types/graph';
 
 // ---------------------------------------------------------------------------
 // Inner component (must be inside ReactFlowProvider)
@@ -49,6 +52,8 @@ function EditorCanvas() {
   const setViewport = useEditorStore((s) => s.setViewport);
   const setNodes = useEditorStore((s) => s.setNodes);
   const setEdges = useEditorStore((s) => s.setEdges);
+  const selectNode = useEditorStore((s) => s.selectNode);
+  const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -85,6 +90,26 @@ function EditorCanvas() {
     [setViewport],
   );
 
+  // Handle node clicks to open the detail panel.
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, node: ModelFlowNode) => {
+      selectNode(node.id);
+      setDetailPanelOpen(true);
+    },
+    [selectNode, setDetailPanelOpen],
+  );
+
+  // Close detail panel when multi-selecting (selection mismatch with single-node panel).
+  const onSelectionChange: OnSelectionChangeFunc = useCallback(
+    ({ nodes: selectedNodes }) => {
+      if (selectedNodes.length !== 1) {
+        setDetailPanelOpen(false);
+        selectNode(null);
+      }
+    },
+    [selectNode, setDetailPanelOpen],
+  );
+
   // --- Error state -----------------------------------------------------------
 
   if (error) {
@@ -115,6 +140,8 @@ function EditorCanvas() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
+        onNodeClick={onNodeClick}
+        onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
         fitView
         selectionOnDrag
@@ -125,6 +152,7 @@ function EditorCanvas() {
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Toolbar nodes={nodes} edges={edges} />
         <StatusBar />
+        <DetailPanel />
       </ReactFlow>
     </div>
   );
