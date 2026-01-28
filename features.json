@@ -144,7 +144,7 @@
       "name": "Set up webview scaffold with React and React Flow",
       "description": "Create the webview entry point (webview/index.tsx, webview/App.tsx) with React 18 and React Flow (@xyflow/react). Set up the useVsCodeApi hook (singleton acquireVsCodeApi wrapper) and useMessageBus hook (typed message send/receive). Create the Zustand store (webview/store/editorStore.ts) for webview state. Set up VS Code CSS variable mappings in webview/styles/theme.css for theme-native styling.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F100"],
       "validation_criteria": [

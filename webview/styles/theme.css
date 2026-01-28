@@ -1,0 +1,105 @@
+/*
+ * VS Code theme integration for the webview.
+ *
+ * Maps VS Code's CSS custom properties to semantic tokens used throughout
+ * the graph editor. All colours automatically adapt when the user switches
+ * between light, dark, and high-contrast themes.
+ *
+ * VS Code injects its custom properties (--vscode-*) into every webview.
+ * We re-export them here under shorter aliases and define graph-specific
+ * design tokens (model status colours, etc.).
+ */
+
+/* -----------------------------------------------------------------------
+   Reset & base
+   ----------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-font-family, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  font-weight: var(--vscode-font-weight, 400);
+}
+
+/* -----------------------------------------------------------------------
+   Design tokens — editor surfaces
+   ----------------------------------------------------------------------- */
+
+:root {
+  /* Surfaces */
+  --editor-bg: var(--vscode-editor-background);
+  --editor-fg: var(--vscode-editor-foreground);
+  --panel-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --panel-border: var(--vscode-panel-border, var(--vscode-editorGroup-border, #444));
+
+  /* Interactive */
+  --button-bg: var(--vscode-button-background);
+  --button-fg: var(--vscode-button-foreground);
+  --button-hover-bg: var(--vscode-button-hoverBackground);
+  --input-bg: var(--vscode-input-background);
+  --input-fg: var(--vscode-input-foreground);
+  --input-border: var(--vscode-input-border, transparent);
+
+  /* Focus & selection */
+  --focus-border: var(--vscode-focusBorder);
+  --selection-bg: var(--vscode-editor-selectionBackground);
+
+  /* Status colours */
+  --error-fg: var(--vscode-errorForeground);
+  --warning-fg: var(--vscode-editorWarning-foreground, #cca700);
+
+  /* -----------------------------------------------------------------------
+     Design tokens — model status colours
+     ----------------------------------------------------------------------- */
+
+  /* Built (exists in manifest) — green */
+  --model-built: #22c55e;
+  --model-built-bg: rgba(34, 197, 94, 0.08);
+
+  /* Design (planned, not yet in manifest) — orange */
+  --model-design: #f97316;
+  --model-design-bg: rgba(249, 115, 22, 0.08);
+
+  /* Missing (repo model not found in manifest) — grey */
+  --model-missing: #6b7280;
+  --model-missing-bg: rgba(107, 114, 128, 0.08);
+
+  /* -----------------------------------------------------------------------
+     Design tokens — edge colours
+     ----------------------------------------------------------------------- */
+
+  /* Built FK relationship — blue */
+  --edge-built: #3b82f6;
+
+  /* Design FK relationship — orange */
+  --edge-design: #f97316;
+}
+
+/* -----------------------------------------------------------------------
+   React Flow overrides — ensure canvas fills the editor and respects theme
+   ----------------------------------------------------------------------- */
+
+.react-flow {
+  background-color: var(--editor-bg);
+}
+
+.react-flow__attribution {
+  display: none;
+}

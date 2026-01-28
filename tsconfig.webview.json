@@ -4,7 +4,7 @@
     "target": "ES2020",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "rootDir": "./webview",
+    "rootDir": ".",
     "outDir": "./out-webview",
     "sourceMap": true,
     "strict": true,
@@ -17,6 +17,6 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["webview/**/*"],
+  "include": ["webview/**/*", "src/types/**/*"],
   "exclude": ["node_modules"]
 }
