@@ -9,6 +9,10 @@
       "source": "repo"
     },
     {
+      "name": "dim_project",
+      "source": "repo"
+    },
+    {
       "name": "dim_work_lot_status",
       "source": "design",
       "schema": "silver",
@@ -24,11 +28,25 @@
           "name": "work_lot_id",
           "dataType": "INT",
           "description": "FK to dim_work_lot"
+        }
+      ]
+    },
+    {
+      "name": "brg_lot_contractor",
+      "source": "design",
+      "schema": "silver",
+      "description": "Bridge table linking work lots to contractors",
+      "columns": [
+        {
+          "name": "bridge_id",
+          "dataType": "INT",
+          "description": "Surrogate key",
+          "isPrimaryKey": true
         },
         {
-          "name": "status",
-          "dataType": "VARCHAR",
-          "description": "Current status label"
+          "name": "work_lot_id",
+          "dataType": "INT",
+          "description": "FK to dim_work_lot"
         }
       ]
     }
@@ -48,6 +66,14 @@
       "toColumn": "work_lot_id",
       "cardinality": "many-to-one",
       "source": "design"
+    },
+    {
+      "fromModel": "brg_lot_contractor",
+      "fromColumn": "work_lot_id",
+      "toModel": "dim_work_lot",
+      "toColumn": "work_lot_id",
+      "cardinality": "one-to-one",
+      "source": "design"
     }
   ],
   "viewConfig": {
@@ -59,7 +85,8 @@
     "positions": {
       "dim_work_lot": { "x": 350, "y": 100 },
       "dim_project": { "x": 50, "y": 100 },
-      "dim_work_lot_status": { "x": 350, "y": 350 }
+      "dim_work_lot_status": { "x": 350, "y": 400 },
+      "brg_lot_contractor": { "x": 700, "y": 250 }
     }
   }
 }

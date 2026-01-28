@@ -36,6 +36,23 @@
   cursor: not-allowed;
 }
 
+/* Confirmation prompt */
+.auto-layout-confirm__label {
+  font-size: 12px;
+  color: var(--editor-fg);
+  padding: 4px 0;
+}
+
+.auto-layout-button--confirm {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: var(--button-bg);
+}
+
+.auto-layout-button--cancel {
+  background: transparent;
+}
+
 /* Spinner for loading state */
 .auto-layout-button__spinner {
   display: inline-block;

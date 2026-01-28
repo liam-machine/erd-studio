@@ -6,7 +6,8 @@
  * then updates node positions optimistically in the store and sends
  * the new positions to the extension host for JSON persistence.
  *
- * Shows a confirmation dialog before replacing existing positions.
+ * Shows an inline confirmation prompt before replacing existing positions.
+ * (VS Code webviews block `window.confirm()`, so we use in-panel UI.)
  */
 
 import { useState, useCallback } from 'react';
@@ -38,26 +39,14 @@ export function AutoLayoutButton({ nodes, edges }: AutoLayoutButtonProps) {
   const domain = useEditorStore((s) => s.domain);
   const setDomain = useEditorStore((s) => s.setDomain);
   const [isLayouting, setIsLayouting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
-  const handleAutoLayout = useCallback(async () => {
+  const runLayout = useCallback(async () => {
     if (!domain || nodes.length === 0 || isLayouting) {
       return;
     }
 
-    // Check if positions already exist — ask for confirmation before replacing.
-    const existingPositions = domain.viewConfig.positions ?? {};
-    const hasPositions = Object.keys(existingPositions).length > 0;
-
-    if (hasPositions) {
-      // eslint-disable-next-line no-restricted-globals
-      const confirmed = confirm(
-        'This will rearrange all nodes. Continue?',
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
-
+    setConfirming(false);
     setIsLayouting(true);
 
     try {
@@ -97,11 +86,51 @@ export function AutoLayoutButton({ nodes, edges }: AutoLayoutButtonProps) {
     }
   }, [domain, nodes, edges, isLayouting, setDomain, fitView, vscode]);
 
+  const handleClick = useCallback(() => {
+    if (!domain || nodes.length === 0 || isLayouting) {
+      return;
+    }
+
+    // If positions already exist, show inline confirmation first.
+    const existingPositions = domain.viewConfig.positions ?? {};
+    const hasPositions = Object.keys(existingPositions).length > 0;
+
+    if (hasPositions) {
+      setConfirming(true);
+    } else {
+      runLayout();
+    }
+  }, [domain, nodes, isLayouting, runLayout]);
+
+  // --- Inline confirmation prompt -------------------------------------------
+
+  if (confirming) {
+    return (
+      <Panel position="top-right" className="auto-layout-panel">
+        <span className="auto-layout-confirm__label">Rearrange all nodes?</span>
+        <button
+          className="auto-layout-button auto-layout-button--confirm"
+          onClick={runLayout}
+        >
+          Continue
+        </button>
+        <button
+          className="auto-layout-button auto-layout-button--cancel"
+          onClick={() => setConfirming(false)}
+        >
+          Cancel
+        </button>
+      </Panel>
+    );
+  }
+
+  // --- Default button -------------------------------------------------------
+
   return (
     <Panel position="top-right" className="auto-layout-panel">
       <button
         className="auto-layout-button"
-        onClick={handleAutoLayout}
+        onClick={handleClick}
         disabled={isLayouting || nodes.length === 0}
         title="Auto-layout nodes using ELK algorithm"
       >
