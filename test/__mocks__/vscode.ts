@@ -12,6 +12,7 @@ export const workspace = {
     onDidDelete: () => ({ dispose: () => {} }),
     dispose: () => {},
   }),
+  onDidChangeTextDocument: () => ({ dispose: () => {} }),
   fs: {
     readFile: async () => Buffer.from('{}'),
     writeFile: async () => {},
@@ -34,6 +35,7 @@ export const window = {
     dispose: () => {},
   }),
   registerTreeDataProvider: () => ({ dispose: () => {} }),
+  registerCustomEditorProvider: () => ({ dispose: () => {} }),
 };
 
 export const commands = {
@@ -41,14 +43,21 @@ export const commands = {
   executeCommand: async () => undefined,
 };
 
-export const Uri = {
-  file: (path: string) => ({ fsPath: path, scheme: 'file', path }),
-  parse: (uri: string) => ({ fsPath: uri, scheme: 'file', path: uri }),
-  joinPath: (base: { path: string }, ...segments: string[]) => ({
-    fsPath: [base.path, ...segments].join('/'),
+/** Creates a mock URI that stringifies to its path (matching VS Code webview behaviour). */
+function createUri(uriPath: string) {
+  return {
+    fsPath: uriPath,
     scheme: 'file',
-    path: [base.path, ...segments].join('/'),
-  }),
+    path: uriPath,
+    toString: () => uriPath,
+  };
+}
+
+export const Uri = {
+  file: (path: string) => createUri(path),
+  parse: (uri: string) => createUri(uri),
+  joinPath: (base: { path: string }, ...segments: string[]) =>
+    createUri([base.path, ...segments].join('/')),
 };
 
 export enum TreeItemCollapsibleState {
@@ -111,4 +120,79 @@ export enum ViewColumn {
   Beside = -2,
   One = 1,
   Two = 2,
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for testing CustomTextEditorProvider
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a mock WebviewPanel for use in unit tests.
+ * Message handlers are captured so tests can simulate postMessage from webview.
+ */
+export function createMockWebviewPanel() {
+  const messageHandlers: Array<(message: unknown) => void> = [];
+  const viewStateHandlers: Array<(e: { webviewPanel: { visible: boolean } }) => void> = [];
+  const disposeHandlers: Array<() => void> = [];
+  const postedMessages: unknown[] = [];
+
+  const panel = {
+    webview: {
+      html: '',
+      options: {} as Record<string, unknown>,
+      cspSource: 'https://mock-csp-source',
+      asWebviewUri: (uri: any) => uri,
+      postMessage: async (message: unknown) => {
+        postedMessages.push(message);
+        return true;
+      },
+      onDidReceiveMessage: (handler: (message: unknown) => void) => {
+        messageHandlers.push(handler);
+        return { dispose: () => {} };
+      },
+    },
+    onDidChangeViewState: (handler: (e: { webviewPanel: { visible: boolean } }) => void) => {
+      viewStateHandlers.push(handler);
+      return { dispose: () => {} };
+    },
+    onDidDispose: (handler: () => void) => {
+      disposeHandlers.push(handler);
+      return { dispose: () => {} };
+    },
+    visible: true,
+    active: true,
+    dispose: () => {},
+
+    // Test helpers (not part of VS Code API)
+    _simulateMessage: (message: unknown) => {
+      for (const handler of messageHandlers) {
+        handler(message);
+      }
+    },
+    _simulateViewStateChange: (visible: boolean) => {
+      for (const handler of viewStateHandlers) {
+        handler({ webviewPanel: { visible } });
+      }
+    },
+    _postedMessages: postedMessages,
+  };
+
+  return panel;
+}
+
+/**
+ * Create a mock TextDocument for use in unit tests.
+ */
+export function createMockTextDocument(fsPath: string, text = '{}') {
+  return {
+    uri: Uri.file(fsPath),
+    getText: () => text,
+    lineCount: text.split('\n').length,
+  };
+}
+
+export class CancellationTokenSource {
+  token = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) };
+  cancel() { this.token.isCancellationRequested = true; }
+  dispose() {}
 }

@@ -126,7 +126,7 @@
       "name": "Create SemanticEditorProvider (custom text editor)",
       "description": "Implement SemanticEditorProvider (src/providers/SemanticEditorProvider.ts) as a CustomTextEditorProvider that opens semantic JSON files in a React webview instead of the default JSON editor. Register with viewType 'dbtSemantic.domainEditor' and selector '**/models/semantic/**/*.json' with priority 'option'. Handle the extension-webview message protocol: listen for 'ready' message from webview, send 'domainLoaded' with reconciled domain data.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F100", "F102"],
       "validation_criteria": [
