@@ -273,7 +273,7 @@
       "name": "Create toolbar with zoom, fit view, and mode display",
       "description": "Implement the Toolbar component (webview/components/Toolbar/Toolbar.tsx) with zoom in/out buttons, fit view button (centres the graph), Auto Layout button (triggers ELK), and domain info display (domain name and layer). For Phase 1, show browse mode only (design mode toggle comes in Phase 2). Include a status bar at the bottom showing model count and relationship count.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F105", "F109"],
       "validation_criteria": [

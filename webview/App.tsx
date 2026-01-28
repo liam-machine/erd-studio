@@ -13,7 +13,6 @@ import {
   ReactFlowProvider,
   Background,
   BackgroundVariant,
-  Controls,
   SelectionMode,
   type Viewport,
   type NodeTypes,
@@ -26,7 +25,8 @@ import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
-import { AutoLayoutButton } from './components/Graph/AutoLayoutButton';
+import { Toolbar } from './components/Toolbar/Toolbar';
+import { StatusBar } from './components/Toolbar/StatusBar';
 import { transformDomain } from './lib/graphTransformer';
 
 // ---------------------------------------------------------------------------
@@ -123,8 +123,8 @@ function EditorCanvas() {
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-        <Controls showInteractive={false} />
-        <AutoLayoutButton nodes={nodes} edges={edges} />
+        <Toolbar nodes={nodes} edges={edges} />
+        <StatusBar />
       </ReactFlow>
     </div>
   );

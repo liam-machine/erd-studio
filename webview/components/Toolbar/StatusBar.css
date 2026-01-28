@@ -1,0 +1,27 @@
+/**
+ * StatusBar styles.
+ *
+ * Positioned at bottom-left of the graph editor. Uses VS Code theme tokens
+ * for consistent styling across light/dark themes.
+ */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--editor-fg);
+  opacity: 0.85;
+}
+
+.status-bar__item {
+  font-variant-numeric: tabular-nums;
+}
+
+.status-bar__divider {
+  color: var(--panel-border);
+}

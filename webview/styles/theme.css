@@ -90,6 +90,22 @@ body {
 
   /* Design FK relationship — orange */
   --edge-design: #f97316;
+
+  /* -----------------------------------------------------------------------
+     Design tokens — layer badge colours
+     ----------------------------------------------------------------------- */
+
+  /* Bronze layer */
+  --layer-bronze: #cd7f32;
+  --layer-bronze-bg: rgba(205, 127, 50, 0.2);
+
+  /* Silver layer */
+  --layer-silver: #a0a0a0;
+  --layer-silver-bg: rgba(192, 192, 192, 0.2);
+
+  /* Gold layer */
+  --layer-gold: #d4a800;
+  --layer-gold-bg: rgba(255, 215, 0, 0.2);
 }
 
 /* -----------------------------------------------------------------------
