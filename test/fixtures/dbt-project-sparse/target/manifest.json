@@ -1,0 +1,38 @@
+{
+  "metadata": {},
+  "nodes": {
+    "model.proj.no_columns": {
+      "unique_id": "model.proj.no_columns",
+      "name": "no_columns",
+      "resource_type": "model",
+      "schema": "bronze",
+      "description": "Model with no columns object"
+    },
+    "model.proj.empty_columns": {
+      "unique_id": "model.proj.empty_columns",
+      "name": "empty_columns",
+      "resource_type": "model",
+      "schema": "bronze",
+      "description": "Model with empty columns",
+      "columns": {}
+    },
+    "model.proj.null_fields": {
+      "unique_id": "model.proj.null_fields",
+      "name": "null_fields",
+      "resource_type": "model",
+      "schema": null,
+      "description": null,
+      "columns": {
+        "col1": { "name": "col1", "data_type": null, "description": null }
+      }
+    },
+    "model.proj.missing_name": {
+      "unique_id": "model.proj.missing_name",
+      "resource_type": "model"
+    },
+    "model.proj.no_unique_id": {
+      "name": "no_unique_id",
+      "resource_type": "model"
+    }
+  }
+}

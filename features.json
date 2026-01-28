@@ -71,7 +71,7 @@
       "name": "Implement ManifestService with streaming JSON parser",
       "description": "Create ManifestService (src/services/manifestService.ts) that stream-parses the ~43MB target/manifest.json using stream-json. Only extract the 'nodes' section — skip macros, sources, exposures, metrics to minimise memory. Provide methods: loadManifest(projectPath), getModelColumns(modelName), hasModel(modelName), getModelNames(), and invalidate(). Cache parsed model data in memory.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F100"],
       "validation_criteria": [
