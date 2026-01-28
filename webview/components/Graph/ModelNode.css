@@ -178,3 +178,23 @@
 .model-node:hover .model-node__handle {
   opacity: 1;
 }
+
+/* -----------------------------------------------------------------------
+   Dragging state
+   ----------------------------------------------------------------------- */
+
+/* React Flow wraps nodes in a container with class .react-flow__node.
+   During drag, it adds .dragging to that container. We target the inner
+   .model-node via the parent selector to show a visible outline. */
+
+.react-flow__node.dragging .model-node {
+  opacity: 0.85;
+  box-shadow:
+    0 0 0 2px var(--vscode-focusBorder, #007fd4),
+    0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* Also show handles while dragging for visual consistency */
+.react-flow__node.dragging .model-node__handle {
+  opacity: 1;
+}
