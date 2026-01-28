@@ -7,10 +7,11 @@
  * editor store.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
   Background,
   BackgroundVariant,
   SelectionMode,
@@ -23,12 +24,14 @@ import '@xyflow/react/dist/style.css';
 
 import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
+import { useStatePersistence } from './hooks/useStatePersistence';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { StatusBar } from './components/Toolbar/StatusBar';
 import { DetailPanel } from './components/DetailPanel/DetailPanel';
+import { Toast } from './components/Toast/Toast';
 import { transformDomain } from './lib/graphTransformer';
 import type { ModelFlowNode } from './types/graph';
 
@@ -55,6 +58,25 @@ function EditorCanvas() {
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
 
+  // State persistence (zoom, pan, selection, mode, detail panel)
+  const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
+    useStatePersistence();
+  const { setViewport: setReactFlowViewport } = useReactFlow();
+
+  // Toast notification for invalid selection after restore
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (invalidSelectedNode) {
+      setToastMessage(
+        `Previously selected model "${invalidSelectedNode}" no longer exists.`,
+      );
+    }
+  }, [invalidSelectedNode]);
+
+  // Memoized callback for toast dismissal (prevents timer re-creation)
+  const dismissToast = useCallback(() => setToastMessage(null), []);
+
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
       switch (msg.type) {
@@ -79,6 +101,18 @@ function EditorCanvas() {
       setEdges(newEdges);
     }
   }, [domain, setNodes, setEdges]);
+
+  // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
+  const hasAppliedViewportRef = useRef(false);
+  useEffect(() => {
+    if (nodes.length > 0 && persistedViewport && !hasAppliedViewportRef.current) {
+      hasAppliedViewportRef.current = true;
+      // Use setTimeout to ensure React Flow has finished rendering
+      setTimeout(() => {
+        setReactFlowViewport(persistedViewport);
+      }, 0);
+    }
+  }, [nodes.length, persistedViewport, setReactFlowViewport]);
 
   // Position persistence and selection handling.
   const { onNodesChange } = usePositionPersistence();
@@ -143,7 +177,7 @@ function EditorCanvas() {
         onNodeClick={onNodeClick}
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
-        fitView
+        fitView={!shouldSkipFitView}
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
         panOnDrag={[1, 2]}
@@ -154,6 +188,10 @@ function EditorCanvas() {
         <StatusBar />
         <DetailPanel />
       </ReactFlow>
+
+      {toastMessage && (
+        <Toast message={toastMessage} variant="warning" onDismiss={dismissToast} />
+      )}
     </div>
   );
 }

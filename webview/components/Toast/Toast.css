@@ -1,0 +1,81 @@
+/**
+ * Toast notification styles.
+ *
+ * Uses VS Code theme tokens from webview/styles/theme.css for consistent
+ * dark/light theme support.
+ */
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+
+  background-color: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+
+  max-width: 400px;
+  color: var(--editor-fg);
+  font-size: 13px;
+
+  animation: toast-slide-in 0.2s ease-out;
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast--warning {
+  border-left: 3px solid var(--warning-fg);
+}
+
+.toast--info {
+  border-left: 3px solid var(--focus-border);
+}
+
+.toast__message {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.toast__dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  opacity: 0.7;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: opacity 0.1s ease, background 0.1s ease;
+}
+
+.toast__dismiss:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.toast__dismiss:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}

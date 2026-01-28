@@ -291,7 +291,7 @@
       "name": "Implement detail panel for model inspection",
       "description": "Create the ModelDetail component (webview/components/DetailPanel/ModelDetail.tsx) that shows detailed information about the selected model node in a side panel. Display: model name, layer/schema, source (repo/design), status (built/design/missing), full column list with data types and PK/FK indicators, and FK relationships involving this model. The panel opens when a node is clicked and can be collapsed.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F106"],
       "validation_criteria": [
@@ -309,7 +309,7 @@
       "name": "Implement webview state restoration",
       "description": "Implement state persistence using VS Code's getState()/setState() API so UI state survives when the webview is hidden and revealed. Persist: zoom level, pan offset, selected node name, browse/design mode, detail panel open/closed state. On reveal, the webview sends 'ready' message, receives fresh domain data from extension host, then applies persisted UI state on top.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F105", "F104"],
       "validation_criteria": [
