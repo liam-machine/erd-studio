@@ -1,0 +1,845 @@
+{
+  "project": {
+    "name": "dbt Semantic Designer",
+    "description": "A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains, and provides a design mode for planning new models, columns, and relationships before they are built. The dbt repo becomes the single source of truth for both lineage and semantic relationships.",
+    "version": "0.1.0",
+    "platform": "web",
+    "tech_stack": {
+      "runtime": "VS Code Extension (Node.js host + browser webview)",
+      "language": "TypeScript",
+      "build": "esbuild (dual target: extension host + webview)",
+      "webview_framework": "React 18 + React Flow (@xyflow/react)",
+      "layout_engine": "elkjs",
+      "state_management": "Zustand",
+      "ui_components": "@vscode-elements/elements + @vscode-elements/react-elements",
+      "manifest_parser": "stream-json (streaming JSON for ~43MB manifest)",
+      "unit_tests": "Vitest + @testing-library/react",
+      "integration_tests": "Mocha via @vscode/test-cli + @vscode/test-electron"
+    }
+  },
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Foundation — Extension Scaffold + Read-Only Viewer",
+      "description": "Get a working VS Code extension that displays semantic domain graphs in read-only mode. Open VS Code in a dbt project, see semantic domains in the sidebar, click a domain to open a graph editor showing models and FK edges with colour-coded status.",
+      "order": 1,
+      "status": "pending"
+    },
+    {
+      "id": "phase-2",
+      "name": "Design Mode — Create Models, Columns, and Relationships",
+      "description": "Enable interactive design of new models and relationships. Toggle into design mode to add new design models (orange), define columns, draw FK relationships, and persist all changes to the semantic domain JSON file.",
+      "order": 2,
+      "status": "pending"
+    },
+    {
+      "id": "phase-3",
+      "name": "Domain Management + Auto-Reconciliation",
+      "description": "Full CRUD on domains and automatic orange-to-green transitions. Create and delete domains, add existing manifest models to domains, file watchers detect manifest changes, and design models automatically transition when they appear in the compiled manifest.",
+      "order": 3,
+      "status": "pending"
+    },
+    {
+      "id": "phase-4",
+      "name": "Polish + Developer Experience",
+      "description": "Quality of life improvements, performance optimizations, and edge case handling. Keyboard shortcuts, context menus, search, minimap, export, and error handling.",
+      "order": 4,
+      "status": "pending"
+    }
+  ],
+  "features": [
+    {
+      "id": "F100",
+      "name": "Set up extension project scaffold",
+      "description": "Create the VS Code extension project structure with esbuild dual build (extension host + webview), two TypeScript configs (tsconfig.json for Node.js and tsconfig.webview.json for DOM), package.json with extension manifest contribution points (commands, views, custom editor, settings, activation events), and .vscodeignore. Include the full directory structure as specified in the plan: src/ (extension host), webview/ (React), media/, test/.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": [],
+      "validation_criteria": [
+        "Run 'npm run build' and verify both extension host and webview bundles are produced without errors",
+        "Run 'tsc --noEmit' for both tsconfigs and verify no type errors",
+        "Open project in VS Code and press F5 — Extension Development Host window launches",
+        "Verify package.json contains all contribution points: commands, viewsContainers, views, customEditors, configuration, activationEvents"
+      ],
+      "implementation_notes": "esbuild.js handles dual build targets. Extension host targets Node.js, webview targets browser/DOM. Use 'workspaceContains:**/dbt_project.yml' as activation event. Custom editor selector: '**/models/semantic/**/*.json' with priority 'option'.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F101",
+      "name": "Implement ManifestService with streaming JSON parser",
+      "description": "Create ManifestService (src/services/manifestService.ts) that stream-parses the ~43MB target/manifest.json using stream-json. Only extract the 'nodes' section — skip macros, sources, exposures, metrics to minimise memory. Provide methods: loadManifest(projectPath), getModelColumns(modelName), hasModel(modelName), getModelNames(), and invalidate(). Cache parsed model data in memory.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F100"],
+      "validation_criteria": [
+        "Unit test: loadManifest parses a sample manifest fixture and returns model data",
+        "Unit test: getModelColumns returns correct columns for a known model",
+        "Unit test: hasModel returns true for existing models, false for non-existent",
+        "Unit test: invalidate() clears cache and next call re-parses",
+        "Verify stream-json does not block the extension host during parse (non-blocking async)"
+      ],
+      "implementation_notes": "Use stream-json with streamValues + filter to extract only the nodes section. The manifest is at target/manifest.json relative to workspace root. Models in manifest are keyed like 'model.project_name.model_name'. Column info includes name, data_type, description. This runs in the extension host (Node.js), not the webview.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F102",
+      "name": "Implement DomainService for reading semantic domain JSON",
+      "description": "Create DomainService (src/services/domainService.ts) with read operations: listDomains() to discover all domain JSON files under models/semantic/, getDomain(layer, domain) to read and parse a specific domain file. Return typed SemanticDomain objects. Define TypeScript types in src/types/semantic.ts covering the full semantic domain JSON schema (schemaVersion, domain, layer, description, models, relationships, viewConfig).",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F100"],
+      "validation_criteria": [
+        "Unit test: listDomains discovers all .json files under models/semantic/ grouped by layer",
+        "Unit test: getDomain reads and parses a valid domain file into a typed SemanticDomain object",
+        "Unit test: getDomain handles missing files with appropriate error",
+        "Verify TypeScript types match the semantic domain JSON schema from the plan"
+      ],
+      "implementation_notes": "Files live at {dbt_project}/models/semantic/{layer}/{domain}.json. Use VS Code workspace APIs for file access. Types in src/types/semantic.ts should include: SemanticDomain, SemanticModel (with source: 'repo' | 'design'), ColumnDef, Relationship, ViewConfig. Include schemaVersion checking.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F103",
+      "name": "Create DomainTreeProvider for sidebar tree view",
+      "description": "Implement DomainTreeProvider (src/providers/DomainTreeProvider.ts) as a VS Code TreeDataProvider that lists all semantic domains grouped by layer (bronze, silver, gold) in the sidebar. Show model count and design model count as badges. Include a 'New Domain...' item at the bottom. Clicking a domain should open its graph editor.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F102"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: sidebar shows 'Semantic Domains' view container with activity bar icon",
+        "Verify in Extension Development Host: tree view lists domains grouped under Bronze, Silver, Gold folders",
+        "Verify in Extension Development Host: each domain item shows model count badge",
+        "Verify in Extension Development Host: clicking a domain opens the graph editor panel"
+      ],
+      "implementation_notes": "Register as 'dbtSemantic.domainTree' view. Use TreeItem with collapsibleState for layer folders. Badge text format: '12 models, 3 design'. The tree view should refresh when domain files change. Layer folders appear even when empty to show available layers.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F104",
+      "name": "Create SemanticEditorProvider (custom text editor)",
+      "description": "Implement SemanticEditorProvider (src/providers/SemanticEditorProvider.ts) as a CustomTextEditorProvider that opens semantic JSON files in a React webview instead of the default JSON editor. Register with viewType 'dbtSemantic.domainEditor' and selector '**/models/semantic/**/*.json' with priority 'option'. Handle the extension-webview message protocol: listen for 'ready' message from webview, send 'domainLoaded' with reconciled domain data.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F100", "F102"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: opening a semantic JSON file shows the custom editor (not raw JSON)",
+        "Verify in Extension Development Host: user can right-click and choose 'Open With...' to view raw JSON instead",
+        "Verify the webview receives domainLoaded message after sending 'ready'",
+        "Verify VS Code manages save/dirty state for the underlying text document"
+      ],
+      "implementation_notes": "Using CustomTextEditorProvider because semantic JSON files are text documents — VS Code manages save/dirty state. The extension host reads the document, reconciles with manifest, and sends enriched data to the webview via postMessage. Implement update loop prevention: set a pendingUpdate flag when writing via WorkspaceEdit to avoid re-sending to webview on the resulting onDidChangeTextDocument event.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F105",
+      "name": "Set up webview scaffold with React and React Flow",
+      "description": "Create the webview entry point (webview/index.tsx, webview/App.tsx) with React 18 and React Flow (@xyflow/react). Set up the useVsCodeApi hook (singleton acquireVsCodeApi wrapper) and useMessageBus hook (typed message send/receive). Create the Zustand store (webview/store/editorStore.ts) for webview state. Set up VS Code CSS variable mappings in webview/styles/theme.css for theme-native styling.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F100"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: webview renders a React Flow canvas inside the custom editor",
+        "Verify the webview correctly acquires VS Code API and sends 'ready' message on mount",
+        "Verify theme.css maps VS Code CSS custom properties for consistent theming",
+        "Verify Zustand store initialises with default state (browse mode, no selected node)"
+      ],
+      "implementation_notes": "Use acquireVsCodeApi() singleton pattern — can only be called once per webview lifecycle. The webview/styles/theme.css should use VS Code's CSS custom properties (--vscode-editor-background, --vscode-editor-foreground, etc.). The Zustand store manages: mode (browse/design), selectedNode, zoom/pan, detailPanelOpen. Also integrate @vscode-elements/elements + @vscode-elements/react-elements for VS Code-native form elements.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F106",
+      "name": "Implement ModelNode component",
+      "description": "Create the ModelNode React component (webview/components/Graph/ModelNode.tsx) for displaying model cards in the React Flow canvas. Show model name with layer badge (e.g. [SLV]), list columns with PK (key icon) and FK (link icon) indicators, column data types, and a column count footer. Apply green border for built models, orange for design models, and grey for missing models.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F105"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: model nodes display with correct name and layer badge",
+        "Verify in Extension Development Host: columns show PK/FK indicators and data types",
+        "Verify in Extension Development Host: built models have green border, design models have orange border, missing models have grey border",
+        "Verify in Extension Development Host: column count is shown in the footer"
+      ],
+      "implementation_notes": "Register as a custom React Flow node type. React Flow handles for FK edges should connect at specific column positions (for ELK port constraints). Colour values: green #22c55e, orange #f97316, grey #6b7280. Design model nodes have an orange header bar. The layer badge reads from the schema field for design models.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F107",
+      "name": "Implement FkEdge component",
+      "description": "Create the FkEdge React component (webview/components/Graph/FkEdge.tsx) for displaying FK relationship edges in the React Flow canvas. Show cardinality labels on edges. Apply blue colour for built relationships and orange for design relationships. Use dashed lines for 1:1 cardinality and solid lines for many-to-one / one-to-many.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F105"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: FK edges render between connected models",
+        "Verify in Extension Development Host: edge labels show cardinality (e.g. 'many-to-one')",
+        "Verify in Extension Development Host: built relationships are blue (#3b82f6), design relationships are orange (#f97316)",
+        "Verify in Extension Development Host: 1:1 edges are dashed, many-to-one edges are solid"
+      ],
+      "implementation_notes": "Register as a custom React Flow edge type. Edge colours: blue #3b82f6 (built), orange #f97316 (design). Relationship identity is composite key: (fromModel, fromColumn, toModel, toColumn), supporting multiple FKs between the same models.",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F108",
+      "name": "Implement graph transformer (models to React Flow nodes/edges)",
+      "description": "Create graphTransformer (webview/lib/graphTransformer.ts) that converts a ReconciledDomain (models with resolved status and columns) into React Flow nodes and edges. Map each model to a ModelNode with position from viewConfig.positions, and each relationship to an FkEdge. Also create colorScheme (webview/lib/colorScheme.ts) with the colour logic for model status.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F106", "F107"],
+      "validation_criteria": [
+        "Unit test: transformer converts a domain with 3 models and 2 relationships into correct React Flow nodes and edges",
+        "Unit test: positions are loaded from viewConfig.positions; models without positions default to (0,0)",
+        "Unit test: colorScheme returns correct colours for built/design/missing status",
+        "Verify in Extension Development Host: opening a domain renders all models and edges correctly positioned"
+      ],
+      "implementation_notes": "Models without a saved position in viewConfig.positions should be placed at (0, 0) and flagged for the user to position manually or trigger auto-layout. The transformer is a pure function, easily unit testable.",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F109",
+      "name": "Integrate ELK layout with Auto Layout button",
+      "description": "Implement ELK layout integration (webview/lib/elkLayout.ts) using elkjs. Set up the ELK Web Worker using blob URL pattern (VS Code webviews cannot use importScripts). Create the Auto Layout button in the toolbar that runs ELK over the full graph and writes resulting positions back to viewConfig.positions. Show a confirmation dialog if positions already exist ('This will rearrange all nodes. Continue?'). Default ELK options: layered algorithm, RIGHT direction, ORTHOGONAL edge routing, 16:9 aspect ratio, FIXED_ORDER port constraints.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F108"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: clicking 'Auto Layout' arranges all nodes in a clean layered layout",
+        "Verify in Extension Development Host: confirmation dialog appears when positions already exist",
+        "Verify ELK runs in a Web Worker and does not block the UI thread",
+        "Verify new positions are persisted to the domain JSON viewConfig.positions"
+      ],
+      "implementation_notes": "VS Code webviews cannot use importScripts or dynamic import() for workers. Bundle the ELK worker into a single file with esbuild, then load via blob URL: import elkWorkerCode from './elk-worker.js?raw'; const workerBlob = new Blob([elkWorkerCode], { type: 'text/javascript' }); const workerUrl = URL.createObjectURL(workerBlob); const elk = new ELK({ workerUrl }). Default ELK config is stored in domain JSON viewConfig.layoutOptions and can be overridden per-domain.",
+      "category": "ui",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "F110",
+      "name": "Implement node position persistence",
+      "description": "Enable drag-to-reposition of model nodes with debounced persistence. When a user drags a node, update that model's entry in viewConfig.positions immediately in the webview state, then debounce the write to the semantic domain JSON file via the extension host. Positions are loaded from viewConfig.positions on open. Auto Layout overwrites all positions.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F108", "F104"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: dragging a node saves its new position to the domain JSON",
+        "Verify debouncing: rapid drags result in a single write, not one per pixel",
+        "Verify positions persist across editor close and reopen",
+        "Verify Auto Layout button overwrites all manual positions"
+      ],
+      "implementation_notes": "Positions live in viewConfig.positions in the domain JSON, committed to git so all users see the same layout. Send updatePositions message to extension host with debounced positions. The extension host writes via WorkspaceEdit. On open, positions are loaded from the JSON; models without positions get (0,0).",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F111",
+      "name": "Implement ReconciliationService",
+      "description": "Create ReconciliationService (src/services/reconciliationService.ts) that compares the semantic domain JSON against the compiled manifest to determine model/column status. For each model: if source is 'design' and exists in manifest → GREEN (built); if source is 'design' and not in manifest → ORANGE (design); if source is 'repo' and exists in manifest → GREEN; if source is 'repo' and not in manifest → GREY (missing). Resolve columns from manifest for built models, from inline definition for design models.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F101", "F102"],
+      "validation_criteria": [
+        "Unit test: design model not in manifest → status ORANGE, columns from inline definition",
+        "Unit test: design model found in manifest → status GREEN, columns from manifest",
+        "Unit test: repo model found in manifest → status GREEN, columns from manifest",
+        "Unit test: repo model not in manifest → status GREY, warning generated",
+        "Unit test: reconcile returns a complete ReconciledDomain with all models resolved"
+      ],
+      "implementation_notes": "Column resolution rules: repo+manifest=manifest columns, repo+no-manifest=warning+no columns, design+no-manifest=inline columns, design+manifest=manifest columns (model has been built). The reconcile method is called whenever domain data or manifest changes.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F112",
+      "name": "Create toolbar with zoom, fit view, and mode display",
+      "description": "Implement the Toolbar component (webview/components/Toolbar/Toolbar.tsx) with zoom in/out buttons, fit view button (centres the graph), Auto Layout button (triggers ELK), and domain info display (domain name and layer). For Phase 1, show browse mode only (design mode toggle comes in Phase 2). Include a status bar at the bottom showing model count and relationship count.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F105", "F109"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: toolbar renders at the top of the graph editor",
+        "Verify in Extension Development Host: zoom and fit view buttons work correctly",
+        "Verify in Extension Development Host: domain name and layer are displayed in the toolbar",
+        "Verify in Extension Development Host: status bar at the bottom shows model and relationship counts"
+      ],
+      "implementation_notes": "The toolbar is the top bar of the graph editor. Use React Flow's built-in zoom/pan controls API. Status bar format: '12 models (3 design) | 18 relationships'. Auto Layout button is wired to the ELK layout feature (F109).",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F113",
+      "name": "Implement detail panel for model inspection",
+      "description": "Create the ModelDetail component (webview/components/DetailPanel/ModelDetail.tsx) that shows detailed information about the selected model node in a side panel. Display: model name, layer/schema, source (repo/design), status (built/design/missing), full column list with data types and PK/FK indicators, and FK relationships involving this model. The panel opens when a node is clicked and can be collapsed.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F106"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: clicking a model node opens the detail panel on the right",
+        "Verify in Extension Development Host: detail panel shows model name, status, and all columns",
+        "Verify in Extension Development Host: PK and FK columns are indicated",
+        "Verify in Extension Development Host: panel can be collapsed and reopened"
+      ],
+      "implementation_notes": "The detail panel sits on the right side of the graph editor layout. For Phase 1, it's read-only. Column editing comes in Phase 2 (F203). Use @vscode-elements for table-like display of columns.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F114",
+      "name": "Implement webview state restoration",
+      "description": "Implement state persistence using VS Code's getState()/setState() API so UI state survives when the webview is hidden and revealed. Persist: zoom level, pan offset, selected node name, browse/design mode, detail panel open/closed state. On reveal, the webview sends 'ready' message, receives fresh domain data from extension host, then applies persisted UI state on top.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F105", "F104"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: switch to another tab, switch back — zoom and pan position are restored",
+        "Verify in Extension Development Host: selected node and detail panel state are restored after tab switch",
+        "Verify domain data is re-fetched fresh on restore (not stale cached data)",
+        "Verify this does not use retainContextWhenHidden"
+      ],
+      "implementation_notes": "This avoids retainContextWhenHidden which keeps the webview in memory permanently and increases resource usage. Persisted state (getState/setState): zoom, pan, selectedNode, mode, detailPanelOpen. Fresh data: full domain + reconciled status + positions. On reveal: webview sends 'ready', receives domainLoaded, applies persisted UI state.",
+      "category": "infrastructure",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F115",
+      "name": "Define shared TypeScript types and message protocol",
+      "description": "Create comprehensive TypeScript type definitions for the extension-webview communication. In src/types/semantic.ts: SemanticDomain, SemanticModel, ColumnDef, Relationship, ViewConfig, DomainSummary, DesignModel, ReconciledDomain, ReconciledModel. In src/types/messages.ts: ExtensionMessage union type (domainLoaded, domainUpdated, manifestRefreshed, error) and WebviewMessage union type (ready, addModel, addColumn, removeColumn, addRelationship, removeModel, removeRelationship, updateViewConfig, addExistingModel, updatePositions, runAutoLayout).",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F100"],
+      "validation_criteria": [
+        "Types compile without errors under both tsconfig.json and tsconfig.webview.json",
+        "All message types are exhaustively handled in both extension host and webview message handlers",
+        "SemanticDomain type matches the JSON schema defined in the plan",
+        "Types are importable from both extension host and webview code"
+      ],
+      "implementation_notes": "These types are shared between extension host and webview. Ensure they are compatible with both Node.js and DOM TypeScript configs. The message protocol is categorised by direction: Extension→Webview and Webview→Extension as defined in the plan.",
+      "category": "infrastructure",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F116",
+      "name": "Wire up extension activation and command registration",
+      "description": "Implement extension.ts with activate() and deactivate() functions. In activate: initialise ManifestService, DomainService, ReconciliationService, register the DomainTreeProvider, register the SemanticEditorProvider, register all commands (createDomain, openDomain, deleteDomain, refreshManifest). Detect the dbt project root from workspace. The extension activates on workspaceContains:**/dbt_project.yml.",
+      "phase": "phase-1",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F101", "F102", "F103", "F104", "F111"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: extension activates when opening a folder containing dbt_project.yml",
+        "Verify in Extension Development Host: all commands appear in the command palette under 'dbt' category",
+        "Verify in Extension Development Host: sidebar tree view loads with domain listing",
+        "Verify in Extension Development Host: opening a semantic JSON file shows the custom editor"
+      ],
+      "implementation_notes": "Lazy-load services to avoid slowing VS Code activation. The extension detects the project root by finding dbt_project.yml in the workspace. All services are initialised with this project path. Use VS Code Disposable pattern for cleanup in deactivate().",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F200",
+      "name": "Implement browse/design mode toggle",
+      "description": "Add a browse/design mode toggle to the toolbar. In browse mode: view-only graph navigation (pan, zoom, select). In design mode: design palette becomes visible with creation controls. The toggle updates the Zustand store and is persisted via getState()/setState().",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F112"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: toolbar shows Browse Mode / Design Mode toggle",
+        "Verify in Extension Development Host: switching to design mode reveals the design palette",
+        "Verify in Extension Development Host: switching to browse mode hides design controls",
+        "Verify mode persists across webview hide/reveal"
+      ],
+      "implementation_notes": "Design mode activates the DesignPalette component (F201) in the toolbar area. Browse mode is the default on first open. Mode state lives in Zustand and is persisted via VS Code webview getState/setState.",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F201",
+      "name": "Create design palette with add model/column/relationship/delete controls",
+      "description": "Implement DesignPalette component (webview/components/Toolbar/DesignPalette.tsx) that appears in design mode. Provides buttons: '+ Model' (opens new model dialog), '+ Column' (adds column to selected design model), '+ Relationship' (opens new FK dialog), 'Delete' (removes selected design item). Buttons are enabled/disabled contextually (e.g. + Column only enabled when a design model is selected).",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F200"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: design palette shows + Model, + Column, + Relationship, Delete buttons",
+        "Verify in Extension Development Host: + Column is disabled when no design model is selected",
+        "Verify in Extension Development Host: Delete is disabled when nothing is selected",
+        "Verify in Extension Development Host: buttons open their respective dialogs"
+      ],
+      "implementation_notes": "Use @vscode-elements for button styling. The Delete button should work for design models, design columns, and design relationships. It should not allow deleting repo (built) items.",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F202",
+      "name": "Implement New Model dialog with JHG templates",
+      "description": "Create NewModelDialog component (webview/components/Dialogs/NewModelDialog.tsx) for creating design models. Fields: model name, schema, layer (auto-set from domain), description, and template picker. Templates: Dimension (dim_), Fact (fct_), Bridge (brg_), SCD Type 2, Blank. Templates pre-populate columns according to JHG conventions. Placeholder resolution: {name} derived from model name minus prefix, {left}/{right} fields for bridge template. On submit, send addModel message to extension host.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F201"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: clicking '+ Model' opens the new model dialog",
+        "Verify in Extension Development Host: selecting 'Dimension' template pre-populates standard dim columns with {name}_id PK",
+        "Verify in Extension Development Host: Bridge template shows Left/Right entity fields",
+        "Verify in Extension Development Host: submitting the dialog creates an orange design model node on the canvas",
+        "Verify the design model is persisted to the semantic domain JSON file"
+      ],
+      "implementation_notes": "Templates: Dimension (dim_) has {name}_id PK, name, description, is_active, valid_from, valid_to, dwh_inserted_at, dwh_updated_at. Fact (fct_) has {name}_id PK, event_date, amount, dwh_inserted_at, dwh_updated_at. Bridge (brg_) has {name}_id PK, {left}_id FK, {right}_id FK, dwh_inserted_at. SCD2 extends dim with scd_valid_from, scd_valid_to, scd_is_current, scd_hash. Blank has no columns. If model name doesn't start with expected prefix, {name} falls back to full model name. Templates are configurable via extension settings.",
+      "category": "ui",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "F203",
+      "name": "Implement column editor in detail panel",
+      "description": "Create ColumnEditor component (webview/components/DetailPanel/ColumnEditor.tsx) that enables adding, editing, and removing columns on design models. Shown in the detail panel when a design model is selected and design mode is active. New Column Dialog fields: column name, data type (dropdown: INT, VARCHAR, TIMESTAMP, BOOLEAN, NUMERIC, DATE), description, is primary key (checkbox). Column editing sends addColumn/removeColumn messages to extension host.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F113", "F200"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: selecting a design model in design mode shows the column editor",
+        "Verify in Extension Development Host: adding a column updates the model node on the canvas",
+        "Verify in Extension Development Host: removing a column updates the model node on the canvas",
+        "Verify in Extension Development Host: column changes persist to the semantic domain JSON",
+        "Verify in Extension Development Host: column editor is not shown for repo (built) models"
+      ],
+      "implementation_notes": "Use @vscode-elements for form controls (dropdown for data type, checkbox for PK). Repo models show columns read-only from manifest. Only design models allow editing. Use NewColumnDialog (webview/components/Dialogs/NewColumnDialog.tsx) for the add column form.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F204",
+      "name": "Implement New Relationship dialog",
+      "description": "Create NewFkDialog component (webview/components/Dialogs/NewFkDialog.tsx) for creating FK relationships between models. Flow: select source model → source column → target model → target column → cardinality (many-to-one / one-to-one). On submit, send addRelationship message to extension host. The relationship is marked with source: 'design' and renders as an orange edge.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F201"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: clicking '+ Relationship' opens the FK dialog",
+        "Verify in Extension Development Host: dialog allows selecting source model, column, target model, column, and cardinality",
+        "Verify in Extension Development Host: submitting creates an orange FK edge on the canvas",
+        "Verify the relationship is persisted to the semantic domain JSON with source: 'design'"
+      ],
+      "implementation_notes": "Cardinality options: many-to-one, one-to-one. Relationship identity is composite key: (fromModel, fromColumn, toModel, toColumn). This supports multiple FK edges between the same pair of models. Use @vscode-elements dropdowns populated with available models and their columns.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F205",
+      "name": "Implement drag-to-connect FK creation",
+      "description": "Enable creating FK relationships by dragging from a column handle on one model node to another model node on the canvas. When the drag completes, open a simplified relationship dialog pre-filled with the source model and target model, allowing the user to select specific columns and cardinality. This is an alternative to the full New Relationship dialog.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F204", "F106"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: in design mode, dragging from a model to another model initiates FK creation",
+        "Verify in Extension Development Host: the connection dialog pre-fills source and target models",
+        "Verify in Extension Development Host: completing the flow creates an orange FK edge",
+        "Verify in Extension Development Host: drag-to-connect is disabled in browse mode"
+      ],
+      "implementation_notes": "Use React Flow's onConnect callback and custom connection line. The drag starts from a handle on the source model node. On connect, open the NewFkDialog pre-filled with source and target models. Design mode only.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F206",
+      "name": "Implement delete actions for design items",
+      "description": "Enable deleting design models, design columns, and design relationships. The Delete button in the design palette removes the currently selected item. Also support pressing the Delete key. Deleting a design model also removes all its relationships. Show a confirmation dialog before deleting models. Only design items (source: 'design') can be deleted — built/repo items cannot be removed through the UI.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F201"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: selecting a design model and clicking Delete removes it from the canvas",
+        "Verify in Extension Development Host: deleting a model also removes its FK edges",
+        "Verify in Extension Development Host: confirmation dialog appears before model deletion",
+        "Verify in Extension Development Host: repo/built items cannot be deleted",
+        "Verify deletions persist to the semantic domain JSON"
+      ],
+      "implementation_notes": "Send removeModel, removeRelationship messages to extension host. The extension host updates the JSON and sends back domainUpdated. Cascade delete: removing a model also removes all relationships where it is fromModel or toModel. Only items with source: 'design' are deletable.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F207",
+      "name": "Implement DomainService write operations",
+      "description": "Extend DomainService with full write operations: createDomain, updateDomain, deleteDomain, addDesignModel, addRelationship, removeModel, removeRelationship, addColumn, removeColumn. All writes use VS Code's WorkspaceEdit API to modify the semantic domain JSON file on disk. This is the backend for all design mode mutations.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F102"],
+      "validation_criteria": [
+        "Unit test: addDesignModel adds a model with source 'design' to the domain JSON",
+        "Unit test: addRelationship adds a relationship to the domain JSON",
+        "Unit test: removeModel removes the model and cascading relationships",
+        "Unit test: all write operations produce valid JSON matching the schema",
+        "Verify writes use WorkspaceEdit so VS Code tracks dirty state and undo history"
+      ],
+      "implementation_notes": "All mutations go through WorkspaceEdit to integrate with VS Code's undo/redo system. After each write, re-read the document, reconcile, and send domainUpdated to the webview. Implement the update loop prevention (pendingUpdate flag) to avoid infinite cycles from onDidChangeTextDocument events triggered by our own writes.",
+      "category": "infrastructure",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "F208",
+      "name": "Implement undo/redo via WorkspaceEdit",
+      "description": "Ensure all design mutations (add/remove model, column, relationship) work with VS Code's built-in undo/redo. Since all writes go through WorkspaceEdit, VS Code's Ctrl+Z / Ctrl+Shift+Z should undo/redo changes. Verify the webview re-renders correctly after undo/redo by handling onDidChangeTextDocument events.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F207"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: Ctrl+Z undoes the last design change",
+        "Verify in Extension Development Host: Ctrl+Shift+Z redoes an undone change",
+        "Verify the graph canvas updates correctly after undo/redo",
+        "Verify multi-step undo works (add model → add column → undo → undo restores original state)"
+      ],
+      "implementation_notes": "WorkspaceEdit-based writes automatically integrate with VS Code's undo stack. The extension host listens for onDidChangeTextDocument — on external changes (including undo), re-read the JSON, reconcile, and send domainUpdated to the webview. The update loop prevention flag ensures self-originated writes don't trigger redundant updates.",
+      "category": "infrastructure",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F209",
+      "name": "Implement validation for design operations",
+      "description": "Add validation rules for design mode operations: prevent duplicate model names within a domain, prevent duplicate column names within a model, prevent circular FK references, ensure FK target columns exist, prevent creating a relationship where the composite key (fromModel, fromColumn, toModel, toColumn) already exists. Show validation errors using VS Code-native error elements.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F202", "F203", "F204"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: attempting to create a model with an existing name shows an error",
+        "Verify in Extension Development Host: attempting to create a duplicate column shows an error",
+        "Verify in Extension Development Host: attempting to create a duplicate FK (same composite key) shows an error",
+        "Verify in Extension Development Host: validation errors display inline in the dialog"
+      ],
+      "implementation_notes": "Validation runs client-side in the webview before sending messages to the extension host. Use @vscode-elements for error display. Circular FK detection: check if adding a new FK would create a cycle in the relationship graph (A→B→C→A).",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F300",
+      "name": "Implement Create Domain command",
+      "description": "Create the 'Create Semantic Domain' command (src/commands/createDomain.ts) that opens a dialog for creating a new domain. Fields: domain name (slug), layer (bronze/silver/gold dropdown), description. Creates the JSON file at models/semantic/{layer}/{domain}.json with the initial schema (schemaVersion: 1, empty models/relationships, default viewConfig). Updates the tree view to show the new domain.",
+      "phase": "phase-3",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F207"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: running 'dbt: Create Semantic Domain' from command palette opens the dialog",
+        "Verify in Extension Development Host: submitting creates a valid JSON file at the correct path",
+        "Verify in Extension Development Host: the new domain appears in the sidebar tree view",
+        "Verify in Extension Development Host: clicking 'New Domain...' in the tree view also triggers creation"
+      ],
+      "implementation_notes": "Use VS Code's showInputBox or a QuickPick for layer selection. The created JSON should include schemaVersion: 1, empty models array, empty relationships array, and default viewConfig with ELK layout options. Refresh the DomainTreeProvider after creation.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F301",
+      "name": "Implement Delete Domain command",
+      "description": "Create the 'Delete Semantic Domain' command (src/commands/deleteDomain.ts) that deletes a domain JSON file. Show a confirmation dialog ('Are you sure you want to delete domain work-lots?'). Available from the tree view context menu (right-click → Delete). After deletion, close any open editor for that domain and refresh the tree view.",
+      "phase": "phase-3",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F207"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: right-clicking a domain in the tree shows 'Delete' option",
+        "Verify in Extension Development Host: confirmation dialog appears before deletion",
+        "Verify in Extension Development Host: confirming deletion removes the JSON file",
+        "Verify in Extension Development Host: tree view refreshes and open editors for the domain are closed"
+      ],
+      "implementation_notes": "Use VS Code's showWarningMessage with 'Delete' and 'Cancel' options. Use workspace.fs.delete for file removal. Close related editor tabs using window.tabGroups.",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F302",
+      "name": "Implement add existing model to domain",
+      "description": "Create functionality to add existing models from the manifest to a semantic domain. In design mode, provide a search/select interface to browse models from manifest.json and add them to the current domain with source: 'repo'. Send addExistingModel message with the model name. The extension host verifies the model exists in manifest, adds it to the domain JSON, reconciles, and updates the webview. Green node appears on the canvas.",
+      "phase": "phase-3",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F101", "F207"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: searching for an existing model shows matching results from manifest",
+        "Verify in Extension Development Host: selecting a model adds a green node to the canvas",
+        "Verify in Extension Development Host: the model is added to the domain JSON with source 'repo'",
+        "Verify in Extension Development Host: columns are resolved from the manifest"
+      ],
+      "implementation_notes": "Use a QuickPick or searchable dropdown listing all model names from ManifestService.getModelNames(). Filter out models already in the domain. The addExistingModel message contains just the model name; the extension host adds { name, source: 'repo' } to the domain JSON.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F303",
+      "name": "Implement file watchers for manifest and semantic files",
+      "description": "Create file watchers (src/watchers/fileWatchers.ts) that monitor: (1) target/manifest.json for changes (dbt compile ran), triggering reconciliation and graph refresh; (2) models/semantic/**/*.json for external changes (AI tools, git operations), triggering tree view and editor refresh; (3) dbt_project.yml for project config changes, triggering project root re-detection.",
+      "phase": "phase-3",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F116"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: modifying manifest.json externally triggers graph refresh",
+        "Verify in Extension Development Host: editing a semantic JSON externally updates the tree view and open editor",
+        "Verify watchers properly dispose on deactivate",
+        "Verify watchers work with the update loop prevention (don't re-trigger on self-originated writes)"
+      ],
+      "implementation_notes": "Use VS Code's workspace.createFileSystemWatcher with appropriate glob patterns. Manifest watcher triggers ManifestService.invalidate() + reconciliation. Semantic file watcher triggers DomainTreeProvider.refresh() and updates open editors. Wire into the update loop prevention so self-originated WorkspaceEdit writes don't trigger redundant refreshes.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F304",
+      "name": "Implement auto-reconciliation on manifest change",
+      "description": "When the manifest file watcher detects a change (dbt compile ran), automatically reconcile all open domain editors. Call ReconciliationService.findNewlyBuiltModels() to detect design models that now appear in the manifest. For each newly built model, transition source from 'design' to 'repo' and remove inline columns. Send manifestRefreshed message to webview with the list of newly built model names. Orange nodes turn green.",
+      "phase": "phase-3",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F303", "F111"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: after external dbt compile, design models that now exist in manifest turn green",
+        "Verify the domain JSON is updated: source changes from 'design' to 'repo', inline columns removed",
+        "Verify a notification shows: 'N design models have been built: model_a, model_b'",
+        "Verify the auto-reconcile can be disabled via the dbtSemantic.autoReconcile setting"
+      ],
+      "implementation_notes": "The auto-transition updates the JSON: changes source from 'design' to 'repo' and removes the inline columns array (columns now come from manifest). The autoReconcile setting controls whether this happens automatically or requires manual trigger. Show VS Code information message listing newly built models.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F305",
+      "name": "Implement manual refresh manifest command",
+      "description": "Create the 'Refresh Manifest' command (registered as dbtSemantic.refreshManifest) that forces re-reading of manifest.json, invalidates the ManifestService cache, and re-reconciles all open domains. Available from the command palette and as a button in the toolbar. Useful when the file watcher misses a change or user wants to force refresh.",
+      "phase": "phase-3",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F101", "F304"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: running 'dbt: Refresh Manifest' from command palette refreshes the data",
+        "Verify in Extension Development Host: graph updates with current manifest state after refresh",
+        "Verify a progress notification shows during manifest re-parse",
+        "Verify the toolbar has a refresh button that triggers the same command"
+      ],
+      "implementation_notes": "Call ManifestService.invalidate() then loadManifest(). Show a progress notification during the parse (the ~43MB file takes time even with streaming). After completion, run reconciliation on all open domain editors.",
+      "category": "infrastructure",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F306",
+      "name": "Update tree view with design model badges and context menu",
+      "description": "Enhance the DomainTreeProvider to show accurate badges reflecting current design vs built counts. Add right-click context menu to domain items: Open, Rename (stretch), Delete. Badges should update when domain files change (via file watcher) or when design models transition to built.",
+      "phase": "phase-3",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F103", "F303"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: domain items show '12 models, 3 design' badge format",
+        "Verify in Extension Development Host: badges update when a design model is added or transitions to built",
+        "Verify in Extension Development Host: right-click context menu shows Open and Delete options",
+        "Verify tree view refreshes on file system changes"
+      ],
+      "implementation_notes": "Badge text format: 'N models, M design' — omit the design part if 0. Context menu uses VS Code's menus contribution point in package.json with 'when' clauses to show only on domain items. Connect to the file watcher for automatic refresh.",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F400",
+      "name": "Implement keyboard shortcuts",
+      "description": "Add keyboard shortcuts for common design mode actions: Delete key to remove selected design item (with confirmation), Ctrl+Z for undo, Ctrl+Shift+Z for redo (already handled via WorkspaceEdit, but ensure focus/keybinding works in webview). Additional shortcuts: Escape to deselect, Ctrl+F for search (Phase 4 search feature).",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F206"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: pressing Delete key removes selected design item",
+        "Verify in Extension Development Host: Escape key deselects the current selection",
+        "Verify in Extension Development Host: keyboard shortcuts work when webview has focus",
+        "Verify shortcuts don't conflict with VS Code's built-in keybindings"
+      ],
+      "implementation_notes": "Webview keyboard events need special handling — use VS Code's keybinding contribution points for commands that should work globally, and DOM keydown listeners for webview-specific shortcuts. Register keybindings in package.json with 'when' clause scoped to the custom editor.",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F401",
+      "name": "Implement context menus on nodes and edges",
+      "description": "Add right-click context menus on model nodes and FK edges in the graph canvas. Model node context menu: View Details, Add Column (design only), Delete Model (design only). FK edge context menu: View Relationship Details, Delete Relationship (design only). Use React Flow's onNodeContextMenu and onEdgeContextMenu.",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F206"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: right-clicking a model node shows context menu",
+        "Verify in Extension Development Host: right-clicking an FK edge shows context menu",
+        "Verify in Extension Development Host: Delete options only appear for design items",
+        "Verify in Extension Development Host: context menu actions work correctly"
+      ],
+      "implementation_notes": "Use a custom context menu component in the webview (VS Code webviews can't use native context menus). Position the menu at the cursor location. Use @vscode-elements menu styling for consistency.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F402",
+      "name": "Implement graph search",
+      "description": "Add search functionality within the graph editor. A search input in the toolbar filters/highlights matching model nodes by name. Non-matching nodes are dimmed. Pressing Enter or clicking a result pans to the matched node and selects it. Useful for navigating large domains.",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F112"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: typing in the search box highlights matching models",
+        "Verify in Extension Development Host: non-matching nodes are dimmed",
+        "Verify in Extension Development Host: pressing Enter on a result pans to and selects the model",
+        "Verify in Extension Development Host: clearing search restores all nodes to normal"
+      ],
+      "implementation_notes": "Use a text input in the toolbar area. Filter is case-insensitive substring match on model name. React Flow supports node opacity changes for dimming. Use fitView with node ID to pan to a specific node.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F403",
+      "name": "Add minimap for large domains",
+      "description": "Enable React Flow's built-in minimap component for an overview of large domain graphs. Show a small overview of the full graph in the bottom-left corner. Minimap nodes should be colour-coded to match model status (green/orange/grey).",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F105"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: minimap appears in the bottom-left of the graph editor",
+        "Verify in Extension Development Host: minimap nodes are colour-coded (green/orange/grey)",
+        "Verify in Extension Development Host: clicking on the minimap pans the main canvas",
+        "Verify minimap can be toggled on/off"
+      ],
+      "implementation_notes": "React Flow provides a MiniMap component out of the box. Customize the nodeColor callback to return status-based colours from the colorScheme module.",
+      "category": "ui",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F404",
+      "name": "Implement graph export as PNG/SVG",
+      "description": "Add the ability to export the current graph view as a PNG or SVG image for documentation purposes. Provide an export button in the toolbar. Use React Flow's toObject() and canvas rendering APIs (or html-to-image library) to capture the graph.",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F112"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: clicking Export opens a save dialog with PNG/SVG options",
+        "Verify the exported image contains all visible models and edges",
+        "Verify the exported image maintains correct colours and layout",
+        "Verify the exported file is saved to the chosen location"
+      ],
+      "implementation_notes": "Use html-to-image library (or similar) to capture the React Flow canvas. Provide both PNG and SVG export options. Use VS Code's showSaveDialog for file location selection. Consider capturing the full graph (not just the visible viewport) for comprehensive documentation.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F405",
+      "name": "Optimize performance for large domains",
+      "description": "Optimize React Flow rendering for large domains (50+ models). Implement: lazy-loading of column details (show count initially, expand on click), virtualized node rendering, memoization of node/edge components, batched position updates. Profile and address any bottlenecks in the reconciliation pipeline.",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F108"],
+      "validation_criteria": [
+        "Verify smooth panning and zooming with 50+ model nodes",
+        "Verify initial render time is acceptable for large domains",
+        "Verify column lazy-loading reduces initial render cost",
+        "Verify memory usage stays reasonable for domains with 100+ models"
+      ],
+      "implementation_notes": "React Flow has built-in performance optimizations (node/edge virtualization). Use React.memo on ModelNode and FkEdge components. Lazy-load column details: show only column count in the node by default, expand to full column list on click or hover. Batch position updates to reduce re-renders.",
+      "category": "infrastructure",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "F406",
+      "name": "Implement error handling and user-friendly messages",
+      "description": "Add comprehensive error handling throughout the extension: invalid JSON in domain files, manifest parse failures, file permission errors, missing dbt project. Show user-friendly VS Code notifications with actionable messages. Add a 'manifest may be stale' warning when domain files are newer than the manifest.",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F116"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: invalid domain JSON shows a helpful error with line number",
+        "Verify in Extension Development Host: manifest parse failure shows a notification with retry option",
+        "Verify in Extension Development Host: stale manifest warning appears when appropriate",
+        "Verify errors are logged to the extension's output channel"
+      ],
+      "implementation_notes": "Create a VS Code output channel for extension logging. Use VS Code's showErrorMessage, showWarningMessage, showInformationMessage for user-facing messages. Add try-catch around all file operations and service calls. Stale manifest detection: compare manifest.json mtime vs recent dbt model file mtimes.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F407",
+      "name": "Implement extension settings UI",
+      "description": "Wire up the extension configuration settings defined in package.json: dbtSemantic.projectPath (path to dbt project root, auto-detected), dbtSemantic.semanticDir (relative path to semantic domain files, default 'models/semantic'), dbtSemantic.autoReconcile (toggle automatic design→built transition, default true). Ensure all services respect these settings and react to changes.",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F116"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: settings appear in VS Code Settings UI under 'dbt Semantic Designer'",
+        "Verify changing semanticDir updates where the extension looks for domain files",
+        "Verify toggling autoReconcile enables/disables automatic transition",
+        "Verify settings changes take effect without requiring extension reload"
+      ],
+      "implementation_notes": "Use VS Code's workspace.getConfiguration('dbtSemantic') API. Listen for onDidChangeConfiguration events to react to setting changes at runtime. Project path auto-detection finds the nearest dbt_project.yml in the workspace.",
+      "category": "infrastructure",
+      "estimated_effort": "small"
+    },
+    {
+      "id": "F408",
+      "name": "Implement welcome experience for new projects",
+      "description": "Add a welcome experience for when a dbt project is opened but no semantic directory exists yet. Show a welcome message in the sidebar tree view with a 'Get Started' action that creates the models/semantic/ directory structure (with bronze, silver, gold subdirectories) and guides the user to create their first domain.",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F300"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: opening a dbt project without semantic/ dir shows welcome message",
+        "Verify in Extension Development Host: clicking 'Get Started' creates the directory structure",
+        "Verify in Extension Development Host: after setup, the Create Domain flow is triggered",
+        "Verify the welcome experience doesn't appear once semantic domains exist"
+      ],
+      "implementation_notes": "Use VS Code's TreeView welcome content (viewsWelcome contribution point). The welcome message should explain what semantic domains are and provide a single 'Get Started' button. Directory creation: models/semantic/bronze/, models/semantic/silver/, models/semantic/gold/.",
+      "category": "ui",
+      "estimated_effort": "small"
+    }
+  ],
+  "metadata": {
+    "generated_from": "plan.md",
+    "generated_at": "2026-01-28T00:00:00.000Z",
+    "feature_counts": {
+      "total": 35,
+      "by_phase": {
+        "phase-1": 17,
+        "phase-2": 10,
+        "phase-3": 7,
+        "phase-4": 9
+      }
+    }
+  }
+}
