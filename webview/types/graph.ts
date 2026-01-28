@@ -20,6 +20,14 @@ export type ModelStatus = 'built' | 'design' | 'missing';
 // Column display
 // ---------------------------------------------------------------------------
 
+/**
+ * Column status for styling:
+ * - `built` — exists in manifest (green)
+ * - `planned` — in plannedColumns but not manifest (orange)
+ * - `missing` — PK/FK reference to non-existent column (orange ghost)
+ */
+export type ColumnStatus = 'built' | 'planned' | 'missing';
+
 /** Column data enriched with PK/FK indicators for display in ModelNode. */
 export interface ColumnDisplay {
   name: string;
@@ -27,6 +35,8 @@ export interface ColumnDisplay {
   isPrimaryKey: boolean;
   /** True if this column is the source of an FK relationship. */
   isForeignKey: boolean;
+  /** Column status for row styling. */
+  status: ColumnStatus;
 }
 
 // ---------------------------------------------------------------------------

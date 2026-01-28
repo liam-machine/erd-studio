@@ -6,7 +6,7 @@
  *
  * Message protocol:
  *   Webview → Extension:  { type: "ready" }
- *   Extension → Webview:  { type: "domainLoaded", payload: SemanticDomain }
+ *   Extension → Webview:  { type: "domainLoaded", payload: ReconciledDomain }
  *   Extension → Webview:  { type: "error", payload: { message: string } }
  *
  * Update loop prevention:
@@ -18,6 +18,8 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 
 import { DomainService } from '../services/domainService';
+import { ManifestService } from '../services/manifestService';
+import { ReconciliationService } from '../services/reconciliationService';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -33,6 +35,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly domainService: DomainService,
+    private readonly manifestService: ManifestService,
+    private readonly reconciliationService: ReconciliationService,
+    private readonly workspaceRoot: string,
   ) {}
 
   async resolveCustomTextEditor(
@@ -56,7 +61,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
         switch (message.type) {
           case 'ready':
-            this.sendDomainData(document, webviewPanel.webview);
+            await this.sendDomainData(document, webviewPanel.webview);
             break;
           case 'updatePositions': {
             const payload = (message as Record<string, unknown>).payload as
@@ -76,14 +81,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       },
     );
 
-    const changeSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
+    const changeSubscription = vscode.workspace.onDidChangeTextDocument(async (e) => {
       if (e.document.uri.toString() !== document.uri.toString()) {
         return;
       }
       if (this.pendingUpdate) {
         return;
       }
-      this.sendDomainData(document, webviewPanel.webview);
+      await this.sendDomainData(document, webviewPanel.webview);
     });
 
     // Note: no onDidChangeViewState handler here. When the webview becomes
@@ -103,16 +108,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   // -------------------------------------------------------------------------
 
   /**
-   * Parse the document and send domain data to the webview.
+   * Parse the document, reconcile with manifest, and send to webview.
    * On parse failure, sends an error message instead.
    */
-  private sendDomainData(
+  private async sendDomainData(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-  ): void {
+  ): Promise<void> {
     try {
       const domain = this.domainService.getDomain(document.uri.fsPath);
-      webview.postMessage({ type: 'domainLoaded', payload: domain });
+      const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const reconciled = this.reconciliationService.reconcile(domain, manifest);
+      webview.postMessage({ type: 'domainLoaded', payload: reconciled });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);

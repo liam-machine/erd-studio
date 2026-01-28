@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 
 import { DomainService } from './services/domainService';
+import { ManifestService } from './services/manifestService';
+import { ReconciliationService } from './services/reconciliationService';
 import { DomainTreeProvider } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
@@ -14,8 +16,16 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   const domainService = new DomainService();
+  const manifestService = new ManifestService();
+  const reconciliationService = new ReconciliationService();
   const treeProvider = new DomainTreeProvider(domainService, workspaceRoot);
-  const editorProvider = new SemanticEditorProvider(context, domainService);
+  const editorProvider = new SemanticEditorProvider(
+    context,
+    domainService,
+    manifestService,
+    reconciliationService,
+    workspaceRoot,
+  );
   const decorationProvider = new SemanticFileDecorationProvider();
 
   context.subscriptions.push(

@@ -196,7 +196,7 @@
     {
       "id": "F108",
       "name": "Implement graph transformer (models to React Flow nodes/edges)",
-      "description": "Create graphTransformer (webview/lib/graphTransformer.ts) that converts a ReconciledDomain (models with resolved status and columns) into React Flow nodes and edges. Map each model to a ModelNode with position from viewConfig.positions, and each relationship to an FkEdge. Also create colorScheme (webview/lib/colorScheme.ts) with the colour logic for model status.",
+      "description": "Create graphTransformer (webview/lib/graphTransformer.ts) that converts a ReconciledDomain (pre-resolved by ReconciliationService) into React Flow nodes and edges. The transformer is now simplified — it just maps the shape since columns and status are already resolved. Map each ReconciledModel to a ModelFlowNode with position from viewConfig.positions, and each ReconciledRelationship to an FkFlowEdge.",
       "phase": "phase-1",
       "status": "completed",
       "skip": false,
@@ -204,10 +204,10 @@
       "validation_criteria": [
         "Unit test: transformer converts a domain with 3 models and 2 relationships into correct React Flow nodes and edges",
         "Unit test: positions are loaded from viewConfig.positions; models without positions default to (0,0)",
-        "Unit test: colorScheme returns correct colours for built/design/missing status",
+        "Unit test: columns are passed through with status (built/planned/missing) for row styling",
         "Verify in Extension Development Host: opening a domain renders all models and edges correctly positioned"
       ],
-      "implementation_notes": "Models without a saved position in viewConfig.positions should be placed at (0, 0) and flagged for the user to position manually or trigger auto-layout. The transformer is a pure function, easily unit testable.",
+      "implementation_notes": "The transformer receives ReconciledDomain from the extension host (columns and status already resolved by ReconciliationService). It maps to React Flow shapes without additional logic. The colorScheme.ts module is no longer used — status is pre-resolved. Models without a saved position default to (0, 0).",
       "category": "ui",
       "estimated_effort": "small"
     },
@@ -249,20 +249,22 @@
     },
     {
       "id": "F111",
-      "name": "Implement ReconciliationService",
-      "description": "Create ReconciliationService (src/services/reconciliationService.ts) that compares the semantic domain JSON against the compiled manifest to determine model/column status. For each model: if source is 'design' and exists in manifest → GREEN (built); if source is 'design' and not in manifest → ORANGE (design); if source is 'repo' and exists in manifest → GREEN; if source is 'repo' and not in manifest → GREY (missing). Resolve columns from manifest for built models, from inline definition for design models.",
+      "name": "Implement ReconciliationService with overlay semantics",
+      "description": "Create ReconciliationService (src/services/reconciliationService.ts) that merges semantic domain JSON with manifest data using 'overlay semantics'. For repo models: manifest columns (green) + plannedColumns not in manifest (orange). For design models: inline columns (all orange). PK designated via 'primaryKey' field on repo models. FK inferred from relationships array. Columns shown with status-based row colouring: green for built, orange for planned/missing.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F101", "F102"],
       "validation_criteria": [
         "Unit test: design model not in manifest → status ORANGE, columns from inline definition",
         "Unit test: design model found in manifest → status GREEN, columns from manifest",
-        "Unit test: repo model found in manifest → status GREEN, columns from manifest",
-        "Unit test: repo model not in manifest → status GREY, warning generated",
-        "Unit test: reconcile returns a complete ReconciledDomain with all models resolved"
+        "Unit test: repo model found in manifest → status GREEN, columns from manifest + plannedColumns not in manifest (orange)",
+        "Unit test: repo model not in manifest → status GREY (missing)",
+        "Unit test: plannedColumn that exists in manifest is skipped (manifest wins)",
+        "Unit test: PK/FK references to non-existent columns show as orange ghost rows",
+        "Visual test: green column rows for built columns, orange for planned, separator between them"
       ],
-      "implementation_notes": "Column resolution rules: repo+manifest=manifest columns, repo+no-manifest=warning+no columns, design+no-manifest=inline columns, design+manifest=manifest columns (model has been built). The reconcile method is called whenever domain data or manifest changes.",
+      "implementation_notes": "Column resolution uses overlay semantics: (1) Start with manifest columns (green/built), (2) Add plannedColumns not in manifest (orange/planned), (3) Add ghost rows for PK/FK references to non-existent columns (orange/missing). The SemanticModel type now includes 'primaryKey' (string) for repo models and 'plannedColumns' (ColumnDef[]) for forward-planning. ReconciliationService is called in SemanticEditorProvider.sendDomainData() before sending to webview. ModelNode displays columns with status-based row styling and a 'PLANNED' separator.",
       "category": "infrastructure",
       "estimated_effort": "medium"
     },
@@ -831,7 +833,8 @@
   ],
   "metadata": {
     "generated_from": "plan.md",
-    "generated_at": "2026-01-28T00:00:00.000Z",
+    "generated_at": "2026-01-29T00:00:00.000Z",
+    "last_updated": "2026-01-29 - F111 ReconciliationService implemented with overlay semantics",
     "feature_counts": {
       "total": 35,
       "by_phase": {

@@ -1,25 +1,26 @@
 /**
- * Graph transformer — converts a SemanticDomain into React Flow nodes and edges.
+ * Graph transformer — converts a ReconciledDomain into React Flow nodes and edges.
  *
  * This is a pure function with no side effects, making it easy to unit test.
  * It handles:
- *   1. Mapping each SemanticModel → ModelFlowNode (with position + columns)
- *   2. Mapping each Relationship → FkFlowEdge (with handle side selection)
- *   3. Enriching columns with isForeignKey by cross-referencing relationships
- *   4. Selecting optimal handle sides based on relative node positions
+ *   1. Mapping each ReconciledModel → ModelFlowNode (with position + columns)
+ *   2. Mapping each ReconciledRelationship → FkFlowEdge (with handle side selection)
+ *   3. Selecting optimal handle sides based on relative node positions
+ *
+ * Column resolution and status determination is done by ReconciliationService
+ * in the extension host — the transformer just maps to React Flow shapes.
  */
 
 import type {
-  SemanticDomain,
-  SemanticModel,
-  Relationship,
-} from '../../src/types/semantic';
+  ReconciledDomain,
+  ReconciledModel,
+  ReconciledRelationship,
+} from '../../src/types/reconciled';
 import type {
   ModelFlowNode,
   FkFlowEdge,
   ColumnDisplay,
 } from '../types/graph';
-import { getModelStatus, getRelationshipStatus } from './colorScheme';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,41 +39,16 @@ export interface TransformResult {
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
 /**
- * Build a set of column names that are FK sources within a domain.
- * A column is an FK source if it appears as `fromColumn` in any relationship
- * where `fromModel` matches the given model name.
+ * Convert a ReconciledModel's columns to ColumnDisplay[].
+ * Columns are already resolved by ReconciliationService — we just map the shape.
  */
-function buildFkColumnSet(
-  modelName: string,
-  relationships: Relationship[],
-): Set<string> {
-  const fkCols = new Set<string>();
-  for (const rel of relationships) {
-    if (rel.fromModel === modelName) {
-      fkCols.add(rel.fromColumn);
-    }
-  }
-  return fkCols;
-}
-
-/**
- * Convert a SemanticModel's columns into ColumnDisplay[], enriching each
- * column with isPrimaryKey and isForeignKey flags.
- *
- * - Repo models: columns will eventually come from the manifest via F111.
- *   For now, repo models have no inline columns so we return an empty array.
- * - Design models: columns come from the inline `columns` array.
- */
-function buildColumns(
-  model: SemanticModel,
-  fkColumns: Set<string>,
-): ColumnDisplay[] {
-  const cols = model.columns ?? [];
-  return cols.map((col) => ({
+function mapColumns(model: ReconciledModel): ColumnDisplay[] {
+  return model.columns.map((col) => ({
     name: col.name,
     dataType: col.dataType,
-    isPrimaryKey: col.isPrimaryKey === true,
-    isForeignKey: fkColumns.has(col.name),
+    isPrimaryKey: col.isPrimaryKey,
+    isForeignKey: col.isForeignKey,
+    status: col.status,
   }));
 }
 
@@ -117,12 +93,12 @@ function pickHandleSides(
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a SemanticDomain into React Flow nodes and edges.
+ * Convert a ReconciledDomain into React Flow nodes and edges.
  *
- * @param domain — the semantic domain loaded from JSON (via extension host).
- * @returns nodes and edges ready for React Flow's `<ReactFlow>` component.
+ * @param domain — the reconciled domain from extension host (already merged with manifest)
+ * @returns nodes and edges ready for React Flow's `<ReactFlow>` component
  */
-export function transformDomain(domain: SemanticDomain): TransformResult {
+export function transformDomain(domain: ReconciledDomain): TransformResult {
   const { models, relationships, viewConfig, layer } = domain;
   const positions = viewConfig.positions ?? {};
 
@@ -135,8 +111,7 @@ export function transformDomain(domain: SemanticDomain): TransformResult {
   // --- Nodes ---------------------------------------------------------------
 
   const nodes: ModelFlowNode[] = models.map((model) => {
-    const fkColumns = buildFkColumnSet(model.name, relationships);
-    const columns = buildColumns(model, fkColumns);
+    const columns = mapColumns(model);
     const position = positionMap.get(model.name) ?? DEFAULT_POSITION;
 
     return {
@@ -145,7 +120,7 @@ export function transformDomain(domain: SemanticDomain): TransformResult {
       position,
       data: {
         modelName: model.name,
-        status: getModelStatus(model),
+        status: model.status,
         layer,
         columns,
       },
@@ -179,7 +154,7 @@ export function transformDomain(domain: SemanticDomain): TransformResult {
           toModel: rel.toModel,
           toColumn: rel.toColumn,
           cardinality: rel.cardinality,
-          status: getRelationshipStatus(rel),
+          status: rel.status,
         },
       };
     });

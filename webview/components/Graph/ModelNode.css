@@ -102,6 +102,45 @@
   background: var(--selection-bg);
 }
 
+/* Column status variants */
+.model-node__column--built {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.model-node__column--built:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.model-node__column--planned,
+.model-node__column--missing {
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.model-node__column--planned:hover,
+.model-node__column--missing:hover {
+  background: rgba(249, 115, 22, 0.18);
+}
+
+/* Separator between built and planned columns */
+.model-node__separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  margin: 2px 0;
+  border-top: 1px dashed var(--model-design);
+  border-bottom: 1px dashed var(--model-design);
+  background: rgba(249, 115, 22, 0.05);
+}
+
+.model-node__separator-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--model-design);
+}
+
 .model-node__col-indicators {
   display: flex;
   gap: 2px;
@@ -127,6 +166,17 @@
 .model-node__fk {
   background: rgba(59, 130, 246, 0.2);
   color: #3b82f6;
+}
+
+/* Planned/missing PK/FK badges get orange styling */
+.model-node__pk--planned {
+  background: rgba(249, 115, 22, 0.25);
+  color: #ea580c;
+}
+
+.model-node__fk--planned {
+  background: rgba(249, 115, 22, 0.25);
+  color: #ea580c;
 }
 
 .model-node__col-name {

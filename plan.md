@@ -27,8 +27,9 @@ A VS Code extension that visualises semantic (FK-based) relationships between db
 | Build trigger (orange→green) | Auto-detect from manifest.json — models turn green when they appear in compiled manifest |
 | AI integration | Document the JSON interface — Claude Code or other AI tools read design state externally |
 | Domain management | Full CRUD — create, edit, and delete semantic domain files |
-| Column source for existing models | manifest.json (compiled truth) |
-| Column source for design models | Defined inline in semantic domain JSON |
+| Column source for repo models | manifest.json (green) + plannedColumns not in manifest (orange) — overlay semantics |
+| Column source for design models | Defined inline in semantic domain JSON (all orange) |
+| PK designation for repo models | `primaryKey` field in semantic JSON (user-defined) |
 | Multi-project support | Single dbt project per workspace |
 | Semantic file location | Inside dbt project: `models/semantic/{layer}/{domain}.json` |
 | Sidebar | Tree view listing all domains by layer + graph editor panel |
@@ -250,16 +251,25 @@ This is the core data format. Files live at `{dbt_project}/models/semantic/{laye
   "layer": "silver",
   "description": "Work lot domain — work lots and their related dimension tables",
 
-  // Models in this domain (existing models reference by name only)
+  // Models in this domain
   "models": [
-    // Existing model — columns resolved from manifest at runtime
+    // Repo model — columns resolved from manifest at runtime
+    // Use 'primaryKey' to designate the PK column
+    // Use 'plannedColumns' for columns not yet built (overlay semantics)
     {
       "name": "dim_work_lot",
-      "source": "repo"
-      // No columns array — pulled from manifest.json
+      "source": "repo",
+      "primaryKey": "work_lot_id",
+      "plannedColumns": [
+        {
+          "name": "estimated_cost",
+          "dataType": "DECIMAL",
+          "description": "Planned column for Q2 — not yet in manifest"
+        }
+      ]
     },
 
-    // Design model — columns defined inline (orange in UI)
+    // Design model — columns defined inline (all orange in UI)
     {
       "name": "dim_work_lot_status",
       "source": "design",
@@ -341,25 +351,50 @@ The extension determines model/column status at runtime by comparing the semanti
 For each model in the semantic domain JSON:
   if model.source == "design":
     if model.name exists in manifest.json:
-      → GREEN (built) — columns now come from manifest
-      → Extension can optionally prompt to remove inline column definitions
+      → Status: BUILT (green border)
+      → Columns: from manifest (green rows)
     else:
-      → ORANGE (design) — columns from inline definition
-  else (source == "repo" or undefined):
+      → Status: DESIGN (orange border)
+      → Columns: from inline 'columns' array (orange rows)
+  else (source == "repo"):
     if model.name exists in manifest.json:
-      → GREEN (built) — columns from manifest
+      → Status: BUILT (green border)
+      → Columns: manifest (green) + plannedColumns not in manifest (orange)
+      → PK: from 'primaryKey' field (green if exists, orange ghost if missing)
+      → FK: inferred from relationships (green if exists, orange ghost if missing)
     else:
-      → RED/GREY (missing) — model referenced but not found in manifest
+      → Status: MISSING (grey border)
+      → Columns: ghost rows for PK/FK references only (orange)
 ```
 
-### Column Resolution Rules
+**Column Row Colours:**
+- **Green background**: Column exists in manifest (built)
+- **Orange background**: Column is planned or missing (not in manifest)
+- **"PLANNED" separator**: Visual divider between built and planned columns
 
-| Model source | manifest has model? | Column source |
-|-------------|-------------------|---------------|
-| `"repo"` | Yes | manifest.json |
-| `"repo"` | No | Show warning, no columns |
-| `"design"` | No | Inline `columns` array in semantic JSON |
-| `"design"` | Yes | manifest.json (model has been built — transition to green) |
+### Column Resolution Rules (Overlay Semantics)
+
+The extension uses **overlay semantics** for column resolution: manifest is the source of truth for built columns, and `plannedColumns` overlay for forward-planning.
+
+| Model source | manifest has model? | Column source | Row colour |
+|-------------|-------------------|---------------|------------|
+| `"repo"` | Yes | manifest.json columns (green) + `plannedColumns` not in manifest (orange) | Green/Orange |
+| `"repo"` | No | Warning state, no columns | Grey |
+| `"design"` | No | Inline `columns` array | Orange |
+| `"design"` | Yes | manifest.json (model has been built — transition to green) | Green |
+
+**PK/FK Resolution:**
+- **Primary Key (repo models)**: Designated via `primaryKey` field (e.g., `"primaryKey": "work_lot_id"`)
+- **Primary Key (design models)**: Via `isPrimaryKey: true` flag in columns array
+- **Foreign Keys (all models)**: Inferred from `relationships` array — any column appearing as `fromColumn` is marked as FK
+
+**Overlay Behaviour:**
+- Manifest columns always display first (green/built)
+- `plannedColumns` not in manifest display below a "PLANNED" separator (orange)
+- `plannedColumns` that exist in manifest are **skipped** (manifest wins, no duplicates)
+- PK/FK references to non-existent columns appear as orange "ghost" rows with `???` dataType
+
+This enables forward-planning: add a `plannedColumn` to a repo model, and it shows orange until you build it via dbt. Once it appears in manifest, it automatically transitions to green.
 
 ---
 
@@ -453,8 +488,11 @@ The main visual editor panel, opened as a custom editor for `.json` domain files
 | Model node border | Built (in manifest) | Green | `#22c55e` |
 | Model node border | Design (not yet built) | Orange | `#f97316` |
 | Model node border | Missing (referenced but not in manifest) | Grey | `#6b7280` |
-| Column text | From manifest | Default (inherits VS Code theme) | — |
-| Column text | Design (user-defined) | Orange | `#f97316` |
+| Column row background | Built (from manifest) | Light green | `rgba(34, 197, 94, 0.08)` |
+| Column row background | Planned/Missing (not in manifest) | Light orange | `rgba(249, 115, 22, 0.1)` |
+| Column separator | "PLANNED" label | Orange dashed border | `#f97316` |
+| PK/FK badge | Built column | Yellow/Blue | `#ca8a04` / `#3b82f6` |
+| PK/FK badge | Planned column | Orange | `#ea580c` |
 | FK edge | Built relationship | Blue | `#3b82f6` |
 | FK edge | Design relationship | Orange | `#f97316` |
 | FK edge | 1:1 cardinality | Dashed line | — |
@@ -557,13 +595,16 @@ class DomainService {
 
 ### ReconciliationService
 
-Compares design state against the manifest to determine model/column status.
+Merges semantic domain JSON with manifest data using **overlay semantics**.
 
 ```typescript
 class ReconciliationService {
-  // Reconcile a domain against the manifest
-  // Returns models with resolved status (green/orange/grey) and columns
-  async reconcile(domain: SemanticDomain, manifest: ManifestData): Promise<ReconciledDomain>
+  // Reconcile a domain against the manifest using overlay semantics
+  // Returns ReconciledDomain with:
+  //   - Models with resolved status (built/design/missing)
+  //   - Columns with resolved status (built/planned/missing) and PK/FK flags
+  //   - Columns ordered: built first, then planned (with separator), then ghost rows
+  reconcile(domain: SemanticDomain, manifest: ManifestData): ReconciledDomain
 
   // Check if any design models have been built (appear in manifest)
   findNewlyBuiltModels(domain: SemanticDomain, manifest: ManifestData): string[]
@@ -571,6 +612,17 @@ class ReconciliationService {
   // Auto-transition: update source from "design" to "repo" for built models
   async autoTransition(layer: string, domainName: string, builtModels: string[]): Promise<void>
 }
+```
+
+**Column Resolution Algorithm:**
+1. For repo models in manifest: Start with manifest columns (status: `built`)
+2. Add `plannedColumns` not in manifest (status: `planned`) — manifest wins if column exists in both
+3. Add ghost rows for PK/FK references to non-existent columns (status: `missing`)
+4. For design models not in manifest: Use inline `columns` array (all status: `planned`)
+
+**SemanticModel Fields for Repo Models:**
+- `primaryKey?: string` — Column name designated as PK
+- `plannedColumns?: ColumnDef[]` — Columns not yet in manifest (overlay)
 ```
 
 ### File Watchers

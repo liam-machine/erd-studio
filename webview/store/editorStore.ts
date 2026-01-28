@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
-import type { SemanticDomain } from '../../src/types/semantic';
+import type { ReconciledDomain } from '../../src/types/reconciled';
 import type { ModelFlowNode, FkFlowEdge } from '../types/graph';
 
 // ---------------------------------------------------------------------------
@@ -27,8 +27,8 @@ export interface EditorState {
   viewport: Viewport;
   /** Whether the detail panel is open. */
   detailPanelOpen: boolean;
-  /** The loaded domain data from the extension host. */
-  domain: SemanticDomain | null;
+  /** The loaded domain data from the extension host (already reconciled with manifest). */
+  domain: ReconciledDomain | null;
   /** Error message from the extension host, if any. */
   error: string | null;
   /** React Flow nodes (local state for selection/drag). */
@@ -42,7 +42,7 @@ export interface EditorActions {
   selectNode: (nodeName: string | null) => void;
   setViewport: (viewport: Viewport) => void;
   setDetailPanelOpen: (open: boolean) => void;
-  setDomain: (domain: SemanticDomain) => void;
+  setDomain: (domain: ReconciledDomain) => void;
   setError: (error: string | null) => void;
   setNodes: (nodes: ModelFlowNode[]) => void;
   setEdges: (edges: FkFlowEdge[]) => void;

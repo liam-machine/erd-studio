@@ -6,11 +6,25 @@
   "models": [
     {
       "name": "dim_work_lot",
-      "source": "repo"
+      "source": "repo",
+      "primaryKey": "work_lot_id",
+      "plannedColumns": [
+        {
+          "name": "estimated_cost",
+          "dataType": "DECIMAL",
+          "description": "Estimated cost for the work lot (planned for Q2)"
+        },
+        {
+          "name": "completion_date",
+          "dataType": "DATE",
+          "description": "Target completion date"
+        }
+      ]
     },
     {
       "name": "dim_project",
-      "source": "repo"
+      "source": "repo",
+      "primaryKey": "project_id"
     },
     {
       "name": "dim_work_lot_status",

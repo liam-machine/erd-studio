@@ -86,44 +86,100 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         <span className="model-node__badge">{LAYER_BADGE[layer] ?? layer}</span>
       </div>
 
-      {/* Columns */}
+      {/* Columns — ordered: built first, then planned/missing with separator */}
       <div className="model-node__columns">
-        {columns.map((col) => (
-          <div key={col.name} className="model-node__column">
-            <Handle
-              type="target"
-              position={Position.Left}
-              id={handleId(col.name, 'left')}
-              className="model-node__handle"
-              style={HANDLE_STYLE}
-            />
+        {(() => {
+          const builtCols = columns.filter((c) => c.status === 'built');
+          const plannedCols = columns.filter((c) => c.status !== 'built');
+          const showSeparator = builtCols.length > 0 && plannedCols.length > 0;
 
-            <span className="model-node__col-indicators">
-              {col.isPrimaryKey && (
-                <span className="model-node__pk" title="Primary Key">
-                  PK
-                </span>
-              )}
-              {col.isForeignKey && (
-                <span className="model-node__fk" title="Foreign Key">
-                  FK
-                </span>
-              )}
-            </span>
-            <span className="model-node__col-name" title={col.name}>
-              {col.name}
-            </span>
-            <span className="model-node__col-type">{col.dataType}</span>
+          return (
+            <>
+              {builtCols.map((col) => (
+                <div key={col.name} className="model-node__column model-node__column--built">
+                  <Handle
+                    type="target"
+                    position={Position.Left}
+                    id={handleId(col.name, 'left')}
+                    className="model-node__handle"
+                    style={HANDLE_STYLE}
+                  />
 
-            <Handle
-              type="source"
-              position={Position.Right}
-              id={handleId(col.name, 'right')}
-              className="model-node__handle"
-              style={HANDLE_STYLE}
-            />
-          </div>
-        ))}
+                  <span className="model-node__col-indicators">
+                    {col.isPrimaryKey && (
+                      <span className="model-node__pk" title="Primary Key">
+                        PK
+                      </span>
+                    )}
+                    {col.isForeignKey && (
+                      <span className="model-node__fk" title="Foreign Key">
+                        FK
+                      </span>
+                    )}
+                  </span>
+                  <span className="model-node__col-name" title={col.name}>
+                    {col.name}
+                  </span>
+                  <span className="model-node__col-type">{col.dataType}</span>
+
+                  <Handle
+                    type="source"
+                    position={Position.Right}
+                    id={handleId(col.name, 'right')}
+                    className="model-node__handle"
+                    style={HANDLE_STYLE}
+                  />
+                </div>
+              ))}
+
+              {showSeparator && (
+                <div className="model-node__separator">
+                  <span className="model-node__separator-label">planned</span>
+                </div>
+              )}
+
+              {plannedCols.map((col) => (
+                <div
+                  key={col.name}
+                  className={`model-node__column model-node__column--${col.status}`}
+                >
+                  <Handle
+                    type="target"
+                    position={Position.Left}
+                    id={handleId(col.name, 'left')}
+                    className="model-node__handle"
+                    style={HANDLE_STYLE}
+                  />
+
+                  <span className="model-node__col-indicators">
+                    {col.isPrimaryKey && (
+                      <span className="model-node__pk model-node__pk--planned" title="Primary Key (planned)">
+                        PK
+                      </span>
+                    )}
+                    {col.isForeignKey && (
+                      <span className="model-node__fk model-node__fk--planned" title="Foreign Key (planned)">
+                        FK
+                      </span>
+                    )}
+                  </span>
+                  <span className="model-node__col-name" title={col.name}>
+                    {col.name}
+                  </span>
+                  <span className="model-node__col-type">{col.dataType}</span>
+
+                  <Handle
+                    type="source"
+                    position={Position.Right}
+                    id={handleId(col.name, 'right')}
+                    className="model-node__handle"
+                    style={HANDLE_STYLE}
+                  />
+                </div>
+              ))}
+            </>
+          );
+        })()}
 
         {columns.length === 0 && (
           <div className="model-node__empty">No columns</div>

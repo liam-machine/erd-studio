@@ -35,7 +35,8 @@ export interface ColumnDef {
  * A model entry in a semantic domain.
  *
  * - `source: "repo"` — exists in the dbt project; columns are resolved from
- *   the compiled manifest at runtime (no inline columns).
+ *   the compiled manifest at runtime. Use `primaryKey` to designate the PK
+ *   and `plannedColumns` for columns not yet built.
  * - `source: "design"` — a planned model that doesn't exist yet; columns,
  *   schema, and description are defined inline.
  */
@@ -48,6 +49,18 @@ export interface SemanticModel {
   description?: string;
   /** Inline column definitions (design models only). */
   columns?: ColumnDef[];
+  /**
+   * Primary key column name (repo models only).
+   * For design models, use `isPrimaryKey: true` in the columns array.
+   */
+  primaryKey?: string;
+  /**
+   * Planned columns not yet in manifest (repo models only).
+   * These are displayed as orange rows until they appear in manifest.
+   * Once a planned column exists in manifest, the manifest version is shown
+   * instead (overlay semantics — manifest always wins).
+   */
+  plannedColumns?: ColumnDef[];
 }
 
 // ---------------------------------------------------------------------------

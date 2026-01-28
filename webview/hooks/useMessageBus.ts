@@ -16,11 +16,11 @@ import { useVsCodeApi } from './useVsCodeApi';
 // Extension → Webview messages
 // ---------------------------------------------------------------------------
 
-import type { SemanticDomain } from '../../src/types/semantic';
+import type { ReconciledDomain } from '../../src/types/reconciled';
 
 export interface DomainLoadedMessage {
   type: 'domainLoaded';
-  payload: SemanticDomain;
+  payload: ReconciledDomain;
 }
 
 export interface ErrorMessage {
