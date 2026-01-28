@@ -1,0 +1,63 @@
+/**
+ * FkEdge styles.
+ *
+ * Uses design tokens from webview/styles/theme.css for VS Code theme
+ * compatibility. Edge colours (built/design) are defined there.
+ */
+
+/* -----------------------------------------------------------------------
+   Edge path
+   ----------------------------------------------------------------------- */
+
+.fk-edge {
+  stroke-width: 2;
+  fill: none;
+}
+
+/* -----------------------------------------------------------------------
+   Status variants
+   ----------------------------------------------------------------------- */
+
+.fk-edge--built {
+  stroke: var(--edge-built);
+}
+
+.fk-edge--design {
+  stroke: var(--edge-design);
+}
+
+/* -----------------------------------------------------------------------
+   Cardinality line-style variants
+   ----------------------------------------------------------------------- */
+
+.fk-edge--one-to-one {
+  stroke-dasharray: 6 3;
+}
+
+/* -----------------------------------------------------------------------
+   Cardinality labels (* and 1)
+   ----------------------------------------------------------------------- */
+
+.fk-edge__label {
+  position: absolute;
+  pointer-events: none;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fk-edge__label--built {
+  color: var(--edge-built);
+}
+
+.fk-edge__label--design {
+  color: var(--edge-design);
+}
+
+/* -----------------------------------------------------------------------
+   Hover interaction
+   ----------------------------------------------------------------------- */
+
+.fk-edge:hover {
+  stroke-width: 3;
+}

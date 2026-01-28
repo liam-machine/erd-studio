@@ -162,7 +162,7 @@
       "name": "Implement ModelNode component",
       "description": "Create the ModelNode React component (webview/components/Graph/ModelNode.tsx) for displaying model cards in the React Flow canvas. Show model name with layer badge (e.g. [SLV]), list columns with PK (key icon) and FK (link icon) indicators, column data types, and a column count footer. Apply green border for built models, orange for design models, and grey for missing models.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F105"],
       "validation_criteria": [
@@ -180,7 +180,7 @@
       "name": "Implement FkEdge component",
       "description": "Create the FkEdge React component (webview/components/Graph/FkEdge.tsx) for displaying FK relationship edges in the React Flow canvas. Show cardinality labels on edges. Apply blue colour for built relationships and orange for design relationships. Use dashed lines for 1:1 cardinality and solid lines for many-to-one / one-to-many.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F105"],
       "validation_criteria": [

@@ -6,8 +6,8 @@
  * these shapes.
  */
 
-import type { Node } from '@xyflow/react';
-import type { Layer } from '../../src/types/semantic';
+import type { Node, Edge } from '@xyflow/react';
+import type { Cardinality, Layer } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
 // Model status
@@ -49,3 +49,25 @@ export type ModelNodeData = {
 
 /** Typed React Flow node for a semantic model. */
 export type ModelFlowNode = Node<ModelNodeData, 'model'>;
+
+// ---------------------------------------------------------------------------
+// FkEdge
+// ---------------------------------------------------------------------------
+
+/** Relationship status for edge colouring: built (blue) or design (orange). */
+export type RelationshipStatus = 'built' | 'design';
+
+/** Data payload for an FkEdge React Flow edge. */
+export type FkEdgeData = {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+  toColumn: string;
+  cardinality: Cardinality;
+  status: RelationshipStatus;
+  /** Index signature required by React Flow's Edge generic. */
+  [key: string]: unknown;
+};
+
+/** Typed React Flow edge for a semantic FK relationship. */
+export type FkFlowEdge = Edge<FkEdgeData, 'fk'>;

@@ -104,6 +104,17 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
 - Remember to `npm run build` after any code changes before refreshing the preview
 - Clean up mock data and `dev-preview.html` before committing
 
+## Dev Mock Data
+
+`webview/App.tsx` contains **mock nodes and edges** for visual development. This renders four model nodes (dim_work_lot, dim_project, dim_work_lot_status, brg_lot_contractor) and three FK edges demonstrating:
+- Built many-to-one (blue solid with crow's foot)
+- Design many-to-one (orange solid with crow's foot)
+- Design one-to-one (orange dashed with perpendicular bars)
+
+The mock data bypasses the graph transformer (F108) which hasn't been implemented yet. **Remove once F108 is complete** and real domain data flows through the transformer.
+
+To preview in Chrome: create `dev-preview.html` (see instructions above), run `npm run build`, serve with `npx http-server -p 8765 --cors -c-1`, and open `http://localhost:8765/dev-preview.html`.
+
 ## Key Conventions
 
 - Shared types live in `src/types/` and are included in both tsconfigs

@@ -6,9 +6,12 @@
  * Border colour indicates model status: green (built), orange (design),
  * grey (missing).
  *
- * Each column row has left (target) and right (source) React Flow handles
- * with IDs like `col-{columnName}-left` / `col-{columnName}-right` so that
- * FK edges (F107) and ELK layout (F109) can route to specific columns.
+ * Provides two kinds of React Flow handles:
+ *   1. **Node-level handles** (top/right/bottom/left) — used by FkEdge for
+ *      Power BI-style connections that route to whichever side creates the
+ *      least bends.
+ *   2. **Column-level handles** (col-{name}-left/right) — reserved for
+ *      future column-specific routing (F109 ELK, F205 drag-to-connect).
  */
 
 import { memo, type CSSProperties } from 'react';
@@ -43,6 +46,19 @@ const HANDLE_STYLE: CSSProperties = {
   // opacity is controlled by CSS (.model-node__handle) so hover transitions work.
 };
 
+/**
+ * Node-level handles — invisible connection points on each side of the card.
+ * FkEdge connects to these for Power BI-style routing (least bends).
+ */
+const NODE_HANDLE_STYLE: CSSProperties = {
+  width: 1,
+  height: 1,
+  minWidth: 0,
+  minHeight: 0,
+  opacity: 0,
+  pointerEvents: 'none',
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -52,6 +68,16 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
 
   return (
     <div className={`model-node model-node--${status}`}>
+      {/* Node-level handles — one source + one target per side */}
+      <Handle type="source" position={Position.Top} id="node-top-src" style={NODE_HANDLE_STYLE} />
+      <Handle type="target" position={Position.Top} id="node-top-tgt" style={NODE_HANDLE_STYLE} />
+      <Handle type="source" position={Position.Right} id="node-right-src" style={NODE_HANDLE_STYLE} />
+      <Handle type="target" position={Position.Right} id="node-right-tgt" style={NODE_HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} id="node-bottom-src" style={NODE_HANDLE_STYLE} />
+      <Handle type="target" position={Position.Bottom} id="node-bottom-tgt" style={NODE_HANDLE_STYLE} />
+      <Handle type="source" position={Position.Left} id="node-left-src" style={NODE_HANDLE_STYLE} />
+      <Handle type="target" position={Position.Left} id="node-left-tgt" style={NODE_HANDLE_STYLE} />
+
       {/* Header */}
       <div className="model-node__header">
         <span className="model-node__name" title={modelName}>
