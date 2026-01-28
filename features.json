@@ -90,7 +90,7 @@
       "name": "Implement DomainService for reading semantic domain JSON",
       "description": "Create DomainService (src/services/domainService.ts) with read operations: listDomains() to discover all domain JSON files under models/semantic/, getDomain(layer, domain) to read and parse a specific domain file. Return typed SemanticDomain objects. Define TypeScript types in src/types/semantic.ts covering the full semantic domain JSON schema (schemaVersion, domain, layer, description, models, relationships, viewConfig).",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F100"],
       "validation_criteria": [
