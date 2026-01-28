@@ -198,7 +198,7 @@
       "name": "Implement graph transformer (models to React Flow nodes/edges)",
       "description": "Create graphTransformer (webview/lib/graphTransformer.ts) that converts a ReconciledDomain (models with resolved status and columns) into React Flow nodes and edges. Map each model to a ModelNode with position from viewConfig.positions, and each relationship to an FkEdge. Also create colorScheme (webview/lib/colorScheme.ts) with the colour logic for model status.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F106", "F107"],
       "validation_criteria": [
@@ -216,7 +216,7 @@
       "name": "Integrate ELK layout with Auto Layout button",
       "description": "Implement ELK layout integration (webview/lib/elkLayout.ts) using elkjs. Set up the ELK Web Worker using blob URL pattern (VS Code webviews cannot use importScripts). Create the Auto Layout button in the toolbar that runs ELK over the full graph and writes resulting positions back to viewConfig.positions. Show a confirmation dialog if positions already exist ('This will rearrange all nodes. Continue?'). Default ELK options: layered algorithm, RIGHT direction, ORTHOGONAL edge routing, 16:9 aspect ratio, FIXED_ORDER port constraints.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F108"],
       "validation_criteria": [

@@ -34,6 +34,14 @@ if (!fs.existsSync(distDir)) {
   fs.mkdirSync(distDir, { recursive: true });
 }
 
+// Read ELK Web Worker code for blob URL injection into the webview bundle.
+// VS Code webviews cannot use importScripts() or load workers from URLs,
+// so the worker code is inlined as a string constant at build time.
+const elkWorkerCode = fs.readFileSync(
+  path.resolve(__dirname, 'node_modules/elkjs/lib/elk-worker.min.js'),
+  'utf-8',
+);
+
 // Extension host build — Node.js, CJS, externalize vscode
 const extensionConfig = {
   entryPoints: ['./src/extension.ts'],
@@ -70,6 +78,7 @@ const webviewConfig = {
   },
   define: {
     'process.env.NODE_ENV': isProduction ? '"production"' : '"development"',
+    '__ELK_WORKER_CODE__': JSON.stringify(elkWorkerCode),
   },
   plugins: [problemMatcherPlugin],
 };

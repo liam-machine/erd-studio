@@ -39,8 +39,15 @@ export interface ReadyMessage {
   type: 'ready';
 }
 
+export interface UpdatePositionsMessage {
+  type: 'updatePositions';
+  payload: {
+    positions: Record<string, { x: number; y: number }>;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
-export type WebviewMessage = ReadyMessage;
+export type WebviewMessage = ReadyMessage | UpdatePositionsMessage;
 
 // ---------------------------------------------------------------------------
 // Hook

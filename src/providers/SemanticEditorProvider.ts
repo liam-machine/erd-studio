@@ -50,11 +50,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // --- Subscriptions (disposed when the panel closes) ---------------------
 
     const messageSubscription = webviewPanel.webview.onDidReceiveMessage(
-      (message: unknown) => {
-        if (isTypedMessage(message) && message.type === 'ready') {
-          this.sendDomainData(document, webviewPanel.webview);
+      async (message: unknown) => {
+        if (!isTypedMessage(message)) {
+          return;
         }
-        // Phase 2: handle mutation messages (addModel, addColumn, etc.)
+        switch (message.type) {
+          case 'ready':
+            this.sendDomainData(document, webviewPanel.webview);
+            break;
+          case 'updatePositions': {
+            const payload = (message as Record<string, unknown>).payload as
+              | { positions: Record<string, { x: number; y: number }> }
+              | undefined;
+            if (payload?.positions) {
+              await this.handleUpdatePositions(
+                document,
+                webviewPanel.webview,
+                payload.positions,
+              );
+            }
+            break;
+          }
+          // Phase 2: handle mutation messages (addModel, addColumn, etc.)
+        }
       },
     );
 
@@ -99,6 +117,57 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
       webview.postMessage({ type: 'error', payload: { message } });
+    }
+  }
+
+  /**
+   * Handle an `updatePositions` message from the webview.
+   *
+   * Merges the new positions into `viewConfig.positions` in the domain JSON
+   * and writes back via WorkspaceEdit (integrates with VS Code undo/redo).
+   */
+  private async handleUpdatePositions(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    positions: Record<string, { x: number; y: number }>,
+  ): Promise<void> {
+    try {
+      // Read from the document buffer (not disk) — the buffer is the source
+      // of truth for unsaved edits.
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+
+      // Merge positions into viewConfig, preserving other viewConfig fields.
+      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      parsed.viewConfig = { ...viewConfig, positions };
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+      this.pendingUpdate = false;
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to save layout positions.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Position update failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to save positions: ${message}` },
+      });
     }
   }
 

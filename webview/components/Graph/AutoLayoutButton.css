@@ -1,0 +1,54 @@
+/**
+ * AutoLayoutButton styles.
+ *
+ * Button sits in a React Flow Panel overlay. Uses VS Code theme tokens
+ * from webview/styles/theme.css for consistent dark/light theme support.
+ */
+
+.auto-layout-panel {
+  display: flex;
+  gap: 6px;
+}
+
+.auto-layout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.auto-layout-button:hover:not(:disabled) {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: var(--button-bg);
+}
+
+.auto-layout-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Spinner for loading state */
+.auto-layout-button__spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: auto-layout-spin 0.6s linear infinite;
+}
+
+@keyframes auto-layout-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

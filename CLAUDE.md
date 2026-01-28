@@ -92,7 +92,7 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
    ```
    Then navigate to `http://localhost:8765/dev-preview.html`
 
-4. **Add temporary mock data** in `webview/App.tsx` to render test nodes (set `nodes={mockNodes}` instead of `nodes={[]}`). Remove before committing.
+4. **Add test models/relationships** to the `domainLoaded` payload in `dev-preview.html` to render sample nodes and edges. The graph transformer (F108) converts `SemanticDomain` data into React Flow nodes/edges automatically.
 
 5. **Use Chrome browser automation** (claude-in-chrome) to take screenshots and verify visual output.
 
@@ -106,12 +106,12 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
 
 ## Dev Mock Data
 
-`webview/App.tsx` contains **mock nodes and edges** for visual development. This renders four model nodes (dim_work_lot, dim_project, dim_work_lot_status, brg_lot_contractor) and three FK edges demonstrating:
+`dev-preview.html` contains **mock SemanticDomain data** in its `domainLoaded` payload for visual development. This provides four models and three FK relationships demonstrating:
 - Built many-to-one (blue solid with crow's foot)
 - Design many-to-one (orange solid with crow's foot)
 - Design one-to-one (orange dashed with perpendicular bars)
 
-The mock data bypasses the graph transformer (F108) which hasn't been implemented yet. **Remove once F108 is complete** and real domain data flows through the transformer.
+The graph transformer (`webview/lib/graphTransformer.ts`, F108) converts the SemanticDomain data into React Flow nodes/edges. The colour scheme logic lives in `webview/lib/colorScheme.ts`.
 
 To preview in Chrome: create `dev-preview.html` (see instructions above), run `npm run build`, serve with `npx http-server -p 8765 --cors -c-1`, and open `http://localhost:8765/dev-preview.html`.
 
