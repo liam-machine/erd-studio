@@ -33,6 +33,7 @@ export const window = {
     show: () => {},
     dispose: () => {},
   }),
+  registerTreeDataProvider: () => ({ dispose: () => {} }),
 };
 
 export const commands = {
@@ -58,10 +59,22 @@ export enum TreeItemCollapsibleState {
 
 export class TreeItem {
   label: string;
+  description?: string;
+  tooltip?: string;
   collapsibleState?: TreeItemCollapsibleState;
+  iconPath?: unknown;
+  command?: unknown;
+  contextValue?: string;
   constructor(label: string, collapsibleState?: TreeItemCollapsibleState) {
     this.label = label;
     this.collapsibleState = collapsibleState;
+  }
+}
+
+export class ThemeIcon {
+  id: string;
+  constructor(id: string) {
+    this.id = id;
   }
 }
 

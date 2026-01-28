@@ -108,7 +108,7 @@
       "name": "Create DomainTreeProvider for sidebar tree view",
       "description": "Implement DomainTreeProvider (src/providers/DomainTreeProvider.ts) as a VS Code TreeDataProvider that lists all semantic domains grouped by layer (bronze, silver, gold) in the sidebar. Show model count and design model count as badges. Include a 'New Domain...' item at the bottom. Clicking a domain should open its graph editor.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F102"],
       "validation_criteria": [
