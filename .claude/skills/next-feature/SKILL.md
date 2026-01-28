@@ -13,7 +13,7 @@ description: >
 
 ## Build the feature
 
-4. IMMEDIATELY use the `Skill` tool to invoke skill `feature-dev` to implement the feature. You MUST call the Skill tool — do NOT attempt to implement the feature yourself, and do NOT explore the codebase beforehand. Pass the feature name, description, implementation_notes, and validation_criteria as the `args` string so the feature-dev agent has full context.
+4. IMMEDIATELY use the `Skill` tool to invoke skill `feature-dev:feature-dev` to implement the feature. You MUST call the Skill tool — do NOT attempt to implement the feature yourself, and do NOT explore the codebase beforehand. Pass the feature name, description, implementation_notes, and validation_criteria as the `args` string so the feature-dev agent has full context.
 
 ## Validate
 
