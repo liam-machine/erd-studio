@@ -7,13 +7,14 @@
  * editor store.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   BackgroundVariant,
   Controls,
+  SelectionMode,
   type Viewport,
   type NodeTypes,
   type EdgeTypes,
@@ -41,9 +42,13 @@ const edgeTypes: EdgeTypes = { fk: FkEdge };
 function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
   const error = useEditorStore((s) => s.error);
+  const nodes = useEditorStore((s) => s.nodes);
+  const edges = useEditorStore((s) => s.edges);
   const setDomain = useEditorStore((s) => s.setDomain);
   const setError = useEditorStore((s) => s.setError);
   const setViewport = useEditorStore((s) => s.setViewport);
+  const setNodes = useEditorStore((s) => s.setNodes);
+  const setEdges = useEditorStore((s) => s.setEdges);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -61,7 +66,16 @@ function EditorCanvas() {
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
 
-  // Position persistence: debounced writes on node drag.
+  // Initialize nodes and edges when domain changes.
+  useEffect(() => {
+    if (domain) {
+      const { nodes: newNodes, edges: newEdges } = transformDomain(domain);
+      setNodes(newNodes);
+      setEdges(newEdges);
+    }
+  }, [domain, setNodes, setEdges]);
+
+  // Position persistence and selection handling.
   const { onNodesChange } = usePositionPersistence();
 
   const onMoveEnd = useCallback(
@@ -69,13 +83,6 @@ function EditorCanvas() {
       setViewport(viewport);
     },
     [setViewport],
-  );
-
-  // Transform domain data into React Flow nodes/edges.
-  // Called unconditionally (before early returns) to satisfy Rules of Hooks.
-  const { nodes, edges } = useMemo(
-    () => (domain ? transformDomain(domain) : { nodes: [], edges: [] }),
-    [domain],
   );
 
   // --- Error state -----------------------------------------------------------
@@ -110,6 +117,9 @@ function EditorCanvas() {
         onNodesChange={onNodesChange}
         onMoveEnd={onMoveEnd}
         fitView
+        selectionOnDrag
+        selectionMode={SelectionMode.Partial}
+        panOnDrag={[1, 2]}
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />

@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
 import type { SemanticDomain } from '../../src/types/semantic';
+import type { ModelFlowNode, FkFlowEdge } from '../types/graph';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +31,10 @@ export interface EditorState {
   domain: SemanticDomain | null;
   /** Error message from the extension host, if any. */
   error: string | null;
+  /** React Flow nodes (local state for selection/drag). */
+  nodes: ModelFlowNode[];
+  /** React Flow edges. */
+  edges: FkFlowEdge[];
 }
 
 export interface EditorActions {
@@ -39,6 +44,8 @@ export interface EditorActions {
   setDetailPanelOpen: (open: boolean) => void;
   setDomain: (domain: SemanticDomain) => void;
   setError: (error: string | null) => void;
+  setNodes: (nodes: ModelFlowNode[]) => void;
+  setEdges: (edges: FkFlowEdge[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +60,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   detailPanelOpen: false,
   domain: null,
   error: null,
+  nodes: [],
+  edges: [],
 
   // Actions
   setMode: (mode) => set({ mode }),
@@ -61,4 +70,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setDetailPanelOpen: (open) => set({ detailPanelOpen: open }),
   setDomain: (domain) => set({ domain, error: null }),
   setError: (error) => set({ error }),
+  setNodes: (nodes) => set({ nodes }),
+  setEdges: (edges) => set({ edges }),
 }));

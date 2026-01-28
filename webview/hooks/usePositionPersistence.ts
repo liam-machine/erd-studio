@@ -1,19 +1,26 @@
 /**
- * usePositionPersistence — handles node position updates with debouncing.
+ * usePositionPersistence — handles React Flow node changes with position persistence.
  *
- * Subscribes to React Flow's `onNodesChange` events and handles two cases:
- *   1. During drag (dragging: true): Updates store immediately for visual feedback
- *   2. On drag end (dragging: false): Debounces and persists to extension host
+ * Uses React Flow's `applyNodeChanges` to handle all change types:
+ *   - Selection: Nodes can be selected/deselected (multi-select supported)
+ *   - Position: Nodes can be dragged, positions update immediately
+ *   - Other: Handles add/remove/reset changes
  *
- * This ensures smooth visual dragging while minimizing file writes.
+ * Position changes are persisted to the extension host with debouncing.
  */
 
 import { useCallback, useRef, useEffect } from 'react';
-import type { OnNodesChange, NodePositionChange, Node } from '@xyflow/react';
+import {
+  applyNodeChanges,
+  type OnNodesChange,
+  type NodeChange,
+  type Node,
+} from '@xyflow/react';
 
 import { useVsCodeApi } from './useVsCodeApi';
 import { useEditorStore } from '../store/editorStore';
 import type { WebviewMessage } from './useMessageBus';
+import type { ModelFlowNode } from '../types/graph';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -27,19 +34,17 @@ const DEBOUNCE_DELAY_MS = 300;
 // ---------------------------------------------------------------------------
 
 /**
- * Returns an `onNodesChange` handler that persists node positions.
- *
- * - Updates positions immediately during drag for visual feedback
- * - Debounces persistence to extension host (300ms after drag end)
- * - Batches multi-node drags into single update
- * - Skips unchanged positions to avoid no-op writes
+ * Returns an `onNodesChange` handler that:
+ * - Applies all changes (selection, position, etc.) to nodes in store
+ * - Persists position changes to extension host with debouncing
  */
 export function usePositionPersistence(): {
   onNodesChange: OnNodesChange<Node>;
 } {
   const vscode = useVsCodeApi();
+  const nodes = useEditorStore((s) => s.nodes);
+  const setNodes = useEditorStore((s) => s.setNodes);
   const domain = useEditorStore((s) => s.domain);
-  const setDomain = useEditorStore((s) => s.setDomain);
 
   // Accumulate position changes for persistence (only final positions).
   const pendingChangesRef = useRef<Map<string, { x: number; y: number }>>(
@@ -49,11 +54,15 @@ export function usePositionPersistence(): {
   // Debounce timeout handle.
   const timeoutRef = useRef<number | null>(null);
 
-  // Snapshot domain ref to avoid stale closure in timeout callback.
+  // Refs to avoid stale closures in timeout callback.
   const domainRef = useRef(domain);
+  const nodesRef = useRef(nodes);
   useEffect(() => {
     domainRef.current = domain;
   }, [domain]);
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   // On unmount: cancel pending timeout and flush any accumulated changes.
   useEffect(() => {
@@ -82,104 +91,82 @@ export function usePositionPersistence(): {
   }, [vscode]);
 
   const onNodesChange: OnNodesChange<Node> = useCallback(
-    (changes) => {
+    (changes: NodeChange<Node>[]) => {
+      // Apply all changes to nodes (handles selection, position, etc.).
+      const updatedNodes = applyNodeChanges(changes, nodesRef.current);
+      setNodes(updatedNodes as ModelFlowNode[]);
+
+      // Extract position changes for persistence.
+      const dragEndChanges = changes.filter(
+        (change): change is NodeChange<Node> & { type: 'position'; position: { x: number; y: number } } =>
+          change.type === 'position' &&
+          'dragging' in change &&
+          change.dragging === false &&
+          'position' in change &&
+          change.position !== undefined,
+      );
+
+      if (dragEndChanges.length === 0) {
+        return;
+      }
+
       const currentDomain = domainRef.current;
       if (!currentDomain) {
         return;
       }
 
-      // Filter for position changes with valid positions.
-      const positionChanges = changes.filter(
-        (change): change is NodePositionChange =>
-          change.type === 'position' && change.position !== undefined,
-      );
+      const savedPositions = currentDomain.viewConfig.positions ?? {};
 
-      if (positionChanges.length === 0) {
-        return;
+      for (const change of dragEndChanges) {
+        const newPos = change.position;
+        const oldPos = savedPositions[change.id];
+
+        // Skip if position unchanged (avoid no-op writes).
+        if (
+          oldPos &&
+          Math.abs(oldPos.x - newPos.x) < 0.5 &&
+          Math.abs(oldPos.y - newPos.y) < 0.5
+        ) {
+          continue;
+        }
+
+        pendingChangesRef.current.set(change.id, {
+          x: Math.round(newPos.x),
+          y: Math.round(newPos.y),
+        });
       }
 
-      // Separate dragging vs drag-end changes.
-      const draggingChanges = positionChanges.filter((c) => c.dragging === true);
-      const dragEndChanges = positionChanges.filter((c) => c.dragging === false);
+      // Schedule debounced persistence if we have changes.
+      if (pendingChangesRef.current.size > 0) {
+        if (timeoutRef.current !== null) {
+          clearTimeout(timeoutRef.current);
+        }
 
-      // --- Handle dragging: update store immediately for visual feedback ---
-      if (draggingChanges.length > 0) {
-        const currentPositions = currentDomain.viewConfig.positions ?? {};
-        const newPositions = { ...currentPositions };
+        timeoutRef.current = window.setTimeout(() => {
+          const latestDomain = domainRef.current;
+          if (!latestDomain) {
+            return;
+          }
 
-        for (const change of draggingChanges) {
-          newPositions[change.id] = {
-            x: change.position!.x,
-            y: change.position!.y,
+          const existingPositions = latestDomain.viewConfig.positions ?? {};
+          const updatedPositions = {
+            ...existingPositions,
+            ...Object.fromEntries(pendingChangesRef.current),
           };
-        }
 
-        // Update store for immediate visual feedback (no persistence yet).
-        const updatedDomain = {
-          ...currentDomain,
-          viewConfig: {
-            ...currentDomain.viewConfig,
-            positions: newPositions,
-          },
-        };
-        setDomain(updatedDomain);
-      }
+          // Persist to extension host (writes to JSON via WorkspaceEdit).
+          const message: WebviewMessage = {
+            type: 'updatePositions',
+            payload: { positions: updatedPositions },
+          };
+          vscode.postMessage(message);
 
-      // --- Handle drag end: accumulate for debounced persistence ---
-      if (dragEndChanges.length > 0) {
-        const savedPositions = currentDomain.viewConfig.positions ?? {};
-
-        for (const change of dragEndChanges) {
-          const newPos = change.position!;
-          const oldPos = savedPositions[change.id];
-
-          // Skip if position unchanged (avoid no-op writes).
-          if (
-            oldPos &&
-            Math.abs(oldPos.x - newPos.x) < 0.5 &&
-            Math.abs(oldPos.y - newPos.y) < 0.5
-          ) {
-            continue;
-          }
-
-          pendingChangesRef.current.set(change.id, {
-            x: Math.round(newPos.x),
-            y: Math.round(newPos.y),
-          });
-        }
-
-        // Schedule debounced persistence if we have changes.
-        if (pendingChangesRef.current.size > 0) {
-          if (timeoutRef.current !== null) {
-            clearTimeout(timeoutRef.current);
-          }
-
-          timeoutRef.current = window.setTimeout(() => {
-            const latestDomain = domainRef.current;
-            if (!latestDomain) {
-              return;
-            }
-
-            const existingPositions = latestDomain.viewConfig.positions ?? {};
-            const updatedPositions = {
-              ...existingPositions,
-              ...Object.fromEntries(pendingChangesRef.current),
-            };
-
-            // Persist to extension host (writes to JSON via WorkspaceEdit).
-            const message: WebviewMessage = {
-              type: 'updatePositions',
-              payload: { positions: updatedPositions },
-            };
-            vscode.postMessage(message);
-
-            pendingChangesRef.current.clear();
-            timeoutRef.current = null;
-          }, DEBOUNCE_DELAY_MS);
-        }
+          pendingChangesRef.current.clear();
+          timeoutRef.current = null;
+        }, DEBOUNCE_DELAY_MS);
       }
     },
-    [setDomain, vscode, domainRef],
+    [setNodes, vscode],
   );
 
   return { onNodesChange };
