@@ -1,0 +1,127 @@
+{
+  "name": "dbt-semantic-designer",
+  "displayName": "dbt Semantic Designer",
+  "description": "Visualise semantic (FK-based) relationships between dbt models within curated business domains, with a design mode for planning new models, columns, and relationships.",
+  "version": "0.1.0",
+  "publisher": "jhg",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/dbt_project.yml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dbtSemantic.createDomain",
+        "title": "Create Semantic Domain",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.openDomain",
+        "title": "Open Semantic Domain",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.deleteDomain",
+        "title": "Delete Semantic Domain",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.refreshManifest",
+        "title": "Refresh Manifest",
+        "category": "dbt"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dbt-semantic",
+          "title": "Semantic Domains",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "dbt-semantic": [
+        {
+          "id": "dbtSemantic.domainTree",
+          "name": "Domains"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "dbtSemantic.domainEditor",
+        "displayName": "Semantic Domain Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/models/semantic/**/*.json"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "configuration": {
+      "title": "dbt Semantic Designer",
+      "properties": {
+        "dbtSemantic.projectPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to dbt project root (auto-detected from workspace)"
+        },
+        "dbtSemantic.semanticDir": {
+          "type": "string",
+          "default": "models/semantic",
+          "description": "Relative path to semantic domain files within the dbt project"
+        },
+        "dbtSemantic.autoReconcile": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically transition design models to built when detected in manifest"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
+    "vscode:prepublish": "npm run package",
+    "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vscode-test"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.1.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.17.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.0",
+    "esbuild": "^0.24.0",
+    "jsdom": "^25.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "@vscode-elements/elements": "^1.6.0",
+    "@vscode-elements/react-elements": "^0.5.0",
+    "@xyflow/react": "^12.4.0",
+    "elkjs": "^0.9.3",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "stream-json": "^1.8.0",
+    "zustand": "^5.0.0"
+  }
+}

@@ -53,7 +53,7 @@
       "name": "Set up extension project scaffold",
       "description": "Create the VS Code extension project structure with esbuild dual build (extension host + webview), two TypeScript configs (tsconfig.json for Node.js and tsconfig.webview.json for DOM), package.json with extension manifest contribution points (commands, views, custom editor, settings, activation events), and .vscodeignore. Include the full directory structure as specified in the plan: src/ (extension host), webview/ (React), media/, test/.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": [],
       "validation_criteria": [
