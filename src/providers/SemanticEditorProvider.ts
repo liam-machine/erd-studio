@@ -192,7 +192,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none';
       script-src ${webview.cspSource} 'nonce-${nonce}';
-      style-src ${webview.cspSource} 'unsafe-inline';">
+      style-src ${webview.cspSource} 'unsafe-inline';
+      worker-src blob:;">
   <title>Semantic Domain Editor</title>
   <link rel="stylesheet" href="${styleUri}">
 </head>
