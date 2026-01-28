@@ -6,6 +6,9 @@
  * Built relationships are blue; design relationships are orange.
  * One-to-one edges use a dashed line style.
  *
+ * The edge line stops short of the node so the cardinality label sits
+ * in the gap between the line end and the node boundary.
+ *
  * Edges connect to node-level handles (top/right/bottom/left) rather
  * than column-specific handles, choosing the side that creates the
  * least bends.
@@ -25,31 +28,35 @@ import './FkEdge.css';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Offset (px) from the endpoint to position the cardinality label. */
-const LABEL_OFFSET = 18;
+/** How far (px) to shorten the edge path on each end (leaves room for label). */
+const PATH_GAP = 20;
+
+/** How far (px) from the node boundary to place the cardinality label. */
+const LABEL_OFFSET = 8;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the (x, y) position for a cardinality label near an endpoint.
- * The label is offset away from the node, along the edge direction.
+ * Offset a point away from its node along the edge direction.
+ * `position` is the handle side (Right/Left/Top/Bottom).
  */
-function labelPosition(
+function offsetPoint(
   x: number,
   y: number,
   position: Position,
+  distance: number,
 ): { x: number; y: number } {
   switch (position) {
     case Position.Right:
-      return { x: x + LABEL_OFFSET, y };
+      return { x: x + distance, y };
     case Position.Left:
-      return { x: x - LABEL_OFFSET, y };
+      return { x: x - distance, y };
     case Position.Bottom:
-      return { x, y: y + LABEL_OFFSET };
+      return { x, y: y + distance };
     case Position.Top:
-      return { x, y: y - LABEL_OFFSET };
+      return { x, y: y - distance };
   }
 }
 
@@ -70,11 +77,16 @@ function FkEdgeComponent({
   if (!data) return null;
   const { cardinality, status } = data;
 
+  // Shorten the path so the line stops before the node, leaving room
+  // for the cardinality label in the gap.
+  const src = offsetPoint(sourceX, sourceY, sourcePosition, PATH_GAP);
+  const tgt = offsetPoint(targetX, targetY, targetPosition, PATH_GAP);
+
   const [edgePath] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
+    sourceX: src.x,
+    sourceY: src.y,
+    targetX: tgt.x,
+    targetY: tgt.y,
     sourcePosition,
     targetPosition,
     borderRadius: 8,
@@ -88,9 +100,12 @@ function FkEdgeComponent({
   // one-to-one → both sides are 1
   const sourceLabel = cardinality === 'many-to-one' ? '*' : '1';
   const targetLabel = '1';
+  const srcLabelClass = sourceLabel === '*' ? ' fk-edge__label--many' : '';
+  const tgtLabelClass = '';
 
-  const srcPos = labelPosition(sourceX, sourceY, sourcePosition);
-  const tgtPos = labelPosition(targetX, targetY, targetPosition);
+  // Labels sit close to the node, in the gap before the shortened path.
+  const srcLabel = offsetPoint(sourceX, sourceY, sourcePosition, LABEL_OFFSET);
+  const tgtLabel = offsetPoint(targetX, targetY, targetPosition, LABEL_OFFSET);
 
   return (
     <>
@@ -109,17 +124,17 @@ function FkEdgeComponent({
       />
       <EdgeLabelRenderer>
         <span
-          className={`fk-edge__label fk-edge__label--${status}`}
+          className={`fk-edge__label fk-edge__label--${status}${srcLabelClass}`}
           style={{
-            transform: `translate(-50%, -50%) translate(${srcPos.x}px, ${srcPos.y}px)`,
+            transform: `translate(-50%, -50%) translate(${srcLabel.x}px, ${srcLabel.y}px)`,
           }}
         >
           {sourceLabel}
         </span>
         <span
-          className={`fk-edge__label fk-edge__label--${status}`}
+          className={`fk-edge__label fk-edge__label--${status}${tgtLabelClass}`}
           style={{
-            transform: `translate(-50%, -50%) translate(${tgtPos.x}px, ${tgtPos.y}px)`,
+            transform: `translate(-50%, -50%) translate(${tgtLabel.x}px, ${tgtLabel.y}px)`,
           }}
         >
           {targetLabel}

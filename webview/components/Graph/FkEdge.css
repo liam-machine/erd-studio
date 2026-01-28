@@ -41,9 +41,14 @@
 .fk-edge__label {
   position: absolute;
   pointer-events: none;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1;
+}
+
+/* The * symbol needs to be visually larger than 1 */
+.fk-edge__label--many {
+  font-size: 22px;
 }
 
 .fk-edge__label--built {
