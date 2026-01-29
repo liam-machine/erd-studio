@@ -114,7 +114,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
-          // Phase 2: handle other mutation messages (removeModel, removeRelationship, etc.)
+          case 'removeModel': {
+            const payload = (message as { payload?: { modelName: string } }).payload;
+            if (payload) {
+              await this.handleRemoveModel(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'removeRelationship': {
+            const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string } }).payload;
+            if (payload) {
+              await this.handleRemoveRelationship(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
         }
       },
     );
@@ -612,6 +625,181 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to add relationship: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle a `removeModel` message from the webview.
+   *
+   * Removes a design model from the domain's models array and cascades
+   * to remove all relationships involving this model.
+   */
+  private async handleRemoveModel(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+      const modelIndex = models.findIndex((m) => m.name === payload.modelName);
+      if (modelIndex === -1) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${payload.modelName}" not found.` },
+        });
+        return;
+      }
+
+      const model = models[modelIndex];
+      // Only allow deleting design models
+      if (model.source !== 'design') {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Cannot delete built model "${payload.modelName}". Only design models can be deleted.` },
+        });
+        return;
+      }
+
+      // Remove the model
+      models.splice(modelIndex, 1);
+      parsed.models = models;
+
+      // Cascade: remove relationships involving this model
+      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+      const filteredRelationships = relationships.filter(
+        (rel) => rel.fromModel !== payload.modelName && rel.toModel !== payload.modelName,
+      );
+      parsed.relationships = filteredRelationships;
+
+      // Remove positions for deleted model
+      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
+      delete positions[payload.modelName];
+      viewConfig.positions = positions;
+      parsed.viewConfig = viewConfig;
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        try {
+          await document.save();
+          await this.sendDomainData(document, webview);
+        } finally {
+          this.pendingUpdate = false;
+        }
+      } else {
+        this.pendingUpdate = false;
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to remove model.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Remove model failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to remove model: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle a `removeRelationship` message from the webview.
+   *
+   * Removes an FK relationship by its composite key (fromModel, fromColumn, toModel, toColumn).
+   */
+  private async handleRemoveRelationship(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: {
+      fromModel: string;
+      fromColumn: string;
+      toModel: string;
+      toColumn: string;
+    },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+
+      const relIndex = relationships.findIndex(
+        (rel) =>
+          rel.fromModel === payload.fromModel &&
+          rel.fromColumn === payload.fromColumn &&
+          rel.toModel === payload.toModel &&
+          rel.toColumn === payload.toColumn,
+      );
+
+      if (relIndex === -1) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Relationship not found.' },
+        });
+        return;
+      }
+
+      const relationship = relationships[relIndex];
+      // Only allow deleting design relationships
+      if (relationship.source !== 'design') {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Cannot delete built relationship. Only design relationships can be deleted.' },
+        });
+        return;
+      }
+
+      // Remove the relationship
+      relationships.splice(relIndex, 1);
+      parsed.relationships = relationships;
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        try {
+          await document.save();
+          await this.sendDomainData(document, webview);
+        } finally {
+          this.pendingUpdate = false;
+        }
+      } else {
+        this.pendingUpdate = false;
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to remove relationship.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Remove relationship failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to remove relationship: ${message}` },
       });
     }
   }

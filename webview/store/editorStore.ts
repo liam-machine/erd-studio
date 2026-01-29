@@ -39,6 +39,8 @@ export interface EditorState {
   newFkDialogOpen: boolean;
   /** Prefill data for FK dialog when opened via drag-to-connect, or null. */
   fkDialogPrefill: FkDialogPrefill | null;
+  /** Whether a delete confirmation is pending (triggered by Delete key). */
+  pendingDeleteConfirmation: boolean;
   /** The loaded domain data from the extension host (already reconciled with manifest). */
   domain: ReconciledDomain | null;
   /** Error message from the extension host, if any. */
@@ -61,6 +63,8 @@ export interface EditorActions {
   openFkDialogWithPrefill: (prefill: FkDialogPrefill) => void;
   /** Clear FK dialog prefill (called on dialog close). */
   clearFkDialogPrefill: () => void;
+  /** Set pending delete confirmation state (triggered by Delete key). */
+  setPendingDeleteConfirmation: (pending: boolean) => void;
   setDomain: (domain: ReconciledDomain) => void;
   setError: (error: string | null) => void;
   setNodes: (nodes: ModelFlowNode[]) => void;
@@ -80,6 +84,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   newModelDialogOpen: false,
   newFkDialogOpen: false,
   fkDialogPrefill: null,
+  pendingDeleteConfirmation: false,
   domain: null,
   error: null,
   nodes: [],
@@ -95,6 +100,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   openFkDialogWithPrefill: (prefill) =>
     set({ newFkDialogOpen: true, fkDialogPrefill: prefill }),
   clearFkDialogPrefill: () => set({ fkDialogPrefill: null }),
+  setPendingDeleteConfirmation: (pending) => set({ pendingDeleteConfirmation: pending }),
   setDomain: (domain) => set({ domain, error: null }),
   setError: (error) => set({ error }),
   setNodes: (nodes) => set({ nodes }),

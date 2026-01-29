@@ -7,11 +7,12 @@
  * - Incoming and outgoing FK relationships
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
+import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { ReconciledRelationship } from '../../../src/types/reconciled';
 import './DetailPanel.css';
 
@@ -30,16 +31,54 @@ const STATUS_LABEL: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 export function DetailPanel() {
+  const vscode = useVsCodeApi();
   const domain = useEditorStore((s) => s.domain);
   const selectedNode = useEditorStore((s) => s.selectedNode);
   const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
+  const pendingDeleteConfirmation = useEditorStore((s) => s.pendingDeleteConfirmation);
+  const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Handle pending delete confirmation from keyboard shortcut
+  useEffect(() => {
+    if (pendingDeleteConfirmation && detailPanelOpen) {
+      setConfirmingDelete(true);
+      setPendingDeleteConfirmation(false);
+    }
+  }, [pendingDeleteConfirmation, detailPanelOpen, setPendingDeleteConfirmation]);
 
   const handleClose = useCallback(() => {
     setDetailPanelOpen(false);
     selectNode(null);
+    setConfirmingDelete(false);
   }, [setDetailPanelOpen, selectNode]);
+
+  const handleDeleteModel = useCallback(() => {
+    if (!selectedNode) return;
+    vscode.postMessage({
+      type: 'removeModel',
+      payload: { modelName: selectedNode },
+    });
+    setConfirmingDelete(false);
+    handleClose();
+  }, [selectedNode, vscode, handleClose]);
+
+  const handleDeleteRelationship = useCallback(
+    (rel: ReconciledRelationship) => {
+      vscode.postMessage({
+        type: 'removeRelationship',
+        payload: {
+          fromModel: rel.fromModel,
+          fromColumn: rel.fromColumn,
+          toModel: rel.toModel,
+          toColumn: rel.toColumn,
+        },
+      });
+    },
+    [vscode],
+  );
 
   // Find the selected model
   const model = useMemo(() => {
@@ -108,6 +147,44 @@ export function DetailPanel() {
         )}
       </div>
 
+      {/* Delete Model button (design models only) */}
+      {model.status === 'design' && (
+        <div className="detail-panel__section detail-panel__section--actions">
+          {confirmingDelete ? (
+            <>
+              <span className="detail-panel__confirm-label">
+                Delete model{totalRelationships > 0 ? ` and ${totalRelationships} relationship(s)` : ''}?
+              </span>
+              <div className="detail-panel__confirm-actions">
+                <button
+                  className="detail-panel__button detail-panel__button--danger"
+                  onClick={handleDeleteModel}
+                  aria-label="Confirm delete model"
+                >
+                  Yes, Delete
+                </button>
+                <button
+                  className="detail-panel__button"
+                  onClick={() => setConfirmingDelete(false)}
+                  aria-label="Cancel delete"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              className="detail-panel__button detail-panel__button--danger"
+              onClick={() => setConfirmingDelete(true)}
+              title="Delete this design model"
+              aria-label="Delete this design model"
+            >
+              Delete Model
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Columns (editable) */}
       <div className="detail-panel__section">
         <ColumnEditor
@@ -143,6 +220,16 @@ export function DetailPanel() {
                 <span className="detail-panel__rel-cardinality">
                   {rel.cardinality}
                 </span>
+                {rel.status === 'design' && (
+                  <button
+                    className="detail-panel__rel-delete"
+                    onClick={() => handleDeleteRelationship(rel)}
+                    title="Delete relationship"
+                    aria-label="Delete relationship"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))}
             {/* Incoming: others reference this model */}
@@ -164,6 +251,16 @@ export function DetailPanel() {
                 <span className="detail-panel__rel-cardinality">
                   {rel.cardinality}
                 </span>
+                {rel.status === 'design' && (
+                  <button
+                    className="detail-panel__rel-delete"
+                    onClick={() => handleDeleteRelationship(rel)}
+                    title="Delete relationship"
+                    aria-label="Delete relationship"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))}
           </div>

@@ -62,6 +62,9 @@ function EditorCanvas() {
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const setTemplates = useEditorStore((s) => s.setTemplates);
   const openFkDialogWithPrefill = useEditorStore((s) => s.openFkDialogWithPrefill);
+  const selectedNode = useEditorStore((s) => s.selectedNode);
+  const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
+  const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
 
   // State persistence (zoom, pan, selection, mode, detail panel)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
@@ -101,6 +104,43 @@ function EditorCanvas() {
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
+
+  // Handle Delete key to delete selected design model
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle Delete/Backspace when a node is selected
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNode && domain) {
+        // Check if user is typing in an input field
+        const activeElement = document.activeElement;
+        if (
+          activeElement instanceof HTMLInputElement ||
+          activeElement instanceof HTMLTextAreaElement ||
+          activeElement instanceof HTMLSelectElement
+        ) {
+          return; // Don't intercept if user is editing
+        }
+
+        // Find the selected model
+        const model = domain.models.find((m) => m.name === selectedNode);
+        if (!model || model.status !== 'design') {
+          return; // Only allow delete for design models
+        }
+
+        // Prevent default browser behavior
+        e.preventDefault();
+
+        // Open detail panel if closed and trigger confirmation mode
+        if (!detailPanelOpen) {
+          setDetailPanelOpen(true);
+        }
+        // Signal to DetailPanel to show confirmation immediately
+        setPendingDeleteConfirmation(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNode, domain, detailPanelOpen, setDetailPanelOpen, setPendingDeleteConfirmation]);
 
   // Get current selectedNode from store to preserve selection across domain updates
   const currentSelectedNode = useEditorStore((s) => s.selectedNode);

@@ -311,3 +311,79 @@
   color: var(--vscode-descriptionForeground, #888);
   white-space: nowrap;
 }
+
+.detail-panel__rel-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__rel-delete:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* ---------------------------------------------------------------------------
+   Actions Section (Delete Model)
+   --------------------------------------------------------------------------- */
+
+.detail-panel__section--actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__button {
+  padding: 6px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.detail-panel__button:hover {
+  background: var(--button-hover-bg);
+  border-color: var(--focus-border);
+}
+
+.detail-panel__button--danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.detail-panel__button--danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+}
+
+.detail-panel__confirm-label {
+  font-size: 11px;
+  color: var(--editor-fg);
+  line-height: 1.4;
+}
+
+.detail-panel__confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.detail-panel__confirm-actions .detail-panel__button {
+  flex: 1;
+}
