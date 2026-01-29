@@ -1,0 +1,27 @@
+/**
+ * DataTypeSelect styles.
+ *
+ * Matches NewModelDialog input styling. BEM naming with VS Code theme tokens.
+ */
+
+.data-type-select {
+  padding: 4px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 2px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.data-type-select:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.data-type-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

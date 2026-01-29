@@ -3,15 +3,14 @@
  *
  * Displays at top-right when a node is clicked. Shows:
  * - Model metadata (name, schema, status, description)
- * - Column list with PK/FK indicators and data types
+ * - Editable column list (Phase 2 F202)
  * - Incoming and outgoing FK relationships
- *
- * Read-only in Phase 1 (F113). Editing will be added in Phase 2 (F203).
  */
 
 import { useCallback, useMemo } from 'react';
 import { Panel } from '@xyflow/react';
 
+import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
 import type { ReconciledRelationship } from '../../../src/types/reconciled';
 import './DetailPanel.css';
@@ -109,39 +108,13 @@ export function DetailPanel() {
         )}
       </div>
 
-      {/* Columns */}
+      {/* Columns (editable) */}
       <div className="detail-panel__section">
-        <h4 className="detail-panel__section-title">
-          Columns ({model.columns.length})
-        </h4>
-        <div className="detail-panel__columns">
-          {model.columns.length === 0 ? (
-            <div className="detail-panel__empty">No columns</div>
-          ) : (
-            model.columns.map((col) => (
-              <div
-                key={col.name}
-                className={`detail-panel__column detail-panel__column--${col.status}`}
-                title={col.description || undefined}
-              >
-                <span className="detail-panel__col-indicators">
-                  {col.isPrimaryKey && (
-                    <span className="detail-panel__pk" title="Primary Key">
-                      PK
-                    </span>
-                  )}
-                  {col.isForeignKey && (
-                    <span className="detail-panel__fk" title="Foreign Key">
-                      FK
-                    </span>
-                  )}
-                </span>
-                <span className="detail-panel__col-name">{col.name}</span>
-                <span className="detail-panel__col-type">{col.dataType}</span>
-              </div>
-            ))
-          )}
-        </div>
+        <ColumnEditor
+          modelName={model.name}
+          modelStatus={model.status}
+          columns={model.columns}
+        />
       </div>
 
       {/* Relationships */}

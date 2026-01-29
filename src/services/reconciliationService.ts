@@ -16,7 +16,7 @@ import type {
   Relationship,
 } from '../types/semantic';
 import type {
-  ReconciledDomain,
+  ReconciledDomainCore,
   ReconciledModel,
   ReconciledColumn,
   ReconciledRelationship,
@@ -32,7 +32,7 @@ export class ReconciliationService {
    * @param manifest - The parsed manifest data (may be empty if no manifest)
    * @returns A fully reconciled domain ready for the webview
    */
-  reconcile(domain: SemanticDomain, manifest: ManifestData): ReconciledDomain {
+  reconcile(domain: SemanticDomain, manifest: ManifestData): ReconciledDomainCore {
     // Build a set of FK column names per model for FK badge assignment
     const fkColumnsByModel = this.buildFkColumnMap(domain.relationships);
 

@@ -91,13 +91,10 @@ export interface ReconciledRelationship {
 // ---------------------------------------------------------------------------
 
 /**
- * A fully reconciled semantic domain ready for the webview.
- *
- * This is the payload sent via `domainLoaded` message to the webview.
- * All columns are resolved, statuses are determined, and the data is
- * ready for direct rendering.
+ * The core reconciled domain data returned by ReconciliationService.
+ * Does not include templates (added separately by the provider).
  */
-export interface ReconciledDomain {
+export interface ReconciledDomainCore {
   schemaVersion: number;
   domain: string;
   layer: Layer;
@@ -105,6 +102,16 @@ export interface ReconciledDomain {
   models: ReconciledModel[];
   relationships: ReconciledRelationship[];
   viewConfig: ViewConfig;
+}
+
+/**
+ * A fully reconciled semantic domain ready for the webview.
+ *
+ * This is the payload sent via `domainLoaded` message to the webview.
+ * All columns are resolved, statuses are determined, and the data is
+ * ready for direct rendering.
+ */
+export interface ReconciledDomain extends ReconciledDomainCore {
   /**
    * Available model templates loaded from semantic/templates/*.json.
    * Used by the New Model dialog to create models with preset columns.

@@ -21,7 +21,7 @@ import { DomainService } from '../services/domainService';
 import { ManifestService } from '../services/manifestService';
 import { ReconciliationService } from '../services/reconciliationService';
 import { TemplateService } from '../services/templateService';
-import type { DesignModel } from '../types/semantic';
+import type { ColumnDef, DesignModel } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -86,7 +86,28 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
-          // Phase 2: handle other mutation messages (addColumn, removeModel, etc.)
+          case 'addColumn': {
+            const payload = (message as { payload?: { modelName: string; column: ColumnDef } }).payload;
+            if (payload) {
+              await this.handleAddColumn(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'updateColumn': {
+            const payload = (message as { payload?: { modelName: string; oldColumnName: string; column: ColumnDef } }).payload;
+            if (payload) {
+              await this.handleUpdateColumn(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'removeColumn': {
+            const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
+            if (payload) {
+              await this.handleRemoveColumn(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          // Phase 2: handle other mutation messages (removeModel, addRelationship, etc.)
         }
       },
     );
@@ -212,6 +233,291 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to add model: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Validate a column definition. Returns error message or null if valid.
+   */
+  private validateColumnDef(column: ColumnDef): string | null {
+    const trimmedName = column.name?.trim();
+    if (!trimmedName) {
+      return 'Column name is required';
+    }
+    if (!/^[a-z0-9_]+$/.test(trimmedName)) {
+      return 'Column name must use lowercase letters, numbers, and underscores';
+    }
+    if (!column.dataType?.trim()) {
+      return 'Data type is required';
+    }
+    return null;
+  }
+
+  /**
+   * Handle an `addColumn` message from the webview.
+   *
+   * Adds a new column to the model's columns (design models) or
+   * plannedColumns (repo models) array.
+   */
+  private async handleAddColumn(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; column: ColumnDef },
+  ): Promise<void> {
+    try {
+      // Validate column definition
+      const validationError = this.validateColumnDef(payload.column);
+      if (validationError) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: validationError },
+        });
+        return;
+      }
+
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+      const model = models.find((m) => m.name === payload.modelName);
+      if (!model) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${payload.modelName}" not found.` },
+        });
+        return;
+      }
+
+      // Determine which array to add to based on model source
+      const isDesignModel = model.source === 'design';
+      const targetArray = isDesignModel ? 'columns' : 'plannedColumns';
+      const columns = (model[targetArray] ?? []) as Array<Record<string, unknown>>;
+
+      // Check for duplicate column name
+      if (columns.some((c) => c.name === payload.column.name)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Column "${payload.column.name}" already exists.` },
+        });
+        return;
+      }
+
+      // Add the new column
+      columns.push({
+        name: payload.column.name,
+        dataType: payload.column.dataType,
+        description: payload.column.description,
+        ...(payload.column.isPrimaryKey ? { isPrimaryKey: true } : {}),
+      });
+      model[targetArray] = columns;
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdate = false;
+        await this.sendDomainData(document, webview);
+      } else {
+        this.pendingUpdate = false;
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to add column.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Add column failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to add column: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle an `updateColumn` message from the webview.
+   *
+   * Updates an existing column in the model's columns (design models) or
+   * plannedColumns (repo models) array.
+   */
+  private async handleUpdateColumn(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; oldColumnName: string; column: ColumnDef },
+  ): Promise<void> {
+    try {
+      // Validate column definition
+      const validationError = this.validateColumnDef(payload.column);
+      if (validationError) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: validationError },
+        });
+        return;
+      }
+
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+      const model = models.find((m) => m.name === payload.modelName);
+      if (!model) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${payload.modelName}" not found.` },
+        });
+        return;
+      }
+
+      // Determine which array to update based on model source
+      const isDesignModel = model.source === 'design';
+      const targetArray = isDesignModel ? 'columns' : 'plannedColumns';
+      const columns = (model[targetArray] ?? []) as Array<Record<string, unknown>>;
+
+      const columnIndex = columns.findIndex((c) => c.name === payload.oldColumnName);
+      if (columnIndex === -1) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Column "${payload.oldColumnName}" not found.` },
+        });
+        return;
+      }
+
+      // Check for duplicate name (if name changed)
+      if (payload.oldColumnName !== payload.column.name) {
+        if (columns.some((c) => c.name === payload.column.name)) {
+          webview.postMessage({
+            type: 'error',
+            payload: { message: `Column "${payload.column.name}" already exists.` },
+          });
+          return;
+        }
+      }
+
+      // Update the column
+      columns[columnIndex] = {
+        name: payload.column.name,
+        dataType: payload.column.dataType,
+        description: payload.column.description,
+        ...(payload.column.isPrimaryKey ? { isPrimaryKey: true } : {}),
+      };
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdate = false;
+        await this.sendDomainData(document, webview);
+      } else {
+        this.pendingUpdate = false;
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to update column.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update column failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to update column: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle a `removeColumn` message from the webview.
+   *
+   * Removes a column from the model's columns (design models) or
+   * plannedColumns (repo models) array.
+   */
+  private async handleRemoveColumn(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+      const model = models.find((m) => m.name === payload.modelName);
+      if (!model) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${payload.modelName}" not found.` },
+        });
+        return;
+      }
+
+      // Determine which array to remove from based on model source
+      const isDesignModel = model.source === 'design';
+      const targetArray = isDesignModel ? 'columns' : 'plannedColumns';
+      const columns = (model[targetArray] ?? []) as Array<Record<string, unknown>>;
+
+      const columnIndex = columns.findIndex((c) => c.name === payload.columnName);
+      if (columnIndex === -1) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Column "${payload.columnName}" not found.` },
+        });
+        return;
+      }
+
+      // Remove the column
+      columns.splice(columnIndex, 1);
+      model[targetArray] = columns;
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdate = false;
+        await this.sendDomainData(document, webview);
+      } else {
+        this.pendingUpdate = false;
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to remove column.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Remove column failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to remove column: ${message}` },
       });
     }
   }

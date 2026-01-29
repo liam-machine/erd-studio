@@ -110,6 +110,21 @@ export interface RemoveColumnMessage {
 }
 
 /**
+ * Request to update an existing column in a model.
+ * For repo models, updates the plannedColumns array.
+ * For design models, updates the columns array.
+ * Phase 2: Design Mode.
+ */
+export interface UpdateColumnMessage {
+  type: 'updateColumn';
+  payload: {
+    modelName: string;
+    oldColumnName: string;
+    column: ColumnDef;
+  };
+}
+
+/**
  * Request to add an FK relationship between two models.
  * Phase 2: Design Mode.
  */
@@ -199,6 +214,7 @@ export type WebviewMessage =
   | AddModelMessage
   | AddColumnMessage
   | RemoveColumnMessage
+  | UpdateColumnMessage
   | AddRelationshipMessage
   | RemoveModelMessage
   | RemoveRelationshipMessage

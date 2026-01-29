@@ -1,0 +1,102 @@
+/**
+ * ColumnEditor styles.
+ *
+ * Editable column list for DetailPanel. BEM naming with VS Code theme tokens.
+ */
+
+/* ---------------------------------------------------------------------------
+   Container
+   --------------------------------------------------------------------------- */
+
+.column-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.column-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.column-editor__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.column-editor__add-btn {
+  padding: 3px 8px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--button-bg);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.column-editor__add-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: var(--button-bg);
+}
+
+.column-editor__add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   Column List
+   --------------------------------------------------------------------------- */
+
+.column-editor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.column-editor__empty {
+  padding: 8px 6px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-style: italic;
+  text-align: center;
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
+   Separator
+   --------------------------------------------------------------------------- */
+
+.column-editor__separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.column-editor__separator::before,
+.column-editor__separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--panel-border);
+}
+
+.column-editor__separator-text {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--model-design);
+  text-transform: uppercase;
+}

@@ -27,6 +27,7 @@ export type {
   AddModelMessage,
   AddColumnMessage,
   RemoveColumnMessage,
+  UpdateColumnMessage,
   AddRelationshipMessage,
   RemoveModelMessage,
   RemoveRelationshipMessage,
