@@ -34,6 +34,7 @@ import { StatusBar } from './components/Toolbar/StatusBar';
 import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { NewModelDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
+import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
 import { Toast } from './components/Toast/Toast';
 import { transformDomain } from './lib/graphTransformer';
 import type { ModelFlowNode } from './types/graph';
@@ -61,6 +62,7 @@ function EditorCanvas() {
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const setTemplates = useEditorStore((s) => s.setTemplates);
+  const setManifestModels = useEditorStore((s) => s.setManifestModels);
   const openFkDialogWithPrefill = useEditorStore((s) => s.openFkDialogWithPrefill);
   const selectedNode = useEditorStore((s) => s.selectedNode);
   const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
@@ -94,13 +96,17 @@ function EditorCanvas() {
           if (msg.payload.templates) {
             setTemplates(msg.payload.templates);
           }
+          // Extract and store manifest models for "Add Existing Model" dialog
+          if (msg.payload.manifestModels) {
+            setManifestModels(msg.payload.manifestModels);
+          }
           break;
         case 'error':
           setError(msg.payload.message);
           break;
       }
     },
-    [setDomain, setError, setTemplates],
+    [setDomain, setError, setTemplates, setManifestModels],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
@@ -325,6 +331,7 @@ function EditorCanvas() {
         <DetailPanel />
         <NewModelDialog />
         <NewFkDialog />
+        <AddExistingModelDialog />
       </ReactFlow>
 
       {toastMessage && (

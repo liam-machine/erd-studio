@@ -13,6 +13,22 @@
 import type { Cardinality, Layer, ModelTemplate, ViewConfig } from './semantic';
 
 // ---------------------------------------------------------------------------
+// Manifest model preview (for Add Existing Model dialog)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lightweight preview of a manifest model for the "Add Existing Model" dialog.
+ * Contains only what's needed for display and selection — full column details
+ * are resolved after the model is added to the domain.
+ */
+export interface ManifestModelPreview {
+  name: string;
+  schema: string;
+  description: string;
+  columnCount: number;
+}
+
+// ---------------------------------------------------------------------------
 // Column status
 // ---------------------------------------------------------------------------
 
@@ -117,4 +133,10 @@ export interface ReconciledDomain extends ReconciledDomainCore {
    * Used by the New Model dialog to create models with preset columns.
    */
   templates: ModelTemplate[];
+
+  /**
+   * Models available in the manifest but not yet in this domain.
+   * Used by the "Add Existing Model" dialog to show available models.
+   */
+  manifestModels: ManifestModelPreview[];
 }

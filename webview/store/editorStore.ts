@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
-import type { ReconciledDomain } from '../../src/types/reconciled';
+import type { ManifestModelPreview, ReconciledDomain } from '../../src/types/reconciled';
 import type { ModelFlowNode, FkFlowEdge } from '../types/graph';
 import type { ModelTemplate } from '../../src/types/semantic';
 
@@ -41,6 +41,8 @@ export interface EditorState {
   fkDialogPrefill: FkDialogPrefill | null;
   /** Whether a delete confirmation is pending (triggered by Delete key). */
   pendingDeleteConfirmation: boolean;
+  /** Whether the add existing model dialog is open. */
+  addExistingModelDialogOpen: boolean;
   /** The loaded domain data from the extension host (already reconciled with manifest). */
   domain: ReconciledDomain | null;
   /** Error message from the extension host, if any. */
@@ -51,6 +53,8 @@ export interface EditorState {
   edges: FkFlowEdge[];
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: ModelTemplate[];
+  /** Manifest models available to add to this domain (not already in domain). */
+  manifestModels: ManifestModelPreview[];
 }
 
 export interface EditorActions {
@@ -65,11 +69,14 @@ export interface EditorActions {
   clearFkDialogPrefill: () => void;
   /** Set pending delete confirmation state (triggered by Delete key). */
   setPendingDeleteConfirmation: (pending: boolean) => void;
+  /** Open/close the add existing model dialog. */
+  setAddExistingModelDialogOpen: (open: boolean) => void;
   setDomain: (domain: ReconciledDomain) => void;
   setError: (error: string | null) => void;
   setNodes: (nodes: ModelFlowNode[]) => void;
   setEdges: (edges: FkFlowEdge[]) => void;
   setTemplates: (templates: ModelTemplate[]) => void;
+  setManifestModels: (models: ManifestModelPreview[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,11 +92,13 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   newFkDialogOpen: false,
   fkDialogPrefill: null,
   pendingDeleteConfirmation: false,
+  addExistingModelDialogOpen: false,
   domain: null,
   error: null,
   nodes: [],
   edges: [],
   templates: [],
+  manifestModels: [],
 
   // Actions
   selectNode: (nodeName) => set({ selectedNode: nodeName }),
@@ -101,9 +110,11 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     set({ newFkDialogOpen: true, fkDialogPrefill: prefill }),
   clearFkDialogPrefill: () => set({ fkDialogPrefill: null }),
   setPendingDeleteConfirmation: (pending) => set({ pendingDeleteConfirmation: pending }),
+  setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
   setDomain: (domain) => set({ domain, error: null }),
   setError: (error) => set({ error }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   setTemplates: (templates) => set({ templates }),
+  setManifestModels: (models) => set({ manifestModels: models }),
 }));

@@ -10,7 +10,7 @@
  * Uses React Flow's zoom/pan APIs and the editor store for domain data.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Panel, useReactFlow, useStore } from '@xyflow/react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
@@ -50,6 +50,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const setDomain = useEditorStore((s) => s.setDomain);
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
   const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
+  const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
 
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
@@ -58,6 +59,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   // Auto layout state
   const [isLayouting, setIsLayouting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+
+  // Model dropdown state
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // Update zoom percentage display
   useEffect(() => {
@@ -78,11 +83,35 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     fitView({ padding: 0.1, duration: 200 });
   }, [fitView]);
 
-  // --- New Model handler ---------------------------------------------------
+  // --- Model dropdown click-outside handler --------------------------------
+
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        modelDropdownRef.current &&
+        !modelDropdownRef.current.contains(e.target as Node)
+      ) {
+        setModelDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [modelDropdownOpen]);
+
+  // --- New Model handlers --------------------------------------------------
 
   const handleNewModel = useCallback(() => {
+    setModelDropdownOpen(false);
     setNewModelDialogOpen(true);
   }, [setNewModelDialogOpen]);
+
+  const handleAddExistingModel = useCallback(() => {
+    setModelDropdownOpen(false);
+    setAddExistingModelDialogOpen(true);
+  }, [setAddExistingModelDialogOpen]);
 
   const handleNewRelationship = useCallback(() => {
     setNewFkDialogOpen(true);
@@ -241,16 +270,39 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       {/* Divider */}
       <div className="toolbar__divider" />
 
-      {/* New Model */}
+      {/* Model Dropdown */}
       <div className="toolbar__section">
-        <button
-          className="toolbar__button toolbar__button--text toolbar__button--primary"
-          onClick={handleNewModel}
-          title="Add new model to domain"
-          aria-label="Add new model to domain"
-        >
-          + Model
-        </button>
+        <div className="toolbar__dropdown" ref={modelDropdownRef}>
+          <button
+            className="toolbar__dropdown-trigger"
+            onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
+            title="Add model to domain"
+            aria-label="Add model to domain"
+            aria-haspopup="menu"
+            aria-expanded={modelDropdownOpen}
+          >
+            + Model
+            <span className="toolbar__dropdown-arrow">▾</span>
+          </button>
+          {modelDropdownOpen && (
+            <div className="toolbar__dropdown-menu" role="menu">
+              <button
+                className="toolbar__dropdown-item"
+                onClick={handleNewModel}
+                role="menuitem"
+              >
+                New Design Model
+              </button>
+              <button
+                className="toolbar__dropdown-item"
+                onClick={handleAddExistingModel}
+                role="menuitem"
+              >
+                Add Existing Model
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Divider */}

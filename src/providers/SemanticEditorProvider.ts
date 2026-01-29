@@ -128,6 +128,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'addExistingModel': {
+            const payload = (message as { payload?: { modelName: string } }).payload;
+            if (payload) {
+              await this.handleAddExistingModel(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
         }
       },
     );
@@ -174,9 +181,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // Load templates from the semantic/templates directory
       const templates = this.templateService.loadTemplates(this.workspaceRoot);
 
+      // Build list of manifest models not already in this domain (for Add Existing Model dialog)
+      const existingModelNames = new Set(reconciled.models.map((m) => m.name));
+      const manifestModels = Array.from(manifest.models.values())
+        .filter((m) => !existingModelNames.has(m.name))
+        .map((m) => ({
+          name: m.name,
+          schema: m.schema,
+          description: m.description,
+          columnCount: m.columns.length,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
       webview.postMessage({
         type: 'domainLoaded',
-        payload: { ...reconciled, templates },
+        payload: { ...reconciled, templates, manifestModels },
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -862,6 +881,147 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         payload: { message: `Failed to save positions: ${message}` },
       });
     }
+  }
+
+  /**
+   * Handle an `addExistingModel` message from the webview.
+   *
+   * Adds an existing model from the manifest to the domain with source: 'repo'.
+   * The model's columns will be resolved from the manifest during reconciliation.
+   */
+  private async handleAddExistingModel(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string },
+  ): Promise<void> {
+    try {
+      // Verify model exists in manifest
+      const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const manifestModel = manifest.models.get(payload.modelName);
+
+      if (!manifestModel) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${payload.modelName}" not found in manifest. Run 'dbt compile' to refresh.` },
+        });
+        return;
+      }
+
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+      // Check for duplicate model name
+      if (models.some((m) => m.name === payload.modelName)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${payload.modelName}" already exists in this domain.` },
+        });
+        return;
+      }
+
+      // Find an open position on the canvas for the new model
+      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const existingPositions = (viewConfig.positions ?? {}) as Record<string, { x: number; y: number }>;
+      const newPosition = this.findOpenPosition(existingPositions);
+
+      // Add the repo model (columns come from manifest via reconciliation)
+      models.push({
+        name: payload.modelName,
+        source: 'repo',
+      });
+
+      // Save the position for the new model
+      const updatedPositions = {
+        ...existingPositions,
+        [payload.modelName]: newPosition,
+      };
+
+      parsed.models = models;
+      parsed.viewConfig = { ...viewConfig, positions: updatedPositions };
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        try {
+          await document.save();
+          await this.sendDomainData(document, webview);
+        } finally {
+          this.pendingUpdate = false;
+        }
+      } else {
+        this.pendingUpdate = false;
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to add model to domain.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Add existing model failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to add model: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Find an open position on the canvas that doesn't overlap existing nodes.
+   * Uses a simple grid-based algorithm that searches outward from the center.
+   */
+  private findOpenPosition(
+    existingPositions: Record<string, { x: number; y: number }>,
+  ): { x: number; y: number } {
+    const NODE_WIDTH = 280;
+    const NODE_HEIGHT = 200;
+    const PADDING = 40;
+    const CELL_WIDTH = NODE_WIDTH + PADDING;
+    const CELL_HEIGHT = NODE_HEIGHT + PADDING;
+
+    // If no existing nodes, place at a reasonable starting position
+    if (Object.keys(existingPositions).length === 0) {
+      return { x: 100, y: 100 };
+    }
+
+    // Find the bounding box of existing nodes (for fallback positioning)
+    const positions = Object.values(existingPositions);
+    const maxX = Math.max(...positions.map((p) => p.x), 0);
+
+    // Try positions in a grid pattern, searching for first non-overlapping spot
+    // Start from top-left and scan right, then down
+    for (let row = 0; row < 20; row++) {
+      for (let col = 0; col < 10; col++) {
+        const candidate = {
+          x: col * CELL_WIDTH + 100,
+          y: row * CELL_HEIGHT + 100,
+        };
+
+        // Check if this spot overlaps any existing node
+        const isOverlapping = positions.some((existing) => {
+          const dx = Math.abs(candidate.x - existing.x);
+          const dy = Math.abs(candidate.y - existing.y);
+          return dx < CELL_WIDTH && dy < CELL_HEIGHT;
+        });
+
+        if (!isOverlapping) {
+          return candidate;
+        }
+      }
+    }
+
+    // Fallback: place to the right of all existing nodes
+    return { x: maxX + CELL_WIDTH, y: 100 };
   }
 
   /**

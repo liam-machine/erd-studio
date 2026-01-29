@@ -568,7 +568,7 @@
       "name": "Implement add existing model to domain",
       "description": "Create functionality to add existing models from the manifest to a semantic domain. Provide a search/select interface (via toolbar button or command palette) to browse models from manifest.json and add them to the current domain with source: 'repo'. Send addExistingModel message with the model name. The extension host verifies the model exists in manifest, adds it to the domain JSON, reconciles, and updates the webview. Green node appears on the canvas.",
       "phase": "phase-3",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F101", "F207"],
       "validation_criteria": [
