@@ -455,7 +455,7 @@
       "name": "Implement delete actions for planned items",
       "description": "Enable deleting planned models, planned columns, and design relationships. Delete button in detail panel (disabled/hidden for built items). Support Delete key when a planned item is selected. Deleting a design model also removes all its relationships. Show confirmation dialog before deleting models. Built models and built columns cannot be deleted — the delete button is disabled or hidden for these.",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F202"],
       "validation_criteria": [
