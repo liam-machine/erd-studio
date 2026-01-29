@@ -45,6 +45,7 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--editor-fg);
+  white-space: nowrap;
 }
 
 .toolbar__layer-badge {
@@ -54,6 +55,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 .toolbar__layer-badge--bronze {
@@ -86,6 +88,7 @@
   font-variant-numeric: tabular-nums;
   color: var(--editor-fg);
   opacity: 0.8;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------
@@ -106,6 +109,7 @@
   color: var(--editor-fg);
   font-family: inherit;
   font-size: 14px;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.1s ease, border-color 0.1s ease;
 }
@@ -143,6 +147,7 @@
   font-size: 12px;
   color: var(--editor-fg);
   margin-right: 4px;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------
@@ -186,6 +191,7 @@
   color: var(--button-fg);
   font-family: inherit;
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.1s ease;
 }
@@ -224,6 +230,7 @@
   font-family: inherit;
   font-size: 12px;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.1s ease;
 }
