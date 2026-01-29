@@ -437,7 +437,7 @@
       "name": "Implement drag-to-connect FK creation",
       "description": "Enable creating FK relationships by dragging from a column handle on one model node to another model node on the canvas. When the drag completes, open a simplified relationship dialog pre-filled with the source model and target model, allowing the user to select specific columns and cardinality. This is an alternative to the full New Relationship dialog. Always enabled (no mode gate).",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F203", "F106"],
       "validation_criteria": [
