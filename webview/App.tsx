@@ -26,6 +26,7 @@ import '@xyflow/react/dist/style.css';
 import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
+import { useVsCodeApi } from './hooks/useVsCodeApi';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
@@ -67,6 +68,19 @@ function EditorCanvas() {
   const selectedNode = useEditorStore((s) => s.selectedNode);
   const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
   const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
+  const selectedEdges = useEditorStore((s) => s.selectedEdges);
+  const setSelectedEdges = useEditorStore((s) => s.setSelectedEdges);
+  // Dialog state for Escape key handling
+  const newModelDialogOpen = useEditorStore((s) => s.newModelDialogOpen);
+  const newFkDialogOpen = useEditorStore((s) => s.newFkDialogOpen);
+  const addExistingModelDialogOpen = useEditorStore((s) => s.addExistingModelDialogOpen);
+  const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
+  const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
+  const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
+  const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
+
+  // VS Code API for sending messages directly (edge deletion)
+  const vscode = useVsCodeApi();
 
   // State persistence (zoom, pan, selection, mode, detail panel)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
@@ -126,48 +140,143 @@ function EditorCanvas() {
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
 
-  // Handle Delete key to delete selected design model
+  // Unified keyboard shortcut handler (Escape, Delete/Backspace)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle Delete/Backspace when a node is selected
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNode && domain) {
-        // Check if user is typing in an input field
-        const activeElement = document.activeElement;
-        if (
-          activeElement instanceof HTMLInputElement ||
-          activeElement instanceof HTMLTextAreaElement ||
-          activeElement instanceof HTMLSelectElement
-        ) {
-          return; // Don't intercept if user is editing
-        }
+      // Guard: Don't intercept if user is typing in an input field
+      const activeElement = document.activeElement;
+      if (
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        activeElement instanceof HTMLSelectElement
+      ) {
+        return;
+      }
 
-        // Find the selected model
-        const model = domain.models.find((m) => m.name === selectedNode);
-        if (!model || model.status !== 'design') {
-          return; // Only allow delete for design models
-        }
-
-        // Prevent default browser behavior
+      // ESCAPE KEY: Close dialogs first, then deselect
+      if (e.key === 'Escape') {
         e.preventDefault();
 
-        // Open detail panel if closed and trigger confirmation mode
-        if (!detailPanelOpen) {
-          setDetailPanelOpen(true);
+        // Close any open dialog (priority order)
+        if (newModelDialogOpen) {
+          setNewModelDialogOpen(false);
+          return;
         }
-        // Signal to DetailPanel to show confirmation immediately
-        setPendingDeleteConfirmation(true);
+        if (newFkDialogOpen) {
+          setNewFkDialogOpen(false);
+          clearFkDialogPrefill();
+          return;
+        }
+        if (addExistingModelDialogOpen) {
+          setAddExistingModelDialogOpen(false);
+          return;
+        }
+
+        // No dialogs open — deselect nodes and edges
+        if (selectedNode || selectedEdges.length > 0) {
+          selectNode(null);
+          setDetailPanelOpen(false);
+          setSelectedEdges([]);
+        }
+        return;
+      }
+
+      // DELETE KEY: Delete selected design models or edges
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (!domain) return;
+
+        // Priority 1: Delete selected node (with confirmation)
+        if (selectedNode) {
+          const model = domain.models.find((m) => m.name === selectedNode);
+          if (model) {
+            if (model.status === 'design') {
+              e.preventDefault();
+              // Open detail panel if closed and trigger confirmation mode
+              if (!detailPanelOpen) {
+                setDetailPanelOpen(true);
+              }
+              setPendingDeleteConfirmation(true);
+              return;
+            } else {
+              // Built or missing model — show toast
+              e.preventDefault();
+              setToastMessage('Cannot delete built or missing models');
+              return;
+            }
+          }
+        }
+
+        // Priority 2: Delete selected edges (no confirmation, immediate)
+        if (selectedEdges.length > 0) {
+          e.preventDefault();
+          let deletedCount = 0;
+          let builtCount = 0;
+
+          for (const edgeId of selectedEdges) {
+            // Find the relationship in domain data by edge ID
+            const rel = domain.relationships.find((r) => {
+              const expectedId = `fk-${r.fromModel}-${r.fromColumn}-${r.toModel}-${r.toColumn}`;
+              return expectedId === edgeId;
+            });
+
+            if (!rel) continue;
+
+            if (rel.status === 'design') {
+              // Delete design relationship immediately
+              vscode.postMessage({
+                type: 'removeRelationship',
+                payload: {
+                  fromModel: rel.fromModel,
+                  fromColumn: rel.fromColumn,
+                  toModel: rel.toModel,
+                  toColumn: rel.toColumn,
+                },
+              });
+              deletedCount++;
+            } else {
+              builtCount++;
+            }
+          }
+
+          // Show toast feedback
+          if (builtCount > 0 && deletedCount === 0) {
+            setToastMessage('Cannot delete built relationships');
+          } else if (builtCount > 0 && deletedCount > 0) {
+            setToastMessage(`Deleted ${deletedCount} design relationship(s). Cannot delete ${builtCount} built relationship(s).`);
+          }
+          return;
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNode, domain, detailPanelOpen, setDetailPanelOpen, setPendingDeleteConfirmation]);
+  }, [
+    selectedNode,
+    selectedEdges,
+    domain,
+    detailPanelOpen,
+    newModelDialogOpen,
+    newFkDialogOpen,
+    addExistingModelDialogOpen,
+    setDetailPanelOpen,
+    setPendingDeleteConfirmation,
+    setNewModelDialogOpen,
+    setNewFkDialogOpen,
+    setAddExistingModelDialogOpen,
+    clearFkDialogPrefill,
+    selectNode,
+    setSelectedEdges,
+    setToastMessage,
+    // Note: vscode is omitted as it's a stable ref from useVsCodeApi
+  ]);
 
   // Get current selectedNode from store to preserve selection across domain updates
   const currentSelectedNode = useEditorStore((s) => s.selectedNode);
 
   // Initialize nodes and edges when domain changes.
   // Preserve visual selection if the selected node still exists.
+  // Clear stale edge selections that no longer exist.
   useEffect(() => {
     if (domain) {
       const { nodes: newNodes, edges: newEdges } = transformDomain(domain);
@@ -180,10 +289,19 @@ function EditorCanvas() {
         }
       }
 
+      // Clear stale edge selections (edges that no longer exist after domain update)
+      if (selectedEdges.length > 0) {
+        const newEdgeIds = new Set(newEdges.map((e) => e.id));
+        const validEdges = selectedEdges.filter((id) => newEdgeIds.has(id));
+        if (validEdges.length !== selectedEdges.length) {
+          setSelectedEdges(validEdges);
+        }
+      }
+
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges, currentSelectedNode]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, selectedEdges, currentSelectedNode]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -224,8 +342,12 @@ function EditorCanvas() {
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).
+  // Also track edge selection for keyboard shortcuts.
   const onSelectionChange: OnSelectionChangeFunc = useCallback(
-    ({ nodes: selectedNodes }) => {
+    ({ nodes: selectedNodes, edges: selectedEdgesInFlow }) => {
+      // Track edge selection in store for keyboard shortcuts
+      setSelectedEdges(selectedEdgesInFlow.map((e) => e.id));
+
       if (selectedNodes.length !== 1) {
         // Check if our stored selection still exists in the domain
         // If so, this is likely a domain update, not a user deselection
@@ -237,7 +359,7 @@ function EditorCanvas() {
         selectNode(null);
       }
     },
-    [selectNode, setDetailPanelOpen, currentSelectedNode, domain],
+    [selectNode, setDetailPanelOpen, setSelectedEdges, currentSelectedNode, domain],
   );
 
   // Handle drag-to-connect from column handles to open the FK dialog.

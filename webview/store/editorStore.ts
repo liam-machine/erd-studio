@@ -29,6 +29,8 @@ export interface FkDialogPrefill {
 export interface EditorState {
   /** Name of the currently selected model node, or null. */
   selectedNode: string | null;
+  /** IDs of currently selected edges. */
+  selectedEdges: string[];
   /** React Flow viewport (pan + zoom). */
   viewport: Viewport;
   /** Whether the detail panel is open. */
@@ -59,6 +61,7 @@ export interface EditorState {
 
 export interface EditorActions {
   selectNode: (nodeName: string | null) => void;
+  setSelectedEdges: (edgeIds: string[]) => void;
   setViewport: (viewport: Viewport) => void;
   setDetailPanelOpen: (open: boolean) => void;
   setNewModelDialogOpen: (open: boolean) => void;
@@ -86,6 +89,7 @@ export interface EditorActions {
 export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   // Default state
   selectedNode: null,
+  selectedEdges: [],
   viewport: { x: 0, y: 0, zoom: 1 },
   detailPanelOpen: false,
   newModelDialogOpen: false,
@@ -102,6 +106,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
 
   // Actions
   selectNode: (nodeName) => set({ selectedNode: nodeName }),
+  setSelectedEdges: (edgeIds) => set({ selectedEdges: edgeIds }),
   setViewport: (viewport) => set({ viewport }),
   setDetailPanelOpen: (open) => set({ detailPanelOpen: open }),
   setNewModelDialogOpen: (open) => set({ newModelDialogOpen: open }),
