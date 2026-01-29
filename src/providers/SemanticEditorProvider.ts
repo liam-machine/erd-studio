@@ -20,6 +20,7 @@ import * as vscode from 'vscode';
 import { DomainService } from '../services/domainService';
 import { ManifestService } from '../services/manifestService';
 import { ReconciliationService } from '../services/reconciliationService';
+import type { DesignModel } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -76,7 +77,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
-          // Phase 2: handle mutation messages (addModel, addColumn, etc.)
+          case 'addModel': {
+            const payload = (message as { payload?: DesignModel }).payload;
+            if (payload) {
+              await this.handleAddModel(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          // Phase 2: handle other mutation messages (addColumn, removeModel, etc.)
         }
       },
     );
@@ -124,6 +132,73 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
       webview.postMessage({ type: 'error', payload: { message } });
+    }
+  }
+
+  /**
+   * Handle an `addModel` message from the webview.
+   *
+   * Adds a new design model to the domain's models array and writes back via
+   * WorkspaceEdit (integrates with VS Code undo/redo).
+   */
+  private async handleAddModel(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    model: DesignModel,
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+
+      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+      // Check for duplicate model name
+      if (models.some((m) => m.name === model.name)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${model.name}" already exists in this domain.` },
+        });
+        return;
+      }
+
+      // Add the new design model
+      models.push({
+        name: model.name,
+        source: 'design',
+        schema: model.schema,
+        description: model.description,
+        columns: model.columns,
+      });
+
+      parsed.models = models;
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+      this.pendingUpdate = false;
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to add model to domain.' },
+        });
+      }
+      // On success, onDidChangeTextDocument will trigger sendDomainData automatically
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Add model failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to add model: ${message}` },
+      });
     }
   }
 

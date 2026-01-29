@@ -1,9 +1,8 @@
 /**
  * NewModelDialog styles.
  *
- * Centered dialog for creating new models. Follows DetailPanel pattern but
- * uses top-center positioning. BEM naming, VS Code theme tokens from
- * webview/styles/theme.css.
+ * Centered dialog for creating new models with JHG templates.
+ * BEM naming, VS Code theme tokens from webview/styles/theme.css.
  */
 
 .new-model-dialog {
@@ -71,15 +70,154 @@
   flex: 1;
   padding: 16px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.new-model-dialog__placeholder {
-  margin: 0;
-  padding: 24px;
-  text-align: center;
-  color: var(--vscode-descriptionForeground, #888);
-  font-style: italic;
+/* ---------------------------------------------------------------------------
+   Form Fields
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.new-model-dialog__label {
   font-size: 12px;
+  font-weight: 500;
+  color: var(--editor-fg);
+}
+
+.new-model-dialog__input,
+.new-model-dialog__select,
+.new-model-dialog__textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.new-model-dialog__input:focus,
+.new-model-dialog__select:focus,
+.new-model-dialog__textarea:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.new-model-dialog__input::placeholder,
+.new-model-dialog__textarea::placeholder {
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.7;
+}
+
+.new-model-dialog__input--error {
+  border-color: var(--error-fg, #f48771);
+}
+
+.new-model-dialog__textarea {
+  min-height: 50px;
+  resize: vertical;
+}
+
+.new-model-dialog__select {
+  cursor: pointer;
+}
+
+.new-model-dialog__error {
+  font-size: 11px;
+  color: var(--error-fg, #f48771);
+}
+
+/* ---------------------------------------------------------------------------
+   Bridge Entity Fields (side-by-side)
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__bridge-fields {
+  display: flex;
+  gap: 12px;
+}
+
+.new-model-dialog__bridge-fields .new-model-dialog__field {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Column Preview
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__preview {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.new-model-dialog__preview-title {
+  margin: 0 0 8px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.new-model-dialog__columns {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.new-model-dialog__column {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: rgba(249, 115, 22, 0.1); /* Design model orange tint */
+  line-height: 1.4;
+}
+
+.new-model-dialog__col-indicators {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 24px;
+}
+
+.new-model-dialog__pk {
+  display: inline-block;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.3px;
+  background: rgba(234, 179, 8, 0.2);
+  color: #ca8a04;
+}
+
+.new-model-dialog__col-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--editor-fg);
+  font-size: 12px;
+}
+
+.new-model-dialog__col-type {
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
 }
 
 /* ---------------------------------------------------------------------------
@@ -100,14 +238,32 @@
   padding: 6px 14px;
   border: 1px solid transparent;
   border-radius: 4px;
-  background: var(--button-bg);
-  color: var(--button-fg);
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background 0.1s ease, opacity 0.1s ease;
 }
 
-.new-model-dialog__button:hover {
+.new-model-dialog__button--primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.new-model-dialog__button--primary:hover:not(:disabled) {
   background: var(--button-hover-bg);
+}
+
+.new-model-dialog__button--secondary {
+  background: transparent;
+  border-color: var(--panel-border);
+  color: var(--editor-fg);
+}
+
+.new-model-dialog__button--secondary:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.new-model-dialog__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

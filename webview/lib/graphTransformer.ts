@@ -14,7 +14,6 @@
 import type {
   ReconciledDomain,
   ReconciledModel,
-  ReconciledRelationship,
 } from '../../src/types/reconciled';
 import type {
   ModelFlowNode,

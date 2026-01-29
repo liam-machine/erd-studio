@@ -14,14 +14,12 @@ import type {
   SemanticDomain,
   SemanticModel,
   Relationship,
-  ColumnDef,
 } from '../types/semantic';
 import type {
   ReconciledDomain,
   ReconciledModel,
   ReconciledColumn,
   ReconciledRelationship,
-  ColumnStatus,
   ModelStatus,
   RelationshipStatus,
 } from '../types/reconciled';
