@@ -14,6 +14,7 @@ import {
   useReactFlow,
   Background,
   BackgroundVariant,
+  MiniMap,
   SelectionMode,
   type Viewport,
   type NodeTypes,
@@ -511,6 +512,22 @@ function EditorCanvas() {
         }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+        <MiniMap
+          position="bottom-right"
+          nodeColor={(node) => {
+            const status = node.data?.status;
+            if (status === 'built') return '#22c55e';
+            if (status === 'design') return '#f97316';
+            if (status === 'missing') return '#6b7280';
+            return '#6b7280';
+          }}
+          maskColor="rgba(0, 0, 0, 0.2)"
+          style={{
+            background: 'var(--panel-bg)',
+            border: '1px solid var(--panel-border)',
+            borderRadius: '4px',
+          }}
+        />
         <Toolbar nodes={nodes} edges={edges} />
         <StatusBar />
         <DetailPanel />

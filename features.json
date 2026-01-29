@@ -710,18 +710,17 @@
     {
       "id": "F403",
       "name": "Add minimap for large domains",
-      "description": "Enable React Flow's built-in minimap component for an overview of large domain graphs. Show a small overview of the full graph in the bottom-left corner. Minimap nodes should be colour-coded to match model status (green/orange/grey).",
+      "description": "Enable React Flow's built-in minimap component for an overview of large domain graphs. Show a small overview of the full graph in the bottom-right corner (to avoid StatusBar conflict). Minimap nodes are colour-coded to match model status (green/orange/grey). Always visible (no toggle).",
       "phase": "phase-4",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F105"],
       "validation_criteria": [
-        "Verify in Extension Development Host: minimap appears in the bottom-left of the graph editor",
+        "Verify in Extension Development Host: minimap appears in the bottom-right of the graph editor",
         "Verify in Extension Development Host: minimap nodes are colour-coded (green/orange/grey)",
-        "Verify in Extension Development Host: clicking on the minimap pans the main canvas",
-        "Verify minimap can be toggled on/off"
+        "Verify in Extension Development Host: clicking on the minimap pans the main canvas"
       ],
-      "implementation_notes": "React Flow provides a MiniMap component out of the box. Customize the nodeColor callback to return status-based colours from the colorScheme module.",
+      "implementation_notes": "Added MiniMap component from @xyflow/react in App.tsx with nodeColor callback returning status-based hex colors (#22c55e for built, #f97316 for design, #6b7280 for missing). Positioned at bottom-right to avoid conflict with StatusBar. Uses VS Code theme tokens for background and border styling. Always visible (no toggle mechanism per user requirement).",
       "category": "ui",
       "estimated_effort": "small"
     },
