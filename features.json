@@ -496,7 +496,7 @@
       "name": "Implement undo/redo via WorkspaceEdit",
       "description": "Ensure all mutations (add/remove model, column, relationship) work with VS Code's built-in undo/redo. Since all writes go through WorkspaceEdit, VS Code's Ctrl+Z / Ctrl+Shift+Z should undo/redo changes. Verify the webview re-renders correctly after undo/redo by handling onDidChangeTextDocument events.",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F206"],
       "validation_criteria": [

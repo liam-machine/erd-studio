@@ -836,9 +836,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       this.pendingUpdate = true;
       const success = await vscode.workspace.applyEdit(edit);
-      this.pendingUpdate = false;
 
-      if (!success) {
+      if (success) {
+        // Save the document so undo/redo works correctly.
+        // Without save, onDidChangeTextDocument would read stale data from disk.
+        await document.save();
+        this.pendingUpdate = false;
+        // Note: We don't call sendDomainData() here because positions are managed
+        // locally by React Flow. The webview already has the correct positions.
+        // However, external undo (Ctrl+Z) will trigger onDidChangeTextDocument,
+        // which will call sendDomainData() and refresh the canvas with old positions.
+      } else {
+        this.pendingUpdate = false;
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to save layout positions.' },
