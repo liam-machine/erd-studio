@@ -658,7 +658,7 @@
       "name": "Implement keyboard shortcuts",
       "description": "Add keyboard shortcuts for common actions: Delete key to remove selected planned item (with confirmation), Ctrl+Z for undo, Ctrl+Shift+Z for redo (already handled via WorkspaceEdit, but ensure focus/keybinding works in webview). Additional shortcuts: Escape to deselect, Ctrl+F for search (Phase 4 search feature).",
       "phase": "phase-4",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F206"],
       "validation_criteria": [
