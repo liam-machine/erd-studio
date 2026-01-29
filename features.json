@@ -399,7 +399,7 @@
       "name": "Implement unified column editor in detail panel",
       "description": "Extend the DetailPanel to support column editing when a model is selected. The behavior depends on model/column status: (1) Built models show read-only built columns (green) plus an 'Add Planned Column' button to add orange columns that will be built later. (2) Planned models (source: design) show all columns as editable. (3) Planned columns on any model can be edited or deleted. (4) Built columns are always read-only. New Column Dialog fields: column name, data type dropdown, description, is primary key checkbox.",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F113"],
       "validation_criteria": [
