@@ -314,78 +314,78 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     try {
       for (const { document, webview } of Array.from(this.openPanels.values())) {
-      try {
-        // Parse current domain from disk
-        const domain = this.domainService.getDomain(document.uri.fsPath);
+        try {
+          // Parse current domain from disk
+          const domain = this.domainService.getDomain(document.uri.fsPath);
 
-        // Detect and execute transitions
-        const result = this.autoReconciliationService.reconcileDomain(
-          domain,
-          manifest,
-        );
-
-        if (!result.transitioned) {
-          // No transitions - just refresh with new manifest data
-          await this.sendDomainData(document, webview);
-          continue;
-        }
-
-        // Persist transitioned domain to disk via WorkspaceEdit
-        const updatedText = JSON.stringify(domain, null, 2) + '\n';
-        const edit = new vscode.WorkspaceEdit();
-        const fullRange = new vscode.Range(
-          document.positionAt(0),
-          document.positionAt(document.getText().length),
-        );
-        edit.replace(document.uri, fullRange, updatedText);
-
-        this.pendingUpdates.set(document.uri.toString(), true);
-        const success = await vscode.workspace.applyEdit(edit);
-
-        if (success) {
-          try {
-            await document.save();
-
-            // Build payload for manifestRefreshed message
-            const reconciled = this.reconciliationService.reconcile(
-              domain,
-              manifest,
-            );
-            const { templates, manifestModels } = this.buildWebviewPayload(
-              reconciled,
-              manifest,
-            );
-
-            // Send manifestRefreshed message with newly built list
-            webview.postMessage({
-              type: 'manifestRefreshed',
-              payload: {
-                domain: { ...reconciled, templates, manifestModels },
-                newlyBuiltModels: result.newlyBuiltModels,
-              },
-            });
-
-            allNewlyBuilt.push(...result.newlyBuiltModels);
-          } finally {
-            this.pendingUpdates.delete(document.uri.toString());
-          }
-        } else {
-          this.pendingUpdates.delete(document.uri.toString());
-          console.error(
-            '[SemanticEditorProvider] Failed to apply auto-reconciliation edit',
+          // Detect and execute transitions
+          const result = this.autoReconciliationService.reconcileDomain(
+            domain,
+            manifest,
           );
+
+          if (!result.transitioned) {
+            // No transitions - just refresh with new manifest data
+            await this.sendDomainData(document, webview);
+            continue;
+          }
+
+          // Persist transitioned domain to disk via WorkspaceEdit
+          const updatedText = JSON.stringify(domain, null, 2) + '\n';
+          const edit = new vscode.WorkspaceEdit();
+          const fullRange = new vscode.Range(
+            document.positionAt(0),
+            document.positionAt(document.getText().length),
+          );
+          edit.replace(document.uri, fullRange, updatedText);
+
+          this.pendingUpdates.set(document.uri.toString(), true);
+          const success = await vscode.workspace.applyEdit(edit);
+
+          if (success) {
+            try {
+              await document.save();
+
+              // Build payload for manifestRefreshed message
+              const reconciled = this.reconciliationService.reconcile(
+                domain,
+                manifest,
+              );
+              const { templates, manifestModels } = this.buildWebviewPayload(
+                reconciled,
+                manifest,
+              );
+
+              // Send manifestRefreshed message with newly built list
+              webview.postMessage({
+                type: 'manifestRefreshed',
+                payload: {
+                  domain: { ...reconciled, templates, manifestModels },
+                  newlyBuiltModels: result.newlyBuiltModels,
+                },
+              });
+
+              allNewlyBuilt.push(...result.newlyBuiltModels);
+            } finally {
+              this.pendingUpdates.delete(document.uri.toString());
+            }
+          } else {
+            this.pendingUpdates.delete(document.uri.toString());
+            console.error(
+              '[SemanticEditorProvider] Failed to apply auto-reconciliation edit',
+            );
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[SemanticEditorProvider] Auto-reconciliation failed for ${document.uri.fsPath}: ${message}`,
+          );
+          webview.postMessage({
+            type: 'error',
+            payload: { message: `Auto-reconciliation failed: ${message}` },
+          });
         }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(
-          `[SemanticEditorProvider] Auto-reconciliation failed for ${document.uri.fsPath}: ${message}`,
-        );
-        webview.postMessage({
-          type: 'error',
-          payload: { message: `Auto-reconciliation failed: ${message}` },
-        });
       }
-    }
     } finally {
       this.reconciliationInProgress = false;
     }

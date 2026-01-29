@@ -622,7 +622,7 @@
       "name": "Implement manual refresh manifest command",
       "description": "Create the 'Refresh Manifest' command (registered as dbtSemantic.refreshManifest) that forces re-reading of manifest.json, invalidates the ManifestService cache, and re-reconciles all open domains. Available from the command palette and as a button in the toolbar. Useful when the file watcher misses a change or user wants to force refresh.",
       "phase": "phase-3",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F101", "F304"],
       "validation_criteria": [
