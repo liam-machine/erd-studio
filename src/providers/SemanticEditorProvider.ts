@@ -182,12 +182,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       this.pendingUpdate = true;
       const success = await vscode.workspace.applyEdit(edit);
-      this.pendingUpdate = false;
 
       if (success) {
-        // Explicitly send updated domain data to refresh the canvas
+        // Save the document so getDomain reads the updated content from disk
+        await document.save();
+        this.pendingUpdate = false;
+        // Send updated domain data to refresh the canvas
         await this.sendDomainData(document, webview);
       } else {
+        this.pendingUpdate = false;
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to add model to domain.' },
