@@ -801,7 +801,7 @@
       "name": "Implement welcome experience for new projects",
       "description": "Add a welcome experience for when a dbt project is opened but no semantic directory exists yet. Show a welcome message in the sidebar tree view with a 'Get Started' action that creates the models/semantic/ directory structure (with bronze, silver, gold subdirectories) and guides the user to create their first domain.",
       "phase": "phase-4",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F300"],
       "validation_criteria": [
@@ -810,7 +810,7 @@
         "Verify in Extension Development Host: after setup, the Create Domain flow is triggered",
         "Verify the welcome experience doesn't appear once semantic domains exist"
       ],
-      "implementation_notes": "Use VS Code's TreeView welcome content (viewsWelcome contribution point). The welcome message should explain what semantic domains are and provide a single 'Get Started' button. Directory creation: models/semantic/bronze/, models/semantic/silver/, models/semantic/gold/.",
+      "implementation_notes": "Implemented using VS Code's viewsWelcome contribution point. DomainTreeProvider returns empty array when semantic directory doesn't exist, triggering the welcome content. setupSemanticDirectory command creates silver/gold directories (bronze excluded per CREATABLE_LAYERS), then launches createDomain. Uses configurable semanticDir setting. Includes 100ms delay before createDomain to ensure tree updates.",
       "category": "ui",
       "estimated_effort": "small"
     }
