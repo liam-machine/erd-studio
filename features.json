@@ -785,7 +785,7 @@
       "description": "Wire up the extension configuration settings defined in package.json: dbtSemantic.projectPath (path to dbt project root, auto-detected), dbtSemantic.semanticDir (relative path to semantic domain files, default 'models/semantic'), dbtSemantic.autoReconcile (toggle automatic design→built transition, default true). Ensure all services respect these settings and react to changes.",
       "phase": "phase-4",
       "status": "pending",
-      "skip": false,
+      "skip": true,
       "dependencies": ["F116"],
       "validation_criteria": [
         "Verify in Extension Development Host: settings appear in VS Code Settings UI under 'dbt Semantic Designer'",

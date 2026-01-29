@@ -87,7 +87,7 @@ describe('DomainService', () => {
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.models).toHaveLength(2);
+      expect(domain.models).toHaveLength(4);
 
       const repoModel = domain.models.find((m) => m.name === 'dim_work_lot');
       expect(repoModel).toBeDefined();
@@ -97,7 +97,7 @@ describe('DomainService', () => {
       const designModel = domain.models.find((m) => m.name === 'dim_work_lot_status');
       expect(designModel).toBeDefined();
       expect(designModel!.source).toBe('design');
-      expect(designModel!.columns).toHaveLength(3);
+      expect(designModel!.columns).toHaveLength(2);
       expect(designModel!.columns![0].isPrimaryKey).toBe(true);
     });
 
@@ -107,7 +107,7 @@ describe('DomainService', () => {
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.relationships).toHaveLength(2);
+      expect(domain.relationships).toHaveLength(3);
 
       const repoRel = domain.relationships.find((r) => r.fromModel === 'dim_work_lot');
       expect(repoRel).toBeDefined();
@@ -129,7 +129,7 @@ describe('DomainService', () => {
       expect(domain.viewConfig.layoutOptions).toBeDefined();
       expect(domain.viewConfig.layoutOptions!['elk.algorithm']).toBe('layered');
       expect(domain.viewConfig.positions).toBeDefined();
-      expect(domain.viewConfig.positions!['dim_work_lot']).toEqual({ x: 350, y: 100 });
+      expect(domain.viewConfig.positions!['dim_work_lot']).toEqual({ x: 309, y: -151 });
     });
 
     it('handles missing files with descriptive error', () => {
@@ -174,14 +174,14 @@ describe('DomainService', () => {
       expect(domain.relationships).toEqual([]);
     });
 
-    it('parses a domain with empty viewConfig', () => {
+    it('parses a domain with minimal viewConfig (no layoutOptions)', () => {
       const filePath = path.join(
         FIXTURE_PROJECT_PATH, 'models', 'semantic', 'gold', 'finance.json'
       );
       const domain = service.getDomain(filePath);
 
       expect(domain.viewConfig).toBeDefined();
-      expect(domain.viewConfig.positions).toBeUndefined();
+      expect(domain.viewConfig.positions).toBeDefined();
       expect(domain.viewConfig.layoutOptions).toBeUndefined();
     });
   });

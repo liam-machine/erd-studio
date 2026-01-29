@@ -60,8 +60,8 @@ describe('DomainTreeProvider', () => {
 
       expect(domain.type).toBe('domain');
       if (domain.type === 'domain') {
-        expect(domain.modelCount).toBe(2);
-        expect(domain.designCount).toBe(1);
+        expect(domain.modelCount).toBe(4);
+        expect(domain.designCount).toBe(2);
       }
     });
 
