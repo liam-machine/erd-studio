@@ -532,7 +532,7 @@
       "name": "Implement Create Domain command",
       "description": "Create the 'Create Semantic Domain' command (src/commands/createDomain.ts) that opens a dialog for creating a new domain. Fields: domain name (slug), layer (bronze/silver/gold dropdown), description. Creates the JSON file at models/semantic/{layer}/{domain}.json with the initial schema (schemaVersion: 1, empty models/relationships, default viewConfig). Updates the tree view to show the new domain.",
       "phase": "phase-3",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F207"],
       "validation_criteria": [
