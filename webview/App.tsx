@@ -32,6 +32,7 @@ import { Toolbar } from './components/Toolbar/Toolbar';
 import { StatusBar } from './components/Toolbar/StatusBar';
 import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { NewModelDialog } from './components/NewModelDialog/NewModelDialog';
+import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { Toast } from './components/Toast/Toast';
 import { transformDomain } from './lib/graphTransformer';
 import type { ModelFlowNode } from './types/graph';
@@ -214,6 +215,7 @@ function EditorCanvas() {
         <StatusBar />
         <DetailPanel />
         <NewModelDialog />
+        <NewFkDialog />
       </ReactFlow>
 
       {toastMessage && (

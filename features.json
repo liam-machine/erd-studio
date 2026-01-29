@@ -418,7 +418,7 @@
       "name": "Implement New Relationship dialog",
       "description": "Create NewFkDialog component (webview/components/Dialogs/NewFkDialog.tsx) for creating FK relationships between models. Add a '+ Relationship' button to the toolbar (next to + Model). Flow: select source model → source column → target model → target column → cardinality (many-to-one / one-to-one). On submit, send addRelationship message to extension host. The relationship is marked with source: 'design' and renders as an orange edge.",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F200"],
       "validation_criteria": [

@@ -49,6 +49,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const domain = useEditorStore((s) => s.domain);
   const setDomain = useEditorStore((s) => s.setDomain);
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
+  const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
 
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
@@ -82,6 +83,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const handleNewModel = useCallback(() => {
     setNewModelDialogOpen(true);
   }, [setNewModelDialogOpen]);
+
+  const handleNewRelationship = useCallback(() => {
+    setNewFkDialogOpen(true);
+  }, [setNewFkDialogOpen]);
 
   // --- Auto Layout handlers ------------------------------------------------
 
@@ -245,6 +250,21 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           aria-label="Add new model to domain"
         >
           + Model
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="toolbar__divider" />
+
+      {/* New Relationship */}
+      <div className="toolbar__section">
+        <button
+          className="toolbar__button toolbar__button--text toolbar__button--primary"
+          onClick={handleNewRelationship}
+          title="Add FK relationship between models"
+          aria-label="Add FK relationship between models"
+        >
+          + Relationship
         </button>
       </div>
     </Panel>

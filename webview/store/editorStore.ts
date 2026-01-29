@@ -26,6 +26,8 @@ export interface EditorState {
   detailPanelOpen: boolean;
   /** Whether the new model dialog is open. */
   newModelDialogOpen: boolean;
+  /** Whether the new FK relationship dialog is open. */
+  newFkDialogOpen: boolean;
   /** The loaded domain data from the extension host (already reconciled with manifest). */
   domain: ReconciledDomain | null;
   /** Error message from the extension host, if any. */
@@ -43,6 +45,7 @@ export interface EditorActions {
   setViewport: (viewport: Viewport) => void;
   setDetailPanelOpen: (open: boolean) => void;
   setNewModelDialogOpen: (open: boolean) => void;
+  setNewFkDialogOpen: (open: boolean) => void;
   setDomain: (domain: ReconciledDomain) => void;
   setError: (error: string | null) => void;
   setNodes: (nodes: ModelFlowNode[]) => void;
@@ -60,6 +63,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   viewport: { x: 0, y: 0, zoom: 1 },
   detailPanelOpen: false,
   newModelDialogOpen: false,
+  newFkDialogOpen: false,
   domain: null,
   error: null,
   nodes: [],
@@ -71,6 +75,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setViewport: (viewport) => set({ viewport }),
   setDetailPanelOpen: (open) => set({ detailPanelOpen: open }),
   setNewModelDialogOpen: (open) => set({ newModelDialogOpen: open }),
+  setNewFkDialogOpen: (open) => set({ newFkDialogOpen: open }),
   setDomain: (domain) => set({ domain, error: null }),
   setError: (error) => set({ error }),
   setNodes: (nodes) => set({ nodes }),

@@ -21,7 +21,7 @@ import { DomainService } from '../services/domainService';
 import { ManifestService } from '../services/manifestService';
 import { ReconciliationService } from '../services/reconciliationService';
 import { TemplateService } from '../services/templateService';
-import type { ColumnDef, DesignModel } from '../types/semantic';
+import type { Cardinality, ColumnDef, DesignModel } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -107,7 +107,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
-          // Phase 2: handle other mutation messages (removeModel, addRelationship, etc.)
+          case 'addRelationship': {
+            const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
+            if (payload) {
+              await this.handleAddRelationship(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          // Phase 2: handle other mutation messages (removeModel, removeRelationship, etc.)
         }
       },
     );
@@ -518,6 +525,93 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to remove column: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle an `addRelationship` message from the webview.
+   *
+   * Adds a new FK relationship to the domain's relationships array.
+   * The relationship is marked with source: 'design' and persisted via WorkspaceEdit.
+   */
+  private async handleAddRelationship(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: {
+      fromModel: string;
+      fromColumn: string;
+      toModel: string;
+      toColumn: string;
+      cardinality: Cardinality;
+    },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+
+      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+
+      // Check for duplicate relationship (same composite key)
+      const isDuplicate = relationships.some(
+        (rel) =>
+          rel.fromModel === payload.fromModel &&
+          rel.fromColumn === payload.fromColumn &&
+          rel.toModel === payload.toModel &&
+          rel.toColumn === payload.toColumn,
+      );
+      if (isDuplicate) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'This relationship already exists.' },
+        });
+        return;
+      }
+
+      // Add the new relationship with source: 'design'
+      relationships.push({
+        fromModel: payload.fromModel,
+        fromColumn: payload.fromColumn,
+        toModel: payload.toModel,
+        toColumn: payload.toColumn,
+        cardinality: payload.cardinality,
+        source: 'design',
+      });
+
+      parsed.relationships = relationships;
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdate = true;
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        try {
+          await document.save();
+          await this.sendDomainData(document, webview);
+        } finally {
+          this.pendingUpdate = false;
+        }
+      } else {
+        this.pendingUpdate = false;
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to add relationship.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdate = false;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to add relationship: ${message}` },
       });
     }
   }
