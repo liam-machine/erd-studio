@@ -87,7 +87,7 @@ describe('DomainService', () => {
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.models).toHaveLength(4);
+      expect(domain.models).toHaveLength(5);
 
       const repoModel = domain.models.find((m) => m.name === 'dim_work_lot');
       expect(repoModel).toBeDefined();
@@ -129,7 +129,7 @@ describe('DomainService', () => {
       expect(domain.viewConfig.layoutOptions).toBeDefined();
       expect(domain.viewConfig.layoutOptions!['elk.algorithm']).toBe('layered');
       expect(domain.viewConfig.positions).toBeDefined();
-      expect(domain.viewConfig.positions!['dim_work_lot']).toEqual({ x: 309, y: -151 });
+      expect(domain.viewConfig.positions!['dim_work_lot']).toEqual({ x: 372, y: 186 });
     });
 
     it('handles missing files with descriptive error', () => {

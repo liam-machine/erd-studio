@@ -25,6 +25,11 @@
         "category": "dbt"
       },
       {
+        "command": "dbtSemantic.setupSemanticDirectory",
+        "title": "Set Up Semantic Domains Directory",
+        "category": "dbt"
+      },
+      {
         "command": "dbtSemantic.openDomain",
         "title": "Open Semantic Domain",
         "category": "dbt"
@@ -62,6 +67,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "dbtSemantic.domainTree",
+        "contents": "No semantic domains found in this dbt project.\n\nSemantic domains help you visualize and design FK relationships between models, with built models shown in green and planned models in orange.\n\n[Get Started](command:dbtSemantic.setupSemanticDirectory)\n\nThis will create the directory structure and guide you to create your first domain."
+      }
+    ],
     "customEditors": [
       {
         "viewType": "dbtSemantic.domainEditor",

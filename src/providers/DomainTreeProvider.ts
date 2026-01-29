@@ -9,6 +9,9 @@
 
 import * as vscode from 'vscode';
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 import type { DomainSummary, Layer } from '../types/semantic';
 import { VALID_LAYERS } from '../types/semantic';
 import { DomainService } from '../services/domainService';
@@ -53,14 +56,21 @@ const CREATABLE_LAYERS: readonly Layer[] = ['silver', 'gold'];
 // Provider
 // ---------------------------------------------------------------------------
 
+/** Default semantic directory relative to project root. */
+const DEFAULT_SEMANTIC_DIR = 'models/semantic';
+
 export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<TreeElement | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private readonly semanticDir: string;
 
   constructor(
     private readonly domainService: DomainService,
     private readonly projectPath: string,
-  ) {}
+    semanticDir?: string,
+  ) {
+    this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
+  }
 
   /** Refresh the entire tree (or a specific element). */
   refresh(element?: TreeElement): void {
@@ -80,6 +90,12 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
 
   getChildren(element?: TreeElement): TreeElement[] | undefined {
     if (!element) {
+      // Check if semantic directory exists - if not, return empty array
+      // to trigger VS Code's viewsWelcome content (F408)
+      const fullSemanticDir = path.join(this.projectPath, this.semanticDir);
+      if (!fs.existsSync(fullSemanticDir)) {
+        return [];
+      }
       return VALID_LAYERS.map((layer): LayerNode => ({ type: 'layer', layer }));
     }
 
@@ -95,7 +111,7 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
   // -------------------------------------------------------------------------
 
   private getLayerChildren(layer: Layer): TreeElement[] {
-    const summaries = this.domainService.listDomains(this.projectPath);
+    const summaries = this.domainService.listDomains(this.projectPath, this.semanticDir);
     const layerDomains = summaries.filter(s => s.layer === layer);
 
     const domainNodes: DomainNode[] = layerDomains.map(summary => {

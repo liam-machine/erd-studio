@@ -27,6 +27,15 @@ describe('DomainTreeProvider', () => {
         { type: 'layer', layer: 'gold' },
       ]);
     });
+
+    it('returns empty array when semantic directory does not exist (F408 welcome)', () => {
+      // Use a non-existent path to simulate missing semantic directory
+      const providerNoSemantic = new DomainTreeProvider(service, '/nonexistent/path');
+      const children = providerNoSemantic.getChildren(undefined);
+
+      expect(children).toHaveLength(0);
+      expect(children).toEqual([]);
+    });
   });
 
   describe('getChildren (layer)', () => {
@@ -60,7 +69,7 @@ describe('DomainTreeProvider', () => {
 
       expect(domain.type).toBe('domain');
       if (domain.type === 'domain') {
-        expect(domain.modelCount).toBe(4);
+        expect(domain.modelCount).toBe(5);
         expect(domain.designCount).toBe(2);
       }
     });

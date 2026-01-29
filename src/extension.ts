@@ -154,12 +154,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   console.log(`dbt Semantic Designer: Found dbt project at ${workspaceRoot}`);
 
+  // Read configuration for semantic directory path
+  const config = vscode.workspace.getConfiguration('dbtSemantic');
+  const semanticDir = config.get<string>('semanticDir', 'models/semantic');
+
   const domainService = new DomainService();
   const manifestService = new ManifestService();
   const reconciliationService = new ReconciliationService();
   const templateService = new TemplateService();
   const autoReconciliationService = new AutoReconciliationService();
-  const treeProvider = new DomainTreeProvider(domainService, workspaceRoot);
+  const treeProvider = new DomainTreeProvider(domainService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
     domainService,
@@ -292,8 +296,8 @@ export function activate(context: vscode.ExtensionContext): void {
           return; // User cancelled (empty string is valid)
         }
 
-        // Step 4: Create directory and file
-        const layerDir = path.join(workspaceRoot, 'models', 'semantic', layer);
+        // Step 4: Create directory and file (using configured semanticDir)
+        const layerDir = path.join(workspaceRoot, semanticDir, layer);
         const filePath = path.join(layerDir, `${slug}.json`);
 
         // Create directory if needed
@@ -551,6 +555,46 @@ export function activate(context: vscode.ExtensionContext): void {
         },
       );
     }),
+    // F408: Set up semantic directory for new projects (welcome experience)
+    vscode.commands.registerCommand(
+      'dbtSemantic.setupSemanticDirectory',
+      async () => {
+        // Step 1: Create directory structure (silver, gold only - bronze not used for semantic domains)
+        // Uses configured semanticDir from settings
+        const fullSemanticDir = path.join(workspaceRoot, semanticDir);
+        const creatableLayers = ['silver', 'gold'] as const;
+
+        try {
+          for (const layer of creatableLayers) {
+            const layerDir = path.join(fullSemanticDir, layer);
+            if (!fs.existsSync(layerDir)) {
+              fs.mkdirSync(layerDir, { recursive: true });
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(
+            `Failed to create semantic directory structure: ${msg}`,
+          );
+          return;
+        }
+
+        // Step 2: Refresh tree view (welcome disappears, layer folders appear)
+        treeProvider.refresh();
+
+        // Step 3: Give VS Code time to re-render the tree before showing the dialog
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Step 4: Show success message
+        void vscode.window.showInformationMessage(
+          'Semantic domains directory created! Now create your first domain.',
+        );
+
+        // Step 5: Trigger the existing createDomain command
+        // (layer picker will appear, user selects silver or gold)
+        await vscode.commands.executeCommand('dbtSemantic.createDomain');
+      },
+    ),
   );
 }
 
