@@ -380,7 +380,7 @@
       "name": "Implement New Model dialog with JHG templates",
       "description": "Create NewModelDialog component (webview/components/Dialogs/NewModelDialog.tsx) for creating design models. Fields: model name, schema, layer (auto-set from domain), description, and template picker. Templates: Dimension (dim_), Fact (fct_), Bridge (brg_), SCD Type 2, Blank. Templates pre-populate columns according to JHG conventions. Placeholder resolution: {name} derived from model name minus prefix, {left}/{right} fields for bridge template. On submit, send addModel message to extension host.",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F200"],
       "validation_criteria": [
