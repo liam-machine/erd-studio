@@ -327,7 +327,7 @@
       "name": "Define shared TypeScript types and message protocol",
       "description": "Create comprehensive TypeScript type definitions for the extension-webview communication. In src/types/semantic.ts: SemanticDomain, SemanticModel, ColumnDef, Relationship, ViewConfig, DomainSummary, DesignModel, ReconciledDomain, ReconciledModel. In src/types/messages.ts: ExtensionMessage union type (domainLoaded, domainUpdated, manifestRefreshed, error) and WebviewMessage union type (ready, addModel, addColumn, removeColumn, addRelationship, removeModel, removeRelationship, updateViewConfig, addExistingModel, updatePositions, runAutoLayout).",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F100"],
       "validation_criteria": [
@@ -834,7 +834,7 @@
   "metadata": {
     "generated_from": "plan.md",
     "generated_at": "2026-01-29T00:00:00.000Z",
-    "last_updated": "2026-01-29 - F111 ReconciliationService implemented with overlay semantics",
+    "last_updated": "2026-01-29 - F115 Shared TypeScript types and message protocol",
     "feature_counts": {
       "total": 35,
       "by_phase": {
