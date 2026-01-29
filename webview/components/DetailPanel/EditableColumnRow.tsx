@@ -272,7 +272,9 @@ export function EditableColumnRow({
         <DataTypeSelect
           value={editValue.dataType}
           onChange={handleDataTypeChange}
+          onBlur={() => setEditingField(null)}
           className="editable-column-row__type-select"
+          autoOpen={true}
         />
       ) : (
         <span

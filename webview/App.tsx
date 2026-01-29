@@ -99,14 +99,27 @@ function EditorCanvas() {
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
 
+  // Get current selectedNode from store to preserve selection across domain updates
+  const currentSelectedNode = useEditorStore((s) => s.selectedNode);
+
   // Initialize nodes and edges when domain changes.
+  // Preserve visual selection if the selected node still exists.
   useEffect(() => {
     if (domain) {
       const { nodes: newNodes, edges: newEdges } = transformDomain(domain);
+
+      // If we have a selected node, preserve the selection in the new nodes
+      if (currentSelectedNode) {
+        const selectedIdx = newNodes.findIndex((n) => n.id === currentSelectedNode);
+        if (selectedIdx !== -1) {
+          newNodes[selectedIdx] = { ...newNodes[selectedIdx], selected: true };
+        }
+      }
+
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges]);
+  }, [domain, setNodes, setEdges, currentSelectedNode]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -140,14 +153,21 @@ function EditorCanvas() {
   );
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
+  // But don't close if the selection reset was caused by a domain update (nodes recreated).
   const onSelectionChange: OnSelectionChangeFunc = useCallback(
     ({ nodes: selectedNodes }) => {
       if (selectedNodes.length !== 1) {
+        // Check if our stored selection still exists in the domain
+        // If so, this is likely a domain update, not a user deselection
+        if (currentSelectedNode && domain?.models.some((m) => m.name === currentSelectedNode)) {
+          // Keep the panel open - the node still exists, selection was just reset by React Flow
+          return;
+        }
         setDetailPanelOpen(false);
         selectNode(null);
       }
     },
-    [selectNode, setDetailPanelOpen],
+    [selectNode, setDetailPanelOpen, currentSelectedNode, domain],
   );
 
   // --- Error state -----------------------------------------------------------
