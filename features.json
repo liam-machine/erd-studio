@@ -345,7 +345,7 @@
       "name": "Wire up extension activation and command registration",
       "description": "Implement extension.ts with activate() and deactivate() functions. In activate: initialise ManifestService, DomainService, ReconciliationService, register the DomainTreeProvider, register the SemanticEditorProvider, register all commands (createDomain, openDomain, deleteDomain, refreshManifest). Detect the dbt project root from workspace. The extension activates on workspaceContains:**/dbt_project.yml.",
       "phase": "phase-1",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F101", "F102", "F103", "F104", "F111"],
       "validation_criteria": [
@@ -834,7 +834,7 @@
   "metadata": {
     "generated_from": "plan.md",
     "generated_at": "2026-01-29T00:00:00.000Z",
-    "last_updated": "2026-01-29 - F115 Shared TypeScript types and message protocol",
+    "last_updated": "2026-01-29 - F116 Extension activation and command registration",
     "feature_counts": {
       "total": 35,
       "by_phase": {
