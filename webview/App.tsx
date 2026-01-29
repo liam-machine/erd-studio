@@ -153,6 +153,12 @@ function EditorCanvas() {
     [selectNode, setDetailPanelOpen],
   );
 
+  // Handle clicks on blank canvas to close the detail panel and clear selection.
+  const onPaneClick = useCallback(() => {
+    setDetailPanelOpen(false);
+    selectNode(null);
+  }, [setDetailPanelOpen, selectNode]);
+
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).
   const onSelectionChange: OnSelectionChangeFunc = useCallback(
@@ -202,6 +208,7 @@ function EditorCanvas() {
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
         fitView={!shouldSkipFitView}
