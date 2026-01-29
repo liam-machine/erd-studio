@@ -37,8 +37,9 @@ import { NewModelDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
 import { Toast } from './components/Toast/Toast';
+import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { transformDomain } from './lib/graphTransformer';
-import type { ModelFlowNode } from './types/graph';
+import type { ModelFlowNode, FkFlowEdge } from './types/graph';
 
 // ---------------------------------------------------------------------------
 // Inner component (must be inside ReactFlowProvider)
@@ -78,6 +79,10 @@ function EditorCanvas() {
   const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
   const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
   const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
+  // Context menu state
+  const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
+  const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
+  const contextMenu = useEditorStore((s) => s.contextMenu);
 
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
@@ -416,6 +421,23 @@ function EditorCanvas() {
     [openFkDialogWithPrefill, setToastMessage, domain],
   );
 
+  // Handle right-click on edges to show context menu (F401)
+  const onEdgeContextMenu = useCallback(
+    (event: React.MouseEvent, edge: FkFlowEdge) => {
+      event.preventDefault();
+      if (edge.data) {
+        openEdgeContextMenu(event.clientX, event.clientY, edge.data);
+      }
+    },
+    [openEdgeContextMenu],
+  );
+
+  // Close context menu on pane click
+  const handlePaneClick = useCallback(() => {
+    closeContextMenu();
+    onPaneClick();
+  }, [closeContextMenu, onPaneClick]);
+
   // --- Error state -----------------------------------------------------------
 
   if (error) {
@@ -447,10 +469,11 @@ function EditorCanvas() {
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
-        onPaneClick={onPaneClick}
+        onPaneClick={handlePaneClick}
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
         onConnect={onConnect}
+        onEdgeContextMenu={onEdgeContextMenu}
         fitView={!shouldSkipFitView}
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
@@ -474,6 +497,9 @@ function EditorCanvas() {
       {toastMessage && (
         <Toast message={toastMessage} variant="warning" onDismiss={dismissToast} />
       )}
+
+      {/* Edge context menu (F401) */}
+      {contextMenu && <ContextMenu />}
     </div>
   );
 }

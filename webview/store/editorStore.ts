@@ -10,7 +10,7 @@
 import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
 import type { ManifestModelPreview, ReconciledDomain } from '../../src/types/reconciled';
-import type { ModelFlowNode, FkFlowEdge } from '../types/graph';
+import type { ModelFlowNode, FkFlowEdge, FkEdgeData } from '../types/graph';
 import type { ModelTemplate } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
@@ -24,6 +24,14 @@ export interface FkDialogPrefill {
   toModel: string;
   /** Optional target column — set when user drags to a specific column handle. */
   toColumn?: string;
+}
+
+/** Context menu state for edge right-click. */
+export interface EdgeContextMenu {
+  type: 'edge';
+  x: number;
+  y: number;
+  data: FkEdgeData;
 }
 
 export interface EditorState {
@@ -57,6 +65,8 @@ export interface EditorState {
   templates: ModelTemplate[];
   /** Manifest models available to add to this domain (not already in domain). */
   manifestModels: ManifestModelPreview[];
+  /** Context menu state (position and target), or null if closed. */
+  contextMenu: EdgeContextMenu | null;
 }
 
 export interface EditorActions {
@@ -80,6 +90,10 @@ export interface EditorActions {
   setEdges: (edges: FkFlowEdge[]) => void;
   setTemplates: (templates: ModelTemplate[]) => void;
   setManifestModels: (models: ManifestModelPreview[]) => void;
+  /** Open context menu for an edge at the given position. */
+  openEdgeContextMenu: (x: number, y: number, data: FkEdgeData) => void;
+  /** Close the context menu. */
+  closeContextMenu: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +117,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   edges: [],
   templates: [],
   manifestModels: [],
+  contextMenu: null,
 
   // Actions
   selectNode: (nodeName) => set({ selectedNode: nodeName }),
@@ -122,4 +137,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setEdges: (edges) => set({ edges }),
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),
+  openEdgeContextMenu: (x, y, data) => set({ contextMenu: { type: 'edge', x, y, data } }),
+  closeContextMenu: () => set({ contextMenu: null }),
 }));

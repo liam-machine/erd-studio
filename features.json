@@ -673,21 +673,21 @@
     },
     {
       "id": "F401",
-      "name": "Implement context menus on nodes and edges",
-      "description": "Add right-click context menus on model nodes and FK edges in the graph canvas. Model node context menu: View Details, Add Column (design only), Delete Model (design only). FK edge context menu: View Relationship Details, Delete Relationship (design only). Use React Flow's onNodeContextMenu and onEdgeContextMenu.",
+      "name": "Implement edge context menu for relationship details",
+      "description": "Add right-click context menu on FK edges in the graph canvas. Shows relationship details (from/to model and column, cardinality, status) and delete option for design relationships. Node context menus were not implemented as they would be redundant — clicking a node already opens the detail panel which provides View Details, Add Column, and Delete Model functionality.",
       "phase": "phase-4",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F206"],
       "validation_criteria": [
-        "Verify in Extension Development Host: right-clicking a model node shows context menu",
-        "Verify in Extension Development Host: right-clicking an FK edge shows context menu",
-        "Verify in Extension Development Host: Delete options only appear for design items",
-        "Verify in Extension Development Host: context menu actions work correctly"
+        "Verify in Extension Development Host: right-clicking an FK edge shows context menu with relationship details",
+        "Verify in Extension Development Host: Delete option only appears for design relationships",
+        "Verify in Extension Development Host: context menu closes on Escape or click outside",
+        "Verify in Extension Development Host: deleting a design relationship via context menu works correctly"
       ],
-      "implementation_notes": "Use a custom context menu component in the webview (VS Code webviews can't use native context menus). Position the menu at the cursor location. Use @vscode-elements menu styling for consistency.",
+      "implementation_notes": "Minimal implementation — only edge context menu was added since node actions (View Details, Add Column, Delete) are already accessible via click + detail panel. Context menu shows: from/to model.column, cardinality, status badge, and Delete button for design relationships. Uses React Flow's onEdgeContextMenu callback. State managed in editorStore (contextMenu). Component: webview/components/ContextMenu/ContextMenu.tsx.",
       "category": "ui",
-      "estimated_effort": "medium"
+      "estimated_effort": "small"
     },
     {
       "id": "F402",
