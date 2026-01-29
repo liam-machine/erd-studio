@@ -101,12 +101,27 @@ function EditorCanvas() {
             setManifestModels(msg.payload.manifestModels);
           }
           break;
+        case 'manifestRefreshed':
+          // F304: Auto-reconciliation detected design models that are now built
+          setDomain(msg.payload.domain);
+          if (msg.payload.domain.templates) {
+            setTemplates(msg.payload.domain.templates);
+          }
+          if (msg.payload.domain.manifestModels) {
+            setManifestModels(msg.payload.domain.manifestModels);
+          }
+          // Show toast notification for newly built models
+          if (msg.payload.newlyBuiltModels.length > 0) {
+            const modelNames = msg.payload.newlyBuiltModels.join(', ');
+            setToastMessage(`Models built: ${modelNames}`);
+          }
+          break;
         case 'error':
           setError(msg.payload.message);
           break;
       }
     },
-    [setDomain, setError, setTemplates, setManifestModels],
+    [setDomain, setError, setTemplates, setManifestModels, setToastMessage],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);

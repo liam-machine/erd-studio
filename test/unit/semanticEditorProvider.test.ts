@@ -6,6 +6,7 @@ import { DomainService } from '../../src/services/domainService';
 import { ManifestService } from '../../src/services/manifestService';
 import { ReconciliationService } from '../../src/services/reconciliationService';
 import { TemplateService } from '../../src/services/templateService';
+import { AutoReconciliationService } from '../../src/services/autoReconciliationService';
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
@@ -28,6 +29,7 @@ describe('SemanticEditorProvider', () => {
   let manifestService: ManifestService;
   let reconciliationService: ReconciliationService;
   let templateService: TemplateService;
+  let autoReconciliationService: AutoReconciliationService;
   let provider: SemanticEditorProvider;
   let context: any;
 
@@ -37,12 +39,14 @@ describe('SemanticEditorProvider', () => {
     manifestService = new ManifestService();
     reconciliationService = new ReconciliationService();
     templateService = new TemplateService();
+    autoReconciliationService = new AutoReconciliationService();
     provider = new SemanticEditorProvider(
       context,
       domainService,
       manifestService,
       reconciliationService,
       templateService,
+      autoReconciliationService,
       FIXTURES_PROJECT_DIR,
     );
   });

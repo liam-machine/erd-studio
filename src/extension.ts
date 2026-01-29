@@ -7,6 +7,7 @@ import { CURRENT_SCHEMA_VERSION, type Layer } from './types/semantic';
 import { ManifestService } from './services/manifestService';
 import { ReconciliationService } from './services/reconciliationService';
 import { TemplateService } from './services/templateService';
+import { AutoReconciliationService } from './services/autoReconciliationService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
@@ -52,6 +53,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const manifestService = new ManifestService();
   const reconciliationService = new ReconciliationService();
   const templateService = new TemplateService();
+  const autoReconciliationService = new AutoReconciliationService();
   const treeProvider = new DomainTreeProvider(domainService, workspaceRoot);
   const editorProvider = new SemanticEditorProvider(
     context,
@@ -59,6 +61,7 @@ export function activate(context: vscode.ExtensionContext): void {
     manifestService,
     reconciliationService,
     templateService,
+    autoReconciliationService,
     workspaceRoot,
   );
   const decorationProvider = new SemanticFileDecorationProvider();
@@ -68,15 +71,42 @@ export function activate(context: vscode.ExtensionContext): void {
   // -------------------------------------------------------------------------
   const fileWatcherService = new FileWatcherService(workspaceRoot);
 
-  // Manifest changed (dbt compile ran) → invalidate cache and notify
-  const manifestChangedSubscription = fileWatcherService.onManifestChanged(() => {
-    manifestService.invalidate();
-    // Open editors will refresh via onDidChangeTextDocument when they next interact
-    // with the manifest (e.g., reconciliation on focus)
-    void vscode.window.showInformationMessage(
-      'dbt manifest updated. Graphs will refresh with latest model data.',
-    );
-  });
+  // Manifest changed (dbt compile ran) → auto-reconcile open domains (F304)
+  const manifestChangedSubscription = fileWatcherService.onManifestChanged(
+    async () => {
+      // Step 1: Invalidate and reload manifest
+      manifestService.invalidate();
+      const manifest = await manifestService.loadManifest(workspaceRoot);
+
+      // Step 2: Check autoReconcile setting
+      const config = vscode.workspace.getConfiguration('dbtSemantic');
+      const autoReconcile = config.get<boolean>('autoReconcile', true);
+
+      if (!autoReconcile) {
+        // Auto-reconciliation disabled - just notify
+        void vscode.window.showInformationMessage(
+          'dbt manifest updated. Auto-reconciliation is disabled.',
+        );
+        return;
+      }
+
+      // Step 3: Reconcile all open domain editors
+      const allNewlyBuilt =
+        await editorProvider.reconcileAllOpenDomains(manifest);
+
+      // Step 4: Show notification
+      if (allNewlyBuilt.length > 0) {
+        const modelList = allNewlyBuilt.join(', ');
+        void vscode.window.showInformationMessage(
+          `${allNewlyBuilt.length} design model(s) have been built: ${modelList}`,
+        );
+      } else {
+        void vscode.window.showInformationMessage(
+          'dbt manifest updated. Graphs will refresh with latest model data.',
+        );
+      }
+    },
+  );
 
   // Semantic file changed externally → refresh tree view
   // (Open editors handle their own refresh via onDidChangeTextDocument)

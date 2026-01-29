@@ -21,6 +21,8 @@ import { DomainService } from '../services/domainService';
 import { ManifestService } from '../services/manifestService';
 import { ReconciliationService } from '../services/reconciliationService';
 import { TemplateService } from '../services/templateService';
+import { AutoReconciliationService } from '../services/autoReconciliationService';
+import type { ManifestData } from '../types/manifest';
 import type { Cardinality, ColumnDef, DesignModel } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
@@ -29,10 +31,20 @@ import type { Cardinality, ColumnDef, DesignModel } from '../types/semantic';
 
 export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
-   * Guard flag to prevent re-sending domain data to the webview when
+   * Guard flags to prevent re-sending domain data to the webview when
    * an onDidChangeTextDocument event is triggered by our own WorkspaceEdit.
+   * Keyed by document URI to support concurrent edits to multiple open domains.
    */
-  private pendingUpdate = false;
+  private readonly pendingUpdates = new Map<string, boolean>();
+
+  /**
+   * Track all open webview panels by document URI.
+   * Used by reconcileAllOpenDomains() to update all editors when manifest changes.
+   */
+  private readonly openPanels = new Map<
+    string,
+    { document: vscode.TextDocument; webview: vscode.Webview }
+  >();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -40,8 +52,40 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly manifestService: ManifestService,
     private readonly reconciliationService: ReconciliationService,
     private readonly templateService: TemplateService,
+    private readonly autoReconciliationService: AutoReconciliationService,
     private readonly workspaceRoot: string,
   ) {}
+
+  /**
+   * Build supplementary payload data for webview messages.
+   * Includes templates and list of manifest models not in the domain.
+   */
+  private buildWebviewPayload(
+    reconciled: { models: Array<{ name: string }> },
+    manifest: ManifestData,
+  ): {
+    templates: ReturnType<TemplateService['loadTemplates']>;
+    manifestModels: Array<{
+      name: string;
+      schema: string;
+      description: string;
+      columnCount: number;
+    }>;
+  } {
+    const templates = this.templateService.loadTemplates(this.workspaceRoot);
+    const existingModelNames = new Set(reconciled.models.map((m) => m.name));
+    const manifestModels = Array.from(manifest.models.values())
+      .filter((m) => !existingModelNames.has(m.name))
+      .map((m) => ({
+        name: m.name,
+        schema: m.schema,
+        description: m.description,
+        columnCount: m.columns.length,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return { templates, manifestModels };
+  }
 
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
@@ -54,6 +98,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     };
 
     webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
+
+    // Track this panel for auto-reconciliation (F304)
+    const panelKey = document.uri.toString();
+    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview });
 
     // --- Subscriptions (disposed when the panel closes) ---------------------
 
@@ -143,7 +191,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (e.document.uri.toString() !== document.uri.toString()) {
         return;
       }
-      if (this.pendingUpdate) {
+      if (this.pendingUpdates.get(panelKey)) {
         return;
       }
       await this.sendDomainData(document, webviewPanel.webview);
@@ -158,6 +206,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
       changeSubscription.dispose();
+      this.openPanels.delete(panelKey);
     });
   }
 
@@ -177,21 +226,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const domain = this.domainService.getDomain(document.uri.fsPath);
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const reconciled = this.reconciliationService.reconcile(domain, manifest);
-
-      // Load templates from the semantic/templates directory
-      const templates = this.templateService.loadTemplates(this.workspaceRoot);
-
-      // Build list of manifest models not already in this domain (for Add Existing Model dialog)
-      const existingModelNames = new Set(reconciled.models.map((m) => m.name));
-      const manifestModels = Array.from(manifest.models.values())
-        .filter((m) => !existingModelNames.has(m.name))
-        .map((m) => ({
-          name: m.name,
-          schema: m.schema,
-          description: m.description,
-          columnCount: m.columns.length,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+      const { templates, manifestModels } = this.buildWebviewPayload(
+        reconciled,
+        manifest,
+      );
 
       webview.postMessage({
         type: 'domainLoaded',
@@ -202,6 +240,99 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
       webview.postMessage({ type: 'error', payload: { message } });
     }
+  }
+
+  /**
+   * Reconcile all open domain editors against fresh manifest.
+   * Called by extension.ts when manifest changes (F304).
+   *
+   * For each open editor:
+   * - Detects design models that now exist in manifest
+   * - Transitions them: source 'design' → 'repo', moves unbuilt columns to plannedColumns
+   * - Persists changes via WorkspaceEdit
+   * - Sends manifestRefreshed message to webview with newlyBuiltModels list
+   *
+   * @param manifest - Fresh manifest data to reconcile against
+   * @returns Array of all newly built model names across all domains
+   */
+  async reconcileAllOpenDomains(manifest: ManifestData): Promise<string[]> {
+    const allNewlyBuilt: string[] = [];
+
+    for (const { document, webview } of Array.from(this.openPanels.values())) {
+      try {
+        // Parse current domain from disk
+        const domain = this.domainService.getDomain(document.uri.fsPath);
+
+        // Detect and execute transitions
+        const result = this.autoReconciliationService.reconcileDomain(
+          domain,
+          manifest,
+        );
+
+        if (!result.transitioned) {
+          // No transitions - just refresh with new manifest data
+          await this.sendDomainData(document, webview);
+          continue;
+        }
+
+        // Persist transitioned domain to disk via WorkspaceEdit
+        const updatedText = JSON.stringify(domain, null, 2) + '\n';
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(
+          document.positionAt(0),
+          document.positionAt(document.getText().length),
+        );
+        edit.replace(document.uri, fullRange, updatedText);
+
+        this.pendingUpdates.set(document.uri.toString(), true);
+        const success = await vscode.workspace.applyEdit(edit);
+
+        if (success) {
+          try {
+            await document.save();
+
+            // Build payload for manifestRefreshed message
+            const reconciled = this.reconciliationService.reconcile(
+              domain,
+              manifest,
+            );
+            const { templates, manifestModels } = this.buildWebviewPayload(
+              reconciled,
+              manifest,
+            );
+
+            // Send manifestRefreshed message with newly built list
+            webview.postMessage({
+              type: 'manifestRefreshed',
+              payload: {
+                domain: { ...reconciled, templates, manifestModels },
+                newlyBuiltModels: result.newlyBuiltModels,
+              },
+            });
+
+            allNewlyBuilt.push(...result.newlyBuiltModels);
+          } finally {
+            this.pendingUpdates.delete(document.uri.toString());
+          }
+        } else {
+          this.pendingUpdates.delete(document.uri.toString());
+          console.error(
+            '[SemanticEditorProvider] Failed to apply auto-reconciliation edit',
+          );
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[SemanticEditorProvider] Auto-reconciliation failed for ${document.uri.fsPath}: ${message}`,
+        );
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Auto-reconciliation failed: ${message}` },
+        });
+      }
+    }
+
+    return allNewlyBuilt;
   }
 
   /**
@@ -249,24 +380,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
         // Save the document so getDomain reads the updated content from disk
         await document.save();
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         // Send updated domain data to refresh the canvas
         await this.sendDomainData(document, webview);
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to add model to domain.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add model failed: ${message}`);
       webview.postMessage({
@@ -359,22 +490,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
         await document.save();
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         await this.sendDomainData(document, webview);
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to add column.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add column failed: ${message}`);
       webview.postMessage({
@@ -460,22 +591,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
         await document.save();
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         await this.sendDomainData(document, webview);
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to update column.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Update column failed: ${message}`);
       webview.postMessage({
@@ -536,22 +667,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
         await document.save();
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         await this.sendDomainData(document, webview);
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to remove column.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Remove column failed: ${message}`);
       webview.postMessage({
@@ -620,7 +751,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
@@ -628,17 +759,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           await document.save();
           await this.sendDomainData(document, webview);
         } finally {
-          this.pendingUpdate = false;
+          this.pendingUpdates.delete(document.uri.toString());
         }
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to add relationship.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
       webview.postMessage({
@@ -709,7 +840,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
@@ -717,17 +848,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           await document.save();
           await this.sendDomainData(document, webview);
         } finally {
-          this.pendingUpdate = false;
+          this.pendingUpdates.delete(document.uri.toString());
         }
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to remove model.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Remove model failed: ${message}`);
       webview.postMessage({
@@ -795,7 +926,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
@@ -803,17 +934,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           await document.save();
           await this.sendDomainData(document, webview);
         } finally {
-          this.pendingUpdate = false;
+          this.pendingUpdates.delete(document.uri.toString());
         }
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to remove relationship.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Remove relationship failed: ${message}`);
       webview.postMessage({
@@ -853,27 +984,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
         // Save the document so undo/redo works correctly.
         // Without save, onDidChangeTextDocument would read stale data from disk.
         await document.save();
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         // Note: We don't call sendDomainData() here because positions are managed
         // locally by React Flow. The webview already has the correct positions.
         // However, external undo (Ctrl+Z) will trigger onDidChangeTextDocument,
         // which will call sendDomainData() and refresh the canvas with old positions.
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to save layout positions.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Position update failed: ${message}`);
       webview.postMessage({
@@ -948,7 +1079,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       edit.replace(document.uri, fullRange, updatedText);
 
-      this.pendingUpdate = true;
+      this.pendingUpdates.set(document.uri.toString(), true);
       const success = await vscode.workspace.applyEdit(edit);
 
       if (success) {
@@ -956,17 +1087,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           await document.save();
           await this.sendDomainData(document, webview);
         } finally {
-          this.pendingUpdate = false;
+          this.pendingUpdates.delete(document.uri.toString());
         }
       } else {
-        this.pendingUpdate = false;
+        this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to add model to domain.' },
         });
       }
     } catch (err) {
-      this.pendingUpdate = false;
+      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add existing model failed: ${message}`);
       webview.postMessage({
