@@ -7,7 +7,7 @@ import { CURRENT_SCHEMA_VERSION, type Layer } from './types/semantic';
 import { ManifestService } from './services/manifestService';
 import { ReconciliationService } from './services/reconciliationService';
 import { TemplateService } from './services/templateService';
-import { DomainTreeProvider } from './providers/DomainTreeProvider';
+import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 
@@ -199,11 +199,88 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       },
     ),
-    vscode.commands.registerCommand('dbtSemantic.deleteDomain', async () => {
-      await vscode.window.showInformationMessage(
-        'Delete Domain feature will be implemented in Phase 3 (F301)',
-      );
-    }),
+    vscode.commands.registerCommand(
+      'dbtSemantic.deleteDomain',
+      async (element?: TreeElement) => {
+        // Validate we have a domain node (from context menu)
+        if (!element || element.type !== 'domain') {
+          void vscode.window.showErrorMessage(
+            'Delete Domain: No domain selected. Right-click a domain in the tree view.',
+          );
+          return;
+        }
+
+        const domainName = element.summary.domain;
+        const filePath = element.summary.filePath;
+        const fileUri = vscode.Uri.file(filePath);
+
+        // Step 1: Check for open editors with unsaved changes
+        const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+        const matchingTabs = allTabs.filter(tab => {
+          const input = tab.input;
+          return input && typeof input === 'object' && 'uri' in input &&
+            (input as { uri: vscode.Uri }).uri.toString() === fileUri.toString();
+        });
+
+        // Check if any matching tab has unsaved changes
+        const dirtyTab = matchingTabs.find(tab => tab.isDirty);
+        if (dirtyTab) {
+          const saveChoice = await vscode.window.showWarningMessage(
+            `Domain "${domainName}" has unsaved changes. Save before deleting?`,
+            { modal: true },
+            'Save',
+            'Discard',
+            'Cancel',
+          );
+          if (saveChoice === 'Cancel' || saveChoice === undefined) {
+            return;
+          }
+          if (saveChoice === 'Save') {
+            // Save the document before proceeding
+            const doc = vscode.workspace.textDocuments.find(
+              d => d.uri.toString() === fileUri.toString(),
+            );
+            if (doc) {
+              const saved = await doc.save();
+              if (!saved) {
+                void vscode.window.showErrorMessage(
+                  `Failed to save "${domainName}". Deletion cancelled.`,
+                );
+                return;
+              }
+            }
+          }
+          // 'Discard' continues without saving
+        }
+
+        // Step 2: Show confirmation dialog
+        const confirm = await vscode.window.showWarningMessage(
+          `Are you sure you want to delete domain "${domainName}"?`,
+          { modal: true },
+          'Delete',
+        );
+        if (confirm !== 'Delete') {
+          return;
+        }
+
+        // Step 3: Close any open editors for this file
+        if (matchingTabs.length > 0) {
+          await vscode.window.tabGroups.close(matchingTabs, /* preserveFocus */ true);
+        }
+
+        // Step 4: Delete the file
+        try {
+          await vscode.workspace.fs.delete(fileUri);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to delete domain: ${msg}`);
+          return;
+        }
+
+        // Step 5: Refresh the tree view
+        treeProvider.refresh();
+      },
+    ),
     vscode.commands.registerCommand('dbtSemantic.refreshManifest', async () => {
       await vscode.window.showInformationMessage(
         'Refresh Manifest feature will be implemented in Phase 3 (F305)',

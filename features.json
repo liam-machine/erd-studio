@@ -550,7 +550,7 @@
       "name": "Implement Delete Domain command",
       "description": "Create the 'Delete Semantic Domain' command (src/commands/deleteDomain.ts) that deletes a domain JSON file. Show a confirmation dialog ('Are you sure you want to delete domain work-lots?'). Available from the tree view context menu (right-click → Delete). After deletion, close any open editor for that domain and refresh the tree view.",
       "phase": "phase-3",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F207"],
       "validation_criteria": [

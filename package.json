@@ -69,6 +69,15 @@
         "priority": "default"
       }
     ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "dbtSemantic.deleteDomain",
+          "when": "view == dbtSemantic.domainTree && viewItem == domain",
+          "group": "7_modification"
+        }
+      ]
+    },
     "configuration": {
       "title": "dbt Semantic Designer",
       "properties": {
