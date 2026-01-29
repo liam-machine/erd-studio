@@ -10,6 +10,7 @@ import { TemplateService } from './services/templateService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
+import { FileWatcherService } from './watchers/FileWatcherService';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -62,9 +63,46 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   const decorationProvider = new SemanticFileDecorationProvider();
 
+  // -------------------------------------------------------------------------
+  // File watchers for auto-refresh (F303)
+  // -------------------------------------------------------------------------
+  const fileWatcherService = new FileWatcherService(workspaceRoot);
+
+  // Manifest changed (dbt compile ran) → invalidate cache and notify
+  const manifestChangedSubscription = fileWatcherService.onManifestChanged(() => {
+    manifestService.invalidate();
+    // Open editors will refresh via onDidChangeTextDocument when they next interact
+    // with the manifest (e.g., reconciliation on focus)
+    void vscode.window.showInformationMessage(
+      'dbt manifest updated. Graphs will refresh with latest model data.',
+    );
+  });
+
+  // Semantic file changed externally → refresh tree view
+  // (Open editors handle their own refresh via onDidChangeTextDocument)
+  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(() => {
+    treeProvider.refresh();
+  });
+
+  // dbt_project.yml changed → suggest window reload
+  const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
+    void vscode.window.showWarningMessage(
+      'dbt_project.yml has changed. Some changes require a window reload to take effect.',
+      'Reload Window',
+    ).then(action => {
+      if (action === 'Reload Window') {
+        void vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }
+    });
+  });
+
   context.subscriptions.push(
     treeProvider,
     decorationProvider,
+    fileWatcherService,
+    manifestChangedSubscription,
+    semanticChangedSubscription,
+    projectChangedSubscription,
     vscode.window.registerTreeDataProvider('dbtSemantic.domainTree', treeProvider),
     vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
     vscode.window.registerFileDecorationProvider(decorationProvider),

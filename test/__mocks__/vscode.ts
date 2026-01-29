@@ -196,3 +196,75 @@ export class CancellationTokenSource {
   cancel() { this.token.isCancellationRequested = true; }
   dispose() {}
 }
+
+// ---------------------------------------------------------------------------
+// Helpers for testing FileSystemWatcher
+// ---------------------------------------------------------------------------
+
+export interface MockFileSystemWatcher {
+  onDidCreate: (handler: (uri: unknown) => void) => { dispose: () => void };
+  onDidChange: (handler: (uri: unknown) => void) => { dispose: () => void };
+  onDidDelete: (handler: (uri: unknown) => void) => { dispose: () => void };
+  dispose: () => void;
+  // Test helpers
+  _simulateCreate: (uri: unknown) => void;
+  _simulateChange: (uri: unknown) => void;
+  _simulateDelete: (uri: unknown) => void;
+}
+
+/** Storage for all created file watchers (for test inspection) */
+export const _mockFileWatchers: MockFileSystemWatcher[] = [];
+
+/** Clear all mock file watchers (call in beforeEach) */
+export function _clearMockFileWatchers(): void {
+  _mockFileWatchers.length = 0;
+}
+
+/**
+ * Create a mock FileSystemWatcher that captures event handlers.
+ * The watcher is automatically added to _mockFileWatchers for test inspection.
+ */
+export function createMockFileSystemWatcher(): MockFileSystemWatcher {
+  const handlers = {
+    create: [] as Array<(uri: unknown) => void>,
+    change: [] as Array<(uri: unknown) => void>,
+    delete: [] as Array<(uri: unknown) => void>,
+  };
+
+  const watcher: MockFileSystemWatcher = {
+    onDidCreate: (handler) => {
+      handlers.create.push(handler);
+      return { dispose: () => {} };
+    },
+    onDidChange: (handler) => {
+      handlers.change.push(handler);
+      return { dispose: () => {} };
+    },
+    onDidDelete: (handler) => {
+      handlers.delete.push(handler);
+      return { dispose: () => {} };
+    },
+    dispose: () => {},
+    _simulateCreate: (uri) => handlers.create.forEach(h => h(uri)),
+    _simulateChange: (uri) => handlers.change.forEach(h => h(uri)),
+    _simulateDelete: (uri) => handlers.delete.forEach(h => h(uri)),
+  };
+
+  _mockFileWatchers.push(watcher);
+  return watcher;
+}
+
+// Override workspace.createFileSystemWatcher to use the mock factory
+workspace.createFileSystemWatcher = () => createMockFileSystemWatcher() as unknown as ReturnType<typeof workspace.createFileSystemWatcher>;
+
+/**
+ * RelativePattern mock for file watchers
+ */
+export class RelativePattern {
+  base: string;
+  pattern: string;
+  constructor(base: string | { uri: { fsPath: string } }, pattern: string) {
+    this.base = typeof base === 'string' ? base : base.uri.fsPath;
+    this.pattern = pattern;
+  }
+}
