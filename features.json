@@ -475,7 +475,7 @@
       "name": "Implement DomainService write operations",
       "description": "Extend DomainService with full write operations: addDesignModel, addRelationship, removeModel, removeRelationship, addColumn (to plannedColumns for repo models, to columns for design models), removeColumn. All writes use VS Code's WorkspaceEdit API to modify the semantic domain JSON file on disk. This is the backend for all mutations.",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F102"],
       "validation_criteria": [
@@ -487,7 +487,7 @@
         "Unit test: all write operations produce valid JSON matching the schema",
         "Verify writes use WorkspaceEdit so VS Code tracks dirty state and undo history"
       ],
-      "implementation_notes": "All mutations go through WorkspaceEdit to integrate with VS Code's undo/redo system. After each write, re-read the document, reconcile, and send domainUpdated to the webview. Implement the update loop prevention (pendingUpdate flag) to avoid infinite cycles from onDidChangeTextDocument events triggered by our own writes.",
+      "implementation_notes": "IMPLEMENTED IN SemanticEditorProvider: All write operations (handleAddModel, handleAddColumn, handleUpdateColumn, handleRemoveColumn, handleAddRelationship, handleRemoveModel, handleRemoveRelationship) were implemented directly in SemanticEditorProvider.ts (lines 194-805) rather than in DomainService. This architectural choice keeps DomainService as a pure read service while the editor provider handles all mutations via WorkspaceEdit, providing tight VS Code integration (undo/redo, dirty state). The pendingUpdate flag prevents update loops from onDidChangeTextDocument events.",
       "category": "infrastructure",
       "estimated_effort": "large"
     },
