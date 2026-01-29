@@ -514,7 +514,7 @@
       "name": "Implement validation for operations",
       "description": "Add validation rules for all operations: prevent duplicate model names within a domain, prevent duplicate column names within a model, prevent circular FK references, ensure FK target columns exist, prevent creating a relationship where the composite key (fromModel, fromColumn, toModel, toColumn) already exists. Show validation errors using VS Code-native error elements.",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F201", "F202", "F203"],
       "validation_criteria": [

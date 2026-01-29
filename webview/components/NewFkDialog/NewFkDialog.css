@@ -139,6 +139,25 @@
   background: rgba(244, 135, 113, 0.1);
 }
 
+.new-fk-dialog__warning {
+  font-size: 11px;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.new-fk-dialog__warning--global {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 3px;
+  background: rgba(204, 167, 0, 0.1);
+}
+
+.new-fk-dialog__warning-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
 /* ---------------------------------------------------------------------------
    Preview
    --------------------------------------------------------------------------- */

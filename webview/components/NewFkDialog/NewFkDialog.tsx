@@ -17,6 +17,7 @@ import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
+import { detectCircularFk, formatCyclePath } from '../../lib/validation';
 import type { Cardinality } from '../../../src/types/semantic';
 import './NewFkDialog.css';
 
@@ -130,6 +131,18 @@ export function NewFkDialog() {
       })),
     [domain],
   );
+
+  // Circular FK detection (warning only, doesn't block submission)
+  const circularWarning = useMemo(() => {
+    if (!fromModel || !toModel || fromModel === toModel) {
+      return null;
+    }
+    const cyclePath = detectCircularFk(existingRelationships, fromModel, toModel);
+    if (cyclePath) {
+      return `This will create a circular reference: ${formatCyclePath(cyclePath)}`;
+    }
+    return null;
+  }, [fromModel, toModel, existingRelationships]);
 
   // Validation
   const errors = useMemo(
@@ -377,6 +390,14 @@ export function NewFkDialog() {
         {errors.duplicate && (
           <div className="new-fk-dialog__error new-fk-dialog__error--global">
             {errors.duplicate}
+          </div>
+        )}
+
+        {/* Circular reference warning (doesn't block submission) */}
+        {circularWarning && (
+          <div className="new-fk-dialog__warning new-fk-dialog__warning--global">
+            <span className="new-fk-dialog__warning-icon">⚠</span>
+            {circularWarning}
           </div>
         )}
 
