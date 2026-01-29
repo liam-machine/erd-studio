@@ -17,6 +17,13 @@ import type { ModelTemplate } from '../../src/types/semantic';
 // Types
 // ---------------------------------------------------------------------------
 
+/** Prefill data for FK dialog when opened via drag-to-connect. */
+export interface FkDialogPrefill {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+}
+
 export interface EditorState {
   /** Name of the currently selected model node, or null. */
   selectedNode: string | null;
@@ -28,6 +35,8 @@ export interface EditorState {
   newModelDialogOpen: boolean;
   /** Whether the new FK relationship dialog is open. */
   newFkDialogOpen: boolean;
+  /** Prefill data for FK dialog when opened via drag-to-connect, or null. */
+  fkDialogPrefill: FkDialogPrefill | null;
   /** The loaded domain data from the extension host (already reconciled with manifest). */
   domain: ReconciledDomain | null;
   /** Error message from the extension host, if any. */
@@ -46,6 +55,10 @@ export interface EditorActions {
   setDetailPanelOpen: (open: boolean) => void;
   setNewModelDialogOpen: (open: boolean) => void;
   setNewFkDialogOpen: (open: boolean) => void;
+  /** Open FK dialog with prefilled source/target from drag-to-connect. */
+  openFkDialogWithPrefill: (prefill: FkDialogPrefill) => void;
+  /** Clear FK dialog prefill (called on dialog close). */
+  clearFkDialogPrefill: () => void;
   setDomain: (domain: ReconciledDomain) => void;
   setError: (error: string | null) => void;
   setNodes: (nodes: ModelFlowNode[]) => void;
@@ -64,6 +77,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   detailPanelOpen: false,
   newModelDialogOpen: false,
   newFkDialogOpen: false,
+  fkDialogPrefill: null,
   domain: null,
   error: null,
   nodes: [],
@@ -76,6 +90,9 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setDetailPanelOpen: (open) => set({ detailPanelOpen: open }),
   setNewModelDialogOpen: (open) => set({ newModelDialogOpen: open }),
   setNewFkDialogOpen: (open) => set({ newFkDialogOpen: open }),
+  openFkDialogWithPrefill: (prefill) =>
+    set({ newFkDialogOpen: true, fkDialogPrefill: prefill }),
+  clearFkDialogPrefill: () => set({ fkDialogPrefill: null }),
   setDomain: (domain) => set({ domain, error: null }),
   setError: (error) => set({ error }),
   setNodes: (nodes) => set({ nodes }),

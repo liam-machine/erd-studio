@@ -12,7 +12,7 @@
  * The new relationship is marked with source: 'design' and renders as orange.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
@@ -85,6 +85,8 @@ export function NewFkDialog() {
   const isOpen = useEditorStore((s) => s.newFkDialogOpen);
   const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
   const domain = useEditorStore((s) => s.domain);
+  const fkDialogPrefill = useEditorStore((s) => s.fkDialogPrefill);
+  const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
   const { send } = useMessageBus(() => {});
 
   // Form state
@@ -154,8 +156,9 @@ export function NewFkDialog() {
 
   const handleClose = useCallback(() => {
     setNewFkDialogOpen(false);
+    clearFkDialogPrefill();
     resetForm();
-  }, [setNewFkDialogOpen, resetForm]);
+  }, [setNewFkDialogOpen, clearFkDialogPrefill, resetForm]);
 
   const handleSubmit = useCallback(() => {
     if (!isValid) return;
@@ -189,6 +192,21 @@ export function NewFkDialog() {
     setToModel(value);
     setToColumn('');
   }, []);
+
+  // Apply prefill when dialog opens with prefill data (from drag-to-connect).
+  // Reset form first to clear any stale toColumn/touched state from previous sessions.
+  useEffect(() => {
+    if (isOpen && fkDialogPrefill) {
+      // Reset all form state before applying prefill
+      setToColumn('');
+      setCardinality('many-to-one');
+      setTouched({});
+      // Apply prefilled values
+      setFromModel(fkDialogPrefill.fromModel);
+      setFromColumn(fkDialogPrefill.fromColumn);
+      setToModel(fkDialogPrefill.toModel);
+    }
+  }, [isOpen, fkDialogPrefill]);
 
   if (!isOpen) {
     return null;

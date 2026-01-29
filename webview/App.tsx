@@ -19,6 +19,7 @@ import {
   type NodeTypes,
   type EdgeTypes,
   type OnSelectionChangeFunc,
+  type Connection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -60,6 +61,7 @@ function EditorCanvas() {
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const setTemplates = useEditorStore((s) => s.setTemplates);
+  const openFkDialogWithPrefill = useEditorStore((s) => s.openFkDialogWithPrefill);
 
   // State persistence (zoom, pan, selection, mode, detail panel)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
@@ -177,6 +179,46 @@ function EditorCanvas() {
     [selectNode, setDetailPanelOpen, currentSelectedNode, domain],
   );
 
+  // Handle drag-to-connect from column handles to open the FK dialog.
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      // Only handle connections from column-level source handles
+      if (!connection.source || !connection.target || !connection.sourceHandle) {
+        return;
+      }
+
+      // Parse source handle ID (format: "col-{sanitized_name}-right")
+      const match = connection.sourceHandle.match(/^col-(.+)-right$/);
+      if (!match) {
+        // Not a column handle, ignore (node-level handles shouldn't trigger connections)
+        return;
+      }
+
+      const fromModel = connection.source; // Node ID is model name
+      const toModel = connection.target;
+
+      // Prevent self-reference (would fail validation anyway, but show toast immediately)
+      if (fromModel === toModel) {
+        setToastMessage('Cannot create relationship from a model to itself');
+        return;
+      }
+
+      // Look up the original column name from the domain data.
+      // The handle ID is sanitized (special chars → underscores), so we need to find
+      // the column whose sanitized name matches. Fallback to sanitized version if not found.
+      const sanitizedColumn = match[1];
+      const model = domain?.models.find((m) => m.name === fromModel);
+      const originalColumn = model?.columns.find(
+        (c) => c.name.replace(/[^a-zA-Z0-9_-]/g, '_') === sanitizedColumn,
+      );
+      const fromColumn = originalColumn?.name ?? sanitizedColumn;
+
+      // Open the FK dialog with prefilled source and target
+      openFkDialogWithPrefill({ fromModel, fromColumn, toModel });
+    },
+    [openFkDialogWithPrefill, setToastMessage, domain],
+  );
+
   // --- Error state -----------------------------------------------------------
 
   if (error) {
@@ -211,11 +253,17 @@ function EditorCanvas() {
         onPaneClick={onPaneClick}
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
+        onConnect={onConnect}
         fitView={!shouldSkipFitView}
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
         panOnDrag={[1, 2]}
         proOptions={{ hideAttribution: true }}
+        connectionLineStyle={{
+          stroke: 'var(--edge-design)',
+          strokeWidth: 2,
+          strokeDasharray: '6 3',
+        }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Toolbar nodes={nodes} edges={edges} />
