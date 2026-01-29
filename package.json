@@ -38,6 +38,11 @@
         "command": "dbtSemantic.refreshManifest",
         "title": "Refresh Manifest",
         "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.renameDomain",
+        "title": "Rename Semantic Domain",
+        "category": "dbt"
       }
     ],
     "viewsContainers": {
@@ -72,9 +77,14 @@
     "menus": {
       "view/item/context": [
         {
+          "command": "dbtSemantic.renameDomain",
+          "when": "view == dbtSemantic.domainTree && viewItem == domain",
+          "group": "7_modification@1"
+        },
+        {
           "command": "dbtSemantic.deleteDomain",
           "when": "view == dbtSemantic.domainTree && viewItem == domain",
-          "group": "7_modification"
+          "group": "7_modification@2"
         }
       ]
     },

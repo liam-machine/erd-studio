@@ -72,6 +72,7 @@ export function DataTypeSelect({
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
+    return undefined;
   }, [isOpen, onBlur]);
 
   // Calculate dropdown position when opening

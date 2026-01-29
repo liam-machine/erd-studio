@@ -137,8 +137,9 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
     );
 
     const modelWord = element.modelCount === 1 ? 'model' : 'models';
+    const designWord = element.designCount === 1 ? 'design' : 'designs';
     item.description = element.designCount > 0
-      ? `${element.modelCount} ${modelWord}, ${element.designCount} design`
+      ? `${element.modelCount} ${modelWord}, ${element.designCount} ${designWord}`
       : `${element.modelCount} ${modelWord}`;
 
     item.contextValue = 'domain';

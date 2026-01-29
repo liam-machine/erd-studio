@@ -640,7 +640,7 @@
       "name": "Update tree view with design model badges and context menu",
       "description": "Enhance the DomainTreeProvider to show accurate badges reflecting current design vs built counts. Add right-click context menu to domain items: Open, Rename (stretch), Delete. Badges should update when domain files change (via file watcher) or when design models transition to built.",
       "phase": "phase-3",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F103", "F303"],
       "validation_criteria": [

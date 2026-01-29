@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { DomainService } from './services/domainService';
-import { CURRENT_SCHEMA_VERSION, type Layer } from './types/semantic';
+import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type SemanticDomain } from './types/semantic';
 import { ManifestService } from './services/manifestService';
 import { ReconciliationService } from './services/reconciliationService';
 import { TemplateService } from './services/templateService';
@@ -30,6 +30,111 @@ function findDbtProjectRoot(): string | undefined {
     if (fs.existsSync(dbtProjectFile)) {
       return projectPath;
     }
+  }
+
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Find all open editor tabs for a given file URI.
+ */
+function findMatchingTabs(fileUri: vscode.Uri): vscode.Tab[] {
+  const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+  return allTabs.filter(tab => {
+    const input = tab.input;
+    return input && typeof input === 'object' && 'uri' in input &&
+      (input as { uri: vscode.Uri }).uri.toString() === fileUri.toString();
+  });
+}
+
+/**
+ * Handle unsaved changes in open editors for a domain file.
+ * Returns true if the operation should proceed, false if cancelled.
+ */
+async function handleUnsavedChanges(
+  fileUri: vscode.Uri,
+  domainName: string,
+  operation: 'deleting' | 'renaming',
+): Promise<boolean> {
+  const matchingTabs = findMatchingTabs(fileUri);
+  const dirtyTab = matchingTabs.find(tab => tab.isDirty);
+
+  if (!dirtyTab) {
+    return true; // No unsaved changes, proceed
+  }
+
+  const saveChoice = await vscode.window.showWarningMessage(
+    `Domain "${domainName}" has unsaved changes. Save before ${operation}?`,
+    { modal: true },
+    'Save',
+    'Discard',
+    'Cancel',
+  );
+
+  if (saveChoice === 'Cancel' || saveChoice === undefined) {
+    return false;
+  }
+
+  if (saveChoice === 'Save') {
+    const doc = vscode.workspace.textDocuments.find(
+      d => d.uri.toString() === fileUri.toString(),
+    );
+    if (doc) {
+      const saved = await doc.save();
+      if (!saved) {
+        const opName = operation === 'deleting' ? 'Deletion' : 'Rename';
+        void vscode.window.showErrorMessage(
+          `Failed to save "${domainName}". ${opName} cancelled.`,
+        );
+        return false;
+      }
+    }
+  }
+
+  // 'Discard' continues without saving
+  return true;
+}
+
+/**
+ * Validate a domain slug for create or rename operations.
+ * Returns an error message if invalid, undefined if valid.
+ */
+function validateDomainSlug(
+  value: string,
+  layer: Layer,
+  existingDomains: DomainSummary[],
+  currentDomainName?: string,
+): string | undefined {
+  if (!value || !value.trim()) {
+    return 'Domain name is required';
+  }
+
+  const slug = value.trim();
+
+  // Check if unchanged (only for rename)
+  if (currentDomainName && slug === currentDomainName) {
+    return 'Domain name unchanged';
+  }
+
+  // Validate slug format: lowercase, alphanumeric, hyphens, underscores
+  if (!/^[a-z][a-z0-9_-]*$/.test(slug)) {
+    return 'Domain name must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores';
+  }
+
+  if (slug.length > 64) {
+    return 'Domain name must be 64 characters or less';
+  }
+
+  // Check for collision in the same layer
+  const collision = existingDomains.find(
+    d => d.domain === slug && d.layer === layer,
+  );
+  if (collision) {
+    return `A domain named "${slug}" already exists in the ${layer} layer`;
   }
 
   return undefined;
@@ -169,27 +274,8 @@ export function activate(context: vscode.ExtensionContext): void {
           prompt: 'Enter domain name (slug format)',
           placeHolder: 'e.g. customer-360, sales-analytics, work-lots',
           ignoreFocusOut: true,
-          validateInput: (value: string) => {
-            if (!value || !value.trim()) {
-              return 'Domain name is required';
-            }
-            const slug = value.trim();
-            // Validate slug format: lowercase, alphanumeric, hyphens, underscores
-            if (!/^[a-z][a-z0-9_-]*$/.test(slug)) {
-              return 'Domain name must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores';
-            }
-            if (slug.length > 64) {
-              return 'Domain name must be 64 characters or less';
-            }
-            // Check for collision in the same layer
-            const collision = existingDomains.find(
-              d => d.domain === slug && d.layer === layer,
-            );
-            if (collision) {
-              return `A domain named "${slug}" already exists in the ${layer} layer`;
-            }
-            return undefined;
-          },
+          validateInput: (value: string) =>
+            validateDomainSlug(value, layer, existingDomains),
         });
         if (!domainSlug) {
           return; // User cancelled
@@ -283,42 +369,9 @@ export function activate(context: vscode.ExtensionContext): void {
         const fileUri = vscode.Uri.file(filePath);
 
         // Step 1: Check for open editors with unsaved changes
-        const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
-        const matchingTabs = allTabs.filter(tab => {
-          const input = tab.input;
-          return input && typeof input === 'object' && 'uri' in input &&
-            (input as { uri: vscode.Uri }).uri.toString() === fileUri.toString();
-        });
-
-        // Check if any matching tab has unsaved changes
-        const dirtyTab = matchingTabs.find(tab => tab.isDirty);
-        if (dirtyTab) {
-          const saveChoice = await vscode.window.showWarningMessage(
-            `Domain "${domainName}" has unsaved changes. Save before deleting?`,
-            { modal: true },
-            'Save',
-            'Discard',
-            'Cancel',
-          );
-          if (saveChoice === 'Cancel' || saveChoice === undefined) {
-            return;
-          }
-          if (saveChoice === 'Save') {
-            // Save the document before proceeding
-            const doc = vscode.workspace.textDocuments.find(
-              d => d.uri.toString() === fileUri.toString(),
-            );
-            if (doc) {
-              const saved = await doc.save();
-              if (!saved) {
-                void vscode.window.showErrorMessage(
-                  `Failed to save "${domainName}". Deletion cancelled.`,
-                );
-                return;
-              }
-            }
-          }
-          // 'Discard' continues without saving
+        const shouldProceed = await handleUnsavedChanges(fileUri, domainName, 'deleting');
+        if (!shouldProceed) {
+          return;
         }
 
         // Step 2: Show confirmation dialog
@@ -332,6 +385,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
 
         // Step 3: Close any open editors for this file
+        const matchingTabs = findMatchingTabs(fileUri);
         if (matchingTabs.length > 0) {
           await vscode.window.tabGroups.close(matchingTabs, /* preserveFocus */ true);
         }
@@ -347,6 +401,111 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Step 5: Refresh the tree view
         treeProvider.refresh();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'dbtSemantic.renameDomain',
+      async (element?: TreeElement) => {
+        // Validate we have a domain node (from context menu)
+        if (!element || element.type !== 'domain') {
+          void vscode.window.showErrorMessage(
+            'Rename Domain: No domain selected. Right-click a domain in the tree view.',
+          );
+          return;
+        }
+
+        const oldDomainName = element.summary.domain;
+        const oldFilePath = element.summary.filePath;
+        const oldFileUri = vscode.Uri.file(oldFilePath);
+        const layer = element.summary.layer;
+
+        // Step 1: Check for open editors with unsaved changes
+        const shouldProceed = await handleUnsavedChanges(oldFileUri, oldDomainName, 'renaming');
+        if (!shouldProceed) {
+          return;
+        }
+
+        // Step 2: Get new domain name with validation
+        const existingDomains = domainService.listDomains(workspaceRoot);
+        const newDomainSlug = await vscode.window.showInputBox({
+          prompt: 'Enter new domain name',
+          value: oldDomainName,
+          ignoreFocusOut: true,
+          validateInput: (value: string) =>
+            validateDomainSlug(value, layer, existingDomains, oldDomainName),
+        });
+
+        if (!newDomainSlug) {
+          return; // User cancelled
+        }
+        const newSlug = newDomainSlug.trim();
+
+        // Defensive check for unchanged name
+        if (newSlug === oldDomainName) {
+          return;
+        }
+
+        // Step 3: Read current domain JSON
+        let domainData: SemanticDomain;
+        try {
+          domainData = domainService.getDomain(oldFilePath);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(
+            `Failed to read domain file: ${msg}`,
+          );
+          return;
+        }
+
+        // Update domain field
+        domainData.domain = newSlug;
+
+        // Step 4: Create new file path
+        const layerDir = path.dirname(oldFilePath);
+        const newFilePath = path.join(layerDir, `${newSlug}.json`);
+        const newFileUri = vscode.Uri.file(newFilePath);
+
+        // Step 5: Perform atomic rename with WorkspaceEdit
+        const edit = new vscode.WorkspaceEdit();
+
+        // Create new file with updated content
+        edit.createFile(newFileUri, {
+          overwrite: false,
+          ignoreIfExists: false,
+        });
+        edit.insert(
+          newFileUri,
+          new vscode.Position(0, 0),
+          JSON.stringify(domainData, null, 2) + '\n',
+        );
+
+        // Delete old file
+        edit.deleteFile(oldFileUri, {
+          ignoreIfNotExists: false,
+        });
+
+        // Apply edit
+        const success = await vscode.workspace.applyEdit(edit);
+        if (!success) {
+          void vscode.window.showErrorMessage(
+            `Failed to rename domain "${oldDomainName}" to "${newSlug}"`,
+          );
+          return;
+        }
+
+        // Step 6: Close old editor tabs
+        const matchingTabs = findMatchingTabs(oldFileUri);
+        if (matchingTabs.length > 0) {
+          await vscode.window.tabGroups.close(matchingTabs, /* preserveFocus */ true);
+        }
+
+        // Step 7: Auto-open renamed domain in custom editor
+        // (Tree view refresh handled by file watcher)
+        await vscode.commands.executeCommand(
+          'vscode.openWith',
+          newFileUri,
+          'dbtSemantic.domainEditor',
+        );
       },
     ),
     vscode.commands.registerCommand('dbtSemantic.refreshManifest', async () => {

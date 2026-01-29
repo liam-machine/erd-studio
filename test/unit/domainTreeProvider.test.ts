@@ -120,7 +120,7 @@ describe('DomainTreeProvider', () => {
       const item = provider.getTreeItem(element);
 
       expect(item.label).toBe('work-lots');
-      expect(item.description).toBe('12 models, 3 design');
+      expect(item.description).toBe('12 models, 3 designs');
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
       expect(item.contextValue).toBe('domain');
     });
