@@ -1,15 +1,15 @@
 /**
- * NewModelDialog — dialog for creating new design models with JHG templates.
+ * NewModelDialog — dialog for creating new design models with configurable templates.
  *
  * Form fields:
  * - Model name (text input, validated for template prefix)
  * - Schema (text input, pre-filled from domain layer)
  * - Description (textarea)
- * - Template picker (Dimension, Fact, Bridge, SCD Type 2, Blank)
- * - Left/Right entity (text inputs, shown only for bridge template)
+ * - Template picker (loaded from semantic/templates/*.json files)
+ * - Left/Right entity (text inputs, shown only for bridge-type templates)
  *
- * Templates pre-populate columns with JHG conventions. Placeholder syntax:
- * {name} = model name minus prefix, {left}/{right} = bridge entity names.
+ * Templates are loaded from the extension host and pre-populate columns.
+ * Placeholder syntax: {name} = model name minus prefix, {left}/{right} = bridge entity names.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -17,91 +17,8 @@ import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
-import type { ColumnDef, DesignModel } from '../../../src/types/semantic';
+import type { ColumnDef, DesignModel, ModelTemplate } from '../../../src/types/semantic';
 import './NewModelDialog.css';
-
-// ---------------------------------------------------------------------------
-// Template types and definitions
-// ---------------------------------------------------------------------------
-
-type TemplateId = 'dimension' | 'fact' | 'bridge' | 'scd2' | 'blank';
-
-interface Template {
-  id: TemplateId;
-  label: string;
-  prefix: string;
-  columns: ColumnDef[];
-}
-
-/**
- * JHG model templates with standard columns and data types.
- * Data types follow dbt-style naming (VARCHAR, INTEGER, TIMESTAMP_NTZ, etc.).
- */
-const TEMPLATES: Template[] = [
-  {
-    id: 'dimension',
-    label: 'Dimension',
-    prefix: 'dim_',
-    columns: [
-      { name: '{name}_id', dataType: 'INTEGER', description: 'Surrogate key', isPrimaryKey: true },
-      { name: 'name', dataType: 'VARCHAR', description: 'Display name' },
-      { name: 'description', dataType: 'VARCHAR', description: 'Long description' },
-      { name: 'is_active', dataType: 'BOOLEAN', description: 'Active flag' },
-      { name: 'valid_from', dataType: 'TIMESTAMP_NTZ', description: 'Effective start' },
-      { name: 'valid_to', dataType: 'TIMESTAMP_NTZ', description: 'Effective end' },
-      { name: 'dwh_inserted_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse insert timestamp' },
-      { name: 'dwh_updated_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse update timestamp' },
-    ],
-  },
-  {
-    id: 'fact',
-    label: 'Fact',
-    prefix: 'fct_',
-    columns: [
-      { name: '{name}_id', dataType: 'INTEGER', description: 'Surrogate key', isPrimaryKey: true },
-      { name: 'event_date', dataType: 'DATE', description: 'Business event date' },
-      { name: 'amount', dataType: 'DECIMAL(18,2)', description: 'Monetary amount' },
-      { name: 'dwh_inserted_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse insert timestamp' },
-      { name: 'dwh_updated_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse update timestamp' },
-    ],
-  },
-  {
-    id: 'bridge',
-    label: 'Bridge',
-    prefix: 'brg_',
-    columns: [
-      { name: '{name}_id', dataType: 'INTEGER', description: 'Surrogate key', isPrimaryKey: true },
-      { name: '{left}_id', dataType: 'INTEGER', description: 'FK to {left}' },
-      { name: '{right}_id', dataType: 'INTEGER', description: 'FK to {right}' },
-      { name: 'dwh_inserted_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse insert timestamp' },
-    ],
-  },
-  {
-    id: 'scd2',
-    label: 'SCD Type 2',
-    prefix: 'dim_',
-    columns: [
-      { name: '{name}_id', dataType: 'INTEGER', description: 'Surrogate key', isPrimaryKey: true },
-      { name: 'name', dataType: 'VARCHAR', description: 'Display name' },
-      { name: 'description', dataType: 'VARCHAR', description: 'Long description' },
-      { name: 'is_active', dataType: 'BOOLEAN', description: 'Active flag' },
-      { name: 'valid_from', dataType: 'TIMESTAMP_NTZ', description: 'Effective start' },
-      { name: 'valid_to', dataType: 'TIMESTAMP_NTZ', description: 'Effective end' },
-      { name: 'scd_valid_from', dataType: 'TIMESTAMP_NTZ', description: 'SCD effective start' },
-      { name: 'scd_valid_to', dataType: 'TIMESTAMP_NTZ', description: 'SCD effective end' },
-      { name: 'scd_is_current', dataType: 'BOOLEAN', description: 'Current version flag' },
-      { name: 'scd_hash', dataType: 'VARCHAR', description: 'Hash of tracked columns' },
-      { name: 'dwh_inserted_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse insert timestamp' },
-      { name: 'dwh_updated_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse update timestamp' },
-    ],
-  },
-  {
-    id: 'blank',
-    label: 'Blank',
-    prefix: '',
-    columns: [],
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -146,7 +63,7 @@ function resolvePlaceholders(
 function validateForm(
   modelName: string,
   schema: string,
-  template: Template,
+  template: ModelTemplate,
   leftEntity: string,
   rightEntity: string,
   existingModelNames: string[],
@@ -173,8 +90,8 @@ function validateForm(
     errors.schema = 'Use lowercase letters, numbers, and underscores only';
   }
 
-  // Bridge entity validation
-  if (template.id === 'bridge') {
+  // Bridge entity validation (check for requiresLeftEntity/requiresRightEntity flags)
+  if (template.requiresLeftEntity || template.requiresRightEntity) {
     if (!leftEntity.trim()) {
       errors.leftEntity = 'Left entity is required';
     } else if (!/^[a-z0-9_]+$/.test(leftEntity)) {
@@ -198,24 +115,26 @@ export function NewModelDialog() {
   const isOpen = useEditorStore((s) => s.newModelDialogOpen);
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
   const domain = useEditorStore((s) => s.domain);
+  const templates = useEditorStore((s) => s.templates);
   const { send } = useMessageBus(() => {});
 
   // Form state
   const [modelName, setModelName] = useState('');
   const [schema, setSchema] = useState('');
   const [description, setDescription] = useState('');
-  const [templateId, setTemplateId] = useState<TemplateId>('dimension');
+  const [templateId, setTemplateId] = useState<string>('dimension');
   const [leftEntity, setLeftEntity] = useState('');
   const [rightEntity, setRightEntity] = useState('');
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
-  // Derived state
+  // Derived state — find the selected template from the store
   const template = useMemo(
-    () => TEMPLATES.find((t) => t.id === templateId) ?? TEMPLATES[0],
-    [templateId],
+    () => templates.find((t) => t.id === templateId) ?? templates[0],
+    [templateId, templates],
   );
 
-  const isBridgeTemplate = template.id === 'bridge';
+  // Check if this template requires left/right entity inputs (bridge tables)
+  const requiresEntityInputs = template?.requiresLeftEntity || template?.requiresRightEntity;
 
   const existingModelNames = useMemo(
     () => (domain?.models ?? []).map((m) => m.name),
@@ -245,11 +164,12 @@ export function NewModelDialog() {
     setModelName('');
     setSchema('');
     setDescription('');
-    setTemplateId('dimension');
+    // Reset to first available template, fallback to 'dimension' if none loaded yet
+    setTemplateId(templates[0]?.id ?? 'dimension');
     setLeftEntity('');
     setRightEntity('');
     setTouched({});
-  }, []);
+  }, [templates]);
 
   const handleClose = useCallback(() => {
     setNewModelDialogOpen(false);
@@ -286,14 +206,15 @@ export function NewModelDialog() {
   }, []);
 
   // Initialize schema from domain layer when dialog opens
-  const handleTemplateChange = useCallback((newTemplateId: TemplateId) => {
+  const handleTemplateChange = useCallback((newTemplateId: string) => {
     setTemplateId(newTemplateId);
-    // Reset bridge fields when switching away from bridge template
-    if (newTemplateId !== 'bridge') {
+    // Reset bridge fields when switching to a template that doesn't need them
+    const newTemplate = templates.find((t) => t.id === newTemplateId);
+    if (newTemplate && !newTemplate.requiresLeftEntity && !newTemplate.requiresRightEntity) {
       setLeftEntity('');
       setRightEntity('');
     }
-  }, []);
+  }, [templates]);
 
   // Set default schema when dialog opens
   useEffect(() => {
@@ -304,6 +225,28 @@ export function NewModelDialog() {
 
   if (!isOpen) {
     return null;
+  }
+
+  // Guard: If no templates loaded yet, show loading state
+  if (templates.length === 0 || !template) {
+    return (
+      <Panel position="top-center" className="new-model-dialog">
+        <div className="new-model-dialog__header">
+          <h3 className="new-model-dialog__title">New Model</h3>
+          <button
+            className="new-model-dialog__close"
+            onClick={handleClose}
+            title="Close dialog"
+            aria-label="Close dialog"
+          >
+            ×
+          </button>
+        </div>
+        <div className="new-model-dialog__content">
+          <p>Loading templates...</p>
+        </div>
+      </Panel>
+    );
   }
 
   return (
@@ -332,9 +275,9 @@ export function NewModelDialog() {
             id="template"
             className="new-model-dialog__select"
             value={templateId}
-            onChange={(e) => handleTemplateChange(e.target.value as TemplateId)}
+            onChange={(e) => handleTemplateChange(e.target.value)}
           >
-            {TEMPLATES.map((t) => (
+            {templates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label} {t.prefix && `(${t.prefix}*)`}
               </option>
@@ -395,8 +338,8 @@ export function NewModelDialog() {
           />
         </div>
 
-        {/* Bridge Entity Fields */}
-        {isBridgeTemplate && (
+        {/* Bridge Entity Fields (for templates that require left/right entities) */}
+        {requiresEntityInputs && (
           <div className="new-model-dialog__bridge-fields">
             <div className="new-model-dialog__field">
               <label className="new-model-dialog__label" htmlFor="leftEntity">

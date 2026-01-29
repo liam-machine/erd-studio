@@ -3,9 +3,13 @@ import * as path from 'path';
 import { CancellationTokenSource, createMockWebviewPanel, createMockTextDocument } from 'vscode';
 
 import { DomainService } from '../../src/services/domainService';
+import { ManifestService } from '../../src/services/manifestService';
+import { ReconciliationService } from '../../src/services/reconciliationService';
+import { TemplateService } from '../../src/services/templateService';
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
+const FIXTURES_PROJECT_DIR = path.resolve(FIXTURES_DIR, 'dbt-project');
 const FIXTURE_DOMAIN_PATH = path.resolve(
   FIXTURES_DIR,
   'dbt-project/models/semantic/silver/work-lots.json',
@@ -21,13 +25,26 @@ function createMockContext(): any {
 
 describe('SemanticEditorProvider', () => {
   let domainService: DomainService;
+  let manifestService: ManifestService;
+  let reconciliationService: ReconciliationService;
+  let templateService: TemplateService;
   let provider: SemanticEditorProvider;
   let context: any;
 
   beforeEach(() => {
     context = createMockContext();
     domainService = new DomainService();
-    provider = new SemanticEditorProvider(context, domainService);
+    manifestService = new ManifestService();
+    reconciliationService = new ReconciliationService();
+    templateService = new TemplateService();
+    provider = new SemanticEditorProvider(
+      context,
+      domainService,
+      manifestService,
+      reconciliationService,
+      templateService,
+      FIXTURES_PROJECT_DIR,
+    );
   });
 
   describe('resolveCustomTextEditor', () => {
@@ -66,6 +83,9 @@ describe('SemanticEditorProvider', () => {
       // Simulate webview sending "ready"
       panel._simulateMessage({ type: 'ready' });
 
+      // Wait for async sendDomainData to complete
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
       const loadedMessage = panel._postedMessages.find(
         (m: any) => m.type === 'domainLoaded',
       ) as any;
@@ -73,7 +93,9 @@ describe('SemanticEditorProvider', () => {
       expect(loadedMessage).toBeDefined();
       expect(loadedMessage.payload.domain).toBe('work-lots');
       expect(loadedMessage.payload.layer).toBe('silver');
-      expect(loadedMessage.payload.models).toHaveLength(2);
+      // Templates should be included in the payload
+      expect(loadedMessage.payload.templates).toBeDefined();
+      expect(loadedMessage.payload.templates.length).toBeGreaterThan(0);
     });
 
     it('sends error when domain file is invalid', async () => {
@@ -102,10 +124,14 @@ describe('SemanticEditorProvider', () => {
 
       // First ready → first domainLoaded
       panel._simulateMessage({ type: 'ready' });
+      // Wait for async sendDomainData to complete
+      await new Promise((resolve) => setTimeout(resolve, 50));
       expect(panel._postedMessages).toHaveLength(1);
 
       // Second ready (simulating webview re-mount after tab switch)
       panel._simulateMessage({ type: 'ready' });
+      // Wait for async sendDomainData to complete
+      await new Promise((resolve) => setTimeout(resolve, 50));
       expect(panel._postedMessages).toHaveLength(2);
 
       const messages = panel._postedMessages.filter(

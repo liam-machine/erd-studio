@@ -58,6 +58,7 @@ function EditorCanvas() {
   const setEdges = useEditorStore((s) => s.setEdges);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
+  const setTemplates = useEditorStore((s) => s.setTemplates);
 
   // State persistence (zoom, pan, selection, mode, detail panel)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
@@ -83,13 +84,17 @@ function EditorCanvas() {
       switch (msg.type) {
         case 'domainLoaded':
           setDomain(msg.payload);
+          // Extract and store templates from the payload
+          if (msg.payload.templates) {
+            setTemplates(msg.payload.templates);
+          }
           break;
         case 'error':
           setError(msg.payload.message);
           break;
       }
     },
-    [setDomain, setError],
+    [setDomain, setError, setTemplates],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);

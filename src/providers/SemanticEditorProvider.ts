@@ -20,6 +20,7 @@ import * as vscode from 'vscode';
 import { DomainService } from '../services/domainService';
 import { ManifestService } from '../services/manifestService';
 import { ReconciliationService } from '../services/reconciliationService';
+import { TemplateService } from '../services/templateService';
 import type { DesignModel } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +39,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly domainService: DomainService,
     private readonly manifestService: ManifestService,
     private readonly reconciliationService: ReconciliationService,
+    private readonly templateService: TemplateService,
     private readonly workspaceRoot: string,
   ) {}
 
@@ -127,7 +129,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const domain = this.domainService.getDomain(document.uri.fsPath);
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const reconciled = this.reconciliationService.reconcile(domain, manifest);
-      webview.postMessage({ type: 'domainLoaded', payload: reconciled });
+
+      // Load templates from the semantic/templates directory
+      const templates = this.templateService.loadTemplates(this.workspaceRoot);
+
+      webview.postMessage({
+        type: 'domainLoaded',
+        payload: { ...reconciled, templates },
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);

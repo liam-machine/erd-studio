@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
 import type { ReconciledDomain } from '../../src/types/reconciled';
 import type { ModelFlowNode, FkFlowEdge } from '../types/graph';
+import type { ModelTemplate } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +34,8 @@ export interface EditorState {
   nodes: ModelFlowNode[];
   /** React Flow edges. */
   edges: FkFlowEdge[];
+  /** Available model templates loaded from semantic/templates/*.json. */
+  templates: ModelTemplate[];
 }
 
 export interface EditorActions {
@@ -44,6 +47,7 @@ export interface EditorActions {
   setError: (error: string | null) => void;
   setNodes: (nodes: ModelFlowNode[]) => void;
   setEdges: (edges: FkFlowEdge[]) => void;
+  setTemplates: (templates: ModelTemplate[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +64,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   error: null,
   nodes: [],
   edges: [],
+  templates: [],
 
   // Actions
   selectNode: (nodeName) => set({ selectedNode: nodeName }),
@@ -70,4 +75,5 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setError: (error) => set({ error }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
+  setTemplates: (templates) => set({ templates }),
 }));

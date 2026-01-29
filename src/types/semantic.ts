@@ -147,3 +147,36 @@ export interface DomainSummary {
   /** Absolute path to the domain JSON file. */
   filePath: string;
 }
+
+// ---------------------------------------------------------------------------
+// Model templates (configurable via JSON files)
+// ---------------------------------------------------------------------------
+
+/**
+ * A model template definition loaded from semantic/templates/*.json files.
+ *
+ * Templates define preset columns and metadata for common model patterns
+ * (dimension, fact, bridge, etc.). Users can add custom templates by
+ * creating new JSON files in the templates directory.
+ *
+ * Placeholder syntax in column names/descriptions:
+ * - {name} = model name minus prefix (e.g., "customer" from "dim_customer")
+ * - {left} = left entity name (bridge templates only)
+ * - {right} = right entity name (bridge templates only)
+ */
+export interface ModelTemplate {
+  /** Unique template identifier (e.g., "dimension", "fact", "bridge"). */
+  id: string;
+  /** Display label in the UI (e.g., "Dimension", "Fact Table"). */
+  label: string;
+  /** Model name prefix (e.g., "dim_", "fct_"). Empty string for no prefix. */
+  prefix: string;
+  /** Description of what this template is used for. */
+  description: string;
+  /** Whether this template requires a left entity name (bridge tables). */
+  requiresLeftEntity?: boolean;
+  /** Whether this template requires a right entity name (bridge tables). */
+  requiresRightEntity?: boolean;
+  /** Preset columns with placeholder syntax in name/description fields. */
+  columns: ColumnDef[];
+}

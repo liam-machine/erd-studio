@@ -1,0 +1,16 @@
+{
+  "id": "dimension",
+  "label": "Dimension",
+  "prefix": "dim_",
+  "description": "Standard dimension table with SCD Type 1 tracking",
+  "columns": [
+    { "name": "{name}_id", "dataType": "INTEGER", "description": "Surrogate key", "isPrimaryKey": true },
+    { "name": "name", "dataType": "VARCHAR", "description": "Display name" },
+    { "name": "description", "dataType": "VARCHAR", "description": "Long description" },
+    { "name": "is_active", "dataType": "BOOLEAN", "description": "Active flag" },
+    { "name": "valid_from", "dataType": "TIMESTAMP_NTZ", "description": "Effective start" },
+    { "name": "valid_to", "dataType": "TIMESTAMP_NTZ", "description": "Effective end" },
+    { "name": "dwh_inserted_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse insert timestamp" },
+    { "name": "dwh_updated_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse update timestamp" }
+  ]
+}

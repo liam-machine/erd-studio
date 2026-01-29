@@ -10,7 +10,7 @@
  * The webview receives ReconciledDomain instead of raw SemanticDomain.
  */
 
-import type { Cardinality, Layer, ViewConfig } from './semantic';
+import type { Cardinality, Layer, ModelTemplate, ViewConfig } from './semantic';
 
 // ---------------------------------------------------------------------------
 // Column status
@@ -105,4 +105,9 @@ export interface ReconciledDomain {
   models: ReconciledModel[];
   relationships: ReconciledRelationship[];
   viewConfig: ViewConfig;
+  /**
+   * Available model templates loaded from semantic/templates/*.json.
+   * Used by the New Model dialog to create models with preset columns.
+   */
+  templates: ModelTemplate[];
 }
