@@ -55,6 +55,14 @@ export type ModelNodeData = {
   columns: ColumnDisplay[];
   /** Whether the node is dimmed (doesn't match current search query). */
   dimmed?: boolean;
+  /**
+   * Whether columns are expanded (F405).
+   * When false, only first N columns are shown with node-level handles only.
+   * Ephemeral state — not persisted, resets on domain refresh.
+   */
+  isExpanded?: boolean;
+  /** Callback to toggle expansion state (F405). Receives model name as argument. */
+  onToggleExpansion?: (modelName: string) => void;
   /** Index signature required by React Flow's Node generic. */
   [key: string]: unknown;
 };

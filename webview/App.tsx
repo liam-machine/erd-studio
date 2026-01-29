@@ -28,6 +28,7 @@ import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
+import { useColumnExpansion } from './hooks/useColumnExpansion';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
@@ -90,6 +91,9 @@ function EditorCanvas() {
 
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
+
+  // F405: Column expansion state (ephemeral, resets on domain change)
+  const { isExpanded, toggleExpansion } = useColumnExpansion();
 
   // State persistence (zoom, pan, selection, mode, detail panel)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
@@ -295,22 +299,26 @@ function EditorCanvas() {
   // Initialize nodes and edges when domain changes.
   // Preserve visual selection if the selected node still exists.
   // Clear stale edge selections that no longer exist.
-  // Apply search dimming (F402).
+  // Apply search dimming (F402) and column expansion (F405).
   useEffect(() => {
     if (domain) {
       let { nodes: newNodes, edges: newEdges } = transformDomain(domain);
 
-      // Apply search dimming (F402)
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        newNodes = newNodes.map((node) => ({
-          ...node,
-          data: {
-            ...node.data,
-            dimmed: !node.data.modelName.toLowerCase().includes(query),
-          },
-        }));
-      }
+      // F405: Inject column expansion state into node data
+      // Also apply search dimming (F402)
+      const query = searchQuery.trim() ? searchQuery.toLowerCase() : '';
+      newNodes = newNodes.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          // F402: Search dimming
+          dimmed: query ? !node.data.modelName.toLowerCase().includes(query) : false,
+          // F405: Column expansion (ephemeral state)
+          // Pass stable toggleExpansion reference — ModelNode calls it with its own modelName
+          isExpanded: isExpanded(node.id),
+          onToggleExpansion: toggleExpansion,
+        },
+      }));
 
       // If we have a selected node, preserve the selection in the new nodes
       if (currentSelectedNode) {
@@ -332,7 +340,7 @@ function EditorCanvas() {
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges, setSelectedEdges, selectedEdges, currentSelectedNode, searchQuery]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, selectedEdges, currentSelectedNode, searchQuery, isExpanded, toggleExpansion]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);

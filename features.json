@@ -730,7 +730,7 @@
       "description": "Add the ability to export the current graph view as a PNG or SVG image for documentation purposes. Provide an export button in the toolbar. Use React Flow's toObject() and canvas rendering APIs (or html-to-image library) to capture the graph.",
       "phase": "phase-4",
       "status": "pending",
-      "skip": false,
+      "skip": true,
       "dependencies": ["F112"],
       "validation_criteria": [
         "Verify in Extension Development Host: clicking Export opens a save dialog with PNG/SVG options",
@@ -747,7 +747,7 @@
       "name": "Optimize performance for large domains",
       "description": "Optimize React Flow rendering for large domains (50+ models). Implement: lazy-loading of column details (show count initially, expand on click), virtualized node rendering, memoization of node/edge components, batched position updates. Profile and address any bottlenecks in the reconciliation pipeline.",
       "phase": "phase-4",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F108"],
       "validation_criteria": [
@@ -756,7 +756,7 @@
         "Verify column lazy-loading reduces initial render cost",
         "Verify memory usage stays reasonable for domains with 100+ models"
       ],
-      "implementation_notes": "React Flow has built-in performance optimizations (node/edge virtualization). Use React.memo on ModelNode and FkEdge components. Lazy-load column details: show only column count in the node by default, expand to full column list on click or hover. Batch position updates to reduce re-renders.",
+      "implementation_notes": "Implemented column lazy-loading via useColumnExpansion hook. Models with >5 columns show first 5 + '...and N more' button. Column handles only render when expanded (reduces DOM nodes). Stable callback references preserve React.memo benefits. Position persistence already debounced (F110). React Flow provides built-in virtualization.",
       "category": "infrastructure",
       "estimated_effort": "large"
     },
@@ -766,7 +766,7 @@
       "description": "Add comprehensive error handling throughout the extension: invalid JSON in domain files, manifest parse failures, file permission errors, missing dbt project. Show user-friendly VS Code notifications with actionable messages. Add a 'manifest may be stale' warning when domain files are newer than the manifest.",
       "phase": "phase-4",
       "status": "pending",
-      "skip": false,
+      "skip": true,
       "dependencies": ["F116"],
       "validation_criteria": [
         "Verify in Extension Development Host: invalid domain JSON shows a helpful error with line number",

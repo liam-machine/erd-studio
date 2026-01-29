@@ -14,9 +14,10 @@
  *      future column-specific routing (F109 ELK, F205 drag-to-connect).
  */
 
-import { memo, type CSSProperties } from 'react';
+import { memo, useMemo, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelFlowNode } from '../../types/graph';
+import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import './ModelNode.css';
 
 // ---------------------------------------------------------------------------
@@ -65,7 +66,23 @@ const NODE_HANDLE_STYLE: CSSProperties = {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, layer, columns, dimmed } = data;
+  const { modelName, status, layer, columns, dimmed, isExpanded = false, onToggleExpansion } = data;
+
+  // F405: Compute visible columns based on expansion state
+  const { displayColumns, hiddenCount, isCollapsed } = useMemo(() => {
+    const shouldCollapse = columns.length > COLLAPSED_COLUMN_LIMIT && !isExpanded;
+    return {
+      displayColumns: shouldCollapse ? columns.slice(0, COLLAPSED_COLUMN_LIMIT) : columns,
+      hiddenCount: shouldCollapse ? columns.length - COLLAPSED_COLUMN_LIMIT : 0,
+      isCollapsed: shouldCollapse,
+    };
+  }, [columns, isExpanded]);
+
+  // Handler for expand/collapse button
+  const handleToggleClick = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent node selection
+    onToggleExpansion?.(modelName);
+  };
 
   return (
     <div className={`model-node model-node--${status}${dimmed ? ' model-node--dimmed' : ''}`}>
@@ -90,21 +107,24 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
       {/* Columns — ordered: built first, then planned/missing with separator */}
       <div className="model-node__columns">
         {(() => {
-          const builtCols = columns.filter((c) => c.status === 'built');
-          const plannedCols = columns.filter((c) => c.status !== 'built');
+          const builtCols = displayColumns.filter((c) => c.status === 'built');
+          const plannedCols = displayColumns.filter((c) => c.status !== 'built');
           const showSeparator = builtCols.length > 0 && plannedCols.length > 0;
 
           return (
             <>
               {builtCols.map((col) => (
                 <div key={col.name} className="model-node__column model-node__column--built">
-                  <Handle
-                    type="target"
-                    position={Position.Left}
-                    id={handleId(col.name, 'left')}
-                    className="model-node__handle"
-                    style={HANDLE_STYLE}
-                  />
+                  {/* F405: Only show column handles when expanded */}
+                  {!isCollapsed && (
+                    <Handle
+                      type="target"
+                      position={Position.Left}
+                      id={handleId(col.name, 'left')}
+                      className="model-node__handle"
+                      style={HANDLE_STYLE}
+                    />
+                  )}
 
                   <span className="model-node__col-indicators">
                     {col.isPrimaryKey && (
@@ -123,13 +143,15 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
                   </span>
                   <span className="model-node__col-type">{col.dataType}</span>
 
-                  <Handle
-                    type="source"
-                    position={Position.Right}
-                    id={handleId(col.name, 'right')}
-                    className="model-node__handle"
-                    style={HANDLE_STYLE}
-                  />
+                  {!isCollapsed && (
+                    <Handle
+                      type="source"
+                      position={Position.Right}
+                      id={handleId(col.name, 'right')}
+                      className="model-node__handle"
+                      style={HANDLE_STYLE}
+                    />
+                  )}
                 </div>
               ))}
 
@@ -144,13 +166,15 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
                   key={col.name}
                   className={`model-node__column model-node__column--${col.status}`}
                 >
-                  <Handle
-                    type="target"
-                    position={Position.Left}
-                    id={handleId(col.name, 'left')}
-                    className="model-node__handle"
-                    style={HANDLE_STYLE}
-                  />
+                  {!isCollapsed && (
+                    <Handle
+                      type="target"
+                      position={Position.Left}
+                      id={handleId(col.name, 'left')}
+                      className="model-node__handle"
+                      style={HANDLE_STYLE}
+                    />
+                  )}
 
                   <span className="model-node__col-indicators">
                     {col.isPrimaryKey && (
@@ -169,15 +193,39 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
                   </span>
                   <span className="model-node__col-type">{col.dataType}</span>
 
-                  <Handle
-                    type="source"
-                    position={Position.Right}
-                    id={handleId(col.name, 'right')}
-                    className="model-node__handle"
-                    style={HANDLE_STYLE}
-                  />
+                  {!isCollapsed && (
+                    <Handle
+                      type="source"
+                      position={Position.Right}
+                      id={handleId(col.name, 'right')}
+                      className="model-node__handle"
+                      style={HANDLE_STYLE}
+                    />
+                  )}
                 </div>
               ))}
+
+              {/* F405: Expansion button when columns are collapsed */}
+              {hiddenCount > 0 && (
+                <button
+                  className="model-node__expand-button"
+                  onClick={handleToggleClick}
+                  title={`Show ${hiddenCount} more column${hiddenCount !== 1 ? 's' : ''}`}
+                >
+                  ...and {hiddenCount} more
+                </button>
+              )}
+
+              {/* F405: Collapse button when expanded */}
+              {isExpanded && columns.length > COLLAPSED_COLUMN_LIMIT && (
+                <button
+                  className="model-node__expand-button"
+                  onClick={handleToggleClick}
+                  title="Show fewer columns"
+                >
+                  Show less
+                </button>
+              )}
             </>
           );
         })()}
