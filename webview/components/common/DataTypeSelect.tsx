@@ -1,10 +1,11 @@
 /**
- * DataTypeSelect — dropdown for selecting SQL data types.
+ * DataTypeSelect — custom dropdown for selecting SQL data types.
  *
+ * Opens immediately on click (no second click required).
  * Common data types for dbt models. Used in column editing contexts.
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import './DataTypeSelect.css';
 
@@ -52,38 +53,137 @@ export function DataTypeSelect({
   className = '',
   autoOpen = false,
 }: DataTypeSelectProps) {
-  const selectRef = useRef<HTMLSelectElement>(null);
+  const [isOpen, setIsOpen] = useState(autoOpen);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
-  // Auto-open dropdown on mount by showing the native picker
+  // Close dropdown when clicking outside
   useEffect(() => {
-    if (autoOpen && selectRef.current) {
-      // Focus the select to highlight it
-      selectRef.current.focus();
-      // Use showPicker() to open the native dropdown (modern browsers)
-      if ('showPicker' in selectRef.current) {
-        try {
-          (selectRef.current as HTMLSelectElement & { showPicker: () => void }).showPicker();
-        } catch {
-          // showPicker may fail if not triggered by user gesture in some browsers
-        }
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+        onBlur?.();
       }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [autoOpen]);
+  }, [isOpen, onBlur]);
+
+  // Calculate dropdown position when opening
+  useEffect(() => {
+    if (isOpen && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 2,
+        left: rect.left,
+      });
+    }
+  }, [isOpen]);
+
+  // Focus the list when it opens for keyboard navigation
+  useEffect(() => {
+    if (isOpen && listRef.current) {
+      listRef.current.focus();
+    }
+  }, [isOpen]);
+
+  // Handle option selection
+  const handleSelect = useCallback(
+    (newValue: string) => {
+      onChange(newValue);
+      setIsOpen(false);
+    },
+    [onChange],
+  );
+
+  // Handle keyboard navigation
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsOpen(false);
+        onBlur?.();
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        const focused = document.activeElement;
+        if (focused?.getAttribute('data-value')) {
+          handleSelect(focused.getAttribute('data-value')!);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const items = listRef.current?.querySelectorAll('li');
+        const currentIdx = Array.from(items || []).findIndex(
+          (item) => item === document.activeElement,
+        );
+        const nextIdx = currentIdx < (items?.length || 0) - 1 ? currentIdx + 1 : 0;
+        (items?.[nextIdx] as HTMLElement)?.focus();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const items = listRef.current?.querySelectorAll('li');
+        const currentIdx = Array.from(items || []).findIndex(
+          (item) => item === document.activeElement,
+        );
+        const prevIdx = currentIdx > 0 ? currentIdx - 1 : (items?.length || 1) - 1;
+        (items?.[prevIdx] as HTMLElement)?.focus();
+      }
+    },
+    [handleSelect, onBlur],
+  );
+
+  // Toggle dropdown
+  const handleToggle = useCallback(() => {
+    if (!disabled) {
+      setIsOpen((prev) => !prev);
+    }
+  }, [disabled]);
 
   return (
-    <select
-      ref={selectRef}
-      className={`data-type-select ${className}`}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={onBlur}
-      disabled={disabled}
+    <div
+      ref={containerRef}
+      className={`data-type-select ${isOpen ? 'data-type-select--open' : ''} ${disabled ? 'data-type-select--disabled' : ''} ${className}`}
     >
-      {DATA_TYPES.map((dt) => (
-        <option key={dt} value={dt}>
-          {dt}
-        </option>
-      ))}
-    </select>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="data-type-select__trigger"
+        onClick={handleToggle}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span className="data-type-select__value">{value}</span>
+        <span className="data-type-select__arrow">▾</span>
+      </button>
+
+      {isOpen && (
+        <ul
+          ref={listRef}
+          className="data-type-select__dropdown"
+          style={{ top: dropdownPosition.top, left: dropdownPosition.left }}
+          role="listbox"
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
+        >
+          {DATA_TYPES.map((dt) => (
+            <li
+              key={dt}
+              className={`data-type-select__option ${dt === value ? 'data-type-select__option--selected' : ''}`}
+              role="option"
+              aria-selected={dt === value}
+              data-value={dt}
+              tabIndex={0}
+              onClick={() => handleSelect(dt)}
+            >
+              {dt}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
