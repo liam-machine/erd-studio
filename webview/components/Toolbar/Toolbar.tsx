@@ -10,7 +10,7 @@
  * Uses React Flow's zoom/pan APIs and the editor store for domain data.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Panel, useReactFlow, useStore } from '@xyflow/react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
@@ -45,12 +45,17 @@ interface ToolbarProps {
 
 export function Toolbar({ nodes, edges }: ToolbarProps) {
   const vscode = useVsCodeApi();
-  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  const { zoomIn, zoomOut, fitView, getNode } = useReactFlow();
   const domain = useEditorStore((s) => s.domain);
   const setDomain = useEditorStore((s) => s.setDomain);
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
   const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
   const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
+  const searchQuery = useEditorStore((s) => s.searchQuery);
+  const setSearchQuery = useEditorStore((s) => s.setSearchQuery);
+  const selectNode = useEditorStore((s) => s.selectNode);
+  const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
+  const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
 
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
@@ -66,6 +71,18 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   // Model dropdown state
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Search input ref (for Ctrl+F focus)
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Compute matching node IDs for search
+  const matchingNodeIds = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase();
+    return nodes
+      .filter((node) => node.data.modelName.toLowerCase().includes(query))
+      .map((node) => node.id);
+  }, [searchQuery, nodes]);
 
   // Update zoom percentage display
   useEffect(() => {
@@ -103,6 +120,39 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [modelDropdownOpen]);
+
+  // --- Search handlers -----------------------------------------------------
+
+  const handleSearchKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter' && matchingNodeIds.length > 0) {
+        e.preventDefault();
+        const firstMatchId = matchingNodeIds[0];
+        const node = getNode(firstMatchId);
+        if (node) {
+          selectNode(firstMatchId);
+          setDetailPanelOpen(true);
+          // Pan to the matched node with animation
+          fitView({ nodes: [{ id: firstMatchId }], duration: 300, padding: 0.3 });
+        }
+      } else if (e.key === 'Escape') {
+        // Clear search on Escape
+        setSearchQuery('');
+        searchInputRef.current?.blur();
+      }
+    },
+    [matchingNodeIds, getNode, selectNode, setDetailPanelOpen, fitView, setSearchQuery],
+  );
+
+  /** Register search focus function for Ctrl+F shortcut (F402) */
+  useEffect(() => {
+    const focusFn = () => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    };
+    registerSearchFocus(focusFn);
+    return () => registerSearchFocus(null);
+  }, [registerSearchFocus]);
 
   // --- New Model handlers --------------------------------------------------
 
@@ -296,6 +346,28 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           {isRefreshing && <span className="toolbar__spinner" />}
           {isRefreshing ? 'Refreshing…' : 'Refresh'}
         </button>
+      </div>
+
+      {/* Divider */}
+      <div className="toolbar__divider" />
+
+      {/* Search (F402) */}
+      <div className="toolbar__section toolbar__search">
+        <input
+          ref={searchInputRef}
+          type="text"
+          className="toolbar__search-input"
+          placeholder="Search models…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={handleSearchKeyDown}
+          aria-label="Search models"
+        />
+        {searchQuery && (
+          <span className="toolbar__search-count">
+            {matchingNodeIds.length}
+          </span>
+        )}
       </div>
 
       {/* Divider */}

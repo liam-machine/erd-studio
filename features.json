@@ -694,7 +694,7 @@
       "name": "Implement graph search",
       "description": "Add search functionality within the graph editor. A search input in the toolbar filters/highlights matching model nodes by name. Non-matching nodes are dimmed. Pressing Enter or clicking a result pans to the matched node and selects it. Useful for navigating large domains.",
       "phase": "phase-4",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F112"],
       "validation_criteria": [

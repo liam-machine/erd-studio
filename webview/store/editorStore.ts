@@ -35,6 +35,8 @@ export interface EdgeContextMenu {
 }
 
 export interface EditorState {
+  /** Current search query for filtering/highlighting nodes. */
+  searchQuery: string;
   /** Name of the currently selected model node, or null. */
   selectedNode: string | null;
   /** IDs of currently selected edges. */
@@ -67,9 +69,12 @@ export interface EditorState {
   manifestModels: ManifestModelPreview[];
   /** Context menu state (position and target), or null if closed. */
   contextMenu: EdgeContextMenu | null;
+  /** Internal: registered search focus function (not persisted). */
+  _searchFocusFn: (() => void) | null;
 }
 
 export interface EditorActions {
+  setSearchQuery: (query: string) => void;
   selectNode: (nodeName: string | null) => void;
   setSelectedEdges: (edgeIds: string[]) => void;
   setViewport: (viewport: Viewport) => void;
@@ -94,6 +99,10 @@ export interface EditorActions {
   openEdgeContextMenu: (x: number, y: number, data: FkEdgeData) => void;
   /** Close the context menu. */
   closeContextMenu: () => void;
+  /** Register a function to focus the search input (called by Toolbar on mount). */
+  registerSearchFocus: (focusFn: (() => void) | null) => void;
+  /** Focus the search input (called by keyboard handler). */
+  focusSearchInput: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +111,7 @@ export interface EditorActions {
 
 export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   // Default state
+  searchQuery: '',
   selectedNode: null,
   selectedEdges: [],
   viewport: { x: 0, y: 0, zoom: 1 },
@@ -118,8 +128,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   templates: [],
   manifestModels: [],
   contextMenu: null,
+  _searchFocusFn: null,
 
   // Actions
+  setSearchQuery: (query) => set({ searchQuery: query }),
   selectNode: (nodeName) => set({ selectedNode: nodeName }),
   setSelectedEdges: (edgeIds) => set({ selectedEdges: edgeIds }),
   setViewport: (viewport) => set({ viewport }),
@@ -139,4 +151,9 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setManifestModels: (models) => set({ manifestModels: models }),
   openEdgeContextMenu: (x, y, data) => set({ contextMenu: { type: 'edge', x, y, data } }),
   closeContextMenu: () => set({ contextMenu: null }),
+  registerSearchFocus: (focusFn) => set({ _searchFocusFn: focusFn }),
+  focusSearchInput: () => {
+    const { _searchFocusFn } = useEditorStore.getState();
+    if (_searchFocusFn) _searchFocusFn();
+  },
 }));

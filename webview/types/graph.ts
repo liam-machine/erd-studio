@@ -53,6 +53,8 @@ export type ModelNodeData = {
   layer: Layer;
   /** Columns to display, enriched with PK/FK flags. */
   columns: ColumnDisplay[];
+  /** Whether the node is dimmed (doesn't match current search query). */
+  dimmed?: boolean;
   /** Index signature required by React Flow's Node generic. */
   [key: string]: unknown;
 };

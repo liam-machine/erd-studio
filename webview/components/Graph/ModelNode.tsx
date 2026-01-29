@@ -65,10 +65,10 @@ const NODE_HANDLE_STYLE: CSSProperties = {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, layer, columns } = data;
+  const { modelName, status, layer, columns, dimmed } = data;
 
   return (
-    <div className={`model-node model-node--${status}`}>
+    <div className={`model-node model-node--${status}${dimmed ? ' model-node--dimmed' : ''}`}>
       {/* Node-level handles — one source + one target per side */}
       <Handle type="source" position={Position.Top} id="node-top-src" style={NODE_HANDLE_STYLE} />
       <Handle type="target" position={Position.Top} id="node-top-tgt" style={NODE_HANDLE_STYLE} />

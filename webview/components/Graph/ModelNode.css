@@ -42,6 +42,17 @@
   opacity: 0.8;
 }
 
+/* Search dimming (F402) — applied when node doesn't match search query */
+.model-node--dimmed {
+  opacity: 0.25;
+  filter: grayscale(0.4);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.model-node--dimmed:hover {
+  opacity: 0.4;
+}
+
 /* -----------------------------------------------------------------------
    Header
    ----------------------------------------------------------------------- */

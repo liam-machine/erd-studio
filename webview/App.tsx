@@ -83,6 +83,9 @@ function EditorCanvas() {
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const contextMenu = useEditorStore((s) => s.contextMenu);
+  // Search state (F402)
+  const searchQuery = useEditorStore((s) => s.searchQuery);
+  const focusSearchInput = useEditorStore((s) => s.focusSearchInput);
 
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
@@ -145,9 +148,17 @@ function EditorCanvas() {
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
 
-  // Unified keyboard shortcut handler (Escape, Delete/Backspace)
+  // Unified keyboard shortcut handler (Escape, Delete/Backspace, Ctrl+F)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+F / Cmd+F: Focus search input (F402)
+      // This should work regardless of focus state
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        focusSearchInput();
+        return;
+      }
+
       // Guard: Don't intercept if user is typing in an input field
       const activeElement = document.activeElement;
       if (
@@ -273,6 +284,7 @@ function EditorCanvas() {
     selectNode,
     setSelectedEdges,
     setToastMessage,
+    focusSearchInput,
     // Note: vscode is omitted as it's a stable ref from useVsCodeApi
   ]);
 
@@ -282,9 +294,22 @@ function EditorCanvas() {
   // Initialize nodes and edges when domain changes.
   // Preserve visual selection if the selected node still exists.
   // Clear stale edge selections that no longer exist.
+  // Apply search dimming (F402).
   useEffect(() => {
     if (domain) {
-      const { nodes: newNodes, edges: newEdges } = transformDomain(domain);
+      let { nodes: newNodes, edges: newEdges } = transformDomain(domain);
+
+      // Apply search dimming (F402)
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        newNodes = newNodes.map((node) => ({
+          ...node,
+          data: {
+            ...node.data,
+            dimmed: !node.data.modelName.toLowerCase().includes(query),
+          },
+        }));
+      }
 
       // If we have a selected node, preserve the selection in the new nodes
       if (currentSelectedNode) {
@@ -306,7 +331,7 @@ function EditorCanvas() {
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges, setSelectedEdges, selectedEdges, currentSelectedNode]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, selectedEdges, currentSelectedNode, searchQuery]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
