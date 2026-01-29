@@ -1,0 +1,113 @@
+/**
+ * NewModelDialog styles.
+ *
+ * Centered dialog for creating new models. Follows DetailPanel pattern but
+ * uses top-center positioning. BEM naming, VS Code theme tokens from
+ * webview/styles/theme.css.
+ */
+
+.new-model-dialog {
+  width: 480px;
+  max-height: calc(100vh - 100px);
+  margin-top: 80px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  z-index: 10; /* Above toolbar and other panels */
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  flex-shrink: 0;
+}
+
+.new-model-dialog__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--editor-fg);
+}
+
+.new-model-dialog__close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.new-model-dialog__close:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Content
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__content {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.new-model-dialog__placeholder {
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground, #888);
+  font-style: italic;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Footer
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--panel-border);
+  flex-shrink: 0;
+}
+
+.new-model-dialog__button {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.new-model-dialog__button:hover {
+  background: var(--button-hover-bg);
+}

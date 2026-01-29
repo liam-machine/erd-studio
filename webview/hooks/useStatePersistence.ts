@@ -1,7 +1,7 @@
 /**
  * useStatePersistence — persists webview UI state to VS Code's webview state API.
  *
- * Subscribes to relevant Zustand store slices (mode, selectedNode, viewport,
+ * Subscribes to relevant Zustand store slices (selectedNode, viewport,
  * detailPanelOpen) and debounces writes to vscode.setState(). On mount, restores
  * state from vscode.getState() if available.
  *
@@ -14,14 +14,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Viewport } from '@xyflow/react';
 
 import { useVsCodeApi } from './useVsCodeApi';
-import { useEditorStore, type EditorMode } from '../store/editorStore';
+import { useEditorStore } from '../store/editorStore';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface PersistedState {
-  mode: EditorMode;
   selectedNode: string | null;
   viewport: Viewport;
   detailPanelOpen: boolean;
@@ -46,14 +45,12 @@ export function useStatePersistence(): {
   const vscode = useVsCodeApi();
 
   // Zustand selectors
-  const mode = useEditorStore((s) => s.mode);
   const selectedNode = useEditorStore((s) => s.selectedNode);
   const viewport = useEditorStore((s) => s.viewport);
   const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
   const domain = useEditorStore((s) => s.domain);
 
   // Zustand actions for restoration
-  const setMode = useEditorStore((s) => s.setMode);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setViewport = useEditorStore((s) => s.setViewport);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
@@ -83,23 +80,20 @@ export function useStatePersistence(): {
   const persistenceEnabledRef = useRef(false);
 
   // Refs to avoid stale closures in timeout callback
-  const modeRef = useRef(mode);
   const selectedNodeRef = useRef(selectedNode);
   const viewportRef = useRef(viewport);
   const detailPanelOpenRef = useRef(detailPanelOpen);
 
   // Keep refs in sync with state (single effect for efficiency)
   useEffect(() => {
-    modeRef.current = mode;
     selectedNodeRef.current = selectedNode;
     viewportRef.current = viewport;
     detailPanelOpenRef.current = detailPanelOpen;
-  }, [mode, selectedNode, viewport, detailPanelOpen]);
+  }, [selectedNode, viewport, detailPanelOpen]);
 
   // Helper to build and write persisted state (avoids duplication)
   const persistState = useCallback(() => {
     const state: PersistedState = {
-      mode: modeRef.current,
       selectedNode: selectedNodeRef.current,
       viewport: viewportRef.current,
       detailPanelOpen: detailPanelOpenRef.current,
@@ -123,11 +117,6 @@ export function useStatePersistence(): {
     const restored = vscode.getState() as PersistedState | null | undefined;
     if (!restored) {
       return;
-    }
-
-    // Restore mode
-    if (restored.mode) {
-      setMode(restored.mode);
     }
 
     // Restore detail panel state
@@ -155,7 +144,7 @@ export function useStatePersistence(): {
         setInvalidSelectedNode(restored.selectedNode);
       }
     }
-  }, [domain, vscode, setMode, setDetailPanelOpen, setViewport, selectNode]);
+  }, [domain, vscode, setDetailPanelOpen, setViewport, selectNode]);
 
   // ---------------------------------------------------------------------------
   // Persist state changes (debounced)
@@ -185,7 +174,7 @@ export function useStatePersistence(): {
         persistState();
       }
     };
-  }, [mode, selectedNode, viewport, detailPanelOpen, persistState]);
+  }, [selectedNode, viewport, detailPanelOpen, persistState]);
 
   return { shouldSkipFitView, invalidSelectedNode, persistedViewport };
 }

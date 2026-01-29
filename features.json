@@ -363,7 +363,7 @@
       "name": "Add Model button in toolbar",
       "description": "Add a permanent '+ Model' button to the toolbar (always visible, no mode toggle needed). Clicking opens the New Model dialog. This replaces the previous browse/design mode toggle approach — the visual distinction between built (green) and planned (orange) items IS the mode indicator. Selection enables editing in the detail panel.",
       "phase": "phase-2",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F112"],
       "validation_criteria": [

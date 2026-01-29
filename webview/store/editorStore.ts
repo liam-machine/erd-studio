@@ -16,17 +16,15 @@ import type { ModelFlowNode, FkFlowEdge } from '../types/graph';
 // Types
 // ---------------------------------------------------------------------------
 
-export type EditorMode = 'browse' | 'design';
-
 export interface EditorState {
-  /** Current editor mode. */
-  mode: EditorMode;
   /** Name of the currently selected model node, or null. */
   selectedNode: string | null;
   /** React Flow viewport (pan + zoom). */
   viewport: Viewport;
   /** Whether the detail panel is open. */
   detailPanelOpen: boolean;
+  /** Whether the new model dialog is open. */
+  newModelDialogOpen: boolean;
   /** The loaded domain data from the extension host (already reconciled with manifest). */
   domain: ReconciledDomain | null;
   /** Error message from the extension host, if any. */
@@ -38,10 +36,10 @@ export interface EditorState {
 }
 
 export interface EditorActions {
-  setMode: (mode: EditorMode) => void;
   selectNode: (nodeName: string | null) => void;
   setViewport: (viewport: Viewport) => void;
   setDetailPanelOpen: (open: boolean) => void;
+  setNewModelDialogOpen: (open: boolean) => void;
   setDomain: (domain: ReconciledDomain) => void;
   setError: (error: string | null) => void;
   setNodes: (nodes: ModelFlowNode[]) => void;
@@ -54,20 +52,20 @@ export interface EditorActions {
 
 export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   // Default state
-  mode: 'browse',
   selectedNode: null,
   viewport: { x: 0, y: 0, zoom: 1 },
   detailPanelOpen: false,
+  newModelDialogOpen: false,
   domain: null,
   error: null,
   nodes: [],
   edges: [],
 
   // Actions
-  setMode: (mode) => set({ mode }),
   selectNode: (nodeName) => set({ selectedNode: nodeName }),
   setViewport: (viewport) => set({ viewport }),
   setDetailPanelOpen: (open) => set({ detailPanelOpen: open }),
+  setNewModelDialogOpen: (open) => set({ newModelDialogOpen: open }),
   setDomain: (domain) => set({ domain, error: null }),
   setError: (error) => set({ error }),
   setNodes: (nodes) => set({ nodes }),

@@ -5,6 +5,7 @@
  * - Domain info (name + layer badge)
  * - Zoom controls (in/out/level/fit)
  * - Auto Layout button
+ * - New Model button (Phase 2)
  *
  * Uses React Flow's zoom/pan APIs and the editor store for domain data.
  */
@@ -47,6 +48,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const domain = useEditorStore((s) => s.domain);
   const setDomain = useEditorStore((s) => s.setDomain);
+  const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
 
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
@@ -74,6 +76,12 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const handleFitView = useCallback(() => {
     fitView({ padding: 0.1, duration: 200 });
   }, [fitView]);
+
+  // --- New Model handler ---------------------------------------------------
+
+  const handleNewModel = useCallback(() => {
+    setNewModelDialogOpen(true);
+  }, [setNewModelDialogOpen]);
 
   // --- Auto Layout handlers ------------------------------------------------
 
@@ -223,6 +231,21 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
             {isLayouting ? 'Layouting…' : 'Auto Layout'}
           </button>
         )}
+      </div>
+
+      {/* Divider */}
+      <div className="toolbar__divider" />
+
+      {/* New Model */}
+      <div className="toolbar__section">
+        <button
+          className="toolbar__button toolbar__button--text toolbar__button--primary"
+          onClick={handleNewModel}
+          title="Add new model to domain"
+          aria-label="Add new model to domain"
+        >
+          + Model
+        </button>
       </div>
     </Panel>
   );

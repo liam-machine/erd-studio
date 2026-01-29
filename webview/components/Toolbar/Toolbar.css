@@ -130,6 +130,11 @@
   color: var(--button-fg);
 }
 
+.toolbar__button--primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
 /* ---------------------------------------------------------------------------
    Confirmation prompt
    --------------------------------------------------------------------------- */
