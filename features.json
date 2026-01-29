@@ -1,7 +1,7 @@
 {
   "project": {
     "name": "dbt Semantic Designer",
-    "description": "A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains, and provides a design mode for planning new models, columns, and relationships before they are built. The dbt repo becomes the single source of truth for both lineage and semantic relationships.",
+    "description": "A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains, and enables interactive design of new models, columns, and relationships before they are built. Built items appear in green; planned items appear in orange. The dbt repo becomes the single source of truth for both lineage and semantic relationships.",
     "version": "0.1.0",
     "platform": "web",
     "tech_stack": {
@@ -27,8 +27,8 @@
     },
     {
       "id": "phase-2",
-      "name": "Design Mode — Create Models, Columns, and Relationships",
-      "description": "Enable interactive design of new models and relationships. Toggle into design mode to add new design models (orange), define columns, draw FK relationships, and persist all changes to the semantic domain JSON file.",
+      "name": "Interactive Design — Create Models, Columns, and Relationships",
+      "description": "Enable interactive design of new models and relationships using a single-mode approach. No browse/design toggle — the visual distinction between built (green) and planned (orange) items IS the mode indicator. Click any model to select it; the detail panel shows edit controls for planned items. Add new design models (orange), define columns, draw FK relationships, and persist all changes to the semantic domain JSON file.",
       "order": 2,
       "status": "pending"
     },
@@ -151,7 +151,7 @@
         "Verify in Extension Development Host: webview renders a React Flow canvas inside the custom editor",
         "Verify the webview correctly acquires VS Code API and sends 'ready' message on mount",
         "Verify theme.css maps VS Code CSS custom properties for consistent theming",
-        "Verify Zustand store initialises with default state (browse mode, no selected node)"
+        "Verify Zustand store initialises with default state (no selected node, detail panel closed)"
       ],
       "implementation_notes": "Use acquireVsCodeApi() singleton pattern — can only be called once per webview lifecycle. The webview/styles/theme.css should use VS Code's CSS custom properties (--vscode-editor-background, --vscode-editor-foreground, etc.). The Zustand store manages: mode (browse/design), selectedNode, zoom/pan, detailPanelOpen. Also integrate @vscode-elements/elements + @vscode-elements/react-elements for VS Code-native form elements.",
       "category": "ui",
@@ -271,7 +271,7 @@
     {
       "id": "F112",
       "name": "Create toolbar with zoom, fit view, and mode display",
-      "description": "Implement the Toolbar component (webview/components/Toolbar/Toolbar.tsx) with zoom in/out buttons, fit view button (centres the graph), Auto Layout button (triggers ELK), and domain info display (domain name and layer). For Phase 1, show browse mode only (design mode toggle comes in Phase 2). Include a status bar at the bottom showing model count and relationship count.",
+      "description": "Implement the Toolbar component (webview/components/Toolbar/Toolbar.tsx) with zoom in/out buttons, fit view button (centres the graph), Auto Layout button (triggers ELK), and domain info display (domain name and layer). Include a status bar at the bottom showing model count and relationship count. Phase 2 will add '+ Model' and '+ Relationship' buttons.",
       "phase": "phase-1",
       "status": "completed",
       "skip": false,
@@ -307,7 +307,7 @@
     {
       "id": "F114",
       "name": "Implement webview state restoration",
-      "description": "Implement state persistence using VS Code's getState()/setState() API so UI state survives when the webview is hidden and revealed. Persist: zoom level, pan offset, selected node name, browse/design mode, detail panel open/closed state. On reveal, the webview sends 'ready' message, receives fresh domain data from extension host, then applies persisted UI state on top.",
+      "description": "Implement state persistence using VS Code's getState()/setState() API so UI state survives when the webview is hidden and revealed. Persist: zoom level, pan offset, selected node name, detail panel open/closed state. On reveal, the webview sends 'ready' message, receives fresh domain data from extension host, then applies persisted UI state on top.",
       "phase": "phase-1",
       "status": "completed",
       "skip": false,
@@ -360,48 +360,29 @@
     },
     {
       "id": "F200",
-      "name": "Implement browse/design mode toggle",
-      "description": "Add a browse/design mode toggle to the toolbar. In browse mode: view-only graph navigation (pan, zoom, select). In design mode: design palette becomes visible with creation controls. The toggle updates the Zustand store and is persisted via getState()/setState().",
+      "name": "Add Model button in toolbar",
+      "description": "Add a permanent '+ Model' button to the toolbar (always visible, no mode toggle needed). Clicking opens the New Model dialog. This replaces the previous browse/design mode toggle approach — the visual distinction between built (green) and planned (orange) items IS the mode indicator. Selection enables editing in the detail panel.",
       "phase": "phase-2",
       "status": "pending",
       "skip": false,
       "dependencies": ["F112"],
       "validation_criteria": [
-        "Verify in Extension Development Host: toolbar shows Browse Mode / Design Mode toggle",
-        "Verify in Extension Development Host: switching to design mode reveals the design palette",
-        "Verify in Extension Development Host: switching to browse mode hides design controls",
-        "Verify mode persists across webview hide/reveal"
+        "Verify in Extension Development Host: toolbar shows '+ Model' button at all times",
+        "Verify in Extension Development Host: clicking '+ Model' opens the new model dialog",
+        "Verify in Extension Development Host: the button uses VS Code-native styling"
       ],
-      "implementation_notes": "Design mode activates the DesignPalette component (F201) in the toolbar area. Browse mode is the default on first open. Mode state lives in Zustand and is persisted via VS Code webview getState/setState.",
+      "implementation_notes": "Single-mode approach: no browse/design toggle. The color scheme (green=built, orange=planned) communicates state. Selection enables editing in the detail panel. Remove the EditorMode type from the store — it's no longer needed.",
       "category": "ui",
       "estimated_effort": "small"
     },
     {
       "id": "F201",
-      "name": "Create design palette with add model/column/relationship/delete controls",
-      "description": "Implement DesignPalette component (webview/components/Toolbar/DesignPalette.tsx) that appears in design mode. Provides buttons: '+ Model' (opens new model dialog), '+ Column' (adds column to selected design model), '+ Relationship' (opens new FK dialog), 'Delete' (removes selected design item). Buttons are enabled/disabled contextually (e.g. + Column only enabled when a design model is selected).",
-      "phase": "phase-2",
-      "status": "pending",
-      "skip": false,
-      "dependencies": ["F200"],
-      "validation_criteria": [
-        "Verify in Extension Development Host: design palette shows + Model, + Column, + Relationship, Delete buttons",
-        "Verify in Extension Development Host: + Column is disabled when no design model is selected",
-        "Verify in Extension Development Host: Delete is disabled when nothing is selected",
-        "Verify in Extension Development Host: buttons open their respective dialogs"
-      ],
-      "implementation_notes": "Use @vscode-elements for button styling. The Delete button should work for design models, design columns, and design relationships. It should not allow deleting repo (built) items.",
-      "category": "ui",
-      "estimated_effort": "small"
-    },
-    {
-      "id": "F202",
       "name": "Implement New Model dialog with JHG templates",
       "description": "Create NewModelDialog component (webview/components/Dialogs/NewModelDialog.tsx) for creating design models. Fields: model name, schema, layer (auto-set from domain), description, and template picker. Templates: Dimension (dim_), Fact (fct_), Bridge (brg_), SCD Type 2, Blank. Templates pre-populate columns according to JHG conventions. Placeholder resolution: {name} derived from model name minus prefix, {left}/{right} fields for bridge template. On submit, send addModel message to extension host.",
       "phase": "phase-2",
       "status": "pending",
       "skip": false,
-      "dependencies": ["F201"],
+      "dependencies": ["F200"],
       "validation_criteria": [
         "Verify in Extension Development Host: clicking '+ Model' opens the new model dialog",
         "Verify in Extension Development Host: selecting 'Dimension' template pre-populates standard dim columns with {name}_id PK",
@@ -414,34 +395,35 @@
       "estimated_effort": "large"
     },
     {
-      "id": "F203",
-      "name": "Implement column editor in detail panel",
-      "description": "Create ColumnEditor component (webview/components/DetailPanel/ColumnEditor.tsx) that enables adding, editing, and removing columns on design models. Shown in the detail panel when a design model is selected and design mode is active. New Column Dialog fields: column name, data type (dropdown: INT, VARCHAR, TIMESTAMP, BOOLEAN, NUMERIC, DATE), description, is primary key (checkbox). Column editing sends addColumn/removeColumn messages to extension host.",
+      "id": "F202",
+      "name": "Implement unified column editor in detail panel",
+      "description": "Extend the DetailPanel to support column editing when a model is selected. The behavior depends on model/column status: (1) Built models show read-only built columns (green) plus an 'Add Planned Column' button to add orange columns that will be built later. (2) Planned models (source: design) show all columns as editable. (3) Planned columns on any model can be edited or deleted. (4) Built columns are always read-only. New Column Dialog fields: column name, data type dropdown, description, is primary key checkbox.",
       "phase": "phase-2",
       "status": "pending",
       "skip": false,
-      "dependencies": ["F113", "F200"],
+      "dependencies": ["F113"],
       "validation_criteria": [
-        "Verify in Extension Development Host: selecting a design model in design mode shows the column editor",
-        "Verify in Extension Development Host: adding a column updates the model node on the canvas",
-        "Verify in Extension Development Host: removing a column updates the model node on the canvas",
-        "Verify in Extension Development Host: column changes persist to the semantic domain JSON",
-        "Verify in Extension Development Host: column editor is not shown for repo (built) models"
+        "Verify in Extension Development Host: selecting any model opens the detail panel with column list",
+        "Verify in Extension Development Host: built columns (green) are read-only with no edit/delete controls",
+        "Verify in Extension Development Host: planned columns (orange) show edit and delete buttons",
+        "Verify in Extension Development Host: 'Add Planned Column' button appears for both built and planned models",
+        "Verify in Extension Development Host: column changes persist to the semantic domain JSON"
       ],
-      "implementation_notes": "Use @vscode-elements for form controls (dropdown for data type, checkbox for PK). Repo models show columns read-only from manifest. Only design models allow editing. Use NewColumnDialog (webview/components/Dialogs/NewColumnDialog.tsx) for the add column form.",
+      "implementation_notes": "No mode toggle needed — selection is the trigger. Built models use 'plannedColumns' array for new columns. Design models use inline 'columns' array. The visual separator between built and planned columns already exists from F111. Use @vscode-elements for form controls.",
       "category": "ui",
       "estimated_effort": "medium"
     },
     {
-      "id": "F204",
+      "id": "F203",
       "name": "Implement New Relationship dialog",
-      "description": "Create NewFkDialog component (webview/components/Dialogs/NewFkDialog.tsx) for creating FK relationships between models. Flow: select source model → source column → target model → target column → cardinality (many-to-one / one-to-one). On submit, send addRelationship message to extension host. The relationship is marked with source: 'design' and renders as an orange edge.",
+      "description": "Create NewFkDialog component (webview/components/Dialogs/NewFkDialog.tsx) for creating FK relationships between models. Add a '+ Relationship' button to the toolbar (next to + Model). Flow: select source model → source column → target model → target column → cardinality (many-to-one / one-to-one). On submit, send addRelationship message to extension host. The relationship is marked with source: 'design' and renders as an orange edge.",
       "phase": "phase-2",
       "status": "pending",
       "skip": false,
-      "dependencies": ["F201"],
+      "dependencies": ["F200"],
       "validation_criteria": [
-        "Verify in Extension Development Host: clicking '+ Relationship' opens the FK dialog",
+        "Verify in Extension Development Host: toolbar shows '+ Relationship' button",
+        "Verify in Extension Development Host: clicking it opens the FK dialog",
         "Verify in Extension Development Host: dialog allows selecting source model, column, target model, column, and cardinality",
         "Verify in Extension Development Host: submitting creates an orange FK edge on the canvas",
         "Verify the relationship is persisted to the semantic domain JSON with source: 'design'"
@@ -451,52 +433,55 @@
       "estimated_effort": "medium"
     },
     {
-      "id": "F205",
+      "id": "F204",
       "name": "Implement drag-to-connect FK creation",
-      "description": "Enable creating FK relationships by dragging from a column handle on one model node to another model node on the canvas. When the drag completes, open a simplified relationship dialog pre-filled with the source model and target model, allowing the user to select specific columns and cardinality. This is an alternative to the full New Relationship dialog.",
+      "description": "Enable creating FK relationships by dragging from a column handle on one model node to another model node on the canvas. When the drag completes, open a simplified relationship dialog pre-filled with the source model and target model, allowing the user to select specific columns and cardinality. This is an alternative to the full New Relationship dialog. Always enabled (no mode gate).",
       "phase": "phase-2",
       "status": "pending",
       "skip": false,
-      "dependencies": ["F204", "F106"],
+      "dependencies": ["F203", "F106"],
       "validation_criteria": [
-        "Verify in Extension Development Host: in design mode, dragging from a model to another model initiates FK creation",
+        "Verify in Extension Development Host: dragging from a model handle to another model initiates FK creation",
         "Verify in Extension Development Host: the connection dialog pre-fills source and target models",
         "Verify in Extension Development Host: completing the flow creates an orange FK edge",
-        "Verify in Extension Development Host: drag-to-connect is disabled in browse mode"
+        "Verify in Extension Development Host: drag-to-connect works at all times (no mode restriction)"
       ],
-      "implementation_notes": "Use React Flow's onConnect callback and custom connection line. The drag starts from a handle on the source model node. On connect, open the NewFkDialog pre-filled with source and target models. Design mode only.",
+      "implementation_notes": "Use React Flow's onConnect callback and custom connection line. The drag starts from a handle on the source model node. On connect, open the NewFkDialog pre-filled with source and target models. No mode check needed.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F205",
+      "name": "Implement delete actions for planned items",
+      "description": "Enable deleting planned models, planned columns, and design relationships. Delete button in detail panel (disabled/hidden for built items). Support Delete key when a planned item is selected. Deleting a design model also removes all its relationships. Show confirmation dialog before deleting models. Built models and built columns cannot be deleted — the delete button is disabled or hidden for these.",
+      "phase": "phase-2",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F202"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: selecting a planned model shows enabled Delete button in detail panel",
+        "Verify in Extension Development Host: selecting a built model shows disabled/hidden Delete button",
+        "Verify in Extension Development Host: planned columns show delete icon, built columns do not",
+        "Verify in Extension Development Host: deleting a model also removes its FK edges",
+        "Verify in Extension Development Host: confirmation dialog appears before model deletion",
+        "Verify deletions persist to the semantic domain JSON"
+      ],
+      "implementation_notes": "Send removeModel, removeColumn, removeRelationship messages to extension host. The extension host updates the JSON and sends back domainUpdated. Cascade delete: removing a model also removes all relationships where it is fromModel or toModel. Delete is only enabled for status: 'design' models and status: 'planned' columns.",
       "category": "ui",
       "estimated_effort": "medium"
     },
     {
       "id": "F206",
-      "name": "Implement delete actions for design items",
-      "description": "Enable deleting design models, design columns, and design relationships. The Delete button in the design palette removes the currently selected item. Also support pressing the Delete key. Deleting a design model also removes all its relationships. Show a confirmation dialog before deleting models. Only design items (source: 'design') can be deleted — built/repo items cannot be removed through the UI.",
-      "phase": "phase-2",
-      "status": "pending",
-      "skip": false,
-      "dependencies": ["F201"],
-      "validation_criteria": [
-        "Verify in Extension Development Host: selecting a design model and clicking Delete removes it from the canvas",
-        "Verify in Extension Development Host: deleting a model also removes its FK edges",
-        "Verify in Extension Development Host: confirmation dialog appears before model deletion",
-        "Verify in Extension Development Host: repo/built items cannot be deleted",
-        "Verify deletions persist to the semantic domain JSON"
-      ],
-      "implementation_notes": "Send removeModel, removeRelationship messages to extension host. The extension host updates the JSON and sends back domainUpdated. Cascade delete: removing a model also removes all relationships where it is fromModel or toModel. Only items with source: 'design' are deletable.",
-      "category": "ui",
-      "estimated_effort": "medium"
-    },
-    {
-      "id": "F207",
       "name": "Implement DomainService write operations",
-      "description": "Extend DomainService with full write operations: createDomain, updateDomain, deleteDomain, addDesignModel, addRelationship, removeModel, removeRelationship, addColumn, removeColumn. All writes use VS Code's WorkspaceEdit API to modify the semantic domain JSON file on disk. This is the backend for all design mode mutations.",
+      "description": "Extend DomainService with full write operations: addDesignModel, addRelationship, removeModel, removeRelationship, addColumn (to plannedColumns for repo models, to columns for design models), removeColumn. All writes use VS Code's WorkspaceEdit API to modify the semantic domain JSON file on disk. This is the backend for all mutations.",
       "phase": "phase-2",
       "status": "pending",
       "skip": false,
       "dependencies": ["F102"],
       "validation_criteria": [
         "Unit test: addDesignModel adds a model with source 'design' to the domain JSON",
+        "Unit test: addColumn to repo model adds to plannedColumns array",
+        "Unit test: addColumn to design model adds to columns array",
         "Unit test: addRelationship adds a relationship to the domain JSON",
         "Unit test: removeModel removes the model and cascading relationships",
         "Unit test: all write operations produce valid JSON matching the schema",
@@ -507,15 +492,15 @@
       "estimated_effort": "large"
     },
     {
-      "id": "F208",
+      "id": "F207",
       "name": "Implement undo/redo via WorkspaceEdit",
-      "description": "Ensure all design mutations (add/remove model, column, relationship) work with VS Code's built-in undo/redo. Since all writes go through WorkspaceEdit, VS Code's Ctrl+Z / Ctrl+Shift+Z should undo/redo changes. Verify the webview re-renders correctly after undo/redo by handling onDidChangeTextDocument events.",
+      "description": "Ensure all mutations (add/remove model, column, relationship) work with VS Code's built-in undo/redo. Since all writes go through WorkspaceEdit, VS Code's Ctrl+Z / Ctrl+Shift+Z should undo/redo changes. Verify the webview re-renders correctly after undo/redo by handling onDidChangeTextDocument events.",
       "phase": "phase-2",
       "status": "pending",
       "skip": false,
-      "dependencies": ["F207"],
+      "dependencies": ["F206"],
       "validation_criteria": [
-        "Verify in Extension Development Host: Ctrl+Z undoes the last design change",
+        "Verify in Extension Development Host: Ctrl+Z undoes the last change",
         "Verify in Extension Development Host: Ctrl+Shift+Z redoes an undone change",
         "Verify the graph canvas updates correctly after undo/redo",
         "Verify multi-step undo works (add model → add column → undo → undo restores original state)"
@@ -525,13 +510,13 @@
       "estimated_effort": "small"
     },
     {
-      "id": "F209",
-      "name": "Implement validation for design operations",
-      "description": "Add validation rules for design mode operations: prevent duplicate model names within a domain, prevent duplicate column names within a model, prevent circular FK references, ensure FK target columns exist, prevent creating a relationship where the composite key (fromModel, fromColumn, toModel, toColumn) already exists. Show validation errors using VS Code-native error elements.",
+      "id": "F208",
+      "name": "Implement validation for operations",
+      "description": "Add validation rules for all operations: prevent duplicate model names within a domain, prevent duplicate column names within a model, prevent circular FK references, ensure FK target columns exist, prevent creating a relationship where the composite key (fromModel, fromColumn, toModel, toColumn) already exists. Show validation errors using VS Code-native error elements.",
       "phase": "phase-2",
       "status": "pending",
       "skip": false,
-      "dependencies": ["F202", "F203", "F204"],
+      "dependencies": ["F201", "F202", "F203"],
       "validation_criteria": [
         "Verify in Extension Development Host: attempting to create a model with an existing name shows an error",
         "Verify in Extension Development Host: attempting to create a duplicate column shows an error",
@@ -581,7 +566,7 @@
     {
       "id": "F302",
       "name": "Implement add existing model to domain",
-      "description": "Create functionality to add existing models from the manifest to a semantic domain. In design mode, provide a search/select interface to browse models from manifest.json and add them to the current domain with source: 'repo'. Send addExistingModel message with the model name. The extension host verifies the model exists in manifest, adds it to the domain JSON, reconciles, and updates the webview. Green node appears on the canvas.",
+      "description": "Create functionality to add existing models from the manifest to a semantic domain. Provide a search/select interface (via toolbar button or command palette) to browse models from manifest.json and add them to the current domain with source: 'repo'. Send addExistingModel message with the model name. The extension host verifies the model exists in manifest, adds it to the domain JSON, reconciles, and updates the webview. Green node appears on the canvas.",
       "phase": "phase-3",
       "status": "pending",
       "skip": false,
@@ -671,7 +656,7 @@
     {
       "id": "F400",
       "name": "Implement keyboard shortcuts",
-      "description": "Add keyboard shortcuts for common design mode actions: Delete key to remove selected design item (with confirmation), Ctrl+Z for undo, Ctrl+Shift+Z for redo (already handled via WorkspaceEdit, but ensure focus/keybinding works in webview). Additional shortcuts: Escape to deselect, Ctrl+F for search (Phase 4 search feature).",
+      "description": "Add keyboard shortcuts for common actions: Delete key to remove selected planned item (with confirmation), Ctrl+Z for undo, Ctrl+Shift+Z for redo (already handled via WorkspaceEdit, but ensure focus/keybinding works in webview). Additional shortcuts: Escape to deselect, Ctrl+F for search (Phase 4 search feature).",
       "phase": "phase-4",
       "status": "pending",
       "skip": false,
@@ -834,12 +819,12 @@
   "metadata": {
     "generated_from": "plan.md",
     "generated_at": "2026-01-29T00:00:00.000Z",
-    "last_updated": "2026-01-29 - F116 Extension activation and command registration",
+    "last_updated": "2026-01-29 - Phase 2 simplified to single-mode approach (no browse/design toggle)",
     "feature_counts": {
-      "total": 35,
+      "total": 34,
       "by_phase": {
         "phase-1": 17,
-        "phase-2": 10,
+        "phase-2": 9,
         "phase-3": 7,
         "phase-4": 9
       }

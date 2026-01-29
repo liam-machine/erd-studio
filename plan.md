@@ -2,17 +2,19 @@
 
 ## Vision
 
-A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains, and provides a **design mode** for planning new models, columns, and relationships before they are built. The dbt repo becomes the single source of truth for both lineage (managed by dbt) and semantic relationships (managed via domain JSON files), giving AI tools full context when building or modifying models.
+A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains, and enables **interactive design** of new models, columns, and relationships before they are built. Built items appear in green; planned items appear in orange. The dbt repo becomes the single source of truth for both lineage (managed by dbt) and semantic relationships (managed via domain JSON files), giving AI tools full context when building or modifying models.
 
 ### Key Workflow
 
 ```
-1. Browse  →  Open a semantic domain in the visual graph editor
+1. Open    →  Open a semantic domain in the visual graph editor
 2. Design  →  Add new models (orange), columns, and FK relationships
 3. Build   →  AI skill reads design state from JSON and generates dbt SQL/YAML
 4. Compile →  Run dbt compile; extension auto-detects new models in manifest
 5. Verify  →  Design models turn green once they appear in the manifest
 ```
+
+**Single-Mode Philosophy**: No browse/design mode toggle. The visual distinction between built (green) and planned (orange) items IS the mode indicator. Click any model to select it — the detail panel shows edit controls for planned items while built items remain read-only.
 
 ---
 
@@ -43,7 +45,7 @@ A VS Code extension that visualises semantic (FK-based) relationships between db
 | ELK layout trigger | Manual button only — not auto-run on open; user clicks "Auto Layout" to recompute |
 | Manifest parsing strategy | Streaming JSON (e.g., `stream-json`) from the start — 43MB manifest must not block extension host |
 | Relationship identity | Composite key: `(fromModel, fromColumn, toModel, toColumn)` — supports multiple FKs between same models |
-| Webview state restoration | Persist UI state (zoom, pan, selected node, mode) via `getState()`/`setState()`; re-fetch domain data fresh on restore |
+| Webview state restoration | Persist UI state (zoom, pan, selected node, detail panel state) via `getState()`/`setState()`; re-fetch domain data fresh on restore |
 | UI component library | `@vscode-elements/elements` + `@vscode-elements/react-elements` for VS Code-native form elements |
 | Test framework (unit + webview) | Vitest — fast, native TypeScript/ESM, esbuild-aligned |
 | Test framework (integration) | Mocha via `@vscode/test-cli` + `@vscode/test-electron` — only officially supported path for Extension Host tests |
@@ -431,8 +433,8 @@ The main visual editor panel, opened as a custom editor for `.json` domain files
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ Toolbar                                                         │
-│ [Browse Mode] [Design Mode]  |  [Auto Layout] [Fit] [Zoom]     │
-│                               |  Domain: work-lots (silver)     │
+│ [+ Model] [+ Relationship]  |  [Auto Layout] [Fit] [Zoom]      │
+│                              |  Domain: work-lots (silver)      │
 ├────────────────────────────────────────────────────┬────────────┤
 │                                                    │            │
 │                                                    │  Detail    │
@@ -450,10 +452,10 @@ The main visual editor panel, opened as a custom editor for `.json` domain files
 │                        │...       │               │  - name    │
 │          ┌─────────────┤          │               │  ...       │
 │          │             └──────────┘               │            │
-│   ┌──────┴─────┐                                  │  Status:   │
-│   │dim_work_   │                                  │  ● Built   │
-│   │lot_status  │                                  │            │
-│   │(ORANGE)    │                                  │            │
+│   ┌──────┴─────┐                                  │  [+ Column]│
+│   │dim_work_   │                                  │            │
+│   │lot_status  │                                  │  Status:   │
+│   │(ORANGE)    │                                  │  ● Built   │
 │   │            │                                  │            │
 │   │work_lot_   │                                  │            │
 │   │status_id   │                                  │            │
@@ -466,20 +468,26 @@ The main visual editor panel, opened as a custom editor for `.json` domain files
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-#### Browse Mode
-- View-only graph navigation (pan, zoom, select)
-- Click a model node to see its details in the side panel
-- No editing controls visible
+#### Single-Mode Interaction
 
-#### Design Mode
-- Activates design palette in the toolbar:
-  - **+ Model**: Opens dialog to define a new model (name, schema, layer, description)
-  - **+ Column**: Adds a column to the selected design model
-  - **+ Relationship**: Creates FK link between two models (click source, click target)
-  - **Delete**: Removes selected design model/column/relationship
-- Design items render in **orange** (model borders, column text, FK edges)
-- Built items render in **green** (model borders)
-- Missing/broken references render in **grey** with a warning icon
+No mode toggle needed — the color scheme communicates state, and selection enables editing:
+
+- **Green border** = Built model (exists in manifest)
+- **Orange border** = Planned model (design model not yet built)
+- **Green column rows** = Built columns (from manifest)
+- **Orange column rows** = Planned columns (not in manifest yet)
+
+**Always available:**
+- Pan, zoom, select nodes
+- Click '+ Model' to create a new design model
+- Click '+ Relationship' to create an FK between models
+- Drag from column handle to another model to create FK
+
+**When a model is selected (detail panel):**
+- Built models: view read-only built columns, add planned columns via '+ Column' button
+- Planned models: edit all columns, delete the model
+- Planned columns: edit name/type, delete
+- Built columns: read-only display (no edit/delete)
 
 #### Colour Scheme
 
@@ -837,28 +845,33 @@ After AI generates the dbt files:
 - Models that exist in manifest are green; design models are orange
 - Pan, zoom, select nodes, view column details
 
-### Phase 2: Design Mode — Create Models, Columns, and Relationships
+### Phase 2: Interactive Design — Create Models, Columns, and Relationships
 
-**Goal**: Enable interactive design of new models and relationships.
+**Goal**: Enable interactive design of new models and relationships using a single-mode approach.
+
+**Design Philosophy**: No browse/design mode toggle. The visual distinction between built (green) and planned (orange) items IS the mode indicator. Click any model to select it — the detail panel shows edit controls for planned items. Built items are read-only; planned items are editable.
 
 **Deliverables**:
-1. Browse/Design mode toggle in toolbar
-2. New Model dialog — create a design model (name, schema, description)
-3. Column Editor in detail panel — add/edit/remove columns on design models
+1. '+ Model' and '+ Relationship' buttons always visible in toolbar
+2. New Model dialog — create a design model with JHG templates (dim, fact, bridge, SCD2, blank)
+3. Unified Column Editor in detail panel:
+   - Built models: read-only built columns (green) + 'Add Planned Column' button for orange columns
+   - Planned models: all columns editable
+   - Planned columns on any model can be edited/deleted; built columns are always read-only
 4. New Relationship dialog — create FK between models
-5. Drag-to-connect — drag from a column on one model to another model to create FK
-6. Delete actions — remove design models, columns, relationships
+5. Drag-to-connect — drag from a column handle to another model to create FK
+6. Delete actions — remove planned models, planned columns, design relationships (disabled for built items)
 7. All mutations write to the semantic domain JSON via extension host
 8. Undo/redo via VS Code's `WorkspaceEdit` integration
 9. Validation — prevent duplicate model names, circular FKs, missing PK references
 
 **What works at end of Phase 2**:
-- Toggle into design mode → design palette appears
-- Add new model → orange node appears on canvas
-- Add columns → columns appear in the orange model node
+- Click '+ Model' → New Model dialog opens → orange node appears on canvas
+- Select any model → detail panel shows columns with appropriate edit controls
+- Add planned columns to a built model → orange columns appear below the green ones
 - Draw FK relationship → orange edge appears between models
 - All changes persist to the semantic domain JSON file
-- Switching back to browse mode hides design controls
+- Delete only works on planned items — built items have disabled delete controls
 
 ### Phase 3: Domain Management + Auto-Reconciliation
 
@@ -998,7 +1011,6 @@ When the webview is hidden (user switches tabs) and later revealed, React state 
 1. **Persisted via `setState()`** (survives hide/reveal):
    - Zoom level and pan offset
    - Selected node name
-   - Browse/Design mode toggle
    - Detail panel open/closed state
 
 2. **Re-fetched from extension host** (always fresh):
