@@ -35,6 +35,7 @@ export type {
   AddExistingModelMessage,
   UpdatePositionsMessage,
   RunAutoLayoutMessage,
+  RefreshManifestMessage,
 } from '../../src/types/messages';
 
 import type { ExtensionMessage, WebviewMessage } from '../../src/types/messages';

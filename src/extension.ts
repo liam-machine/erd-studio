@@ -350,8 +350,46 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
     vscode.commands.registerCommand('dbtSemantic.refreshManifest', async () => {
-      await vscode.window.showInformationMessage(
-        'Refresh Manifest feature will be implemented in Phase 3 (F305)',
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Refreshing dbt manifest...',
+          cancellable: false,
+        },
+        async () => {
+          // Step 1: Invalidate and reload manifest
+          manifestService.invalidate();
+          const manifest = await manifestService.loadManifest(workspaceRoot);
+
+          // Step 2: Check autoReconcile setting
+          const config = vscode.workspace.getConfiguration('dbtSemantic');
+          const autoReconcile = config.get<boolean>('autoReconcile', true);
+
+          if (!autoReconcile) {
+            // Auto-reconciliation disabled - just refresh editors without transitioning
+            await editorProvider.refreshAllOpenDomains();
+            void vscode.window.showInformationMessage(
+              'Manifest refreshed. Auto-reconciliation is disabled.',
+            );
+            return;
+          }
+
+          // Step 3: Reconcile all open domain editors
+          const allNewlyBuilt =
+            await editorProvider.reconcileAllOpenDomains(manifest);
+
+          // Step 4: Show notification
+          if (allNewlyBuilt.length > 0) {
+            const modelList = allNewlyBuilt.join(', ');
+            void vscode.window.showInformationMessage(
+              `Manifest refreshed. ${allNewlyBuilt.length} design model(s) have been built: ${modelList}`,
+            );
+          } else {
+            void vscode.window.showInformationMessage(
+              'Manifest refreshed. Graphs updated with latest model data.',
+            );
+          }
+        },
       );
     }),
   );

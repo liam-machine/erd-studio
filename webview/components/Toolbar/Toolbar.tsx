@@ -60,6 +60,9 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const [isLayouting, setIsLayouting] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
+  // Refresh manifest state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   // Model dropdown state
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
@@ -178,6 +181,20 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     }
   }, [domain, nodes, isLayouting, runLayout]);
 
+  // --- Refresh Manifest handler ----------------------------------------------
+
+  const handleRefreshManifest = useCallback(() => {
+    if (isRefreshing) return;
+
+    setIsRefreshing(true);
+    const message: WebviewMessage = { type: 'refreshManifest' };
+    vscode.postMessage(message);
+
+    // Reset refreshing state after a timeout (the actual refresh is async)
+    // The extension will show its own progress notification
+    setTimeout(() => setIsRefreshing(false), 1000);
+  }, [isRefreshing, vscode]);
+
   // --- Early return if no domain -------------------------------------------
 
   if (!domain) {
@@ -265,6 +282,20 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
             {isLayouting ? 'Layouting…' : 'Auto Layout'}
           </button>
         )}
+      </div>
+
+      {/* Refresh Manifest (F305) */}
+      <div className="toolbar__section">
+        <button
+          className="toolbar__button toolbar__button--text"
+          onClick={handleRefreshManifest}
+          disabled={isRefreshing}
+          title="Refresh manifest and re-reconcile domains"
+          aria-label="Refresh manifest and re-reconcile domains"
+        >
+          {isRefreshing && <span className="toolbar__spinner" />}
+          {isRefreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
       </div>
 
       {/* Divider */}

@@ -38,6 +38,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly pendingUpdates = new Map<string, boolean>();
 
   /**
+   * Guard flag to prevent concurrent reconciliation operations.
+   * Only one refresh/reconcile operation should run at a time to avoid
+   * race conditions between manual refresh (F305) and file watcher (F304).
+   */
+  private reconciliationInProgress = false;
+
+  /**
    * Track all open webview panels by document URI.
    * Used by reconcileAllOpenDomains() to update all editors when manifest changes.
    */
@@ -183,6 +190,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'refreshManifest': {
+            // Trigger the refresh manifest command (F305)
+            // This runs the full refresh flow with progress notification
+            await vscode.commands.executeCommand('dbtSemantic.refreshManifest');
+            break;
+          }
         }
       },
     );
@@ -243,8 +256,43 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Refresh all open domain editors with fresh manifest data without auto-transitioning.
+   * Called by extension.ts when user manually refreshes manifest and autoReconcile is disabled.
+   *
+   * Simply re-sends domain data to each open webview to reflect updated manifest state.
+   *
+   * @returns Promise that resolves when all open domains have been refreshed
+   */
+  async refreshAllOpenDomains(): Promise<void> {
+    if (this.reconciliationInProgress) {
+      console.warn('[SemanticEditorProvider] Reconciliation already in progress, skipping refresh');
+      return;
+    }
+
+    this.reconciliationInProgress = true;
+    try {
+      for (const { document, webview } of Array.from(this.openPanels.values())) {
+        try {
+          await this.sendDomainData(document, webview);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[SemanticEditorProvider] Refresh failed for ${document.uri.fsPath}: ${message}`,
+          );
+          webview.postMessage({
+            type: 'error',
+            payload: { message: `Refresh failed: ${message}` },
+          });
+        }
+      }
+    } finally {
+      this.reconciliationInProgress = false;
+    }
+  }
+
+  /**
    * Reconcile all open domain editors against fresh manifest.
-   * Called by extension.ts when manifest changes (F304).
+   * Called by extension.ts when manifest changes (F304) or manual refresh (F305).
    *
    * For each open editor:
    * - Detects design models that now exist in manifest
@@ -256,9 +304,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * @returns Array of all newly built model names across all domains
    */
   async reconcileAllOpenDomains(manifest: ManifestData): Promise<string[]> {
+    if (this.reconciliationInProgress) {
+      console.warn('[SemanticEditorProvider] Reconciliation already in progress, skipping');
+      return [];
+    }
+
+    this.reconciliationInProgress = true;
     const allNewlyBuilt: string[] = [];
 
-    for (const { document, webview } of Array.from(this.openPanels.values())) {
+    try {
+      for (const { document, webview } of Array.from(this.openPanels.values())) {
       try {
         // Parse current domain from disk
         const domain = this.domainService.getDomain(document.uri.fsPath);
@@ -330,6 +385,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           payload: { message: `Auto-reconciliation failed: ${message}` },
         });
       }
+    }
+    } finally {
+      this.reconciliationInProgress = false;
     }
 
     return allNewlyBuilt;

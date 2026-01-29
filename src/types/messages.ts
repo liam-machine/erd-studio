@@ -208,6 +208,15 @@ export interface RunAutoLayoutMessage {
   type: 'runAutoLayout';
 }
 
+/**
+ * Request to refresh the manifest and re-reconcile all open domains.
+ * Useful when the file watcher misses a change or user wants to force refresh.
+ * Phase 3: F305 Manual Refresh Manifest.
+ */
+export interface RefreshManifestMessage {
+  type: 'refreshManifest';
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -221,7 +230,8 @@ export type WebviewMessage =
   | UpdateViewConfigMessage
   | AddExistingModelMessage
   | UpdatePositionsMessage
-  | RunAutoLayoutMessage;
+  | RunAutoLayoutMessage
+  | RefreshManifestMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types
