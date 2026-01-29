@@ -19,9 +19,16 @@ import {
   getSmoothStepPath,
   EdgeLabelRenderer,
   Position,
+  useStore,
+  useInternalNode,
   type EdgeProps,
 } from '@xyflow/react';
 import type { FkFlowEdge } from '../../types/graph';
+import {
+  calculateEdgeOffset,
+  parseSideFromHandle,
+  getSideLength,
+} from '../../lib/edgeDistribution';
 import './FkEdge.css';
 
 // ---------------------------------------------------------------------------
@@ -72,15 +79,62 @@ function FkEdgeComponent({
   targetY,
   sourcePosition,
   targetPosition,
+  sourceHandleId,
+  targetHandleId,
   data,
 }: EdgeProps<FkFlowEdge>) {
+  // Access all edges from React Flow store for distribution calculation
+  const allEdges = useStore((state) => state.edges);
+
+  // Get source and target node dimensions for calculating side lengths
+  const sourceNode = useInternalNode(data?.fromModel ?? '');
+  const targetNode = useInternalNode(data?.toModel ?? '');
+
   if (!data) return null;
-  const { cardinality, status } = data;
+  const { cardinality, status, fromModel, toModel } = data;
+
+  // Parse which side each handle is on (top/right/bottom/left)
+  const sourceSide = parseSideFromHandle(sourceHandleId);
+  const targetSide = parseSideFromHandle(targetHandleId);
+
+  // Calculate distribution offsets to spread multiple edges along node sides
+  let adjustedSourceX = sourceX;
+  let adjustedSourceY = sourceY;
+  let adjustedTargetX = targetX;
+  let adjustedTargetY = targetY;
+
+  if (sourceSide) {
+    const sideLength = getSideLength(sourceSide, sourceNode?.measured);
+    const sourceOffset = calculateEdgeOffset(
+      id,
+      fromModel,
+      sourceSide,
+      true, // isSource
+      allEdges,
+      sideLength,
+    );
+    adjustedSourceX += sourceOffset.x;
+    adjustedSourceY += sourceOffset.y;
+  }
+
+  if (targetSide) {
+    const sideLength = getSideLength(targetSide, targetNode?.measured);
+    const targetOffset = calculateEdgeOffset(
+      id,
+      toModel,
+      targetSide,
+      false, // isSource
+      allEdges,
+      sideLength,
+    );
+    adjustedTargetX += targetOffset.x;
+    adjustedTargetY += targetOffset.y;
+  }
 
   // Shorten the path so the line stops before the node, leaving room
   // for the cardinality label in the gap.
-  const src = offsetPoint(sourceX, sourceY, sourcePosition, PATH_GAP);
-  const tgt = offsetPoint(targetX, targetY, targetPosition, PATH_GAP);
+  const src = offsetPoint(adjustedSourceX, adjustedSourceY, sourcePosition, PATH_GAP);
+  const tgt = offsetPoint(adjustedTargetX, adjustedTargetY, targetPosition, PATH_GAP);
 
   const [edgePath] = getSmoothStepPath({
     sourceX: src.x,
@@ -104,8 +158,9 @@ function FkEdgeComponent({
   const tgtLabelClass = '';
 
   // Labels sit close to the node, in the gap before the shortened path.
-  const srcLabel = offsetPoint(sourceX, sourceY, sourcePosition, LABEL_OFFSET);
-  const tgtLabel = offsetPoint(targetX, targetY, targetPosition, LABEL_OFFSET);
+  // Use adjusted coordinates so labels align with distributed connection points.
+  const srcLabel = offsetPoint(adjustedSourceX, adjustedSourceY, sourcePosition, LABEL_OFFSET);
+  const tgtLabel = offsetPoint(adjustedTargetX, adjustedTargetY, targetPosition, LABEL_OFFSET);
 
   return (
     <>

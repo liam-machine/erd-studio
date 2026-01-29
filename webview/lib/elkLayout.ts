@@ -20,7 +20,7 @@ import type { NodePosition, LayoutOptions } from '../../src/types/semantic';
 // ---------------------------------------------------------------------------
 
 /** Fixed width for all model cards in the ELK layout. */
-const NODE_WIDTH = 280;
+export const NODE_WIDTH = 280;
 
 /** Height of the header section (name + layer badge). */
 const NODE_HEADER_HEIGHT = 29;
