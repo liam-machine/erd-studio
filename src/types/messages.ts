@@ -217,6 +217,22 @@ export interface RefreshManifestMessage {
   type: 'refreshManifest';
 }
 
+/**
+ * Request to undo the last edit operation.
+ * Executes VS Code's native undo command on the document.
+ */
+export interface UndoMessage {
+  type: 'undo';
+}
+
+/**
+ * Request to redo the last undone operation.
+ * Executes VS Code's native redo command on the document.
+ */
+export interface RedoMessage {
+  type: 'redo';
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -231,7 +247,9 @@ export type WebviewMessage =
   | AddExistingModelMessage
   | UpdatePositionsMessage
   | RunAutoLayoutMessage
-  | RefreshManifestMessage;
+  | RefreshManifestMessage
+  | UndoMessage
+  | RedoMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

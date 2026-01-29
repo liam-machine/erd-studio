@@ -37,13 +37,19 @@ const LAYER_ABBREV: Record<string, string> = {
 interface ToolbarProps {
   nodes: ModelFlowNode[];
   edges: FkFlowEdge[];
+  /** Whether all columns are currently expanded. */
+  allExpanded: boolean;
+  /** Expand all columns in all nodes. */
+  onExpandAll: () => void;
+  /** Collapse all columns in all nodes. */
+  onCollapseAll: () => void;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function Toolbar({ nodes, edges }: ToolbarProps) {
+export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll }: ToolbarProps) {
   const vscode = useVsCodeApi();
   const { zoomIn, zoomOut, fitView, getNode } = useReactFlow();
   const domain = useEditorStore((s) => s.domain);
@@ -63,7 +69,6 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
 
   // Auto layout state
   const [isLayouting, setIsLayouting] = useState(false);
-  const [confirming, setConfirming] = useState(false);
 
   // Refresh manifest state
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -177,7 +182,6 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       return;
     }
 
-    setConfirming(false);
     setIsLayouting(true);
 
     try {
@@ -219,17 +223,20 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     if (!domain || nodes.length === 0 || isLayouting) {
       return;
     }
-
-    // Show confirmation if positions already exist
-    const existingPositions = domain.viewConfig.positions ?? {};
-    const hasPositions = Object.keys(existingPositions).length > 0;
-
-    if (hasPositions) {
-      setConfirming(true);
-    } else {
-      runLayout();
-    }
+    runLayout();
   }, [domain, nodes, isLayouting, runLayout]);
+
+  // --- Undo/Redo handlers ----------------------------------------------------
+
+  const handleUndo = useCallback(() => {
+    const message: WebviewMessage = { type: 'undo' };
+    vscode.postMessage(message);
+  }, [vscode]);
+
+  const handleRedo = useCallback(() => {
+    const message: WebviewMessage = { type: 'redo' };
+    vscode.postMessage(message);
+  }, [vscode]);
 
   // --- Refresh Manifest handler ----------------------------------------------
 
@@ -300,38 +307,41 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       {/* Divider */}
       <div className="toolbar__divider" />
 
+      {/* Undo/Redo */}
+      <div className="toolbar__section toolbar__undo-redo">
+        <button
+          className="toolbar__button"
+          onClick={handleUndo}
+          title="Undo (Ctrl+Z)"
+          aria-label="Undo"
+        >
+          ↶
+        </button>
+        <button
+          className="toolbar__button"
+          onClick={handleRedo}
+          title="Redo (Ctrl+Shift+Z)"
+          aria-label="Redo"
+        >
+          ↷
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="toolbar__divider" />
+
       {/* Auto Layout */}
       <div className="toolbar__section">
-        {confirming ? (
-          <>
-            <span className="toolbar__confirm-label">Rearrange all?</span>
-            <button
-              className="toolbar__button toolbar__button--confirm"
-              onClick={runLayout}
-              aria-label="Confirm rearrange all nodes"
-            >
-              Yes
-            </button>
-            <button
-              className="toolbar__button"
-              onClick={() => setConfirming(false)}
-              aria-label="Cancel rearrange"
-            >
-              No
-            </button>
-          </>
-        ) : (
-          <button
-            className="toolbar__button toolbar__button--text"
-            onClick={handleAutoLayout}
-            disabled={isLayouting || nodes.length === 0}
-            title="Auto-layout nodes using ELK algorithm"
-            aria-label="Auto-layout nodes using ELK algorithm"
-          >
-            {isLayouting && <span className="toolbar__spinner" />}
-            {isLayouting ? 'Layouting…' : 'Auto Layout'}
-          </button>
-        )}
+        <button
+          className="toolbar__button toolbar__button--text"
+          onClick={handleAutoLayout}
+          disabled={isLayouting || nodes.length === 0}
+          title="Auto-layout nodes using ELK algorithm"
+          aria-label="Auto-layout nodes using ELK algorithm"
+        >
+          {isLayouting && <span className="toolbar__spinner" />}
+          {isLayouting ? 'Layouting…' : 'Auto Layout'}
+        </button>
       </div>
 
       {/* Refresh Manifest (F305) */}
@@ -368,6 +378,21 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
             {matchingNodeIds.length}
           </span>
         )}
+      </div>
+
+      {/* Divider */}
+      <div className="toolbar__divider" />
+
+      {/* Column Expansion Toggle (F405) */}
+      <div className="toolbar__section">
+        <button
+          className="toolbar__button toolbar__button--text"
+          onClick={allExpanded ? onCollapseAll : onExpandAll}
+          title={allExpanded ? 'Collapse all columns to show fewer details' : 'Expand all columns to show full details'}
+          aria-label={allExpanded ? 'Collapse all columns' : 'Expand all columns'}
+        >
+          {allExpanded ? 'Collapse All' : 'Expand All'}
+        </button>
       </div>
 
       {/* Divider */}

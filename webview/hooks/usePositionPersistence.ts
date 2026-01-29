@@ -45,6 +45,7 @@ export function usePositionPersistence(): {
   const nodes = useEditorStore((s) => s.nodes);
   const setNodes = useEditorStore((s) => s.setNodes);
   const domain = useEditorStore((s) => s.domain);
+  const setDomain = useEditorStore((s) => s.setDomain);
 
   // Accumulate position changes for persistence (only final positions).
   const pendingChangesRef = useRef<Map<string, { x: number; y: number }>>(
@@ -74,7 +75,8 @@ export function usePositionPersistence(): {
 
       // Flush pending changes to extension host.
       if (pendingChangesRef.current.size > 0 && domainRef.current) {
-        const existingPositions = domainRef.current.viewConfig.positions ?? {};
+        const latestDomain = domainRef.current;
+        const existingPositions = latestDomain.viewConfig.positions ?? {};
         const updatedPositions = {
           ...existingPositions,
           ...Object.fromEntries(pendingChangesRef.current),
@@ -85,10 +87,20 @@ export function usePositionPersistence(): {
           payload: { positions: updatedPositions },
         };
         vscode.postMessage(message);
+
+        // Update domain state locally for consistency
+        setDomain({
+          ...latestDomain,
+          viewConfig: {
+            ...latestDomain.viewConfig,
+            positions: updatedPositions,
+          },
+        });
+
         pendingChangesRef.current.clear();
       }
     };
-  }, [vscode]);
+  }, [vscode, setDomain]);
 
   const onNodesChange: OnNodesChange<Node> = useCallback(
     (changes: NodeChange<Node>[]) => {
@@ -161,12 +173,22 @@ export function usePositionPersistence(): {
           };
           vscode.postMessage(message);
 
+          // Update domain state locally so subsequent saves use correct base positions.
+          // This prevents stale positions from overwriting recently saved ones.
+          setDomain({
+            ...latestDomain,
+            viewConfig: {
+              ...latestDomain.viewConfig,
+              positions: updatedPositions,
+            },
+          });
+
           pendingChangesRef.current.clear();
           timeoutRef.current = null;
         }, DEBOUNCE_DELAY_MS);
       }
     },
-    [setNodes, vscode],
+    [setNodes, setDomain, vscode],
   );
 
   return { onNodesChange };

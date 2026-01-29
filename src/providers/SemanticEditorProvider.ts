@@ -196,6 +196,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             await vscode.commands.executeCommand('dbtSemantic.refreshManifest');
             break;
           }
+          case 'undo': {
+            // Execute VS Code's native undo command, then save and refresh
+            await vscode.commands.executeCommand('undo');
+            await document.save();
+            await this.sendDomainData(document, webviewPanel.webview);
+            break;
+          }
+          case 'redo': {
+            // Execute VS Code's native redo command, then save and refresh
+            await vscode.commands.executeCommand('redo');
+            await document.save();
+            await this.sendDomainData(document, webviewPanel.webview);
+            break;
+          }
         }
       },
     );
