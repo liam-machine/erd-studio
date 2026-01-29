@@ -586,7 +586,7 @@
       "name": "Implement file watchers for manifest and semantic files",
       "description": "Create file watchers (src/watchers/fileWatchers.ts) that monitor: (1) target/manifest.json for changes (dbt compile ran), triggering reconciliation and graph refresh; (2) models/semantic/**/*.json for external changes (AI tools, git operations), triggering tree view and editor refresh; (3) dbt_project.yml for project config changes, triggering project root re-detection.",
       "phase": "phase-3",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F116"],
       "validation_criteria": [
