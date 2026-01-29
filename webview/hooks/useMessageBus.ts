@@ -7,47 +7,36 @@
  *
  * This hook subscribes to incoming messages on mount and provides a typed
  * `send` helper for outgoing messages.
+ *
+ * Type definitions live in src/types/messages.ts and are shared between
+ * the extension host and webview contexts.
  */
 
 import { useCallback, useEffect, useRef } from 'react';
 import { useVsCodeApi } from './useVsCodeApi';
 
-// ---------------------------------------------------------------------------
-// Extension → Webview messages
-// ---------------------------------------------------------------------------
+// Import shared message types from src/types/messages.ts
+export type {
+  ExtensionMessage,
+  WebviewMessage,
+  DomainLoadedMessage,
+  DomainUpdatedMessage,
+  ManifestRefreshedMessage,
+  ErrorMessage,
+  ReadyMessage,
+  AddModelMessage,
+  AddColumnMessage,
+  RemoveColumnMessage,
+  AddRelationshipMessage,
+  RemoveModelMessage,
+  RemoveRelationshipMessage,
+  UpdateViewConfigMessage,
+  AddExistingModelMessage,
+  UpdatePositionsMessage,
+  RunAutoLayoutMessage,
+} from '../../src/types/messages';
 
-import type { ReconciledDomain } from '../../src/types/reconciled';
-
-export interface DomainLoadedMessage {
-  type: 'domainLoaded';
-  payload: ReconciledDomain;
-}
-
-export interface ErrorMessage {
-  type: 'error';
-  payload: { message: string };
-}
-
-/** Union of all messages the extension can send to the webview. */
-export type ExtensionMessage = DomainLoadedMessage | ErrorMessage;
-
-// ---------------------------------------------------------------------------
-// Webview → Extension messages
-// ---------------------------------------------------------------------------
-
-export interface ReadyMessage {
-  type: 'ready';
-}
-
-export interface UpdatePositionsMessage {
-  type: 'updatePositions';
-  payload: {
-    positions: Record<string, { x: number; y: number }>;
-  };
-}
-
-/** Union of all messages the webview can send to the extension. */
-export type WebviewMessage = ReadyMessage | UpdatePositionsMessage;
+import type { ExtensionMessage, WebviewMessage } from '../../src/types/messages';
 
 // ---------------------------------------------------------------------------
 // Hook

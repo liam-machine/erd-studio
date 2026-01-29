@@ -63,6 +63,17 @@ export interface SemanticModel {
   plannedColumns?: ColumnDef[];
 }
 
+/**
+ * A design model definition used when creating new models via addModel message.
+ * All design models have source: 'design' and define columns inline.
+ */
+export interface DesignModel {
+  name: string;
+  schema: string;
+  description: string;
+  columns: ColumnDef[];
+}
+
 // ---------------------------------------------------------------------------
 // Relationships
 // ---------------------------------------------------------------------------
