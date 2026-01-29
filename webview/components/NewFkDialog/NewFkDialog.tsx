@@ -194,17 +194,18 @@ export function NewFkDialog() {
   }, []);
 
   // Apply prefill when dialog opens with prefill data (from drag-to-connect).
-  // Reset form first to clear any stale toColumn/touched state from previous sessions.
+  // Reset form first to clear any stale state from previous sessions.
   useEffect(() => {
     if (isOpen && fkDialogPrefill) {
-      // Reset all form state before applying prefill
-      setToColumn('');
+      // Reset non-prefilled form state
       setCardinality('many-to-one');
       setTouched({});
       // Apply prefilled values
       setFromModel(fkDialogPrefill.fromModel);
       setFromColumn(fkDialogPrefill.fromColumn);
       setToModel(fkDialogPrefill.toModel);
+      // Apply target column if user dropped on a specific column handle
+      setToColumn(fkDialogPrefill.toColumn ?? '');
     }
   }, [isOpen, fkDialogPrefill]);
 

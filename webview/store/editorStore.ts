@@ -22,6 +22,8 @@ export interface FkDialogPrefill {
   fromModel: string;
   fromColumn: string;
   toModel: string;
+  /** Optional target column — set when user drags to a specific column handle. */
+  toColumn?: string;
 }
 
 export interface EditorState {

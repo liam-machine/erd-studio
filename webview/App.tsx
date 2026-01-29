@@ -188,8 +188,8 @@ function EditorCanvas() {
       }
 
       // Parse source handle ID (format: "col-{sanitized_name}-right")
-      const match = connection.sourceHandle.match(/^col-(.+)-right$/);
-      if (!match) {
+      const sourceMatch = connection.sourceHandle.match(/^col-(.+)-right$/);
+      if (!sourceMatch) {
         // Not a column handle, ignore (node-level handles shouldn't trigger connections)
         return;
       }
@@ -203,18 +203,32 @@ function EditorCanvas() {
         return;
       }
 
-      // Look up the original column name from the domain data.
+      // Look up the original source column name from the domain data.
       // The handle ID is sanitized (special chars → underscores), so we need to find
       // the column whose sanitized name matches. Fallback to sanitized version if not found.
-      const sanitizedColumn = match[1];
-      const model = domain?.models.find((m) => m.name === fromModel);
-      const originalColumn = model?.columns.find(
-        (c) => c.name.replace(/[^a-zA-Z0-9_-]/g, '_') === sanitizedColumn,
+      const sanitizedSourceColumn = sourceMatch[1];
+      const sourceModel = domain?.models.find((m) => m.name === fromModel);
+      const originalSourceColumn = sourceModel?.columns.find(
+        (c) => c.name.replace(/[^a-zA-Z0-9_-]/g, '_') === sanitizedSourceColumn,
       );
-      const fromColumn = originalColumn?.name ?? sanitizedColumn;
+      const fromColumn = originalSourceColumn?.name ?? sanitizedSourceColumn;
+
+      // Check if user dropped on a target column handle (format: "col-{sanitized_name}-left")
+      let toColumn: string | undefined;
+      if (connection.targetHandle) {
+        const targetMatch = connection.targetHandle.match(/^col-(.+)-left$/);
+        if (targetMatch) {
+          const sanitizedTargetColumn = targetMatch[1];
+          const targetModel = domain?.models.find((m) => m.name === toModel);
+          const originalTargetColumn = targetModel?.columns.find(
+            (c) => c.name.replace(/[^a-zA-Z0-9_-]/g, '_') === sanitizedTargetColumn,
+          );
+          toColumn = originalTargetColumn?.name ?? sanitizedTargetColumn;
+        }
+      }
 
       // Open the FK dialog with prefilled source and target
-      openFkDialogWithPrefill({ fromModel, fromColumn, toModel });
+      openFkDialogWithPrefill({ fromModel, fromColumn, toModel, toColumn });
     },
     [openFkDialogWithPrefill, setToastMessage, domain],
   );

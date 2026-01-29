@@ -37,12 +37,13 @@ function handleId(column: string, side: 'left' | 'right'): string {
 
 /** Shared inline style for per-column handles (avoids !important overrides). */
 const HANDLE_STYLE: CSSProperties = {
-  width: 8,
-  height: 8,
+  width: 14,
+  height: 14,
   minWidth: 0,
   minHeight: 0,
   background: 'var(--focus-border)',
-  border: '1.5px solid var(--editor-bg)',
+  border: '2px solid var(--editor-bg)',
+  borderRadius: '50%',
   // opacity is controlled by CSS (.model-node__handle) so hover transitions work.
 };
 
