@@ -604,7 +604,7 @@
       "name": "Implement auto-reconciliation on manifest change",
       "description": "When the manifest file watcher detects a change (dbt compile ran), automatically reconcile all open domain editors. Call ReconciliationService.findNewlyBuiltModels() to detect design models that now appear in the manifest. For each newly built model, transition source from 'design' to 'repo' and remove inline columns. Send manifestRefreshed message to webview with the list of newly built model names. Orange nodes turn green.",
       "phase": "phase-3",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F303", "F111"],
       "validation_criteria": [
