@@ -10,8 +10,10 @@
  *   1. **Node-level handles** (top/right/bottom/left) — used by FkEdge for
  *      Power BI-style connections that route to whichever side creates the
  *      least bends.
- *   2. **Column-level handles** (col-{name}-left/right) — reserved for
- *      future column-specific routing (F109 ELK, F205 drag-to-connect).
+ *   2. **Column-level handles** (col-{name}-{side}-{type}) — bidirectional
+ *      handles on both left and right sides for drag-to-connect relationships.
+ *      Each side has both source and target handles to allow connections from
+ *      any direction.
  */
 
 import { memo, useMemo, type CSSProperties } from 'react';
@@ -31,9 +33,9 @@ const LAYER_BADGE: Record<string, string> = {
 };
 
 /** Sanitise a column name for use as a React Flow handle ID. */
-function handleId(column: string, side: 'left' | 'right'): string {
+function handleId(column: string, side: 'left' | 'right', type: 'src' | 'tgt'): string {
   const safe = column.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return `col-${safe}-${side}`;
+  return `col-${safe}-${side}-${type}`;
 }
 
 /** Shared inline style for per-column handles (avoids !important overrides). */
@@ -116,14 +118,24 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
               {builtCols.map((col) => (
                 <div key={col.name} className="model-node__column model-node__column--built">
                   {/* F405: Only show column handles when expanded */}
+                  {/* Bidirectional handles: both source and target on each side */}
                   {!isCollapsed && (
-                    <Handle
-                      type="target"
-                      position={Position.Left}
-                      id={handleId(col.name, 'left')}
-                      className="model-node__handle"
-                      style={HANDLE_STYLE}
-                    />
+                    <>
+                      <Handle
+                        type="source"
+                        position={Position.Left}
+                        id={handleId(col.name, 'left', 'src')}
+                        className="model-node__handle"
+                        style={HANDLE_STYLE}
+                      />
+                      <Handle
+                        type="target"
+                        position={Position.Left}
+                        id={handleId(col.name, 'left', 'tgt')}
+                        className="model-node__handle"
+                        style={HANDLE_STYLE}
+                      />
+                    </>
                   )}
 
                   <span className="model-node__col-indicators">
@@ -144,13 +156,22 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
                   <span className="model-node__col-type">{col.dataType}</span>
 
                   {!isCollapsed && (
-                    <Handle
-                      type="source"
-                      position={Position.Right}
-                      id={handleId(col.name, 'right')}
-                      className="model-node__handle"
-                      style={HANDLE_STYLE}
-                    />
+                    <>
+                      <Handle
+                        type="source"
+                        position={Position.Right}
+                        id={handleId(col.name, 'right', 'src')}
+                        className="model-node__handle"
+                        style={HANDLE_STYLE}
+                      />
+                      <Handle
+                        type="target"
+                        position={Position.Right}
+                        id={handleId(col.name, 'right', 'tgt')}
+                        className="model-node__handle"
+                        style={HANDLE_STYLE}
+                      />
+                    </>
                   )}
                 </div>
               ))}
@@ -166,14 +187,24 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
                   key={col.name}
                   className={`model-node__column model-node__column--${col.status}`}
                 >
+                  {/* Bidirectional handles: both source and target on each side */}
                   {!isCollapsed && (
-                    <Handle
-                      type="target"
-                      position={Position.Left}
-                      id={handleId(col.name, 'left')}
-                      className="model-node__handle"
-                      style={HANDLE_STYLE}
-                    />
+                    <>
+                      <Handle
+                        type="source"
+                        position={Position.Left}
+                        id={handleId(col.name, 'left', 'src')}
+                        className="model-node__handle"
+                        style={HANDLE_STYLE}
+                      />
+                      <Handle
+                        type="target"
+                        position={Position.Left}
+                        id={handleId(col.name, 'left', 'tgt')}
+                        className="model-node__handle"
+                        style={HANDLE_STYLE}
+                      />
+                    </>
                   )}
 
                   <span className="model-node__col-indicators">
@@ -194,13 +225,22 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
                   <span className="model-node__col-type">{col.dataType}</span>
 
                   {!isCollapsed && (
-                    <Handle
-                      type="source"
-                      position={Position.Right}
-                      id={handleId(col.name, 'right')}
-                      className="model-node__handle"
-                      style={HANDLE_STYLE}
-                    />
+                    <>
+                      <Handle
+                        type="source"
+                        position={Position.Right}
+                        id={handleId(col.name, 'right', 'src')}
+                        className="model-node__handle"
+                        style={HANDLE_STYLE}
+                      />
+                      <Handle
+                        type="target"
+                        position={Position.Right}
+                        id={handleId(col.name, 'right', 'tgt')}
+                        className="model-node__handle"
+                        style={HANDLE_STYLE}
+                      />
+                    </>
                   )}
                 </div>
               ))}

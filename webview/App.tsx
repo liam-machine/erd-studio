@@ -434,6 +434,7 @@ function EditorCanvas() {
   );
 
   // Handle drag-to-connect from column handles to open the FK dialog.
+  // Supports bidirectional connections: both left and right sides can be source or target.
   const onConnect = useCallback(
     (connection: Connection) => {
       // Only handle connections from column-level source handles
@@ -441,8 +442,8 @@ function EditorCanvas() {
         return;
       }
 
-      // Parse source handle ID (format: "col-{sanitized_name}-right")
-      const sourceMatch = connection.sourceHandle.match(/^col-(.+)-right$/);
+      // Parse source handle ID (format: "col-{sanitized_name}-(left|right)-src")
+      const sourceMatch = connection.sourceHandle.match(/^col-(.+)-(left|right)-src$/);
       if (!sourceMatch) {
         // Not a column handle, ignore (node-level handles shouldn't trigger connections)
         return;
@@ -467,10 +468,10 @@ function EditorCanvas() {
       );
       const fromColumn = originalSourceColumn?.name ?? sanitizedSourceColumn;
 
-      // Check if user dropped on a target column handle (format: "col-{sanitized_name}-left")
+      // Check if user dropped on a target column handle (format: "col-{sanitized_name}-(left|right)-tgt")
       let toColumn: string | undefined;
       if (connection.targetHandle) {
-        const targetMatch = connection.targetHandle.match(/^col-(.+)-left$/);
+        const targetMatch = connection.targetHandle.match(/^col-(.+)-(left|right)-tgt$/);
         if (targetMatch) {
           const sanitizedTargetColumn = targetMatch[1];
           const targetModel = domain?.models.find((m) => m.name === toModel);
