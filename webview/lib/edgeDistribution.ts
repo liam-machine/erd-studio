@@ -6,8 +6,9 @@
  * functions to distribute those connection points evenly along the side.
  *
  * The algorithm:
- *   1. Group edges by (nodeId, side, direction) — e.g., all source edges from
- *      "orders" node on the "right" side
+ *   1. Group edges by (nodeId, side) — ALL edges on a side, regardless of
+ *      direction (incoming/outgoing). This prevents overlap between source
+ *      and target edges that would otherwise be centered independently.
  *   2. For each edge, find its index in the sorted group (consistent ordering)
  *   3. Calculate offset from center: evenly divide the side length
  *   4. Apply offset perpendicular to the edge direction
@@ -42,7 +43,7 @@ export interface EdgeOffset {
 // ---------------------------------------------------------------------------
 
 /**
- * Get all edge IDs that connect to a specific node side.
+ * Get all edge IDs that connect to a specific node side in a specific direction.
  *
  * @param edges — all edges in the graph
  * @param nodeId — the node to check connections for
@@ -67,6 +68,36 @@ export function getEdgesForSide(
       } else {
         return edge.target === nodeId && edge.targetHandle === expectedHandle;
       }
+    })
+    .map((edge) => edge.id)
+    .sort(); // Sort for consistent ordering across renders
+}
+
+/**
+ * Get all edge IDs that connect to a specific node side, regardless of direction.
+ *
+ * This includes both edges where the node is the source (outgoing) AND edges
+ * where it's the target (incoming). Used for distribution to prevent overlap
+ * between incoming and outgoing edges on the same side.
+ *
+ * @param edges — all edges in the graph
+ * @param nodeId — the node to check connections for
+ * @param side — which side of the node (top/right/bottom/left)
+ * @returns Sorted array of edge IDs for consistent ordering
+ */
+export function getAllEdgesForSide(
+  edges: Edge[],
+  nodeId: string,
+  side: Side,
+): string[] {
+  const sourceHandle = `node-${side}-src`;
+  const targetHandle = `node-${side}-tgt`;
+
+  return edges
+    .filter((edge) => {
+      const isSourceOnSide = edge.source === nodeId && edge.sourceHandle === sourceHandle;
+      const isTargetOnSide = edge.target === nodeId && edge.targetHandle === targetHandle;
+      return isSourceOnSide || isTargetOnSide;
     })
     .map((edge) => edge.id)
     .sort(); // Sort for consistent ordering across renders
@@ -170,11 +201,13 @@ export function calculateDistributionOffset(
  * Calculate the full offset for an edge's connection point.
  *
  * This is the main entry point — combines grouping and offset calculation.
+ * Groups ALL edges on a side together (both incoming and outgoing) to prevent
+ * overlap between source and target edges.
  *
  * @param edgeId — the edge to calculate offset for
  * @param nodeId — the node this edge connects to
  * @param side — which side of the node
- * @param isSource — true if calculating source offset, false for target
+ * @param isSource — true if calculating source offset, false for target (kept for API compatibility)
  * @param allEdges — all edges in the graph
  * @param sideLength — width (for top/bottom) or height (for left/right) of the node
  * @returns Offset in pixels from the center of the side
@@ -187,8 +220,9 @@ export function calculateEdgeOffset(
   allEdges: Edge[],
   sideLength: number,
 ): EdgeOffset {
-  // Get all edges connecting to this node side
-  const edgesForSide = getEdgesForSide(allEdges, nodeId, side, isSource);
+  // Get ALL edges connecting to this node side (both directions)
+  // This ensures incoming and outgoing edges don't overlap at the same point
+  const edgesForSide = getAllEdgesForSide(allEdges, nodeId, side);
 
   // Find this edge's index in the group
   const edgeIndex = edgesForSide.indexOf(edgeId);
