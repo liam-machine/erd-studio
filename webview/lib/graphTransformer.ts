@@ -98,7 +98,7 @@ function pickHandleSides(
  * @returns nodes and edges ready for React Flow's `<ReactFlow>` component
  */
 export function transformDomain(domain: ReconciledDomain): TransformResult {
-  const { models, relationships, viewConfig, layer } = domain;
+  const { models, relationships, viewConfig, layer, layerConfig } = domain;
   const positions = viewConfig.positions ?? {};
 
   // Build a map of model name → position for edge handle selection.
@@ -121,6 +121,7 @@ export function transformDomain(domain: ReconciledDomain): TransformResult {
         modelName: model.name,
         status: model.status,
         layer,
+        layerConfig,
         columns,
       },
     };

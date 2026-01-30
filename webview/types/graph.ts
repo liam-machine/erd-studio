@@ -8,6 +8,7 @@
 
 import type { Node, Edge } from '@xyflow/react';
 import type { Cardinality, Layer } from '../../src/types/semantic';
+import type { LayerConfig } from '../../src/types/layer';
 
 // ---------------------------------------------------------------------------
 // Model status
@@ -51,6 +52,8 @@ export type ModelNodeData = {
   status: ModelStatus;
   /** Data warehouse layer. */
   layer: Layer;
+  /** Layer configuration for dynamic badge styling (color, abbreviation). */
+  layerConfig?: LayerConfig;
   /** Columns to display, enriched with PK/FK flags. */
   columns: ColumnDisplay[];
   /** Whether the node is dimmed (doesn't match current search query). */

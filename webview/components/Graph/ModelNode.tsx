@@ -69,7 +69,7 @@ const NODE_HANDLE_STYLE: CSSProperties = {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, layer, columns, dimmed, isExpanded = false, onToggleExpansion } = data;
+  const { modelName, status, layer, layerConfig, columns, dimmed, isExpanded = false, onToggleExpansion } = data;
 
   // F405: Compute visible columns based on expansion state
   const { displayColumns, hiddenCount, isCollapsed } = useMemo(() => {
@@ -104,8 +104,14 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         <span className="model-node__name" title={modelName}>
           {modelName}
         </span>
-        <span className="model-node__badge">
-          {LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
+        <span
+          className="model-node__badge"
+          style={layerConfig?.color ? {
+            backgroundColor: `${layerConfig.color}33`, // 20% opacity
+            color: layerConfig.color,
+          } : undefined}
+        >
+          {layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
       </div>
 
