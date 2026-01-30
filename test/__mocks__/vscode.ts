@@ -36,6 +36,7 @@ export const window = {
   }),
   registerTreeDataProvider: () => ({ dispose: () => {} }),
   registerCustomEditorProvider: () => ({ dispose: () => {} }),
+  createTreeView: () => ({ dispose: () => {} }),
 };
 
 export const commands = {
@@ -112,6 +113,40 @@ export class Disposable {
         }
       },
     };
+  }
+}
+
+/**
+ * Mock DataTransferItem for drag-and-drop testing.
+ */
+export class DataTransferItem {
+  constructor(public readonly value: unknown) {}
+  asString(): Thenable<string> {
+    return Promise.resolve(String(this.value));
+  }
+  asFile(): undefined {
+    return undefined;
+  }
+}
+
+/**
+ * Mock DataTransfer for drag-and-drop testing.
+ */
+export class DataTransfer {
+  private items = new Map<string, DataTransferItem>();
+
+  get(mimeType: string): DataTransferItem | undefined {
+    return this.items.get(mimeType);
+  }
+
+  set(mimeType: string, value: DataTransferItem): void {
+    this.items.set(mimeType, value);
+  }
+
+  forEach(
+    callback: (value: DataTransferItem, mimeType: string) => void,
+  ): void {
+    this.items.forEach((value, key) => callback(value, key));
   }
 }
 

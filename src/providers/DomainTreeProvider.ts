@@ -5,6 +5,8 @@
  * Each domain shows a badge with model count and design model count.
  * "New Domain..." items appear inside silver and gold layer folders
  * (bronze is raw/staging and not used for semantic domain design).
+ *
+ * Supports drag-and-drop to reorder layers.
  */
 
 import * as vscode from 'vscode';
@@ -15,6 +17,9 @@ import * as path from 'path';
 import type { DomainSummary, Layer } from '../types/semantic';
 import { DomainService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
+
+/** MIME type for layer drag-drop within the tree. */
+const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
 
 // ---------------------------------------------------------------------------
 // Tree element types (discriminated union)
@@ -46,10 +51,15 @@ export type TreeElement = LayerNode | DomainNode | NewDomainNode;
 /** Default semantic directory relative to project root. */
 const DEFAULT_SEMANTIC_DIR = 'models/semantic';
 
-export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> {
+export class DomainTreeProvider
+  implements vscode.TreeDataProvider<TreeElement>, vscode.TreeDragAndDropController<TreeElement> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<TreeElement | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private readonly semanticDir: string;
+
+  // TreeDragAndDropController properties
+  readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
+  readonly dragMimeTypes = [LAYER_DRAG_MIME_TYPE];
 
   constructor(
     private readonly domainService: DomainService,
@@ -58,6 +68,72 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
     semanticDir?: string,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
+  }
+
+  // -------------------------------------------------------------------------
+  // TreeDragAndDropController implementation
+  // -------------------------------------------------------------------------
+
+  /**
+   * Handle drag start — only allow dragging layer nodes.
+   */
+  handleDrag(
+    source: readonly TreeElement[],
+    dataTransfer: vscode.DataTransfer,
+    _token: vscode.CancellationToken,
+  ): void | Thenable<void> {
+    // Only allow dragging single layer nodes
+    if (source.length !== 1 || source[0].type !== 'layer') {
+      return;
+    }
+
+    const layerNode = source[0];
+    dataTransfer.set(LAYER_DRAG_MIME_TYPE, new vscode.DataTransferItem(layerNode.layer));
+  }
+
+  /**
+   * Handle drop — reorder layers when dropping on another layer.
+   */
+  async handleDrop(
+    target: TreeElement | undefined,
+    dataTransfer: vscode.DataTransfer,
+    _token: vscode.CancellationToken,
+  ): Promise<void> {
+    // Get the dragged layer ID
+    const transferItem = dataTransfer.get(LAYER_DRAG_MIME_TYPE);
+    if (!transferItem) return;
+
+    const draggedLayerId = transferItem.value as string;
+
+    // Target must be a layer node (or undefined for root)
+    if (!target || target.type !== 'layer') return;
+
+    const targetLayerId = target.layer;
+
+    // Don't do anything if dropping on itself
+    if (draggedLayerId === targetLayerId) return;
+
+    // Get current layer order
+    const layers = this.layerService.getAllLayers();
+    const layerIds = layers.map(l => l.id);
+
+    // Find positions
+    const draggedIndex = layerIds.indexOf(draggedLayerId);
+    const targetIndex = layerIds.indexOf(targetLayerId);
+
+    if (draggedIndex === -1 || targetIndex === -1) return;
+
+    // Remove from old position and insert at new position
+    layerIds.splice(draggedIndex, 1);
+    layerIds.splice(targetIndex, 0, draggedLayerId);
+
+    try {
+      await this.layerService.reorderLayers(layerIds);
+      this.refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
+    }
   }
 
   /** Refresh the entire tree (or a specific element). */

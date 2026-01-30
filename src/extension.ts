@@ -246,7 +246,11 @@ export function activate(context: vscode.ExtensionContext): void {
     manifestChangedSubscription,
     semanticChangedSubscription,
     projectChangedSubscription,
-    vscode.window.registerTreeDataProvider('dbtSemantic.domainTree', treeProvider),
+    vscode.window.createTreeView('dbtSemantic.domainTree', {
+      treeDataProvider: treeProvider,
+      dragAndDropController: treeProvider,
+      canSelectMany: false,
+    }),
     vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
     vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.commands.registerCommand('dbtSemantic.openDomain', (filePath: string) => {
