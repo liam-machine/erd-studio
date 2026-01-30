@@ -12,6 +12,7 @@ import type { Viewport } from '@xyflow/react';
 import type { ManifestModelPreview, ReconciledDomain } from '../../src/types/reconciled';
 import type { ModelFlowNode, FkFlowEdge, FkEdgeData } from '../types/graph';
 import type { ModelTemplate } from '../../src/types/semantic';
+import type { PaletteId } from '../lib/colorPalettes';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,6 +72,12 @@ export interface EditorState {
   contextMenu: EdgeContextMenu | null;
   /** Internal: registered search focus function (not persisted). */
   _searchFocusFn: (() => void) | null;
+  /** Current colour palette ID. */
+  paletteId: PaletteId;
+  /** Whether the legend panel is visible. */
+  legendOpen: boolean;
+  /** Whether the welcome modal is visible. */
+  welcomeModalOpen: boolean;
 }
 
 export interface EditorActions {
@@ -103,6 +110,12 @@ export interface EditorActions {
   registerSearchFocus: (focusFn: (() => void) | null) => void;
   /** Focus the search input (called by keyboard handler). */
   focusSearchInput: () => void;
+  /** Set the colour palette. */
+  setPaletteId: (paletteId: PaletteId) => void;
+  /** Toggle the legend panel visibility. */
+  setLegendOpen: (open: boolean) => void;
+  /** Toggle the welcome modal visibility. */
+  setWelcomeModalOpen: (open: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +142,9 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   manifestModels: [],
   contextMenu: null,
   _searchFocusFn: null,
+  paletteId: 'coolWarm',
+  legendOpen: false,
+  welcomeModalOpen: false,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -156,4 +172,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     const { _searchFocusFn } = useEditorStore.getState();
     if (_searchFocusFn) _searchFocusFn();
   },
+  setPaletteId: (paletteId) => set({ paletteId }),
+  setLegendOpen: (open) => set({ legendOpen: open }),
+  setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
 }));

@@ -16,6 +16,12 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
 import { runElkLayout } from '../../lib/elkLayout';
+import {
+  PALETTES,
+  applyPalette,
+  persistPalette,
+  type PaletteId,
+} from '../../lib/colorPalettes';
 import type { ModelFlowNode, FkFlowEdge } from '../../types/graph';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './Toolbar.css';
@@ -63,6 +69,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
+  const paletteId = useEditorStore((s) => s.paletteId);
+  const setPaletteId = useEditorStore((s) => s.setPaletteId);
 
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
@@ -77,6 +85,10 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   // Model dropdown state
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Palette dropdown state
+  const [paletteDropdownOpen, setPaletteDropdownOpen] = useState(false);
+  const paletteDropdownRef = useRef<HTMLDivElement>(null);
 
   // Search input ref (for Ctrl+F focus)
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -126,6 +138,36 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [modelDropdownOpen]);
+
+  // --- Palette dropdown click-outside handler -------------------------------
+
+  useEffect(() => {
+    if (!paletteDropdownOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        paletteDropdownRef.current &&
+        !paletteDropdownRef.current.contains(e.target as Node)
+      ) {
+        setPaletteDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [paletteDropdownOpen]);
+
+  // --- Palette change handler ------------------------------------------------
+
+  const handlePaletteChange = useCallback(
+    (newPalette: PaletteId) => {
+      setPaletteId(newPalette);
+      applyPalette(newPalette);
+      persistPalette(newPalette);
+      setPaletteDropdownOpen(false);
+    },
+    [setPaletteId],
+  );
 
   // --- Search handlers -----------------------------------------------------
 
@@ -404,6 +446,63 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         >
           {allExpanded ? 'Collapse All' : 'Expand All'}
         </button>
+      </div>
+
+      {/* Divider */}
+      <div className="toolbar__divider" />
+
+      {/* Palette Dropdown */}
+      <div className="toolbar__section">
+        <div className="toolbar__dropdown" ref={paletteDropdownRef}>
+          <button
+            className="toolbar__dropdown-trigger toolbar__dropdown-trigger--palette"
+            onClick={() => setPaletteDropdownOpen(!paletteDropdownOpen)}
+            title="Change colour palette"
+            aria-label="Change colour palette"
+            aria-haspopup="menu"
+            aria-expanded={paletteDropdownOpen}
+          >
+            <span
+              className="toolbar__palette-swatch"
+              style={{ backgroundColor: PALETTES[paletteId].colors.modelBuilt }}
+            />
+            <span
+              className="toolbar__palette-swatch"
+              style={{ backgroundColor: PALETTES[paletteId].colors.modelDesign }}
+            />
+            <span className="toolbar__dropdown-arrow">▾</span>
+          </button>
+          {paletteDropdownOpen && (
+            <div className="toolbar__dropdown-menu toolbar__dropdown-menu--palette" role="menu">
+              {(Object.keys(PALETTES) as PaletteId[]).map((id) => {
+                const palette = PALETTES[id];
+                const isSelected = paletteId === id;
+                return (
+                  <button
+                    key={id}
+                    className={`toolbar__dropdown-item toolbar__dropdown-item--palette${isSelected ? ' toolbar__dropdown-item--selected' : ''}`}
+                    onClick={() => handlePaletteChange(id)}
+                    role="menuitem"
+                    aria-checked={isSelected}
+                  >
+                    <span className="toolbar__palette-preview">
+                      <span
+                        className="toolbar__palette-swatch"
+                        style={{ backgroundColor: palette.colors.modelBuilt }}
+                      />
+                      <span
+                        className="toolbar__palette-swatch"
+                        style={{ backgroundColor: palette.colors.modelDesign }}
+                      />
+                    </span>
+                    <span className="toolbar__palette-name">{palette.name}</span>
+                    {isSelected && <span className="toolbar__check">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Divider */}

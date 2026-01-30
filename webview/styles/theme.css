@@ -69,27 +69,29 @@ body {
      Design tokens — model status colours
      ----------------------------------------------------------------------- */
 
-  /* Built (exists in manifest) — green */
-  --model-built: #22c55e;
-  --model-built-bg: rgba(34, 197, 94, 0.08);
+  /* Built (exists in manifest) — defaults before palette applied */
+  --model-built: #60a5fa;
+  --model-built-bg: rgba(96, 165, 250, 0.08);
+  --model-built-text: #ffffff;
 
-  /* Design (planned, not yet in manifest) — orange */
-  --model-design: #f97316;
-  --model-design-bg: rgba(249, 115, 22, 0.08);
+  /* Design (planned, not yet in manifest) — defaults before palette applied */
+  --model-design: #ea580c;
+  --model-design-bg: rgba(234, 88, 12, 0.08);
+  --model-design-text: #ffffff;
 
   /* Missing (repo model not found in manifest) — grey */
-  --model-missing: #6b7280;
-  --model-missing-bg: rgba(107, 114, 128, 0.08);
+  --model-missing: #9ca3af;
+  --model-missing-bg: rgba(156, 163, 175, 0.08);
 
   /* -----------------------------------------------------------------------
      Design tokens — edge colours
      ----------------------------------------------------------------------- */
 
-  /* Built FK relationship — blue */
-  --edge-built: #3b82f6;
+  /* Built FK relationship — defaults before palette applied */
+  --edge-built: #60a5fa;
 
-  /* Design FK relationship — orange */
-  --edge-design: #f97316;
+  /* Design FK relationship — defaults before palette applied */
+  --edge-design: #ea580c;
 
   /* -----------------------------------------------------------------------
      Design tokens — layer badge colours

@@ -40,7 +40,14 @@ import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
+import { Legend } from './components/Legend/Legend';
+import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { transformDomain } from './lib/graphTransformer';
+import {
+  applyPalette,
+  loadPersistedPalette,
+  getPaletteColors,
+} from './lib/colorPalettes';
 import type { ModelFlowNode, FkFlowEdge } from './types/graph';
 
 // ---------------------------------------------------------------------------
@@ -115,6 +122,12 @@ function EditorCanvas() {
   // Search state (F402)
   const searchQuery = useEditorStore((s) => s.searchQuery);
   const focusSearchInput = useEditorStore((s) => s.focusSearchInput);
+  // Legend state
+  const legendOpen = useEditorStore((s) => s.legendOpen);
+  const setLegendOpen = useEditorStore((s) => s.setLegendOpen);
+  // Palette state
+  const paletteId = useEditorStore((s) => s.paletteId);
+  const setPaletteId = useEditorStore((s) => s.setPaletteId);
 
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
@@ -140,6 +153,13 @@ function EditorCanvas() {
 
   // Memoized callback for toast dismissal (prevents timer re-creation)
   const dismissToast = useCallback(() => setToastMessage(null), []);
+
+  // Initialize colour palette on mount
+  useEffect(() => {
+    const savedPalette = loadPersistedPalette();
+    setPaletteId(savedPalette);
+    applyPalette(savedPalette);
+  }, [setPaletteId]);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -193,6 +213,13 @@ function EditorCanvas() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
         focusSearchInput();
+        return;
+      }
+
+      // Shift+? : Toggle legend panel
+      if (e.shiftKey && e.key === '?') {
+        e.preventDefault();
+        setLegendOpen(!legendOpen);
         return;
       }
 
@@ -322,6 +349,8 @@ function EditorCanvas() {
     setSelectedEdges,
     setToastMessage,
     focusSearchInput,
+    legendOpen,
+    setLegendOpen,
     // Note: vscode is omitted as it's a stable ref from useVsCodeApi
   ]);
 
@@ -591,10 +620,11 @@ function EditorCanvas() {
           position="bottom-right"
           nodeColor={(node) => {
             const status = node.data?.status;
-            if (status === 'built') return '#22c55e';
-            if (status === 'design') return '#f97316';
-            if (status === 'missing') return '#6b7280';
-            return '#6b7280';
+            const colors = getPaletteColors(paletteId);
+            if (status === 'built') return colors.modelBuilt;
+            if (status === 'design') return colors.modelDesign;
+            if (status === 'missing') return colors.modelMissing;
+            return colors.modelMissing;
           }}
           maskColor="rgba(0, 0, 0, 0.2)"
           style={{
@@ -623,6 +653,12 @@ function EditorCanvas() {
 
       {/* Edge context menu (F401) */}
       {contextMenu && <ContextMenu />}
+
+      {/* Legend panel (bottom-left) */}
+      <Legend />
+
+      {/* Welcome modal (first-time users) */}
+      <WelcomeModal />
     </div>
   );
 }

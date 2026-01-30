@@ -1,0 +1,288 @@
+/**
+ * Legend panel styles.
+ *
+ * Uses VS Code theme tokens from webview/styles/theme.css for consistent
+ * dark/light support. Model and edge colours use the palette CSS variables.
+ */
+
+/* ---------------------------------------------------------------------------
+   Toggle button (collapsed state)
+   --------------------------------------------------------------------------- */
+
+.legend-toggle {
+  z-index: 10;
+}
+
+.legend-toggle__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--editor-fg);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.legend-toggle__button:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Panel (expanded state)
+   --------------------------------------------------------------------------- */
+
+.legend {
+  max-width: 260px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  z-index: 10;
+}
+
+.legend__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.legend__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.legend__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.1s ease, background 0.1s ease;
+}
+
+.legend__close:hover {
+  opacity: 1;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Content area
+   --------------------------------------------------------------------------- */
+
+.legend__content {
+  padding: 8px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Sections
+   --------------------------------------------------------------------------- */
+
+.legend__section {
+  padding: 8px 12px;
+}
+
+.legend__section:not(:last-child) {
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.legend__section-title {
+  margin: 0 0 8px 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------------------
+   Items
+   --------------------------------------------------------------------------- */
+
+.legend__items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legend__items--cardinality {
+  gap: 6px;
+}
+
+.legend__items--badges {
+  flex-direction: row;
+  gap: 16px;
+}
+
+.legend__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.legend__item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.legend__item-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--editor-fg);
+}
+
+.legend__item-desc {
+  font-size: 10px;
+  color: var(--editor-fg);
+  opacity: 0.6;
+}
+
+/* ---------------------------------------------------------------------------
+   Model card samples
+   --------------------------------------------------------------------------- */
+
+.legend__model-card {
+  width: 36px;
+  height: 24px;
+  border-radius: 3px;
+  border-width: 2px;
+  border-style: solid;
+  background: var(--panel-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+.legend__model-card--built {
+  border-color: var(--model-built);
+}
+
+.legend__model-card--design {
+  border-color: var(--model-design);
+}
+
+.legend__model-card--missing {
+  border-color: var(--model-missing);
+  opacity: 0.6;
+}
+
+.legend__model-header {
+  height: 8px;
+}
+
+.legend__model-header--built {
+  background: var(--model-built);
+}
+
+.legend__model-header--design {
+  background: var(--model-design);
+}
+
+.legend__model-header--missing {
+  background: var(--model-missing);
+}
+
+/* ---------------------------------------------------------------------------
+   Edge samples (SVG lines)
+   --------------------------------------------------------------------------- */
+
+.legend__edge-sample {
+  width: 48px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.legend__edge {
+  stroke-width: 2;
+}
+
+.legend__edge--built {
+  stroke: var(--edge-built);
+}
+
+.legend__edge--design {
+  stroke: var(--edge-design);
+}
+
+.legend__edge--dashed {
+  stroke-dasharray: 6 3;
+}
+
+.legend__edge--dotted {
+  stroke-dasharray: 2 4;
+}
+
+/* ---------------------------------------------------------------------------
+   Cardinality display
+   --------------------------------------------------------------------------- */
+
+.legend__cardinality {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 56px;
+}
+
+.legend__cardinality-line {
+  width: 28px;
+  height: 8px;
+}
+
+.legend__cardinality-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--edge-built);
+  min-width: 10px;
+  text-align: center;
+}
+
+.legend__cardinality-label--many {
+  font-size: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   Column badges
+   --------------------------------------------------------------------------- */
+
+.legend__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.legend__badge--pk {
+  background: rgba(250, 204, 21, 0.2);
+  color: #facc15;
+}
+
+.legend__badge--fk {
+  background: rgba(96, 165, 250, 0.2);
+  color: var(--edge-built);
+}
