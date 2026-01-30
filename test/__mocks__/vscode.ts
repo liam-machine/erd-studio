@@ -81,10 +81,19 @@ export class TreeItem {
   }
 }
 
-export class ThemeIcon {
+export class ThemeColor {
   id: string;
   constructor(id: string) {
     this.id = id;
+  }
+}
+
+export class ThemeIcon {
+  id: string;
+  color?: ThemeColor;
+  constructor(id: string, color?: ThemeColor) {
+    this.id = id;
+    this.color = color;
   }
 }
 

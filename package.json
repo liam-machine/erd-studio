@@ -87,6 +87,33 @@
         }
       ]
     },
+    "colors": [
+      {
+        "id": "dbtSemantic.layer.bronze",
+        "description": "Color for bronze layer folders",
+        "defaults": { "dark": "#cd7f32", "light": "#cd7f32", "highContrast": "#cd7f32" }
+      },
+      {
+        "id": "dbtSemantic.layer.silver",
+        "description": "Color for silver layer folders",
+        "defaults": { "dark": "#a0a0a0", "light": "#808080", "highContrast": "#a0a0a0" }
+      },
+      {
+        "id": "dbtSemantic.layer.gold",
+        "description": "Color for gold layer folders",
+        "defaults": { "dark": "#d4a800", "light": "#b8960a", "highContrast": "#d4a800" }
+      },
+      {
+        "id": "dbtSemantic.layer.platinum",
+        "description": "Color for platinum layer folders",
+        "defaults": { "dark": "#e5e4e2", "light": "#c0c0c0", "highContrast": "#e5e4e2" }
+      },
+      {
+        "id": "dbtSemantic.layer.custom",
+        "description": "Color for custom layer folders",
+        "defaults": { "dark": "#6a9fb5", "light": "#4a7f95", "highContrast": "#6a9fb5" }
+      }
+    ],
     "viewsWelcome": [
       {
         "view": "dbtSemantic.domainTree",

@@ -210,7 +210,15 @@ export class DomainTreeProvider
       vscode.TreeItemCollapsibleState.Expanded,
     );
     item.contextValue = 'layer';
-    item.iconPath = new vscode.ThemeIcon('folder');
+
+    // Use colored folder icon based on layer
+    // Known layers use their predefined color, others use custom color
+    const knownLayers = ['bronze', 'silver', 'gold', 'platinum'];
+    const colorId = knownLayers.includes(element.layer)
+      ? `dbtSemantic.layer.${element.layer}`
+      : 'dbtSemantic.layer.custom';
+    item.iconPath = new vscode.ThemeIcon('folder', new vscode.ThemeColor(colorId));
+
     return item;
   }
 
