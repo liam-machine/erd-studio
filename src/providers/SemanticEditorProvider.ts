@@ -183,6 +183,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'updateRelationship': {
+            const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
+            if (payload) {
+              await this.handleUpdateRelationship(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
           case 'addExistingModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
@@ -240,6 +247,57 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Generic helper to apply a mutation to the domain JSON and persist it.
+   * Handles the common WorkspaceEdit pattern used by all mutation handlers.
+   *
+   * @param document - The VS Code text document to edit
+   * @param mutator - Function that mutates the parsed JSON object
+   * @param options.refreshWebview - If true (default), calls sendDomainData after save
+   * @returns true if the edit was applied successfully, false otherwise
+   * @throws Error if mutation throws (caller should catch and report to webview)
+   */
+  private async applyDomainEdit(
+    document: vscode.TextDocument,
+    mutator: (parsed: Record<string, unknown>) => void,
+    options: { refreshWebview?: boolean; webview?: vscode.Webview } = {},
+  ): Promise<boolean> {
+    const { refreshWebview = true, webview } = options;
+    const panelKey = document.uri.toString();
+
+    const text = document.getText();
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+
+    // Apply the mutation
+    mutator(parsed);
+
+    const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(
+      document.positionAt(0),
+      document.positionAt(text.length),
+    );
+    edit.replace(document.uri, fullRange, updatedText);
+
+    this.pendingUpdates.set(panelKey, true);
+    const success = await vscode.workspace.applyEdit(edit);
+
+    if (success) {
+      try {
+        await document.save();
+        if (refreshWebview && webview) {
+          await this.sendDomainData(document, webview);
+        }
+      } finally {
+        this.pendingUpdates.delete(panelKey);
+      }
+      return true;
+    } else {
+      this.pendingUpdates.delete(panelKey);
+      return false;
+    }
+  }
 
   /**
    * Parse the document, reconcile with manifest, and send to webview.
@@ -788,66 +846,44 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     },
   ): Promise<void> {
     try {
-      const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
 
-      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+          // Check for duplicate relationship (same composite key)
+          const isDuplicate = relationships.some(
+            (rel) =>
+              rel.fromModel === payload.fromModel &&
+              rel.fromColumn === payload.fromColumn &&
+              rel.toModel === payload.toModel &&
+              rel.toColumn === payload.toColumn,
+          );
+          if (isDuplicate) {
+            throw new Error('This relationship already exists.');
+          }
 
-      // Check for duplicate relationship (same composite key)
-      const isDuplicate = relationships.some(
-        (rel) =>
-          rel.fromModel === payload.fromModel &&
-          rel.fromColumn === payload.fromColumn &&
-          rel.toModel === payload.toModel &&
-          rel.toColumn === payload.toColumn,
+          // Add the new relationship with source: 'design'
+          relationships.push({
+            fromModel: payload.fromModel,
+            fromColumn: payload.fromColumn,
+            toModel: payload.toModel,
+            toColumn: payload.toColumn,
+            cardinality: payload.cardinality,
+            source: 'design',
+          });
+          parsed.relationships = relationships;
+        },
+        { webview },
       );
-      if (isDuplicate) {
-        webview.postMessage({
-          type: 'error',
-          payload: { message: 'This relationship already exists.' },
-        });
-        return;
-      }
 
-      // Add the new relationship with source: 'design'
-      relationships.push({
-        fromModel: payload.fromModel,
-        fromColumn: payload.fromColumn,
-        toModel: payload.toModel,
-        toColumn: payload.toColumn,
-        cardinality: payload.cardinality,
-        source: 'design',
-      });
-
-      parsed.relationships = relationships;
-      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
-
-      const edit = new vscode.WorkspaceEdit();
-      const fullRange = new vscode.Range(
-        document.positionAt(0),
-        document.positionAt(text.length),
-      );
-      edit.replace(document.uri, fullRange, updatedText);
-
-      this.pendingUpdates.set(document.uri.toString(), true);
-      const success = await vscode.workspace.applyEdit(edit);
-
-      if (success) {
-        try {
-          await document.save();
-          await this.sendDomainData(document, webview);
-        } finally {
-          this.pendingUpdates.delete(document.uri.toString());
-        }
-      } else {
-        this.pendingUpdates.delete(document.uri.toString());
+      if (!success) {
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to add relationship.' },
         });
       }
     } catch (err) {
-      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
       webview.postMessage({
@@ -952,72 +988,99 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     },
   ): Promise<void> {
     try {
-      const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
-      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+          const relIndex = relationships.findIndex(
+            (rel) =>
+              rel.fromModel === payload.fromModel &&
+              rel.fromColumn === payload.fromColumn &&
+              rel.toModel === payload.toModel &&
+              rel.toColumn === payload.toColumn,
+          );
 
-      const relIndex = relationships.findIndex(
-        (rel) =>
-          rel.fromModel === payload.fromModel &&
-          rel.fromColumn === payload.fromColumn &&
-          rel.toModel === payload.toModel &&
-          rel.toColumn === payload.toColumn,
+          if (relIndex === -1) {
+            throw new Error('Relationship not found.');
+          }
+
+          const relationship = relationships[relIndex];
+          if (relationship.source !== 'design') {
+            throw new Error('Cannot delete built relationship. Only design relationships can be deleted.');
+          }
+
+          relationships.splice(relIndex, 1);
+          parsed.relationships = relationships;
+        },
+        { webview },
       );
 
-      if (relIndex === -1) {
-        webview.postMessage({
-          type: 'error',
-          payload: { message: 'Relationship not found.' },
-        });
-        return;
-      }
-
-      const relationship = relationships[relIndex];
-      // Only allow deleting design relationships
-      if (relationship.source !== 'design') {
-        webview.postMessage({
-          type: 'error',
-          payload: { message: 'Cannot delete built relationship. Only design relationships can be deleted.' },
-        });
-        return;
-      }
-
-      // Remove the relationship
-      relationships.splice(relIndex, 1);
-      parsed.relationships = relationships;
-
-      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
-      const edit = new vscode.WorkspaceEdit();
-      const fullRange = new vscode.Range(
-        document.positionAt(0),
-        document.positionAt(text.length),
-      );
-      edit.replace(document.uri, fullRange, updatedText);
-
-      this.pendingUpdates.set(document.uri.toString(), true);
-      const success = await vscode.workspace.applyEdit(edit);
-
-      if (success) {
-        try {
-          await document.save();
-          await this.sendDomainData(document, webview);
-        } finally {
-          this.pendingUpdates.delete(document.uri.toString());
-        }
-      } else {
-        this.pendingUpdates.delete(document.uri.toString());
+      if (!success) {
         webview.postMessage({
           type: 'error',
           payload: { message: 'Failed to remove relationship.' },
         });
       }
     } catch (err) {
-      this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Remove relationship failed: ${message}`);
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to remove relationship: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle updateRelationship message — updates a relationship's cardinality.
+   * Works for both design and built relationships.
+   */
+  private async handleUpdateRelationship(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: {
+      fromModel: string;
+      fromColumn: string;
+      toModel: string;
+      toColumn: string;
+      cardinality: Cardinality;
+    },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+          const relIndex = relationships.findIndex(
+            (rel) =>
+              rel.fromModel === payload.fromModel &&
+              rel.fromColumn === payload.fromColumn &&
+              rel.toModel === payload.toModel &&
+              rel.toColumn === payload.toColumn,
+          );
+
+          if (relIndex === -1) {
+            throw new Error('Relationship not found.');
+          }
+
+          relationships[relIndex].cardinality = payload.cardinality;
+          parsed.relationships = relationships;
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to update relationship.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update relationship failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to update relationship: ${message}` },
       });
     }
   }
@@ -1129,6 +1192,46 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         name: payload.modelName,
         source: 'repo',
       });
+
+      // Auto-create relationships from manifest tests (F409 enhancement)
+      // When adding a model from manifest, automatically add any relationship tests
+      // that involve this model where both endpoints are now in the domain.
+      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+      const modelNames = new Set(models.map((m) => m.name as string));
+      const relationshipTests = this.manifestService.getRelationshipTests();
+
+      for (const test of relationshipTests) {
+        // Only consider tests that involve the newly added model
+        if (test.fromModel !== payload.modelName && test.toModel !== payload.modelName) {
+          continue;
+        }
+
+        // Check if both models are now in the domain
+        if (!modelNames.has(test.fromModel) || !modelNames.has(test.toModel)) {
+          continue;
+        }
+
+        // Check if relationship already exists (by all 4 keys)
+        const alreadyExists = relationships.some(
+          (r) =>
+            r.fromModel === test.fromModel &&
+            r.fromColumn === test.fromColumn &&
+            r.toModel === test.toModel &&
+            r.toColumn === test.toColumn,
+        );
+
+        if (!alreadyExists) {
+          // Add as built relationship (no source: 'design' property)
+          relationships.push({
+            fromModel: test.fromModel,
+            fromColumn: test.fromColumn,
+            toModel: test.toModel,
+            toColumn: test.toColumn,
+            cardinality: 'many-to-one' as const, // Default cardinality for FK relationships
+          });
+        }
+      }
+      parsed.relationships = relationships;
 
       // Save the position for the new model
       const updatedPositions = {

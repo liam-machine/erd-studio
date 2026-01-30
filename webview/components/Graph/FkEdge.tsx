@@ -147,15 +147,44 @@ function FkEdgeComponent({
   });
 
   const statusClass = `fk-edge--${status}`;
-  const cardinalityClass =
-    cardinality === 'one-to-one' ? 'fk-edge--one-to-one' : '';
+  // Apply special styling for one-to-one (dashed) and many-to-many (dotted)
+  let cardinalityClass = '';
+  if (cardinality === 'one-to-one') {
+    cardinalityClass = 'fk-edge--one-to-one';
+  } else if (cardinality === 'many-to-many') {
+    cardinalityClass = 'fk-edge--many-to-many';
+  }
 
-  // Cardinality labels: many-to-one → source is *, target is 1
-  // one-to-one → both sides are 1
-  const sourceLabel = cardinality === 'many-to-one' ? '*' : '1';
-  const targetLabel = '1';
+  // Cardinality labels at each end:
+  // - many-to-one: * at source, 1 at target
+  // - one-to-one: 1 at both ends
+  // - one-to-many: 1 at source, * at target
+  // - many-to-many: * at both ends
+  let sourceLabel: string;
+  let targetLabel: string;
+  switch (cardinality) {
+    case 'many-to-one':
+      sourceLabel = '*';
+      targetLabel = '1';
+      break;
+    case 'one-to-one':
+      sourceLabel = '1';
+      targetLabel = '1';
+      break;
+    case 'one-to-many':
+      sourceLabel = '1';
+      targetLabel = '*';
+      break;
+    case 'many-to-many':
+      sourceLabel = '*';
+      targetLabel = '*';
+      break;
+    default:
+      sourceLabel = '*';
+      targetLabel = '1';
+  }
   const srcLabelClass = sourceLabel === '*' ? ' fk-edge__label--many' : '';
-  const tgtLabelClass = '';
+  const tgtLabelClass = targetLabel === '*' ? ' fk-edge__label--many' : '';
 
   // Labels sit close to the node, in the gap before the shortened path.
   // Use adjusted coordinates so labels align with distributed connection points.

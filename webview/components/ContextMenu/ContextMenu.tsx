@@ -1,16 +1,32 @@
 /**
- * ContextMenu — minimal context menu for graph elements.
+ * ContextMenu — context menu for graph elements.
  *
- * Currently supports FK edges only (F401 minimal implementation).
- * Shows relationship details and delete option for design relationships.
+ * Currently supports FK edges only.
+ * Shows relationship details, cardinality editing, and delete option.
  * Positioned at cursor location, closes on click-outside or Escape.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { FkEdgeData } from '../../types/graph';
+import type { Cardinality } from '../../../src/types/semantic';
 import './ContextMenu.css';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Padding from viewport edge when repositioning. */
+const VIEWPORT_PADDING = 8;
+
+/** All supported cardinality types with display labels. */
+const CARDINALITY_OPTIONS: { value: Cardinality; label: string }[] = [
+  { value: 'many-to-one', label: 'Many → One' },
+  { value: 'one-to-one', label: 'One → One' },
+  { value: 'one-to-many', label: 'One → Many' },
+  { value: 'many-to-many', label: 'Many → Many' },
+];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -22,6 +38,60 @@ export function ContextMenu() {
 
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
+
+  // Track whether cardinality dropdown is open
+  const [cardinalityOpen, setCardinalityOpen] = useState(false);
+
+  // Track delete confirmation state (two-click pattern)
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Adjusted position to keep menu within viewport
+  const [adjustedPosition, setAdjustedPosition] = useState<{ x: number; y: number } | null>(null);
+
+  // Reset state when context menu changes or closes
+  useEffect(() => {
+    if (!contextMenu) {
+      setCardinalityOpen(false);
+      setConfirmingDelete(false);
+      setAdjustedPosition(null);
+    } else {
+      // Reset when new context menu opens (will be recalculated in useLayoutEffect)
+      setAdjustedPosition(null);
+      setConfirmingDelete(false);
+    }
+  }, [contextMenu]);
+
+  // Adjust position after render to keep menu within viewport bounds
+  useLayoutEffect(() => {
+    if (!contextMenu || !menuRef.current) return;
+
+    const menu = menuRef.current;
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    let newX = contextMenu.x;
+    let newY = contextMenu.y;
+
+    // Check if menu overflows right edge
+    if (contextMenu.x + menuRect.width > viewportWidth - VIEWPORT_PADDING) {
+      newX = viewportWidth - menuRect.width - VIEWPORT_PADDING;
+    }
+
+    // Check if menu overflows bottom edge
+    if (contextMenu.y + menuRect.height > viewportHeight - VIEWPORT_PADDING) {
+      newY = viewportHeight - menuRect.height - VIEWPORT_PADDING;
+    }
+
+    // Ensure menu doesn't go off left/top edges
+    newX = Math.max(VIEWPORT_PADDING, newX);
+    newY = Math.max(VIEWPORT_PADDING, newY);
+
+    // Only update if position changed
+    if (newX !== contextMenu.x || newY !== contextMenu.y) {
+      setAdjustedPosition({ x: newX, y: newY });
+    }
+  }, [contextMenu]);
 
   // Close on click outside
   useEffect(() => {
@@ -45,25 +115,51 @@ export function ContextMenu() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        closeContextMenu();
+        if (cardinalityOpen) {
+          setCardinalityOpen(false);
+        } else {
+          closeContextMenu();
+        }
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [contextMenu, closeContextMenu]);
+  }, [contextMenu, closeContextMenu, cardinalityOpen]);
 
-  // Handle delete relationship
-  const handleDelete = useCallback(() => {
+  // Handle delete relationship with confirmation
+  const handleDeleteClick = useCallback(() => {
     if (!contextMenu || contextMenu.type !== 'edge') return;
 
-    const { fromModel, fromColumn, toModel, toColumn } = contextMenu.data;
-    vscode.postMessage({
-      type: 'removeRelationship',
-      payload: { fromModel, fromColumn, toModel, toColumn },
-    });
-    closeContextMenu();
-  }, [contextMenu, vscode, closeContextMenu]);
+    if (!confirmingDelete) {
+      // First click: show confirmation
+      setConfirmingDelete(true);
+    } else {
+      // Second click: actually delete
+      const { fromModel, fromColumn, toModel, toColumn } = contextMenu.data;
+      vscode.postMessage({
+        type: 'removeRelationship',
+        payload: { fromModel, fromColumn, toModel, toColumn },
+      });
+      closeContextMenu();
+    }
+  }, [contextMenu, vscode, closeContextMenu, confirmingDelete]);
+
+  // Handle cardinality change
+  const handleCardinalityChange = useCallback(
+    (newCardinality: Cardinality) => {
+      if (!contextMenu || contextMenu.type !== 'edge') return;
+
+      const { fromModel, fromColumn, toModel, toColumn } = contextMenu.data;
+      vscode.postMessage({
+        type: 'updateRelationship',
+        payload: { fromModel, fromColumn, toModel, toColumn, cardinality: newCardinality },
+      });
+      setCardinalityOpen(false);
+      closeContextMenu();
+    },
+    [contextMenu, vscode, closeContextMenu],
+  );
 
   // --- Early return if not visible ---
   if (!contextMenu) return null;
@@ -74,25 +170,41 @@ export function ContextMenu() {
   const edge = contextMenu.data as FkEdgeData;
   const isDesign = edge.status === 'design';
 
-  // Format cardinality for display
-  const cardinalityLabel = edge.cardinality === 'many-to-one' ? 'Many → One' : 'One → One';
+  // Get current cardinality label
+  const currentOption = CARDINALITY_OPTIONS.find((opt) => opt.value === edge.cardinality);
+  const cardinalityLabel = currentOption?.label ?? edge.cardinality;
+
+  // Use adjusted position if available, otherwise use original position
+  const displayX = adjustedPosition?.x ?? contextMenu.x;
+  const displayY = adjustedPosition?.y ?? contextMenu.y;
 
   return (
     <div
       ref={menuRef}
       className="context-menu"
       style={{
-        left: contextMenu.x,
-        top: contextMenu.y,
+        left: displayX,
+        top: displayY,
       }}
       role="menu"
     >
       {/* Relationship details header */}
       <div className="context-menu__header">
         <span className="context-menu__title">Relationship</span>
-        <span className={`context-menu__status context-menu__status--${edge.status}`}>
-          {edge.status}
-        </span>
+        <div className="context-menu__header-actions">
+          {isDesign && (
+            <button
+              className={`context-menu__delete-link${confirmingDelete ? ' context-menu__delete-link--confirming' : ''}`}
+              onClick={handleDeleteClick}
+              role="menuitem"
+            >
+              {confirmingDelete ? 'Confirm?' : 'Remove'}
+            </button>
+          )}
+          <span className={`context-menu__status context-menu__status--${edge.status}`}>
+            {edge.status}
+          </span>
+        </div>
       </div>
 
       {/* Relationship info */}
@@ -109,25 +221,41 @@ export function ContextMenu() {
             {edge.toModel}.<strong>{edge.toColumn}</strong>
           </span>
         </div>
-        <div className="context-menu__row">
+
+        {/* Cardinality with dropdown */}
+        <div className="context-menu__row context-menu__row--cardinality">
           <span className="context-menu__label">Cardinality</span>
-          <span className="context-menu__value">{cardinalityLabel}</span>
+          <div className="context-menu__cardinality-wrapper">
+            <button
+              className="context-menu__cardinality-button"
+              onClick={() => setCardinalityOpen(!cardinalityOpen)}
+              aria-haspopup="listbox"
+              aria-expanded={cardinalityOpen}
+            >
+              {cardinalityLabel}
+              <span className="context-menu__cardinality-arrow">▾</span>
+            </button>
+            {cardinalityOpen && (
+              <ul className="context-menu__cardinality-dropdown" role="listbox">
+                {CARDINALITY_OPTIONS.map((option) => (
+                  <li
+                    key={option.value}
+                    className={`context-menu__cardinality-option${
+                      option.value === edge.cardinality ? ' context-menu__cardinality-option--selected' : ''
+                    }`}
+                    role="option"
+                    aria-selected={option.value === edge.cardinality}
+                    onClick={() => handleCardinalityChange(option.value)}
+                  >
+                    {option.label}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Delete option (design only) */}
-      {isDesign && (
-        <>
-          <div className="context-menu__divider" />
-          <button
-            className="context-menu__item context-menu__item--danger"
-            onClick={handleDelete}
-            role="menuitem"
-          >
-            Delete Relationship
-          </button>
-        </>
-      )}
     </div>
   );
 }

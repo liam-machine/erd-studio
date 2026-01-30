@@ -79,7 +79,7 @@ export interface DesignModel {
 // ---------------------------------------------------------------------------
 
 /** FK relationship cardinality. */
-export type Cardinality = 'many-to-one' | 'one-to-one';
+export type Cardinality = 'many-to-one' | 'one-to-one' | 'one-to-many' | 'many-to-many';
 
 /**
  * An FK relationship between two models in a domain.

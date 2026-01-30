@@ -30,8 +30,14 @@
    Cardinality line-style variants
    ----------------------------------------------------------------------- */
 
+/* One-to-one: dashed line */
 .fk-edge--one-to-one {
   stroke-dasharray: 6 3;
+}
+
+/* Many-to-many: dotted line */
+.fk-edge--many-to-many {
+  stroke-dasharray: 2 4;
 }
 
 /* -----------------------------------------------------------------------

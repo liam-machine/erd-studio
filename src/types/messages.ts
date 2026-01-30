@@ -173,6 +173,22 @@ export interface RemoveRelationshipMessage {
 }
 
 /**
+ * Request to update a relationship's cardinality.
+ * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
+ * Works for both design and built relationships.
+ */
+export interface UpdateRelationshipMessage {
+  type: 'updateRelationship';
+  payload: {
+    fromModel: string;
+    fromColumn: string;
+    toModel: string;
+    toColumn: string;
+    cardinality: Cardinality;
+  };
+}
+
+/**
  * Request to update view configuration (layout options, etc.).
  */
 export interface UpdateViewConfigMessage {
@@ -249,6 +265,7 @@ export type WebviewMessage =
   | AddRelationshipMessage
   | RemoveModelMessage
   | RemoveRelationshipMessage
+  | UpdateRelationshipMessage
   | UpdateViewConfigMessage
   | AddExistingModelMessage
   | UpdatePositionsMessage

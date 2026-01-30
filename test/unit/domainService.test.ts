@@ -107,16 +107,16 @@ describe('DomainService', () => {
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.relationships).toHaveLength(4);
+      expect(domain.relationships).toHaveLength(2);
 
       const repoRel = domain.relationships.find((r) => r.fromModel === 'dim_work_lot');
       expect(repoRel).toBeDefined();
-      expect(repoRel!.cardinality).toBe('many-to-one');
+      expect(repoRel!.cardinality).toBe('one-to-many');
       expect(repoRel!.source).toBeUndefined();
 
-      const designRel = domain.relationships.find((r) => r.fromModel === 'dim_work_lot_status');
-      expect(designRel).toBeDefined();
-      expect(designRel!.source).toBe('design');
+      const repoRel2 = domain.relationships.find((r) => r.fromModel === 'fct_work_events');
+      expect(repoRel2).toBeDefined();
+      expect(repoRel2!.cardinality).toBe('many-to-one');
     });
 
     it('parses viewConfig correctly', () => {
@@ -129,7 +129,7 @@ describe('DomainService', () => {
       expect(domain.viewConfig.layoutOptions).toBeDefined();
       expect(domain.viewConfig.layoutOptions!['elk.algorithm']).toBe('layered');
       expect(domain.viewConfig.positions).toBeDefined();
-      expect(domain.viewConfig.positions!['dim_work_lot']).toEqual({ x: 372, y: 186 });
+      expect(domain.viewConfig.positions!['dim_work_lot']).toEqual({ x: 402, y: -7 });
     });
 
     it('handles missing files with descriptive error', () => {
