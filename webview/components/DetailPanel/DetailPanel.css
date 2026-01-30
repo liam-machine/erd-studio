@@ -363,14 +363,18 @@
 }
 
 .detail-panel__button--danger {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.3);
+  align-self: flex-start;
+  background: transparent;
+  color: #dc6b6b;
+  border-color: rgba(220, 107, 107, 0.25);
+  font-size: 11px;
+  padding: 4px 10px;
 }
 
 .detail-panel__button--danger:hover {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
+  background: rgba(220, 107, 107, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
 }
 
 .detail-panel__confirm-label {
@@ -386,4 +390,18 @@
 
 .detail-panel__confirm-actions .detail-panel__button {
   flex: 1;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.detail-panel__confirm-actions .detail-panel__button--danger {
+  align-self: auto;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.detail-panel__confirm-actions .detail-panel__button--danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
 }
