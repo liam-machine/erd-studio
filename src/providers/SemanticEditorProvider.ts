@@ -230,6 +230,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.pendingUpdates.get(panelKey)) {
         return;
       }
+      // Save the document before sending data to webview.
+      // This ensures changes from keyboard undo/redo (Ctrl+Z/Ctrl+Shift+Z)
+      // are persisted to disk before we read and send to the webview.
+      // Without this, sendDomainData reads from disk (old state) while
+      // the undone content only exists in VS Code's in-memory document.
+      if (document.isDirty) {
+        await document.save();
+      }
       await this.sendDomainData(document, webviewPanel.webview);
     });
 
