@@ -7,10 +7,11 @@
  * manifest at runtime) or designed inline (columns defined in the JSON).
  */
 
-/** Valid data-warehouse layers for semantic domains. */
-export type Layer = 'bronze' | 'silver' | 'gold';
-
-export const VALID_LAYERS: readonly Layer[] = ['bronze', 'silver', 'gold'] as const;
+/**
+ * Layer identifier type - dynamic string validated at runtime.
+ * Layer configuration is managed by LayerService and stored in layers.json.
+ */
+export type Layer = string;
 
 /** The current schema version written by this extension. */
 export const CURRENT_SCHEMA_VERSION = 1;

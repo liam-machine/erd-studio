@@ -13,8 +13,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { DomainSummary, Layer } from '../types/semantic';
-import { VALID_LAYERS } from '../types/semantic';
 import { DomainService } from '../services/domainService';
+import type { LayerService } from '../services/layerService';
 
 // ---------------------------------------------------------------------------
 // Tree element types (discriminated union)
@@ -40,19 +40,6 @@ interface NewDomainNode {
 export type TreeElement = LayerNode | DomainNode | NewDomainNode;
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const LAYER_LABELS: Record<Layer, string> = {
-  bronze: 'Bronze',
-  silver: 'Silver',
-  gold: 'Gold',
-};
-
-/** Layers that support creating new domains from the tree view. */
-const CREATABLE_LAYERS: readonly Layer[] = ['silver', 'gold'];
-
-// ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
 
@@ -66,6 +53,7 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
 
   constructor(
     private readonly domainService: DomainService,
+    private readonly layerService: LayerService,
     private readonly projectPath: string,
     semanticDir?: string,
   ) {
@@ -96,7 +84,9 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
       if (!fs.existsSync(fullSemanticDir)) {
         return [];
       }
-      return VALID_LAYERS.map((layer): LayerNode => ({ type: 'layer', layer }));
+      // Load layers dynamically from LayerService
+      const layers = this.layerService.getAllLayers();
+      return layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
     }
 
     if (element.type === 'layer') {
@@ -129,7 +119,8 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
 
     const children: TreeElement[] = [...domainNodes];
 
-    if (CREATABLE_LAYERS.includes(layer)) {
+    // Check if this layer allows creating new domains
+    if (this.layerService.isCreatable(layer)) {
       children.push({ type: 'newDomain', layer });
     }
 
@@ -137,8 +128,9 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
   }
 
   private createLayerItem(element: LayerNode): vscode.TreeItem {
+    const layerConfig = this.layerService.getLayer(element.layer);
     const item = new vscode.TreeItem(
-      LAYER_LABELS[element.layer],
+      layerConfig?.label ?? element.layer,
       vscode.TreeItemCollapsibleState.Expanded,
     );
     item.contextValue = 'layer';
@@ -160,7 +152,7 @@ export class DomainTreeProvider implements vscode.TreeDataProvider<TreeElement> 
 
     item.contextValue = 'domain';
     item.iconPath = new vscode.ThemeIcon('json');
-    item.tooltip = `${LAYER_LABELS[element.summary.layer]} / ${element.summary.domain}`;
+    item.tooltip = `${this.layerService.getLabel(element.summary.layer)} / ${element.summary.domain}`;
     item.command = {
       command: 'dbtSemantic.openDomain',
       title: 'Open Domain',

@@ -48,6 +48,26 @@
         "command": "dbtSemantic.renameDomain",
         "title": "Rename Semantic Domain",
         "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.addLayer",
+        "title": "Add Layer",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.editLayer",
+        "title": "Edit Layer",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.removeLayer",
+        "title": "Remove Layer",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.initializeLayerConfig",
+        "title": "Initialize Layer Configuration",
+        "category": "dbt"
       }
     ],
     "viewsContainers": {
@@ -96,6 +116,23 @@
           "command": "dbtSemantic.deleteDomain",
           "when": "view == dbtSemantic.domainTree && viewItem == domain",
           "group": "7_modification@2"
+        },
+        {
+          "command": "dbtSemantic.editLayer",
+          "when": "view == dbtSemantic.domainTree && viewItem == layer",
+          "group": "7_modification@1"
+        },
+        {
+          "command": "dbtSemantic.removeLayer",
+          "when": "view == dbtSemantic.domainTree && viewItem == layer",
+          "group": "7_modification@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "dbtSemantic.addLayer",
+          "when": "view == dbtSemantic.domainTree",
+          "group": "navigation"
         }
       ]
     },

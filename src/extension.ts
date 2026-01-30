@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { DomainService } from './services/domainService';
+import { LayerService } from './services/layerService';
 import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type SemanticDomain } from './types/semantic';
 import { ManifestService } from './services/manifestService';
 import { ReconciliationService } from './services/reconciliationService';
@@ -158,12 +159,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const config = vscode.workspace.getConfiguration('dbtSemantic');
   const semanticDir = config.get<string>('semanticDir', 'models/semantic');
 
-  const domainService = new DomainService();
+  // LayerService must be instantiated first as other services depend on it
+  const layerService = new LayerService(workspaceRoot, semanticDir);
+  const domainService = new DomainService(layerService);
   const manifestService = new ManifestService();
   const reconciliationService = new ReconciliationService();
   const templateService = new TemplateService();
   const autoReconciliationService = new AutoReconciliationService();
-  const treeProvider = new DomainTreeProvider(domainService, workspaceRoot, semanticDir);
+  const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
     domainService,
@@ -171,6 +174,7 @@ export function activate(context: vscode.ExtensionContext): void {
     reconciliationService,
     templateService,
     autoReconciliationService,
+    layerService,
     workspaceRoot,
   );
   const decorationProvider = new SemanticFileDecorationProvider();
@@ -258,10 +262,18 @@ export function activate(context: vscode.ExtensionContext): void {
         // Step 1: Determine layer (skip QuickPick if passed from tree view)
         let layer: Layer | undefined = layerArg;
         if (!layer) {
-          const layerItems: Array<{ label: string; value: Layer }> = [
-            { label: 'Silver', value: 'silver' },
-            { label: 'Gold', value: 'gold' },
-          ];
+          // Get creatable layers from LayerService
+          const creatableLayers = layerService.getCreatableLayers();
+          if (creatableLayers.length === 0) {
+            void vscode.window.showErrorMessage(
+              'No layers configured for domain creation. Add layers first.',
+            );
+            return;
+          }
+          const layerItems = creatableLayers.map(l => ({
+            label: l.label,
+            value: l.id,
+          }));
           const layerChoice = await vscode.window.showQuickPick(layerItems, {
             placeHolder: 'Select layer for the new semantic domain',
             ignoreFocusOut: true,
@@ -559,18 +571,26 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'dbtSemantic.setupSemanticDirectory',
       async () => {
-        // Step 1: Create directory structure (silver, gold only - bronze not used for semantic domains)
-        // Uses configured semanticDir from settings
+        // Step 1: Create directory structure using default layers from LayerService
         const fullSemanticDir = path.join(workspaceRoot, semanticDir);
-        const creatableLayers = ['silver', 'gold'] as const;
+        const defaultLayers = layerService.getAllLayers();
 
         try {
-          for (const layer of creatableLayers) {
-            const layerDir = path.join(fullSemanticDir, layer);
+          // Create semantic directory if needed
+          if (!fs.existsSync(fullSemanticDir)) {
+            fs.mkdirSync(fullSemanticDir, { recursive: true });
+          }
+
+          // Create layer directories
+          for (const layer of defaultLayers) {
+            const layerDir = path.join(fullSemanticDir, layer.id);
             if (!fs.existsSync(layerDir)) {
               fs.mkdirSync(layerDir, { recursive: true });
             }
           }
+
+          // Save default layers.json configuration
+          await layerService.saveConfig(defaultLayers);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(
@@ -595,7 +615,374 @@ export function activate(context: vscode.ExtensionContext): void {
         await vscode.commands.executeCommand('dbtSemantic.createDomain');
       },
     ),
+    // -------------------------------------------------------------------------
+    // Layer Management Commands
+    // -------------------------------------------------------------------------
+    vscode.commands.registerCommand(
+      'dbtSemantic.addLayer',
+      async () => {
+        // Step 1: Get layer ID
+        const id = await vscode.window.showInputBox({
+          prompt: 'Layer ID (lowercase, e.g., platinum)',
+          placeHolder: 'e.g., platinum, staging, raw',
+          ignoreFocusOut: true,
+          validateInput: (value: string) => {
+            if (!value || !value.trim()) {
+              return 'Layer ID is required';
+            }
+            if (!/^[a-z][a-z0-9_-]*$/.test(value.trim())) {
+              return 'Must start with lowercase letter, contain only lowercase letters, numbers, hyphens, underscores';
+            }
+            if (layerService.hasLayer(value.trim())) {
+              return `Layer "${value.trim()}" already exists`;
+            }
+            return undefined;
+          },
+        });
+        if (!id) return;
+        const layerId = id.trim();
+
+        // Step 2: Get label
+        const label = await vscode.window.showInputBox({
+          prompt: 'Layer display name',
+          value: layerId.charAt(0).toUpperCase() + layerId.slice(1),
+          ignoreFocusOut: true,
+        });
+        if (label === undefined) return;
+
+        // Step 3: Get abbreviation
+        const abbreviation = await vscode.window.showInputBox({
+          prompt: 'Abbreviation for badges (3 characters)',
+          value: layerId.slice(0, 3).toUpperCase(),
+          ignoreFocusOut: true,
+          validateInput: (value: string) => {
+            if (!value || value.trim().length === 0) {
+              return 'Abbreviation is required';
+            }
+            if (value.trim().length > 4) {
+              return 'Abbreviation should be 3-4 characters';
+            }
+            return undefined;
+          },
+        });
+        if (abbreviation === undefined) return;
+
+        // Step 4: Color picker
+        const colorOptions = [
+          { label: '$(circle-filled) Blue', value: '#3b82f6' },
+          { label: '$(circle-filled) Green', value: '#22c55e' },
+          { label: '$(circle-filled) Purple', value: '#a855f7' },
+          { label: '$(circle-filled) Orange', value: '#f97316' },
+          { label: '$(circle-filled) Cyan', value: '#06b6d4' },
+          { label: '$(circle-filled) Pink', value: '#ec4899' },
+          { label: '$(edit) Custom hex color...', value: 'custom' },
+        ];
+        const colorPick = await vscode.window.showQuickPick(colorOptions, {
+          placeHolder: 'Select layer color',
+          ignoreFocusOut: true,
+        });
+        if (!colorPick) return;
+
+        let color = colorPick.value;
+        if (color === 'custom') {
+          const customColor = await vscode.window.showInputBox({
+            prompt: 'Enter hex color (e.g., #ff5733)',
+            placeHolder: '#ff5733',
+            ignoreFocusOut: true,
+            validateInput: (value: string) => {
+              if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
+                return 'Invalid hex color format (e.g., #ff5733)';
+              }
+              return undefined;
+            },
+          });
+          if (!customColor) return;
+          color = customColor;
+        }
+
+        // Step 5: Creatable checkbox
+        const creatablePick = await vscode.window.showQuickPick([
+          { label: 'Yes - allow creating domains in this layer', value: true },
+          { label: 'No - read-only layer (e.g., raw/staging)', value: false },
+        ], {
+          placeHolder: 'Allow creating domains in this layer?',
+          ignoreFocusOut: true,
+        });
+        if (!creatablePick) return;
+        const creatable = creatablePick.value;
+
+        // Step 6: Add layer
+        try {
+          await layerService.addLayer({
+            id: layerId,
+            label: label.trim() || layerId.charAt(0).toUpperCase() + layerId.slice(1),
+            abbreviation: abbreviation.trim().toUpperCase(),
+            color,
+            creatable,
+          });
+
+          // Create directory
+          const layerDir = path.join(workspaceRoot, semanticDir, layerId);
+          if (!fs.existsSync(layerDir)) {
+            fs.mkdirSync(layerDir, { recursive: true });
+          }
+
+          // Refresh tree
+          treeProvider.refresh();
+
+          void vscode.window.showInformationMessage(
+            `Layer "${label.trim() || layerId}" added successfully.`,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to add layer: ${msg}`);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'dbtSemantic.editLayer',
+      async (element?: TreeElement) => {
+        // Get layer ID from context menu or prompt
+        let layerId: string | undefined;
+        if (element && element.type === 'layer') {
+          layerId = element.layer;
+        } else {
+          // Show picker
+          const layers = layerService.getAllLayers();
+          const layerPick = await vscode.window.showQuickPick(
+            layers.map(l => ({ label: l.label, value: l.id })),
+            { placeHolder: 'Select layer to edit' },
+          );
+          if (!layerPick) return;
+          layerId = layerPick.value;
+        }
+
+        const layer = layerService.getLayer(layerId);
+        if (!layer) {
+          void vscode.window.showErrorMessage(`Layer "${layerId}" not found`);
+          return;
+        }
+
+        // Show edit options
+        const editOptions = [
+          { label: '$(edit) Rename Layer', value: 'rename' },
+          { label: '$(symbol-color) Change Color', value: 'color' },
+          { label: '$(tag) Change Abbreviation', value: 'abbreviation' },
+          { label: layer.creatable ? '$(lock) Make Non-Creatable' : '$(unlock) Make Creatable', value: 'creatable' },
+        ];
+        const editChoice = await vscode.window.showQuickPick(editOptions, {
+          placeHolder: `Edit layer: ${layer.label}`,
+        });
+        if (!editChoice) return;
+
+        try {
+          switch (editChoice.value) {
+            case 'rename': {
+              const newLabel = await vscode.window.showInputBox({
+                prompt: 'New layer display name',
+                value: layer.label,
+                ignoreFocusOut: true,
+              });
+              if (newLabel === undefined || newLabel.trim() === layer.label) return;
+              await layerService.updateLayer(layerId, { label: newLabel.trim() });
+              break;
+            }
+            case 'color': {
+              const colorOptions = [
+                { label: '$(circle-filled) Blue', value: '#3b82f6' },
+                { label: '$(circle-filled) Green', value: '#22c55e' },
+                { label: '$(circle-filled) Purple', value: '#a855f7' },
+                { label: '$(circle-filled) Orange', value: '#f97316' },
+                { label: '$(circle-filled) Cyan', value: '#06b6d4' },
+                { label: '$(circle-filled) Pink', value: '#ec4899' },
+                { label: '$(edit) Custom hex color...', value: 'custom' },
+              ];
+              const colorPick = await vscode.window.showQuickPick(colorOptions, {
+                placeHolder: 'Select new color',
+              });
+              if (!colorPick) return;
+
+              let color = colorPick.value;
+              if (color === 'custom') {
+                const customColor = await vscode.window.showInputBox({
+                  prompt: 'Enter hex color (e.g., #ff5733)',
+                  value: layer.color,
+                  ignoreFocusOut: true,
+                  validateInput: (value: string) => {
+                    if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
+                      return 'Invalid hex color format';
+                    }
+                    return undefined;
+                  },
+                });
+                if (!customColor) return;
+                color = customColor;
+              }
+              await layerService.updateLayerColor(layerId, color);
+              break;
+            }
+            case 'abbreviation': {
+              const newAbbrev = await vscode.window.showInputBox({
+                prompt: 'New abbreviation (3-4 characters)',
+                value: layer.abbreviation,
+                ignoreFocusOut: true,
+                validateInput: (value: string) => {
+                  if (!value || value.trim().length === 0) {
+                    return 'Abbreviation is required';
+                  }
+                  if (value.trim().length > 4) {
+                    return 'Abbreviation should be 3-4 characters';
+                  }
+                  return undefined;
+                },
+              });
+              if (newAbbrev === undefined) return;
+              await layerService.updateLayer(layerId, { abbreviation: newAbbrev.trim().toUpperCase() });
+              break;
+            }
+            case 'creatable': {
+              await layerService.updateLayer(layerId, { creatable: !layer.creatable });
+              break;
+            }
+          }
+
+          treeProvider.refresh();
+          void vscode.window.showInformationMessage(`Layer "${layer.label}" updated.`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to update layer: ${msg}`);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'dbtSemantic.removeLayer',
+      async (element?: TreeElement) => {
+        // Get layer ID from context menu or prompt
+        let layerId: string | undefined;
+        if (element && element.type === 'layer') {
+          layerId = element.layer;
+        } else {
+          const layers = layerService.getAllLayers();
+          const layerPick = await vscode.window.showQuickPick(
+            layers.map(l => ({ label: l.label, value: l.id })),
+            { placeHolder: 'Select layer to remove' },
+          );
+          if (!layerPick) return;
+          layerId = layerPick.value;
+        }
+
+        const layer = layerService.getLayer(layerId);
+        if (!layer) {
+          void vscode.window.showErrorMessage(`Layer "${layerId}" not found`);
+          return;
+        }
+
+        // Check for existing domains
+        const domains = domainService.listDomains(workspaceRoot, semanticDir);
+        const layerDomains = domains.filter(d => d.layer === layerId);
+
+        if (layerDomains.length > 0) {
+          void vscode.window.showErrorMessage(
+            `Cannot remove layer "${layer.label}" — it contains ${layerDomains.length} domain(s). ` +
+            `Delete or move domains first.`,
+          );
+          return;
+        }
+
+        // Confirm deletion
+        const confirm = await vscode.window.showWarningMessage(
+          `Remove layer "${layer.label}"? This will delete the directory.`,
+          { modal: true },
+          'Remove',
+        );
+        if (confirm !== 'Remove') return;
+
+        try {
+          // Update config first (safer ordering - if this fails, nothing is lost)
+          await layerService.removeLayer(layerId);
+
+          // Then remove directory (if config update succeeded)
+          const layerDir = path.join(workspaceRoot, semanticDir, layerId);
+          if (fs.existsSync(layerDir)) {
+            await vscode.workspace.fs.delete(
+              vscode.Uri.file(layerDir),
+              { recursive: true },
+            );
+          }
+
+          // Refresh tree
+          treeProvider.refresh();
+
+          void vscode.window.showInformationMessage(
+            `Layer "${layer.label}" removed.`,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to remove layer: ${msg}`);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'dbtSemantic.initializeLayerConfig',
+      async () => {
+        // Auto-detect layers from filesystem
+        const detected = layerService.detectLayersFromFilesystem();
+
+        if (detected.length === 0) {
+          // No existing layers, just save defaults
+          const defaultLayers = layerService.getAllLayers();
+          await layerService.saveConfig(defaultLayers);
+          void vscode.window.showInformationMessage(
+            'Layer configuration saved with default layers (Silver, Gold).',
+          );
+          return;
+        }
+
+        // Show detected layers and ask to save
+        const layerNames = detected.map(l => l.label).join(', ');
+        const choice = await vscode.window.showInformationMessage(
+          `Detected layers: ${layerNames}. Save this configuration?`,
+          'Save',
+          'Customize',
+          'Cancel',
+        );
+
+        if (choice === 'Save') {
+          await layerService.saveConfig(detected);
+          layerService.invalidateCache();
+          treeProvider.refresh();
+          void vscode.window.showInformationMessage(
+            `Layer configuration saved to ${semanticDir}/layers.json`,
+          );
+        } else if (choice === 'Customize') {
+          // Save first, then open for editing
+          await layerService.saveConfig(detected);
+          const uri = vscode.Uri.file(layerService.getConfigPath());
+          await vscode.commands.executeCommand('vscode.open', uri);
+        }
+      },
+    ),
   );
+
+  // -------------------------------------------------------------------------
+  // First-run check: prompt to initialize layers.json for existing projects
+  // -------------------------------------------------------------------------
+  const fullSemanticDir = path.join(workspaceRoot, semanticDir);
+  if (fs.existsSync(fullSemanticDir) && !layerService.configFileExists()) {
+    const detected = layerService.detectLayersFromFilesystem();
+    if (detected.length > 0) {
+      const layerNames = detected.map(l => l.label).join(', ');
+      void vscode.window.showInformationMessage(
+        `Detected layers: ${layerNames}. Would you like to save layer configuration for customization?`,
+        'Save Config',
+        'Later',
+      ).then(async (choice) => {
+        if (choice === 'Save Config') {
+          await vscode.commands.executeCommand('dbtSemantic.initializeLayerConfig');
+        }
+      });
+    }
+  }
 }
 
 export function deactivate(): void {

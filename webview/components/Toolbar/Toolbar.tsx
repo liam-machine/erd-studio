@@ -24,7 +24,8 @@ import './Toolbar.css';
 // Layer badge display
 // ---------------------------------------------------------------------------
 
-const LAYER_ABBREV: Record<string, string> = {
+// Fallback abbreviations for when layerConfig is not available
+const LAYER_ABBREV_FALLBACK: Record<string, string> = {
   bronze: 'BRZ',
   silver: 'SLV',
   gold: 'GLD',
@@ -258,7 +259,11 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     return null;
   }
 
-  const layerAbbrev = LAYER_ABBREV[domain.layer] ?? domain.layer.toUpperCase();
+  // Use layerConfig for dynamic abbreviation and color, with fallbacks
+  const layerAbbrev = domain.layerConfig?.abbreviation
+    ?? LAYER_ABBREV_FALLBACK[domain.layer]
+    ?? domain.layer.substring(0, 3).toUpperCase();
+  const layerColor = domain.layerConfig?.color;
 
   // --- Render --------------------------------------------------------------
 
@@ -267,7 +272,13 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       {/* Domain info */}
       <div className="toolbar__section toolbar__domain">
         <span className="toolbar__domain-name">{domain.domain}</span>
-        <span className={`toolbar__layer-badge toolbar__layer-badge--${domain.layer}`}>
+        <span
+          className={`toolbar__layer-badge${layerColor ? '' : ` toolbar__layer-badge--${domain.layer}`}`}
+          style={layerColor ? {
+            backgroundColor: `${layerColor}33`, // 20% opacity
+            color: layerColor,
+          } : undefined}
+        >
           {layerAbbrev}
         </span>
       </div>

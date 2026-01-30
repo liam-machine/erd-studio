@@ -8,6 +8,7 @@ import { ReconciliationService } from '../../src/services/reconciliationService'
 import { TemplateService } from '../../src/services/templateService';
 import { AutoReconciliationService } from '../../src/services/autoReconciliationService';
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { LayerService } from '../../src/services/layerService';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const FIXTURES_PROJECT_DIR = path.resolve(FIXTURES_DIR, 'dbt-project');
@@ -30,12 +31,14 @@ describe('SemanticEditorProvider', () => {
   let reconciliationService: ReconciliationService;
   let templateService: TemplateService;
   let autoReconciliationService: AutoReconciliationService;
+  let layerService: LayerService;
   let provider: SemanticEditorProvider;
   let context: any;
 
   beforeEach(() => {
     context = createMockContext();
-    domainService = new DomainService();
+    layerService = new LayerService(FIXTURES_PROJECT_DIR);
+    domainService = new DomainService(layerService);
     manifestService = new ManifestService();
     reconciliationService = new ReconciliationService();
     templateService = new TemplateService();
@@ -47,6 +50,7 @@ describe('SemanticEditorProvider', () => {
       reconciliationService,
       templateService,
       autoReconciliationService,
+      layerService,
       FIXTURES_PROJECT_DIR,
     );
   });

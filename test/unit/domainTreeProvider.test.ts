@@ -3,17 +3,41 @@ import * as path from 'path';
 import { TreeItemCollapsibleState } from 'vscode';
 import { DomainService } from '../../src/services/domainService';
 import { DomainTreeProvider, type TreeElement } from '../../src/providers/DomainTreeProvider';
+import type { LayerService } from '../../src/services/layerService';
+import type { LayerConfig } from '../../src/types/layer';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const FIXTURE_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project');
 
+// Mock LayerService that returns the classic bronze/silver/gold layers
+function createMockLayerService(): LayerService {
+  const layers: LayerConfig[] = [
+    { id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', creatable: false, order: 0 },
+    { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#a0a0a0', creatable: true, order: 1 },
+    { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', creatable: true, order: 2 },
+  ];
+  return {
+    getAllLayers: () => layers,
+    getLayer: (id: string) => layers.find(l => l.id === id),
+    hasLayer: (id: string) => layers.some(l => l.id === id),
+    getValidLayerIds: () => layers.map(l => l.id),
+    getCreatableLayers: () => layers.filter(l => l.creatable),
+    getLabel: (id: string) => layers.find(l => l.id === id)?.label ?? id,
+    getAbbreviation: (id: string) => layers.find(l => l.id === id)?.abbreviation ?? id.substring(0, 3).toUpperCase(),
+    getColor: (id: string) => layers.find(l => l.id === id)?.color ?? '#808080',
+    isCreatable: (id: string) => layers.find(l => l.id === id)?.creatable ?? false,
+  } as LayerService;
+}
+
 describe('DomainTreeProvider', () => {
   let service: DomainService;
+  let layerService: LayerService;
   let provider: DomainTreeProvider;
 
   beforeEach(() => {
-    service = new DomainService();
-    provider = new DomainTreeProvider(service, FIXTURE_PROJECT_PATH);
+    layerService = createMockLayerService();
+    service = new DomainService(layerService);
+    provider = new DomainTreeProvider(service, layerService, FIXTURE_PROJECT_PATH);
   });
 
   describe('getChildren (root)', () => {
@@ -30,7 +54,7 @@ describe('DomainTreeProvider', () => {
 
     it('returns empty array when semantic directory does not exist (F408 welcome)', () => {
       // Use a non-existent path to simulate missing semantic directory
-      const providerNoSemantic = new DomainTreeProvider(service, '/nonexistent/path');
+      const providerNoSemantic = new DomainTreeProvider(service, layerService, '/nonexistent/path');
       const children = providerNoSemantic.getChildren(undefined);
 
       expect(children).toHaveLength(0);
@@ -69,7 +93,7 @@ describe('DomainTreeProvider', () => {
 
       expect(domain.type).toBe('domain');
       if (domain.type === 'domain') {
-        expect(domain.modelCount).toBe(5);
+        expect(domain.modelCount).toBe(4);
         expect(domain.designCount).toBe(2);
       }
     });

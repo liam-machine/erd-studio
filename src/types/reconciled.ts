@@ -11,6 +11,7 @@
  */
 
 import type { Cardinality, Layer, ModelTemplate, ViewConfig } from './semantic';
+import type { LayerConfig } from './layer';
 
 // ---------------------------------------------------------------------------
 // Manifest model preview (for Add Existing Model dialog)
@@ -139,4 +140,10 @@ export interface ReconciledDomain extends ReconciledDomainCore {
    * Used by the "Add Existing Model" dialog to show available models.
    */
   manifestModels: ManifestModelPreview[];
+
+  /**
+   * Layer configuration for this domain's layer.
+   * Used for dynamic badge colors, labels, and abbreviations.
+   */
+  layerConfig?: LayerConfig;
 }

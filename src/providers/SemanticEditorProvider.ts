@@ -22,6 +22,7 @@ import { ManifestService } from '../services/manifestService';
 import { ReconciliationService } from '../services/reconciliationService';
 import { TemplateService } from '../services/templateService';
 import { AutoReconciliationService } from '../services/autoReconciliationService';
+import { LayerService } from '../services/layerService';
 import type { ManifestData } from '../types/manifest';
 import type { Cardinality, ColumnDef, DesignModel } from '../types/semantic';
 
@@ -60,6 +61,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly reconciliationService: ReconciliationService,
     private readonly templateService: TemplateService,
     private readonly autoReconciliationService: AutoReconciliationService,
+    private readonly layerService: LayerService,
     private readonly workspaceRoot: string,
   ) {}
 
@@ -316,9 +318,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         manifest,
       );
 
+      // Get layer config for dynamic badge colors and labels
+      const layerConfig = this.layerService.getLayer(domain.layer);
+
       webview.postMessage({
         type: 'domainLoaded',
-        payload: { ...reconciled, templates, manifestModels },
+        payload: { ...reconciled, templates, manifestModels, layerConfig },
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

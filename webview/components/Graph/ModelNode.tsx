@@ -26,7 +26,8 @@ import './ModelNode.css';
 // Constants
 // ---------------------------------------------------------------------------
 
-const LAYER_BADGE: Record<string, string> = {
+// Fallback abbreviations for when layerConfig is not available
+const LAYER_BADGE_FALLBACK: Record<string, string> = {
   bronze: 'BRZ',
   silver: 'SLV',
   gold: 'GLD',
@@ -103,7 +104,9 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         <span className="model-node__name" title={modelName}>
           {modelName}
         </span>
-        <span className="model-node__badge">{LAYER_BADGE[layer] ?? layer}</span>
+        <span className="model-node__badge">
+          {LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
+        </span>
       </div>
 
       {/* Columns — ordered: built first, then planned/missing with separator */}

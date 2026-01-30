@@ -15,19 +15,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { DomainSummary, Layer, SemanticDomain } from '../types/semantic';
-import { CURRENT_SCHEMA_VERSION, VALID_LAYERS } from '../types/semantic';
+import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
+import type { LayerService } from './layerService';
 
 const DEFAULT_SEMANTIC_DIR = 'models/semantic';
 
 export class DomainService {
+  constructor(private readonly layerService: LayerService) {}
+
   /**
    * Discover all semantic domain JSON files under models/semantic/,
    * grouped by layer. Returns lightweight summaries (no full parse).
    *
    * Directory structure expected:
-   *   models/semantic/bronze/*.json
-   *   models/semantic/silver/*.json
-   *   models/semantic/gold/*.json
+   *   models/semantic/{layer}/*.json
+   * where {layer} is defined in layers.json configuration.
    */
   listDomains(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): DomainSummary[] {
     const basePath = path.join(projectPath, semanticDir);
@@ -37,8 +39,10 @@ export class DomainService {
     }
 
     const summaries: DomainSummary[] = [];
+    const layers = this.layerService.getAllLayers();
 
-    for (const layer of VALID_LAYERS) {
+    for (const layerConfig of layers) {
+      const layer = layerConfig.id;
       const layerDir = path.join(basePath, layer);
       if (!fs.existsSync(layerDir)) {
         continue;
@@ -142,19 +146,20 @@ export class DomainService {
   }
 
   private parseLayer(value: unknown, filePath: string): Layer {
-    if (typeof value === 'string' && VALID_LAYERS.includes(value as Layer)) {
-      return value as Layer;
+    if (typeof value === 'string' && this.layerService.hasLayer(value)) {
+      return value;
     }
 
     // Fall back to inferring from directory name
     const parentDir = path.basename(path.dirname(filePath));
-    if (VALID_LAYERS.includes(parentDir as Layer)) {
-      return parentDir as Layer;
+    if (this.layerService.hasLayer(parentDir)) {
+      return parentDir;
     }
 
+    const validLayers = this.layerService.getValidLayerIds().join(', ');
     throw new Error(
       `Domain file ${filePath} has invalid layer "${String(value)}". ` +
-      `Expected one of: ${VALID_LAYERS.join(', ')}`
+      `Expected one of: ${validLayers}`,
     );
   }
 
