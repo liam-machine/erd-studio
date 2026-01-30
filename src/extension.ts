@@ -12,6 +12,7 @@ import { AutoReconciliationService } from './services/autoReconciliationService'
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
+import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
 
 /**
@@ -178,6 +179,7 @@ export function activate(context: vscode.ExtensionContext): void {
     workspaceRoot,
   );
   const decorationProvider = new SemanticFileDecorationProvider();
+  const layerDecorationProvider = new LayerDecorationProvider(layerService);
 
   // -------------------------------------------------------------------------
   // File watchers for auto-refresh (F303)
@@ -242,6 +244,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     treeProvider,
     decorationProvider,
+    layerDecorationProvider,
     fileWatcherService,
     manifestChangedSubscription,
     semanticChangedSubscription,
@@ -253,6 +256,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
     vscode.window.registerFileDecorationProvider(decorationProvider),
+    vscode.window.registerFileDecorationProvider(layerDecorationProvider),
     vscode.commands.registerCommand('dbtSemantic.openDomain', (filePath: string) => {
       vscode.commands.executeCommand(
         'vscode.openWith',
@@ -731,8 +735,9 @@ export function activate(context: vscode.ExtensionContext): void {
             fs.mkdirSync(layerDir, { recursive: true });
           }
 
-          // Refresh tree
+          // Refresh tree and decorations
           treeProvider.refresh();
+          layerDecorationProvider.refresh();
 
           void vscode.window.showInformationMessage(
             `Layer "${label.trim() || layerId}" added successfully.`,
@@ -851,6 +856,7 @@ export function activate(context: vscode.ExtensionContext): void {
           }
 
           treeProvider.refresh();
+          layerDecorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${layer.label}" updated.`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -914,8 +920,9 @@ export function activate(context: vscode.ExtensionContext): void {
             );
           }
 
-          // Refresh tree
+          // Refresh tree and decorations
           treeProvider.refresh();
+          layerDecorationProvider.refresh();
 
           void vscode.window.showInformationMessage(
             `Layer "${layer.label}" removed.`,
@@ -955,6 +962,7 @@ export function activate(context: vscode.ExtensionContext): void {
           await layerService.saveConfig(detected);
           layerService.invalidateCache();
           treeProvider.refresh();
+          layerDecorationProvider.refresh();
           void vscode.window.showInformationMessage(
             `Layer configuration saved to ${semanticDir}/layers.json`,
           );
