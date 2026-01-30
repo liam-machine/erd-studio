@@ -3,11 +3,12 @@
  *
  * Renders built columns (read-only) and planned columns (editable).
  * Supports adding new planned columns and inline editing.
+ * Uses ColumnRowEditor for consistent column row rendering.
  */
 
 import { useCallback, useMemo, useState } from 'react';
 
-import { EditableColumnRow } from './EditableColumnRow';
+import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import type { ModelStatus, ReconciledColumn } from '../../../src/types/reconciled';
 import type { ColumnDef } from '../../../src/types/semantic';
@@ -30,8 +31,8 @@ export interface ColumnEditorProps {
 export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorProps) {
   const { send } = useMessageBus(() => {});
 
-  // State for pending new column (being added inline)
-  const [pendingNewColumn, setPendingNewColumn] = useState<ReconciledColumn | null>(null);
+  // State for whether we're adding a new column
+  const [isAddingColumn, setIsAddingColumn] = useState(false);
 
   // Split columns into built and planned
   const { builtColumns, plannedColumns } = useMemo(() => {
@@ -58,16 +59,9 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
 
   // Handle adding a new column
   const handleAddColumn = useCallback(() => {
-    if (pendingNewColumn) return; // Already adding
-    setPendingNewColumn({
-      name: '',
-      dataType: 'STRING',
-      description: '',
-      status: 'planned',
-      isPrimaryKey: false,
-      isForeignKey: false,
-    });
-  }, [pendingNewColumn]);
+    if (isAddingColumn) return; // Already adding
+    setIsAddingColumn(true);
+  }, [isAddingColumn]);
 
   // Handle saving a column (add or update)
   const handleColumnUpdate = useCallback(
@@ -78,7 +72,7 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
           type: 'addColumn',
           payload: { modelName, column: updated },
         });
-        setPendingNewColumn(null);
+        setIsAddingColumn(false);
       } else {
         // Updating existing column
         send({
@@ -103,12 +97,22 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
 
   // Handle cancelling new column add
   const handleCancelNew = useCallback(() => {
-    setPendingNewColumn(null);
+    setIsAddingColumn(false);
   }, []);
 
   // --- Render ----------------------------------------------------------------
 
-  const hasPlannedColumns = plannedColumns.length > 0 || pendingNewColumn !== null;
+  const hasPlannedColumns = plannedColumns.length > 0 || isAddingColumn;
+
+  // New column template for when user clicks "Add Column"
+  const newColumnTemplate: ReconciledColumn = {
+    name: '',
+    dataType: 'STRING',
+    description: '',
+    status: 'planned',
+    isPrimaryKey: false,
+    isForeignKey: false,
+  };
 
   return (
     <div className="column-editor">
@@ -121,7 +125,7 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
           <button
             className="column-editor__add-btn"
             onClick={handleAddColumn}
-            disabled={pendingNewColumn !== null}
+            disabled={isAddingColumn}
             title="Add planned column"
           >
             + Add Column
@@ -131,19 +135,19 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
 
       {/* Column list */}
       <div className="column-editor__list">
-        {columns.length === 0 && !pendingNewColumn && (
+        {columns.length === 0 && !isAddingColumn && (
           <div className="column-editor__empty">No columns</div>
         )}
 
         {/* Built columns (read-only) */}
         {builtColumns.map((col) => (
-          <EditableColumnRow
+          <ColumnRowEditor
             key={col.name}
             column={col}
-            editable={false}
+            mode="readonly"
             existingColumnNames={existingColumnNames}
-            onUpdate={() => {}}
-            onDelete={() => {}}
+            showIndicators={true}
+            showDelete={false}
           />
         ))}
 
@@ -156,30 +160,44 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
 
         {/* Planned columns (editable) */}
         {plannedColumns.map((col) => (
-          <EditableColumnRow
+          <ColumnRowEditor
             key={col.name}
             column={col}
-            editable={true}
+            mode="editable"
             existingColumnNames={existingColumnNames}
             onUpdate={(updated) => handleColumnUpdate(col.name, updated, false)}
             onDelete={() => handleColumnDelete(col.name)}
+            showIndicators={true}
+            showDelete={true}
           />
         ))}
 
-        {/* Pending new column (inline add) */}
-        {pendingNewColumn && (
-          <EditableColumnRow
+        {/* Pending new column (inline add) - at the bottom */}
+        {isAddingColumn && (
+          <ColumnRowEditor
             key="__new__"
-            column={pendingNewColumn}
-            editable={true}
-            isNew={true}
+            column={newColumnTemplate}
+            mode="new"
             existingColumnNames={existingColumnNames}
             onUpdate={(updated) => handleColumnUpdate('', updated, true)}
-            onDelete={handleCancelNew}
-            onCancelNew={handleCancelNew}
+            onCancel={handleCancelNew}
+            showIndicators={true}
+            showDelete={false}
           />
         )}
       </div>
+
+      {/* Bottom "Add Column" button for longer lists */}
+      {isEditable && columns.length > 0 && (
+        <button
+          className="column-editor__add-btn column-editor__add-btn--bottom"
+          onClick={handleAddColumn}
+          disabled={isAddingColumn}
+          title="Add planned column"
+        >
+          + Add Column
+        </button>
+      )}
     </div>
   );
 }

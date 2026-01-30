@@ -100,3 +100,13 @@
   color: var(--model-design);
   text-transform: uppercase;
 }
+
+/* ---------------------------------------------------------------------------
+   Bottom Add Button
+   --------------------------------------------------------------------------- */
+
+.column-editor__add-btn--bottom {
+  width: 100%;
+  margin-top: 6px;
+  justify-content: center;
+}
