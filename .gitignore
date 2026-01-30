@@ -10,3 +10,4 @@ dev-preview.html
 /dbt_project.yml
 /target/
 /models/
+.env

@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dbt Semantic Designer vs SQL DBM</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --primary-light: #818cf8;
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.3);
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --dark: #0f172a;
+      --dark-card: #1e293b;
+      --dark-border: #334155;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--dark);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Animated gradient background */
+    .bg-gradient {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background:
+        radial-gradient(ellipse at 20% 20%, rgba(79, 70, 229, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(16, 185, 129, 0.1) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(245, 158, 11, 0.05) 0%, transparent 70%);
+      z-index: -1;
+      animation: gradientShift 15s ease-in-out infinite alternate;
+    }
+
+    @keyframes gradientShift {
+      0% { transform: scale(1) rotate(0deg); }
+      100% { transform: scale(1.1) rotate(3deg); }
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    /* Hero Section */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 4rem 2rem;
+      position: relative;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 200px;
+      background: linear-gradient(to bottom, transparent, var(--dark));
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(79, 70, 229, 0.2);
+      border: 1px solid var(--primary);
+      padding: 0.5rem 1rem;
+      border-radius: 50px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      margin-bottom: 2rem;
+      animation: fadeInUp 0.6s ease-out;
+    }
+
+    .hero-badge .dot {
+      width: 8px;
+      height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.2); }
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-weight: 900;
+      line-height: 1.1;
+      margin-bottom: 1.5rem;
+      animation: fadeInUp 0.6s ease-out 0.1s both;
+    }
+
+    .hero h1 .highlight {
+      background: linear-gradient(135deg, var(--primary-light), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin-bottom: 2rem;
+      animation: fadeInUp 0.6s ease-out 0.2s both;
+    }
+
+    .hero-cta {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      animation: fadeInUp 0.6s ease-out 0.3s both;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1rem 2rem;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      color: white;
+      box-shadow: 0 4px 20px rgba(79, 70, 229, 0.4);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 30px rgba(79, 70, 229, 0.5);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--dark-border);
+    }
+
+    .btn-secondary:hover {
+      background: var(--dark-card);
+      border-color: var(--primary);
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Scroll indicator */
+    .scroll-indicator {
+      position: absolute;
+      bottom: 4rem;
+      left: 50%;
+      transform: translateX(-50%);
+      animation: bounce 2s ease-in-out infinite;
+      z-index: 10;
+    }
+
+    .scroll-indicator svg {
+      width: 32px;
+      height: 32px;
+      stroke: var(--text-muted);
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50% { transform: translateX(-50%) translateY(10px); }
+    }
+
+    /* Price comparison banner */
+    .price-banner {
+      background: linear-gradient(135deg, var(--danger), #dc2626);
+      padding: 1rem 2rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .price-banner::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 200%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+      animation: shimmer 3s ease-in-out infinite;
+    }
+
+    @keyframes shimmer {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(50%); }
+    }
+
+    .price-banner .content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .price-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .price-item .label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      opacity: 0.8;
+    }
+
+    .price-item .value {
+      font-size: 1.5rem;
+      font-weight: 800;
+    }
+
+    .price-item .value.strike {
+      text-decoration: line-through;
+      opacity: 0.7;
+    }
+
+    .price-vs {
+      font-size: 2rem;
+      font-weight: 900;
+    }
+
+    /* Advantages Section */
+    .advantages {
+      padding: 6rem 0;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 4rem;
+    }
+
+    .section-header h2 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      margin-bottom: 1rem;
+    }
+
+    .section-header p {
+      color: var(--text-muted);
+      font-size: 1.125rem;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    /* Advantage Cards */
+    .advantage-grid {
+      display: grid;
+      gap: 2rem;
+    }
+
+    .advantage-card {
+      background: var(--dark-card);
+      border: 1px solid var(--dark-border);
+      border-radius: 24px;
+      padding: 3rem;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.4s ease;
+    }
+
+    .advantage-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--primary);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    .advantage-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .advantage-card:hover::before {
+      opacity: 1;
+    }
+
+    .advantage-number {
+      position: absolute;
+      top: 2rem;
+      right: 2rem;
+      font-size: 6rem;
+      font-weight: 900;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--dark-border), transparent);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .advantage-icon {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+      font-size: 2rem;
+    }
+
+    .advantage-card.accent .advantage-icon {
+      background: linear-gradient(135deg, var(--accent), #059669);
+    }
+
+    .advantage-card.warning .advantage-icon {
+      background: linear-gradient(135deg, var(--warning), #d97706);
+    }
+
+    .advantage-keyword {
+      font-size: 2rem;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, var(--text), var(--text-muted));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .advantage-card:hover .advantage-keyword {
+      background: linear-gradient(135deg, var(--primary-light), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .advantage-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--text);
+    }
+
+    .advantage-description {
+      color: var(--text-muted);
+      line-height: 1.7;
+      position: relative;
+      z-index: 1;
+    }
+
+    .advantage-description strong {
+      color: var(--text);
+    }
+
+    /* Featured large card */
+    .advantage-card.featured {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      align-items: center;
+      background: linear-gradient(135deg, var(--dark-card), rgba(79, 70, 229, 0.1));
+    }
+
+    .advantage-card.featured .advantage-visual {
+      position: relative;
+    }
+
+    .workflow-diagram {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .workflow-step {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.5rem;
+      background: var(--dark);
+      border-radius: 12px;
+      border: 1px solid var(--dark-border);
+      transition: all 0.3s ease;
+    }
+
+    .workflow-step:hover {
+      border-color: var(--primary);
+      transform: translateX(8px);
+    }
+
+    .workflow-step .step-num {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .workflow-step .step-content {
+      flex: 1;
+    }
+
+    .workflow-step .step-title {
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .workflow-step .step-desc {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .workflow-arrow {
+      display: flex;
+      justify-content: center;
+      color: var(--primary);
+    }
+
+    /* Comparison Table */
+    .comparison {
+      padding: 6rem 0;
+      background: linear-gradient(to bottom, transparent, rgba(30, 41, 59, 0.5), transparent);
+    }
+
+    .comparison-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--dark-card);
+      border: 1px solid var(--dark-border);
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+      padding: 1.25rem 1.5rem;
+      text-align: left;
+      border-bottom: 1px solid var(--dark-border);
+    }
+
+    .comparison-table th {
+      background: var(--dark);
+      font-weight: 700;
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .comparison-table th:first-child {
+      width: 30%;
+    }
+
+    .comparison-table th.winner {
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      color: white;
+    }
+
+    .comparison-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .comparison-table td:first-child {
+      font-weight: 600;
+    }
+
+    .comparison-table tr:hover td {
+      background: rgba(79, 70, 229, 0.05);
+    }
+
+    .check {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .cross {
+      color: var(--danger);
+      font-weight: 700;
+    }
+
+    .partial {
+      color: var(--warning);
+      font-weight: 700;
+    }
+
+    /* CTA Section */
+    .cta-section {
+      padding: 8rem 0;
+      text-align: center;
+    }
+
+    .cta-card {
+      background: linear-gradient(135deg, var(--primary), var(--primary-light));
+      border-radius: 32px;
+      padding: 4rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cta-card::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 50%);
+      animation: rotate 20s linear infinite;
+    }
+
+    @keyframes rotate {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .cta-card h2 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      margin-bottom: 1rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cta-card p {
+      font-size: 1.25rem;
+      opacity: 0.9;
+      margin-bottom: 2rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cta-card .btn {
+      background: white;
+      color: var(--primary);
+      position: relative;
+      z-index: 1;
+    }
+
+    .cta-card .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    /* Footer */
+    footer {
+      padding: 3rem 0;
+      border-top: 1px solid var(--dark-border);
+      text-align: center;
+      color: var(--text-muted);
+    }
+
+    footer a {
+      color: var(--primary-light);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .advantage-card.featured {
+        grid-template-columns: 1fr;
+      }
+
+      .price-banner .content {
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .comparison-table {
+        font-size: 0.875rem;
+      }
+
+      .comparison-table th,
+      .comparison-table td {
+        padding: 1rem;
+      }
+    }
+
+    /* Animations on scroll */
+    .animate-on-scroll {
+      opacity: 0;
+      transform: translateY(40px);
+      transition: all 0.6s ease-out;
+    }
+
+    .animate-on-scroll.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-gradient"></div>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="hero-badge">
+      <span class="dot"></span>
+      Open Source & Free Forever
+    </div>
+    <h1>
+      Stop Paying for<br>
+      <span class="highlight">Data Modeling</span>
+    </h1>
+    <p>
+      Why maintain two systems when your semantic models can live right where your dbt code does?
+      dbt Semantic Designer brings visual modeling directly into VS Code.
+    </p>
+    <div class="hero-cta">
+      <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.dbt-semantic-designer" class="btn btn-primary">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7,10 12,15 17,10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Install Free
+      </a>
+      <a href="https://github.com/liamwynne/dbt-semantic-designer" class="btn btn-secondary">
+        View on GitHub
+      </a>
+    </div>
+    <div class="scroll-indicator">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 5v14M5 12l7 7 7-7"/>
+      </svg>
+    </div>
+  </section>
+
+  <!-- Price Comparison Banner -->
+  <div class="price-banner">
+    <div class="content">
+      <div class="price-item">
+        <span class="label">SQL DBM</span>
+        <span class="value strike">$50 - $4,000+/mo</span>
+      </div>
+      <span class="price-vs">vs</span>
+      <div class="price-item">
+        <span class="label">dbt Semantic Designer</span>
+        <span class="value">$0 Forever</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Advantages Section -->
+  <section class="advantages">
+    <div class="container">
+      <div class="section-header">
+        <h2>Why Make the Switch?</h2>
+        <p>Every advantage designed for modern data teams who live in code</p>
+      </div>
+
+      <div class="advantage-grid">
+
+        <!-- Advantage 1: Git-First (merged: Single Source of Truth + Git-Native) -->
+        <div class="advantage-card animate-on-scroll">
+          <span class="advantage-number">01</span>
+          <div class="advantage-icon">&#x1F500;</div>
+          <div class="advantage-keyword">Git-First</div>
+          <h3 class="advantage-title">Single Source of Truth, Native Version Control</h3>
+          <p class="advantage-description">
+            Your semantic models live <strong>in the same repository</strong> as your dbt code.
+            When you add a column to a semantic model and implement it in dbt,
+            <strong>both changes are in the same commit</strong>. Your PR reviewers see the
+            full picture: the "what" (dbt code) and the "why" (semantic context) together.
+            <br><br>
+            Git blame, git bisect, branch strategies, code review - all your existing
+            workflows just work. No syncing between platforms, no "export and commit" dance.
+            <strong>SQL DBM approach:</strong> Maintain a separate cloud platform that must be manually
+            kept in sync. Two systems = two places for things to go wrong.
+          </p>
+        </div>
+
+        <!-- Advantage 2: Design to Build (merged: Build Mode + Auto-Sync + Tested) -->
+        <div class="advantage-card accent animate-on-scroll">
+          <span class="advantage-number">02</span>
+          <div class="advantage-icon">&#x1F3D7;</div>
+          <div class="advantage-keyword">Design to Build</div>
+          <h3 class="advantage-title">Complete Design-to-Production Lifecycle</h3>
+          <p class="advantage-description">
+            See your <strong>planned models (orange)</strong> right next to your
+            <strong>built models (blue)</strong> on the same canvas. When you run <code>dbt build</code>
+            and a designed model becomes real, the extension <strong>automatically detects it</strong>
+            and updates the canvas. Columns sync too.
+            <br><br>
+            The extension reads your <strong>dbt test definitions</strong> to identify FK relationships
+            between built models. If a relationship isn't tested, you'll know. Your semantic layer
+            isn't just documentation - it's validated by the same tests that run in CI.
+          </p>
+        </div>
+
+        <!-- Advantage 3: AI-Native Workflow (Featured) -->
+        <div class="advantage-card featured animate-on-scroll">
+          <div class="advantage-content">
+            <span class="advantage-number">03</span>
+            <div class="advantage-icon">&#x1F916;</div>
+            <div class="advantage-keyword">AI-Native</div>
+            <h3 class="advantage-title">Claude-Powered Design-to-Build Pipeline</h3>
+            <p class="advantage-description">
+              Because your semantic models are just JSON files in your repo,
+              <strong>Claude Code can read, design, and build them</strong> without any APIs or MCP servers.
+              <br><br>
+              Use a Claude skill to generate a complete semantic model design from requirements.
+              Review the visual result in the canvas UI. Then use another skill to scaffold the
+              actual dbt models. The AI has <strong>full context</strong> of both your lineage
+              relationships and semantic relationships in the same workspace.
+            </p>
+          </div>
+          <div class="advantage-visual">
+            <div class="workflow-diagram">
+              <div class="workflow-step">
+                <span class="step-num">1</span>
+                <div class="step-content">
+                  <div class="step-title">Describe Requirements</div>
+                  <div class="step-desc">"Design a customer 360 domain with orders and products"</div>
+                </div>
+              </div>
+              <div class="workflow-arrow">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12l7 7 7-7"/>
+                </svg>
+              </div>
+              <div class="workflow-step">
+                <span class="step-num">2</span>
+                <div class="step-content">
+                  <div class="step-title">Claude Generates Design</div>
+                  <div class="step-desc">Semantic JSON created with models, columns, relationships</div>
+                </div>
+              </div>
+              <div class="workflow-arrow">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12l7 7 7-7"/>
+                </svg>
+              </div>
+              <div class="workflow-step">
+                <span class="step-num">3</span>
+                <div class="step-content">
+                  <div class="step-title">Human Reviews in Canvas</div>
+                  <div class="step-desc">Visual validation, adjustments, approval</div>
+                </div>
+              </div>
+              <div class="workflow-arrow">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12l7 7 7-7"/>
+                </svg>
+              </div>
+              <div class="workflow-step">
+                <span class="step-num">4</span>
+                <div class="step-content">
+                  <div class="step-title">Claude Builds dbt Models</div>
+                  <div class="step-desc">SQL, YAML, tests all generated from the design</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Advantage 4: Own Your Destiny -->
+        <div class="advantage-card warning animate-on-scroll">
+          <span class="advantage-number">04</span>
+          <div class="advantage-icon">&#x1F3AF;</div>
+          <div class="advantage-keyword">Your Rules</div>
+          <h3 class="advantage-title">Control Your Own Destiny</h3>
+          <p class="advantage-description">
+            Need a specific feature for your business process? <strong>Build it.</strong>
+            The extension is MIT-licensed and designed to be extended. Your roadmap isn't
+            held hostage by a SaaS vendor's priorities.
+            <br><br>
+            With SQL DBM, you wait for their team to prioritize your feature request.
+            With dbt Semantic Designer, you fork, customize, and ship on your timeline.
+          </p>
+        </div>
+
+        <!-- Advantage 5: Free Forever -->
+        <div class="advantage-card animate-on-scroll">
+          <span class="advantage-number">05</span>
+          <div class="advantage-icon">&#x1F4B0;</div>
+          <div class="advantage-keyword">Zero Cost</div>
+          <h3 class="advantage-title">Free Forever, No Strings</h3>
+          <p class="advantage-description">
+            Not "free tier with limits." Not "free trial." <strong>Actually free.</strong>
+            MIT licensed, open source, no telemetry, no vendor lock-in.
+            <br><br>
+            SQL DBM starts at $50/month and scales to $4,000+ for enterprise features.
+            That's $48,000/year that could go toward something more useful.
+          </p>
+        </div>
+
+        <!-- Advantage 6: Offline & Private -->
+        <div class="advantage-card warning animate-on-scroll">
+          <span class="advantage-number">06</span>
+          <div class="advantage-icon">&#x1F512;</div>
+          <div class="advantage-keyword">Private</div>
+          <h3 class="advantage-title">Offline-Capable, Data Never Leaves</h3>
+          <p class="advantage-description">
+            Works on a plane. Works behind a firewall. Works in air-gapped environments.
+            <strong>Your schema never touches external servers.</strong>
+            <br><br>
+            SQL DBM is cloud-only. Your table names, column names, relationships, and
+            documentation all live on their servers. With dbt Semantic Designer,
+            sensitive metadata stays exactly where you put it: your machine, your repo.
+          </p>
+        </div>
+
+        <!-- Advantage 7: IDE Integration -->
+        <div class="advantage-card animate-on-scroll">
+          <span class="advantage-number">07</span>
+          <div class="advantage-icon">&#x1F4BB;</div>
+          <div class="advantage-keyword">Native</div>
+          <h3 class="advantage-title">VS Code Integration, Not Another Tab</h3>
+          <p class="advantage-description">
+            Your semantic designer opens <strong>in the same window</strong> as your dbt code.
+            Cmd+click from the canvas to jump to the actual SQL file. Use your existing
+            keyboard shortcuts, themes, and extensions.
+            <br><br>
+            Context switching kills productivity. With SQL DBM, you bounce between browser
+            tabs and your IDE. With this extension, everything is one Alt+Tab away.
+          </p>
+        </div>
+
+        <!-- Advantage 8: Domain-Based Job Orchestration -->
+        <div class="advantage-card animate-on-scroll">
+          <span class="advantage-number">08</span>
+          <div class="advantage-icon">&#x23F1;</div>
+          <div class="advantage-keyword">Smart Jobs</div>
+          <h3 class="advantage-title">Domain-Based dbt Job Orchestration</h3>
+          <p class="advantage-description">
+            Build dbt jobs scoped to specific domains. <strong>Tag models by domain</strong>
+            so you can refresh customer data hourly while finance models run daily.
+            Match your pipeline cadence to actual report usage patterns.
+            <br><br>
+            Stop running monolithic dbt jobs that refresh everything. Domain-aware
+            orchestration means <strong>faster pipelines, lower compute costs</strong>,
+            and fresher data where it matters most. Your semantic domains become
+            the natural boundaries for job scheduling.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison Table -->
+  <section class="comparison">
+    <div class="container">
+      <div class="section-header">
+        <h2>Feature Comparison</h2>
+        <p>How the two approaches stack up</p>
+      </div>
+
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>SQL DBM</th>
+            <th class="winner">dbt Semantic Designer</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Price</td>
+            <td>$50 - $4,000+/mo</td>
+            <td class="check">Free Forever</td>
+          </tr>
+          <tr>
+            <td>Git-native, same repo as dbt</td>
+            <td class="cross">No (separate platform)</td>
+            <td class="check">Native JSON in your repo</td>
+          </tr>
+          <tr>
+            <td>Works offline</td>
+            <td class="cross">No (cloud-only)</td>
+            <td class="check">Yes</td>
+          </tr>
+          <tr>
+            <td>Data stays on your machine</td>
+            <td class="cross">No</td>
+            <td class="check">Yes</td>
+          </tr>
+          <tr>
+            <td>AI/Claude integration</td>
+            <td class="partial">API available</td>
+            <td class="check">Direct file access</td>
+          </tr>
+          <tr>
+            <td>Auto-sync & test validation</td>
+            <td class="cross">Manual sync, no test integration</td>
+            <td class="check">Auto-reconcile + dbt tests</td>
+          </tr>
+          <tr>
+            <td>Custom feature development</td>
+            <td class="cross">Request & wait</td>
+            <td class="check">Fork & build</td>
+          </tr>
+          <tr>
+            <td>IDE integration</td>
+            <td class="cross">Browser only</td>
+            <td class="check">Native VS Code</td>
+          </tr>
+          <tr>
+            <td>Domain-based job orchestration</td>
+            <td class="cross">No</td>
+            <td class="check">Tag & schedule by domain</td>
+          </tr>
+          <tr>
+            <td>Visual ERD canvas</td>
+            <td class="check">Yes</td>
+            <td class="check">Yes (React Flow)</td>
+          </tr>
+          <tr>
+            <td>Enterprise SSO</td>
+            <td class="check">Yes</td>
+            <td class="partial">N/A (local tool)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="cta-section">
+    <div class="container">
+      <div class="cta-card">
+        <h2>Ready to Simplify?</h2>
+        <p>Install in seconds. Zero configuration. Start designing immediately.</p>
+        <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.dbt-semantic-designer" class="btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7,10 12,15 17,10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Get dbt Semantic Designer
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>
+        dbt Semantic Designer is open source under the MIT license.<br>
+        <a href="https://github.com/liamwynne/dbt-semantic-designer">View on GitHub</a> &middot;
+        <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.dbt-semantic-designer">VS Code Marketplace</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    // Animate elements on scroll
+    const observerOptions = {
+      threshold: 0.1,
+      rootMargin: '0px 0px -50px 0px'
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, observerOptions);
+
+    document.querySelectorAll('.animate-on-scroll').forEach(el => {
+      observer.observe(el);
+    });
+
+    // Stagger animation for cards
+    document.querySelectorAll('.advantage-card').forEach((card, index) => {
+      card.style.transitionDelay = `${index * 0.1}s`;
+    });
+  </script>
+</body>
+</html>

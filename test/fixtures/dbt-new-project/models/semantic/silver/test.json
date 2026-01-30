@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "domain": "test",
+  "layer": "silver",
+  "description": "yo yo",
+  "models": [],
+  "relationships": [],
+  "viewConfig": {}
+}
