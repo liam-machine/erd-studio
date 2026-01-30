@@ -44,6 +44,8 @@ export interface ManifestModelInfo {
   description: string;
   /** Column definitions from dbt */
   columns: ManifestColumn[];
+  /** Original file path from manifest (e.g., "models/silver/dim_customer.sql") */
+  originalFilePath?: string;
 }
 
 /** Parsed manifest data cached in memory. */

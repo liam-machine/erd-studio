@@ -137,6 +137,8 @@ export class DomainService {
       domain: typeof obj.domain === 'string' ? obj.domain : path.basename(filePath, '.json'),
       layer: this.parseLayer(obj.layer, filePath),
       description: typeof obj.description === 'string' ? obj.description : '',
+      // Optional folder filter for models (e.g., "models/silver")
+      ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
       models: Array.isArray(obj.models) ? (obj.models as SemanticDomain['models']) : [],
       relationships: Array.isArray(obj.relationships) ? (obj.relationships as SemanticDomain['relationships']) : [],
       viewConfig: this.parseViewConfig(obj.viewConfig),

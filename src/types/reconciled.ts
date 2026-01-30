@@ -116,6 +116,8 @@ export interface ReconciledDomainCore {
   domain: string;
   layer: Layer;
   description: string;
+  /** Optional folder filter for models (e.g., "models/silver"). */
+  modelFolder?: string;
   models: ReconciledModel[];
   relationships: ReconciledRelationship[];
   viewConfig: ViewConfig;

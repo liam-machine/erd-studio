@@ -22,6 +22,7 @@ export function AddExistingModelDialog() {
   const isOpen = useEditorStore((s) => s.addExistingModelDialogOpen);
   const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
   const manifestModels = useEditorStore((s) => s.manifestModels);
+  const modelFolder = useEditorStore((s) => s.domain?.modelFolder);
   const { send } = useMessageBus(() => {});
 
   // Local state
@@ -97,9 +98,17 @@ export function AddExistingModelDialog() {
         </div>
         <div className="add-existing-model-dialog__content">
           <div className="add-existing-model-dialog__empty">
-            <p>No manifest models available.</p>
+            <p>No models available to add.</p>
             <p className="add-existing-model-dialog__empty-hint">
-              Run <code>dbt compile</code> to generate the manifest, or all models may already be in this domain.
+              {modelFolder ? (
+                <>
+                  No models found in <code>{modelFolder}/</code>. Run <code>dbt compile</code> or check your folder filter.
+                </>
+              ) : (
+                <>
+                  Run <code>dbt compile</code> to generate the manifest, or all models may already be in this domain.
+                </>
+              )}
             </p>
           </div>
         </div>

@@ -15,6 +15,7 @@
       "resource_type": "model",
       "schema": "silver",
       "description": "Work lot dimension table",
+      "original_file_path": "models/silver/dim_work_lot.sql",
       "columns": {
         "work_lot_id": {
           "name": "work_lot_id",
@@ -46,6 +47,7 @@
       "resource_type": "model",
       "schema": "silver",
       "description": "Project dimension table",
+      "original_file_path": "models/silver/dim_project.sql",
       "columns": {
         "project_id": {
           "name": "project_id",
@@ -65,8 +67,9 @@
       "unique_id": "model.my_dbt_project.fct_work_events",
       "name": "fct_work_events",
       "resource_type": "model",
-      "schema": "silver",
+      "schema": "gold",
       "description": "Work events fact table",
+      "original_file_path": "models/gold/fct_work_events.sql",
       "columns": {
         "event_id": {
           "name": "event_id",

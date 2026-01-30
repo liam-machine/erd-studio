@@ -130,6 +130,13 @@ export interface SemanticDomain {
   domain: string;
   layer: Layer;
   description: string;
+  /**
+   * Optional folder filter for models (e.g., "models/silver").
+   * When set, only manifest models with originalFilePath matching this prefix
+   * will appear in the "Add Existing Model" dialog.
+   * Undefined or null means no filter (show all models).
+   */
+  modelFolder?: string;
   models: SemanticModel[];
   relationships: Relationship[];
   viewConfig: ViewConfig;

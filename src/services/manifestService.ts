@@ -98,6 +98,35 @@ export class ManifestService {
     this.loadPromise = null;
   }
 
+  /**
+   * Get unique top-level model folders from the manifest.
+   * Extracts the first two path segments (e.g., "models/silver") from each model's
+   * originalFilePath. Only includes paths starting with "models/".
+   *
+   * @returns Sorted array of folder paths (e.g., ["models/gold", "models/silver"])
+   */
+  getModelFolders(): string[] {
+    if (!this.cache) {
+      return [];
+    }
+
+    const folders = new Set<string>();
+    for (const model of this.cache.models.values()) {
+      const filePath = model.originalFilePath;
+      if (!filePath || !filePath.startsWith('models/')) {
+        continue;
+      }
+
+      // Extract top-level folder: "models/silver/core/dim_customer.sql" → "models/silver"
+      const parts = filePath.split('/');
+      if (parts.length >= 2) {
+        folders.add(`${parts[0]}/${parts[1]}`);
+      }
+    }
+
+    return Array.from(folders).sort();
+  }
+
   private async parseManifest(projectPath: string): Promise<ManifestData> {
     const manifestPath = path.join(projectPath, 'target', 'manifest.json');
 
@@ -197,6 +226,8 @@ export class ManifestService {
       schema: typeof node.schema === 'string' ? node.schema : '',
       description: typeof node.description === 'string' ? node.description : '',
       columns,
+      originalFilePath:
+        typeof node.original_file_path === 'string' ? node.original_file_path : undefined,
     };
   }
 

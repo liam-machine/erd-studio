@@ -68,10 +68,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Build supplementary payload data for webview messages.
    * Includes templates and list of manifest models not in the domain.
+   *
+   * @param reconciled - Reconciled domain data with existing models
+   * @param manifest - Loaded manifest data
+   * @param modelFolder - Optional folder filter (e.g., "models/silver")
    */
   private buildWebviewPayload(
     reconciled: { models: Array<{ name: string }> },
     manifest: ManifestData,
+    modelFolder?: string,
   ): {
     templates: ReturnType<TemplateService['loadTemplates']>;
     manifestModels: Array<{
@@ -83,8 +88,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   } {
     const templates = this.templateService.loadTemplates(this.workspaceRoot);
     const existingModelNames = new Set(reconciled.models.map((m) => m.name));
-    const manifestModels = Array.from(manifest.models.values())
-      .filter((m) => !existingModelNames.has(m.name))
+
+    let filteredModels = Array.from(manifest.models.values()).filter(
+      (m) => !existingModelNames.has(m.name),
+    );
+
+    // Apply folder filter if configured (prefix match)
+    if (modelFolder) {
+      const folderPrefix = modelFolder.endsWith('/') ? modelFolder : `${modelFolder}/`;
+      filteredModels = filteredModels.filter(
+        (m) => m.originalFilePath && m.originalFilePath.startsWith(folderPrefix),
+      );
+    }
+
+    const manifestModels = filteredModels
       .map((m) => ({
         name: m.name,
         schema: m.schema,
@@ -324,6 +341,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const { templates, manifestModels } = this.buildWebviewPayload(
         reconciled,
         manifest,
+        domain.modelFolder,
       );
 
       // Get layer config for dynamic badge colors and labels
@@ -439,6 +457,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               const { templates, manifestModels } = this.buildWebviewPayload(
                 reconciled,
                 manifest,
+                domain.modelFolder,
               );
 
               // Send manifestRefreshed message with newly built list

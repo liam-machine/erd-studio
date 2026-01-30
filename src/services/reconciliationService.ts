@@ -53,6 +53,7 @@ export class ReconciliationService {
       domain: domain.domain,
       layer: domain.layer,
       description: domain.description,
+      modelFolder: domain.modelFolder,
       models,
       relationships,
       viewConfig: domain.viewConfig,

@@ -316,7 +316,38 @@ export function activate(context: vscode.ExtensionContext): void {
           return; // User cancelled (empty string is valid)
         }
 
-        // Step 4: Create directory and file (using configured semanticDir)
+        // Step 4: Get model folder filter (optional)
+        // Load manifest to detect available folders
+        let modelFolder: string | undefined;
+        try {
+          await manifestService.loadManifest(workspaceRoot);
+          const availableFolders = manifestService.getModelFolders();
+
+          if (availableFolders.length > 0) {
+            const folderItems: Array<{ label: string; value: string | undefined }> = [
+              { label: '$(folder) Any folder (no filter)', value: undefined },
+              ...availableFolders.map((folder) => ({
+                label: `$(folder) ${folder}`,
+                value: folder,
+              })),
+            ];
+
+            const folderChoice = await vscode.window.showQuickPick(folderItems, {
+              placeHolder: 'Filter models by folder (optional)',
+              ignoreFocusOut: true,
+            });
+
+            if (folderChoice === undefined) {
+              return; // User cancelled
+            }
+            modelFolder = folderChoice.value;
+          }
+        } catch {
+          // If manifest loading fails, skip folder picker (graceful degradation)
+          console.warn('[createDomain] Failed to load manifest for folder detection, skipping folder picker');
+        }
+
+        // Step 5: Create directory and file (using configured semanticDir)
         const layerDir = path.join(workspaceRoot, semanticDir, layer);
         const filePath = path.join(layerDir, `${slug}.json`);
 
@@ -334,11 +365,12 @@ export function activate(context: vscode.ExtensionContext): void {
         }
 
         // Create domain JSON with initial schema
-        const domainData = {
+        const domainData: Record<string, unknown> = {
           schemaVersion: CURRENT_SCHEMA_VERSION,
           domain: slug,
           layer,
           description: description.trim(),
+          ...(modelFolder ? { modelFolder } : {}),
           models: [],
           relationships: [],
           viewConfig: {},
@@ -366,10 +398,10 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        // Step 5: Refresh tree view
+        // Step 6: Refresh tree view
         treeProvider.refresh();
 
-        // Step 6: Auto-open in custom editor
+        // Step 7: Auto-open in custom editor
         await vscode.commands.executeCommand(
           'vscode.openWith',
           vscode.Uri.file(filePath),
