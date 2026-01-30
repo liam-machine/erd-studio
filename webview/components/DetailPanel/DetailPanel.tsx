@@ -147,26 +147,26 @@ export function DetailPanel() {
         )}
       </div>
 
-      {/* Delete Model button (design models only) */}
-      {model.status === 'design' && (
+      {/* Remove from Domain button (design and built models) */}
+      {(model.status === 'design' || model.status === 'built') && (
         <div className="detail-panel__section detail-panel__section--actions">
           {confirmingDelete ? (
             <>
               <span className="detail-panel__confirm-label">
-                Delete model{totalRelationships > 0 ? ` and ${totalRelationships} relationship(s)` : ''}?
+                Remove model from domain?{totalRelationships > 0 ? ` (${totalRelationships} relationship(s) will also be removed)` : ''}
               </span>
               <div className="detail-panel__confirm-actions">
                 <button
                   className="detail-panel__button detail-panel__button--danger"
                   onClick={handleDeleteModel}
-                  aria-label="Confirm delete model"
+                  aria-label="Confirm remove model"
                 >
-                  Yes, Delete
+                  Yes, Remove
                 </button>
                 <button
                   className="detail-panel__button"
                   onClick={() => setConfirmingDelete(false)}
-                  aria-label="Cancel delete"
+                  aria-label="Cancel"
                 >
                   Cancel
                 </button>
@@ -176,10 +176,10 @@ export function DetailPanel() {
             <button
               className="detail-panel__button detail-panel__button--danger"
               onClick={() => setConfirmingDelete(true)}
-              title="Delete this design model"
-              aria-label="Delete this design model"
+              title="Remove this model from the domain"
+              aria-label="Remove this model from the domain"
             >
-              Delete Model
+              Remove from Domain
             </button>
           )}
         </div>

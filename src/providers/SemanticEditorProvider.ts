@@ -882,17 +882,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      const model = models[modelIndex];
-      // Only allow deleting design models
-      if (model.source !== 'design') {
-        webview.postMessage({
-          type: 'error',
-          payload: { message: `Cannot delete built model "${payload.modelName}". Only design models can be deleted.` },
-        });
-        return;
-      }
-
-      // Remove the model
+      // Remove the model (both design and repo models can be removed from the domain)
       models.splice(modelIndex, 1);
       parsed.models = models;
 

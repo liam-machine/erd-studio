@@ -238,11 +238,11 @@ function EditorCanvas() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!domain) return;
 
-        // Priority 1: Delete selected node (with confirmation)
+        // Priority 1: Remove selected node (with confirmation)
         if (selectedNode) {
           const model = domain.models.find((m) => m.name === selectedNode);
           if (model) {
-            if (model.status === 'design') {
+            if (model.status === 'design' || model.status === 'built') {
               e.preventDefault();
               // Open detail panel if closed and trigger confirmation mode
               if (!detailPanelOpen) {
@@ -251,9 +251,9 @@ function EditorCanvas() {
               setPendingDeleteConfirmation(true);
               return;
             } else {
-              // Built or missing model — show toast
+              // Missing model — show toast
               e.preventDefault();
-              setToastMessage('Cannot delete built or missing models');
+              setToastMessage('Cannot remove missing models');
               return;
             }
           }
