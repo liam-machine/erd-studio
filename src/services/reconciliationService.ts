@@ -9,7 +9,11 @@
  * The output is a ReconciledDomain ready for the webview.
  */
 
-import type { ManifestData, ManifestColumn } from '../types/manifest';
+import type {
+  ManifestData,
+  ManifestColumn,
+  ManifestRelationshipTest,
+} from '../types/manifest';
 import type {
   SemanticDomain,
   SemanticModel,
@@ -41,7 +45,7 @@ export class ReconciliationService {
     );
 
     const relationships = domain.relationships.map((rel) =>
-      this.reconcileRelationship(rel),
+      this.reconcileRelationship(rel, manifest.relationshipTests),
     );
 
     return {
@@ -230,9 +234,19 @@ export class ReconciliationService {
 
   /**
    * Reconcile a relationship to add status.
+   *
+   * A relationship is 'built' if it exists as a relationship test in the manifest.
+   * Otherwise, it's 'design' (user-created and not yet in manifest).
    */
-  private reconcileRelationship(rel: Relationship): ReconciledRelationship {
-    const status: RelationshipStatus = rel.source === 'design' ? 'design' : 'built';
+  private reconcileRelationship(
+    rel: Relationship,
+    manifestTests: ManifestRelationshipTest[],
+  ): ReconciledRelationship {
+    const isInManifest = this.isRelationshipInManifest(rel, manifestTests);
+
+    // Built if exists in manifest tests, otherwise design
+    const status: RelationshipStatus = isInManifest ? 'built' : 'design';
+
     return {
       fromModel: rel.fromModel,
       fromColumn: rel.fromColumn,
@@ -242,4 +256,33 @@ export class ReconciliationService {
       status,
     };
   }
+
+  /**
+   * Check if a relationship exists as a relationship test in the manifest.
+   * Matches by composite key: (fromModel, fromColumn, toModel, toColumn).
+   */
+  private isRelationshipInManifest(
+    rel: Relationship,
+    tests: ManifestRelationshipTest[],
+  ): boolean {
+    return tests.some((test) => relationshipMatchesTest(rel, test));
+  }
+}
+
+/**
+ * Check if a relationship matches a manifest relationship test.
+ * Matches by composite key: (fromModel, fromColumn, toModel, toColumn).
+ *
+ * Exported for use by AutoReconciliationService.
+ */
+export function relationshipMatchesTest(
+  rel: { fromModel: string; fromColumn: string; toModel: string; toColumn: string },
+  test: ManifestRelationshipTest,
+): boolean {
+  return (
+    test.fromModel === rel.fromModel &&
+    test.fromColumn === rel.fromColumn &&
+    test.toModel === rel.toModel &&
+    test.toColumn === rel.toColumn
+  );
 }

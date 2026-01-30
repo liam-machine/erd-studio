@@ -37,14 +37,20 @@ export interface DomainUpdatedMessage {
 }
 
 /**
- * Sent when the manifest is refreshed and design models may have transitioned.
- * Contains the updated domain and list of newly built model names.
+ * Sent when the manifest is refreshed and design models/relationships may have transitioned.
+ * Contains the updated domain and lists of newly built items.
  */
 export interface ManifestRefreshedMessage {
   type: 'manifestRefreshed';
   payload: {
     domain: ReconciledDomain;
     newlyBuiltModels: string[];
+    newlyBuiltRelationships: Array<{
+      fromModel: string;
+      fromColumn: string;
+      toModel: string;
+      toColumn: string;
+    }>;
   };
 }
 

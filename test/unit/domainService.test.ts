@@ -107,7 +107,7 @@ describe('DomainService', () => {
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.relationships).toHaveLength(3);
+      expect(domain.relationships).toHaveLength(4);
 
       const repoRel = domain.relationships.find((r) => r.fromModel === 'dim_work_lot');
       expect(repoRel).toBeDefined();

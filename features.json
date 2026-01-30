@@ -813,6 +813,46 @@
       "implementation_notes": "Implemented using VS Code's viewsWelcome contribution point. DomainTreeProvider returns empty array when semantic directory doesn't exist, triggering the welcome content. setupSemanticDirectory command creates silver/gold directories (bronze excluded per CREATABLE_LAYERS), then launches createDomain. Uses configurable semanticDir setting. Includes 100ms delay before createDomain to ensure tree updates.",
       "category": "ui",
       "estimated_effort": "small"
+    },
+    {
+      "id": "F409",
+      "name": "Determine relationship status from manifest relationship tests",
+      "description": "Fix relationship status logic so that relationships are marked as 'built' (blue) when they exist as relationship tests in the dbt manifest.json, and 'design' (orange) when they don't. Currently all new relationships default to 'design' regardless of whether the FK/PK columns exist in built models. The manifest contains relationship tests with test_metadata.name='relationships' that specify fromModel, fromColumn (kwargs.column_name), toModel (from depends_on.nodes), and toColumn (kwargs.field). Reconciliation should check these tests to determine if a relationship is built. When the manifest is updated (dbt compile), design relationships that now exist in the manifest should automatically transition to built (orange → blue).",
+      "phase": "phase-3",
+      "status": "completed",
+      "skip": false,
+      "dependencies": ["F111", "F101", "F304"],
+      "validation_criteria": [
+        "Unit test: relationship matching a manifest relationship test is marked status 'built' (blue edge)",
+        "Unit test: relationship not in manifest is marked status 'design' (orange edge)",
+        "Unit test: relationship tests are parsed correctly from manifest nodes where resource_type='test' and test_metadata.name='relationships'",
+        "Verify in Extension Development Host: adding an existing model with manifest relationships shows blue edges",
+        "Verify in Extension Development Host: manually created relationships remain orange until they appear in manifest after dbt compile",
+        "Verify reconciliation runs when domain is loaded, when existing model is added to canvas, and when manifest is updated",
+        "Verify in Extension Development Host: after dbt compile adds a relationship test, the corresponding design relationship turns blue automatically"
+      ],
+      "implementation_notes": "Extend ManifestService to extract relationship tests: filter nodes where resource_type='test' and test_metadata.name='relationships'. Parse test_metadata.kwargs for column_name (FK), field (PK), and to (ref('model_name')). Use depends_on.nodes for unambiguous model identification (format: model.<project>.<model_name>). ReconciliationService should match domain relationships against manifest relationships to set status. A relationship is 'built' if it matches a manifest relationship test by (fromModel, fromColumn, toModel, toColumn). User-created relationships are always 'design' initially - they only become 'built' after appearing in manifest via dbt compile. Hook into the manifest file watcher (F304) to trigger relationship status reconciliation when manifest changes, similar to how model status transitions from design → built.",
+      "category": "infrastructure",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F410",
+      "name": "Enhanced model search with manifest relationship filtering",
+      "description": "Enhance the 'Add Existing Model' search to highlight and filter models that have manifest relationships to models already in the domain. Add a toggle: when ON, only show models with relationships to domain models; when OFF, show all models but sort related ones to the top with visual distinction. Related models appear with blue highlight and subtitle text like 'Related to dim_customer'. Check both relationship directions (searched model has FK to domain model, OR domain model has FK to searched model).",
+      "phase": "phase-4",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F409", "F302"],
+      "validation_criteria": [
+        "Verify in Extension Development Host: toggle appears in Add Existing Model dialog",
+        "Verify in Extension Development Host: with toggle ON, only models with manifest relationships to domain models appear",
+        "Verify in Extension Development Host: with toggle OFF, related models appear at top with blue highlight and 'Related to X' subtitle",
+        "Verify in Extension Development Host: both FK directions are checked (model→domain and domain→model)",
+        "Unit test: getRelatedModels returns models connected via manifest relationship tests to any domain model"
+      ],
+      "implementation_notes": "Extend ManifestService with getRelatedModels(domainModelNames: string[]) that returns model names with manifest relationships to the given models. Use the relationship test data from F409. In AddExistingModelDialog: add a toggle state, filter/sort results based on toggle, style related models with blue background and 'Related to {modelName}' subtitle showing which domain model they connect to. If multiple connections exist, show the first one.",
+      "category": "ui",
+      "estimated_effort": "medium"
     }
   ],
   "metadata": {
@@ -820,12 +860,12 @@
     "generated_at": "2026-01-29T00:00:00.000Z",
     "last_updated": "2026-01-29 - Phase 2 simplified to single-mode approach (no browse/design toggle)",
     "feature_counts": {
-      "total": 34,
+      "total": 36,
       "by_phase": {
         "phase-1": 17,
         "phase-2": 9,
-        "phase-3": 7,
-        "phase-4": 9
+        "phase-3": 8,
+        "phase-4": 10
       }
     }
   }

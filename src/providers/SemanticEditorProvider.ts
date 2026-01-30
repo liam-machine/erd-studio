@@ -376,10 +376,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 payload: {
                   domain: { ...reconciled, templates, manifestModels },
                   newlyBuiltModels: result.newlyBuiltModels,
+                  newlyBuiltRelationships: result.newlyBuiltRelationships,
                 },
               });
 
               allNewlyBuilt.push(...result.newlyBuiltModels);
+              allNewlyBuilt.push(
+                ...result.newlyBuiltRelationships.map(
+                  (r) => `${r.fromModel}.${r.fromColumn}→${r.toModel}.${r.toColumn}`,
+                ),
+              );
             } finally {
               this.pendingUpdates.delete(document.uri.toString());
             }

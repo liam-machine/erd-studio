@@ -5,6 +5,10 @@
  * vs collapsed showing first N columns). State is ephemeral — it resets when
  * the domain changes because the hook recreates with a fresh Set.
  *
+ * Smart collapsing: columns only collapse automatically when there are enough
+ * nodes (NODE_THRESHOLD) to warrant performance optimization. Below that
+ * threshold, all columns are shown by default.
+ *
  * @module F405 Performance optimization
  */
 
@@ -17,17 +21,24 @@ import { useState, useCallback } from 'react';
 /** Number of columns to show when collapsed. */
 export const COLLAPSED_COLUMN_LIMIT = 5;
 
+/** Number of nodes required before auto-collapsing columns for performance. */
+export const NODE_THRESHOLD = 30;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface UseColumnExpansionReturn {
-  /** Check if a model's columns are expanded. */
+  /** Check if a model's columns are expanded (or should be shown due to low node count). */
   isExpanded: (modelId: string) => boolean;
   /** Toggle expansion state for a model. */
   toggleExpansion: (modelId: string) => void;
   /** Collapse all expanded models. */
   collapseAll: () => void;
+  /** Expand all models (show all columns). */
+  expandAll: (modelIds: string[]) => void;
+  /** Whether columns are in "all expanded" mode. */
+  allExpanded: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,13 +53,17 @@ export interface UseColumnExpansionReturn {
  */
 export function useColumnExpansion(): UseColumnExpansionReturn {
   const [expandedSet, setExpandedSet] = useState<Set<string>>(() => new Set());
+  // Track if user has explicitly set "all expanded" mode
+  const [allExpanded, setAllExpanded] = useState(false);
 
   const isExpanded = useCallback(
-    (modelId: string) => expandedSet.has(modelId),
-    [expandedSet],
+    (modelId: string) => allExpanded || expandedSet.has(modelId),
+    [expandedSet, allExpanded],
   );
 
   const toggleExpansion = useCallback((modelId: string) => {
+    // If in allExpanded mode, switch to individual tracking and collapse this one
+    setAllExpanded(false);
     setExpandedSet((prev) => {
       const next = new Set(prev);
       if (next.has(modelId)) {
@@ -61,8 +76,14 @@ export function useColumnExpansion(): UseColumnExpansionReturn {
   }, []);
 
   const collapseAll = useCallback(() => {
+    setAllExpanded(false);
     setExpandedSet(new Set());
   }, []);
 
-  return { isExpanded, toggleExpansion, collapseAll };
+  const expandAll = useCallback((modelIds: string[]) => {
+    setAllExpanded(true);
+    setExpandedSet(new Set(modelIds));
+  }, []);
+
+  return { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded };
 }

@@ -28,7 +28,7 @@ import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
-import { useColumnExpansion } from './hooks/useColumnExpansion';
+import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
@@ -42,6 +42,33 @@ import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { transformDomain } from './lib/graphTransformer';
 import type { ModelFlowNode, FkFlowEdge } from './types/graph';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build and show a toast notification for newly built models/relationships.
+ */
+function showBuiltNotification(
+  models: string[],
+  relationships: Array<{ fromModel: string; fromColumn: string; toModel: string; toColumn: string }>,
+  setToastMessage: (msg: string) => void,
+): void {
+  const modelCount = models.length;
+  const relCount = relationships.length;
+
+  if (modelCount === 0 && relCount === 0) return;
+
+  const parts: string[] = [];
+  if (modelCount > 0) {
+    parts.push(`Models: ${models.join(', ')}`);
+  }
+  if (relCount > 0) {
+    parts.push(`${relCount} relationship${relCount > 1 ? 's' : ''}`);
+  }
+  setToastMessage(`Built: ${parts.join(' | ')}`);
+}
 
 // ---------------------------------------------------------------------------
 // Inner component (must be inside ReactFlowProvider)
@@ -93,7 +120,7 @@ function EditorCanvas() {
   const vscode = useVsCodeApi();
 
   // F405: Column expansion state (ephemeral, resets on domain change)
-  const { isExpanded, toggleExpansion } = useColumnExpansion();
+  const { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded } = useColumnExpansion();
 
   // State persistence (zoom, pan, selection, mode, detail panel)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
@@ -127,6 +154,10 @@ function EditorCanvas() {
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
           }
+          // F405: Auto-expand all columns if below node threshold for better UX
+          if (msg.payload.models.length < NODE_THRESHOLD) {
+            expandAll(msg.payload.models.map((m) => m.name));
+          }
           break;
         case 'manifestRefreshed':
           // F304: Auto-reconciliation detected design models that are now built
@@ -137,18 +168,19 @@ function EditorCanvas() {
           if (msg.payload.domain.manifestModels) {
             setManifestModels(msg.payload.domain.manifestModels);
           }
-          // Show toast notification for newly built models
-          if (msg.payload.newlyBuiltModels.length > 0) {
-            const modelNames = msg.payload.newlyBuiltModels.join(', ');
-            setToastMessage(`Models built: ${modelNames}`);
-          }
+          // Show toast notification for newly built models and relationships
+          showBuiltNotification(
+            msg.payload.newlyBuiltModels,
+            msg.payload.newlyBuiltRelationships ?? [],
+            setToastMessage,
+          );
           break;
         case 'error':
           setError(msg.payload.message);
           break;
       }
     },
-    [setDomain, setError, setTemplates, setManifestModels, setToastMessage],
+    [setDomain, setError, setTemplates, setManifestModels, setToastMessage, expandAll],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
@@ -536,7 +568,13 @@ function EditorCanvas() {
             borderRadius: '4px',
           }}
         />
-        <Toolbar nodes={nodes} edges={edges} />
+        <Toolbar
+          nodes={nodes}
+          edges={edges}
+          allExpanded={allExpanded}
+          onExpandAll={() => expandAll(nodes.map((n) => n.id))}
+          onCollapseAll={collapseAll}
+        />
         <StatusBar />
         <DetailPanel />
         <NewModelDialog />

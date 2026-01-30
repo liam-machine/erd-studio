@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { AutoReconciliationService } from '../../src/services/autoReconciliationService';
 import type { SemanticDomain } from '../../src/types/semantic';
-import type { ManifestData } from '../../src/types/manifest';
+import type { ManifestData, ManifestRelationshipTest } from '../../src/types/manifest';
 
 describe('AutoReconciliationService', () => {
   const service = new AutoReconciliationService();
@@ -13,6 +13,7 @@ describe('AutoReconciliationService', () => {
   // Helper to create a mock manifest
   function createMockManifest(
     models: Array<{ name: string; columns: Array<{ name: string; data_type: string }> }>,
+    relationshipTests: ManifestRelationshipTest[] = [],
   ): ManifestData {
     const modelMap = new Map<string, { name: string; schema: string; description: string; columns: Array<{ name: string; data_type: string; description: string }> }>();
     for (const model of models) {
@@ -23,7 +24,7 @@ describe('AutoReconciliationService', () => {
         columns: model.columns.map((c) => ({ ...c, description: '' })),
       });
     }
-    return { models: modelMap };
+    return { models: modelMap, relationshipTests };
   }
 
   describe('findNewlyBuiltModels', () => {
@@ -438,6 +439,298 @@ describe('AutoReconciliationService', () => {
       expect(result.newlyBuiltModels).toEqual(['dim_customer']);
       expect(domain.models[0].source).toBe('repo'); // Transitioned
       expect(domain.models[1].source).toBe('design'); // Still design
+    });
+
+    it('includes newlyBuiltRelationships in result', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [],
+        relationships: [],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([]);
+
+      const result = service.reconcileDomain(domain, manifest);
+
+      expect(result.newlyBuiltRelationships).toBeDefined();
+      expect(result.newlyBuiltRelationships).toEqual([]);
+    });
+  });
+
+  describe('findNewlyBuiltRelationships (F409)', () => {
+    it('returns empty array when no design relationships exist', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [],
+        relationships: [
+          {
+            fromModel: 'a',
+            fromColumn: 'id',
+            toModel: 'b',
+            toColumn: 'id',
+            cardinality: 'many-to-one',
+            // No source field = not a design relationship
+          },
+        ],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([]);
+
+      const result = service.findNewlyBuiltRelationships(domain, manifest);
+
+      expect(result).toEqual([]);
+    });
+
+    it('returns design relationship when matching test exists in manifest', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [],
+        relationships: [
+          {
+            fromModel: 'dim_work_lot',
+            fromColumn: 'project_id',
+            toModel: 'dim_project',
+            toColumn: 'project_id',
+            cardinality: 'many-to-one',
+            source: 'design',
+          },
+        ],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([], [
+        {
+          fromModel: 'dim_work_lot',
+          fromColumn: 'project_id',
+          toModel: 'dim_project',
+          toColumn: 'project_id',
+        },
+      ]);
+
+      const result = service.findNewlyBuiltRelationships(domain, manifest);
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        fromModel: 'dim_work_lot',
+        fromColumn: 'project_id',
+        toModel: 'dim_project',
+        toColumn: 'project_id',
+      });
+    });
+
+    it('does not return design relationship without matching manifest test', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [],
+        relationships: [
+          {
+            fromModel: 'a',
+            fromColumn: 'id',
+            toModel: 'b',
+            toColumn: 'id',
+            cardinality: 'many-to-one',
+            source: 'design',
+          },
+        ],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([]);
+
+      const result = service.findNewlyBuiltRelationships(domain, manifest);
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('transitionRelationshipsToBuilt (F409)', () => {
+    it('removes source field from relationships matching manifest tests', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [],
+        relationships: [
+          {
+            fromModel: 'dim_work_lot',
+            fromColumn: 'project_id',
+            toModel: 'dim_project',
+            toColumn: 'project_id',
+            cardinality: 'many-to-one',
+            source: 'design',
+          },
+        ],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([], [
+        {
+          fromModel: 'dim_work_lot',
+          fromColumn: 'project_id',
+          toModel: 'dim_project',
+          toColumn: 'project_id',
+        },
+      ]);
+
+      service.transitionRelationshipsToBuilt(domain, manifest);
+
+      expect(domain.relationships[0].source).toBeUndefined();
+    });
+
+    it('does not modify relationships without matching tests', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [],
+        relationships: [
+          {
+            fromModel: 'a',
+            fromColumn: 'id',
+            toModel: 'b',
+            toColumn: 'id',
+            cardinality: 'many-to-one',
+            source: 'design',
+          },
+        ],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([]);
+
+      service.transitionRelationshipsToBuilt(domain, manifest);
+
+      expect(domain.relationships[0].source).toBe('design');
+    });
+
+    it('does not modify relationships without source field', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [],
+        relationships: [
+          {
+            fromModel: 'dim_work_lot',
+            fromColumn: 'project_id',
+            toModel: 'dim_project',
+            toColumn: 'project_id',
+            cardinality: 'many-to-one',
+            // No source field
+          },
+        ],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([], [
+        {
+          fromModel: 'dim_work_lot',
+          fromColumn: 'project_id',
+          toModel: 'dim_project',
+          toColumn: 'project_id',
+        },
+      ]);
+
+      service.transitionRelationshipsToBuilt(domain, manifest);
+
+      // Should still have no source field
+      expect(domain.relationships[0].source).toBeUndefined();
+    });
+  });
+
+  describe('reconcileDomain with relationships (F409)', () => {
+    it('transitions both models and relationships', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [
+          {
+            name: 'dim_customer',
+            source: 'design',
+            columns: [{ name: 'id', dataType: 'integer' }],
+          },
+        ],
+        relationships: [
+          {
+            fromModel: 'dim_order',
+            fromColumn: 'customer_id',
+            toModel: 'dim_customer',
+            toColumn: 'id',
+            cardinality: 'many-to-one',
+            source: 'design',
+          },
+        ],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest(
+        [{ name: 'dim_customer', columns: [{ name: 'id', data_type: 'integer' }] }],
+        [
+          {
+            fromModel: 'dim_order',
+            fromColumn: 'customer_id',
+            toModel: 'dim_customer',
+            toColumn: 'id',
+          },
+        ],
+      );
+
+      const result = service.reconcileDomain(domain, manifest);
+
+      expect(result.transitioned).toBe(true);
+      expect(result.newlyBuiltModels).toEqual(['dim_customer']);
+      expect(result.newlyBuiltRelationships).toHaveLength(1);
+      expect(domain.models[0].source).toBe('repo');
+      expect(domain.relationships[0].source).toBeUndefined();
+    });
+
+    it('returns transitioned: true when only relationships are transitioned', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [{ name: 'dim_customer', source: 'repo' }],
+        relationships: [
+          {
+            fromModel: 'dim_order',
+            fromColumn: 'customer_id',
+            toModel: 'dim_customer',
+            toColumn: 'id',
+            cardinality: 'many-to-one',
+            source: 'design',
+          },
+        ],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest(
+        [{ name: 'dim_customer', columns: [] }],
+        [
+          {
+            fromModel: 'dim_order',
+            fromColumn: 'customer_id',
+            toModel: 'dim_customer',
+            toColumn: 'id',
+          },
+        ],
+      );
+
+      const result = service.reconcileDomain(domain, manifest);
+
+      expect(result.transitioned).toBe(true);
+      expect(result.newlyBuiltModels).toEqual([]);
+      expect(result.newlyBuiltRelationships).toHaveLength(1);
     });
   });
 });

@@ -15,12 +15,23 @@
 
 import type { ManifestData } from '../types/manifest';
 import type { SemanticDomain, SemanticModel, ColumnDef } from '../types/semantic';
+import { relationshipMatchesTest } from './reconciliationService';
+
+/** Identifies a relationship by its composite key */
+export interface RelationshipKey {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+  toColumn: string;
+}
 
 export interface ReconciliationResult {
-  /** Whether any models were transitioned */
+  /** Whether any models or relationships were transitioned */
   transitioned: boolean;
   /** Names of models that transitioned from design to repo */
   newlyBuiltModels: string[];
+  /** Relationships that transitioned from design to built */
+  newlyBuiltRelationships: RelationshipKey[];
 }
 
 export class AutoReconciliationService {
@@ -124,28 +135,100 @@ export class AutoReconciliationService {
   }
 
   /**
+   * Find relationships in domain with source: 'design' that now exist in manifest tests.
+   */
+  findNewlyBuiltRelationships(
+    domain: SemanticDomain,
+    manifest: ManifestData,
+  ): RelationshipKey[] {
+    const newlyBuilt: RelationshipKey[] = [];
+    const tests = manifest.relationshipTests;
+
+    for (const rel of domain.relationships) {
+      // Only check relationships explicitly marked as design
+      if (rel.source !== 'design') {
+        continue;
+      }
+
+      // Check if this relationship now exists in manifest
+      const matchingTest = tests.find((test) => relationshipMatchesTest(rel, test));
+
+      if (matchingTest) {
+        newlyBuilt.push({
+          fromModel: rel.fromModel,
+          fromColumn: rel.fromColumn,
+          toModel: rel.toModel,
+          toColumn: rel.toColumn,
+        });
+      }
+    }
+
+    return newlyBuilt;
+  }
+
+  /**
+   * Remove source: 'design' field from relationships that now exist in manifest.
+   * Mutates domain.relationships in-place.
+   */
+  transitionRelationshipsToBuilt(
+    domain: SemanticDomain,
+    manifest: ManifestData,
+  ): void {
+    const tests = manifest.relationshipTests;
+
+    for (const rel of domain.relationships) {
+      if (rel.source !== 'design') {
+        continue;
+      }
+
+      const matchingTest = tests.find((test) => relationshipMatchesTest(rel, test));
+      if (matchingTest) {
+        // Remove the source field - absence of source means built
+        delete rel.source;
+      }
+    }
+  }
+
+  /**
    * Execute auto-reconciliation for a domain.
-   * Detects newly built models and transitions them.
+   * Detects newly built models and relationships, then transitions them.
    *
    * @param domain - The semantic domain to reconcile (will be mutated if transitions occur)
    * @param manifest - The manifest data to reconcile against
-   * @returns Result indicating whether transitions occurred and which models
+   * @returns Result indicating whether transitions occurred and which models/relationships
    */
   reconcileDomain(
     domain: SemanticDomain,
     manifest: ManifestData,
   ): ReconciliationResult {
-    const newlyBuilt = this.findNewlyBuiltModels(domain, manifest);
+    const newlyBuiltModels = this.findNewlyBuiltModels(domain, manifest);
+    const newlyBuiltRelationships = this.findNewlyBuiltRelationships(domain, manifest);
 
-    if (newlyBuilt.length === 0) {
-      return { transitioned: false, newlyBuiltModels: [] };
+    const transitioned =
+      newlyBuiltModels.length > 0 || newlyBuiltRelationships.length > 0;
+
+    if (!transitioned) {
+      return {
+        transitioned: false,
+        newlyBuiltModels: [],
+        newlyBuiltRelationships: [],
+      };
     }
 
-    // Transition each model
-    for (const modelName of newlyBuilt) {
+    // Transition models
+    for (const modelName of newlyBuiltModels) {
       this.transitionModelToRepo(domain, modelName, manifest);
     }
 
-    return { transitioned: true, newlyBuiltModels: newlyBuilt };
+    // Transition relationships
+    if (newlyBuiltRelationships.length > 0) {
+      this.transitionRelationshipsToBuilt(domain, manifest);
+    }
+
+    return {
+      transitioned: true,
+      newlyBuiltModels: newlyBuiltModels,
+      newlyBuiltRelationships,
+    };
   }
 }

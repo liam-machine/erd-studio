@@ -63,35 +63,6 @@
           "description": "FK to dim_work_lot"
         }
       ]
-    },
-    {
-      "name": "fct_work_events",
-      "source": "repo"
-    }
-  ],
-  "relationships": [
-    {
-      "fromModel": "dim_work_lot",
-      "fromColumn": "project_id",
-      "toModel": "dim_project",
-      "toColumn": "project_id",
-      "cardinality": "many-to-one"
-    },
-    {
-      "fromModel": "dim_work_lot_status",
-      "fromColumn": "work_lot_id",
-      "toModel": "dim_work_lot",
-      "toColumn": "work_lot_id",
-      "cardinality": "many-to-one",
-      "source": "design"
-    },
-    {
-      "fromModel": "brg_lot_contractor",
-      "fromColumn": "work_lot_id",
-      "toModel": "dim_work_lot",
-      "toColumn": "work_lot_id",
-      "cardinality": "one-to-one",
-      "source": "design"
     }
   ],
   "viewConfig": {
@@ -102,25 +73,35 @@
     },
     "positions": {
       "dim_work_lot": {
-        "x": 372,
-        "y": 186
+        "x": -44,
+        "y": -9
       },
       "dim_project": {
-        "x": 732,
-        "y": 232
+        "x": 481,
+        "y": 53
       },
       "dim_work_lot_status": {
-        "x": 12,
-        "y": 347
+        "x": 31,
+        "y": -483
       },
       "brg_lot_contractor": {
-        "x": 12,
-        "y": 199
+        "x": -151,
+        "y": -348
       },
       "fct_work_events": {
-        "x": 12,
-        "y": 12
+        "x": -217,
+        "y": 482
       }
     }
-  }
+  },
+  "relationships": [
+    {
+      "fromModel": "brg_lot_contractor",
+      "fromColumn": "bridge_id",
+      "toModel": "dim_work_lot",
+      "toColumn": "project_id",
+      "cardinality": "many-to-one",
+      "source": "design"
+    }
+  ]
 }

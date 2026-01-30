@@ -253,4 +253,67 @@ describe('ManifestService', () => {
       expect(data.models.has('no_unique_id')).toBe(false);
     });
   });
+
+  describe('relationship test extraction (F409)', () => {
+    it('extracts relationship tests from manifest', async () => {
+      const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
+
+      expect(data.relationshipTests).toBeDefined();
+      expect(data.relationshipTests).toHaveLength(2);
+    });
+
+    it('parses relationship test fields correctly', async () => {
+      const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
+
+      // Find the dim_work_lot → dim_project relationship test
+      const relTest = data.relationshipTests.find(
+        (r) => r.fromModel === 'dim_work_lot' && r.toModel === 'dim_project'
+      );
+
+      expect(relTest).toBeDefined();
+      expect(relTest!.fromColumn).toBe('project_id');
+      expect(relTest!.toColumn).toBe('project_id');
+    });
+
+    it('extracts fromModel from attached_node when available', async () => {
+      const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
+
+      // Both relationship tests in fixture use attached_node
+      const relTest = data.relationshipTests.find(
+        (r) => r.fromModel === 'fct_work_events'
+      );
+
+      expect(relTest).toBeDefined();
+      expect(relTest!.fromModel).toBe('fct_work_events');
+      expect(relTest!.toModel).toBe('dim_work_lot');
+    });
+
+    it('returns empty array when no relationship tests exist', async () => {
+      // Sparse project has no relationship tests
+      const data = await service.loadManifest(SPARSE_PROJECT_PATH);
+
+      expect(data.relationshipTests).toEqual([]);
+    });
+
+    it('provides getRelationshipTests() accessor', async () => {
+      await service.loadManifest(FIXTURE_PROJECT_PATH);
+
+      const tests = service.getRelationshipTests();
+      expect(tests).toHaveLength(2);
+    });
+
+    it('returns empty from getRelationshipTests() when cache is empty', () => {
+      // Without loading manifest, should return empty array
+      expect(service.getRelationshipTests()).toEqual([]);
+    });
+
+    it('clears relationship tests on invalidate', async () => {
+      await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(service.getRelationshipTests()).toHaveLength(2);
+
+      service.invalidate();
+
+      expect(service.getRelationshipTests()).toEqual([]);
+    });
+  });
 });

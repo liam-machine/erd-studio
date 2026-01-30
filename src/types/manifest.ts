@@ -13,6 +13,23 @@ export interface ManifestColumn {
   description: string;
 }
 
+/**
+ * Relationship test info extracted from manifest test nodes.
+ *
+ * In dbt, relationship tests are schema tests that validate FK constraints.
+ * They appear in the manifest as test nodes with test_metadata.name='relationships'.
+ */
+export interface ManifestRelationshipTest {
+  /** FK model name (short name, e.g. "dim_work_lot") */
+  fromModel: string;
+  /** FK column name (from test_metadata.kwargs.column_name) */
+  fromColumn: string;
+  /** PK model name (short name, e.g. "dim_project") */
+  toModel: string;
+  /** PK column name (from test_metadata.kwargs.field) */
+  toColumn: string;
+}
+
 /** Model info extracted from a dbt manifest node. */
 export interface ManifestModelInfo {
   /** Short model name (e.g. "dim_work_lot") */
@@ -33,4 +50,6 @@ export interface ManifestModelInfo {
 export interface ManifestData {
   /** Models indexed by short name (e.g. "dim_work_lot") */
   models: Map<string, ManifestModelInfo>;
+  /** Relationship tests extracted from manifest test nodes */
+  relationshipTests: ManifestRelationshipTest[];
 }
