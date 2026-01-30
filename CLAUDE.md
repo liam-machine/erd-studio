@@ -122,3 +122,17 @@ To preview in Chrome: create `dev-preview.html` (see instructions above), run `n
 - All colours use CSS custom properties from `webview/styles/theme.css`
 - React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
 - Extension host writes use `WorkspaceEdit` for undo/redo integration
+
+## Publishing to VS Code Marketplace
+
+**Marketplace:** https://marketplace.visualstudio.com/items?itemName=liamwynne.dbt-semantic-designer
+
+### Publish a New Version
+
+1. Bump `version` in `package.json`
+2. Run:
+   ```bash
+   source .env && npx @vscode/vsce publish --pat "$AZURE_PAT"
+   ```
+
+PAT is stored in `.env` as `AZURE_PAT`. Manage at https://dev.azure.com/LiamWynne/_usersSettings/tokens

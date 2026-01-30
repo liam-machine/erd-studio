@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "silver",
+      "label": "Silver",
+      "abbreviation": "SLV",
+      "color": "#a855f7",
+      "creatable": true,
+      "order": 0
+    },
+    {
+      "id": "gold",
+      "label": "Gold",
+      "abbreviation": "GLD",
+      "color": "#06b6d4",
+      "creatable": true,
+      "order": 1
+    }
+  ]
+}

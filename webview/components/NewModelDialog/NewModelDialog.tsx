@@ -122,10 +122,11 @@ export function NewModelDialog() {
   const [modelName, setModelName] = useState('');
   const [schema, setSchema] = useState('');
   const [description, setDescription] = useState('');
-  const [templateId, setTemplateId] = useState<string>('dimension');
+  const [templateId, setTemplateId] = useState<string>('blank');
   const [leftEntity, setLeftEntity] = useState('');
   const [rightEntity, setRightEntity] = useState('');
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [customColumns, setCustomColumns] = useState<ColumnDef[]>([]);
 
   // Derived state — find the selected template from the store
   const template = useMemo(
@@ -147,29 +148,40 @@ export function NewModelDialog() {
     [modelName, schema, template, leftEntity, rightEntity, existingModelNames],
   );
 
-  const isValid = Object.keys(errors).length === 0 && modelName.trim() !== '';
+  // Validate custom columns (all must have valid names)
+  const hasInvalidColumns = useMemo(
+    () =>
+      customColumns.some(
+        (col) => !col.name.trim() || !/^[a-z0-9_]+$/.test(col.name)
+      ),
+    [customColumns]
+  );
 
-  // Resolved columns with placeholders replaced
+  const isValid = Object.keys(errors).length === 0 && modelName.trim() !== '' && !hasInvalidColumns;
+
+  // Resolved columns with placeholders replaced, plus custom columns
   const resolvedColumns = useMemo(() => {
     const baseName = extractBaseName(modelName || '{name}', template.prefix);
-    return resolvePlaceholders(template.columns, {
+    const templateCols = resolvePlaceholders(template.columns, {
       name: baseName || '{name}',
       left: leftEntity || '{left}',
       right: rightEntity || '{right}',
     });
-  }, [modelName, template, leftEntity, rightEntity]);
+    return [...templateCols, ...customColumns];
+  }, [modelName, template, leftEntity, rightEntity, customColumns]);
 
   // Handlers
   const resetForm = useCallback(() => {
     setModelName('');
     setSchema('');
     setDescription('');
-    // Reset to first available template, fallback to 'dimension' if none loaded yet
-    setTemplateId(templates[0]?.id ?? 'dimension');
+    // Reset to blank template
+    setTemplateId('blank');
     setLeftEntity('');
     setRightEntity('');
     setTouched({});
-  }, [templates]);
+    setCustomColumns([]);
+  }, []);
 
   const handleClose = useCallback(() => {
     setNewModelDialogOpen(false);
@@ -180,11 +192,12 @@ export function NewModelDialog() {
     if (!isValid) return;
 
     const baseName = extractBaseName(modelName, template.prefix);
-    const finalColumns = resolvePlaceholders(template.columns, {
+    const templateCols = resolvePlaceholders(template.columns, {
       name: baseName,
       left: leftEntity,
       right: rightEntity,
     });
+    const finalColumns = [...templateCols, ...customColumns];
 
     const newModel: DesignModel = {
       name: modelName.trim(),
@@ -199,7 +212,7 @@ export function NewModelDialog() {
     });
 
     handleClose();
-  }, [isValid, modelName, schema, description, template, leftEntity, rightEntity, send, handleClose]);
+  }, [isValid, modelName, schema, description, template, leftEntity, rightEntity, customColumns, send, handleClose]);
 
   const handleBlur = useCallback((field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
@@ -215,6 +228,29 @@ export function NewModelDialog() {
       setRightEntity('');
     }
   }, [templates]);
+
+  // Column management handlers
+  const handleAddColumn = useCallback(() => {
+    setCustomColumns((prev) => [
+      ...prev,
+      { name: '', dataType: 'VARCHAR', description: '' },
+    ]);
+  }, []);
+
+  const handleRemoveColumn = useCallback((index: number) => {
+    setCustomColumns((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleColumnChange = useCallback(
+    (index: number, field: keyof ColumnDef, value: string | boolean) => {
+      setCustomColumns((prev) =>
+        prev.map((col, i) =>
+          i === index ? { ...col, [field]: value } : col
+        )
+      );
+    },
+    []
+  );
 
   // Set default schema when dialog opens
   useEffect(() => {
@@ -378,27 +414,110 @@ export function NewModelDialog() {
           </div>
         )}
 
-        {/* Column Preview */}
-        {resolvedColumns.length > 0 && (
-          <div className="new-model-dialog__preview">
+        {/* Column Editor */}
+        <div className="new-model-dialog__column-editor">
+          <div className="new-model-dialog__column-header">
             <h4 className="new-model-dialog__preview-title">
               Columns ({resolvedColumns.length})
             </h4>
-            <div className="new-model-dialog__columns">
-              {resolvedColumns.map((col) => (
-                <div key={col.name} className="new-model-dialog__column">
-                  <span className="new-model-dialog__col-indicators">
-                    {col.isPrimaryKey && (
-                      <span className="new-model-dialog__pk" title="Primary Key">PK</span>
-                    )}
-                  </span>
-                  <span className="new-model-dialog__col-name">{col.name}</span>
-                  <span className="new-model-dialog__col-type">{col.dataType}</span>
-                </div>
-              ))}
-            </div>
+            <button
+              type="button"
+              className="new-model-dialog__add-column-btn"
+              onClick={handleAddColumn}
+              title="Add column"
+            >
+              + Add Column
+            </button>
           </div>
-        )}
+
+          {/* Template columns (read-only preview) */}
+          {template.columns.length > 0 && (
+            <div className="new-model-dialog__template-columns">
+              <span className="new-model-dialog__section-label">From template</span>
+              <div className="new-model-dialog__columns">
+                {resolvePlaceholders(template.columns, {
+                  name: extractBaseName(modelName || '{name}', template.prefix) || '{name}',
+                  left: leftEntity || '{left}',
+                  right: rightEntity || '{right}',
+                }).map((col) => (
+                  <div key={col.name} className="new-model-dialog__column new-model-dialog__column--template">
+                    <span className="new-model-dialog__col-indicators">
+                      {col.isPrimaryKey && (
+                        <span className="new-model-dialog__pk" title="Primary Key">PK</span>
+                      )}
+                    </span>
+                    <span className="new-model-dialog__col-name">{col.name}</span>
+                    <span className="new-model-dialog__col-type">{col.dataType}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom columns (editable) */}
+          {customColumns.length > 0 && (
+            <div className="new-model-dialog__custom-columns">
+              <span className="new-model-dialog__section-label">Custom columns</span>
+              <div className="new-model-dialog__column-list">
+                {customColumns.map((col, idx) => (
+                  <div key={idx} className="new-model-dialog__column-row">
+                    <input
+                      type="checkbox"
+                      className="new-model-dialog__col-pk-checkbox"
+                      checked={col.isPrimaryKey ?? false}
+                      onChange={(e) => handleColumnChange(idx, 'isPrimaryKey', e.target.checked)}
+                      title="Primary Key"
+                    />
+                    <input
+                      type="text"
+                      className={`new-model-dialog__col-input new-model-dialog__col-input--name ${
+                        col.name && !/^[a-z0-9_]+$/.test(col.name) ? 'new-model-dialog__col-input--error' : ''
+                      }`}
+                      value={col.name}
+                      onChange={(e) => handleColumnChange(idx, 'name', e.target.value)}
+                      placeholder="column_name"
+                    />
+                    <select
+                      className="new-model-dialog__col-select"
+                      value={col.dataType}
+                      onChange={(e) => handleColumnChange(idx, 'dataType', e.target.value)}
+                    >
+                      <option value="VARCHAR">VARCHAR</option>
+                      <option value="INTEGER">INTEGER</option>
+                      <option value="BOOLEAN">BOOLEAN</option>
+                      <option value="DATE">DATE</option>
+                      <option value="TIMESTAMP_NTZ">TIMESTAMP_NTZ</option>
+                      <option value="DECIMAL(18,2)">DECIMAL(18,2)</option>
+                      <option value="FLOAT">FLOAT</option>
+                    </select>
+                    <input
+                      type="text"
+                      className="new-model-dialog__col-input new-model-dialog__col-input--desc"
+                      value={col.description}
+                      onChange={(e) => handleColumnChange(idx, 'description', e.target.value)}
+                      placeholder="Description"
+                    />
+                    <button
+                      type="button"
+                      className="new-model-dialog__col-remove"
+                      onClick={() => handleRemoveColumn(idx)}
+                      title="Remove column"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {resolvedColumns.length === 0 && (
+            <div className="new-model-dialog__empty-columns">
+              <span>No columns yet. Click "Add Column" to add columns to this model.</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Footer */}

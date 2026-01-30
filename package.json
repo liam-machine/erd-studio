@@ -2,10 +2,22 @@
   "name": "dbt-semantic-designer",
   "displayName": "dbt Semantic Designer",
   "description": "Visualise semantic (FK-based) relationships between dbt models within curated business domains, with a design mode for planning new models, columns, and relationships.",
-  "version": "0.1.0",
-  "publisher": "jhg",
-  "license": "UNLICENSED",
-  "private": true,
+  "version": "0.1.1",
+  "publisher": "liamwynne",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liamwynne/dbt-semantic-designer"
+  },
+  "keywords": [
+    "dbt",
+    "semantic",
+    "data modeling",
+    "visualization",
+    "ERD",
+    "relationships"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -91,27 +103,47 @@
       {
         "id": "dbtSemantic.layer.bronze",
         "description": "Color for bronze layer folders",
-        "defaults": { "dark": "#cd7f32", "light": "#cd7f32", "highContrast": "#cd7f32" }
+        "defaults": {
+          "dark": "#cd7f32",
+          "light": "#cd7f32",
+          "highContrast": "#cd7f32"
+        }
       },
       {
         "id": "dbtSemantic.layer.silver",
         "description": "Color for silver layer folders",
-        "defaults": { "dark": "#a0a0a0", "light": "#808080", "highContrast": "#a0a0a0" }
+        "defaults": {
+          "dark": "#a0a0a0",
+          "light": "#808080",
+          "highContrast": "#a0a0a0"
+        }
       },
       {
         "id": "dbtSemantic.layer.gold",
         "description": "Color for gold layer folders",
-        "defaults": { "dark": "#d4a800", "light": "#b8960a", "highContrast": "#d4a800" }
+        "defaults": {
+          "dark": "#d4a800",
+          "light": "#b8960a",
+          "highContrast": "#d4a800"
+        }
       },
       {
         "id": "dbtSemantic.layer.platinum",
         "description": "Color for platinum layer folders",
-        "defaults": { "dark": "#e5e4e2", "light": "#c0c0c0", "highContrast": "#e5e4e2" }
+        "defaults": {
+          "dark": "#e5e4e2",
+          "light": "#c0c0c0",
+          "highContrast": "#e5e4e2"
+        }
       },
       {
         "id": "dbtSemantic.layer.custom",
         "description": "Color for custom layer folders",
-        "defaults": { "dark": "#6a9fb5", "light": "#4a7f95", "highContrast": "#6a9fb5" }
+        "defaults": {
+          "dark": "#6a9fb5",
+          "light": "#4a7f95",
+          "highContrast": "#6a9fb5"
+        }
       }
     ],
     "viewsWelcome": [
@@ -195,6 +227,7 @@
     "test:integration": "vscode-test"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@testing-library/react": "^16.1.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.17.0",

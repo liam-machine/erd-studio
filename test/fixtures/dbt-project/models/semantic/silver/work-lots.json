@@ -18,13 +18,43 @@
           "name": "completion_date",
           "dataType": "DATE",
           "description": "Target completion date"
+        },
+        {
+          "name": "hdlkfjgld",
+          "dataType": "STRING",
+          "description": ""
+        },
+        {
+          "name": "sdsd",
+          "dataType": "BIGINT",
+          "description": ""
+        },
+        {
+          "name": "sds",
+          "dataType": "BIGINT",
+          "description": ""
+        },
+        {
+          "name": "sdsdfgg",
+          "dataType": "INT",
+          "description": ""
+        },
+        {
+          "name": "dfdff",
+          "dataType": "TIMESTAMP",
+          "description": ""
+        },
+        {
+          "name": "dffdf",
+          "dataType": "JSON",
+          "description": ""
+        },
+        {
+          "name": "cc",
+          "dataType": "BIGINT",
+          "description": ""
         }
       ]
-    },
-    {
-      "name": "dim_project",
-      "source": "repo",
-      "primaryKey": "project_id"
     },
     {
       "name": "dim_work_lot_status",
@@ -42,6 +72,31 @@
           "name": "work_lot_id",
           "dataType": "INT",
           "description": "FK to dim_work_lot"
+        },
+        {
+          "name": "sdsd",
+          "dataType": "STRING",
+          "description": ""
+        },
+        {
+          "name": "weewe",
+          "dataType": "STRING",
+          "description": ""
+        },
+        {
+          "name": "sdsdf",
+          "dataType": "BOOLEAN",
+          "description": ""
+        },
+        {
+          "name": "sfdf",
+          "dataType": "STRING",
+          "description": ""
+        },
+        {
+          "name": "dfdfd",
+          "dataType": "FLOAT",
+          "description": ""
         }
       ]
     },
@@ -63,6 +118,90 @@
           "description": "FK to dim_work_lot"
         }
       ]
+    },
+    {
+      "name": "xxx",
+      "source": "design",
+      "schema": "silver",
+      "description": "",
+      "columns": [
+        {
+          "name": "test",
+          "dataType": "BIGINT",
+          "description": ""
+        },
+        {
+          "name": "ggg",
+          "dataType": "STRING",
+          "description": ""
+        },
+        {
+          "name": "sds",
+          "dataType": "INT",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "name": "fct_work_events",
+      "source": "repo",
+      "plannedColumns": [
+        {
+          "name": "sdsdsssd",
+          "dataType": "STRING",
+          "description": ""
+        },
+        {
+          "name": "as",
+          "dataType": "STRING",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "name": "sskdj",
+      "source": "design",
+      "schema": "silver",
+      "description": "",
+      "columns": [
+        {
+          "name": "sldksl",
+          "dataType": "DATE",
+          "description": "askmlakm",
+          "isPrimaryKey": false
+        },
+        {
+          "name": "ssd",
+          "dataType": "BOOLEAN",
+          "description": "sd",
+          "isPrimaryKey": true
+        },
+        {
+          "name": "ds",
+          "dataType": "INTEGER",
+          "description": "sd",
+          "isPrimaryKey": true
+        },
+        {
+          "name": "ssdkjdf",
+          "dataType": "INT",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "name": "dd",
+      "source": "design",
+      "schema": "gold",
+      "description": "",
+      "columns": [
+        {
+          "name": "sd",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false
+        }
+      ]
     }
   ],
   "viewConfig": {
@@ -73,24 +212,32 @@
     },
     "positions": {
       "dim_work_lot": {
-        "x": -44,
-        "y": -9
-      },
-      "dim_project": {
-        "x": 481,
-        "y": 53
+        "x": 324,
+        "y": 328
       },
       "dim_work_lot_status": {
-        "x": 31,
-        "y": -483
+        "x": 292,
+        "y": -112
       },
       "brg_lot_contractor": {
-        "x": -151,
-        "y": -348
+        "x": 368,
+        "y": 787
+      },
+      "xxx": {
+        "x": 732,
+        "y": 269
       },
       "fct_work_events": {
-        "x": -217,
-        "y": 482
+        "x": -109,
+        "y": 492
+      },
+      "sskdj": {
+        "x": 612,
+        "y": 12
+      },
+      "dd": {
+        "x": 12,
+        "y": 12
       }
     }
   },
@@ -100,6 +247,21 @@
       "fromColumn": "bridge_id",
       "toModel": "dim_work_lot",
       "toColumn": "project_id",
+      "cardinality": "many-to-one",
+      "source": "design"
+    },
+    {
+      "fromModel": "fct_work_events",
+      "fromColumn": "work_lot_id",
+      "toModel": "dim_work_lot",
+      "toColumn": "work_lot_id",
+      "cardinality": "one-to-many"
+    },
+    {
+      "fromModel": "dim_work_lot",
+      "fromColumn": "completion_date",
+      "toModel": "xxx",
+      "toColumn": "test",
       "cardinality": "many-to-one",
       "source": "design"
     }

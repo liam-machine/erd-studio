@@ -149,17 +149,24 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Column Preview
+   Column Editor
    --------------------------------------------------------------------------- */
 
-.new-model-dialog__preview {
+.new-model-dialog__column-editor {
   margin-top: 4px;
   padding-top: 12px;
   border-top: 1px solid var(--panel-border);
 }
 
+.new-model-dialog__column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
 .new-model-dialog__preview-title {
-  margin: 0 0 8px 0;
+  margin: 0;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -167,11 +174,42 @@
   color: var(--vscode-descriptionForeground, #888);
 }
 
+.new-model-dialog__add-column-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.new-model-dialog__add-column-btn:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.new-model-dialog__section-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.8;
+}
+
+.new-model-dialog__template-columns,
+.new-model-dialog__custom-columns {
+  margin-bottom: 10px;
+}
+
 .new-model-dialog__columns {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 180px;
+  max-height: 140px;
   overflow-y: auto;
 }
 
@@ -183,6 +221,10 @@
   border-radius: 3px;
   background: rgba(249, 115, 22, 0.1); /* Design model orange tint */
   line-height: 1.4;
+}
+
+.new-model-dialog__column--template {
+  opacity: 0.85;
 }
 
 .new-model-dialog__col-indicators {
@@ -218,6 +260,107 @@
   color: var(--vscode-descriptionForeground, #888);
   font-size: 11px;
   font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* Custom column row (editable) */
+.new-model-dialog__column-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.new-model-dialog__column-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(249, 115, 22, 0.08);
+  border: 1px solid rgba(249, 115, 22, 0.2);
+}
+
+.new-model-dialog__col-pk-checkbox {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: #ca8a04;
+}
+
+.new-model-dialog__col-input {
+  padding: 4px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.new-model-dialog__col-input:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.new-model-dialog__col-input--name {
+  flex: 1;
+  min-width: 100px;
+}
+
+.new-model-dialog__col-input--desc {
+  flex: 1.5;
+  min-width: 120px;
+}
+
+.new-model-dialog__col-input--error {
+  border-color: var(--error-fg, #f48771);
+}
+
+.new-model-dialog__col-select {
+  padding: 4px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  cursor: pointer;
+  min-width: 110px;
+}
+
+.new-model-dialog__col-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--error-fg, #f48771);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.new-model-dialog__col-remove:hover {
+  background: rgba(244, 135, 113, 0.15);
+}
+
+.new-model-dialog__empty-columns {
+  padding: 16px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 12px;
+  font-style: italic;
+  background: rgba(128, 128, 128, 0.05);
+  border-radius: 4px;
+  border: 1px dashed var(--panel-border);
 }
 
 /* ---------------------------------------------------------------------------

@@ -18,3 +18,9 @@ features.json
 **/*.map
 **/*.ts
 !dist/**
+.env
+dev-preview.html
+CLAUDE.md
+models/**
+target/**
+dbt_project.yml
