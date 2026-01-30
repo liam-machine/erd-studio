@@ -27,6 +27,21 @@
 }
 
 /* -----------------------------------------------------------------------
+   Dimming (selection)
+   Applied when edge is not connected to the currently selected node
+   ----------------------------------------------------------------------- */
+
+.fk-edge--dimmed {
+  opacity: 0.25;
+  filter: grayscale(0.4);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.fk-edge--dimmed:hover {
+  opacity: 0.4;
+}
+
+/* -----------------------------------------------------------------------
    Cardinality line-style variants
    ----------------------------------------------------------------------- */
 
@@ -63,6 +78,12 @@
 
 .fk-edge__label--design {
   color: var(--edge-design);
+}
+
+.fk-edge__label--dimmed {
+  opacity: 0.25;
+  filter: grayscale(0.4);
+  transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
 /* -----------------------------------------------------------------------

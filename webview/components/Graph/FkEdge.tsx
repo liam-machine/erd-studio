@@ -91,7 +91,7 @@ function FkEdgeComponent({
   const targetNode = useInternalNode(data?.toModel ?? '');
 
   if (!data) return null;
-  const { cardinality, status, fromModel, toModel } = data;
+  const { cardinality, status, fromModel, toModel, dimmed } = data;
 
   // Parse which side each handle is on (top/right/bottom/left)
   const sourceSide = parseSideFromHandle(sourceHandleId);
@@ -196,7 +196,7 @@ function FkEdgeComponent({
       <path
         id={id}
         d={edgePath}
-        className={`fk-edge ${statusClass} ${cardinalityClass}`}
+        className={`fk-edge ${statusClass} ${cardinalityClass}${dimmed ? ' fk-edge--dimmed' : ''}`}
       />
       {/* Invisible wider path for easier hover/click targeting */}
       <path
@@ -208,7 +208,7 @@ function FkEdgeComponent({
       />
       <EdgeLabelRenderer>
         <span
-          className={`fk-edge__label fk-edge__label--${status}${srcLabelClass}`}
+          className={`fk-edge__label fk-edge__label--${status}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
           style={{
             transform: `translate(-50%, -50%) translate(${srcLabel.x}px, ${srcLabel.y}px)`,
           }}
@@ -216,7 +216,7 @@ function FkEdgeComponent({
           {sourceLabel}
         </span>
         <span
-          className={`fk-edge__label fk-edge__label--${status}${tgtLabelClass}`}
+          className={`fk-edge__label fk-edge__label--${status}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
           style={{
             transform: `translate(-50%, -50%) translate(${tgtLabel.x}px, ${tgtLabel.y}px)`,
           }}

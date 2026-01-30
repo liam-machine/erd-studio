@@ -331,25 +331,59 @@ function EditorCanvas() {
   // Initialize nodes and edges when domain changes.
   // Preserve visual selection if the selected node still exists.
   // Clear stale edge selections that no longer exist.
-  // Apply search dimming (F402) and column expansion (F405).
+  // Apply search dimming (F402), selection dimming, and column expansion (F405).
   useEffect(() => {
     if (domain) {
       let { nodes: newNodes, edges: newEdges } = transformDomain(domain);
 
+      // Compute connected nodes for selection dimming.
+      // When a node is selected, only the selected node and its direct neighbors stay bright.
+      const connectedNodeIds = new Set<string>();
+      if (currentSelectedNode) {
+        connectedNodeIds.add(currentSelectedNode);
+        // Find all nodes connected to the selected node via edges
+        newEdges.forEach((edge) => {
+          if (edge.data) {
+            if (edge.data.fromModel === currentSelectedNode) {
+              connectedNodeIds.add(edge.data.toModel);
+            }
+            if (edge.data.toModel === currentSelectedNode) {
+              connectedNodeIds.add(edge.data.fromModel);
+            }
+          }
+        });
+      }
+
+      // F402: Search dimming + selection dimming (additive)
       // F405: Inject column expansion state into node data
-      // Also apply search dimming (F402)
       const query = searchQuery.trim() ? searchQuery.toLowerCase() : '';
-      newNodes = newNodes.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          // F402: Search dimming
-          dimmed: query ? !node.data.modelName.toLowerCase().includes(query) : false,
-          // F405: Column expansion (ephemeral state)
-          // Pass stable toggleExpansion reference — ModelNode calls it with its own modelName
-          isExpanded: isExpanded(node.id),
-          onToggleExpansion: toggleExpansion,
-        },
+      newNodes = newNodes.map((node) => {
+        const searchDimmed = query ? !node.data.modelName.toLowerCase().includes(query) : false;
+        const selectionDimmed = currentSelectedNode !== null && !connectedNodeIds.has(node.id);
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            // Node is dimmed if either search doesn't match OR it's not connected to selection
+            dimmed: searchDimmed || selectionDimmed,
+            // F405: Column expansion (ephemeral state)
+            // Pass stable toggleExpansion reference — ModelNode calls it with its own modelName
+            isExpanded: isExpanded(node.id),
+            onToggleExpansion: toggleExpansion,
+          },
+        };
+      });
+
+      // Apply selection dimming to edges.
+      // An edge is bright only if both endpoints are in the connected set.
+      newEdges = newEdges.map((edge) => ({
+        ...edge,
+        data: edge.data ? {
+          ...edge.data,
+          dimmed: currentSelectedNode !== null &&
+            (!connectedNodeIds.has(edge.data.fromModel) || !connectedNodeIds.has(edge.data.toModel)),
+        } : edge.data,
       }));
 
       // If we have a selected node, preserve the selection in the new nodes

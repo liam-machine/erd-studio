@@ -85,6 +85,8 @@ export type FkEdgeData = {
   toColumn: string;
   cardinality: Cardinality;
   status: RelationshipStatus;
+  /** Whether the edge is dimmed (not connected to current selection). */
+  dimmed?: boolean;
   /** Index signature required by React Flow's Edge generic. */
   [key: string]: unknown;
 };
