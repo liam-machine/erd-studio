@@ -264,6 +264,20 @@
   background: rgba(249, 115, 22, 0.1);
 }
 
+.detail-panel__relationship--clickable {
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.detail-panel__relationship--clickable:hover {
+  background: rgba(128, 128, 128, 0.2);
+}
+
+.detail-panel__relationship--clickable:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
 .detail-panel__rel-direction {
   flex-shrink: 0;
   font-weight: 700;
@@ -286,6 +300,8 @@
   font-weight: 600;
   color: var(--editor-fg);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail-panel__rel-arrow {

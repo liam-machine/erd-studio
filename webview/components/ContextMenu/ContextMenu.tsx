@@ -35,12 +35,16 @@ const CARDINALITY_OPTIONS: { value: Cardinality; label: string }[] = [
 export function ContextMenu() {
   const vscode = useVsCodeApi();
   const menuRef = useRef<HTMLDivElement>(null);
+  const cardinalityButtonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLUListElement>(null);
 
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
 
   // Track whether cardinality dropdown is open
   const [cardinalityOpen, setCardinalityOpen] = useState(false);
+  // Track whether dropdown should flip upward
+  const [dropdownFlipped, setDropdownFlipped] = useState(false);
 
   // Track delete confirmation state (two-click pattern)
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -48,22 +52,21 @@ export function ContextMenu() {
   // Adjusted position to keep menu within viewport
   const [adjustedPosition, setAdjustedPosition] = useState<{ x: number; y: number } | null>(null);
 
-  // Reset state when context menu changes or closes
+  // Reset state when context menu closes
   useEffect(() => {
     if (!contextMenu) {
       setCardinalityOpen(false);
       setConfirmingDelete(false);
       setAdjustedPosition(null);
-    } else {
-      // Reset when new context menu opens (will be recalculated in useLayoutEffect)
-      setAdjustedPosition(null);
-      setConfirmingDelete(false);
     }
   }, [contextMenu]);
 
   // Adjust position after render to keep menu within viewport bounds
   useLayoutEffect(() => {
     if (!contextMenu || !menuRef.current) return;
+
+    // Reset confirmation state when menu opens at new position
+    setConfirmingDelete(false);
 
     const menu = menuRef.current;
     const menuRect = menu.getBoundingClientRect();
@@ -73,25 +76,48 @@ export function ContextMenu() {
     let newX = contextMenu.x;
     let newY = contextMenu.y;
 
-    // Check if menu overflows right edge
+    // Check if menu overflows right edge - flip to left of click point
     if (contextMenu.x + menuRect.width > viewportWidth - VIEWPORT_PADDING) {
-      newX = viewportWidth - menuRect.width - VIEWPORT_PADDING;
+      // Position menu to the left of the click point
+      newX = contextMenu.x - menuRect.width;
     }
 
-    // Check if menu overflows bottom edge
+    // Check if menu overflows bottom edge - flip to above click point
     if (contextMenu.y + menuRect.height > viewportHeight - VIEWPORT_PADDING) {
-      newY = viewportHeight - menuRect.height - VIEWPORT_PADDING;
+      // Position menu above the click point
+      newY = contextMenu.y - menuRect.height;
     }
 
-    // Ensure menu doesn't go off left/top edges
-    newX = Math.max(VIEWPORT_PADDING, newX);
-    newY = Math.max(VIEWPORT_PADDING, newY);
+    // Final safety: ensure menu is within bounds
+    newX = Math.max(VIEWPORT_PADDING, Math.min(newX, viewportWidth - menuRect.width - VIEWPORT_PADDING));
+    newY = Math.max(VIEWPORT_PADDING, Math.min(newY, viewportHeight - menuRect.height - VIEWPORT_PADDING));
 
-    // Only update if position changed
-    if (newX !== contextMenu.x || newY !== contextMenu.y) {
-      setAdjustedPosition({ x: newX, y: newY });
-    }
+    setAdjustedPosition({ x: newX, y: newY });
   }, [contextMenu]);
+
+  // Adjust cardinality dropdown position when it opens
+  useLayoutEffect(() => {
+    if (!cardinalityOpen || !cardinalityButtonRef.current || !dropdownRef.current) {
+      setDropdownFlipped(false);
+      return;
+    }
+
+    const buttonRect = cardinalityButtonRef.current.getBoundingClientRect();
+    const dropdownRect = dropdownRef.current.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+
+    // Check if dropdown would overflow bottom of viewport
+    const spaceBelow = viewportHeight - buttonRect.bottom;
+    const spaceAbove = buttonRect.top;
+    const dropdownHeight = dropdownRect.height;
+
+    // Flip upward if not enough space below but enough space above
+    if (spaceBelow < dropdownHeight + VIEWPORT_PADDING && spaceAbove > dropdownHeight + VIEWPORT_PADDING) {
+      setDropdownFlipped(true);
+    } else {
+      setDropdownFlipped(false);
+    }
+  }, [cardinalityOpen]);
 
   // Close on click outside
   useEffect(() => {
@@ -185,6 +211,8 @@ export function ContextMenu() {
       style={{
         left: displayX,
         top: displayY,
+        // Hide until position is calculated to prevent flash at wrong position
+        visibility: adjustedPosition ? 'visible' : 'hidden',
       }}
       role="menu"
     >
@@ -227,16 +255,21 @@ export function ContextMenu() {
           <span className="context-menu__label">Cardinality</span>
           <div className="context-menu__cardinality-wrapper">
             <button
+              ref={cardinalityButtonRef}
               className="context-menu__cardinality-button"
               onClick={() => setCardinalityOpen(!cardinalityOpen)}
               aria-haspopup="listbox"
               aria-expanded={cardinalityOpen}
             >
               {cardinalityLabel}
-              <span className="context-menu__cardinality-arrow">▾</span>
+              <span className={`context-menu__cardinality-arrow${dropdownFlipped ? ' context-menu__cardinality-arrow--flipped' : ''}`}>▾</span>
             </button>
             {cardinalityOpen && (
-              <ul className="context-menu__cardinality-dropdown" role="listbox">
+              <ul
+                ref={dropdownRef}
+                className={`context-menu__cardinality-dropdown${dropdownFlipped ? ' context-menu__cardinality-dropdown--flipped' : ''}`}
+                role="listbox"
+              >
                 {CARDINALITY_OPTIONS.map((option) => (
                   <li
                     key={option.value}

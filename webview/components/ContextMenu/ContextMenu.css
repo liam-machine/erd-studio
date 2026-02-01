@@ -201,6 +201,17 @@
   z-index: 10;
 }
 
+/* Flipped dropdown (opens upward) */
+.context-menu__cardinality-dropdown--flipped {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 4px 0;
+}
+
+.context-menu__cardinality-arrow--flipped {
+  transform: rotate(180deg);
+}
+
 
 .context-menu__cardinality-option {
   padding: 6px 10px;

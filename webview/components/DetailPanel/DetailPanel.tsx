@@ -14,6 +14,7 @@ import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { ReconciledRelationship } from '../../../src/types/reconciled';
+import type { FkEdgeData } from '../../types/graph';
 import './DetailPanel.css';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ export function DetailPanel() {
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const pendingDeleteConfirmation = useEditorStore((s) => s.pendingDeleteConfirmation);
   const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
+  const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // Handle pending delete confirmation from keyboard shortcut
@@ -78,6 +80,24 @@ export function DetailPanel() {
       });
     },
     [vscode],
+  );
+
+  // Open context menu when clicking a relationship row (for cardinality editing)
+  const handleRelationshipClick = useCallback(
+    (x: number, y: number, rel: ReconciledRelationship) => {
+      // Convert ReconciledRelationship to FkEdgeData shape for the context menu
+      const edgeData: FkEdgeData = {
+        fromModel: rel.fromModel,
+        fromColumn: rel.fromColumn,
+        toModel: rel.toModel,
+        toColumn: rel.toColumn,
+        cardinality: rel.cardinality,
+        status: rel.status,
+      };
+      // Position the context menu near the click
+      openEdgeContextMenu(x, y, edgeData);
+    },
+    [openEdgeContextMenu],
   );
 
   // Find the selected model
@@ -205,15 +225,29 @@ export function DetailPanel() {
             {outgoing.map((rel) => (
               <div
                 key={`out-${rel.fromColumn}-${rel.toModel}-${rel.toColumn}`}
-                className={`detail-panel__relationship detail-panel__relationship--${rel.status}`}
+                className={`detail-panel__relationship detail-panel__relationship--${rel.status} detail-panel__relationship--clickable`}
+                onClick={(e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    // For keyboard events, position context menu near the element
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
+                  }
+                }}
+                title="Click to edit cardinality"
               >
                 <span className="detail-panel__rel-direction" title="Outgoing FK">
                   →
                 </span>
                 <span className="detail-panel__rel-columns">
-                  <span className="detail-panel__rel-local">{rel.fromColumn}</span>
+                  <span className="detail-panel__rel-local" title={rel.fromColumn}>
+                    {rel.fromColumn}
+                  </span>
                   <span className="detail-panel__rel-arrow">→</span>
-                  <span className="detail-panel__rel-target">
+                  <span className="detail-panel__rel-target" title={`${rel.toModel}.${rel.toColumn}`}>
                     {rel.toModel}.{rel.toColumn}
                   </span>
                 </span>
@@ -223,7 +257,10 @@ export function DetailPanel() {
                 {rel.status === 'design' && (
                   <button
                     className="detail-panel__rel-delete"
-                    onClick={() => handleDeleteRelationship(rel)}
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent row click from firing
+                      handleDeleteRelationship(rel);
+                    }}
                     title="Delete relationship"
                     aria-label="Delete relationship"
                   >
@@ -236,17 +273,31 @@ export function DetailPanel() {
             {incoming.map((rel) => (
               <div
                 key={`in-${rel.fromModel}-${rel.fromColumn}-${rel.toColumn}`}
-                className={`detail-panel__relationship detail-panel__relationship--${rel.status}`}
+                className={`detail-panel__relationship detail-panel__relationship--${rel.status} detail-panel__relationship--clickable`}
+                onClick={(e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    // For keyboard events, position context menu near the element
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
+                  }
+                }}
+                title="Click to edit cardinality"
               >
                 <span className="detail-panel__rel-direction" title="Incoming FK">
                   ←
                 </span>
                 <span className="detail-panel__rel-columns">
-                  <span className="detail-panel__rel-target">
+                  <span className="detail-panel__rel-target" title={`${rel.fromModel}.${rel.fromColumn}`}>
                     {rel.fromModel}.{rel.fromColumn}
                   </span>
                   <span className="detail-panel__rel-arrow">→</span>
-                  <span className="detail-panel__rel-local">{rel.toColumn}</span>
+                  <span className="detail-panel__rel-local" title={rel.toColumn}>
+                    {rel.toColumn}
+                  </span>
                 </span>
                 <span className="detail-panel__rel-cardinality">
                   {rel.cardinality}
@@ -254,7 +305,10 @@ export function DetailPanel() {
                 {rel.status === 'design' && (
                   <button
                     className="detail-panel__rel-delete"
-                    onClick={() => handleDeleteRelationship(rel)}
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent row click from firing
+                      handleDeleteRelationship(rel);
+                    }}
                     title="Delete relationship"
                     aria-label="Delete relationship"
                   >
