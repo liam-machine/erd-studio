@@ -39,8 +39,32 @@ export interface EdgeOffset {
 }
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Map of node IDs to their positions. */
+export type NodePositionMap = Map<string, { x: number; y: number }>;
+
+// ---------------------------------------------------------------------------
 // Edge grouping
 // ---------------------------------------------------------------------------
+
+/**
+ * Get the position of the node at the other end of an edge.
+ *
+ * @param edge — the edge to analyze
+ * @param nodeId — the node we're connecting FROM (to find the OTHER end)
+ * @param nodePositions — map of all node positions
+ * @returns Position of the connected node, or undefined if not found
+ */
+function getConnectedNodePosition(
+  edge: Edge,
+  nodeId: string,
+  nodePositions: NodePositionMap,
+): { x: number; y: number } | undefined {
+  const otherNodeId = edge.source === nodeId ? edge.target : edge.source;
+  return nodePositions.get(otherNodeId);
+}
 
 /**
  * Get all edge IDs that connect to a specific node side in a specific direction.
@@ -80,27 +104,61 @@ export function getEdgesForSide(
  * where it's the target (incoming). Used for distribution to prevent overlap
  * between incoming and outgoing edges on the same side.
  *
+ * When nodePositions is provided, edges are sorted by the position of their
+ * connected node (the node at the OTHER end of the edge):
+ *   - For left/right sides: sort by Y position (top to bottom)
+ *   - For top/bottom sides: sort by X position (left to right)
+ *
+ * This sorting minimizes edge crossings by aligning connection points with
+ * the visual flow of the connected nodes.
+ *
  * @param edges — all edges in the graph
  * @param nodeId — the node to check connections for
  * @param side — which side of the node (top/right/bottom/left)
+ * @param nodePositions — optional map of node positions for spatial sorting
  * @returns Sorted array of edge IDs for consistent ordering
  */
 export function getAllEdgesForSide(
   edges: Edge[],
   nodeId: string,
   side: Side,
+  nodePositions?: NodePositionMap,
 ): string[] {
   const sourceHandle = `node-${side}-src`;
   const targetHandle = `node-${side}-tgt`;
 
-  return edges
-    .filter((edge) => {
-      const isSourceOnSide = edge.source === nodeId && edge.sourceHandle === sourceHandle;
-      const isTargetOnSide = edge.target === nodeId && edge.targetHandle === targetHandle;
-      return isSourceOnSide || isTargetOnSide;
+  const edgesForSide = edges.filter((edge) => {
+    const isSourceOnSide = edge.source === nodeId && edge.sourceHandle === sourceHandle;
+    const isTargetOnSide = edge.target === nodeId && edge.targetHandle === targetHandle;
+    return isSourceOnSide || isTargetOnSide;
+  });
+
+  // Sort by position of the connected node (other end of the edge)
+  // - For left/right sides: sort by Y position (top to bottom)
+  // - For top/bottom sides: sort by X position (left to right)
+  return edgesForSide
+    .sort((a, b) => {
+      // If no positions provided, fall back to alphabetical sort
+      if (!nodePositions) {
+        return a.id.localeCompare(b.id);
+      }
+
+      const posA = getConnectedNodePosition(a, nodeId, nodePositions);
+      const posB = getConnectedNodePosition(b, nodeId, nodePositions);
+
+      // Fallback to alphabetical if positions not available
+      if (!posA || !posB) {
+        return a.id.localeCompare(b.id);
+      }
+
+      // Choose axis based on side
+      if (side === 'left' || side === 'right') {
+        return posA.y - posB.y; // Sort by Y (vertical)
+      } else {
+        return posA.x - posB.x; // Sort by X (horizontal)
+      }
     })
-    .map((edge) => edge.id)
-    .sort(); // Sort for consistent ordering across renders
+    .map((edge) => edge.id);
 }
 
 /**
@@ -204,12 +262,16 @@ export function calculateDistributionOffset(
  * Groups ALL edges on a side together (both incoming and outgoing) to prevent
  * overlap between source and target edges.
  *
+ * When nodePositions is provided, edges are sorted by their connected node's
+ * position to minimize visual crossings.
+ *
  * @param edgeId — the edge to calculate offset for
  * @param nodeId — the node this edge connects to
  * @param side — which side of the node
  * @param isSource — true if calculating source offset, false for target (kept for API compatibility)
  * @param allEdges — all edges in the graph
  * @param sideLength — width (for top/bottom) or height (for left/right) of the node
+ * @param nodePositions — optional map of node positions for spatial sorting
  * @returns Offset in pixels from the center of the side
  */
 export function calculateEdgeOffset(
@@ -219,10 +281,11 @@ export function calculateEdgeOffset(
   isSource: boolean,
   allEdges: Edge[],
   sideLength: number,
+  nodePositions?: NodePositionMap,
 ): EdgeOffset {
   // Get ALL edges connecting to this node side (both directions)
   // This ensures incoming and outgoing edges don't overlap at the same point
-  const edgesForSide = getAllEdgesForSide(allEdges, nodeId, side);
+  const edgesForSide = getAllEdgesForSide(allEdges, nodeId, side, nodePositions);
 
   // Find this edge's index in the group
   const edgeIndex = edgesForSide.indexOf(edgeId);

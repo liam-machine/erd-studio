@@ -14,7 +14,7 @@
  * least bends.
  */
 
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import {
   getSmoothStepPath,
   EdgeLabelRenderer,
@@ -28,6 +28,7 @@ import {
   calculateEdgeOffset,
   parseSideFromHandle,
   getSideLength,
+  type NodePositionMap,
 } from '../../lib/edgeDistribution';
 import './FkEdge.css';
 
@@ -86,9 +87,26 @@ function FkEdgeComponent({
   // Access all edges from React Flow store for distribution calculation
   const allEdges = useStore((state) => state.edges);
 
+  // Access node lookup for building position map
+  const nodeLookup = useStore((state) => state.nodeLookup);
+
   // Get source and target node dimensions for calculating side lengths
   const sourceNode = useInternalNode(data?.fromModel ?? '');
   const targetNode = useInternalNode(data?.toModel ?? '');
+
+  // Build position map for spatial edge sorting
+  // Memoized to avoid rebuilding when unrelated state changes
+  const nodePositions = useMemo((): NodePositionMap => {
+    const positions: NodePositionMap = new Map();
+    for (const [nodeId, node] of nodeLookup) {
+      if (node.internals?.positionAbsolute) {
+        positions.set(nodeId, node.internals.positionAbsolute);
+      } else if (node.position) {
+        positions.set(nodeId, node.position);
+      }
+    }
+    return positions;
+  }, [nodeLookup]);
 
   if (!data) return null;
   const { cardinality, status, fromModel, toModel, dimmed } = data;
@@ -112,6 +130,7 @@ function FkEdgeComponent({
       true, // isSource
       allEdges,
       sideLength,
+      nodePositions,
     );
     adjustedSourceX += sourceOffset.x;
     adjustedSourceY += sourceOffset.y;
@@ -126,6 +145,7 @@ function FkEdgeComponent({
       false, // isSource
       allEdges,
       sideLength,
+      nodePositions,
     );
     adjustedTargetX += targetOffset.x;
     adjustedTargetY += targetOffset.y;
