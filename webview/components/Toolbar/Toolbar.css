@@ -253,7 +253,7 @@
 }
 
 .toolbar__search-input {
-  width: 140px;
+  width: 110px;
   height: 24px;
   padding: 0 8px;
   border: 1px solid var(--input-border, var(--panel-border));
@@ -265,6 +265,7 @@
 }
 
 .toolbar__search-input:focus {
+  width: 140px;
   outline: 1px solid var(--focus-border);
   outline-offset: -1px;
   border-color: var(--focus-border);
@@ -341,4 +342,39 @@
 .toolbar__check {
   color: var(--button-bg);
   font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Quick tooltips (instant on hover)
+   --------------------------------------------------------------------------- */
+
+.toolbar__button--tooltip {
+  position: relative;
+}
+
+.toolbar__button--tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  color: var(--editor-fg);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  z-index: 1000;
+}
+
+.toolbar__button--tooltip:hover::after {
+  opacity: 1;
+  transition-delay: 0.15s; /* Very short delay - appears quickly */
 }

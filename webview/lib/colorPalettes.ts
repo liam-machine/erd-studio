@@ -2,9 +2,9 @@
  * Colour palette definitions for the semantic designer.
  *
  * Three palettes are available, each with different design rationales:
- * - coolWarm: Blue for built, orange for design (best accessibility)
- * - cicd: Emerald green for built, amber for design (CI/CD inspired)
- * - minimalist: Cyan for built, slate for design (subtle/professional)
+ * - coolWarm: Blue for built, teal for approved, orange for design (best accessibility)
+ * - cicd: Blue for built, green for approved, amber for design (CI/CD inspired)
+ * - trafficLight: Green for built, yellow for approved, red for design (traffic light)
  *
  * Palette colours are applied via CSS custom properties at runtime.
  */
@@ -13,7 +13,7 @@
 // Types
 // ---------------------------------------------------------------------------
 
-export type PaletteId = 'coolWarm' | 'cicd' | 'minimalist';
+export type PaletteId = 'coolWarm' | 'cicd' | 'trafficLight';
 
 export interface ColorPalette {
   id: PaletteId;
@@ -64,41 +64,41 @@ export const PALETTES: Record<PaletteId, ColorPalette> = {
   cicd: {
     id: 'cicd',
     name: 'CI/CD Status',
-    description: 'Emerald for built, cyan for approved, amber for design — DevOps familiar',
+    description: 'Blue for built, green for approved, amber for design — DevOps familiar',
     colors: {
-      modelBuilt: '#059669',      // Emerald-600 (darker for contrast)
-      modelBuiltBg: 'rgba(5, 150, 105, 0.08)',
-      modelBuiltText: '#ffffff',  // White on dark emerald
-      modelApproved: '#0891b2',   // Cyan-600
-      modelApprovedBg: 'rgba(8, 145, 178, 0.08)',
-      modelApprovedText: '#ffffff', // White on cyan
-      modelDesign: '#d97706',     // Amber-600 (much darker for white text)
+      modelBuilt: '#3b82f6',      // Blue-500 (stable/deployed)
+      modelBuiltBg: 'rgba(59, 130, 246, 0.08)',
+      modelBuiltText: '#ffffff',  // White on blue
+      modelApproved: '#10b981',   // Emerald-500 (green = approved/passing)
+      modelApprovedBg: 'rgba(16, 185, 129, 0.08)',
+      modelApprovedText: '#ffffff', // White on emerald
+      modelDesign: '#d97706',     // Amber-600 (caution/in progress)
       modelDesignBg: 'rgba(217, 119, 6, 0.08)',
       modelDesignText: '#ffffff', // White on dark amber
       modelMissing: '#6b7280',    // Gray-500
       modelMissingBg: 'rgba(107, 114, 128, 0.08)',
-      edgeBuilt: '#10b981',       // Emerald-500 (edges can be brighter)
+      edgeBuilt: '#60a5fa',       // Blue-400 (edges can be brighter)
       edgeDesign: '#f59e0b',      // Amber-500 (edges can be brighter)
     },
   },
-  minimalist: {
-    id: 'minimalist',
-    name: 'Minimalist',
-    description: 'Cyan for built, indigo for approved, violet for design — subtle/professional',
+  trafficLight: {
+    id: 'trafficLight',
+    name: 'Traffic Light',
+    description: 'Green for built, yellow for approved, red for design — universal recognition',
     colors: {
-      modelBuilt: '#0891b2',      // Cyan-600 (darker for contrast)
-      modelBuiltBg: 'rgba(8, 145, 178, 0.08)',
-      modelBuiltText: '#ffffff',  // White on dark cyan
-      modelApproved: '#4f46e5',   // Indigo-600
-      modelApprovedBg: 'rgba(79, 70, 229, 0.08)',
-      modelApprovedText: '#ffffff', // White on indigo
-      modelDesign: '#7c3aed',     // Violet-600 (darker for white text)
-      modelDesignBg: 'rgba(124, 58, 237, 0.08)',
-      modelDesignText: '#ffffff', // White on dark violet
-      modelMissing: '#64748b',    // Slate-500
-      modelMissingBg: 'rgba(100, 116, 139, 0.08)',
-      edgeBuilt: '#06b6d4',       // Cyan-500 (edges can be brighter)
-      edgeDesign: '#8b5cf6',      // Violet-500 (edges can be brighter)
+      modelBuilt: '#22c55e',      // Green-500 (success/done)
+      modelBuiltBg: 'rgba(34, 197, 94, 0.08)',
+      modelBuiltText: '#ffffff',  // White on green
+      modelApproved: '#eab308',   // Yellow-500 (caution/pending)
+      modelApprovedBg: 'rgba(234, 179, 8, 0.08)',
+      modelApprovedText: '#ffffff', // White on yellow
+      modelDesign: '#ef4444',     // Red-500 (stop/needs work)
+      modelDesignBg: 'rgba(239, 68, 68, 0.08)',
+      modelDesignText: '#ffffff', // White on red
+      modelMissing: '#737373',    // Neutral-500
+      modelMissingBg: 'rgba(115, 115, 115, 0.08)',
+      edgeBuilt: '#4ade80',       // Green-400 (edges can be brighter)
+      edgeDesign: '#f87171',      // Red-400 (edges can be brighter)
     },
   },
 };

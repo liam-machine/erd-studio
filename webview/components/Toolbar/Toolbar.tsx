@@ -386,33 +386,26 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       {/* Auto Layout */}
       <div className="toolbar__section">
         <button
-          className="toolbar__button toolbar__button--text"
+          className="toolbar__button toolbar__button--tooltip"
           onClick={handleAutoLayout}
           disabled={isLayouting || nodes.length === 0}
-          title="Auto-layout nodes using ELK algorithm"
+          data-tooltip="Auto Layout"
           aria-label="Auto-layout nodes using ELK algorithm"
         >
-          {isLayouting && <span className="toolbar__spinner" />}
-          {isLayouting ? 'Layouting…' : 'Auto Layout'}
+          {isLayouting ? <span className="toolbar__spinner" /> : '⊞'}
         </button>
-      </div>
 
-      {/* Refresh Manifest (F305) */}
-      <div className="toolbar__section">
+        {/* Refresh Manifest */}
         <button
-          className="toolbar__button toolbar__button--text"
+          className="toolbar__button toolbar__button--tooltip"
           onClick={handleRefreshManifest}
           disabled={isRefreshing}
-          title="Refresh manifest and re-reconcile domains"
+          data-tooltip="Refresh"
           aria-label="Refresh manifest and re-reconcile domains"
         >
-          {isRefreshing && <span className="toolbar__spinner" />}
-          {isRefreshing ? 'Refreshing…' : 'Refresh'}
+          {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
         </button>
       </div>
-
-      {/* Divider */}
-      <div className="toolbar__divider" />
 
       {/* Search (F402) */}
       <div className="toolbar__section toolbar__search">
@@ -439,17 +432,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       {/* Column Expansion Toggle (F405) */}
       <div className="toolbar__section">
         <button
-          className="toolbar__button toolbar__button--text"
+          className="toolbar__button toolbar__button--tooltip"
           onClick={allExpanded ? onCollapseAll : onExpandAll}
-          title={allExpanded ? 'Collapse all columns to show fewer details' : 'Expand all columns to show full details'}
+          data-tooltip={allExpanded ? 'Collapse All' : 'Expand All'}
           aria-label={allExpanded ? 'Collapse all columns' : 'Expand all columns'}
         >
-          {allExpanded ? 'Collapse All' : 'Expand All'}
+          {allExpanded ? '⊟' : '⊞'}
         </button>
       </div>
-
-      {/* Divider */}
-      <div className="toolbar__divider" />
 
       {/* Palette Dropdown */}
       <div className="toolbar__section">
@@ -465,10 +455,17 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             <span
               className="toolbar__palette-swatch"
               style={{ backgroundColor: PALETTES[paletteId].colors.modelBuilt }}
+              title="Built"
+            />
+            <span
+              className="toolbar__palette-swatch"
+              style={{ backgroundColor: PALETTES[paletteId].colors.modelApproved }}
+              title="Approved"
             />
             <span
               className="toolbar__palette-swatch"
               style={{ backgroundColor: PALETTES[paletteId].colors.modelDesign }}
+              title="Design"
             />
             <span className="toolbar__dropdown-arrow">▾</span>
           </button>
@@ -489,10 +486,17 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       <span
                         className="toolbar__palette-swatch"
                         style={{ backgroundColor: palette.colors.modelBuilt }}
+                        title="Built"
+                      />
+                      <span
+                        className="toolbar__palette-swatch"
+                        style={{ backgroundColor: palette.colors.modelApproved }}
+                        title="Approved"
                       />
                       <span
                         className="toolbar__palette-swatch"
                         style={{ backgroundColor: palette.colors.modelDesign }}
+                        title="Design"
                       />
                     </span>
                     <span className="toolbar__palette-name">{palette.name}</span>
@@ -508,18 +512,18 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       {/* Divider */}
       <div className="toolbar__divider" />
 
-      {/* Model Dropdown */}
+      {/* Add Dropdown (Models + Relationships) */}
       <div className="toolbar__section">
         <div className="toolbar__dropdown" ref={modelDropdownRef}>
           <button
             className="toolbar__dropdown-trigger"
             onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-            title="Add model to domain"
-            aria-label="Add model to domain"
+            title="Add model or relationship"
+            aria-label="Add model or relationship"
             aria-haspopup="menu"
             aria-expanded={modelDropdownOpen}
           >
-            + Model
+            + Add
             <span className="toolbar__dropdown-arrow">▾</span>
           </button>
           {modelDropdownOpen && (
@@ -538,24 +542,16 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               >
                 Add Existing Model
               </button>
+              <button
+                className="toolbar__dropdown-item"
+                onClick={() => { setModelDropdownOpen(false); handleNewRelationship(); }}
+                role="menuitem"
+              >
+                New Relationship
+              </button>
             </div>
           )}
         </div>
-      </div>
-
-      {/* Divider */}
-      <div className="toolbar__divider" />
-
-      {/* New Relationship */}
-      <div className="toolbar__section">
-        <button
-          className="toolbar__button toolbar__button--text toolbar__button--primary"
-          onClick={handleNewRelationship}
-          title="Add FK relationship between models"
-          aria-label="Add FK relationship between models"
-        >
-          + Relationship
-        </button>
       </div>
     </Panel>
   );
