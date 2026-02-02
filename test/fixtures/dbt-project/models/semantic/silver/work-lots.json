@@ -12,91 +12,74 @@
         {
           "name": "estimated_cost",
           "dataType": "DECIMAL",
-          "description": "Estimated cost for the work lot (planned for Q2)"
+          "description": "Estimated cost for the work lot (planned for Q2)",
+          "approved": true
         },
         {
           "name": "completion_date",
           "dataType": "DATE",
-          "description": "Target completion date"
+          "description": "Target completion date",
+          "approved": true
         },
         {
           "name": "hdlkfjgld",
           "dataType": "STRING",
-          "description": ""
+          "description": "",
+          "approved": true
         },
         {
           "name": "sdsd",
           "dataType": "BIGINT",
-          "description": ""
+          "description": "",
+          "approved": true
         },
         {
           "name": "sds",
           "dataType": "BIGINT",
-          "description": ""
+          "description": "",
+          "approved": true
         },
         {
           "name": "sdsdfgg",
           "dataType": "INT",
-          "description": ""
+          "description": "",
+          "approved": true
         },
         {
           "name": "dfdff",
           "dataType": "TIMESTAMP",
-          "description": ""
+          "description": "",
+          "approved": true
         },
         {
           "name": "dffdf",
           "dataType": "JSON",
-          "description": ""
+          "description": "",
+          "approved": true
         },
         {
           "name": "cc",
           "dataType": "BIGINT",
-          "description": ""
-        }
-      ]
-    },
-    {
-      "name": "dim_work_lot_status",
-      "source": "design",
-      "schema": "silver",
-      "description": "Tracks work lot lifecycle status transitions",
-      "columns": [
-        {
-          "name": "work_lot_status_id",
-          "dataType": "INT",
-          "description": "Surrogate key",
-          "isPrimaryKey": true
+          "description": "",
+          "approved": true
         },
         {
-          "name": "work_lot_id",
-          "dataType": "INT",
-          "description": "FK to dim_work_lot"
-        },
-        {
-          "name": "sdsd",
-          "dataType": "STRING",
-          "description": ""
-        },
-        {
-          "name": "weewe",
-          "dataType": "STRING",
-          "description": ""
-        },
-        {
-          "name": "sdsdf",
-          "dataType": "BOOLEAN",
-          "description": ""
-        },
-        {
-          "name": "sfdf",
-          "dataType": "STRING",
-          "description": ""
-        },
-        {
-          "name": "dfdfd",
+          "name": "ff",
           "dataType": "FLOAT",
-          "description": ""
+          "description": "",
+          "approved": true
+        },
+        {
+          "name": "tt",
+          "dataType": "STRING",
+          "description": "",
+          "approved": true
+        },
+        {
+          "name": "gg",
+          "dataType": "STRING",
+          "description": "",
+          "approved": true
         }
       ]
     },
@@ -131,11 +114,6 @@
           "description": ""
         },
         {
-          "name": "ggg",
-          "dataType": "STRING",
-          "description": ""
-        },
-        {
           "name": "sds",
           "dataType": "INT",
           "description": ""
@@ -153,7 +131,7 @@
         },
         {
           "name": "as",
-          "dataType": "STRING",
+          "dataType": "FLOAT",
           "description": ""
         }
       ]
@@ -186,6 +164,16 @@
           "name": "ssdkjdf",
           "dataType": "INT",
           "description": ""
+        },
+        {
+          "name": "sdds",
+          "dataType": "STRING",
+          "description": ""
+        },
+        {
+          "name": "sdsd",
+          "dataType": "BOOLEAN",
+          "description": ""
         }
       ]
     },
@@ -199,7 +187,30 @@
           "name": "sd",
           "dataType": "VARCHAR",
           "description": "",
-          "isPrimaryKey": false
+          "approved": true
+        }
+      ],
+      "approved": true
+    },
+    {
+      "name": "dim_project",
+      "source": "repo"
+    },
+    {
+      "name": "tttt",
+      "source": "design",
+      "schema": "silver",
+      "description": "",
+      "columns": [
+        {
+          "name": "abc",
+          "dataType": "STRING",
+          "description": ""
+        },
+        {
+          "name": "dsdf",
+          "dataType": "STRING",
+          "description": ""
         }
       ]
     }
@@ -212,44 +223,40 @@
     },
     "positions": {
       "dim_work_lot": {
-        "x": 324,
-        "y": 328
-      },
-      "dim_work_lot_status": {
-        "x": 292,
-        "y": -112
+        "x": 372,
+        "y": 173
       },
       "brg_lot_contractor": {
-        "x": 368,
-        "y": 787
+        "x": 743,
+        "y": 504
       },
       "xxx": {
-        "x": 732,
-        "y": 269
+        "x": 372,
+        "y": 25
       },
       "fct_work_events": {
-        "x": -109,
-        "y": 492
+        "x": 12,
+        "y": 393
       },
       "sskdj": {
-        "x": 612,
+        "x": 12,
         "y": 12
       },
       "dd": {
-        "x": 12,
-        "y": 12
+        "x": 732,
+        "y": 209
+      },
+      "dim_project": {
+        "x": 732,
+        "y": 334
+      },
+      "tttt": {
+        "x": 375,
+        "y": 810
       }
     }
   },
   "relationships": [
-    {
-      "fromModel": "brg_lot_contractor",
-      "fromColumn": "bridge_id",
-      "toModel": "dim_work_lot",
-      "toColumn": "project_id",
-      "cardinality": "many-to-one",
-      "source": "design"
-    },
     {
       "fromModel": "fct_work_events",
       "fromColumn": "work_lot_id",
@@ -260,8 +267,56 @@
     {
       "fromModel": "dim_work_lot",
       "fromColumn": "completion_date",
+      "toModel": "dd",
+      "toColumn": "sd",
+      "cardinality": "one-to-many",
+      "source": "design",
+      "approved": true
+    },
+    {
+      "fromModel": "dim_work_lot",
+      "fromColumn": "name",
+      "toModel": "brg_lot_contractor",
+      "toColumn": "bridge_id",
+      "cardinality": "many-to-one",
+      "source": "design"
+    },
+    {
+      "fromModel": "dim_work_lot",
+      "fromColumn": "project_id",
+      "toModel": "dim_project",
+      "toColumn": "project_id",
+      "cardinality": "one-to-one"
+    },
+    {
+      "fromModel": "brg_lot_contractor",
+      "fromColumn": "bridge_id",
+      "toModel": "tttt",
+      "toColumn": "abc",
+      "cardinality": "many-to-one",
+      "source": "design"
+    },
+    {
+      "fromModel": "fct_work_events",
+      "fromColumn": "amount",
+      "toModel": "tttt",
+      "toColumn": "abc",
+      "cardinality": "many-to-one",
+      "source": "design"
+    },
+    {
+      "fromModel": "sskdj",
+      "fromColumn": "sldksl",
       "toModel": "xxx",
       "toColumn": "test",
+      "cardinality": "many-to-one",
+      "source": "design"
+    },
+    {
+      "fromModel": "sskdj",
+      "fromColumn": "sdds",
+      "toModel": "dim_work_lot",
+      "toColumn": "dffdf",
       "cardinality": "many-to-one",
       "source": "design"
     }
