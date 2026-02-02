@@ -20,7 +20,6 @@ import {
   type NodeTypes,
   type EdgeTypes,
   type OnSelectionChangeFunc,
-  type Connection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -32,6 +31,7 @@ import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
+import { DragLine } from './components/Graph/DragLine';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { StatusBar } from './components/Toolbar/StatusBar';
 import { DetailPanel } from './components/DetailPanel/DetailPanel';
@@ -496,60 +496,26 @@ function EditorCanvas() {
     [selectNode, setDetailPanelOpen, setSelectedEdges, currentSelectedNode, domain],
   );
 
-  // Handle drag-to-connect from column handles to open the FK dialog.
-  // Supports bidirectional connections: both left and right sides can be source or target.
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      // Only handle connections from column-level source handles
-      if (!connection.source || !connection.target || !connection.sourceHandle) {
-        return;
-      }
-
-      // Parse source handle ID (format: "col-{sanitized_name}-(left|right)-src")
-      const sourceMatch = connection.sourceHandle.match(/^col-(.+)-(left|right)-src$/);
-      if (!sourceMatch) {
-        // Not a column handle, ignore (node-level handles shouldn't trigger connections)
-        return;
-      }
-
-      const fromModel = connection.source; // Node ID is model name
-      const toModel = connection.target;
-
-      // Prevent self-reference (would fail validation anyway, but show toast immediately)
-      if (fromModel === toModel) {
-        setToastMessage('Cannot create relationship from a model to itself');
-        return;
-      }
-
-      // Look up the original source column name from the domain data.
-      // The handle ID is sanitized (special chars → underscores), so we need to find
-      // the column whose sanitized name matches. Fallback to sanitized version if not found.
-      const sanitizedSourceColumn = sourceMatch[1];
-      const sourceModel = domain?.models.find((m) => m.name === fromModel);
-      const originalSourceColumn = sourceModel?.columns.find(
-        (c) => c.name.replace(/[^a-zA-Z0-9_-]/g, '_') === sanitizedSourceColumn,
-      );
-      const fromColumn = originalSourceColumn?.name ?? sanitizedSourceColumn;
-
-      // Check if user dropped on a target column handle (format: "col-{sanitized_name}-(left|right)-tgt")
-      let toColumn: string | undefined;
-      if (connection.targetHandle) {
-        const targetMatch = connection.targetHandle.match(/^col-(.+)-(left|right)-tgt$/);
-        if (targetMatch) {
-          const sanitizedTargetColumn = targetMatch[1];
-          const targetModel = domain?.models.find((m) => m.name === toModel);
-          const originalTargetColumn = targetModel?.columns.find(
-            (c) => c.name.replace(/[^a-zA-Z0-9_-]/g, '_') === sanitizedTargetColumn,
-          );
-          toColumn = originalTargetColumn?.name ?? sanitizedTargetColumn;
-        }
-      }
-
-      // Open the FK dialog with prefilled source and target
+  // Handle long-press column drag to create relationships.
+  // Listens for custom events dispatched by ColumnRow in ModelNode.
+  useEffect(() => {
+    const handleColumnRelationshipDrop = (e: Event) => {
+      const { fromModel, fromColumn, toModel, toColumn } = (e as CustomEvent).detail;
       openFkDialogWithPrefill({ fromModel, fromColumn, toModel, toColumn });
-    },
-    [openFkDialogWithPrefill, setToastMessage, domain],
-  );
+    };
+
+    const handleColumnRelationshipSelfDrop = () => {
+      setToastMessage('Cannot create relationship from a model to itself');
+    };
+
+    window.addEventListener('column-relationship-drop', handleColumnRelationshipDrop);
+    window.addEventListener('column-relationship-self-drop', handleColumnRelationshipSelfDrop);
+
+    return () => {
+      window.removeEventListener('column-relationship-drop', handleColumnRelationshipDrop);
+      window.removeEventListener('column-relationship-self-drop', handleColumnRelationshipSelfDrop);
+    };
+  }, [openFkDialogWithPrefill, setToastMessage]);
 
   // Handle right-click on edges to show context menu (F401)
   const onEdgeContextMenu = useCallback(
@@ -602,18 +568,12 @@ function EditorCanvas() {
         onPaneClick={handlePaneClick}
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
-        onConnect={onConnect}
         onEdgeContextMenu={onEdgeContextMenu}
         fitView={!shouldSkipFitView}
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
         panOnDrag={[1, 2]}
         proOptions={{ hideAttribution: true }}
-        connectionLineStyle={{
-          stroke: 'var(--edge-design)',
-          strokeWidth: 2,
-          strokeDasharray: '6 3',
-        }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <MiniMap
@@ -650,6 +610,9 @@ function EditorCanvas() {
       {toastMessage && (
         <Toast message={toastMessage} variant="warning" onDismiss={dismissToast} />
       )}
+
+      {/* Drag line for column relationship creation */}
+      <DragLine />
 
       {/* Edge context menu (F401) */}
       {contextMenu && <ContextMenu />}

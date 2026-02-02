@@ -101,10 +101,37 @@
   gap: 6px;
   padding: 3px 10px;
   line-height: 1.4;
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.15s ease, filter 0.15s ease;
 }
 
 .model-node__column:hover {
   background: var(--selection-bg);
+}
+
+/* Long-press feedback — pulsing glow during 200ms delay */
+.model-node__column--pressing {
+  cursor: grabbing;
+  animation: column-press-pulse 0.4s ease-in-out infinite;
+}
+
+@keyframes column-press-pulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 2px var(--focus-border);
+    filter: brightness(1.15);
+  }
+  50% {
+    box-shadow: inset 0 0 0 2px var(--focus-border), 0 0 8px 2px var(--focus-border);
+    filter: brightness(1.25);
+  }
+}
+
+/* Active dragging state — column being dragged */
+.model-node__column--dragging {
+  cursor: grabbing;
+  opacity: 0.6;
+  box-shadow: inset 0 0 0 2px var(--edge-design);
 }
 
 /* Column status variants — use CSS variables for palette support */
@@ -260,22 +287,6 @@
 }
 
 /* -----------------------------------------------------------------------
-   Handles (per-column connection points)
-   ----------------------------------------------------------------------- */
-
-/* Size and colour are set via inline style to avoid !important overrides
-   against React Flow's default handle styles. Only opacity/transition live
-   here so the hover reveal works via pure CSS. */
-.model-node__handle {
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.model-node:hover .model-node__handle {
-  opacity: 1;
-}
-
-/* -----------------------------------------------------------------------
    Selection state
    ----------------------------------------------------------------------- */
 
@@ -299,9 +310,4 @@
   box-shadow:
     0 0 0 2px var(--vscode-focusBorder, #007fd4),
     0 4px 12px rgba(0, 0, 0, 0.25);
-}
-
-/* Also show handles while dragging for visual consistency */
-.react-flow__node.dragging .model-node__handle {
-  opacity: 1;
 }

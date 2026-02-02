@@ -6,20 +6,21 @@
  * Border colour indicates model status: green (built), orange (design),
  * grey (missing).
  *
- * Provides two kinds of React Flow handles:
- *   1. **Node-level handles** (top/right/bottom/left) — used by FkEdge for
- *      Power BI-style connections that route to whichever side creates the
- *      least bends.
- *   2. **Column-level handles** (col-{name}-{side}-{type}) — bidirectional
- *      handles on both left and right sides for drag-to-connect relationships.
- *      Each side has both source and target handles to allow connections from
- *      any direction.
+ * Provides node-level handles (top/right/bottom/left) used by FkEdge for
+ * Power BI-style connections that route to whichever side creates the
+ * least bends.
+ *
+ * Relationships are created via long-press on column rows:
+ *   1. Long-press (200-250ms) on a column to start drag mode
+ *   2. Drag to a column in another model
+ *   3. Release to open the relationship dialog with prefilled data
  */
 
-import { memo, useCallback, useMemo, type CSSProperties } from 'react';
+import { memo, useCallback, useMemo, useEffect, useRef, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import type { ModelFlowNode } from '../../types/graph';
+import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
+import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
 import './ModelNode.css';
 
@@ -32,24 +33,6 @@ const LAYER_BADGE_FALLBACK: Record<string, string> = {
   bronze: 'BRZ',
   silver: 'SLV',
   gold: 'GLD',
-};
-
-/** Sanitise a column name for use as a React Flow handle ID. */
-function handleId(column: string, side: 'left' | 'right', type: 'src' | 'tgt'): string {
-  const safe = column.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return `col-${safe}-${side}-${type}`;
-}
-
-/** Shared inline style for per-column handles (avoids !important overrides). */
-const HANDLE_STYLE: CSSProperties = {
-  width: 14,
-  height: 14,
-  minWidth: 0,
-  minHeight: 0,
-  background: 'var(--focus-border)',
-  border: '2px solid var(--editor-bg)',
-  borderRadius: '50%',
-  // opacity is controlled by CSS (.model-node__handle) so hover transitions work.
 };
 
 /**
@@ -66,7 +49,161 @@ const NODE_HANDLE_STYLE: CSSProperties = {
 };
 
 // ---------------------------------------------------------------------------
-// Component
+// ColumnRow — individual column with long-press drag support
+// ---------------------------------------------------------------------------
+
+interface ColumnRowProps {
+  column: ColumnDisplay;
+  modelName: string;
+  isBuilt: boolean;
+}
+
+function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
+  // Store actions for drag line visualization
+  const startDragLine = useEditorStore((s) => s.startDragLine);
+  const updateDragLineMouse = useEditorStore((s) => s.updateDragLineMouse);
+  const endDragLine = useEditorStore((s) => s.endDragLine);
+
+  // Ref to the column element for position calculation
+  const elementRef = useRef<HTMLDivElement>(null);
+
+  const { isPressing, isDragging, endDrag, handlers } = useLongPressDrag({
+    delay: 220,
+    onLongPressStart: () => {
+      // Calculate absolute position of the column element center
+      if (elementRef.current) {
+        const rect = elementRef.current.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        startDragLine(modelName, column.name, centerX, centerY);
+      }
+    },
+  });
+
+  // Track mounted state to prevent state updates after unmount
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // When drag starts, track mouse position and detect drop target
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (!mountedRef.current) return;
+      updateDragLineMouse(e.clientX, e.clientY);
+    };
+
+    const handleGlobalMouseUp = (e: MouseEvent) => {
+      // Guard against unmounted component
+      if (!mountedRef.current) return;
+
+      // Find the element under the cursor
+      const targetElement = document.elementFromPoint(e.clientX, e.clientY);
+      if (!targetElement) {
+        endDrag();
+        endDragLine();
+        return;
+      }
+
+      // Look for a column row element (has data-column-name attribute)
+      const columnRow = targetElement.closest('[data-column-name]') as HTMLElement | null;
+      const modelNode = targetElement.closest('[data-model-name]') as HTMLElement | null;
+
+      if (columnRow && modelNode) {
+        const targetColumnName = columnRow.dataset.columnName;
+        const targetModelName = modelNode.dataset.modelName;
+
+        if (targetColumnName && targetModelName && targetModelName !== modelName) {
+          // Valid drop target — dispatch custom event for App to handle
+          window.dispatchEvent(
+            new CustomEvent('column-relationship-drop', {
+              detail: {
+                fromModel: modelName,
+                fromColumn: column.name,
+                toModel: targetModelName,
+                toColumn: targetColumnName,
+              },
+            }),
+          );
+        } else if (targetModelName === modelName) {
+          // Dropped on same model — show toast via event
+          window.dispatchEvent(
+            new CustomEvent('column-relationship-self-drop'),
+          );
+        }
+      }
+
+      endDrag();
+      endDragLine();
+    };
+
+    // Also handle Escape key to cancel drag
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (!mountedRef.current) return;
+        endDrag();
+        endDragLine();
+      }
+    };
+
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isDragging, endDrag, endDragLine, updateDragLineMouse, modelName, column.name]);
+
+  const statusClass = isBuilt
+    ? 'model-node__column--built'
+    : `model-node__column--${column.status}`;
+
+  const pressClass = isPressing ? 'model-node__column--pressing' : '';
+  const dragClass = isDragging ? 'model-node__column--dragging' : '';
+
+  return (
+    <div
+      ref={elementRef}
+      className={`model-node__column ${statusClass} ${pressClass} ${dragClass} nodrag`.trim()}
+      data-column-name={column.name}
+      {...handlers}
+    >
+      <span className="model-node__col-indicators">
+        {column.isPrimaryKey && (
+          <span
+            className={`model-node__pk${!isBuilt ? ' model-node__pk--planned' : ''}`}
+            title={isBuilt ? 'Primary Key' : 'Primary Key (planned)'}
+          >
+            PK
+          </span>
+        )}
+        {column.isForeignKey && (
+          <span
+            className={`model-node__fk${!isBuilt ? ' model-node__fk--planned' : ''}`}
+            title={isBuilt ? 'Foreign Key' : 'Foreign Key (planned)'}
+          >
+            FK
+          </span>
+        )}
+      </span>
+      <span className="model-node__col-name" title={column.name}>
+        {column.name}
+      </span>
+      <span className="model-node__col-type">{column.dataType}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ModelNode Component
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
@@ -99,9 +236,15 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
     [openNodeContextMenu, modelName, status, approved],
   );
 
+  // Split columns into built and planned
+  const builtCols = useMemo(() => displayColumns.filter((c) => c.status === 'built'), [displayColumns]);
+  const plannedCols = useMemo(() => displayColumns.filter((c) => c.status !== 'built'), [displayColumns]);
+  const showSeparator = builtCols.length > 0 && plannedCols.length > 0;
+
   return (
     <div
       className={`model-node model-node--${status}${dimmed ? ' model-node--dimmed' : ''}`}
+      data-model-name={modelName}
       onContextMenu={handleContextMenu}
     >
       {/* Node-level handles — one source + one target per side */}
@@ -132,167 +275,51 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
 
       {/* Columns — ordered: built first, then planned/missing with separator */}
       <div className="model-node__columns">
-        {(() => {
-          const builtCols = displayColumns.filter((c) => c.status === 'built');
-          const plannedCols = displayColumns.filter((c) => c.status !== 'built');
-          const showSeparator = builtCols.length > 0 && plannedCols.length > 0;
+        {builtCols.map((col) => (
+          <ColumnRow
+            key={col.name}
+            column={col}
+            modelName={modelName}
+            isBuilt={true}
+          />
+        ))}
 
-          return (
-            <>
-              {builtCols.map((col) => (
-                <div key={col.name} className="model-node__column model-node__column--built">
-                  {/* F405: Only show column handles when expanded */}
-                  {/* Bidirectional handles: both source and target on each side */}
-                  {!isCollapsed && (
-                    <>
-                      <Handle
-                        type="source"
-                        position={Position.Left}
-                        id={handleId(col.name, 'left', 'src')}
-                        className="model-node__handle"
-                        style={HANDLE_STYLE}
-                      />
-                      <Handle
-                        type="target"
-                        position={Position.Left}
-                        id={handleId(col.name, 'left', 'tgt')}
-                        className="model-node__handle"
-                        style={HANDLE_STYLE}
-                      />
-                    </>
-                  )}
+        {showSeparator && (
+          <div className="model-node__separator">
+            <span className="model-node__separator-label">planned</span>
+          </div>
+        )}
 
-                  <span className="model-node__col-indicators">
-                    {col.isPrimaryKey && (
-                      <span className="model-node__pk" title="Primary Key">
-                        PK
-                      </span>
-                    )}
-                    {col.isForeignKey && (
-                      <span className="model-node__fk" title="Foreign Key">
-                        FK
-                      </span>
-                    )}
-                  </span>
-                  <span className="model-node__col-name" title={col.name}>
-                    {col.name}
-                  </span>
-                  <span className="model-node__col-type">{col.dataType}</span>
+        {plannedCols.map((col) => (
+          <ColumnRow
+            key={col.name}
+            column={col}
+            modelName={modelName}
+            isBuilt={false}
+          />
+        ))}
 
-                  {!isCollapsed && (
-                    <>
-                      <Handle
-                        type="source"
-                        position={Position.Right}
-                        id={handleId(col.name, 'right', 'src')}
-                        className="model-node__handle"
-                        style={HANDLE_STYLE}
-                      />
-                      <Handle
-                        type="target"
-                        position={Position.Right}
-                        id={handleId(col.name, 'right', 'tgt')}
-                        className="model-node__handle"
-                        style={HANDLE_STYLE}
-                      />
-                    </>
-                  )}
-                </div>
-              ))}
+        {/* F405: Expansion button when columns are collapsed */}
+        {hiddenCount > 0 && (
+          <button
+            className="model-node__expand-button"
+            onClick={handleToggleClick}
+            title={`Show ${hiddenCount} more column${hiddenCount !== 1 ? 's' : ''}`}
+          >
+            ...and {hiddenCount} more
+          </button>
+        )}
 
-              {showSeparator && (
-                <div className="model-node__separator">
-                  <span className="model-node__separator-label">planned</span>
-                </div>
-              )}
-
-              {plannedCols.map((col) => (
-                <div
-                  key={col.name}
-                  className={`model-node__column model-node__column--${col.status}`}
-                >
-                  {/* Bidirectional handles: both source and target on each side */}
-                  {!isCollapsed && (
-                    <>
-                      <Handle
-                        type="source"
-                        position={Position.Left}
-                        id={handleId(col.name, 'left', 'src')}
-                        className="model-node__handle"
-                        style={HANDLE_STYLE}
-                      />
-                      <Handle
-                        type="target"
-                        position={Position.Left}
-                        id={handleId(col.name, 'left', 'tgt')}
-                        className="model-node__handle"
-                        style={HANDLE_STYLE}
-                      />
-                    </>
-                  )}
-
-                  <span className="model-node__col-indicators">
-                    {col.isPrimaryKey && (
-                      <span className="model-node__pk model-node__pk--planned" title="Primary Key (planned)">
-                        PK
-                      </span>
-                    )}
-                    {col.isForeignKey && (
-                      <span className="model-node__fk model-node__fk--planned" title="Foreign Key (planned)">
-                        FK
-                      </span>
-                    )}
-                  </span>
-                  <span className="model-node__col-name" title={col.name}>
-                    {col.name}
-                  </span>
-                  <span className="model-node__col-type">{col.dataType}</span>
-
-                  {!isCollapsed && (
-                    <>
-                      <Handle
-                        type="source"
-                        position={Position.Right}
-                        id={handleId(col.name, 'right', 'src')}
-                        className="model-node__handle"
-                        style={HANDLE_STYLE}
-                      />
-                      <Handle
-                        type="target"
-                        position={Position.Right}
-                        id={handleId(col.name, 'right', 'tgt')}
-                        className="model-node__handle"
-                        style={HANDLE_STYLE}
-                      />
-                    </>
-                  )}
-                </div>
-              ))}
-
-              {/* F405: Expansion button when columns are collapsed */}
-              {hiddenCount > 0 && (
-                <button
-                  className="model-node__expand-button"
-                  onClick={handleToggleClick}
-                  title={`Show ${hiddenCount} more column${hiddenCount !== 1 ? 's' : ''}`}
-                >
-                  ...and {hiddenCount} more
-                </button>
-              )}
-
-              {/* F405: Collapse button when expanded */}
-              {isExpanded && columns.length > COLLAPSED_COLUMN_LIMIT && (
-                <button
-                  className="model-node__expand-button"
-                  onClick={handleToggleClick}
-                  title="Show fewer columns"
-                >
-                  Show less
-                </button>
-              )}
-            </>
-          );
-        })()}
+        {/* F405: Collapse button when expanded */}
+        {isExpanded && columns.length > COLLAPSED_COLUMN_LIMIT && (
+          <button
+            className="model-node__expand-button"
+            onClick={handleToggleClick}
+            title="Show fewer columns"
+          >
+            Show less
+          </button>
+        )}
 
         {columns.length === 0 && (
           <div className="model-node__empty">No columns</div>

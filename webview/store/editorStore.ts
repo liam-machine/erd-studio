@@ -91,6 +91,15 @@ export interface EditorState {
   legendOpen: boolean;
   /** Whether the welcome modal is visible. */
   welcomeModalOpen: boolean;
+  /** Active drag line state for creating relationships via column drag. */
+  dragLineState: {
+    sourceModelName: string;
+    sourceColumnName: string;
+    sourceX: number;
+    sourceY: number;
+    currentX: number;
+    currentY: number;
+  } | null;
 }
 
 export interface EditorActions {
@@ -131,6 +140,12 @@ export interface EditorActions {
   setLegendOpen: (open: boolean) => void;
   /** Toggle the welcome modal visibility. */
   setWelcomeModalOpen: (open: boolean) => void;
+  /** Start drag line for column relationship creation. */
+  startDragLine: (modelName: string, columnName: string, sourceX: number, sourceY: number) => void;
+  /** Update drag line endpoint as mouse moves. */
+  updateDragLineMouse: (mouseX: number, mouseY: number) => void;
+  /** End drag line (on drop or cancel). */
+  endDragLine: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +175,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   paletteId: 'coolWarm',
   legendOpen: false,
   welcomeModalOpen: false,
+  dragLineState: null,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -191,4 +207,28 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setPaletteId: (paletteId) => set({ paletteId }),
   setLegendOpen: (open) => set({ legendOpen: open }),
   setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
+  startDragLine: (modelName, columnName, sourceX, sourceY) =>
+    set({
+      dragLineState: {
+        sourceModelName: modelName,
+        sourceColumnName: columnName,
+        sourceX,
+        sourceY,
+        currentX: sourceX,
+        currentY: sourceY,
+      },
+    }),
+  updateDragLineMouse: (mouseX, mouseY) =>
+    set((state) =>
+      state.dragLineState
+        ? {
+            dragLineState: {
+              ...state.dragLineState,
+              currentX: mouseX,
+              currentY: mouseY,
+            },
+          }
+        : {},
+    ),
+  endDragLine: () => set({ dragLineState: null }),
 }));
