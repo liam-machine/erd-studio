@@ -179,6 +179,10 @@
   border-color: var(--model-built);
 }
 
+.legend__model-card--approved {
+  border-color: var(--model-approved);
+}
+
 .legend__model-card--design {
   border-color: var(--model-design);
 }
@@ -194,6 +198,10 @@
 
 .legend__model-header--built {
   background: var(--model-built);
+}
+
+.legend__model-header--approved {
+  background: var(--model-approved);
 }
 
 .legend__model-header--design {
@@ -220,6 +228,10 @@
 
 .legend__edge--built {
   stroke: var(--edge-built);
+}
+
+.legend__edge--approved {
+  stroke: var(--model-approved);
 }
 
 .legend__edge--design {

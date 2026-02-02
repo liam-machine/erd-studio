@@ -15,7 +15,7 @@ import type { LayerConfig } from '../../src/types/layer';
 // ---------------------------------------------------------------------------
 
 /** Reconciled model status (determined by comparing domain JSON with manifest). */
-export type ModelStatus = 'built' | 'design' | 'missing';
+export type ModelStatus = 'built' | 'approved' | 'design' | 'missing';
 
 // ---------------------------------------------------------------------------
 // Column display
@@ -23,11 +23,12 @@ export type ModelStatus = 'built' | 'design' | 'missing';
 
 /**
  * Column status for styling:
- * - `built` — exists in manifest (green)
+ * - `built` — exists in manifest (blue)
+ * - `approved` — approved for build (teal)
  * - `planned` — in plannedColumns but not manifest (orange)
  * - `missing` — PK/FK reference to non-existent column (orange ghost)
  */
-export type ColumnStatus = 'built' | 'planned' | 'missing';
+export type ColumnStatus = 'built' | 'approved' | 'planned' | 'missing';
 
 /** Column data enriched with PK/FK indicators for display in ModelNode. */
 export interface ColumnDisplay {
@@ -38,6 +39,8 @@ export interface ColumnDisplay {
   isForeignKey: boolean;
   /** Column status for row styling. */
   status: ColumnStatus;
+  /** Whether this column has been approved for build. */
+  approved: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,8 +51,10 @@ export interface ColumnDisplay {
 export type ModelNodeData = {
   /** Model name (unique within a domain). */
   modelName: string;
-  /** Model status: built (green), design (orange), or missing (grey). */
+  /** Model status: built (blue), approved (teal), design (orange), or missing (grey). */
   status: ModelStatus;
+  /** Whether this model has been approved for build. */
+  approved: boolean;
   /** Data warehouse layer. */
   layer: Layer;
   /** Layer configuration for dynamic badge styling (color, abbreviation). */
@@ -77,8 +82,8 @@ export type ModelFlowNode = Node<ModelNodeData, 'model'>;
 // FkEdge
 // ---------------------------------------------------------------------------
 
-/** Relationship status for edge colouring: built (blue) or design (orange). */
-export type RelationshipStatus = 'built' | 'design';
+/** Relationship status for edge colouring: built (blue), approved (teal), or design (orange). */
+export type RelationshipStatus = 'built' | 'approved' | 'design';
 
 /** Data payload for an FkEdge React Flow edge. */
 export type FkEdgeData = {
@@ -88,6 +93,8 @@ export type FkEdgeData = {
   toColumn: string;
   cardinality: Cardinality;
   status: RelationshipStatus;
+  /** Whether this relationship has been approved for build. */
+  approved: boolean;
   /** Whether the edge is dimmed (not connected to current selection). */
   dimmed?: boolean;
   /** Index signature required by React Flow's Edge generic. */

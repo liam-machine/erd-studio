@@ -91,14 +91,22 @@ export class ReconciliationService {
     // Determine model status
     let status: ModelStatus;
     if (model.source === 'design') {
-      status = isInManifest ? 'built' : 'design';
+      if (isInManifest) {
+        status = 'built';
+      } else if (model.approved === true) {
+        status = 'approved';
+      } else {
+        status = 'design';
+      }
     } else {
       // repo model
       status = isInManifest ? 'built' : 'missing';
     }
 
     // Resolve columns based on model source and manifest presence
-    const columns = this.resolveColumns(model, manifestModel, fkColumns);
+    // Pass model approval state for defensive column status computation
+    const isModelApproved = model.approved === true;
+    const columns = this.resolveColumns(model, manifestModel, fkColumns, isModelApproved);
 
     return {
       name: model.name,
@@ -106,6 +114,7 @@ export class ReconciliationService {
       schema: manifestModel?.schema ?? model.schema ?? '',
       description: manifestModel?.description ?? model.description ?? '',
       columns,
+      approved: model.approved ?? false,
     };
   }
 
@@ -116,11 +125,14 @@ export class ReconciliationService {
    * 1. Built columns (from manifest) — green
    * 2. Planned columns not in manifest — orange
    * 3. Missing PK/FK ghost columns — orange
+   *
+   * @param isModelApproved - Whether the parent model is approved (for defensive status check)
    */
   private resolveColumns(
     model: SemanticModel,
     manifestModel: { columns: ManifestColumn[] } | undefined,
     fkColumns: Set<string>,
+    isModelApproved: boolean,
   ): ReconciledColumn[] {
     const columns: ReconciledColumn[] = [];
     const seenColumns = new Set<string>();
@@ -129,13 +141,16 @@ export class ReconciliationService {
     if (model.source === 'design' && !manifestModel) {
       const inlineColumns = model.columns ?? [];
       for (const col of inlineColumns) {
+        // Defensive: column can only be 'approved' if both column AND model are approved
+        const isApproved = col.approved === true && isModelApproved;
         columns.push({
           name: col.name,
           dataType: col.dataType,
           description: col.description,
-          status: 'planned',
+          status: isApproved ? 'approved' : 'planned',
           isPrimaryKey: col.isPrimaryKey === true,
           isForeignKey: fkColumns.has(col.name),
+          approved: isApproved,
         });
         seenColumns.add(col.name);
       }
@@ -150,21 +165,27 @@ export class ReconciliationService {
           status: 'built',
           isPrimaryKey: isPk,
           isForeignKey: fkColumns.has(col.name),
+          approved: true, // Built columns are always approved
         });
         seenColumns.add(col.name);
       }
 
       // Add planned columns not in manifest (overlay)
+      // For repo/built models, column approval doesn't require model approval
       const plannedColumns = model.plannedColumns ?? [];
       for (const col of plannedColumns) {
         if (!seenColumns.has(col.name)) {
+          // Repo models: column can be approved independently
+          // Design models would use the inline columns path above, not this
+          const isApproved = col.approved === true;
           columns.push({
             name: col.name,
             dataType: col.dataType,
             description: col.description,
-            status: 'planned',
+            status: isApproved ? 'approved' : 'planned',
             isPrimaryKey: this.isPrimaryKey(model, col.name),
             isForeignKey: fkColumns.has(col.name),
+            approved: isApproved,
           });
           seenColumns.add(col.name);
         }
@@ -213,6 +234,7 @@ export class ReconciliationService {
         status: 'missing',
         isPrimaryKey: true,
         isForeignKey: false,
+        approved: false, // Ghost columns are not approved
       });
       seenColumns.add(model.primaryKey);
     }
@@ -227,6 +249,7 @@ export class ReconciliationService {
           status: 'missing',
           isPrimaryKey: false,
           isForeignKey: true,
+          approved: false, // Ghost columns are not approved
         });
         seenColumns.add(fkCol);
       }
@@ -236,8 +259,10 @@ export class ReconciliationService {
   /**
    * Reconcile a relationship to add status.
    *
-   * A relationship is 'built' if it exists as a relationship test in the manifest.
-   * Otherwise, it's 'design' (user-created and not yet in manifest).
+   * A relationship is:
+   * - 'built' if it exists as a relationship test in the manifest
+   * - 'approved' if it has approved === true but not in manifest
+   * - 'design' otherwise (user-created and not yet in manifest)
    */
   private reconcileRelationship(
     rel: Relationship,
@@ -245,8 +270,20 @@ export class ReconciliationService {
   ): ReconciledRelationship {
     const isInManifest = this.isRelationshipInManifest(rel, manifestTests);
 
-    // Built if exists in manifest tests, otherwise design
-    const status: RelationshipStatus = isInManifest ? 'built' : 'design';
+    // Determine status
+    let status: RelationshipStatus;
+    let approved: boolean;
+
+    if (isInManifest) {
+      status = 'built';
+      approved = true;
+    } else if (rel.approved === true) {
+      status = 'approved';
+      approved = true;
+    } else {
+      status = 'design';
+      approved = false;
+    }
 
     return {
       fromModel: rel.fromModel,
@@ -255,6 +292,7 @@ export class ReconciliationService {
       toColumn: rel.toColumn,
       cardinality: rel.cardinality,
       status,
+      approved,
     };
   }
 

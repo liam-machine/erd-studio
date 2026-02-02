@@ -236,6 +236,48 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             await this.sendDomainData(document, webviewPanel.webview);
             break;
           }
+          case 'approveModel': {
+            const payload = (message as { payload?: { modelName: string } }).payload;
+            if (payload) {
+              await this.handleApproveModel(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'unapproveModel': {
+            const payload = (message as { payload?: { modelName: string } }).payload;
+            if (payload) {
+              await this.handleUnapproveModel(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'approveColumn': {
+            const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
+            if (payload) {
+              await this.handleApproveColumn(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'unapproveColumn': {
+            const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
+            if (payload) {
+              await this.handleUnapproveColumn(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'approveRelationship': {
+            const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string } }).payload;
+            if (payload) {
+              await this.handleApproveRelationship(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'unapproveRelationship': {
+            const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string } }).payload;
+            if (payload) {
+              await this.handleUnapproveRelationship(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
         }
       },
     );
@@ -642,11 +684,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       // Add the new column
+      // Note: New columns start without approval even if model is approved
+      // The user must explicitly approve new columns
       columns.push({
         name: payload.column.name,
         dataType: payload.column.dataType,
         description: payload.column.description,
         ...(payload.column.isPrimaryKey ? { isPrimaryKey: true } : {}),
+        ...(payload.column.approved ? { approved: true } : {}),
       });
       model[targetArray] = columns;
 
@@ -743,12 +788,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
       }
 
-      // Update the column
+      // Update the column — preserve existing approval state unless explicitly changed
+      const existingApproved = columns[columnIndex].approved;
+      const newApproved = payload.column.approved ?? existingApproved;
       columns[columnIndex] = {
         name: payload.column.name,
         dataType: payload.column.dataType,
         description: payload.column.description,
         ...(payload.column.isPrimaryKey ? { isPrimaryKey: true } : {}),
+        ...(newApproved ? { approved: true } : {}),
       };
 
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
@@ -1309,6 +1357,360 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       });
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Approval handlers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Handle `approveModel` message — approves a model and all its columns.
+   * Sets model.approved = true and approved = true on all existing columns.
+   */
+  private async handleApproveModel(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+
+          if (!model) {
+            throw new Error(`Model "${payload.modelName}" not found.`);
+          }
+
+          // Set model as approved
+          model.approved = true;
+
+          // Approve all existing columns (design models only)
+          if (model.source === 'design' && Array.isArray(model.columns)) {
+            for (const col of model.columns as Array<Record<string, unknown>>) {
+              col.approved = true;
+            }
+          }
+
+          // Approve all planned columns (repo models)
+          if (model.source === 'repo' && Array.isArray(model.plannedColumns)) {
+            for (const col of model.plannedColumns as Array<Record<string, unknown>>) {
+              col.approved = true;
+            }
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to approve model.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Approve model failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to approve model: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle `unapproveModel` message — unapproves a model.
+   * Removes the approved flag from the model AND cascades to all columns.
+   * This maintains the invariant: columns cannot be approved if model is not approved.
+   */
+  private async handleUnapproveModel(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+
+          if (!model) {
+            throw new Error(`Model "${payload.modelName}" not found.`);
+          }
+
+          // Remove approval from model
+          delete model.approved;
+
+          // Cascade unapproval to all columns (maintains invariant)
+          if (model.source === 'design' && Array.isArray(model.columns)) {
+            for (const col of model.columns as Array<Record<string, unknown>>) {
+              delete col.approved;
+            }
+          }
+          if (Array.isArray(model.plannedColumns)) {
+            for (const col of model.plannedColumns as Array<Record<string, unknown>>) {
+              delete col.approved;
+            }
+          }
+
+          // Cascade unapproval to relationships involving this model
+          // (relationships require both models to be built/approved)
+          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+          for (const rel of relationships) {
+            if (rel.fromModel === payload.modelName || rel.toModel === payload.modelName) {
+              delete rel.approved;
+            }
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to unapprove model.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Unapprove model failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to unapprove model: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle `approveColumn` message — approves a single column.
+   * Requires model to be approved first.
+   */
+  private async handleApproveColumn(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+
+          if (!model) {
+            throw new Error(`Model "${payload.modelName}" not found.`);
+          }
+
+          // For design models, require model approval first
+          // For repo (built) models, allow column approval without model approval
+          const isDesignModel = model.source === 'design';
+          if (isDesignModel && model.approved !== true) {
+            throw new Error('Cannot approve column until model is approved.');
+          }
+
+          // Find and approve the column
+          const targetArray = isDesignModel ? 'columns' : 'plannedColumns';
+          const columns = (model[targetArray] ?? []) as Array<Record<string, unknown>>;
+
+          const column = columns.find((c) => c.name === payload.columnName);
+          if (!column) {
+            throw new Error(`Column "${payload.columnName}" not found.`);
+          }
+
+          column.approved = true;
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to approve column.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Approve column failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to approve column: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle `unapproveColumn` message — unapproves a single column.
+   */
+  private async handleUnapproveColumn(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+
+          if (!model) {
+            throw new Error(`Model "${payload.modelName}" not found.`);
+          }
+
+          // Find and unapprove the column
+          const isDesignModel = model.source === 'design';
+          const targetArray = isDesignModel ? 'columns' : 'plannedColumns';
+          const columns = (model[targetArray] ?? []) as Array<Record<string, unknown>>;
+
+          const column = columns.find((c) => c.name === payload.columnName);
+          if (!column) {
+            throw new Error(`Column "${payload.columnName}" not found.`);
+          }
+
+          delete column.approved;
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to unapprove column.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Unapprove column failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to unapprove column: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle `approveRelationship` message — approves a relationship.
+   */
+  private async handleApproveRelationship(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+          const rel = relationships.find(
+            (r) =>
+              r.fromModel === payload.fromModel &&
+              r.fromColumn === payload.fromColumn &&
+              r.toModel === payload.toModel &&
+              r.toColumn === payload.toColumn,
+          );
+
+          if (!rel) {
+            throw new Error('Relationship not found.');
+          }
+
+          // Only design relationships can be approved
+          if (rel.source !== 'design') {
+            throw new Error('Only design relationships can be approved.');
+          }
+
+          // Check that both models are built or approved (not design)
+          // A model is "approvable" if it's a repo model OR a design model with approved=true
+          const fromModel = models.find((m) => m.name === payload.fromModel);
+          const toModel = models.find((m) => m.name === payload.toModel);
+
+          const isModelApprovable = (model: Record<string, unknown> | undefined): boolean => {
+            if (!model) return false;
+            // Repo models are always approvable (they're built or missing)
+            if (model.source === 'repo') return true;
+            // Design models must be approved
+            return model.approved === true;
+          };
+
+          if (!isModelApprovable(fromModel)) {
+            throw new Error(`Cannot approve relationship: model "${payload.fromModel}" must be approved first.`);
+          }
+          if (!isModelApprovable(toModel)) {
+            throw new Error(`Cannot approve relationship: model "${payload.toModel}" must be approved first.`);
+          }
+
+          rel.approved = true;
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to approve relationship.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Approve relationship failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to approve relationship: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle `unapproveRelationship` message — unapproves a relationship.
+   */
+  private async handleUnapproveRelationship(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+          const rel = relationships.find(
+            (r) =>
+              r.fromModel === payload.fromModel &&
+              r.fromColumn === payload.fromColumn &&
+              r.toModel === payload.toModel &&
+              r.toColumn === payload.toColumn,
+          );
+
+          if (!rel) {
+            throw new Error('Relationship not found.');
+          }
+
+          delete rel.approved;
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to unapprove relationship.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Unapprove relationship failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to unapprove relationship: ${message}` },
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Utility methods
+  // ---------------------------------------------------------------------------
 
   /**
    * Find an open position on the canvas that doesn't overlap existing nodes.

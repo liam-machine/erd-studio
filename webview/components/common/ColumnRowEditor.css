@@ -35,6 +35,14 @@
   background: rgba(249, 115, 22, 0.15);
 }
 
+.column-row-editor--approved {
+  background: var(--model-approved-bg);
+}
+
+.column-row-editor--approved:hover {
+  background: rgba(20, 184, 166, 0.15);
+}
+
 .column-row-editor--editable {
   cursor: pointer;
 }
@@ -199,4 +207,47 @@
   white-space: nowrap;
   z-index: 10;
   margin-top: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Approval Toggle
+   --------------------------------------------------------------------------- */
+
+.column-row-editor__approve {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--model-approved, #14b8a6);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--model-approved, #14b8a6);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.1s ease, background 0.1s ease;
+}
+
+.column-row-editor:hover .column-row-editor__approve {
+  opacity: 1;
+}
+
+.column-row-editor__approve:hover {
+  background: var(--model-approved-bg, rgba(20, 184, 166, 0.15));
+}
+
+.column-row-editor__approve--approved {
+  background: var(--model-approved, #14b8a6);
+  color: var(--model-approved-text, #fff);
+  opacity: 1;
+}
+
+.column-row-editor__approve--approved:hover {
+  background: var(--model-design, #f97316);
+  border-color: var(--model-design, #f97316);
+  color: var(--model-design-text, #fff);
 }

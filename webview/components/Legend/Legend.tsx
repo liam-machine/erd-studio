@@ -73,6 +73,15 @@ export function Legend() {
               </div>
             </div>
             <div className="legend__item">
+              <div className="legend__model-card legend__model-card--approved">
+                <div className="legend__model-header legend__model-header--approved" />
+              </div>
+              <div className="legend__item-text">
+                <span className="legend__item-label">Approved</span>
+                <span className="legend__item-desc">Ready for build</span>
+              </div>
+            </div>
+            <div className="legend__item">
               <div className="legend__model-card legend__model-card--design">
                 <div className="legend__model-header legend__model-header--design" />
               </div>
@@ -104,6 +113,15 @@ export function Legend() {
               <div className="legend__item-text">
                 <span className="legend__item-label">Built FK</span>
                 <span className="legend__item-desc">Exists in manifest</span>
+              </div>
+            </div>
+            <div className="legend__item">
+              <svg className="legend__edge-sample" viewBox="0 0 60 16" aria-hidden="true">
+                <line x1="0" y1="8" x2="60" y2="8" className="legend__edge legend__edge--approved" />
+              </svg>
+              <div className="legend__item-text">
+                <span className="legend__item-label">Approved FK</span>
+                <span className="legend__item-desc">Ready for build</span>
               </div>
             </div>
             <div className="legend__item">

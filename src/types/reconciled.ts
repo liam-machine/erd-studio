@@ -35,11 +35,12 @@ export interface ManifestModelPreview {
 
 /**
  * Status of a resolved column:
- * - `built` — column exists in manifest (green)
+ * - `built` — column exists in manifest (blue)
+ * - `approved` — column is approved for build (teal)
  * - `planned` — column is in plannedColumns but not in manifest (orange)
  * - `missing` — PK/FK reference to a column that doesn't exist (orange ghost)
  */
-export type ColumnStatus = 'built' | 'planned' | 'missing';
+export type ColumnStatus = 'built' | 'approved' | 'planned' | 'missing';
 
 // ---------------------------------------------------------------------------
 // Model status
@@ -47,11 +48,12 @@ export type ColumnStatus = 'built' | 'planned' | 'missing';
 
 /**
  * Status of a resolved model:
- * - `built` — repo model found in manifest (green)
+ * - `built` — repo model found in manifest (blue)
+ * - `approved` — design model approved for build (teal)
  * - `design` — design model not in manifest (orange)
  * - `missing` — repo model NOT found in manifest (grey/warning)
  */
-export type ModelStatus = 'built' | 'design' | 'missing';
+export type ModelStatus = 'built' | 'approved' | 'design' | 'missing';
 
 // ---------------------------------------------------------------------------
 // Reconciled column
@@ -65,6 +67,8 @@ export interface ReconciledColumn {
   status: ColumnStatus;
   isPrimaryKey: boolean;
   isForeignKey: boolean;
+  /** Whether this column has been approved for build. */
+  approved: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,11 +83,14 @@ export interface ReconciledModel {
   description: string;
   /**
    * Resolved columns in display order:
-   * 1. Built columns (from manifest) — green
-   * 2. Planned columns (not in manifest) — orange
-   * 3. Missing PK/FK ghost columns — orange
+   * 1. Built columns (from manifest) — blue
+   * 2. Approved columns (approved for build) — teal
+   * 3. Planned columns (not in manifest) — orange
+   * 4. Missing PK/FK ghost columns — orange
    */
   columns: ReconciledColumn[];
+  /** Whether this model has been approved for build. */
+  approved: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +98,7 @@ export interface ReconciledModel {
 // ---------------------------------------------------------------------------
 
 /** Relationship status for edge colouring. */
-export type RelationshipStatus = 'built' | 'design';
+export type RelationshipStatus = 'built' | 'approved' | 'design';
 
 /** A relationship with resolved status. */
 export interface ReconciledRelationship {
@@ -101,6 +108,8 @@ export interface ReconciledRelationship {
   toColumn: string;
   cardinality: Cardinality;
   status: RelationshipStatus;
+  /** Whether this relationship has been approved for build. */
+  approved: boolean;
 }
 
 // ---------------------------------------------------------------------------

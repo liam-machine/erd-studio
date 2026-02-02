@@ -74,6 +74,11 @@ body {
   --model-built-bg: rgba(96, 165, 250, 0.08);
   --model-built-text: #ffffff;
 
+  /* Approved (approved for build) — defaults before palette applied */
+  --model-approved: #14b8a6;
+  --model-approved-bg: rgba(20, 184, 166, 0.08);
+  --model-approved-text: #ffffff;
+
   /* Design (planned, not yet in manifest) — defaults before palette applied */
   --model-design: #ea580c;
   --model-design-bg: rgba(234, 88, 12, 0.08);

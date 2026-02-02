@@ -25,7 +25,10 @@ export interface ColumnRowEditorColumn {
   description: string;
   isPrimaryKey?: boolean;
   isForeignKey?: boolean;
-  status?: 'built' | 'planned';
+  /** Column status for styling. */
+  status?: 'built' | 'approved' | 'planned' | 'missing';
+  /** Whether the column has been approved for build. */
+  approved?: boolean;
 }
 
 export interface ColumnRowEditorProps {
@@ -41,6 +44,12 @@ export interface ColumnRowEditorProps {
   onDelete?: () => void;
   /** Callback when new row is cancelled (Escape key). */
   onCancel?: () => void;
+  /** Callback when approve button is clicked. */
+  onApprove?: () => void;
+  /** Callback when unapprove button is clicked. */
+  onUnapprove?: () => void;
+  /** Whether this column can be approved (model is approved or built). */
+  canApprove?: boolean;
   /** Show PK/FK indicator badges. Default true. */
   showIndicators?: boolean;
   /** Show delete button on hover. Default true for editable mode. */
@@ -86,6 +95,9 @@ export function ColumnRowEditor({
   onUpdate,
   onDelete,
   onCancel,
+  onApprove,
+  onUnapprove,
+  canApprove = false,
   showIndicators = true,
   showDelete = true,
 }: ColumnRowEditorProps) {
@@ -333,6 +345,25 @@ export function ColumnRowEditor({
         >
           {localColumn.dataType}
         </span>
+      )}
+
+      {/* Approval toggle (for planned columns when canApprove is true) */}
+      {mode === 'editable' && canApprove && (
+        <button
+          className={`column-row-editor__approve ${column.approved ? 'column-row-editor__approve--approved' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (column.approved) {
+              onUnapprove?.();
+            } else {
+              onApprove?.();
+            }
+          }}
+          title={column.approved ? 'Remove approval' : 'Approve column for build'}
+          aria-label={column.approved ? 'Unapprove column' : 'Approve column'}
+        >
+          {column.approved ? '✓' : '○'}
+        </button>
       )}
 
       {/* Delete button */}

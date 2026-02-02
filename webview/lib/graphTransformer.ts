@@ -48,6 +48,7 @@ function mapColumns(model: ReconciledModel): ColumnDisplay[] {
     isPrimaryKey: col.isPrimaryKey,
     isForeignKey: col.isForeignKey,
     status: col.status,
+    approved: col.approved,
   }));
 }
 
@@ -120,6 +121,7 @@ export function transformDomain(domain: ReconciledDomain): TransformResult {
       data: {
         modelName: model.name,
         status: model.status,
+        approved: model.approved,
         layer,
         layerConfig,
         columns,
@@ -155,6 +157,7 @@ export function transformDomain(domain: ReconciledDomain): TransformResult {
           toColumn: rel.toColumn,
           cardinality: rel.cardinality,
           status: rel.status,
+          approved: rel.approved,
         },
       };
     });

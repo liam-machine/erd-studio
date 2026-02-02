@@ -28,6 +28,10 @@
   border-color: var(--model-built);
 }
 
+.model-node--approved {
+  border-color: var(--model-approved);
+}
+
 .model-node--design {
   border-color: var(--model-design);
 }
@@ -110,6 +114,15 @@
 
 .model-node__column--built:hover {
   background: var(--model-built-bg);
+  filter: brightness(1.15);
+}
+
+.model-node__column--approved {
+  background: var(--model-approved-bg);
+}
+
+.model-node__column--approved:hover {
+  background: var(--model-approved-bg);
   filter: brightness(1.15);
 }
 

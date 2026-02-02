@@ -22,6 +22,10 @@
   stroke: var(--edge-built);
 }
 
+.fk-edge--approved {
+  stroke: var(--model-approved);
+}
+
 .fk-edge--design {
   stroke: var(--edge-design);
 }
@@ -74,6 +78,10 @@
 
 .fk-edge__label--built {
   color: var(--edge-built);
+}
+
+.fk-edge__label--approved {
+  color: var(--model-approved);
 }
 
 .fk-edge__label--design {

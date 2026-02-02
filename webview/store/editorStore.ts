@@ -35,6 +35,19 @@ export interface EdgeContextMenu {
   data: FkEdgeData;
 }
 
+/** Context menu state for node right-click. */
+export interface NodeContextMenu {
+  type: 'node';
+  x: number;
+  y: number;
+  modelName: string;
+  modelStatus: 'built' | 'approved' | 'design' | 'missing';
+  isApproved: boolean;
+}
+
+/** Union of context menu states. */
+export type ContextMenuState = EdgeContextMenu | NodeContextMenu | null;
+
 export interface EditorState {
   /** Current search query for filtering/highlighting nodes. */
   searchQuery: string;
@@ -69,7 +82,7 @@ export interface EditorState {
   /** Manifest models available to add to this domain (not already in domain). */
   manifestModels: ManifestModelPreview[];
   /** Context menu state (position and target), or null if closed. */
-  contextMenu: EdgeContextMenu | null;
+  contextMenu: ContextMenuState;
   /** Internal: registered search focus function (not persisted). */
   _searchFocusFn: (() => void) | null;
   /** Current colour palette ID. */
@@ -104,6 +117,8 @@ export interface EditorActions {
   setManifestModels: (models: ManifestModelPreview[]) => void;
   /** Open context menu for an edge at the given position. */
   openEdgeContextMenu: (x: number, y: number, data: FkEdgeData) => void;
+  /** Open context menu for a node at the given position. */
+  openNodeContextMenu: (x: number, y: number, modelName: string, modelStatus: 'built' | 'approved' | 'design' | 'missing', isApproved: boolean) => void;
   /** Close the context menu. */
   closeContextMenu: () => void;
   /** Register a function to focus the search input (called by Toolbar on mount). */
@@ -166,6 +181,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),
   openEdgeContextMenu: (x, y, data) => set({ contextMenu: { type: 'edge', x, y, data } }),
+  openNodeContextMenu: (x, y, modelName, modelStatus, isApproved) => set({ contextMenu: { type: 'node', x, y, modelName, modelStatus, isApproved } }),
   closeContextMenu: () => set({ contextMenu: null }),
   registerSearchFocus: (focusFn) => set({ _searchFocusFn: focusFn }),
   focusSearchInput: () => {

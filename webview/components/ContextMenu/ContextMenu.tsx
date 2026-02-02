@@ -40,6 +40,7 @@ export function ContextMenu() {
 
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
+  const domain = useEditorStore((s) => s.domain);
 
   // Track whether cardinality dropdown is open
   const [cardinalityOpen, setCardinalityOpen] = useState(false);
@@ -190,11 +191,85 @@ export function ContextMenu() {
   // --- Early return if not visible ---
   if (!contextMenu) return null;
 
-  // Currently only edge context menus are supported
-  if (contextMenu.type !== 'edge') return null;
+  // --- Node context menu ---
+  if (contextMenu.type === 'node') {
+    const { modelName, modelStatus, isApproved } = contextMenu;
+    const canApprove = modelStatus === 'design' || modelStatus === 'approved';
 
+    const displayX = adjustedPosition?.x ?? contextMenu.x;
+    const displayY = adjustedPosition?.y ?? contextMenu.y;
+
+    return (
+      <div
+        ref={menuRef}
+        className="context-menu"
+        style={{
+          left: displayX,
+          top: displayY,
+          visibility: adjustedPosition ? 'visible' : 'hidden',
+        }}
+        role="menu"
+      >
+        <div className="context-menu__header">
+          <span className="context-menu__title">{modelName}</span>
+          <span className={`context-menu__status context-menu__status--${modelStatus}`}>
+            {modelStatus}
+          </span>
+        </div>
+
+        {canApprove && (
+          <div className="context-menu__info">
+            {isApproved ? (
+              <button
+                className="context-menu__action-button context-menu__action-button--unapprove"
+                onClick={() => {
+                  vscode.postMessage({
+                    type: 'unapproveModel',
+                    payload: { modelName },
+                  });
+                  closeContextMenu();
+                }}
+                role="menuitem"
+              >
+                Unapprove Model
+              </button>
+            ) : (
+              <button
+                className="context-menu__action-button context-menu__action-button--approve"
+                onClick={() => {
+                  vscode.postMessage({
+                    type: 'approveModel',
+                    payload: { modelName },
+                  });
+                  closeContextMenu();
+                }}
+                role="menuitem"
+              >
+                Approve Model
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // --- Edge context menu ---
   const edge = contextMenu.data as FkEdgeData;
   const isDesign = edge.status === 'design';
+  const isApprovedRel = edge.status === 'approved';
+
+  // Check if both models are built or approved (not design or missing)
+  const canApproveRelationship = (): boolean => {
+    if (!domain) return false;
+    const fromModel = domain.models.find((m) => m.name === edge.fromModel);
+    const toModel = domain.models.find((m) => m.name === edge.toModel);
+    const isApprovable = (status: string | undefined) =>
+      status === 'built' || status === 'approved';
+    return isApprovable(fromModel?.status) && isApprovable(toModel?.status);
+  };
+
+  const canApproveRel = (isDesign || isApprovedRel) && canApproveRelationship();
 
   // Get current cardinality label
   const currentOption = CARDINALITY_OPTIONS.find((opt) => opt.value === edge.cardinality);
@@ -287,6 +362,51 @@ export function ContextMenu() {
             )}
           </div>
         </div>
+
+        {/* Approve/Unapprove button for design relationships */}
+        {canApproveRel && (
+          <div className="context-menu__row">
+            {isApprovedRel ? (
+              <button
+                className="context-menu__action-button context-menu__action-button--unapprove"
+                onClick={() => {
+                  vscode.postMessage({
+                    type: 'unapproveRelationship',
+                    payload: {
+                      fromModel: edge.fromModel,
+                      fromColumn: edge.fromColumn,
+                      toModel: edge.toModel,
+                      toColumn: edge.toColumn,
+                    },
+                  });
+                  closeContextMenu();
+                }}
+                role="menuitem"
+              >
+                Unapprove Relationship
+              </button>
+            ) : (
+              <button
+                className="context-menu__action-button context-menu__action-button--approve"
+                onClick={() => {
+                  vscode.postMessage({
+                    type: 'approveRelationship',
+                    payload: {
+                      fromModel: edge.fromModel,
+                      fromColumn: edge.fromColumn,
+                      toModel: edge.toModel,
+                      toColumn: edge.toColumn,
+                    },
+                  });
+                  closeContextMenu();
+                }}
+                role="menuitem"
+              >
+                Approve Relationship
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
     </div>

@@ -58,9 +58,19 @@
   color: var(--model-built);
 }
 
+.context-menu__status--approved {
+  background: var(--model-approved-bg);
+  color: var(--model-approved);
+}
+
 .context-menu__status--design {
   background: var(--model-design-bg);
   color: var(--model-design);
+}
+
+.context-menu__status--missing {
+  background: var(--model-missing-bg);
+  color: var(--model-missing);
 }
 
 /* ---------------------------------------------------------------------------
@@ -261,4 +271,41 @@
   opacity: 1;
   color: var(--error-fg);
   background: rgba(239, 68, 68, 0.15);
+}
+
+/* ---------------------------------------------------------------------------
+   Action button (for node context menu)
+   --------------------------------------------------------------------------- */
+
+.context-menu__action-button {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.context-menu__action-button:hover {
+  background: var(--button-hover-bg, var(--button-bg));
+  filter: brightness(1.1);
+}
+
+.context-menu__action-button--approve {
+  background: var(--model-approved);
+  color: var(--model-approved-text);
+}
+
+.context-menu__action-button--unapprove {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--editor-fg);
 }

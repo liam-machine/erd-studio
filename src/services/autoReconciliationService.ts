@@ -100,11 +100,16 @@ export class AutoReconciliationService {
       if (!manifestColumnNames.has(col.name)) {
         // Column doesn't exist in manifest yet - keep as planned
         // Remove isPrimaryKey flag when moving to plannedColumns
-        plannedColumns.push({
+        // Preserve approved flag if set
+        const plannedCol: ColumnDef = {
           name: col.name,
           dataType: col.dataType,
           description: col.description,
-        });
+        };
+        if (col.approved === true) {
+          plannedCol.approved = true;
+        }
+        plannedColumns.push(plannedCol);
       }
     }
 
@@ -117,6 +122,8 @@ export class AutoReconciliationService {
     }
 
     // Build the repo model (replacing the design model)
+    // Note: approved flag is intentionally NOT preserved when transitioning to repo
+    // because the model is now built (exists in manifest), so approval is no longer relevant
     const repoModel: SemanticModel = {
       name: model.name,
       source: 'repo',

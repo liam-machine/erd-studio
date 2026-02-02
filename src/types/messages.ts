@@ -255,6 +255,79 @@ export interface RedoMessage {
   type: 'redo';
 }
 
+/**
+ * Request to approve a model and all its existing columns.
+ * Sets model.approved = true and column.approved = true for all columns.
+ */
+export interface ApproveModelMessage {
+  type: 'approveModel';
+  payload: {
+    modelName: string;
+  };
+}
+
+/**
+ * Request to unapprove a model.
+ * Sets model.approved = false but leaves column approval states unchanged.
+ */
+export interface UnapproveModelMessage {
+  type: 'unapproveModel';
+  payload: {
+    modelName: string;
+  };
+}
+
+/**
+ * Request to approve a single column.
+ * Requires the model to be approved first.
+ */
+export interface ApproveColumnMessage {
+  type: 'approveColumn';
+  payload: {
+    modelName: string;
+    columnName: string;
+  };
+}
+
+/**
+ * Request to unapprove a single column.
+ */
+export interface UnapproveColumnMessage {
+  type: 'unapproveColumn';
+  payload: {
+    modelName: string;
+    columnName: string;
+  };
+}
+
+/**
+ * Request to approve a relationship.
+ * Sets relationship.approved = true.
+ */
+export interface ApproveRelationshipMessage {
+  type: 'approveRelationship';
+  payload: {
+    fromModel: string;
+    fromColumn: string;
+    toModel: string;
+    toColumn: string;
+  };
+}
+
+/**
+ * Request to unapprove a relationship.
+ * Removes relationship.approved field.
+ */
+export interface UnapproveRelationshipMessage {
+  type: 'unapproveRelationship';
+  payload: {
+    fromModel: string;
+    fromColumn: string;
+    toModel: string;
+    toColumn: string;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -272,7 +345,13 @@ export type WebviewMessage =
   | RunAutoLayoutMessage
   | RefreshManifestMessage
   | UndoMessage
-  | RedoMessage;
+  | RedoMessage
+  | ApproveModelMessage
+  | UnapproveModelMessage
+  | ApproveColumnMessage
+  | UnapproveColumnMessage
+  | ApproveRelationshipMessage
+  | UnapproveRelationshipMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

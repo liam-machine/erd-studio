@@ -23,6 +23,9 @@ export interface ColorPalette {
     modelBuilt: string;
     modelBuiltBg: string;
     modelBuiltText: string;      // Text colour for built model headers
+    modelApproved: string;       // Approved model border colour
+    modelApprovedBg: string;     // Approved model/column background
+    modelApprovedText: string;   // Text colour for approved model headers
     modelDesign: string;
     modelDesignBg: string;
     modelDesignText: string;     // Text colour for design model headers
@@ -41,11 +44,14 @@ export const PALETTES: Record<PaletteId, ColorPalette> = {
   coolWarm: {
     id: 'coolWarm',
     name: 'Cool/Warm',
-    description: 'Blue for built, orange for design — best accessibility',
+    description: 'Blue for built, teal for approved, orange for design — best accessibility',
     colors: {
       modelBuilt: '#60a5fa',      // Blue-400
       modelBuiltBg: 'rgba(96, 165, 250, 0.08)',
       modelBuiltText: '#ffffff',  // White on blue
+      modelApproved: '#14b8a6',   // Teal-500
+      modelApprovedBg: 'rgba(20, 184, 166, 0.08)',
+      modelApprovedText: '#ffffff', // White on teal
       modelDesign: '#ea580c',     // Orange-600 (darker for contrast)
       modelDesignBg: 'rgba(234, 88, 12, 0.08)',
       modelDesignText: '#ffffff', // White on dark orange
@@ -58,11 +64,14 @@ export const PALETTES: Record<PaletteId, ColorPalette> = {
   cicd: {
     id: 'cicd',
     name: 'CI/CD Status',
-    description: 'Emerald for built, amber for design — DevOps familiar',
+    description: 'Emerald for built, cyan for approved, amber for design — DevOps familiar',
     colors: {
       modelBuilt: '#059669',      // Emerald-600 (darker for contrast)
       modelBuiltBg: 'rgba(5, 150, 105, 0.08)',
       modelBuiltText: '#ffffff',  // White on dark emerald
+      modelApproved: '#0891b2',   // Cyan-600
+      modelApprovedBg: 'rgba(8, 145, 178, 0.08)',
+      modelApprovedText: '#ffffff', // White on cyan
       modelDesign: '#d97706',     // Amber-600 (much darker for white text)
       modelDesignBg: 'rgba(217, 119, 6, 0.08)',
       modelDesignText: '#ffffff', // White on dark amber
@@ -75,11 +84,14 @@ export const PALETTES: Record<PaletteId, ColorPalette> = {
   minimalist: {
     id: 'minimalist',
     name: 'Minimalist',
-    description: 'Cyan for built, violet for design — subtle/professional',
+    description: 'Cyan for built, indigo for approved, violet for design — subtle/professional',
     colors: {
       modelBuilt: '#0891b2',      // Cyan-600 (darker for contrast)
       modelBuiltBg: 'rgba(8, 145, 178, 0.08)',
       modelBuiltText: '#ffffff',  // White on dark cyan
+      modelApproved: '#4f46e5',   // Indigo-600
+      modelApprovedBg: 'rgba(79, 70, 229, 0.08)',
+      modelApprovedText: '#ffffff', // White on indigo
       modelDesign: '#7c3aed',     // Violet-600 (darker for white text)
       modelDesignBg: 'rgba(124, 58, 237, 0.08)',
       modelDesignText: '#ffffff', // White on dark violet
@@ -110,6 +122,9 @@ export function applyPalette(paletteId: PaletteId): void {
   root.style.setProperty('--model-built', colors.modelBuilt);
   root.style.setProperty('--model-built-bg', colors.modelBuiltBg);
   root.style.setProperty('--model-built-text', colors.modelBuiltText);
+  root.style.setProperty('--model-approved', colors.modelApproved);
+  root.style.setProperty('--model-approved-bg', colors.modelApprovedBg);
+  root.style.setProperty('--model-approved-text', colors.modelApprovedText);
   root.style.setProperty('--model-design', colors.modelDesign);
   root.style.setProperty('--model-design-bg', colors.modelDesignBg);
   root.style.setProperty('--model-design-text', colors.modelDesignText);

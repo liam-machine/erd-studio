@@ -26,6 +26,8 @@ export interface ColumnDef {
   dataType: string;
   description: string;
   isPrimaryKey?: boolean;
+  /** Whether this column has been approved for build. */
+  approved?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +64,12 @@ export interface SemanticModel {
    * instead (overlay semantics — manifest always wins).
    */
   plannedColumns?: ColumnDef[];
+  /**
+   * Whether this model has been approved for build.
+   * Approving a model auto-approves all existing columns.
+   * New columns added after approval start as unapproved.
+   */
+  approved?: boolean;
 }
 
 /**
@@ -97,6 +105,8 @@ export interface Relationship {
   cardinality: Cardinality;
   /** Present and set to `"design"` for relationships created in design mode. */
   source?: 'design';
+  /** Whether this relationship has been approved for build. */
+  approved?: boolean;
 }
 
 // ---------------------------------------------------------------------------

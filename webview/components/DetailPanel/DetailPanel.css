@@ -142,6 +142,40 @@
   color: var(--model-missing);
 }
 
+.detail-panel__status-badge--approved {
+  background: var(--model-approved-bg);
+  color: var(--model-approved);
+}
+
+/* Approve/Unapprove button in metadata row */
+.detail-panel__approve-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--model-approved);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--model-approved);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.detail-panel__approve-btn:hover {
+  background: var(--model-approved);
+  color: var(--model-approved-text, #fff);
+}
+
+.detail-panel__approve-btn--unapprove {
+  border-color: var(--model-design);
+  color: var(--model-design);
+}
+
+.detail-panel__approve-btn--unapprove:hover {
+  background: var(--model-design);
+  color: var(--model-design-text, #fff);
+}
+
 .detail-panel__description {
   margin: 8px 0 0 0;
   color: var(--editor-fg);
@@ -260,6 +294,10 @@
   background: rgba(59, 130, 246, 0.08);
 }
 
+.detail-panel__relationship--approved {
+  background: rgba(20, 184, 166, 0.1);
+}
+
 .detail-panel__relationship--design {
   background: rgba(249, 115, 22, 0.1);
 }
@@ -349,6 +387,46 @@
 .detail-panel__rel-delete:hover {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
+}
+
+/* Relationship approval toggle */
+.detail-panel__rel-approve {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--model-approved, #14b8a6);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--model-approved, #14b8a6);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.1s ease, background 0.1s ease;
+}
+
+.detail-panel__relationship:hover .detail-panel__rel-approve {
+  opacity: 1;
+}
+
+.detail-panel__rel-approve:hover {
+  background: var(--model-approved-bg, rgba(20, 184, 166, 0.15));
+}
+
+.detail-panel__rel-approve--approved {
+  background: var(--model-approved, #14b8a6);
+  color: var(--model-approved-text, #fff);
+  opacity: 1;
+}
+
+.detail-panel__rel-approve--approved:hover {
+  background: var(--model-design, #f97316);
+  border-color: var(--model-design, #f97316);
+  color: var(--model-design-text, #fff);
 }
 
 /* ---------------------------------------------------------------------------

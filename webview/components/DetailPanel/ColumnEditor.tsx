@@ -21,6 +21,7 @@ import './ColumnEditor.css';
 export interface ColumnEditorProps {
   modelName: string;
   modelStatus: ModelStatus;
+  modelApproved: boolean;
   columns: ReconciledColumn[];
 }
 
@@ -28,7 +29,7 @@ export interface ColumnEditorProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorProps) {
+export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }: ColumnEditorProps) {
   const { send } = useMessageBus(() => {});
 
   // State for whether we're adding a new column
@@ -54,8 +55,8 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
     [columns],
   );
 
-  // Determine if model is editable (design or repo with planned columns support)
-  const isEditable = modelStatus === 'design' || modelStatus === 'built';
+  // Determine if model is editable (design, approved, or built models support adding columns)
+  const isEditable = modelStatus === 'design' || modelStatus === 'approved' || modelStatus === 'built';
 
   // Handle adding a new column
   const handleAddColumn = useCallback(() => {
@@ -95,6 +96,28 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
     [send, modelName],
   );
 
+  // Handle approving a column
+  const handleColumnApprove = useCallback(
+    (columnName: string) => {
+      send({
+        type: 'approveColumn',
+        payload: { modelName, columnName },
+      });
+    },
+    [send, modelName],
+  );
+
+  // Handle unapproving a column
+  const handleColumnUnapprove = useCallback(
+    (columnName: string) => {
+      send({
+        type: 'unapproveColumn',
+        payload: { modelName, columnName },
+      });
+    },
+    [send, modelName],
+  );
+
   // Handle cancelling new column add
   const handleCancelNew = useCallback(() => {
     setIsAddingColumn(false);
@@ -112,6 +135,7 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
     status: 'planned',
     isPrimaryKey: false,
     isForeignKey: false,
+    approved: false,
   };
 
   return (
@@ -167,6 +191,9 @@ export function ColumnEditor({ modelName, modelStatus, columns }: ColumnEditorPr
             existingColumnNames={existingColumnNames}
             onUpdate={(updated) => handleColumnUpdate(col.name, updated, false)}
             onDelete={() => handleColumnDelete(col.name)}
+            onApprove={() => handleColumnApprove(col.name)}
+            onUnapprove={() => handleColumnUnapprove(col.name)}
+            canApprove={modelStatus === 'built' || modelApproved}
             showIndicators={true}
             showDelete={true}
           />

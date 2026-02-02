@@ -23,6 +23,7 @@ import './DetailPanel.css';
 
 const STATUS_LABEL: Record<string, string> = {
   built: 'Built',
+  approved: 'Approved',
   design: 'Design',
   missing: 'Missing',
 };
@@ -82,6 +83,22 @@ export function DetailPanel() {
     [vscode],
   );
 
+  const handleApproveModel = useCallback(() => {
+    if (!selectedNode) return;
+    vscode.postMessage({
+      type: 'approveModel',
+      payload: { modelName: selectedNode },
+    });
+  }, [selectedNode, vscode]);
+
+  const handleUnapproveModel = useCallback(() => {
+    if (!selectedNode) return;
+    vscode.postMessage({
+      type: 'unapproveModel',
+      payload: { modelName: selectedNode },
+    });
+  }, [selectedNode, vscode]);
+
   // Open context menu when clicking a relationship row (for cardinality editing)
   const handleRelationshipClick = useCallback(
     (x: number, y: number, rel: ReconciledRelationship) => {
@@ -93,11 +110,42 @@ export function DetailPanel() {
         toColumn: rel.toColumn,
         cardinality: rel.cardinality,
         status: rel.status,
+        approved: rel.approved,
       };
       // Position the context menu near the click
       openEdgeContextMenu(x, y, edgeData);
     },
     [openEdgeContextMenu],
+  );
+
+  const handleApproveRelationship = useCallback(
+    (rel: ReconciledRelationship) => {
+      vscode.postMessage({
+        type: 'approveRelationship',
+        payload: {
+          fromModel: rel.fromModel,
+          fromColumn: rel.fromColumn,
+          toModel: rel.toModel,
+          toColumn: rel.toColumn,
+        },
+      });
+    },
+    [vscode],
+  );
+
+  const handleUnapproveRelationship = useCallback(
+    (rel: ReconciledRelationship) => {
+      vscode.postMessage({
+        type: 'unapproveRelationship',
+        payload: {
+          fromModel: rel.fromModel,
+          fromColumn: rel.fromColumn,
+          toModel: rel.toModel,
+          toColumn: rel.toColumn,
+        },
+      });
+    },
+    [vscode],
   );
 
   // Find the selected model
@@ -115,6 +163,20 @@ export function DetailPanel() {
     const incoming = domain.relationships.filter((r) => r.toModel === selectedNode);
     return { outgoing, incoming };
   }, [domain, selectedNode]);
+
+  // Check if a relationship can be approved (both models must be built or approved)
+  const canApproveRelationship = useCallback(
+    (rel: ReconciledRelationship): boolean => {
+      if (!domain) return false;
+      const fromModel = domain.models.find((m) => m.name === rel.fromModel);
+      const toModel = domain.models.find((m) => m.name === rel.toModel);
+      // Both models must be 'built' or 'approved' (not 'design' or 'missing')
+      const isApprovable = (status: string | undefined) =>
+        status === 'built' || status === 'approved';
+      return isApprovable(fromModel?.status) && isApprovable(toModel?.status);
+    },
+    [domain],
+  );
 
   // --- Early returns -----------------------------------------------------
 
@@ -160,6 +222,25 @@ export function DetailPanel() {
             <span className={`detail-panel__status-badge detail-panel__status-badge--${model.status}`}>
               {STATUS_LABEL[model.status] ?? model.status}
             </span>
+            {/* Approve/Unapprove button for design models */}
+            {model.status === 'design' && (
+              <button
+                className="detail-panel__approve-btn"
+                onClick={handleApproveModel}
+                title="Mark model as approved for build"
+              >
+                Approve
+              </button>
+            )}
+            {model.status === 'approved' && (
+              <button
+                className="detail-panel__approve-btn detail-panel__approve-btn--unapprove"
+                onClick={handleUnapproveModel}
+                title="Remove approval from model"
+              >
+                Unapprove
+              </button>
+            )}
           </div>
         </div>
         {model.description && (
@@ -210,6 +291,7 @@ export function DetailPanel() {
         <ColumnEditor
           modelName={model.name}
           modelStatus={model.status}
+          modelApproved={model.approved}
           columns={model.columns}
         />
       </div>
@@ -254,6 +336,24 @@ export function DetailPanel() {
                 <span className="detail-panel__rel-cardinality">
                   {rel.cardinality}
                 </span>
+                {/* Approval toggle for design/approved relationships (only if both models are ready) */}
+                {(rel.status === 'design' || rel.status === 'approved') && canApproveRelationship(rel) && (
+                  <button
+                    className={`detail-panel__rel-approve ${rel.approved ? 'detail-panel__rel-approve--approved' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (rel.approved) {
+                        handleUnapproveRelationship(rel);
+                      } else {
+                        handleApproveRelationship(rel);
+                      }
+                    }}
+                    title={rel.approved ? 'Remove approval' : 'Approve relationship'}
+                    aria-label={rel.approved ? 'Unapprove relationship' : 'Approve relationship'}
+                  >
+                    {rel.approved ? '✓' : '○'}
+                  </button>
+                )}
                 {rel.status === 'design' && (
                   <button
                     className="detail-panel__rel-delete"
@@ -302,6 +402,24 @@ export function DetailPanel() {
                 <span className="detail-panel__rel-cardinality">
                   {rel.cardinality}
                 </span>
+                {/* Approval toggle for design/approved relationships (only if both models are ready) */}
+                {(rel.status === 'design' || rel.status === 'approved') && canApproveRelationship(rel) && (
+                  <button
+                    className={`detail-panel__rel-approve ${rel.approved ? 'detail-panel__rel-approve--approved' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (rel.approved) {
+                        handleUnapproveRelationship(rel);
+                      } else {
+                        handleApproveRelationship(rel);
+                      }
+                    }}
+                    title={rel.approved ? 'Remove approval' : 'Approve relationship'}
+                    aria-label={rel.approved ? 'Unapprove relationship' : 'Approve relationship'}
+                  >
+                    {rel.approved ? '✓' : '○'}
+                  </button>
+                )}
                 {rel.status === 'design' && (
                   <button
                     className="detail-panel__rel-delete"
