@@ -1,0 +1,14 @@
+version: 2
+models:
+  - name: dim_project
+    description: Project dimension table
+    config:
+      tags:
+        - silver
+        - domain:work-lots
+        - domain:bill
+    columns:
+      - name: project_id
+        description: Surrogate key for project
+      - name: project_name
+        description: Project name

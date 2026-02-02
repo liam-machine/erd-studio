@@ -23,6 +23,7 @@ import { ReconciliationService } from '../services/reconciliationService';
 import { TemplateService } from '../services/templateService';
 import { AutoReconciliationService } from '../services/autoReconciliationService';
 import { LayerService } from '../services/layerService';
+import { SchemaTagService } from '../services/schemaTagService';
 import type { ManifestData } from '../types/manifest';
 import type { Cardinality, ColumnDef, DesignModel } from '../types/semantic';
 
@@ -62,6 +63,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly templateService: TemplateService,
     private readonly autoReconciliationService: AutoReconciliationService,
     private readonly layerService: LayerService,
+    private readonly schemaTagService: SchemaTagService,
     private readonly workspaceRoot: string,
   ) {}
 
@@ -998,6 +1000,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
+      // Capture model info before removal (for tag management)
+      const modelToRemove = models[modelIndex];
+      const isRepoModel = modelToRemove.source === 'repo';
+      const domainName = typeof parsed.domain === 'string' ? parsed.domain : undefined;
+
       // Remove the model (both design and repo models can be removed from the domain)
       models.splice(modelIndex, 1);
       parsed.models = models;
@@ -1030,6 +1037,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (success) {
         try {
           await document.save();
+
+          // Remove domain tag from schema.yml for repo models only
+          if (isRepoModel && domainName) {
+            const tagEdit = await this.schemaTagService.removeDomainTag(
+              payload.modelName,
+              domainName,
+              this.workspaceRoot,
+            );
+            if (tagEdit) {
+              const tagSuccess = await vscode.workspace.applyEdit(tagEdit);
+              if (tagSuccess) {
+                // Save all modified documents (the schema.yml file)
+                await vscode.workspace.saveAll(false);
+              }
+            }
+          }
+
           await this.sendDomainData(document, webview);
         } finally {
           this.pendingUpdates.delete(document.uri.toString());
@@ -1336,6 +1360,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (success) {
         try {
           await document.save();
+
+          // Add domain tag to schema.yml for the newly added model
+          const domainName = typeof parsed.domain === 'string' ? parsed.domain : undefined;
+          if (domainName && manifestModel.originalFilePath) {
+            const tagEdit = await this.schemaTagService.addDomainTag(
+              payload.modelName,
+              domainName,
+              this.workspaceRoot,
+            );
+            if (tagEdit) {
+              const tagSuccess = await vscode.workspace.applyEdit(tagEdit);
+              if (tagSuccess) {
+                // Save all modified documents (the schema.yml file)
+                await vscode.workspace.saveAll(false);
+              }
+            }
+          }
+
           await this.sendDomainData(document, webview);
         } finally {
           this.pendingUpdates.delete(document.uri.toString());

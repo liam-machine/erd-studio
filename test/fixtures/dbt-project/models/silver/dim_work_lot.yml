@@ -1,0 +1,7 @@
+version: 2
+models:
+  - name: dim_work_lot
+    config:
+      tags:
+        - domain:work-lots
+        - domain:bill
