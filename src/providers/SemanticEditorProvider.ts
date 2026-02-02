@@ -211,6 +211,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'editRelationship': {
+            const payload = (message as { payload?: { originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string; fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
+            if (payload) {
+              await this.handleEditRelationship(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
           case 'addExistingModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
@@ -1185,6 +1192,105 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to update relationship: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle an `editRelationship` message from the webview.
+   *
+   * Edits a relationship by finding it via the original composite key
+   * and updating all fields. Preserves source and approved status.
+   * Only works for design/approved relationships (not built).
+   */
+  private async handleEditRelationship(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: {
+      originalFromModel: string;
+      originalFromColumn: string;
+      originalToModel: string;
+      originalToColumn: string;
+      fromModel: string;
+      fromColumn: string;
+      toModel: string;
+      toColumn: string;
+      cardinality: Cardinality;
+    },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+
+          // Find the relationship by original composite key
+          const relIndex = relationships.findIndex(
+            (rel) =>
+              rel.fromModel === payload.originalFromModel &&
+              rel.fromColumn === payload.originalFromColumn &&
+              rel.toModel === payload.originalToModel &&
+              rel.toColumn === payload.originalToColumn,
+          );
+
+          if (relIndex === -1) {
+            throw new Error('Relationship not found.');
+          }
+
+          const existingRel = relationships[relIndex];
+
+          // Only allow editing design relationships (not built from manifest)
+          if (existingRel.source !== 'design') {
+            throw new Error('Cannot edit built relationships.');
+          }
+
+          // Check for duplicate at new key (if key changed)
+          const keyChanged =
+            payload.fromModel !== payload.originalFromModel ||
+            payload.fromColumn !== payload.originalFromColumn ||
+            payload.toModel !== payload.originalToModel ||
+            payload.toColumn !== payload.originalToColumn;
+
+          if (keyChanged) {
+            const isDuplicate = relationships.some(
+              (rel, idx) =>
+                idx !== relIndex &&
+                rel.fromModel === payload.fromModel &&
+                rel.fromColumn === payload.fromColumn &&
+                rel.toModel === payload.toModel &&
+                rel.toColumn === payload.toColumn,
+            );
+            if (isDuplicate) {
+              throw new Error('A relationship with this key already exists.');
+            }
+          }
+
+          // Update the relationship, preserving source and approved status
+          relationships[relIndex] = {
+            ...existingRel,
+            fromModel: payload.fromModel,
+            fromColumn: payload.fromColumn,
+            toModel: payload.toModel,
+            toColumn: payload.toColumn,
+            cardinality: payload.cardinality,
+          };
+          parsed.relationships = relationships;
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to edit relationship.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Edit relationship failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to edit relationship: ${message}` },
       });
     }
   }

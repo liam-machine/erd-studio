@@ -246,6 +246,28 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Subtle edit link in header
+   --------------------------------------------------------------------------- */
+
+.context-menu__edit-link {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--button-bg);
+  font-family: inherit;
+  font-size: 10px;
+  opacity: 0.7;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.context-menu__edit-link:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ---------------------------------------------------------------------------
    Subtle delete link in header
    --------------------------------------------------------------------------- */
 

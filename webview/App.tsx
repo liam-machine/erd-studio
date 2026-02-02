@@ -115,6 +115,7 @@ function EditorCanvas() {
   const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
   const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
   const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
+  const clearFkDialogEditData = useEditorStore((s) => s.clearFkDialogEditData);
   // Context menu state
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
@@ -245,6 +246,7 @@ function EditorCanvas() {
         if (newFkDialogOpen) {
           setNewFkDialogOpen(false);
           clearFkDialogPrefill();
+          clearFkDialogEditData();
           return;
         }
         if (addExistingModelDialogOpen) {
@@ -345,6 +347,7 @@ function EditorCanvas() {
     setNewFkDialogOpen,
     setAddExistingModelDialogOpen,
     clearFkDialogPrefill,
+    clearFkDialogEditData,
     selectNode,
     setSelectedEdges,
     setToastMessage,

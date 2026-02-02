@@ -4,7 +4,7 @@
  * Messages are categorised by direction:
  *   Extension → Webview:  domainLoaded, domainUpdated, manifestRefreshed, error
  *   Webview → Extension:  ready, addModel, addColumn, removeColumn, addRelationship,
- *                         removeModel, removeRelationship, updateViewConfig,
+ *                         removeModel, removeRelationship, editRelationship, updateViewConfig,
  *                         addExistingModel, updatePositions, runAutoLayout
  *
  * All message types use a discriminated union pattern with a `type` field,
@@ -328,6 +328,28 @@ export interface UnapproveRelationshipMessage {
   };
 }
 
+/**
+ * Request to edit a relationship (change any field including the composite key).
+ * Preserves source and approved status while allowing full modification.
+ * Only works for design/approved relationships (not built).
+ */
+export interface EditRelationshipMessage {
+  type: 'editRelationship';
+  payload: {
+    /** Original composite key to find the relationship */
+    originalFromModel: string;
+    originalFromColumn: string;
+    originalToModel: string;
+    originalToColumn: string;
+    /** New values (may be same as original) */
+    fromModel: string;
+    fromColumn: string;
+    toModel: string;
+    toColumn: string;
+    cardinality: Cardinality;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -339,6 +361,7 @@ export type WebviewMessage =
   | RemoveModelMessage
   | RemoveRelationshipMessage
   | UpdateRelationshipMessage
+  | EditRelationshipMessage
   | UpdateViewConfigMessage
   | AddExistingModelMessage
   | UpdatePositionsMessage

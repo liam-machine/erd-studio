@@ -2,7 +2,7 @@
  * ContextMenu — context menu for graph elements.
  *
  * Currently supports FK edges only.
- * Shows relationship details, cardinality editing, and delete option.
+ * Shows relationship details, cardinality editing, edit option, and delete option.
  * Positioned at cursor location, closes on click-outside or Escape.
  */
 
@@ -11,6 +11,7 @@ import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { FkEdgeData } from '../../types/graph';
 import type { Cardinality } from '../../../src/types/semantic';
+import type { FkDialogEditData } from '../../store/editorStore';
 import './ContextMenu.css';
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ export function ContextMenu() {
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const domain = useEditorStore((s) => s.domain);
+  const openFkDialogForEdit = useEditorStore((s) => s.openFkDialogForEdit);
 
   // Track whether cardinality dropdown is open
   const [cardinalityOpen, setCardinalityOpen] = useState(false);
@@ -188,6 +190,22 @@ export function ContextMenu() {
     [contextMenu, vscode, closeContextMenu],
   );
 
+  // Handle edit relationship (open the FK dialog in edit mode)
+  const handleEditClick = useCallback(() => {
+    if (!contextMenu || contextMenu.type !== 'edge') return;
+
+    const { fromModel, fromColumn, toModel, toColumn, cardinality } = contextMenu.data;
+    const editData: FkDialogEditData = {
+      fromModel,
+      fromColumn,
+      toModel,
+      toColumn,
+      cardinality,
+    };
+    openFkDialogForEdit(editData);
+    closeContextMenu();
+  }, [contextMenu, openFkDialogForEdit, closeContextMenu]);
+
   // --- Early return if not visible ---
   if (!contextMenu) return null;
 
@@ -295,6 +313,16 @@ export function ContextMenu() {
       <div className="context-menu__header">
         <span className="context-menu__title">Relationship</span>
         <div className="context-menu__header-actions">
+          {/* Edit button - only for design or approved relationships (not built) */}
+          {(isDesign || isApprovedRel) && (
+            <button
+              className="context-menu__edit-link"
+              onClick={handleEditClick}
+              role="menuitem"
+            >
+              Edit...
+            </button>
+          )}
           {isDesign && (
             <button
               className={`context-menu__delete-link${confirmingDelete ? ' context-menu__delete-link--confirming' : ''}`}

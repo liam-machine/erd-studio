@@ -27,6 +27,15 @@ export interface FkDialogPrefill {
   toColumn?: string;
 }
 
+/** Edit data for FK dialog when editing an existing relationship. */
+export interface FkDialogEditData {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+  toColumn: string;
+  cardinality: import('../../src/types/semantic').Cardinality;
+}
+
 /** Context menu state for edge right-click. */
 export interface EdgeContextMenu {
   type: 'edge';
@@ -65,6 +74,8 @@ export interface EditorState {
   newFkDialogOpen: boolean;
   /** Prefill data for FK dialog when opened via drag-to-connect, or null. */
   fkDialogPrefill: FkDialogPrefill | null;
+  /** Edit data for FK dialog when editing an existing relationship, or null. */
+  fkDialogEditData: FkDialogEditData | null;
   /** Whether a delete confirmation is pending (triggered by Delete key). */
   pendingDeleteConfirmation: boolean;
   /** Whether the add existing model dialog is open. */
@@ -114,6 +125,10 @@ export interface EditorActions {
   openFkDialogWithPrefill: (prefill: FkDialogPrefill) => void;
   /** Clear FK dialog prefill (called on dialog close). */
   clearFkDialogPrefill: () => void;
+  /** Open FK dialog for editing an existing relationship. */
+  openFkDialogForEdit: (editData: FkDialogEditData) => void;
+  /** Clear FK dialog edit data (called on dialog close). */
+  clearFkDialogEditData: () => void;
   /** Set pending delete confirmation state (triggered by Delete key). */
   setPendingDeleteConfirmation: (pending: boolean) => void;
   /** Open/close the add existing model dialog. */
@@ -162,6 +177,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   newModelDialogOpen: false,
   newFkDialogOpen: false,
   fkDialogPrefill: null,
+  fkDialogEditData: null,
   pendingDeleteConfirmation: false,
   addExistingModelDialogOpen: false,
   domain: null,
@@ -186,8 +202,11 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setNewModelDialogOpen: (open) => set({ newModelDialogOpen: open }),
   setNewFkDialogOpen: (open) => set({ newFkDialogOpen: open }),
   openFkDialogWithPrefill: (prefill) =>
-    set({ newFkDialogOpen: true, fkDialogPrefill: prefill }),
+    set({ newFkDialogOpen: true, fkDialogPrefill: prefill, fkDialogEditData: null }),
   clearFkDialogPrefill: () => set({ fkDialogPrefill: null }),
+  openFkDialogForEdit: (editData) =>
+    set({ newFkDialogOpen: true, fkDialogEditData: editData, fkDialogPrefill: null }),
+  clearFkDialogEditData: () => set({ fkDialogEditData: null }),
   setPendingDeleteConfirmation: (pending) => set({ pendingDeleteConfirmation: pending }),
   setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
   setDomain: (domain) => set({ domain, error: null }),

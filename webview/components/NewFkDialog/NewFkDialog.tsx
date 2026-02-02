@@ -1,5 +1,5 @@
 /**
- * NewFkDialog — dialog for creating FK relationships between models.
+ * NewFkDialog — dialog for creating or editing FK relationships between models.
  *
  * Form fields:
  * - Source model (dropdown)
@@ -8,8 +8,11 @@
  * - Target column (dropdown, filtered by target model)
  * - Cardinality (many-to-one / one-to-one)
  *
- * On submit, sends an addRelationship message to the extension host.
- * The new relationship is marked with source: 'design' and renders as orange.
+ * Mode detection:
+ * - Create mode: fkDialogEditData is null (sends addRelationship)
+ * - Edit mode: fkDialogEditData is set (sends editRelationship)
+ *
+ * When editing, the approval status is preserved by the extension host.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -28,6 +31,8 @@ import './NewFkDialog.css';
 /**
  * Validate the FK relationship form fields.
  * Returns a record of field name → error message.
+ *
+ * @param originalKey - When editing, the original composite key to exclude from duplicate check
  */
 function validateForm(
   fromModel: string,
@@ -40,6 +45,12 @@ function validateForm(
     toModel: string;
     toColumn: string;
   }>,
+  originalKey?: {
+    fromModel: string;
+    fromColumn: string;
+    toModel: string;
+    toColumn: string;
+  },
 ): Record<string, string> {
   const errors: Record<string, string> = {};
 
@@ -62,14 +73,28 @@ function validateForm(
   }
 
   // Check for duplicate relationship (same composite key)
+  // When editing, skip the check if the key matches the original relationship
   if (fromModel && fromColumn && toModel && toColumn) {
-    const isDuplicate = existingRelationships.some(
-      (rel) =>
+    const isDuplicate = existingRelationships.some((rel) => {
+      const isSameAsOriginal =
+        originalKey &&
+        rel.fromModel === originalKey.fromModel &&
+        rel.fromColumn === originalKey.fromColumn &&
+        rel.toModel === originalKey.toModel &&
+        rel.toColumn === originalKey.toColumn;
+
+      // If this is the relationship we're editing, don't count it as a duplicate
+      if (isSameAsOriginal) {
+        return false;
+      }
+
+      return (
         rel.fromModel === fromModel &&
         rel.fromColumn === fromColumn.trim() &&
         rel.toModel === toModel &&
-        rel.toColumn === toColumn.trim(),
-    );
+        rel.toColumn === toColumn.trim()
+      );
+    });
     if (isDuplicate) {
       errors.duplicate = 'This relationship already exists';
     }
@@ -88,7 +113,12 @@ export function NewFkDialog() {
   const domain = useEditorStore((s) => s.domain);
   const fkDialogPrefill = useEditorStore((s) => s.fkDialogPrefill);
   const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
+  const fkDialogEditData = useEditorStore((s) => s.fkDialogEditData);
+  const clearFkDialogEditData = useEditorStore((s) => s.clearFkDialogEditData);
   const { send } = useMessageBus(() => {});
+
+  // Determine if we're in edit mode (editing an existing relationship)
+  const isEditMode = fkDialogEditData !== null;
 
   // Form state
   const [fromModel, setFromModel] = useState('');
@@ -132,22 +162,52 @@ export function NewFkDialog() {
     [domain],
   );
 
+  // For circular detection in edit mode, exclude the relationship being edited
+  // (otherwise changing endpoints could cause false positive cycle warnings)
+  const relationshipsForCycleCheck = useMemo(() => {
+    if (!fkDialogEditData) return existingRelationships;
+    return existingRelationships.filter(
+      (r) =>
+        !(
+          r.fromModel === fkDialogEditData.fromModel &&
+          r.fromColumn === fkDialogEditData.fromColumn &&
+          r.toModel === fkDialogEditData.toModel &&
+          r.toColumn === fkDialogEditData.toColumn
+        ),
+    );
+  }, [existingRelationships, fkDialogEditData]);
+
   // Circular FK detection (warning only, doesn't block submission)
   const circularWarning = useMemo(() => {
     if (!fromModel || !toModel || fromModel === toModel) {
       return null;
     }
-    const cyclePath = detectCircularFk(existingRelationships, fromModel, toModel);
+    const cyclePath = detectCircularFk(relationshipsForCycleCheck, fromModel, toModel);
     if (cyclePath) {
       return `This will create a circular reference: ${formatCyclePath(cyclePath)}`;
     }
     return null;
-  }, [fromModel, toModel, existingRelationships]);
+  }, [fromModel, toModel, relationshipsForCycleCheck]);
 
-  // Validation
+  // Validation — pass original key when editing to skip self-duplicate check
   const errors = useMemo(
-    () => validateForm(fromModel, fromColumn, toModel, toColumn, existingRelationships),
-    [fromModel, fromColumn, toModel, toColumn, existingRelationships],
+    () =>
+      validateForm(
+        fromModel,
+        fromColumn,
+        toModel,
+        toColumn,
+        existingRelationships,
+        fkDialogEditData
+          ? {
+              fromModel: fkDialogEditData.fromModel,
+              fromColumn: fkDialogEditData.fromColumn,
+              toModel: fkDialogEditData.toModel,
+              toColumn: fkDialogEditData.toColumn,
+            }
+          : undefined,
+      ),
+    [fromModel, fromColumn, toModel, toColumn, existingRelationships, fkDialogEditData],
   );
 
   const isValid =
@@ -170,25 +230,45 @@ export function NewFkDialog() {
   const handleClose = useCallback(() => {
     setNewFkDialogOpen(false);
     clearFkDialogPrefill();
+    clearFkDialogEditData();
     resetForm();
-  }, [setNewFkDialogOpen, clearFkDialogPrefill, resetForm]);
+  }, [setNewFkDialogOpen, clearFkDialogPrefill, clearFkDialogEditData, resetForm]);
 
   const handleSubmit = useCallback(() => {
     if (!isValid) return;
 
-    send({
-      type: 'addRelationship',
-      payload: {
-        fromModel,
-        fromColumn: fromColumn.trim(),
-        toModel,
-        toColumn: toColumn.trim(),
-        cardinality,
-      },
-    });
+    if (isEditMode && fkDialogEditData) {
+      // Edit mode: send editRelationship with original key
+      send({
+        type: 'editRelationship',
+        payload: {
+          originalFromModel: fkDialogEditData.fromModel,
+          originalFromColumn: fkDialogEditData.fromColumn,
+          originalToModel: fkDialogEditData.toModel,
+          originalToColumn: fkDialogEditData.toColumn,
+          fromModel,
+          fromColumn: fromColumn.trim(),
+          toModel,
+          toColumn: toColumn.trim(),
+          cardinality,
+        },
+      });
+    } else {
+      // Create mode: send addRelationship
+      send({
+        type: 'addRelationship',
+        payload: {
+          fromModel,
+          fromColumn: fromColumn.trim(),
+          toModel,
+          toColumn: toColumn.trim(),
+          cardinality,
+        },
+      });
+    }
 
     handleClose();
-  }, [isValid, fromModel, fromColumn, toModel, toColumn, cardinality, send, handleClose]);
+  }, [isValid, isEditMode, fkDialogEditData, fromModel, fromColumn, toModel, toColumn, cardinality, send, handleClose]);
 
   const handleBlur = useCallback((field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
@@ -222,6 +302,18 @@ export function NewFkDialog() {
     }
   }, [isOpen, fkDialogPrefill]);
 
+  // Apply edit data when dialog opens for editing an existing relationship.
+  useEffect(() => {
+    if (isOpen && fkDialogEditData) {
+      setTouched({});
+      setFromModel(fkDialogEditData.fromModel);
+      setFromColumn(fkDialogEditData.fromColumn);
+      setToModel(fkDialogEditData.toModel);
+      setToColumn(fkDialogEditData.toColumn);
+      setCardinality(fkDialogEditData.cardinality);
+    }
+  }, [isOpen, fkDialogEditData]);
+
   if (!isOpen) {
     return null;
   }
@@ -230,7 +322,9 @@ export function NewFkDialog() {
     <Panel position="top-center" className="new-fk-dialog">
       {/* Header */}
       <div className="new-fk-dialog__header">
-        <h3 className="new-fk-dialog__title">New Relationship</h3>
+        <h3 className="new-fk-dialog__title">
+          {isEditMode ? 'Edit Relationship' : 'New Relationship'}
+        </h3>
         <button
           className="new-fk-dialog__close"
           onClick={handleClose}
@@ -428,7 +522,7 @@ export function NewFkDialog() {
           onClick={handleSubmit}
           disabled={!isValid}
         >
-          Create Relationship
+          {isEditMode ? 'Save Changes' : 'Create Relationship'}
         </button>
       </div>
     </Panel>
