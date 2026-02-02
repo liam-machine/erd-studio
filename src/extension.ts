@@ -9,6 +9,7 @@ import { ManifestService } from './services/manifestService';
 import { ReconciliationService } from './services/reconciliationService';
 import { TemplateService } from './services/templateService';
 import { AutoReconciliationService } from './services/autoReconciliationService';
+import { SchemaTagService } from './services/schemaTagService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
@@ -167,6 +168,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const reconciliationService = new ReconciliationService();
   const templateService = new TemplateService();
   const autoReconciliationService = new AutoReconciliationService();
+  const schemaTagService = new SchemaTagService(manifestService);
   const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
@@ -176,6 +178,7 @@ export function activate(context: vscode.ExtensionContext): void {
     templateService,
     autoReconciliationService,
     layerService,
+    schemaTagService,
     workspaceRoot,
   );
   const decorationProvider = new SemanticFileDecorationProvider();

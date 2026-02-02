@@ -1,0 +1,1578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-Assisted Data Engineering Workflow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #fafaf9;
+      --bg-card: #ffffff;
+      --text-primary: #1c1917;
+      --text-secondary: #78716c;
+      --text-muted: #a8a29e;
+      --border: #e7e5e4;
+      --accent: #d97706;
+      --accent-soft: #fef3c7;
+      --ai-blue: #3b82f6;
+      --ai-blue-soft: #eff6ff;
+      --human-amber: #d97706;
+      --human-amber-soft: #fef3c7;
+      --success: #059669;
+      --success-soft: #ecfdf5;
+      --teal: #0d9488;
+      --teal-soft: #ccfbf1;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      padding: 3rem 4rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .header-title {
+      font-family: 'Instrument Serif', serif;
+      font-size: 3.5rem;
+      font-weight: 400;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+
+    .header-subtitle {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .header-meta {
+      text-align: right;
+    }
+
+    .header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--text-primary);
+      color: var(--bg);
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border-radius: 2rem;
+    }
+
+    /* Main container */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 4rem;
+    }
+
+    /* Intro section */
+    .intro {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      margin-bottom: 6rem;
+      padding-bottom: 4rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .intro-text {
+      font-family: 'Instrument Serif', serif;
+      font-size: 1.75rem;
+      font-weight: 400;
+      line-height: 1.4;
+      color: var(--text-primary);
+    }
+
+    .intro-text em {
+      font-style: italic;
+      color: var(--accent);
+    }
+
+    .intro-details {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .intro-detail {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+
+    .intro-detail-icon {
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .intro-detail-icon.ai {
+      background: var(--ai-blue-soft);
+      color: var(--ai-blue);
+    }
+
+    .intro-detail-icon.human {
+      background: var(--human-amber-soft);
+      color: var(--human-amber);
+    }
+
+    .intro-detail-icon.teal {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .intro-detail-content h4 {
+      font-size: 0.875rem;
+      font-weight: 500;
+      margin-bottom: 0.25rem;
+    }
+
+    .intro-detail-content p {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+
+    /* Workflow section */
+    .workflow-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 3rem;
+    }
+
+    .workflow-title {
+      font-family: 'Instrument Serif', serif;
+      font-size: 2rem;
+      font-weight: 400;
+    }
+
+    .workflow-legend {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .legend-dot {
+      width: 0.625rem;
+      height: 0.625rem;
+      border-radius: 50%;
+    }
+
+    .legend-dot.ai { background: var(--ai-blue); }
+    .legend-dot.human { background: var(--human-amber); }
+
+    /* Timeline */
+    .timeline {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 1.75rem;
+      top: 3rem;
+      bottom: 3rem;
+      width: 1px;
+      background: linear-gradient(to bottom,
+        var(--ai-blue) 0%,
+        var(--ai-blue) 12%,
+        var(--human-amber) 24%,
+        var(--human-amber) 40%,
+        var(--ai-blue) 52%,
+        var(--teal) 64%,
+        var(--ai-blue) 76%,
+        var(--success) 100%
+      );
+    }
+
+    /* Step card */
+    .step {
+      display: grid;
+      grid-template-columns: 3.5rem 1fr;
+      gap: 2rem;
+      padding: 2rem 0;
+      position: relative;
+    }
+
+    .step:not(:last-child) {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .step-marker {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .step-number {
+      width: 3.5rem;
+      height: 3.5rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Instrument Serif', serif;
+      font-size: 1.25rem;
+      font-weight: 400;
+      position: relative;
+      z-index: 1;
+    }
+
+    .step.ai .step-number {
+      background: var(--ai-blue-soft);
+      color: var(--ai-blue);
+      border: 2px solid var(--ai-blue);
+    }
+
+    .step.human .step-number {
+      background: var(--human-amber-soft);
+      color: var(--human-amber);
+      border: 2px solid var(--human-amber);
+    }
+
+    .step.complete .step-number {
+      background: var(--success-soft);
+      color: var(--success);
+      border: 2px solid var(--success);
+    }
+
+    .step.orchestration .step-number {
+      background: var(--teal-soft);
+      color: var(--teal);
+      border: 2px solid var(--teal);
+    }
+
+    .step-type {
+      font-size: 0.625rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+    }
+
+    .step-content {
+      padding-top: 0.5rem;
+    }
+
+    .step-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+
+    .step-title {
+      font-family: 'Instrument Serif', serif;
+      font-size: 1.5rem;
+      font-weight: 400;
+      line-height: 1.2;
+    }
+
+    .step-tool {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.375rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      font-size: 0.6875rem;
+      color: var(--text-secondary);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .step-tool.new {
+      background: var(--teal-soft);
+      border-color: var(--teal);
+      color: var(--teal);
+    }
+
+    .step-description {
+      font-size: 0.9375rem;
+      color: var(--text-secondary);
+      margin-bottom: 1.5rem;
+      max-width: 600px;
+    }
+
+    /* Step visual */
+    .step-visual {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      overflow: hidden;
+    }
+
+    .visual-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .visual-dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: var(--border);
+    }
+
+    .visual-dot:nth-child(1) { background: #fca5a5; }
+    .visual-dot:nth-child(2) { background: #fcd34d; }
+    .visual-dot:nth-child(3) { background: #86efac; }
+
+    .visual-title {
+      margin-left: 0.5rem;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .visual-content {
+      padding: 1.5rem;
+    }
+
+    /* Chat visual */
+    .chat-messages {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .chat-message {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+    }
+
+    .chat-avatar {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
+
+    .chat-avatar.user {
+      background: var(--text-primary);
+      color: var(--bg);
+    }
+
+    .chat-avatar.claude {
+      background: linear-gradient(135deg, var(--ai-blue), #8b5cf6);
+      color: white;
+    }
+
+    .chat-bubble {
+      background: var(--bg);
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      max-width: 400px;
+    }
+
+    .chat-bubble code {
+      background: var(--human-amber-soft);
+      color: var(--human-amber);
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.8125rem;
+    }
+
+    /* Schema visual */
+    .schema-diagram {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .schema-table {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      min-width: 140px;
+      overflow: hidden;
+    }
+
+    .schema-table-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+
+    .schema-table-header .badge {
+      font-size: 0.5625rem;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .schema-table-header .badge.dim {
+      background: var(--ai-blue-soft);
+      color: var(--ai-blue);
+    }
+
+    .schema-table-header .badge.fact {
+      background: var(--human-amber-soft);
+      color: var(--human-amber);
+    }
+
+    .schema-columns {
+      padding: 0.5rem 0;
+    }
+
+    .schema-column {
+      padding: 0.25rem 0.75rem;
+      font-size: 0.6875rem;
+      color: var(--text-secondary);
+      font-family: 'SF Mono', Monaco, monospace;
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+
+    .schema-column .pk {
+      color: var(--human-amber);
+      font-weight: 600;
+    }
+
+    .schema-column .fk {
+      color: var(--ai-blue);
+    }
+
+    .schema-relation {
+      color: var(--text-muted);
+      font-size: 1.5rem;
+    }
+
+    /* VS Code visual */
+    .vscode-mock {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      min-height: 200px;
+    }
+
+    .vscode-sidebar {
+      background: #252526;
+      padding: 0.75rem 0;
+      border-right: 1px solid #3c3c3c;
+    }
+
+    .vscode-sidebar-title {
+      padding: 0.5rem 1rem;
+      font-size: 0.625rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .vscode-file {
+      padding: 0.375rem 1rem;
+      font-size: 0.75rem;
+      color: #ccc;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+    }
+
+    .vscode-file:hover {
+      background: #2a2d2e;
+    }
+
+    .vscode-file.active {
+      background: #37373d;
+    }
+
+    .vscode-file-icon {
+      width: 1rem;
+      height: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.625rem;
+      background: #3b82f6;
+      color: white;
+      border-radius: 0.125rem;
+    }
+
+    .vscode-canvas {
+      background: #1e1e1e;
+      padding: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .canvas-nodes {
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+    }
+
+    .canvas-node {
+      background: #2d2d30;
+      border: 1px solid #3c3c3c;
+      border-radius: 0.375rem;
+      min-width: 120px;
+      overflow: hidden;
+    }
+
+    .canvas-node.selected {
+      border-color: var(--human-amber);
+      box-shadow: 0 0 0 1px var(--human-amber);
+    }
+
+    .canvas-node-header {
+      padding: 0.5rem 0.625rem;
+      font-size: 0.6875rem;
+      font-weight: 500;
+      color: #e5e5e5;
+      border-bottom: 1px solid #3c3c3c;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .canvas-node-badge {
+      font-size: 0.5rem;
+      padding: 0.125rem 0.25rem;
+      border-radius: 0.125rem;
+      text-transform: uppercase;
+    }
+
+    .canvas-node-badge.design {
+      background: var(--human-amber);
+      color: white;
+    }
+
+    .canvas-node-badge.built {
+      background: var(--success);
+      color: white;
+    }
+
+    .canvas-node-columns {
+      padding: 0.375rem 0;
+    }
+
+    .canvas-node-col {
+      padding: 0.125rem 0.625rem;
+      font-size: 0.5625rem;
+      color: #999;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+
+    .canvas-edge {
+      width: 3rem;
+      height: 2px;
+      background: #4a4a4d;
+      position: relative;
+    }
+
+    .canvas-edge::before {
+      content: '';
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      border: 4px solid transparent;
+      border-left-color: #4a4a4d;
+    }
+
+    /* Approval visual */
+    .approval-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .approval-checklist {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .approval-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: var(--bg);
+      border-radius: 0.375rem;
+    }
+
+    .approval-checkbox {
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: transparent;
+      font-size: 0.625rem;
+    }
+
+    .approval-checkbox.checked {
+      background: var(--success);
+      border-color: var(--success);
+      color: white;
+    }
+
+    .approval-label {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    .approval-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.875rem 1.5rem;
+      background: var(--human-amber);
+      color: white;
+      border: none;
+      border-radius: 0.375rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      align-self: flex-start;
+    }
+
+    /* Code visual */
+    .code-block {
+      background: #1e1e1e;
+      padding: 1rem;
+      border-radius: 0.375rem;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.75rem;
+      line-height: 1.6;
+      color: #d4d4d4;
+      overflow-x: auto;
+    }
+
+    .code-block .keyword { color: #c586c0; }
+    .code-block .string { color: #ce9178; }
+    .code-block .property { color: #9cdcfe; }
+    .code-block .comment { color: #6a9955; }
+    .code-block .function { color: #dcdcaa; }
+
+    /* Domain tagging visual */
+    .domain-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .domain-card {
+      background: var(--bg);
+      border-radius: 0.5rem;
+      padding: 1.25rem;
+      border: 1px solid var(--border);
+    }
+
+    .domain-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+
+    .domain-name {
+      font-weight: 500;
+      font-size: 0.9375rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .domain-tag {
+      font-size: 0.625rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 1rem;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-weight: 500;
+    }
+
+    .domain-tag.customer {
+      background: var(--ai-blue-soft);
+      color: var(--ai-blue);
+    }
+
+    .domain-tag.finance {
+      background: var(--human-amber-soft);
+      color: var(--human-amber);
+    }
+
+    .domain-tag.inventory {
+      background: var(--teal-soft);
+      color: var(--teal);
+    }
+
+    .domain-tag.hr {
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .domain-cadence {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+
+    .domain-cadence .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .domain-cadence .dot.fast { background: var(--success); }
+    .domain-cadence .dot.medium { background: var(--human-amber); }
+    .domain-cadence .dot.slow { background: var(--ai-blue); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .domain-models {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.375rem;
+    }
+
+    .domain-model-chip {
+      font-size: 0.6875rem;
+      padding: 0.25rem 0.5rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      font-family: 'SF Mono', Monaco, monospace;
+      color: var(--text-secondary);
+    }
+
+    .domain-command {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: #1e1e1e;
+      border-radius: 0.375rem;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.6875rem;
+      color: #d4d4d4;
+    }
+
+    .domain-command .cmd { color: var(--success); }
+    .domain-command .flag { color: var(--ai-blue); }
+    .domain-command .value { color: var(--human-amber); }
+
+    /* Report visual */
+    .report-mock {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1rem;
+    }
+
+    .report-kpi {
+      background: var(--bg);
+      padding: 1rem;
+      border-radius: 0.375rem;
+      text-align: center;
+    }
+
+    .report-kpi-label {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .report-kpi-value {
+      font-family: 'Instrument Serif', serif;
+      font-size: 2rem;
+      color: var(--text-primary);
+    }
+
+    .report-kpi-change {
+      font-size: 0.75rem;
+      color: var(--success);
+      margin-top: 0.25rem;
+    }
+
+    .report-chart {
+      background: var(--bg);
+      padding: 1rem;
+      border-radius: 0.375rem;
+      grid-column: span 3;
+    }
+
+    .report-chart-title {
+      font-size: 0.75rem;
+      font-weight: 500;
+      margin-bottom: 1rem;
+    }
+
+    .report-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.5rem;
+      height: 80px;
+    }
+
+    .report-bar {
+      flex: 1;
+      background: linear-gradient(to top, var(--ai-blue), var(--ai-blue-soft));
+      border-radius: 0.25rem 0.25rem 0 0;
+      min-height: 20px;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: 6rem;
+      padding: 3rem 0;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .footer-text {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    .footer-text strong {
+      color: var(--text-primary);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .footer-link {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .footer-link:hover {
+      color: var(--accent);
+    }
+
+    /* Animations */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(1rem);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .step {
+      animation: fadeInUp 0.6s ease-out both;
+    }
+
+    .step:nth-child(1) { animation-delay: 0.1s; }
+    .step:nth-child(2) { animation-delay: 0.2s; }
+    .step:nth-child(3) { animation-delay: 0.3s; }
+    .step:nth-child(4) { animation-delay: 0.4s; }
+    .step:nth-child(5) { animation-delay: 0.5s; }
+    .step:nth-child(6) { animation-delay: 0.6s; }
+    .step:nth-child(7) { animation-delay: 0.7s; }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .header {
+        padding: 2rem;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+
+      .header-title {
+        font-size: 2.5rem;
+      }
+
+      .header-meta {
+        text-align: left;
+      }
+
+      .container {
+        padding: 2rem;
+      }
+
+      .intro {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+      }
+
+      .vscode-mock {
+        grid-template-columns: 1fr;
+      }
+
+      .vscode-sidebar {
+        display: none;
+      }
+
+      .domain-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div>
+      <p class="header-subtitle">dbt Semantic Designer</p>
+      <h1 class="header-title">AI-Assisted Data Engineering</h1>
+    </div>
+    <div class="header-meta">
+      <span class="header-badge">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 6v6l4 2"/>
+        </svg>
+        Vision Document
+      </span>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="intro">
+      <p class="intro-text">
+        A workflow where <em>Claude designs</em> the data model,
+        <em>humans review</em> and refine, then <em>Claude builds</em>
+        the implementation. From KPI request to Power BI report.
+      </p>
+      <div class="intro-details">
+        <div class="intro-detail">
+          <div class="intro-detail-icon ai">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <div class="intro-detail-content">
+            <h4>AI-Driven Steps</h4>
+            <p>Claude handles design generation, dbt model creation, and report building</p>
+          </div>
+        </div>
+        <div class="intro-detail">
+          <div class="intro-detail-icon human">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div class="intro-detail-content">
+            <h4>Human Checkpoints</h4>
+            <p>Data engineers review, tweak, and approve at critical decision points</p>
+          </div>
+        </div>
+        <div class="intro-detail">
+          <div class="intro-detail-icon teal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+              <line x1="7" y1="7" x2="7.01" y2="7"/>
+            </svg>
+          </div>
+          <div class="intro-detail-content">
+            <h4>Domain Tagging</h4>
+            <p>Auto-tag models by domain for efficient, cadence-based dbt refreshes</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="workflow">
+      <div class="workflow-header">
+        <h2 class="workflow-title">The Workflow</h2>
+        <div class="workflow-legend">
+          <div class="legend-item">
+            <span class="legend-dot ai"></span>
+            AI Step
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot human"></span>
+            Human Step
+          </div>
+        </div>
+      </div>
+
+      <div class="timeline">
+        <!-- Step 1: User Request -->
+        <div class="step ai">
+          <div class="step-marker">
+            <div class="step-number">1</div>
+            <span class="step-type">Request</span>
+          </div>
+          <div class="step-content">
+            <div class="step-header">
+              <h3 class="step-title">User Requests a KPI Report</h3>
+              <span class="step-tool">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                Claude Code
+              </span>
+            </div>
+            <p class="step-description">
+              The data engineer describes the business requirement in natural language.
+              Claude understands the KPI, required dimensions, and data sources.
+            </p>
+            <div class="step-visual">
+              <div class="visual-header">
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-title">Claude Code Terminal</span>
+              </div>
+              <div class="visual-content">
+                <div class="chat-messages">
+                  <div class="chat-message">
+                    <div class="chat-avatar user">LW</div>
+                    <div class="chat-bubble">
+                      Build me a report with KPI: <code>Revenue per Customer</code>
+                      broken down by region and product category
+                    </div>
+                  </div>
+                  <div class="chat-message">
+                    <div class="chat-avatar claude">C</div>
+                    <div class="chat-bubble">
+                      I'll design a star schema for this KPI. You'll need dimensions for
+                      customers, regions, products, and time, plus a fact table for orders...
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: Claude Designs -->
+        <div class="step ai">
+          <div class="step-marker">
+            <div class="step-number">2</div>
+            <span class="step-type">AI</span>
+          </div>
+          <div class="step-content">
+            <div class="step-header">
+              <h3 class="step-title">Claude Designs the Semantic Model</h3>
+              <span class="step-tool">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="3" y1="9" x2="21" y2="9"/>
+                  <line x1="9" y1="21" x2="9" y2="9"/>
+                </svg>
+                Semantic Domain JSON
+              </span>
+            </div>
+            <p class="step-description">
+              Claude analyzes the KPI requirements and generates a complete semantic domain
+              with models, columns, relationships, and cardinalities.
+            </p>
+            <div class="step-visual">
+              <div class="visual-header">
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-title">Proposed Schema Design</span>
+              </div>
+              <div class="visual-content">
+                <div class="schema-diagram">
+                  <div class="schema-table">
+                    <div class="schema-table-header">
+                      dim_customer
+                      <span class="badge dim">DIM</span>
+                    </div>
+                    <div class="schema-columns">
+                      <div class="schema-column"><span class="pk">PK</span> customer_id</div>
+                      <div class="schema-column">customer_name</div>
+                      <div class="schema-column"><span class="fk">FK</span> region_id</div>
+                    </div>
+                  </div>
+                  <span class="schema-relation">→</span>
+                  <div class="schema-table">
+                    <div class="schema-table-header">
+                      fct_orders
+                      <span class="badge fact">FACT</span>
+                    </div>
+                    <div class="schema-columns">
+                      <div class="schema-column"><span class="pk">PK</span> order_id</div>
+                      <div class="schema-column"><span class="fk">FK</span> customer_id</div>
+                      <div class="schema-column"><span class="fk">FK</span> product_id</div>
+                      <div class="schema-column">revenue</div>
+                    </div>
+                  </div>
+                  <span class="schema-relation">←</span>
+                  <div class="schema-table">
+                    <div class="schema-table-header">
+                      dim_product
+                      <span class="badge dim">DIM</span>
+                    </div>
+                    <div class="schema-columns">
+                      <div class="schema-column"><span class="pk">PK</span> product_id</div>
+                      <div class="schema-column">product_name</div>
+                      <div class="schema-column">category</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: Human Reviews -->
+        <div class="step human">
+          <div class="step-marker">
+            <div class="step-number">3</div>
+            <span class="step-type">Human</span>
+          </div>
+          <div class="step-content">
+            <div class="step-header">
+              <h3 class="step-title">Data Engineer Reviews in VS Code</h3>
+              <span class="step-tool">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/>
+                  <line x1="12" y1="22" x2="12" y2="15.5"/>
+                  <polyline points="22 8.5 12 15.5 2 8.5"/>
+                </svg>
+                dbt Semantic Designer
+              </span>
+            </div>
+            <p class="step-description">
+              The semantic domain opens in the dbt Semantic Designer extension.
+              The engineer can visually inspect relationships, add columns, or adjust cardinalities.
+            </p>
+            <div class="step-visual">
+              <div class="visual-header">
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-title">VS Code — dbt Semantic Designer</span>
+              </div>
+              <div class="visual-content" style="padding: 0;">
+                <div class="vscode-mock">
+                  <div class="vscode-sidebar">
+                    <div class="vscode-sidebar-title">Semantic Domains</div>
+                    <div class="vscode-file">
+                      <span class="vscode-file-icon">S</span>
+                      silver/
+                    </div>
+                    <div class="vscode-file active">
+                      <span class="vscode-file-icon">G</span>
+                      revenue-analytics.json
+                    </div>
+                  </div>
+                  <div class="vscode-canvas">
+                    <div class="canvas-nodes">
+                      <div class="canvas-node">
+                        <div class="canvas-node-header">
+                          dim_customer
+                          <span class="canvas-node-badge design">Design</span>
+                        </div>
+                        <div class="canvas-node-columns">
+                          <div class="canvas-node-col">customer_id</div>
+                          <div class="canvas-node-col">customer_name</div>
+                        </div>
+                      </div>
+                      <div class="canvas-edge"></div>
+                      <div class="canvas-node selected">
+                        <div class="canvas-node-header">
+                          fct_orders
+                          <span class="canvas-node-badge design">Design</span>
+                        </div>
+                        <div class="canvas-node-columns">
+                          <div class="canvas-node-col">order_id</div>
+                          <div class="canvas-node-col">revenue</div>
+                        </div>
+                      </div>
+                      <div class="canvas-edge"></div>
+                      <div class="canvas-node">
+                        <div class="canvas-node-header">
+                          dim_product
+                          <span class="canvas-node-badge built">Built</span>
+                        </div>
+                        <div class="canvas-node-columns">
+                          <div class="canvas-node-col">product_id</div>
+                          <div class="canvas-node-col">category</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4: Human Approves -->
+        <div class="step human">
+          <div class="step-marker">
+            <div class="step-number">4</div>
+            <span class="step-type">Human</span>
+          </div>
+          <div class="step-content">
+            <div class="step-header">
+              <h3 class="step-title">Engineer Approves the Design</h3>
+              <span class="step-tool">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                  <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                Approval Checkpoint
+              </span>
+            </div>
+            <p class="step-description">
+              Once satisfied with the design, the engineer confirms approval.
+              This triggers Claude to proceed with implementation.
+            </p>
+            <div class="step-visual">
+              <div class="visual-header">
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-title">Design Review Checklist</span>
+              </div>
+              <div class="visual-content">
+                <div class="approval-panel">
+                  <div class="approval-checklist">
+                    <div class="approval-item">
+                      <div class="approval-checkbox checked">✓</div>
+                      <span class="approval-label">All required dimensions included</span>
+                    </div>
+                    <div class="approval-item">
+                      <div class="approval-checkbox checked">✓</div>
+                      <span class="approval-label">Fact table grain is correct</span>
+                    </div>
+                    <div class="approval-item">
+                      <div class="approval-checkbox checked">✓</div>
+                      <span class="approval-label">Relationship cardinalities verified</span>
+                    </div>
+                    <div class="approval-item">
+                      <div class="approval-checkbox checked">✓</div>
+                      <span class="approval-label">KPI can be calculated from this model</span>
+                    </div>
+                  </div>
+                  <button class="approval-button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Approve Design
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 5: Claude Builds dbt -->
+        <div class="step ai">
+          <div class="step-marker">
+            <div class="step-number">5</div>
+            <span class="step-type">AI</span>
+          </div>
+          <div class="step-content">
+            <div class="step-header">
+              <h3 class="step-title">Claude Builds the dbt Models</h3>
+              <span class="step-tool">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="16 18 22 12 16 6"/>
+                  <polyline points="8 6 2 12 8 18"/>
+                </svg>
+                dbt YAML + SQL
+              </span>
+            </div>
+            <p class="step-description">
+              Claude generates the dbt model files: YAML schema definitions with tests,
+              and SQL transformations based on the approved design.
+            </p>
+            <div class="step-visual">
+              <div class="visual-header">
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-title">models/gold/fct_orders.yml</span>
+              </div>
+              <div class="visual-content" style="padding: 0;">
+                <div class="code-block">
+<span class="property">version</span>: <span class="string">2</span>
+
+<span class="property">models</span>:
+  - <span class="property">name</span>: <span class="string">fct_orders</span>
+    <span class="property">description</span>: <span class="string">Order fact table for revenue analytics</span>
+    <span class="property">columns</span>:
+      - <span class="property">name</span>: <span class="string">order_id</span>
+        <span class="property">tests</span>:
+          - <span class="function">unique</span>
+          - <span class="function">not_null</span>
+      - <span class="property">name</span>: <span class="string">customer_id</span>
+        <span class="property">tests</span>:
+          - <span class="function">relationships</span>:
+              <span class="property">to</span>: <span class="string">ref('dim_customer')</span>
+              <span class="property">field</span>: <span class="string">customer_id</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 6: Domain Tagging for Orchestration -->
+        <div class="step orchestration">
+          <div class="step-marker">
+            <div class="step-number">6</div>
+            <span class="step-type">Auto</span>
+          </div>
+          <div class="step-content">
+            <div class="step-header">
+              <h3 class="step-title">Models Tagged by Domain for Orchestration</h3>
+              <span class="step-tool new">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                  <line x1="7" y1="7" x2="7.01" y2="7"/>
+                </svg>
+                Domain Tags
+              </span>
+            </div>
+            <p class="step-description">
+              When models are added to a semantic domain, they're automatically tagged in their schema.yml.
+              This enables domain-based dbt orchestration with varying refresh cadences—customer data hourly,
+              finance daily, inventory weekly—based on actual reporting needs.
+            </p>
+            <div class="step-visual">
+              <div class="visual-header">
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-title">Domain-Based Refresh Orchestration</span>
+              </div>
+              <div class="visual-content">
+                <div class="domain-grid">
+                  <div class="domain-card">
+                    <div class="domain-card-header">
+                      <span class="domain-name">
+                        <span class="domain-tag customer">domain:customer-360</span>
+                      </span>
+                      <span class="domain-cadence">
+                        <span class="dot fast"></span>
+                        Hourly
+                      </span>
+                    </div>
+                    <div class="domain-models">
+                      <span class="domain-model-chip">dim_customer</span>
+                      <span class="domain-model-chip">fct_orders</span>
+                      <span class="domain-model-chip">dim_region</span>
+                    </div>
+                    <div class="domain-command">
+                      <span class="cmd">dbt build</span> <span class="flag">--select</span> <span class="value">tag:domain:customer-360</span>
+                    </div>
+                  </div>
+                  <div class="domain-card">
+                    <div class="domain-card-header">
+                      <span class="domain-name">
+                        <span class="domain-tag finance">domain:finance</span>
+                      </span>
+                      <span class="domain-cadence">
+                        <span class="dot medium"></span>
+                        Daily
+                      </span>
+                    </div>
+                    <div class="domain-models">
+                      <span class="domain-model-chip">fct_gl_entries</span>
+                      <span class="domain-model-chip">dim_cost_center</span>
+                      <span class="domain-model-chip">fct_budget</span>
+                    </div>
+                    <div class="domain-command">
+                      <span class="cmd">dbt build</span> <span class="flag">--select</span> <span class="value">tag:domain:finance</span>
+                    </div>
+                  </div>
+                  <div class="domain-card">
+                    <div class="domain-card-header">
+                      <span class="domain-name">
+                        <span class="domain-tag inventory">domain:inventory</span>
+                      </span>
+                      <span class="domain-cadence">
+                        <span class="dot slow"></span>
+                        Weekly
+                      </span>
+                    </div>
+                    <div class="domain-models">
+                      <span class="domain-model-chip">dim_warehouse</span>
+                      <span class="domain-model-chip">fct_stock_levels</span>
+                      <span class="domain-model-chip">dim_product</span>
+                    </div>
+                    <div class="domain-command">
+                      <span class="cmd">dbt build</span> <span class="flag">--select</span> <span class="value">tag:domain:inventory</span>
+                    </div>
+                  </div>
+                  <div class="domain-card">
+                    <div class="domain-card-header">
+                      <span class="domain-name">
+                        <span class="domain-tag hr">domain:hr</span>
+                      </span>
+                      <span class="domain-cadence">
+                        <span class="dot slow"></span>
+                        Monthly
+                      </span>
+                    </div>
+                    <div class="domain-models">
+                      <span class="domain-model-chip">dim_employee</span>
+                      <span class="domain-model-chip">fct_timesheets</span>
+                      <span class="domain-model-chip">dim_department</span>
+                    </div>
+                    <div class="domain-command">
+                      <span class="cmd">dbt build</span> <span class="flag">--select</span> <span class="value">tag:domain:hr</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 7: Claude Creates Report -->
+        <div class="step complete">
+          <div class="step-marker">
+            <div class="step-number">7</div>
+            <span class="step-type">Complete</span>
+          </div>
+          <div class="step-content">
+            <div class="step-header">
+              <h3 class="step-title">Claude Creates the Power BI Report</h3>
+              <span class="step-tool">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="3" y1="9" x2="21" y2="9"/>
+                  <line x1="9" y1="21" x2="9" y2="9"/>
+                </svg>
+                Power BI
+              </span>
+            </div>
+            <p class="step-description">
+              With the dbt models built, Claude configures the Power BI relationships
+              and creates visualizations for the requested KPI.
+            </p>
+            <div class="step-visual">
+              <div class="visual-header">
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-dot"></span>
+                <span class="visual-title">Revenue Analytics Dashboard</span>
+              </div>
+              <div class="visual-content">
+                <div class="report-mock">
+                  <div class="report-kpi">
+                    <div class="report-kpi-label">Revenue per Customer</div>
+                    <div class="report-kpi-value">$847</div>
+                    <div class="report-kpi-change">↑ 12.3% vs LY</div>
+                  </div>
+                  <div class="report-kpi">
+                    <div class="report-kpi-label">Total Customers</div>
+                    <div class="report-kpi-value">14.2K</div>
+                    <div class="report-kpi-change">↑ 8.1% vs LY</div>
+                  </div>
+                  <div class="report-kpi">
+                    <div class="report-kpi-label">Total Revenue</div>
+                    <div class="report-kpi-value">$12M</div>
+                    <div class="report-kpi-change">↑ 21.4% vs LY</div>
+                  </div>
+                  <div class="report-chart">
+                    <div class="report-chart-title">Revenue per Customer by Region</div>
+                    <div class="report-bars">
+                      <div class="report-bar" style="height: 70%;"></div>
+                      <div class="report-bar" style="height: 100%;"></div>
+                      <div class="report-bar" style="height: 55%;"></div>
+                      <div class="report-bar" style="height: 85%;"></div>
+                      <div class="report-bar" style="height: 40%;"></div>
+                      <div class="report-bar" style="height: 95%;"></div>
+                      <div class="report-bar" style="height: 60%;"></div>
+                      <div class="report-bar" style="height: 75%;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p class="footer-text">
+        <strong>dbt Semantic Designer</strong> — AI-assisted data engineering with human oversight
+      </p>
+      <div class="footer-links">
+        <a href="#" class="footer-link">Documentation</a>
+        <a href="#" class="footer-link">GitHub</a>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>

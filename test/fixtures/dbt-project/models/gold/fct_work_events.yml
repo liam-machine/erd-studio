@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: fct_work_events
+    description: Work events fact table
+    config:
+      tags:
+        - gold
+        - daily
+    columns:
+      - name: event_id
+        description: Event surrogate key
+      - name: work_lot_id
+        description: FK to dim_work_lot
+      - name: event_date
+        description: Date of the event
+      - name: amount
+        description: Event amount
