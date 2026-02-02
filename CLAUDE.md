@@ -123,6 +123,51 @@ To preview in Chrome: create `dev-preview.html` (see instructions above), run `n
 - React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
 - Extension host writes use `WorkspaceEdit` for undo/redo integration
 
+## Status Lifecycle
+
+Models, columns, and relationships follow a progression from design to built:
+
+### Model Status: `design` → `approved` → `built`
+
+| Status | Description | Color | Source |
+|--------|-------------|-------|--------|
+| `design` | Planned model not yet in dbt | Orange | `source: 'design'` in JSON |
+| `approved` | Ready for build, reviewed | Teal | `source: 'design'` + `approved: true` |
+| `built` | Exists in dbt manifest | Blue | `source: 'repo'` and found in manifest |
+| `missing` | Referenced but not in manifest | Grey | `source: 'repo'` but not in manifest |
+
+### Column Status: `planned` → `approved` → `built`
+
+| Status | Description | Color |
+|--------|-------------|-------|
+| `planned` | Column defined but not in manifest | Orange |
+| `approved` | Column approved for build | Teal |
+| `built` | Column exists in manifest | Blue |
+
+### Relationship Status: `design` → `approved` → `built`
+
+| Status | Description | Color |
+|--------|-------------|-------|
+| `design` | Planned FK relationship | Orange |
+| `approved` | Relationship approved for build | Teal |
+| `built` | Relationship test exists in manifest | Blue |
+
+### Approval Rules
+
+1. **Models**: Can be approved via DetailPanel button or right-click context menu
+2. **Columns**:
+   - On design models: require model approval first
+   - On built models: can be approved independently (for planned columns)
+3. **Relationships**: Can only be approved when **both** connected models are `built` or `approved`
+
+### Cascade Behavior
+
+When **unapproving a model**, the following cascades automatically:
+- All columns in that model become unapproved
+- All relationships connected to that model become unapproved
+
+This maintains the invariant that approved items must have their dependencies also approved.
+
 ## Publishing to VS Code Marketplace
 
 **Marketplace:** https://marketplace.visualstudio.com/items?itemName=liamwynne.dbt-semantic-designer
