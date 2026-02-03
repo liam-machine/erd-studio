@@ -82,7 +82,7 @@ export interface SemanticModel {
  */
 export interface DesignModel {
   name: string;
-  schema: string;
+  schema?: string;
   description: string;
   columns: ColumnDef[];
 }

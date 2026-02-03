@@ -3,7 +3,6 @@
  *
  * Form fields:
  * - Model name (text input, validated for template prefix)
- * - Schema (text input, pre-filled from domain layer)
  * - Description (textarea)
  * - Template picker (loaded from semantic/templates/*.json files)
  * - Left/Right entity (text inputs, shown only for bridge-type templates)
@@ -63,7 +62,6 @@ function resolvePlaceholders(
  */
 function validateForm(
   modelName: string,
-  schema: string,
   template: ModelTemplate,
   leftEntity: string,
   rightEntity: string,
@@ -82,13 +80,6 @@ function validateForm(
     errors.modelName = `Add content after "${template.prefix}" (e.g., ${template.prefix}example)`;
   } else if (existingModelNames.includes(modelName)) {
     errors.modelName = `Model "${modelName}" already exists in this domain`;
-  }
-
-  // Schema validation
-  if (!schema.trim()) {
-    errors.schema = 'Schema is required';
-  } else if (!/^[a-z0-9_]+$/.test(schema)) {
-    errors.schema = 'Use lowercase letters, numbers, and underscores only';
   }
 
   // Bridge entity validation (check for requiresLeftEntity/requiresRightEntity flags)
@@ -121,7 +112,6 @@ export function NewModelDialog() {
 
   // Form state
   const [modelName, setModelName] = useState('');
-  const [schema, setSchema] = useState('');
   const [description, setDescription] = useState('');
   const [templateId, setTemplateId] = useState<string>('blank');
   const [leftEntity, setLeftEntity] = useState('');
@@ -145,8 +135,8 @@ export function NewModelDialog() {
 
   // Validation
   const errors = useMemo(
-    () => validateForm(modelName, schema, template, leftEntity, rightEntity, existingModelNames),
-    [modelName, schema, template, leftEntity, rightEntity, existingModelNames],
+    () => validateForm(modelName, template, leftEntity, rightEntity, existingModelNames),
+    [modelName, template, leftEntity, rightEntity, existingModelNames],
   );
 
   // Validate custom columns (all must have valid names)
@@ -174,7 +164,6 @@ export function NewModelDialog() {
   // Handlers
   const resetForm = useCallback(() => {
     setModelName('');
-    setSchema('');
     setDescription('');
     // Reset to blank template
     setTemplateId('blank');
@@ -202,7 +191,6 @@ export function NewModelDialog() {
 
     const newModel: DesignModel = {
       name: modelName.trim(),
-      schema: schema.trim(),
       description: description.trim(),
       columns: finalColumns,
     };
@@ -213,7 +201,7 @@ export function NewModelDialog() {
     });
 
     handleClose();
-  }, [isValid, modelName, schema, description, template, leftEntity, rightEntity, customColumns, send, handleClose]);
+  }, [isValid, modelName, description, template, leftEntity, rightEntity, customColumns, send, handleClose]);
 
   const handleBlur = useCallback((field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
@@ -252,13 +240,6 @@ export function NewModelDialog() {
     },
     []
   );
-
-  // Set default schema when dialog opens
-  useEffect(() => {
-    if (isOpen && !schema && domain?.layer) {
-      setSchema(domain.layer);
-    }
-  }, [isOpen, schema, domain?.layer]);
 
   if (!isOpen) {
     return null;
@@ -338,25 +319,6 @@ export function NewModelDialog() {
           />
           {touched.modelName && errors.modelName && (
             <span className="new-model-dialog__error">{errors.modelName}</span>
-          )}
-        </div>
-
-        {/* Schema */}
-        <div className="new-model-dialog__field">
-          <label className="new-model-dialog__label" htmlFor="schema">
-            Schema
-          </label>
-          <input
-            id="schema"
-            type="text"
-            className={`new-model-dialog__input ${touched.schema && errors.schema ? 'new-model-dialog__input--error' : ''}`}
-            value={schema}
-            onChange={(e) => setSchema(e.target.value)}
-            onBlur={() => handleBlur('schema')}
-            placeholder="silver"
-          />
-          {touched.schema && errors.schema && (
-            <span className="new-model-dialog__error">{errors.schema}</span>
           )}
         </div>
 
