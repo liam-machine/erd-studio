@@ -47,6 +47,7 @@ function mapColumns(model: ReconciledModel): ColumnDisplay[] {
     dataType: col.dataType,
     isPrimaryKey: col.isPrimaryKey,
     isForeignKey: col.isForeignKey,
+    isNaturalKey: col.isNaturalKey,
     status: col.status,
     approved: col.approved,
   }));

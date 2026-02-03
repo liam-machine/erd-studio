@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { DataTypeSelect } from './DataTypeSelect';
+import { KeyBadgeGroup } from './KeyBadgeGroup';
 import { useFocusWithinRow } from '../../hooks/useFocusWithinRow';
 import type { ColumnDef } from '../../../src/types/semantic';
 import './ColumnRowEditor.css';
@@ -25,6 +26,7 @@ export interface ColumnRowEditorColumn {
   description: string;
   isPrimaryKey?: boolean;
   isForeignKey?: boolean;
+  isNaturalKey?: boolean;
   /** Column status for styling. */
   status?: 'built' | 'approved' | 'planned' | 'missing';
   /** Whether the column has been approved for build. */
@@ -50,10 +52,18 @@ export interface ColumnRowEditorProps {
   onUnapprove?: () => void;
   /** Whether this column can be approved (model is approved or built). */
   canApprove?: boolean;
-  /** Show PK/FK indicator badges. Default true. */
+  /** Show PK/FK/NK indicator badges. Default true. */
   showIndicators?: boolean;
   /** Show delete button on hover. Default true for editable mode. */
   showDelete?: boolean;
+  /** Callback when PK badge is toggled. */
+  onTogglePK?: () => void;
+  /** Callback when FK badge is toggled. */
+  onToggleFK?: () => void;
+  /** Callback when NK badge is toggled. */
+  onToggleNK?: () => void;
+  /** Show warning if multiple PKs exist in model. */
+  showMultiplePKWarning?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +110,10 @@ export function ColumnRowEditor({
   canApprove = false,
   showIndicators = true,
   showDelete = true,
+  onTogglePK,
+  onToggleFK,
+  onToggleNK,
+  showMultiplePKWarning = false,
 }: ColumnRowEditorProps) {
   // Local state for editing
   const [localColumn, setLocalColumn] = useState<ColumnDef>({
@@ -107,6 +121,8 @@ export function ColumnRowEditor({
     dataType: column.dataType,
     description: column.description,
     isPrimaryKey: column.isPrimaryKey,
+    isForeignKey: column.isForeignKey,
+    isNaturalKey: column.isNaturalKey,
   });
   const [editingField, setEditingField] = useState<'name' | 'dataType' | null>(
     mode === 'new' ? 'name' : null
@@ -130,10 +146,19 @@ export function ColumnRowEditor({
         dataType: column.dataType,
         description: column.description,
         isPrimaryKey: column.isPrimaryKey,
+        isForeignKey: column.isForeignKey,
+        isNaturalKey: column.isNaturalKey,
       });
     }
     isSavingRef.current = false;
-  }, [column.name, column.dataType, column.description, column.isPrimaryKey]);
+  }, [
+    column.name,
+    column.dataType,
+    column.description,
+    column.isPrimaryKey,
+    column.isForeignKey,
+    column.isNaturalKey,
+  ]);
 
   // Auto-focus when entering edit mode or when mode is 'new'
   useEffect(() => {
@@ -168,6 +193,8 @@ export function ColumnRowEditor({
       dataType: localColumn.dataType,
       description: localColumn.description.trim(),
       isPrimaryKey: localColumn.isPrimaryKey,
+      isForeignKey: localColumn.isForeignKey,
+      isNaturalKey: localColumn.isNaturalKey,
     });
     setEditingField(null);
   }, [mode, localColumn, existingColumnNames, column.name, onUpdate]);
@@ -224,6 +251,8 @@ export function ColumnRowEditor({
             dataType: column.dataType,
             description: column.description,
             isPrimaryKey: column.isPrimaryKey,
+            isForeignKey: column.isForeignKey,
+            isNaturalKey: column.isNaturalKey,
           });
           setEditingField(null);
         }
@@ -252,6 +281,8 @@ export function ColumnRowEditor({
             dataType: newType,
             description: localColumn.description.trim(),
             isPrimaryKey: localColumn.isPrimaryKey,
+            isForeignKey: localColumn.isForeignKey,
+            isNaturalKey: localColumn.isNaturalKey,
           });
         }
       }
@@ -285,20 +316,19 @@ export function ColumnRowEditor({
 
   return (
     <div className={rowClasses} {...rowProps}>
-      {/* PK/FK indicators */}
+      {/* PK/FK/NK key badges — always pass toggles so built columns can edit keys */}
       {showIndicators && (
-        <span className="column-row-editor__indicators">
-          {column.isPrimaryKey && (
-            <span className="column-row-editor__pk" title="Primary Key">
-              PK
-            </span>
-          )}
-          {column.isForeignKey && (
-            <span className="column-row-editor__fk" title="Foreign Key">
-              FK
-            </span>
-          )}
-        </span>
+        <KeyBadgeGroup
+          isPrimaryKey={column.isPrimaryKey ?? false}
+          isForeignKey={column.isForeignKey ?? false}
+          isNaturalKey={column.isNaturalKey ?? false}
+          mode={onTogglePK || onToggleFK || onToggleNK ? 'editable' : 'readonly'}
+          status={status}
+          onTogglePK={onTogglePK}
+          onToggleFK={onToggleFK}
+          onToggleNK={onToggleNK}
+          showMultiplePKWarning={showMultiplePKWarning}
+        />
       )}
 
       {/* Column name */}

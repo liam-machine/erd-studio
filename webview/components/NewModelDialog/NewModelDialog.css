@@ -227,24 +227,7 @@
   opacity: 0.85;
 }
 
-.new-model-dialog__col-indicators {
-  display: flex;
-  gap: 2px;
-  flex-shrink: 0;
-  min-width: 24px;
-}
-
-.new-model-dialog__pk {
-  display: inline-block;
-  padding: 0 3px;
-  border-radius: 2px;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1.5;
-  letter-spacing: 0.3px;
-  background: rgba(234, 179, 8, 0.2);
-  color: #ca8a04;
-}
+/* Key badges now handled by KeyBadgeGroup component */
 
 .new-model-dialog__col-name {
   flex: 1;
@@ -281,13 +264,7 @@
   border: 1px solid rgba(249, 115, 22, 0.2);
 }
 
-.new-model-dialog__col-pk-checkbox {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  accent-color: #ca8a04;
-}
+/* Old checkbox removed - using KeyBadgeGroup dropdown instead */
 
 .new-model-dialog__col-input {
   padding: 4px 6px;

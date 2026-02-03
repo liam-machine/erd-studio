@@ -30,13 +30,15 @@ export type ModelStatus = 'built' | 'approved' | 'design' | 'missing';
  */
 export type ColumnStatus = 'built' | 'approved' | 'planned' | 'missing';
 
-/** Column data enriched with PK/FK indicators for display in ModelNode. */
+/** Column data enriched with PK/FK/NK indicators for display in ModelNode. */
 export interface ColumnDisplay {
   name: string;
   dataType: string;
   isPrimaryKey: boolean;
   /** True if this column is the source of an FK relationship. */
   isForeignKey: boolean;
+  /** True if this column is a natural key (business identifier). */
+  isNaturalKey: boolean;
   /** Column status for row styling. */
   status: ColumnStatus;
   /** Whether this column has been approved for build. */

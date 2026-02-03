@@ -12,6 +12,7 @@ import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import type { ModelStatus, ReconciledColumn } from '../../../src/types/reconciled';
 import type { ColumnDef } from '../../../src/types/semantic';
+import type { ColumnKeyType } from '../../../src/types/messages';
 import './ColumnEditor.css';
 
 // ---------------------------------------------------------------------------
@@ -123,6 +124,24 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
     setIsAddingColumn(false);
   }, []);
 
+  // Handle toggling key type (PK/FK/NK)
+  const handleToggleKey = useCallback(
+    (columnName: string, keyType: ColumnKeyType, currentValue: boolean) => {
+      send({
+        type: 'toggleColumnKey',
+        payload: { modelName, columnName, keyType, value: !currentValue },
+      });
+    },
+    [send, modelName],
+  );
+
+  // Compute whether model has multiple PKs (for warning display)
+  const pkColumnNames = useMemo(
+    () => columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
+    [columns],
+  );
+  const hasMultiplePKs = pkColumnNames.length > 1;
+
   // --- Render ----------------------------------------------------------------
 
   const hasPlannedColumns = plannedColumns.length > 0 || isAddingColumn;
@@ -135,6 +154,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
     status: 'planned',
     isPrimaryKey: false,
     isForeignKey: false,
+    isNaturalKey: false,
     approved: false,
   };
 
@@ -163,7 +183,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
           <div className="column-editor__empty">No columns</div>
         )}
 
-        {/* Built columns (read-only) */}
+        {/* Built columns — editable key types, readonly other fields */}
         {builtColumns.map((col) => (
           <ColumnRowEditor
             key={col.name}
@@ -172,6 +192,10 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
             existingColumnNames={existingColumnNames}
             showIndicators={true}
             showDelete={false}
+            onTogglePK={() => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
+            onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
+            onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
+            showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
           />
         ))}
 
@@ -196,6 +220,10 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
             canApprove={modelStatus === 'built' || modelApproved}
             showIndicators={true}
             showDelete={true}
+            onTogglePK={() => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
+            onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
+            onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
+            showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
           />
         ))}
 

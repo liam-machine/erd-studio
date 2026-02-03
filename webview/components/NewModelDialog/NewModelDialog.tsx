@@ -17,6 +17,7 @@ import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
+import { KeyBadgeGroup } from '../common/KeyBadgeGroup';
 import type { ColumnDef, DesignModel, ModelTemplate } from '../../../src/types/semantic';
 import './NewModelDialog.css';
 
@@ -441,11 +442,13 @@ export function NewModelDialog() {
                   right: rightEntity || '{right}',
                 }).map((col) => (
                   <div key={col.name} className="new-model-dialog__column new-model-dialog__column--template">
-                    <span className="new-model-dialog__col-indicators">
-                      {col.isPrimaryKey && (
-                        <span className="new-model-dialog__pk" title="Primary Key">PK</span>
-                      )}
-                    </span>
+                    <KeyBadgeGroup
+                      isPrimaryKey={col.isPrimaryKey ?? false}
+                      isForeignKey={col.isForeignKey ?? false}
+                      isNaturalKey={col.isNaturalKey ?? false}
+                      mode="readonly"
+                      status="planned"
+                    />
                     <span className="new-model-dialog__col-name">{col.name}</span>
                     <span className="new-model-dialog__col-type">{col.dataType}</span>
                   </div>
@@ -461,12 +464,15 @@ export function NewModelDialog() {
               <div className="new-model-dialog__column-list">
                 {customColumns.map((col, idx) => (
                   <div key={idx} className="new-model-dialog__column-row">
-                    <input
-                      type="checkbox"
-                      className="new-model-dialog__col-pk-checkbox"
-                      checked={col.isPrimaryKey ?? false}
-                      onChange={(e) => handleColumnChange(idx, 'isPrimaryKey', e.target.checked)}
-                      title="Primary Key"
+                    <KeyBadgeGroup
+                      isPrimaryKey={col.isPrimaryKey ?? false}
+                      isForeignKey={col.isForeignKey ?? false}
+                      isNaturalKey={col.isNaturalKey ?? false}
+                      mode="editable"
+                      status="planned"
+                      onTogglePK={() => handleColumnChange(idx, 'isPrimaryKey', !col.isPrimaryKey)}
+                      onToggleFK={() => handleColumnChange(idx, 'isForeignKey', !col.isForeignKey)}
+                      onToggleNK={() => handleColumnChange(idx, 'isNaturalKey', !col.isNaturalKey)}
                     />
                     <input
                       type="text"

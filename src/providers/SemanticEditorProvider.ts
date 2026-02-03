@@ -183,6 +183,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'toggleColumnKey': {
+            const payload = (message as { payload?: { modelName: string; columnName: string; keyType: 'PK' | 'FK' | 'NK'; value: boolean } }).payload;
+            if (payload) {
+              await this.handleToggleColumnKey(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
           case 'addRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
@@ -700,6 +707,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         dataType: payload.column.dataType,
         description: payload.column.description,
         ...(payload.column.isPrimaryKey ? { isPrimaryKey: true } : {}),
+        ...(payload.column.isForeignKey ? { isForeignKey: true } : {}),
+        ...(payload.column.isNaturalKey ? { isNaturalKey: true } : {}),
         ...(payload.column.approved ? { approved: true } : {}),
       });
       model[targetArray] = columns;
@@ -797,14 +806,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
       }
 
-      // Update the column — preserve existing approval state unless explicitly changed
+      // Update the column — preserve existing key and approval state unless explicitly changed
+      const existingPK = columns[columnIndex].isPrimaryKey;
+      const existingFK = columns[columnIndex].isForeignKey;
+      const existingNK = columns[columnIndex].isNaturalKey;
       const existingApproved = columns[columnIndex].approved;
+      const newPK = payload.column.isPrimaryKey ?? existingPK;
+      const newFK = payload.column.isForeignKey ?? existingFK;
+      const newNK = payload.column.isNaturalKey ?? existingNK;
       const newApproved = payload.column.approved ?? existingApproved;
       columns[columnIndex] = {
         name: payload.column.name,
         dataType: payload.column.dataType,
         description: payload.column.description,
-        ...(payload.column.isPrimaryKey ? { isPrimaryKey: true } : {}),
+        ...(newPK ? { isPrimaryKey: true } : {}),
+        ...(newFK ? { isForeignKey: true } : {}),
+        ...(newNK ? { isNaturalKey: true } : {}),
         ...(newApproved ? { approved: true } : {}),
       };
 
@@ -913,6 +930,103 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to remove column: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle a `toggleColumnKey` message from the webview.
+   *
+   * Toggles PK/FK/NK flags on a column. For built columns, the key type
+   * override is stored in plannedColumns with the same name as the manifest column.
+   */
+  private async handleToggleColumnKey(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string; keyType: 'PK' | 'FK' | 'NK'; value: boolean },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+      const model = models.find((m) => m.name === payload.modelName);
+      if (!model) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${payload.modelName}" not found.` },
+        });
+        return;
+      }
+
+      // Map key type to field name
+      const fieldMap: Record<string, string> = {
+        PK: 'isPrimaryKey',
+        FK: 'isForeignKey',
+        NK: 'isNaturalKey',
+      };
+      const fieldName = fieldMap[payload.keyType];
+
+      // Determine which array to update based on model source
+      const isDesignModel = model.source === 'design';
+      const targetArray = isDesignModel ? 'columns' : 'plannedColumns';
+      const columns = (model[targetArray] ?? []) as Array<Record<string, unknown>>;
+
+      let column = columns.find((c) => c.name === payload.columnName);
+
+      // For built columns on repo models, we need to create a plannedColumns entry
+      // to store the key type override
+      if (!column && !isDesignModel) {
+        // Create an override entry in plannedColumns
+        column = { name: payload.columnName };
+        columns.push(column);
+        model[targetArray] = columns;
+      }
+
+      if (!column) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Column "${payload.columnName}" not found.` },
+        });
+        return;
+      }
+
+      // Toggle the key flag
+      if (payload.value) {
+        column[fieldName] = true;
+      } else {
+        delete column[fieldName];
+      }
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdates.set(document.uri.toString(), true);
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdates.delete(document.uri.toString());
+        await this.sendDomainData(document, webview);
+      } else {
+        this.pendingUpdates.delete(document.uri.toString());
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to toggle key type.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdates.delete(document.uri.toString());
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Toggle key failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to toggle key type: ${message}` },
       });
     }
   }

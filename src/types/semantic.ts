@@ -26,6 +26,10 @@ export interface ColumnDef {
   dataType: string;
   description: string;
   isPrimaryKey?: boolean;
+  /** Stored FK flag for design-time FK intent (separate from computed FK from relationships). */
+  isForeignKey?: boolean;
+  /** Natural key flag — business identifier like email, SKU, customer_code. */
+  isNaturalKey?: boolean;
   /** Whether this column has been approved for build. */
   approved?: boolean;
 }

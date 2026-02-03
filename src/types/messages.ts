@@ -300,6 +300,23 @@ export interface UnapproveColumnMessage {
   };
 }
 
+/** Key type for column key toggles. */
+export type ColumnKeyType = 'PK' | 'FK' | 'NK';
+
+/**
+ * Request to toggle a column's key type (PK, FK, or NK).
+ * Each key type is independent — a column can be any combination.
+ */
+export interface ToggleColumnKeyMessage {
+  type: 'toggleColumnKey';
+  payload: {
+    modelName: string;
+    columnName: string;
+    keyType: ColumnKeyType;
+    value: boolean;
+  };
+}
+
 /**
  * Request to approve a relationship.
  * Sets relationship.approved = true.
@@ -374,7 +391,8 @@ export type WebviewMessage =
   | ApproveColumnMessage
   | UnapproveColumnMessage
   | ApproveRelationshipMessage
-  | UnapproveRelationshipMessage;
+  | UnapproveRelationshipMessage
+  | ToggleColumnKeyMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

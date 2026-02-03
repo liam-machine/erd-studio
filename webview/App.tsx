@@ -585,6 +585,7 @@ function EditorCanvas() {
             const status = node.data?.status;
             const colors = getPaletteColors(paletteId);
             if (status === 'built') return colors.modelBuilt;
+            if (status === 'approved') return colors.modelApproved;
             if (status === 'design') return colors.modelDesign;
             if (status === 'missing') return colors.modelMissing;
             return colors.modelMissing;

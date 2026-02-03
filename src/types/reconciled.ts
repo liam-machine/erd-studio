@@ -59,14 +59,17 @@ export type ModelStatus = 'built' | 'approved' | 'design' | 'missing';
 // Reconciled column
 // ---------------------------------------------------------------------------
 
-/** A column with resolved status and PK/FK flags. */
+/** A column with resolved status and PK/FK/NK flags. */
 export interface ReconciledColumn {
   name: string;
   dataType: string;
   description: string;
   status: ColumnStatus;
   isPrimaryKey: boolean;
+  /** FK status — true if stored flag is set OR column is used in a relationship. */
   isForeignKey: boolean;
+  /** Natural key flag — business identifier like email, SKU, customer_code. */
+  isNaturalKey: boolean;
   /** Whether this column has been approved for build. */
   approved: boolean;
 }

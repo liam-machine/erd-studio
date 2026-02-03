@@ -149,22 +149,31 @@ export class ReconciliationService {
           description: col.description,
           status: isApproved ? 'approved' : 'planned',
           isPrimaryKey: col.isPrimaryKey === true,
-          isForeignKey: fkColumns.has(col.name),
+          // FK: true if stored flag is set OR column is used in a relationship
+          isForeignKey: col.isForeignKey === true || fkColumns.has(col.name),
+          isNaturalKey: col.isNaturalKey === true,
           approved: isApproved,
         });
         seenColumns.add(col.name);
       }
     } else if (manifestModel) {
       // Model is in manifest — use manifest columns (built)
+      // Check if we have any key overrides from planned columns
+      const plannedColumnsMap = new Map(
+        (model.plannedColumns ?? []).map((c) => [c.name, c]),
+      );
       for (const col of manifestModel.columns) {
         const isPk = this.isPrimaryKey(model, col.name);
+        // Allow key overrides from planned columns for built columns
+        const override = plannedColumnsMap.get(col.name);
         columns.push({
           name: col.name,
           dataType: col.data_type ?? 'unknown',
           description: col.description,
           status: 'built',
-          isPrimaryKey: isPk,
-          isForeignKey: fkColumns.has(col.name),
+          isPrimaryKey: override?.isPrimaryKey ?? isPk,
+          isForeignKey: override?.isForeignKey === true || fkColumns.has(col.name),
+          isNaturalKey: override?.isNaturalKey === true,
           approved: true, // Built columns are always approved
         });
         seenColumns.add(col.name);
@@ -184,7 +193,9 @@ export class ReconciliationService {
             description: col.description,
             status: isApproved ? 'approved' : 'planned',
             isPrimaryKey: this.isPrimaryKey(model, col.name),
-            isForeignKey: fkColumns.has(col.name),
+            // FK: true if stored flag is set OR column is used in a relationship
+            isForeignKey: col.isForeignKey === true || fkColumns.has(col.name),
+            isNaturalKey: col.isNaturalKey === true,
             approved: isApproved,
           });
           seenColumns.add(col.name);
@@ -234,6 +245,7 @@ export class ReconciliationService {
         status: 'missing',
         isPrimaryKey: true,
         isForeignKey: false,
+        isNaturalKey: false,
         approved: false, // Ghost columns are not approved
       });
       seenColumns.add(model.primaryKey);
@@ -249,6 +261,7 @@ export class ReconciliationService {
           status: 'missing',
           isPrimaryKey: false,
           isForeignKey: true,
+          isNaturalKey: false,
           approved: false, // Ghost columns are not approved
         });
         seenColumns.add(fkCol);

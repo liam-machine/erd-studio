@@ -22,6 +22,7 @@ import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
+import { KeyBadge } from '../common/KeyBadge';
 import './ModelNode.css';
 
 // ---------------------------------------------------------------------------
@@ -178,20 +179,28 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
     >
       <span className="model-node__col-indicators">
         {column.isPrimaryKey && (
-          <span
-            className={`model-node__pk${!isBuilt ? ' model-node__pk--planned' : ''}`}
-            title={isBuilt ? 'Primary Key' : 'Primary Key (planned)'}
-          >
-            PK
-          </span>
+          <KeyBadge
+            type="PK"
+            active={true}
+            mode="readonly"
+            status={isBuilt ? 'built' : 'planned'}
+          />
         )}
         {column.isForeignKey && (
-          <span
-            className={`model-node__fk${!isBuilt ? ' model-node__fk--planned' : ''}`}
-            title={isBuilt ? 'Foreign Key' : 'Foreign Key (planned)'}
-          >
-            FK
-          </span>
+          <KeyBadge
+            type="FK"
+            active={true}
+            mode="readonly"
+            status={isBuilt ? 'built' : 'planned'}
+          />
+        )}
+        {column.isNaturalKey && (
+          <KeyBadge
+            type="NK"
+            active={true}
+            mode="readonly"
+            status={isBuilt ? 'built' : 'planned'}
+          />
         )}
       </span>
       <span className="model-node__col-name" title={column.name}>
