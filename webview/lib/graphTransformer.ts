@@ -20,6 +20,7 @@ import type {
   FkFlowEdge,
   ColumnDisplay,
 } from '../types/graph';
+import { sortColumnsByKeyPriority } from './columnSort';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,10 +40,11 @@ const DEFAULT_POSITION = { x: 0, y: 0 };
 
 /**
  * Convert a ReconciledModel's columns to ColumnDisplay[].
- * Columns are already resolved by ReconciliationService — we just map the shape.
+ * Columns are already resolved by ReconciliationService — we just map the shape
+ * and sort by key priority (PK → NK → FK → non-key).
  */
 function mapColumns(model: ReconciledModel): ColumnDisplay[] {
-  return model.columns.map((col) => ({
+  const mapped = model.columns.map((col) => ({
     name: col.name,
     dataType: col.dataType,
     isPrimaryKey: col.isPrimaryKey,
@@ -51,6 +53,7 @@ function mapColumns(model: ReconciledModel): ColumnDisplay[] {
     status: col.status,
     approved: col.approved,
   }));
+  return sortColumnsByKeyPriority(mapped);
 }
 
 // ---------------------------------------------------------------------------

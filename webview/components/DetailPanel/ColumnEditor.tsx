@@ -10,6 +10,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { useMessageBus } from '../../hooks/useMessageBus';
+import { sortColumnsByKeyPriority } from '../../lib/columnSort';
 import type { ModelStatus, ReconciledColumn } from '../../../src/types/reconciled';
 import type { ColumnDef } from '../../../src/types/semantic';
 import type { ColumnKeyType } from '../../../src/types/messages';
@@ -36,7 +37,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
   // State for whether we're adding a new column
   const [isAddingColumn, setIsAddingColumn] = useState(false);
 
-  // Split columns into built and planned
+  // Split columns into built and planned, then sort each by key priority (PK → NK → FK)
   const { builtColumns, plannedColumns } = useMemo(() => {
     const built: ReconciledColumn[] = [];
     const planned: ReconciledColumn[] = [];
@@ -47,7 +48,10 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
         planned.push(col);
       }
     }
-    return { builtColumns: built, plannedColumns: planned };
+    return {
+      builtColumns: sortColumnsByKeyPriority(built),
+      plannedColumns: sortColumnsByKeyPriority(planned),
+    };
   }, [columns]);
 
   // All column names (for duplicate validation)
