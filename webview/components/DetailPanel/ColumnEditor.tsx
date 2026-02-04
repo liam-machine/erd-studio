@@ -37,6 +37,9 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
   // State for whether we're adding a new column
   const [isAddingColumn, setIsAddingColumn] = useState(false);
 
+  // State for tracking expanded columns (by column name)
+  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
+
   // Split columns into built and planned, then sort each by key priority (PK → NK → FK)
   const { builtColumns, plannedColumns } = useMemo(() => {
     const built: ReconciledColumn[] = [];
@@ -128,6 +131,29 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
     setIsAddingColumn(false);
   }, []);
 
+  // Handle toggling a single column's expanded state
+  const handleToggleExpand = useCallback((columnName: string) => {
+    setExpandedColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(columnName)) {
+        next.delete(columnName);
+      } else {
+        next.add(columnName);
+      }
+      return next;
+    });
+  }, []);
+
+  // Expand all columns
+  const handleExpandAll = useCallback(() => {
+    setExpandedColumns(new Set(columns.map((c) => c.name)));
+  }, [columns]);
+
+  // Collapse all columns
+  const handleCollapseAll = useCallback(() => {
+    setExpandedColumns(new Set());
+  }, []);
+
   // Handle toggling key type (PK/FK/NK)
   const handleToggleKey = useCallback(
     (columnName: string, keyType: ColumnKeyType, currentValue: boolean) => {
@@ -145,6 +171,10 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
     [columns],
   );
   const hasMultiplePKs = pkColumnNames.length > 1;
+
+  // Check expansion state for UI
+  const allExpanded = columns.length > 0 && expandedColumns.size === columns.length;
+  const anyExpanded = expandedColumns.size > 0;
 
   // --- Render ----------------------------------------------------------------
 
@@ -169,16 +199,43 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
         <h4 className="column-editor__title">
           Columns ({columns.length})
         </h4>
-        {isEditable && (
-          <button
-            className="column-editor__add-btn"
-            onClick={handleAddColumn}
-            disabled={isAddingColumn}
-            title="Add planned column"
-          >
-            + Add Column
-          </button>
-        )}
+        <div className="column-editor__header-actions">
+          {/* Expand/Collapse All buttons */}
+          {columns.length > 0 && (
+            <div className="column-editor__expand-controls">
+              {!allExpanded && (
+                <button
+                  className="column-editor__expand-btn"
+                  onClick={handleExpandAll}
+                  data-tooltip="Expand all"
+                  aria-label="Expand all descriptions"
+                >
+                  ⊞
+                </button>
+              )}
+              {anyExpanded && (
+                <button
+                  className="column-editor__expand-btn"
+                  onClick={handleCollapseAll}
+                  data-tooltip="Collapse all"
+                  aria-label="Collapse all descriptions"
+                >
+                  ⊟
+                </button>
+              )}
+            </div>
+          )}
+          {isEditable && (
+            <button
+              className="column-editor__add-btn"
+              onClick={handleAddColumn}
+              disabled={isAddingColumn}
+              title="Add planned column"
+            >
+              + Add Column
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Column list */}
@@ -200,6 +257,8 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
             onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
             onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
+            expanded={expandedColumns.has(col.name)}
+            onToggleExpand={() => handleToggleExpand(col.name)}
           />
         ))}
 
@@ -228,6 +287,8 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
             onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
             onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
+            expanded={expandedColumns.has(col.name)}
+            onToggleExpand={() => handleToggleExpand(col.name)}
           />
         ))}
 
@@ -242,6 +303,8 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
             onCancel={handleCancelNew}
             showIndicators={true}
             showDelete={false}
+            expanded={true}
+            onToggleExpand={() => {}}
           />
         )}
       </div>

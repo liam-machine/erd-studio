@@ -64,6 +64,10 @@ export interface ColumnRowEditorProps {
   onToggleNK?: () => void;
   /** Show warning if multiple PKs exist in model. */
   showMultiplePKWarning?: boolean;
+  /** Whether the description area is expanded. */
+  expanded?: boolean;
+  /** Callback when the expand/collapse chevron is clicked. */
+  onToggleExpand?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +118,8 @@ export function ColumnRowEditor({
   onToggleFK,
   onToggleNK,
   showMultiplePKWarning = false,
+  expanded = false,
+  onToggleExpand,
 }: ColumnRowEditorProps) {
   // Local state for editing
   const [localColumn, setLocalColumn] = useState<ColumnDef>({
@@ -124,13 +130,14 @@ export function ColumnRowEditor({
     isForeignKey: column.isForeignKey,
     isNaturalKey: column.isNaturalKey,
   });
-  const [editingField, setEditingField] = useState<'name' | 'dataType' | null>(
+  const [editingField, setEditingField] = useState<'name' | 'dataType' | 'description' | null>(
     mode === 'new' ? 'name' : null
   );
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Refs for auto-focus
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Track if we're in the middle of saving (prevents double-save)
   const isSavingRef = useRef(false);
@@ -165,6 +172,12 @@ export function ColumnRowEditor({
     if (editingField === 'name' && nameInputRef.current) {
       nameInputRef.current.focus();
       nameInputRef.current.select();
+    }
+    if (editingField === 'description' && descriptionInputRef.current) {
+      descriptionInputRef.current.focus();
+      // Move cursor to end of text
+      const len = descriptionInputRef.current.value.length;
+      descriptionInputRef.current.setSelectionRange(len, len);
     }
   }, [editingField]);
 
@@ -218,7 +231,7 @@ export function ColumnRowEditor({
 
   // Handle clicking a field to start editing
   const handleFieldClick = useCallback(
-    (field: 'name' | 'dataType') => {
+    (field: 'name' | 'dataType' | 'description') => {
       if (mode === 'readonly') return;
       // Mark that we're switching fields to prevent blur handler from saving
       isSwitchingFieldRef.current = true;
@@ -299,10 +312,22 @@ export function ColumnRowEditor({
     [onDelete]
   );
 
+  // Handle chevron toggle click
+  const handleChevronClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onToggleExpand?.();
+    },
+    [onToggleExpand]
+  );
+
   // --- Render --------------------------------------------------------------
 
   const isEditing = editingField !== null;
   const status = column.status ?? (mode === 'readonly' ? 'built' : 'planned');
+
+  // Check if description exists
+  const hasDescription = Boolean(localColumn.description?.trim());
 
   const rowClasses = [
     'column-row-editor',
@@ -310,102 +335,170 @@ export function ColumnRowEditor({
     mode !== 'readonly' && 'column-row-editor--editable',
     isEditing && 'column-row-editor--editing',
     validationError && 'column-row-editor--has-error',
+    expanded && 'column-row-editor--expanded',
   ]
     .filter(Boolean)
     .join(' ');
 
   return (
     <div className={rowClasses} {...rowProps}>
-      {/* PK/FK/NK key badges — always pass toggles so built columns can edit keys */}
-      {showIndicators && (
-        <KeyBadgeGroup
-          isPrimaryKey={column.isPrimaryKey ?? false}
-          isForeignKey={column.isForeignKey ?? false}
-          isNaturalKey={column.isNaturalKey ?? false}
-          mode={onTogglePK || onToggleFK || onToggleNK ? 'editable' : 'readonly'}
-          status={status}
-          onTogglePK={onTogglePK}
-          onToggleFK={onToggleFK}
-          onToggleNK={onToggleNK}
-          showMultiplePKWarning={showMultiplePKWarning}
-        />
-      )}
+      {/* Main row content */}
+      <div className="column-row-editor__main">
+        {/* Expand/collapse chevron */}
+        {onToggleExpand && (
+          <button
+            className="column-row-editor__chevron"
+            onClick={handleChevronClick}
+            title={expanded ? 'Collapse description' : 'Expand description'}
+            aria-label={expanded ? 'Collapse description' : 'Expand description'}
+            aria-expanded={expanded}
+          >
+            {expanded ? '▾' : '▸'}
+          </button>
+        )}
 
-      {/* Column name */}
-      {isEditing && editingField === 'name' ? (
-        <input
-          ref={nameInputRef}
-          type="text"
-          className={`column-row-editor__input ${validationError ? 'column-row-editor__input--error' : ''}`}
-          value={localColumn.name}
-          onChange={(e) =>
-            setLocalColumn((prev) => ({ ...prev, name: e.target.value }))
-          }
-          onKeyDown={handleKeyDown}
-          placeholder="column_name"
-        />
-      ) : (
-        <span
-          className="column-row-editor__name"
-          onClick={() => handleFieldClick('name')}
-          onMouseDown={(e) => e.preventDefault()} // Prevent blur before click registers
-          title={mode !== 'readonly' ? 'Click to edit' : undefined}
-        >
-          {localColumn.name || (
-            <em className="column-row-editor__placeholder">column_name</em>
-          )}
-        </span>
-      )}
+        {/* PK/FK/NK key badges — always pass toggles so built columns can edit keys */}
+        {showIndicators && (
+          <KeyBadgeGroup
+            isPrimaryKey={column.isPrimaryKey ?? false}
+            isForeignKey={column.isForeignKey ?? false}
+            isNaturalKey={column.isNaturalKey ?? false}
+            mode={onTogglePK || onToggleFK || onToggleNK ? 'editable' : 'readonly'}
+            status={status}
+            onTogglePK={onTogglePK}
+            onToggleFK={onToggleFK}
+            onToggleNK={onToggleNK}
+            showMultiplePKWarning={showMultiplePKWarning}
+          />
+        )}
 
-      {/* Data type */}
-      {isEditing && editingField === 'dataType' ? (
-        <DataTypeSelect
-          value={localColumn.dataType}
-          onChange={handleDataTypeChange}
-          onBlur={() => setEditingField(null)}
-          className="column-row-editor__type-select"
-          autoOpen={true}
-        />
-      ) : (
-        <span
-          className="column-row-editor__type"
-          onClick={() => handleFieldClick('dataType')}
-          onMouseDown={(e) => e.preventDefault()} // Prevent blur before click registers
-          title={mode !== 'readonly' ? 'Click to edit' : undefined}
-        >
-          {localColumn.dataType}
-        </span>
-      )}
-
-      {/* Approval toggle (for planned columns when canApprove is true) */}
-      {mode === 'editable' && canApprove && (
-        <button
-          className={`column-row-editor__approve ${column.approved ? 'column-row-editor__approve--approved' : ''}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (column.approved) {
-              onUnapprove?.();
-            } else {
-              onApprove?.();
+        {/* Column name */}
+        {isEditing && editingField === 'name' ? (
+          <input
+            ref={nameInputRef}
+            type="text"
+            className={`column-row-editor__input ${validationError ? 'column-row-editor__input--error' : ''}`}
+            value={localColumn.name}
+            onChange={(e) =>
+              setLocalColumn((prev) => ({ ...prev, name: e.target.value }))
             }
-          }}
-          title={column.approved ? 'Remove approval' : 'Approve column for build'}
-          aria-label={column.approved ? 'Unapprove column' : 'Approve column'}
-        >
-          {column.approved ? '✓' : '○'}
-        </button>
-      )}
+            onKeyDown={handleKeyDown}
+            placeholder="column_name"
+          />
+        ) : (
+          <span
+            className="column-row-editor__name"
+            onClick={() => handleFieldClick('name')}
+            onMouseDown={(e) => e.preventDefault()} // Prevent blur before click registers
+            title={mode !== 'readonly' ? 'Click to edit' : undefined}
+          >
+            {localColumn.name || (
+              <em className="column-row-editor__placeholder">column_name</em>
+            )}
+          </span>
+        )}
 
-      {/* Delete button */}
-      {showDelete && mode !== 'readonly' && mode !== 'new' && (
-        <button
-          className="column-row-editor__delete"
-          onClick={handleDeleteClick}
-          title="Delete column"
-          aria-label="Delete column"
-        >
-          ×
-        </button>
+        {/* Info indicator — shows when collapsed and has description */}
+        {!expanded && hasDescription && (
+          <span
+            className="column-row-editor__info-badge"
+            title={localColumn.description}
+            onClick={handleChevronClick}
+          >
+            ⓘ
+          </span>
+        )}
+
+        {/* Data type */}
+        {isEditing && editingField === 'dataType' ? (
+          <DataTypeSelect
+            value={localColumn.dataType}
+            onChange={handleDataTypeChange}
+            onBlur={() => setEditingField(null)}
+            className="column-row-editor__type-select"
+            autoOpen={true}
+          />
+        ) : (
+          <span
+            className="column-row-editor__type"
+            onClick={() => handleFieldClick('dataType')}
+            onMouseDown={(e) => e.preventDefault()} // Prevent blur before click registers
+            title={mode !== 'readonly' ? 'Click to edit' : undefined}
+          >
+            {localColumn.dataType}
+          </span>
+        )}
+
+        {/* Approval toggle (for planned columns when canApprove is true) */}
+        {mode === 'editable' && canApprove && (
+          <button
+            className={`column-row-editor__approve ${column.approved ? 'column-row-editor__approve--approved' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (column.approved) {
+                onUnapprove?.();
+              } else {
+                onApprove?.();
+              }
+            }}
+            title={column.approved ? 'Remove approval' : 'Approve column for build'}
+            aria-label={column.approved ? 'Unapprove column' : 'Approve column'}
+          >
+            {column.approved ? '✓' : '○'}
+          </button>
+        )}
+
+        {/* Delete button */}
+        {showDelete && mode !== 'readonly' && mode !== 'new' && (
+          <button
+            className="column-row-editor__delete"
+            onClick={handleDeleteClick}
+            title="Delete column"
+            aria-label="Delete column"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      {/* Expanded description area */}
+      {expanded && (
+        <div className="column-row-editor__description-area">
+          {editingField === 'description' ? (
+            <textarea
+              ref={descriptionInputRef}
+              className="column-row-editor__description-input"
+              value={localColumn.description}
+              onChange={(e) =>
+                setLocalColumn((prev) => ({ ...prev, description: e.target.value }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setLocalColumn((prev) => ({ ...prev, description: column.description }));
+                  setEditingField(null);
+                }
+                // Allow Enter for newlines in textarea, use Ctrl/Cmd+Enter to save
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  handleSave();
+                }
+              }}
+              placeholder="Add a description for this column..."
+              rows={2}
+            />
+          ) : (
+            <div
+              className={`column-row-editor__description-text ${!hasDescription ? 'column-row-editor__description-text--empty' : ''}`}
+              onClick={() => handleFieldClick('description')}
+              title={mode !== 'readonly' ? 'Click to edit description' : undefined}
+            >
+              {localColumn.description || (
+                mode !== 'readonly' ? 'Click to add description...' : 'No description'
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Validation error */}
