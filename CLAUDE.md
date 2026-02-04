@@ -133,8 +133,8 @@ Models, columns, and relationships follow a progression from design to built:
 |--------|-------------|-------|--------|
 | `design` | Planned model not yet in dbt | Orange | `source: 'design'` in JSON |
 | `approved` | Ready for build, reviewed | Teal | `source: 'design'` + `approved: true` |
-| `built` | Exists in dbt manifest | Blue | `source: 'repo'` and found in manifest |
-| `missing` | Referenced but not in manifest | Grey | `source: 'repo'` but not in manifest |
+| `built` | Exists in dbt manifest | Blue | `source: 'built'` and found in manifest |
+| `missing` | Referenced but not in manifest | Grey | `source: 'built'` but not in manifest |
 
 ### Column Status: `planned` → `approved` → `built`
 

@@ -6,7 +6,7 @@
   "models": [
     {
       "name": "fct_transactions",
-      "source": "repo"
+      "source": "built"
     }
   ],
   "relationships": [],

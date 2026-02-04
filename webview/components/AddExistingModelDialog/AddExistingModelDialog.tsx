@@ -3,7 +3,7 @@
  *
  * Displays a searchable list of models from the dbt manifest that are not yet
  * in the current domain. Selecting a model sends the `addExistingModel` message
- * to the extension host, which adds it with source: 'repo'.
+ * to the extension host, which adds it with source: 'built'.
  */
 
 import { useCallback, useMemo, useState } from 'react';

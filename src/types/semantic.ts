@@ -37,7 +37,7 @@ export interface ColumnDef {
 /**
  * A model entry in a semantic domain.
  *
- * - `source: "repo"` — exists in the dbt project; columns are resolved from
+ * - `source: "built"` — exists in the dbt project; columns are resolved from
  *   the compiled manifest at runtime. Use `primaryKey` to designate the PK
  *   and `plannedColumns` for columns not yet built.
  * - `source: "design"` — a planned model that doesn't exist yet; columns,
@@ -45,7 +45,7 @@ export interface ColumnDef {
  */
 export interface SemanticModel {
   name: string;
-  source: 'repo' | 'design';
+  source: 'built' | 'design';
   /** Schema the model will be materialised in (design models only). */
   schema?: string;
   /** Model description (design models only — repo models use manifest). */

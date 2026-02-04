@@ -35,7 +35,7 @@ describe('AutoReconciliationService', () => {
         layer: 'silver',
         description: '',
         models: [
-          { name: 'existing_model', source: 'repo' },
+          { name: 'existing_model', source: 'built' },
         ],
         relationships: [],
         viewConfig: {},
@@ -114,7 +114,7 @@ describe('AutoReconciliationService', () => {
             source: 'design',
             columns: [{ name: 'id', dataType: 'integer' }],
           },
-          { name: 'existing_model', source: 'repo' },
+          { name: 'existing_model', source: 'built' },
         ],
         relationships: [],
         viewConfig: {},
@@ -131,8 +131,8 @@ describe('AutoReconciliationService', () => {
     });
   });
 
-  describe('transitionModelToRepo', () => {
-    it('changes source from design to repo', () => {
+  describe('transitionModelToBuilt', () => {
+    it('changes source from design to built', () => {
       const domain: SemanticDomain = {
         schemaVersion: 1,
         domain: 'test',
@@ -154,10 +154,10 @@ describe('AutoReconciliationService', () => {
         { name: 'dim_customer', columns: [{ name: 'id', data_type: 'integer' }] },
       ]);
 
-      service.transitionModelToRepo(domain, 'dim_customer', manifest);
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
 
       const model = domain.models[0];
-      expect(model.source).toBe('repo');
+      expect(model.source).toBe('built');
     });
 
     it('removes inline columns array', () => {
@@ -183,7 +183,7 @@ describe('AutoReconciliationService', () => {
         { name: 'dim_customer', columns: [{ name: 'id', data_type: 'integer' }, { name: 'name', data_type: 'string' }] },
       ]);
 
-      service.transitionModelToRepo(domain, 'dim_customer', manifest);
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
 
       const model = domain.models[0];
       expect(model.columns).toBeUndefined();
@@ -213,7 +213,7 @@ describe('AutoReconciliationService', () => {
         { name: 'dim_customer', columns: [{ name: 'id', data_type: 'integer' }, { name: 'name', data_type: 'string' }] },
       ]);
 
-      service.transitionModelToRepo(domain, 'dim_customer', manifest);
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
 
       const model = domain.models[0];
       expect(model.plannedColumns).toBeDefined();
@@ -246,7 +246,7 @@ describe('AutoReconciliationService', () => {
         { name: 'dim_customer', columns: [{ name: 'id', data_type: 'integer' }, { name: 'name', data_type: 'string' }] },
       ]);
 
-      service.transitionModelToRepo(domain, 'dim_customer', manifest);
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
 
       const model = domain.models[0];
       expect(model.plannedColumns).toBeUndefined();
@@ -275,7 +275,7 @@ describe('AutoReconciliationService', () => {
         { name: 'dim_customer', columns: [{ name: 'customer_id', data_type: 'integer' }, { name: 'name', data_type: 'string' }] },
       ]);
 
-      service.transitionModelToRepo(domain, 'dim_customer', manifest);
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
 
       const model = domain.models[0];
       expect(model.primaryKey).toBe('customer_id');
@@ -305,7 +305,7 @@ describe('AutoReconciliationService', () => {
         { name: 'dim_customer', columns: [{ name: 'name', data_type: 'string' }] },
       ]);
 
-      service.transitionModelToRepo(domain, 'dim_customer', manifest);
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
 
       const model = domain.models[0];
       // primaryKey should NOT be set because customer_id is not in manifest
@@ -328,7 +328,7 @@ describe('AutoReconciliationService', () => {
       const manifest = createMockManifest([]);
 
       expect(() => {
-        service.transitionModelToRepo(domain, 'nonexistent', manifest);
+        service.transitionModelToBuilt(domain, 'nonexistent', manifest);
       }).toThrow('Model "nonexistent" not found in domain');
     });
 
@@ -338,7 +338,7 @@ describe('AutoReconciliationService', () => {
         domain: 'test',
         layer: 'silver',
         description: '',
-        models: [{ name: 'existing', source: 'repo' }],
+        models: [{ name: 'existing', source: 'built' }],
         relationships: [],
         viewConfig: {},
       };
@@ -347,7 +347,7 @@ describe('AutoReconciliationService', () => {
       ]);
 
       expect(() => {
-        service.transitionModelToRepo(domain, 'existing', manifest);
+        service.transitionModelToBuilt(domain, 'existing', manifest);
       }).toThrow('Model "existing" is not a design model');
     });
   });
@@ -359,7 +359,7 @@ describe('AutoReconciliationService', () => {
         domain: 'test',
         layer: 'silver',
         description: '',
-        models: [{ name: 'existing', source: 'repo' }],
+        models: [{ name: 'existing', source: 'built' }],
         relationships: [],
         viewConfig: {},
       };
@@ -403,8 +403,8 @@ describe('AutoReconciliationService', () => {
 
       expect(result.transitioned).toBe(true);
       expect(result.newlyBuiltModels).toEqual(['dim_customer', 'dim_product']);
-      expect(domain.models[0].source).toBe('repo');
-      expect(domain.models[1].source).toBe('repo');
+      expect(domain.models[0].source).toBe('built');
+      expect(domain.models[1].source).toBe('built');
     });
 
     it('only transitions models that exist in manifest', () => {
@@ -437,7 +437,7 @@ describe('AutoReconciliationService', () => {
 
       expect(result.transitioned).toBe(true);
       expect(result.newlyBuiltModels).toEqual(['dim_customer']);
-      expect(domain.models[0].source).toBe('repo'); // Transitioned
+      expect(domain.models[0].source).toBe('built'); // Transitioned
       expect(domain.models[1].source).toBe('design'); // Still design
     });
 
@@ -691,7 +691,7 @@ describe('AutoReconciliationService', () => {
       expect(result.transitioned).toBe(true);
       expect(result.newlyBuiltModels).toEqual(['dim_customer']);
       expect(result.newlyBuiltRelationships).toHaveLength(1);
-      expect(domain.models[0].source).toBe('repo');
+      expect(domain.models[0].source).toBe('built');
       expect(domain.relationships[0].source).toBeUndefined();
     });
 
@@ -701,7 +701,7 @@ describe('AutoReconciliationService', () => {
         domain: 'test',
         layer: 'silver',
         description: '',
-        models: [{ name: 'dim_customer', source: 'repo' }],
+        models: [{ name: 'dim_customer', source: 'built' }],
         relationships: [
           {
             fromModel: 'dim_order',

@@ -6,7 +6,7 @@
   "models": [
     {
       "name": "dim_work_lot",
-      "source": "repo",
+      "source": "built",
       "primaryKey": "work_lot_id",
       "plannedColumns": [
         {
@@ -122,7 +122,7 @@
     },
     {
       "name": "fct_work_events",
-      "source": "repo",
+      "source": "built",
       "plannedColumns": [
         {
           "name": "sdsdsssd",
@@ -194,7 +194,7 @@
     },
     {
       "name": "dim_project",
-      "source": "repo"
+      "source": "built"
     },
     {
       "name": "tttt",

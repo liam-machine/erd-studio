@@ -201,7 +201,7 @@ export interface UpdateViewConfigMessage {
 
 /**
  * Request to add an existing model from the manifest to the domain.
- * The model is added with source: 'repo'.
+ * The model is added with source: 'built'.
  * Phase 3: Domain Management.
  */
 export interface AddExistingModelMessage {
