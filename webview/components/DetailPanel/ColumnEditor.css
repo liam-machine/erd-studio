@@ -166,6 +166,11 @@
   text-transform: uppercase;
 }
 
+/* Status-specific separator colors */
+.column-editor__separator--approved .column-editor__separator-text {
+  color: var(--model-approved);
+}
+
 /* ---------------------------------------------------------------------------
    Bottom Add Button
    --------------------------------------------------------------------------- */

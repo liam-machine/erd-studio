@@ -22,6 +22,7 @@ import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
+import { groupColumnsByStatus } from '../../lib/columnGrouping';
 import { KeyBadge } from '../common/KeyBadge';
 import './ModelNode.css';
 
@@ -245,10 +246,13 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
     [openNodeContextMenu, modelName, status, approved],
   );
 
-  // Split columns into built and planned
-  const builtCols = useMemo(() => displayColumns.filter((c) => c.status === 'built'), [displayColumns]);
-  const plannedCols = useMemo(() => displayColumns.filter((c) => c.status !== 'built'), [displayColumns]);
-  const showSeparator = builtCols.length > 0 && plannedCols.length > 0;
+  // Group columns by status: built -> approved -> planned
+  const { built: builtCols, approved: approvedCols, planned: plannedCols } = useMemo(
+    () => groupColumnsByStatus(displayColumns),
+    [displayColumns]
+  );
+  const showBuiltApprovedSeparator = builtCols.length > 0 && approvedCols.length > 0;
+  const showApprovedPlannedSeparator = (builtCols.length > 0 || approvedCols.length > 0) && plannedCols.length > 0;
 
   return (
     <div
@@ -282,8 +286,9 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         </span>
       </div>
 
-      {/* Columns — ordered: built first, then planned/missing with separator */}
+      {/* Columns — ordered: built -> approved -> planned with separators */}
       <div className="model-node__columns">
+        {/* Built columns */}
         {builtCols.map((col) => (
           <ColumnRow
             key={col.name}
@@ -293,12 +298,27 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
           />
         ))}
 
-        {showSeparator && (
-          <div className="model-node__separator">
-            <span className="model-node__separator-label">planned</span>
-          </div>
+        {/* Separator: built -> approved */}
+        {showBuiltApprovedSeparator && (
+          <div className="model-node__separator model-node__separator--subtle" />
         )}
 
+        {/* Approved columns */}
+        {approvedCols.map((col) => (
+          <ColumnRow
+            key={col.name}
+            column={col}
+            modelName={modelName}
+            isBuilt={false}
+          />
+        ))}
+
+        {/* Separator: approved -> planned */}
+        {showApprovedPlannedSeparator && (
+          <div className="model-node__separator model-node__separator--subtle" />
+        )}
+
+        {/* Planned columns */}
         {plannedCols.map((col) => (
           <ColumnRow
             key={col.name}

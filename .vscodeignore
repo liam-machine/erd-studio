@@ -25,8 +25,9 @@ data engineer plugin/**
 
 # Dev/local files
 .claude/**
-.env
+.env*
 dev-preview.html
+.worktrees/**
 
 # dbt files (for testing only)
 models/**

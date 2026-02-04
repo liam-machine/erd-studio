@@ -164,7 +164,7 @@
   filter: brightness(1.15);
 }
 
-/* Separator between built and planned columns */
+/* Separator between status groups */
 .model-node__separator {
   display: flex;
   align-items: center;
@@ -182,6 +182,17 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--model-design);
+}
+
+/* Subtle separator variant (no label, just a line) for canvas view */
+.model-node__separator--subtle {
+  height: 1px;
+  padding: 0;
+  margin: 2px 0;
+  border-top: 1px solid var(--panel-border);
+  border-bottom: none;
+  background: transparent;
+  opacity: 0.6;
 }
 
 .model-node__col-indicators {

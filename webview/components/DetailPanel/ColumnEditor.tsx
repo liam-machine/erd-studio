@@ -10,7 +10,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { useMessageBus } from '../../hooks/useMessageBus';
-import { sortColumnsByKeyPriority } from '../../lib/columnSort';
+import { groupColumnsByStatus } from '../../lib/columnGrouping';
 import type { ModelStatus, ReconciledColumn } from '../../../src/types/reconciled';
 import type { ColumnDef } from '../../../src/types/semantic';
 import type { ColumnKeyType } from '../../../src/types/messages';
@@ -40,22 +40,11 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
   // State for tracking expanded columns (by column name)
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
 
-  // Split columns into built and planned, then sort each by key priority (PK → NK → FK)
-  const { builtColumns, plannedColumns } = useMemo(() => {
-    const built: ReconciledColumn[] = [];
-    const planned: ReconciledColumn[] = [];
-    for (const col of columns) {
-      if (col.status === 'built') {
-        built.push(col);
-      } else {
-        planned.push(col);
-      }
-    }
-    return {
-      builtColumns: sortColumnsByKeyPriority(built),
-      plannedColumns: sortColumnsByKeyPriority(planned),
-    };
-  }, [columns]);
+  // Group columns by status: built -> approved -> planned, sorted by key priority within each group
+  const { built: builtColumns, approved: approvedColumns, planned: plannedColumns } = useMemo(
+    () => groupColumnsByStatus(columns),
+    [columns]
+  );
 
   // All column names (for duplicate validation)
   const existingColumnNames = useMemo(
@@ -178,6 +167,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
 
   // --- Render ----------------------------------------------------------------
 
+  const hasApprovedColumns = approvedColumns.length > 0;
   const hasPlannedColumns = plannedColumns.length > 0 || isAddingColumn;
 
   // New column template for when user clicks "Add Column"
@@ -262,8 +252,38 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
           />
         ))}
 
-        {/* Separator between built and planned */}
-        {builtColumns.length > 0 && hasPlannedColumns && (
+        {/* Separator: built -> approved */}
+        {builtColumns.length > 0 && hasApprovedColumns && (
+          <div className="column-editor__separator column-editor__separator--approved">
+            <span className="column-editor__separator-text">APPROVED</span>
+          </div>
+        )}
+
+        {/* Approved columns (editable) */}
+        {approvedColumns.map((col) => (
+          <ColumnRowEditor
+            key={col.name}
+            column={col}
+            mode="editable"
+            existingColumnNames={existingColumnNames}
+            onUpdate={(updated) => handleColumnUpdate(col.name, updated, false)}
+            onDelete={() => handleColumnDelete(col.name)}
+            onApprove={() => handleColumnApprove(col.name)}
+            onUnapprove={() => handleColumnUnapprove(col.name)}
+            canApprove={modelStatus === 'built' || modelApproved}
+            showIndicators={true}
+            showDelete={true}
+            onTogglePK={() => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
+            onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
+            onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
+            showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
+            expanded={expandedColumns.has(col.name)}
+            onToggleExpand={() => handleToggleExpand(col.name)}
+          />
+        ))}
+
+        {/* Separator: approved -> planned */}
+        {(builtColumns.length > 0 || approvedColumns.length > 0) && hasPlannedColumns && (
           <div className="column-editor__separator">
             <span className="column-editor__separator-text">PLANNED</span>
           </div>
