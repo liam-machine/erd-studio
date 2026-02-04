@@ -113,10 +113,10 @@ describe('DomainService', () => {
 
       expect(domain.models).toHaveLength(4);
 
-      const repoModel = domain.models.find((m) => m.name === 'dim_work_lot');
-      expect(repoModel).toBeDefined();
-      expect(repoModel!.source).toBe('repo');
-      expect(repoModel!.columns).toBeUndefined();
+      const builtModel = domain.models.find((m) => m.name === 'dim_work_lot');
+      expect(builtModel).toBeDefined();
+      expect(builtModel!.source).toBe('built');
+      expect(builtModel!.columns).toBeUndefined();
 
       const designModel = domain.models.find((m) => m.name === 'dim_work_lot_status');
       expect(designModel).toBeDefined();

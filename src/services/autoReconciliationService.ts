@@ -4,7 +4,7 @@
  *
  * This service encapsulates the business logic for auto-reconciliation:
  * 1. Find design models that now exist in manifest
- * 2. Transition source from 'design' to 'repo'
+ * 2. Transition source from 'design' to 'built'
  * 3. Move inline columns NOT in manifest to plannedColumns (preserves user's planned work)
  * 4. Remove inline columns array (manifest becomes source of truth)
  *
@@ -58,13 +58,13 @@ export class AutoReconciliationService {
    * Algorithm:
    * 1. Find design columns NOT in manifest → move to plannedColumns
    * 2. Extract primary key from isPrimaryKey flag
-   * 3. Update model: source='repo', remove design-only fields
+   * 3. Update model: source='built', remove design-only fields
    *
    * @param domain - The semantic domain containing the model (will be mutated)
    * @param modelName - Name of the model to transition
    * @param manifest - The manifest data containing built model information
    */
-  transitionModelToRepo(
+  transitionModelToBuilt(
     domain: SemanticDomain,
     modelName: string,
     manifest: ManifestData,
@@ -121,24 +121,24 @@ export class AutoReconciliationService {
       primaryKey = pkColumn.name;
     }
 
-    // Build the repo model (replacing the design model)
-    // Note: approved flag is intentionally NOT preserved when transitioning to repo
+    // Build the built model (replacing the design model)
+    // Note: approved flag is intentionally NOT preserved when transitioning to built
     // because the model is now built (exists in manifest), so approval is no longer relevant
-    const repoModel: SemanticModel = {
+    const builtModel: SemanticModel = {
       name: model.name,
-      source: 'repo',
+      source: 'built',
     };
 
     if (primaryKey) {
-      repoModel.primaryKey = primaryKey;
+      builtModel.primaryKey = primaryKey;
     }
 
     if (plannedColumns.length > 0) {
-      repoModel.plannedColumns = plannedColumns;
+      builtModel.plannedColumns = plannedColumns;
     }
 
     // Replace in domain
-    domain.models[modelIndex] = repoModel;
+    domain.models[modelIndex] = builtModel;
   }
 
   /**
@@ -224,7 +224,7 @@ export class AutoReconciliationService {
 
     // Transition models
     for (const modelName of newlyBuiltModels) {
-      this.transitionModelToRepo(domain, modelName, manifest);
+      this.transitionModelToBuilt(domain, modelName, manifest);
     }
 
     // Transition relationships

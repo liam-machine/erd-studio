@@ -214,8 +214,8 @@ export class ReconciliationService {
    * Check if a column is the primary key for a model.
    */
   private isPrimaryKey(model: SemanticModel, columnName: string): boolean {
-    // For repo models, check the primaryKey field
-    if (model.source === 'repo' && model.primaryKey === columnName) {
+    // For built models, check the primaryKey field
+    if (model.source === 'built' && model.primaryKey === columnName) {
       return true;
     }
     // For design models, check the isPrimaryKey flag in columns

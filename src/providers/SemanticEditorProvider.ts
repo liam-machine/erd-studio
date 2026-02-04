@@ -457,7 +457,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    *
    * For each open editor:
    * - Detects design models that now exist in manifest
-   * - Transitions them: source 'design' → 'repo', moves unbuilt columns to plannedColumns
+   * - Transitions them: source 'design' → 'built', moves unbuilt columns to plannedColumns
    * - Persists changes via WorkspaceEdit
    * - Sends manifestRefreshed message to webview with newlyBuiltModels list
    *
@@ -1123,7 +1123,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       // Capture model info before removal (for tag management)
       const modelToRemove = models[modelIndex];
-      const isRepoModel = modelToRemove.source === 'repo';
+      const isBuiltModel = modelToRemove.source === 'built';
       const domainName = typeof parsed.domain === 'string' ? parsed.domain : undefined;
 
       // Remove the model (both design and repo models can be removed from the domain)
@@ -1159,8 +1159,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         try {
           await document.save();
 
-          // Remove domain tag from schema.yml for repo models only
-          if (isRepoModel && domainName) {
+          // Remove domain tag from schema.yml for built models only
+          if (isBuiltModel && domainName) {
             const tagEdit = await this.schemaTagService.removeDomainTag(
               payload.modelName,
               domainName,
@@ -1472,7 +1472,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Handle an `addExistingModel` message from the webview.
    *
-   * Adds an existing model from the manifest to the domain with source: 'repo'.
+   * Adds an existing model from the manifest to the domain with source: 'built'.
    * The model's columns will be resolved from the manifest during reconciliation.
    */
   private async handleAddExistingModel(
@@ -1511,10 +1511,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const existingPositions = (viewConfig.positions ?? {}) as Record<string, { x: number; y: number }>;
       const newPosition = this.findOpenPosition(existingPositions);
 
-      // Add the repo model (columns come from manifest via reconciliation)
+      // Add the built model (columns come from manifest via reconciliation)
       models.push({
         name: payload.modelName,
-        source: 'repo',
+        source: 'built',
       });
 
       // Auto-create relationships from manifest tests (F409 enhancement)
@@ -1654,8 +1654,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
           }
 
-          // Approve all planned columns (repo models)
-          if (model.source === 'repo' && Array.isArray(model.plannedColumns)) {
+          // Approve all planned columns (built models)
+          if (model.source === 'built' && Array.isArray(model.plannedColumns)) {
             for (const col of model.plannedColumns as Array<Record<string, unknown>>) {
               col.approved = true;
             }
@@ -1890,8 +1890,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
           const isModelApprovable = (model: Record<string, unknown> | undefined): boolean => {
             if (!model) return false;
-            // Repo models are always approvable (they're built or missing)
-            if (model.source === 'repo') return true;
+            // Built models are always approvable (they're built or missing)
+            if (model.source === 'built') return true;
             // Design models must be approved
             return model.approved === true;
           };
