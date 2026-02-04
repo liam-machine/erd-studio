@@ -49,6 +49,12 @@ export class LayerDecorationProvider implements vscode.FileDecorationProvider {
     // so we map to the closest chart color based on hue
     const color = hex.toLowerCase();
 
+    // Grey/silver tones (low saturation) - check FIRST before hue ranges
+    // Grey colors have undefined hue, so hue-based checks give wrong results
+    if (this.isLowSaturation(color)) {
+      return new vscode.ThemeColor('descriptionForeground');
+    }
+
     // Bronze/copper tones
     if (color === '#cd7f32' || this.isInHueRange(color, 20, 40)) {
       return new vscode.ThemeColor('charts.orange');
@@ -74,14 +80,14 @@ export class LayerDecorationProvider implements vscode.FileDecorationProvider {
       return new vscode.ThemeColor('charts.purple');
     }
 
-    // Red/pink tones
-    if (this.isInHueRange(color, 320, 360) || this.isInHueRange(color, 0, 20)) {
-      return new vscode.ThemeColor('charts.red');
+    // Pink tones (high hue, near red but distinct)
+    if (this.isInHueRange(color, 320, 360)) {
+      return new vscode.ThemeColor('charts.purple');
     }
 
-    // Grey/silver tones (low saturation)
-    if (this.isLowSaturation(color)) {
-      return new vscode.ThemeColor('descriptionForeground');
+    // Red tones
+    if (this.isInHueRange(color, 0, 20)) {
+      return new vscode.ThemeColor('charts.red');
     }
 
     // Default fallback

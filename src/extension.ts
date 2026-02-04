@@ -712,12 +712,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Step 4: Color picker
         const colorOptions = [
-          { label: '$(circle-filled) Blue', value: '#3b82f6' },
-          { label: '$(circle-filled) Green', value: '#22c55e' },
-          { label: '$(circle-filled) Purple', value: '#a855f7' },
-          { label: '$(circle-filled) Orange', value: '#f97316' },
-          { label: '$(circle-filled) Cyan', value: '#06b6d4' },
-          { label: '$(circle-filled) Pink', value: '#ec4899' },
+          { label: '⚪ Silver', value: '#a0a0a0' },
+          { label: '🟡 Gold', value: '#d4a800' },
+          { label: '🔵 Blue', value: '#3b82f6' },
+          { label: '🟢 Green', value: '#22c55e' },
+          { label: '🟣 Purple', value: '#a855f7' },
+          { label: '🟠 Orange', value: '#f97316' },
+          { label: '🔵 Cyan', value: '#06b6d4' },
+          { label: '🔴 Red', value: '#ef4444' },
           { label: '$(edit) Custom hex color...', value: 'custom' },
         ];
         const colorPick = await vscode.window.showQuickPick(colorOptions, {
@@ -833,12 +835,14 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             case 'color': {
               const colorOptions = [
-                { label: '$(circle-filled) Blue', value: '#3b82f6' },
-                { label: '$(circle-filled) Green', value: '#22c55e' },
-                { label: '$(circle-filled) Purple', value: '#a855f7' },
-                { label: '$(circle-filled) Orange', value: '#f97316' },
-                { label: '$(circle-filled) Cyan', value: '#06b6d4' },
-                { label: '$(circle-filled) Pink', value: '#ec4899' },
+                { label: '⚪ Silver', value: '#a0a0a0' },
+                { label: '🟡 Gold', value: '#d4a800' },
+                { label: '🔵 Blue', value: '#3b82f6' },
+                { label: '🟢 Green', value: '#22c55e' },
+                { label: '🟣 Purple', value: '#a855f7' },
+                { label: '🟠 Orange', value: '#f97316' },
+                { label: '🔵 Cyan', value: '#06b6d4' },
+                { label: '🔴 Red', value: '#ef4444' },
                 { label: '$(edit) Custom hex color...', value: 'custom' },
               ];
               const colorPick = await vscode.window.showQuickPick(colorOptions, {
