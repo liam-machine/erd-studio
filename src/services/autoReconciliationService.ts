@@ -92,15 +92,18 @@ export class AutoReconciliationService {
       manifestModel.columns.map((col) => col.name),
     );
 
-    // Find columns in design that are NOT yet built (preserve as planned)
+    // Process inline design columns in a single pass:
+    // - Columns NOT in manifest → full planned column entries (key flags stripped)
+    // - Columns IN manifest with key flags → minimal key-only override entries
+    //   (same pattern used by handleToggleColumnKey in SemanticEditorProvider)
     const inlineColumns = model.columns ?? [];
     const plannedColumns: ColumnDef[] = [];
+    const keyOverrides: ColumnDef[] = [];
 
     for (const col of inlineColumns) {
       if (!manifestColumnNames.has(col.name)) {
-        // Column doesn't exist in manifest yet - keep as planned
-        // Remove isPrimaryKey flag when moving to plannedColumns
-        // Preserve approved flag if set
+        // Column doesn't exist in manifest yet — keep as planned column.
+        // Key flags are stripped; they only apply to built columns.
         const plannedCol: ColumnDef = {
           name: col.name,
           dataType: col.dataType,
@@ -110,6 +113,26 @@ export class AutoReconciliationService {
           plannedCol.approved = true;
         }
         plannedColumns.push(plannedCol);
+      } else {
+        // Column IS in manifest — preserve any key flags as override
+        const hasKeyFlags =
+          col.isPrimaryKey === true ||
+          col.isForeignKey === true ||
+          col.isNaturalKey === true;
+
+        if (hasKeyFlags) {
+          const override = { name: col.name } as ColumnDef;
+          if (col.isPrimaryKey === true) {
+            override.isPrimaryKey = true;
+          }
+          if (col.isForeignKey === true) {
+            override.isForeignKey = true;
+          }
+          if (col.isNaturalKey === true) {
+            override.isNaturalKey = true;
+          }
+          keyOverrides.push(override);
+        }
       }
     }
 
@@ -133,8 +156,10 @@ export class AutoReconciliationService {
       builtModel.primaryKey = primaryKey;
     }
 
-    if (plannedColumns.length > 0) {
-      builtModel.plannedColumns = plannedColumns;
+    // Combine planned columns (not in manifest) with key overrides (in manifest)
+    const allPlannedColumns = [...plannedColumns, ...keyOverrides];
+    if (allPlannedColumns.length > 0) {
+      builtModel.plannedColumns = allPlannedColumns;
     }
 
     // Replace in domain

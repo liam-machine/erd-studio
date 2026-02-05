@@ -315,6 +315,225 @@ describe('AutoReconciliationService', () => {
       expect(model.plannedColumns![0].name).toBe('customer_id');
     });
 
+    it('preserves isPrimaryKey as plannedColumns override for manifest columns', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [
+          {
+            name: 'dim_customer',
+            source: 'design',
+            columns: [
+              { name: 'customer_id', dataType: 'integer', description: '', isPrimaryKey: true },
+              { name: 'name', dataType: 'string', description: '' },
+            ],
+          },
+        ],
+        relationships: [],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([
+        { name: 'dim_customer', columns: [{ name: 'customer_id', data_type: 'integer' }, { name: 'name', data_type: 'string' }] },
+      ]);
+
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
+
+      const model = domain.models[0];
+      expect(model.primaryKey).toBe('customer_id'); // Top-level field
+      expect(model.plannedColumns).toBeDefined();
+      const override = model.plannedColumns!.find((c) => c.name === 'customer_id');
+      expect(override).toBeDefined();
+      expect(override!.isPrimaryKey).toBe(true);
+      // Key-only override: no dataType or description
+      expect(override!.dataType).toBeUndefined();
+    });
+
+    it('preserves isForeignKey as plannedColumns override for manifest columns', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [
+          {
+            name: 'dim_order',
+            source: 'design',
+            columns: [
+              { name: 'order_id', dataType: 'integer', description: '', isPrimaryKey: true },
+              { name: 'customer_id', dataType: 'integer', description: '', isForeignKey: true },
+            ],
+          },
+        ],
+        relationships: [],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([
+        { name: 'dim_order', columns: [{ name: 'order_id', data_type: 'integer' }, { name: 'customer_id', data_type: 'integer' }] },
+      ]);
+
+      service.transitionModelToBuilt(domain, 'dim_order', manifest);
+
+      const model = domain.models[0];
+      const override = model.plannedColumns!.find((c) => c.name === 'customer_id');
+      expect(override).toBeDefined();
+      expect(override!.isForeignKey).toBe(true);
+      expect(override!.dataType).toBeUndefined();
+    });
+
+    it('preserves isNaturalKey as plannedColumns override for manifest columns', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [
+          {
+            name: 'dim_product',
+            source: 'design',
+            columns: [
+              { name: 'product_id', dataType: 'integer', description: '', isPrimaryKey: true },
+              { name: 'sku', dataType: 'string', description: '', isNaturalKey: true },
+            ],
+          },
+        ],
+        relationships: [],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([
+        { name: 'dim_product', columns: [{ name: 'product_id', data_type: 'integer' }, { name: 'sku', data_type: 'string' }] },
+      ]);
+
+      service.transitionModelToBuilt(domain, 'dim_product', manifest);
+
+      const model = domain.models[0];
+      const override = model.plannedColumns!.find((c) => c.name === 'sku');
+      expect(override).toBeDefined();
+      expect(override!.isNaturalKey).toBe(true);
+      expect(override!.dataType).toBeUndefined();
+    });
+
+    it('preserves multiple key flags on same column during transition', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [
+          {
+            name: 'dim_account',
+            source: 'design',
+            columns: [
+              {
+                name: 'account_number',
+                dataType: 'string',
+                description: '',
+                isPrimaryKey: true,
+                isForeignKey: true,
+                isNaturalKey: true,
+              },
+            ],
+          },
+        ],
+        relationships: [],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([
+        { name: 'dim_account', columns: [{ name: 'account_number', data_type: 'string' }] },
+      ]);
+
+      service.transitionModelToBuilt(domain, 'dim_account', manifest);
+
+      const model = domain.models[0];
+      const override = model.plannedColumns!.find((c) => c.name === 'account_number');
+      expect(override).toBeDefined();
+      expect(override!.isPrimaryKey).toBe(true);
+      expect(override!.isForeignKey).toBe(true);
+      expect(override!.isNaturalKey).toBe(true);
+    });
+
+    it('preserves key overrides alongside planned columns not in manifest', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [
+          {
+            name: 'dim_customer',
+            source: 'design',
+            columns: [
+              { name: 'customer_id', dataType: 'integer', description: '', isPrimaryKey: true },
+              { name: 'email', dataType: 'string', description: '', isNaturalKey: true },
+              { name: 'future_score', dataType: 'float', description: 'Planned column' },
+            ],
+          },
+        ],
+        relationships: [],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([
+        { name: 'dim_customer', columns: [
+          { name: 'customer_id', data_type: 'integer' },
+          { name: 'email', data_type: 'string' },
+        ] },
+      ]);
+
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
+
+      const model = domain.models[0];
+      expect(model.plannedColumns).toBeDefined();
+      expect(model.plannedColumns).toHaveLength(3);
+
+      // future_score: full planned column (not in manifest)
+      const futureCol = model.plannedColumns!.find((c) => c.name === 'future_score');
+      expect(futureCol).toBeDefined();
+      expect(futureCol!.dataType).toBe('float');
+      expect(futureCol!.isPrimaryKey).toBeUndefined();
+
+      // customer_id: key-only override (in manifest)
+      const pkOverride = model.plannedColumns!.find((c) => c.name === 'customer_id');
+      expect(pkOverride).toBeDefined();
+      expect(pkOverride!.isPrimaryKey).toBe(true);
+      expect(pkOverride!.dataType).toBeUndefined();
+
+      // email: key-only override (in manifest)
+      const nkOverride = model.plannedColumns!.find((c) => c.name === 'email');
+      expect(nkOverride).toBeDefined();
+      expect(nkOverride!.isNaturalKey).toBe(true);
+      expect(nkOverride!.dataType).toBeUndefined();
+    });
+
+    it('does not create overrides for columns without key flags', () => {
+      const domain: SemanticDomain = {
+        schemaVersion: 1,
+        domain: 'test',
+        layer: 'silver',
+        description: '',
+        models: [
+          {
+            name: 'dim_customer',
+            source: 'design',
+            columns: [
+              { name: 'id', dataType: 'integer', description: '' },
+              { name: 'name', dataType: 'string', description: '' },
+            ],
+          },
+        ],
+        relationships: [],
+        viewConfig: {},
+      };
+      const manifest = createMockManifest([
+        { name: 'dim_customer', columns: [{ name: 'id', data_type: 'integer' }, { name: 'name', data_type: 'string' }] },
+      ]);
+
+      service.transitionModelToBuilt(domain, 'dim_customer', manifest);
+
+      const model = domain.models[0];
+      expect(model.plannedColumns).toBeUndefined();
+    });
+
     it('throws error when model not found in domain', () => {
       const domain: SemanticDomain = {
         schemaVersion: 1,
