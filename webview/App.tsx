@@ -573,6 +573,7 @@ function EditorCanvas() {
         onMoveEnd={onMoveEnd}
         onEdgeContextMenu={onEdgeContextMenu}
         fitView={!shouldSkipFitView}
+        minZoom={0.05}
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
         panOnDrag={[1, 2]}

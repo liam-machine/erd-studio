@@ -59,15 +59,27 @@ function estimateNodeHeight(columnCount: number): number {
  * These produce a clean left-to-right layered layout with orthogonal edge
  * routing, 16:9 aspect ratio, and fixed port ordering (handles stay on
  * consistent sides).
+ *
+ * Coffman-Graham layering with a bound of 10 prevents star-schema hub nodes
+ * (like dim_work_lot with 20+ incoming FKs) from stacking all dependents
+ * into a single tall column. Network-simplex node placement minimises total
+ * edge length, and post-compaction further tightens the result.
  */
 export const DEFAULT_ELK_OPTIONS: Record<string, string> = {
   'elk.algorithm': 'layered',
   'elk.direction': 'RIGHT',
   'elk.edgeRouting': 'ORTHOGONAL',
   'elk.aspectRatio': '1.777',
-  'elk.spacing.nodeNode': '40',
+  'elk.spacing.nodeNode': '30',
   'elk.layered.spacing.nodeNodeBetweenLayers': '80',
   'elk.portConstraints': 'FIXED_ORDER',
+  // Limit nodes per layer to prevent tall single-column stacking
+  'elk.layered.layering.strategy': 'COFFMAN_GRAHAM',
+  'elk.layered.layering.coffmanGraham.layerBound': '10',
+  // Better node placement for star-schema graphs with hub nodes
+  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+  // Post-compaction to minimize edge lengths
+  'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH',
 };
 
 // ---------------------------------------------------------------------------
