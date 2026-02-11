@@ -16,7 +16,7 @@
  *   3. Release to open the relationship dialog with prefilled data
  */
 
-import { memo, useCallback, useMemo, useEffect, useRef, type CSSProperties } from 'react';
+import { memo, useCallback, useMemo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
@@ -65,6 +65,17 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
   const startDragLine = useEditorStore((s) => s.startDragLine);
   const updateDragLineMouse = useEditorStore((s) => s.updateDragLineMouse);
   const endDragLine = useEditorStore((s) => s.endDragLine);
+
+  // Stable selector: only re-renders when drag starts/ends, not on every mouse move
+  const dragSourceModel = useEditorStore((s) => s.dragLineState?.sourceModelName ?? null);
+
+  // Track whether cursor is over this column during a cross-model drag
+  const [isDropTarget, setIsDropTarget] = useState(false);
+
+  // Reset drop target state when drag ends
+  useEffect(() => {
+    if (!dragSourceModel) setIsDropTarget(false);
+  }, [dragSourceModel]);
 
   // Ref to the column element for position calculation
   const elementRef = useRef<HTMLDivElement>(null);
@@ -164,19 +175,35 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
     };
   }, [isDragging, endDrag, endDragLine, updateDragLineMouse, modelName, column.name]);
 
+  // Drop target: highlight when dragging from a different model and hovering this column
+  const isValidDropTarget = dragSourceModel !== null && dragSourceModel !== modelName;
+
+  const handleMouseEnter = useCallback(() => {
+    if (isValidDropTarget) setIsDropTarget(true);
+  }, [isValidDropTarget]);
+
+  // Compose with the long-press hook's onMouseLeave to avoid overwriting it
+  const handleMouseLeave = useCallback(() => {
+    setIsDropTarget(false);
+    handlers.onMouseLeave();
+  }, [handlers]);
+
   const statusClass = isBuilt
     ? 'model-node__column--built'
     : `model-node__column--${column.status}`;
 
   const pressClass = isPressing ? 'model-node__column--pressing' : '';
   const dragClass = isDragging ? 'model-node__column--dragging' : '';
+  const dropTargetClass = isDropTarget ? 'model-node__column--drop-target' : '';
 
   return (
     <div
       ref={elementRef}
-      className={`model-node__column ${statusClass} ${pressClass} ${dragClass} nodrag`.trim()}
+      className={`model-node__column ${statusClass} ${pressClass} ${dragClass} ${dropTargetClass} nodrag`.trim()}
       data-column-name={column.name}
+      onMouseEnter={handleMouseEnter}
       {...handlers}
+      onMouseLeave={handleMouseLeave}
     >
       <span className="model-node__col-indicators">
         {column.isPrimaryKey && (

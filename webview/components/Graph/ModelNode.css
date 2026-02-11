@@ -134,6 +134,15 @@
   box-shadow: inset 0 0 0 2px var(--edge-design);
 }
 
+/* Drop target — column under cursor during cross-model drag */
+.model-node__column--drop-target {
+  background: rgba(234, 88, 12, 0.18) !important;
+  box-shadow: inset 0 0 0 2px var(--edge-design), 0 0 10px 2px rgba(234, 88, 12, 0.35);
+  filter: brightness(1.2);
+  cursor: crosshair;
+  transition: box-shadow 0.1s ease, background 0.1s ease;
+}
+
 /* Column status variants — use CSS variables for palette support */
 .model-node__column--built {
   background: var(--model-built-bg);
