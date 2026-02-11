@@ -5,7 +5,7 @@
       "id": "silver",
       "label": "Silver",
       "abbreviation": "SLV",
-      "color": "#a855f7",
+      "color": "#a0a0a0",
       "creatable": true,
       "order": 0
     },

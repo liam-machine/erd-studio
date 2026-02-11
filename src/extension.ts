@@ -610,6 +610,35 @@ export function activate(context: vscode.ExtensionContext): void {
         },
       );
     }),
+    vscode.commands.registerCommand('dbtSemantic.syncDomainTags', async () => {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Syncing domain tags...',
+          cancellable: false,
+        },
+        async () => {
+          // Ensure manifest is loaded
+          await manifestService.loadManifest(workspaceRoot);
+
+          const tagsAdded = await schemaTagService.syncAllDomainTags(
+            domainService,
+            workspaceRoot,
+            semanticDir,
+          );
+
+          if (tagsAdded > 0) {
+            void vscode.window.showInformationMessage(
+              `Domain tags synced. ${tagsAdded} tag(s) added to schema files.`,
+            );
+          } else {
+            void vscode.window.showInformationMessage(
+              'Domain tags are already in sync — no changes needed.',
+            );
+          }
+        },
+      );
+    }),
     // F408: Set up semantic directory for new projects (welcome experience)
     vscode.commands.registerCommand(
       'dbtSemantic.setupSemanticDirectory',

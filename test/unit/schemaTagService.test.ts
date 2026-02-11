@@ -105,10 +105,14 @@ describe('SchemaTagService', () => {
 
       const edit = await service.addDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
 
-      expect(edit).not.toBeNull();
-      // The edit should contain a createFile operation
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      expect(edits.some((e: { type: string }) => e.type === 'createFile')).toBe(true);
+      // New files are written directly to disk (returns null, no WorkspaceEdit needed)
+      expect(edit).toBeNull();
+      expect(fs.existsSync(schemaPath)).toBe(true);
+
+      const content = yaml.load(fs.readFileSync(schemaPath, 'utf-8')) as Record<string, unknown>;
+      const models = content.models as Array<{ name: string; config?: { tags?: string[] } }>;
+      expect(models[0].name).toBe('dim_work_lot');
+      expect(models[0].config?.tags).toContain('domain:work-lots');
     });
 
     it('adds tag to existing schema.yml without tags', async () => {

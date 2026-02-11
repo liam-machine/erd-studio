@@ -1,4 +1,21 @@
-# dbt Semantic Designer — Project Context
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Build & Test Commands
+
+```bash
+npm run build          # Build both extension + webview bundles (esbuild)
+npm run watch          # Watch mode — rebuilds on change
+npm run compile        # Type-check only (both tsconfigs, no emit)
+npm run test           # Run unit tests (vitest)
+npm run test:watch     # Run tests in watch mode
+npm run package        # Production build (minified, no sourcemaps)
+```
+
+Single test file: `npx vitest run test/unit/domainService.test.ts`
+
+Tests use vitest with `vscode` module aliased to `test/__mocks__/vscode.ts`. Test fixtures live in `test/fixtures/`.
 
 ## Architecture
 
@@ -6,7 +23,103 @@ VS Code extension with dual build targets:
 - **Extension host** (Node.js, CJS) — `src/` directory
 - **Webview** (Browser, IIFE with React) — `webview/` directory
 
-Built with esbuild. Two TypeScript configs: `tsconfig.json` (Node.js) and `tsconfig.webview.json` (DOM).
+Built with esbuild (`esbuild.js`). Two TypeScript configs: `tsconfig.json` (Node.js) and `tsconfig.webview.json` (DOM). The webview tsconfig includes `src/types/**/*` so types are shared.
+
+### Data Flow
+
+```
+manifest.json ─┐
+                ├─→ ReconciliationService ─→ ReconciledDomain ─→ [message] ─→ graphTransformer ─→ React Flow
+domain.json ───┘
+```
+
+1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`)
+2. **DomainService** reads semantic domain JSON from `models/semantic/**/*.json`
+3. **ReconciliationService** merges both into a `ReconciledDomain` with resolved statuses
+4. Extension sends `domainLoaded` message to webview
+5. **graphTransformer** converts `ReconciledDomain` → React Flow nodes + edges
+6. **elkLayout** runs ELK auto-layout in a Web Worker (injected at build time as `__ELK_WORKER_CODE__`)
+
+### Extension Host (`src/`)
+
+| Directory | Purpose |
+|-----------|---------|
+| `providers/` | `SemanticEditorProvider` (custom editor), `DomainTreeProvider` (sidebar tree) |
+| `services/` | Business logic — manifest parsing, domain I/O, reconciliation, layers, templates |
+| `watchers/` | `FileWatcherService` — debounced watchers for manifest, domains, project config |
+| `types/` | Shared type definitions (imported by both host and webview) |
+
+### Webview (`webview/`)
+
+| Directory | Purpose |
+|-----------|---------|
+| `components/` | React components — `Graph/` (ModelNode, FkEdge), `DetailPanel/`, dialogs, toolbar |
+| `store/` | Zustand store (`editorStore.ts`) — UI state, selection, dialogs |
+| `hooks/` | `useMessageBus` (extension comms), `useVsCodeApi`, position/state persistence |
+| `lib/` | Pure functions — `graphTransformer`, `elkLayout`, `colorPalettes`, `columnSort` |
+| `styles/` | `theme.css` — CSS custom properties mapping VS Code theme vars |
+
+### Message Protocol (`src/types/messages.ts`)
+
+Extension ↔ Webview communication uses discriminated unions on `type` field:
+- **Extension → Webview**: `domainLoaded`, `domainUpdated`, `manifestRefreshed`, `error`
+- **Webview → Extension**: `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `approveModel`, `unapproveModel`, `updatePositions`, `runAutoLayout`, etc.
+
+All mutations go through `WorkspaceEdit` for undo/redo integration.
+
+## Key Conventions
+
+- Shared types live in `src/types/` and are included in both tsconfigs
+- Webview components use BEM CSS class naming
+- All colours use CSS custom properties from `webview/styles/theme.css`
+- React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
+- Extension host writes use `WorkspaceEdit` for undo/redo integration
+- ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
+
+## Status Lifecycle
+
+Models, columns, and relationships follow a progression from design to built:
+
+### Model Status: `design` → `approved` → `built`
+
+| Status | Description | Color | Source |
+|--------|-------------|-------|--------|
+| `design` | Planned model not yet in dbt | Orange | `source: 'design'` in JSON |
+| `approved` | Ready for build, reviewed | Teal | `source: 'design'` + `approved: true` |
+| `built` | Exists in dbt manifest | Blue | `source: 'built'` and found in manifest |
+| `missing` | Referenced but not in manifest | Grey | `source: 'built'` but not in manifest |
+
+### Column Status: `planned` → `approved` → `built`
+
+| Status | Description | Color |
+|--------|-------------|-------|
+| `planned` | Column defined but not in manifest | Orange |
+| `approved` | Column approved for build | Teal |
+| `built` | Column exists in manifest | Blue |
+
+### Relationship Status: `design` → `approved` → `built`
+
+| Status | Description | Color |
+|--------|-------------|-------|
+| `design` | Planned FK relationship | Orange |
+| `approved` | Relationship approved for build | Teal |
+| `built` | Relationship test exists in manifest | Blue |
+
+### Approval Rules
+
+1. **Models**: Can be approved via DetailPanel button or right-click context menu
+2. **Columns**:
+   - On design models: require model approval first
+   - On built models: can be approved independently (for planned columns)
+3. **Relationships**: Can only be approved when **both** connected models are `built` or `approved`
+
+### Cascade Behavior
+
+When **unapproving a model**, the following cascades automatically:
+- All columns in that model become unapproved
+- All relationships connected to that model become unapproved
+
+This maintains the invariant that approved items must have their dependencies also approved.
 
 ## Testing the Webview UI in Chrome
 
@@ -92,7 +205,7 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
    ```
    Then navigate to `http://localhost:8765/dev-preview.html`
 
-4. **Add test models/relationships** to the `domainLoaded` payload in `dev-preview.html` to render sample nodes and edges. The graph transformer (F108) converts `SemanticDomain` data into React Flow nodes/edges automatically.
+4. **Add test models/relationships** to the `domainLoaded` payload in `dev-preview.html` to render sample nodes and edges. The graph transformer converts `SemanticDomain` data into React Flow nodes/edges automatically.
 
 5. **Use Chrome browser automation** (claude-in-chrome) to take screenshots and verify visual output.
 
@@ -111,62 +224,9 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
 - Design many-to-one (orange solid with crow's foot)
 - Design one-to-one (orange dashed with perpendicular bars)
 
-The graph transformer (`webview/lib/graphTransformer.ts`, F108) converts the SemanticDomain data into React Flow nodes/edges. The colour scheme logic lives in `webview/lib/colorScheme.ts`.
+The graph transformer (`webview/lib/graphTransformer.ts`) converts the SemanticDomain data into React Flow nodes/edges. The colour scheme logic lives in `webview/lib/colorPalettes.ts`.
 
 To preview in Chrome: create `dev-preview.html` (see instructions above), run `npm run build`, serve with `npx http-server -p 8765 --cors -c-1`, and open `http://localhost:8765/dev-preview.html`.
-
-## Key Conventions
-
-- Shared types live in `src/types/` and are included in both tsconfigs
-- Webview components use BEM CSS class naming
-- All colours use CSS custom properties from `webview/styles/theme.css`
-- React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
-- Extension host writes use `WorkspaceEdit` for undo/redo integration
-
-## Status Lifecycle
-
-Models, columns, and relationships follow a progression from design to built:
-
-### Model Status: `design` → `approved` → `built`
-
-| Status | Description | Color | Source |
-|--------|-------------|-------|--------|
-| `design` | Planned model not yet in dbt | Orange | `source: 'design'` in JSON |
-| `approved` | Ready for build, reviewed | Teal | `source: 'design'` + `approved: true` |
-| `built` | Exists in dbt manifest | Blue | `source: 'built'` and found in manifest |
-| `missing` | Referenced but not in manifest | Grey | `source: 'built'` but not in manifest |
-
-### Column Status: `planned` → `approved` → `built`
-
-| Status | Description | Color |
-|--------|-------------|-------|
-| `planned` | Column defined but not in manifest | Orange |
-| `approved` | Column approved for build | Teal |
-| `built` | Column exists in manifest | Blue |
-
-### Relationship Status: `design` → `approved` → `built`
-
-| Status | Description | Color |
-|--------|-------------|-------|
-| `design` | Planned FK relationship | Orange |
-| `approved` | Relationship approved for build | Teal |
-| `built` | Relationship test exists in manifest | Blue |
-
-### Approval Rules
-
-1. **Models**: Can be approved via DetailPanel button or right-click context menu
-2. **Columns**:
-   - On design models: require model approval first
-   - On built models: can be approved independently (for planned columns)
-3. **Relationships**: Can only be approved when **both** connected models are `built` or `approved`
-
-### Cascade Behavior
-
-When **unapproving a model**, the following cascades automatically:
-- All columns in that model become unapproved
-- All relationships connected to that model become unapproved
-
-This maintains the invariant that approved items must have their dependencies also approved.
 
 ## Publishing to VS Code Marketplace
 

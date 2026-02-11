@@ -2,7 +2,7 @@
   "name": "dbt-semantic-designer",
   "displayName": "dbt Semantic Designer",
   "description": "Visualise semantic (FK-based) relationships between dbt models within curated business domains, with a design mode for planning new models, columns, and relationships.",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -55,6 +55,12 @@
         "command": "dbtSemantic.refreshManifest",
         "title": "Refresh Manifest",
         "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.syncDomainTags",
+        "title": "Sync Domain Tags to Schema Files",
+        "category": "dbt",
+        "icon": "$(sync)"
       },
       {
         "command": "dbtSemantic.renameDomain",
@@ -189,9 +195,14 @@
       ],
       "view/title": [
         {
+          "command": "dbtSemantic.syncDomainTags",
+          "when": "view == dbtSemantic.domainTree",
+          "group": "navigation@1"
+        },
+        {
           "command": "dbtSemantic.addLayer",
           "when": "view == dbtSemantic.domainTree",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ]
     },

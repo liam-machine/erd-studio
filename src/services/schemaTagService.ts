@@ -18,6 +18,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import * as yaml from 'js-yaml';
 
+import type { DomainService } from './domainService';
 import type { ManifestService } from './manifestService';
 
 /**
@@ -232,6 +233,63 @@ export class SchemaTagService {
       );
       return [];
     }
+  }
+
+  /**
+   * Sync domain tags for all built models across all semantic domain files.
+   *
+   * Iterates every domain JSON, finds built models, and ensures each has
+   * a `domain:{domain_name}` tag in its schema.yml. Skips models that
+   * already have the correct tag (idempotent).
+   *
+   * @param domainService - DomainService to discover all domains
+   * @param workspaceRoot - dbt project root path
+   * @param semanticDir - Semantic directory relative path (e.g., "models/semantic")
+   * @returns Number of tags added
+   */
+  async syncAllDomainTags(
+    domainService: DomainService,
+    workspaceRoot: string,
+    semanticDir: string,
+  ): Promise<number> {
+    const domains = domainService.listDomains(workspaceRoot, semanticDir);
+    let tagsAdded = 0;
+
+    for (const summary of domains) {
+      let domain;
+      try {
+        domain = domainService.getDomain(summary.filePath);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[SchemaTagService] Skipping ${summary.filePath}: ${message}`);
+        continue;
+      }
+
+      const domainName = domain.domain;
+      if (!domainName) {
+        continue;
+      }
+
+      for (const model of domain.models) {
+        if (model.source !== 'built') {
+          continue;
+        }
+
+        const tagEdit = await this.addDomainTag(model.name, domainName, workspaceRoot);
+        if (tagEdit) {
+          const success = await vscode.workspace.applyEdit(tagEdit);
+          if (success) {
+            tagsAdded++;
+          }
+        }
+      }
+    }
+
+    if (tagsAdded > 0) {
+      await vscode.workspace.saveAll(false);
+    }
+
+    return tagsAdded;
   }
 
   /**

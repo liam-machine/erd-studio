@@ -507,6 +507,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             try {
               await document.save();
 
+              // Add domain tags to schema.yml for newly built models
+              const domainName = typeof domain.domain === 'string' ? domain.domain : undefined;
+              if (domainName && result.newlyBuiltModels.length > 0) {
+                for (const modelName of result.newlyBuiltModels) {
+                  const tagEdit = await this.schemaTagService.addDomainTag(
+                    modelName,
+                    domainName,
+                    this.workspaceRoot,
+                  );
+                  if (tagEdit) {
+                    await vscode.workspace.applyEdit(tagEdit);
+                  }
+                }
+                await vscode.workspace.saveAll(false);
+              }
+
               // Build payload for manifestRefreshed message
               const reconciled = this.reconciliationService.reconcile(
                 domain,

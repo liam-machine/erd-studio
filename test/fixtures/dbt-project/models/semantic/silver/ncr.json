@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "domain": "ncr",
+  "layer": "silver",
+  "description": "ncr",
+  "modelFolder": "models/silver",
+  "models": [
+    {
+      "name": "sdcsdferw",
+      "source": "design",
+      "schema": "silver",
+      "description": "",
+      "columns": [
+        {
+          "name": "wefwefew",
+          "dataType": "DATE",
+          "description": "",
+          "isForeignKey": true
+        },
+        {
+          "name": "ewfw4ef",
+          "dataType": "STRING",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "name": "dim_project",
+      "source": "built",
+      "plannedColumns": [
+        {
+          "name": "project_id",
+          "isPrimaryKey": true,
+          "isForeignKey": true,
+          "isNaturalKey": true
+        },
+        {
+          "name": "project_name",
+          "isForeignKey": true
+        },
+        {
+          "name": "abdh",
+          "dataType": "STRING",
+          "description": "",
+          "isNaturalKey": true
+        },
+        {
+          "name": "dsd",
+          "dataType": "STRING",
+          "description": "",
+          "isPrimaryKey": true
+        }
+      ]
+    }
+  ],
+  "relationships": [],
+  "viewConfig": {
+    "positions": {
+      "sdcsdferw": {
+        "x": -138,
+        "y": -114
+      },
+      "dim_project": {
+        "x": -272,
+        "y": -451
+      }
+    }
+  }
+}
