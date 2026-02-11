@@ -139,11 +139,12 @@ export function NewModelDialog() {
     [modelName, template, leftEntity, rightEntity, existingModelNames],
   );
 
-  // Validate custom columns (all must have valid names)
+  // Only flag columns that have been touched (non-empty name) but are invalid.
+  // Empty columns are allowed while editing — they are filtered out on submit.
   const hasInvalidColumns = useMemo(
     () =>
       customColumns.some(
-        (col) => !col.name.trim() || !/^[a-z0-9_]+$/.test(col.name)
+        (col) => col.name.trim() !== '' && !/^[a-z0-9_]+$/.test(col.name)
       ),
     [customColumns]
   );
@@ -187,7 +188,9 @@ export function NewModelDialog() {
       left: leftEntity,
       right: rightEntity,
     });
-    const finalColumns = [...templateCols, ...customColumns];
+    // Filter out empty custom columns on submit
+    const validCustomColumns = customColumns.filter((col) => col.name.trim() !== '');
+    const finalColumns = [...templateCols, ...validCustomColumns];
 
     const newModel: DesignModel = {
       name: modelName.trim(),
@@ -475,6 +478,14 @@ export function NewModelDialog() {
                     </button>
                   </div>
                 ))}
+                {/* Inline add row at the bottom of the list */}
+                <div
+                  className="new-model-dialog__column-row new-model-dialog__column-row--add"
+                  onClick={handleAddColumn}
+                  title="Add another column"
+                >
+                  <span className="new-model-dialog__add-row-text">+ add column</span>
+                </div>
               </div>
             </div>
           )}

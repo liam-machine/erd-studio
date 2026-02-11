@@ -329,6 +329,27 @@
   background: rgba(244, 135, 113, 0.15);
 }
 
+/* Inline "add column" row at the bottom of the list */
+.new-model-dialog__column-row--add {
+  justify-content: center;
+  background: transparent;
+  border: 1px dashed var(--panel-border);
+  cursor: pointer;
+  padding: 5px 8px;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.new-model-dialog__column-row--add:hover {
+  background: rgba(249, 115, 22, 0.06);
+  border-color: rgba(249, 115, 22, 0.4);
+}
+
+.new-model-dialog__add-row-text {
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-style: italic;
+}
+
 .new-model-dialog__empty-columns {
   padding: 16px;
   text-align: center;
