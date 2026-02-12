@@ -19,7 +19,7 @@
    --------------------------------------------------------------------------- */
 
 .discrepancy-review-dialog {
-  width: 520px;
+  width: 600px;
   max-height: 500px;
   display: flex;
   flex-direction: column;
@@ -137,6 +137,37 @@
   color: var(--vscode-descriptionForeground, #888);
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
+}
+
+/* Type badges */
+
+.discrepancy-review-dialog__type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.discrepancy-review-dialog__type-badge--datatype {
+  background: rgba(204, 167, 0, 0.15);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.discrepancy-review-dialog__type-badge--extra {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+}
+
+.discrepancy-review-dialog__type-badge--missing {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+}
+
+.discrepancy-review-dialog__structural-label {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--vscode-descriptionForeground, #888);
 }
 
 /* Status badges */

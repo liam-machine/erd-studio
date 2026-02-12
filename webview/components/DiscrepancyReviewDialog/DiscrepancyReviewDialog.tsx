@@ -43,34 +43,55 @@ export function DiscrepancyReviewDialog() {
   }, [setDiscrepancyReviewModel]);
 
   const handleAccept = useCallback(
-    (columnName: string) => {
+    (col: ReconciledColumn & { discrepancy: NonNullable<ReconciledColumn['discrepancy']> }) => {
       if (!modelName) return;
-      send({
-        type: 'acceptDiscrepancy',
-        payload: { modelName, columnName },
-      });
+      if (col.discrepancy.structural) {
+        send({
+          type: 'acceptStructuralDiscrepancy',
+          payload: { modelName, columnName: col.name, discrepancyType: col.discrepancy.structural },
+        });
+      } else {
+        send({
+          type: 'acceptDiscrepancy',
+          payload: { modelName, columnName: col.name },
+        });
+      }
     },
     [send, modelName],
   );
 
   const handleReject = useCallback(
-    (columnName: string) => {
+    (col: ReconciledColumn & { discrepancy: NonNullable<ReconciledColumn['discrepancy']> }) => {
       if (!modelName) return;
-      send({
-        type: 'rejectDiscrepancy',
-        payload: { modelName, columnName },
-      });
+      if (col.discrepancy.structural) {
+        send({
+          type: 'rejectStructuralDiscrepancy',
+          payload: { modelName, columnName: col.name, discrepancyType: col.discrepancy.structural },
+        });
+      } else {
+        send({
+          type: 'rejectDiscrepancy',
+          payload: { modelName, columnName: col.name },
+        });
+      }
     },
     [send, modelName],
   );
 
   const handleUnreject = useCallback(
-    (columnName: string) => {
+    (col: ReconciledColumn & { discrepancy: NonNullable<ReconciledColumn['discrepancy']> }) => {
       if (!modelName) return;
-      send({
-        type: 'unrejectDiscrepancy',
-        payload: { modelName, columnName },
-      });
+      if (col.discrepancy.structural) {
+        send({
+          type: 'unrejectStructuralDiscrepancy',
+          payload: { modelName, columnName: col.name },
+        });
+      } else {
+        send({
+          type: 'unrejectDiscrepancy',
+          payload: { modelName, columnName: col.name },
+        });
+      }
     },
     [send, modelName],
   );
@@ -111,7 +132,7 @@ export function DiscrepancyReviewDialog() {
           <div className="discrepancy-review-dialog__subtitle">
             <span className="discrepancy-review-dialog__model-name">{modelName}</span>
             {' \u2014 '}
-            {discrepantColumns.length} column{discrepantColumns.length !== 1 ? 's' : ''} with datatype discrepancies
+            {discrepantColumns.length} column{discrepantColumns.length !== 1 ? 's' : ''} with discrepancies
           </div>
         </div>
 
@@ -121,6 +142,7 @@ export function DiscrepancyReviewDialog() {
             <thead>
               <tr>
                 <th>Column</th>
+                <th>Type</th>
                 <th>Expected</th>
                 <th>Actual</th>
                 <th>Status</th>
@@ -136,15 +158,40 @@ export function DiscrepancyReviewDialog() {
                   <td className="discrepancy-review-dialog__col-name">
                     {col.name}
                   </td>
-                  <td>
-                    <code className="discrepancy-review-dialog__expected">
-                      {col.discrepancy.dataType.expected}
-                    </code>
+                  <td className="discrepancy-review-dialog__type">
+                    {col.discrepancy.structural === 'extra' ? (
+                      <span className="discrepancy-review-dialog__type-badge discrepancy-review-dialog__type-badge--extra">Extra</span>
+                    ) : col.discrepancy.structural === 'missing' ? (
+                      <span className="discrepancy-review-dialog__type-badge discrepancy-review-dialog__type-badge--missing">Missing</span>
+                    ) : (
+                      <span className="discrepancy-review-dialog__type-badge discrepancy-review-dialog__type-badge--datatype">DataType</span>
+                    )}
                   </td>
                   <td>
-                    <code className="discrepancy-review-dialog__actual">
-                      {col.discrepancy.dataType.actual}
-                    </code>
+                    {col.discrepancy.dataType ? (
+                      <code className="discrepancy-review-dialog__expected">
+                        {col.discrepancy.dataType.expected}
+                      </code>
+                    ) : col.discrepancy.structural === 'extra' ? (
+                      <span className="discrepancy-review-dialog__structural-label">Not designed</span>
+                    ) : col.discrepancy.structural === 'missing' ? (
+                      <code className="discrepancy-review-dialog__expected">
+                        {col.dataType}
+                      </code>
+                    ) : '—'}
+                  </td>
+                  <td>
+                    {col.discrepancy.dataType ? (
+                      <code className="discrepancy-review-dialog__actual">
+                        {col.discrepancy.dataType.actual}
+                      </code>
+                    ) : col.discrepancy.structural === 'extra' ? (
+                      <code className="discrepancy-review-dialog__actual">
+                        {col.dataType}
+                      </code>
+                    ) : col.discrepancy.structural === 'missing' ? (
+                      <span className="discrepancy-review-dialog__structural-label">Not built</span>
+                    ) : '—'}
                   </td>
                   <td>
                     {col.discrepancy.rejected ? (
@@ -161,7 +208,7 @@ export function DiscrepancyReviewDialog() {
                     {col.discrepancy.rejected ? (
                       <button
                         className="discrepancy-review-dialog__btn"
-                        onClick={() => handleUnreject(col.name)}
+                        onClick={() => handleUnreject(col)}
                         title="Clear rejection"
                       >
                         Undo
@@ -170,14 +217,14 @@ export function DiscrepancyReviewDialog() {
                       <>
                         <button
                           className="discrepancy-review-dialog__btn discrepancy-review-dialog__btn--accept"
-                          onClick={() => handleAccept(col.name)}
-                          title="Accept manifest value"
+                          onClick={() => handleAccept(col)}
+                          title={col.discrepancy.structural ? 'Accept and resolve' : 'Accept manifest value'}
                         >
                           Accept
                         </button>
                         <button
                           className="discrepancy-review-dialog__btn discrepancy-review-dialog__btn--reject"
-                          onClick={() => handleReject(col.name)}
+                          onClick={() => handleReject(col)}
                           title="Flag as non-conforming"
                         >
                           Reject

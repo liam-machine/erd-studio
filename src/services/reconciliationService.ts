@@ -166,13 +166,21 @@ export class ReconciliationService {
       const plannedColumnsMap = new Map(
         (model.plannedColumns ?? []).map((c) => [c.name, c]),
       );
+
+      // Build designedColumns set for structural discrepancy detection
+      const designedSet = model.designedColumns
+        ? new Set(model.designedColumns)
+        : undefined;
+
       for (const col of manifestModel.columns) {
         const isPk = this.isPrimaryKey(model, col.name);
         // Allow key overrides from planned columns for built columns
         const override = plannedColumnsMap.get(col.name);
 
-        // Detect dataType discrepancy: override has expectedDataType that still differs from manifest
+        // Detect discrepancies
         let discrepancy: ReconciledColumn['discrepancy'];
+
+        // DataType discrepancy: override has expectedDataType that still differs from manifest
         if (override?.expectedDataType) {
           const actualType = col.data_type ?? 'unknown';
           if (override.expectedDataType !== actualType) {
@@ -182,6 +190,14 @@ export class ReconciliationService {
             };
           }
           // If expectedDataType now matches manifest, discrepancy auto-resolves (not shown)
+        }
+
+        // Structural discrepancy: extra column (in manifest but not in original design)
+        if (!discrepancy && designedSet && !designedSet.has(col.name)) {
+          discrepancy = {
+            structural: 'extra',
+            rejected: override?.structuralRejected === true,
+          };
         }
 
         columns.push({
@@ -206,6 +222,16 @@ export class ReconciliationService {
           // Repo models: column can be approved independently
           // Design models would use the inline columns path above, not this
           const isApproved = col.approved === true;
+
+          // Structural discrepancy: missing column (was in original design but not in manifest)
+          let discrepancy: ReconciledColumn['discrepancy'];
+          if (designedSet && designedSet.has(col.name)) {
+            discrepancy = {
+              structural: 'missing',
+              rejected: col.structuralRejected === true,
+            };
+          }
+
           columns.push({
             name: col.name,
             dataType: col.dataType,
@@ -216,6 +242,7 @@ export class ReconciliationService {
             isForeignKey: col.isForeignKey === true || fkColumns.has(col.name),
             isNaturalKey: col.isNaturalKey === true,
             approved: isApproved,
+            ...(discrepancy ? { discrepancy } : {}),
           });
           seenColumns.add(col.name);
         }

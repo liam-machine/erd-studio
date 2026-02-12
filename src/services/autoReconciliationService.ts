@@ -158,6 +158,9 @@ export class AutoReconciliationService {
       primaryKey = pkColumn.name;
     }
 
+    // Capture original design column names for structural discrepancy detection
+    const designedColumnNames = inlineColumns.map((c) => c.name);
+
     // Build the built model (replacing the design model)
     // Note: approved flag is intentionally NOT preserved when transitioning to built
     // because the model is now built (exists in manifest), so approval is no longer relevant
@@ -165,6 +168,10 @@ export class AutoReconciliationService {
       name: model.name,
       source: 'built',
     };
+
+    if (designedColumnNames.length > 0) {
+      builtModel.designedColumns = designedColumnNames;
+    }
 
     if (primaryKey) {
       builtModel.primaryKey = primaryKey;

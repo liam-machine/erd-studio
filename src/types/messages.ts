@@ -406,11 +406,53 @@ export interface UnrejectDiscrepancyMessage {
 /**
  * Request to accept all column discrepancies for a model.
  * Removes all expectedDataType fields from plannedColumns overrides.
+ * Also clears structural discrepancies: removes extras from designedColumns,
+ * removes missing from both plannedColumns and designedColumns.
  */
 export interface AcceptAllDiscrepanciesMessage {
   type: 'acceptAllDiscrepancies';
   payload: {
     modelName: string;
+  };
+}
+
+/**
+ * Request to accept a structural discrepancy (extra or missing column).
+ * - Extra: removes column name from designedColumns (acknowledge the column exists)
+ * - Missing: removes column from plannedColumns AND designedColumns (stop expecting it)
+ */
+export interface AcceptStructuralDiscrepancyMessage {
+  type: 'acceptStructuralDiscrepancy';
+  payload: {
+    modelName: string;
+    columnName: string;
+    discrepancyType: 'extra' | 'missing';
+  };
+}
+
+/**
+ * Request to reject a structural discrepancy (extra or missing column).
+ * - Extra: creates/updates plannedColumns override with structuralRejected: true
+ * - Missing: sets structuralRejected: true on existing plannedColumns entry
+ */
+export interface RejectStructuralDiscrepancyMessage {
+  type: 'rejectStructuralDiscrepancy';
+  payload: {
+    modelName: string;
+    columnName: string;
+    discrepancyType: 'extra' | 'missing';
+  };
+}
+
+/**
+ * Request to un-reject a structural discrepancy.
+ * Clears structuralRejected flag and removes empty overrides.
+ */
+export interface UnrejectStructuralDiscrepancyMessage {
+  type: 'unrejectStructuralDiscrepancy';
+  payload: {
+    modelName: string;
+    columnName: string;
   };
 }
 
@@ -443,7 +485,10 @@ export type WebviewMessage =
   | AcceptDiscrepancyMessage
   | RejectDiscrepancyMessage
   | UnrejectDiscrepancyMessage
-  | AcceptAllDiscrepanciesMessage;
+  | AcceptAllDiscrepanciesMessage
+  | AcceptStructuralDiscrepancyMessage
+  | RejectStructuralDiscrepancyMessage
+  | UnrejectStructuralDiscrepancyMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

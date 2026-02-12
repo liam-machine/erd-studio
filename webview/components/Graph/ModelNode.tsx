@@ -305,7 +305,7 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         {discrepancyCount && discrepancyCount > 0 ? (
           <span
             className="model-node__discrepancy-badge"
-            title={`${discrepancyCount} datatype discrepanc${discrepancyCount > 1 ? 'ies' : 'y'} detected`}
+            title={`${discrepancyCount} discrepanc${discrepancyCount > 1 ? 'ies' : 'y'} detected`}
           >
             ⚠ {discrepancyCount}
           </span>

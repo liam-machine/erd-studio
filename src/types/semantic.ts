@@ -43,6 +43,12 @@ export interface ColumnDef {
    * When true, the discrepancy is still shown but with a "rejected" visual indicator.
    */
   rejected?: boolean;
+  /**
+   * Whether a structural discrepancy (extra column) has been explicitly rejected.
+   * Used on plannedColumns overrides for columns that exist in manifest but were
+   * not part of the original design (extra columns flagged as unwanted).
+   */
+  structuralRejected?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +91,14 @@ export interface SemanticModel {
    * New columns added after approval start as unapproved.
    */
   approved?: boolean;
+  /**
+   * Original design column names captured during design→built transition.
+   * Used by ReconciliationService to detect structural discrepancies:
+   * - Extra columns: in manifest but not in designedColumns
+   * - Missing columns: in designedColumns but not in manifest
+   * Only present on models that transitioned from design to built.
+   */
+  designedColumns?: string[];
 }
 
 /**

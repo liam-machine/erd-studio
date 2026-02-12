@@ -156,35 +156,56 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
     [send, modelName],
   );
 
-  // Handle accepting a discrepancy
+  // Handle accepting a discrepancy (dataType or structural)
   const handleAcceptDiscrepancy = useCallback(
-    (columnName: string) => {
-      send({
-        type: 'acceptDiscrepancy',
-        payload: { modelName, columnName },
-      });
+    (col: ReconciledColumn) => {
+      if (col.discrepancy?.structural) {
+        send({
+          type: 'acceptStructuralDiscrepancy',
+          payload: { modelName, columnName: col.name, discrepancyType: col.discrepancy.structural },
+        });
+      } else {
+        send({
+          type: 'acceptDiscrepancy',
+          payload: { modelName, columnName: col.name },
+        });
+      }
     },
     [send, modelName],
   );
 
-  // Handle rejecting a discrepancy
+  // Handle rejecting a discrepancy (dataType or structural)
   const handleRejectDiscrepancy = useCallback(
-    (columnName: string) => {
-      send({
-        type: 'rejectDiscrepancy',
-        payload: { modelName, columnName },
-      });
+    (col: ReconciledColumn) => {
+      if (col.discrepancy?.structural) {
+        send({
+          type: 'rejectStructuralDiscrepancy',
+          payload: { modelName, columnName: col.name, discrepancyType: col.discrepancy.structural },
+        });
+      } else {
+        send({
+          type: 'rejectDiscrepancy',
+          payload: { modelName, columnName: col.name },
+        });
+      }
     },
     [send, modelName],
   );
 
-  // Handle un-rejecting a discrepancy
+  // Handle un-rejecting a discrepancy (dataType or structural)
   const handleUnrejectDiscrepancy = useCallback(
-    (columnName: string) => {
-      send({
-        type: 'unrejectDiscrepancy',
-        payload: { modelName, columnName },
-      });
+    (col: ReconciledColumn) => {
+      if (col.discrepancy?.structural) {
+        send({
+          type: 'unrejectStructuralDiscrepancy',
+          payload: { modelName, columnName: col.name },
+        });
+      } else {
+        send({
+          type: 'unrejectDiscrepancy',
+          payload: { modelName, columnName: col.name },
+        });
+      }
     },
     [send, modelName],
   );
@@ -301,9 +322,9 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={() => handleToggleExpand(col.name)}
-            onAcceptDiscrepancy={col.discrepancy ? () => handleAcceptDiscrepancy(col.name) : undefined}
-            onRejectDiscrepancy={col.discrepancy && !col.discrepancy.rejected ? () => handleRejectDiscrepancy(col.name) : undefined}
-            onUnrejectDiscrepancy={col.discrepancy?.rejected ? () => handleUnrejectDiscrepancy(col.name) : undefined}
+            onAcceptDiscrepancy={col.discrepancy ? () => handleAcceptDiscrepancy(col) : undefined}
+            onRejectDiscrepancy={col.discrepancy && !col.discrepancy.rejected ? () => handleRejectDiscrepancy(col) : undefined}
+            onUnrejectDiscrepancy={col.discrepancy?.rejected ? () => handleUnrejectDiscrepancy(col) : undefined}
           />
         ))}
 
@@ -364,6 +385,9 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={() => handleToggleExpand(col.name)}
+            onAcceptDiscrepancy={col.discrepancy ? () => handleAcceptDiscrepancy(col) : undefined}
+            onRejectDiscrepancy={col.discrepancy && !col.discrepancy.rejected ? () => handleRejectDiscrepancy(col) : undefined}
+            onUnrejectDiscrepancy={col.discrepancy?.rejected ? () => handleUnrejectDiscrepancy(col) : undefined}
           />
         ))}
 

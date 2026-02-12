@@ -322,6 +322,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'acceptStructuralDiscrepancy': {
+            const payload = (message as { payload?: { modelName: string; columnName: string; discrepancyType: 'extra' | 'missing' } }).payload;
+            if (payload) {
+              await this.handleAcceptStructuralDiscrepancy(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'rejectStructuralDiscrepancy': {
+            const payload = (message as { payload?: { modelName: string; columnName: string; discrepancyType: 'extra' | 'missing' } }).payload;
+            if (payload) {
+              await this.handleRejectStructuralDiscrepancy(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'unrejectStructuralDiscrepancy': {
+            const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
+            if (payload) {
+              await this.handleUnrejectStructuralDiscrepancy(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
         }
       },
     );
@@ -2175,7 +2196,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Accept all column discrepancies for a model — removes all expectedDataType
-   * fields and rejected flags from plannedColumns overrides.
+   * fields and rejected flags from plannedColumns overrides, and clears structural
+   * discrepancies by updating designedColumns.
    */
   private async handleAcceptAllDiscrepancies(
     document: vscode.TextDocument,
@@ -2193,16 +2215,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
 
           const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+          const designedColumns = (model.designedColumns ?? []) as string[];
 
-          // Remove expectations and clean up empty entries (iterate in reverse for safe splice)
+          // Track columns to remove from plannedColumns (missing structural accept)
+          const missingToRemove = new Set<string>();
+
+          // Remove dataType expectations and structural flags (iterate in reverse for safe splice)
           for (let i = plannedColumns.length - 1; i >= 0; i--) {
             const col = plannedColumns[i];
-            if (!col.expectedDataType) {
-              continue; // No expectation on this entry
+            let changed = false;
+
+            // Clear dataType discrepancy
+            if (col.expectedDataType) {
+              delete col.expectedDataType;
+              delete col.rejected;
+              changed = true;
             }
 
-            delete col.expectedDataType;
-            delete col.rejected;
+            // Clear structural discrepancy
+            if (col.structuralRejected !== undefined) {
+              delete col.structuralRejected;
+              changed = true;
+            }
+
+            // Check if this is a missing column (in designedColumns but not manifest)
+            // If so, accepting means removing from plannedColumns
+            if (designedColumns.includes(col.name as string)) {
+              missingToRemove.add(col.name as string);
+            }
+
+            if (!changed && !missingToRemove.has(col.name as string)) {
+              continue;
+            }
 
             // Remove entry if no overrides remain
             const hasKeyOverrides =
@@ -2213,6 +2257,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             if (!hasKeyOverrides && !hasOtherData) {
               plannedColumns.splice(i, 1);
             }
+          }
+
+          // Accept structural: clear designedColumns (all columns now accepted)
+          if (designedColumns.length > 0) {
+            delete model.designedColumns;
           }
 
           // Remove empty plannedColumns array
@@ -2235,6 +2284,218 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to accept all discrepancies: ${message}` },
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Structural discrepancy handlers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Accept a structural discrepancy.
+   * - Extra: remove column name from designedColumns (acknowledge the column)
+   * - Missing: remove from plannedColumns AND designedColumns (stop expecting it)
+   */
+  private async handleAcceptStructuralDiscrepancy(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string; discrepancyType: 'extra' | 'missing' },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model || model.source !== 'built') {
+            throw new Error('Model not found or not built.');
+          }
+
+          const designedColumns = (model.designedColumns ?? []) as string[];
+
+          if (payload.discrepancyType === 'extra') {
+            // Accept extra: add to designedColumns so it's no longer "extra"
+            if (!designedColumns.includes(payload.columnName)) {
+              designedColumns.push(payload.columnName);
+              model.designedColumns = designedColumns;
+            }
+
+            // Clean up structuralRejected override if it exists
+            const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+            const colIndex = plannedColumns.findIndex((c) => c.name === payload.columnName);
+            if (colIndex !== -1) {
+              const col = plannedColumns[colIndex];
+              delete col.structuralRejected;
+
+              // Remove entry if no overrides remain
+              const hasKeyOverrides =
+                col.isPrimaryKey === true || col.isForeignKey === true || col.isNaturalKey === true;
+              const hasOtherData =
+                col.dataType !== undefined || col.description !== undefined ||
+                col.approved !== undefined || col.expectedDataType !== undefined ||
+                col.rejected !== undefined;
+
+              if (!hasKeyOverrides && !hasOtherData) {
+                plannedColumns.splice(colIndex, 1);
+              }
+
+              if (plannedColumns.length === 0) {
+                delete model.plannedColumns;
+              }
+            }
+          } else {
+            // Accept missing: remove from both designedColumns and plannedColumns
+            const dcIndex = designedColumns.indexOf(payload.columnName);
+            if (dcIndex !== -1) {
+              designedColumns.splice(dcIndex, 1);
+            }
+            if (designedColumns.length === 0) {
+              delete model.designedColumns;
+            } else {
+              model.designedColumns = designedColumns;
+            }
+
+            const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+            const colIndex = plannedColumns.findIndex((c) => c.name === payload.columnName);
+            if (colIndex !== -1) {
+              plannedColumns.splice(colIndex, 1);
+            }
+            if (plannedColumns.length === 0) {
+              delete model.plannedColumns;
+            }
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to accept structural discrepancy.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Accept structural discrepancy failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to accept structural discrepancy: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Reject a structural discrepancy — marks column with structuralRejected flag.
+   * - Extra: creates/updates plannedColumns override with structuralRejected: true
+   * - Missing: sets structuralRejected: true on existing plannedColumns entry
+   */
+  private async handleRejectStructuralDiscrepancy(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string; discrepancyType: 'extra' | 'missing' },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model || model.source !== 'built') {
+            throw new Error('Model not found or not built.');
+          }
+
+          const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+          model.plannedColumns = plannedColumns;
+
+          const col = plannedColumns.find((c) => c.name === payload.columnName);
+          if (col) {
+            col.structuralRejected = true;
+          } else {
+            // Create minimal override entry for extra columns
+            plannedColumns.push({
+              name: payload.columnName,
+              structuralRejected: true,
+            });
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to reject structural discrepancy.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Reject structural discrepancy failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to reject structural discrepancy: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Un-reject a structural discrepancy — clears the structuralRejected flag.
+   */
+  private async handleUnrejectStructuralDiscrepancy(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model || model.source !== 'built') {
+            throw new Error('Model not found or not built.');
+          }
+
+          const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+          const colIndex = plannedColumns.findIndex((c) => c.name === payload.columnName);
+          if (colIndex === -1) {
+            return;
+          }
+
+          const col = plannedColumns[colIndex];
+          delete col.structuralRejected;
+
+          // Remove entry if no overrides remain
+          const hasKeyOverrides =
+            col.isPrimaryKey === true || col.isForeignKey === true || col.isNaturalKey === true;
+          const hasOtherData =
+            col.dataType !== undefined || col.description !== undefined ||
+            col.approved !== undefined || col.expectedDataType !== undefined ||
+            col.rejected !== undefined;
+
+          if (!hasKeyOverrides && !hasOtherData) {
+            plannedColumns.splice(colIndex, 1);
+          }
+
+          if (plannedColumns.length === 0) {
+            delete model.plannedColumns;
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to unreject structural discrepancy.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Unreject structural discrepancy failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to unreject structural discrepancy: ${message}` },
       });
     }
   }

@@ -74,11 +74,16 @@ export interface ReconciledColumn {
   approved: boolean;
   /**
    * Discrepancy between the approved design and the built manifest.
-   * Present only for built columns where the manifest value differs from the design expectation.
+   * Present for:
+   * - Built columns where the manifest dataType differs from the design expectation (dataType discrepancy)
+   * - Built columns that were not in the original design (extra — structural discrepancy)
+   * - Planned columns that were in the original design but not in manifest (missing — structural discrepancy)
    */
   discrepancy?: {
-    /** Expected dataType from the approved design vs actual from manifest. */
-    dataType: { expected: string; actual: string };
+    /** Expected vs actual dataType. Present only for dataType discrepancies. */
+    dataType?: { expected: string; actual: string };
+    /** Structural discrepancy type: 'extra' (in manifest, not in design) or 'missing' (in design, not in manifest). */
+    structural?: 'extra' | 'missing';
     /** Whether the user has explicitly rejected this discrepancy (manifest is non-conforming). */
     rejected: boolean;
   };
@@ -105,7 +110,7 @@ export interface ReconciledModel {
   /** Whether this model has been approved for build. */
   approved: boolean;
   /**
-   * Number of columns with unresolved discrepancies (expected vs actual dataType).
+   * Number of columns with unresolved discrepancies (dataType or structural).
    * Used by the webview to show a warning badge on the model node.
    * Only present when > 0.
    */

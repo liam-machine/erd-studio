@@ -33,7 +33,8 @@ export interface ColumnRowEditorColumn {
   approved?: boolean;
   /** Discrepancy between approved design and built manifest. */
   discrepancy?: {
-    dataType: { expected: string; actual: string };
+    dataType?: { expected: string; actual: string };
+    structural?: 'extra' | 'missing';
     rejected: boolean;
   };
 }
@@ -515,18 +516,30 @@ export function ColumnRowEditor({
         </div>
       )}
 
-      {/* Discrepancy indicator — shown for built columns with dataType mismatch */}
+      {/* Discrepancy indicator — shown for columns with dataType or structural discrepancies */}
       {column.discrepancy && (
-        <div className={`column-row-editor__discrepancy ${column.discrepancy.rejected ? 'column-row-editor__discrepancy--rejected' : ''}`}>
+        <div className={`column-row-editor__discrepancy ${column.discrepancy.rejected ? 'column-row-editor__discrepancy--rejected' : ''} ${column.discrepancy.structural ? 'column-row-editor__discrepancy--structural' : ''}`}>
           <span className="column-row-editor__discrepancy-icon">⚠</span>
           <span className="column-row-editor__discrepancy-detail">
-            <span className="column-row-editor__discrepancy-label">
-              {column.discrepancy.rejected ? 'Non-conforming:' : 'Expected:'}
-            </span>
-            {' '}
-            <code className="column-row-editor__discrepancy-expected">{column.discrepancy.dataType.expected}</code>
-            {' → '}
-            <code className="column-row-editor__discrepancy-actual">{column.discrepancy.dataType.actual}</code>
+            {column.discrepancy.dataType ? (
+              <>
+                <span className="column-row-editor__discrepancy-label">
+                  {column.discrepancy.rejected ? 'Non-conforming:' : 'Expected:'}
+                </span>
+                {' '}
+                <code className="column-row-editor__discrepancy-expected">{column.discrepancy.dataType.expected}</code>
+                {' → '}
+                <code className="column-row-editor__discrepancy-actual">{column.discrepancy.dataType.actual}</code>
+              </>
+            ) : column.discrepancy.structural === 'extra' ? (
+              <span className="column-row-editor__discrepancy-label">
+                {column.discrepancy.rejected ? 'Rejected extra:' : 'Extra column'} — not in original design
+              </span>
+            ) : column.discrepancy.structural === 'missing' ? (
+              <span className="column-row-editor__discrepancy-label">
+                {column.discrepancy.rejected ? 'Rejected missing:' : 'Missing column'} — designed but not built
+              </span>
+            ) : null}
           </span>
           <span className="column-row-editor__discrepancy-actions">
             {column.discrepancy.rejected ? (
@@ -542,14 +555,14 @@ export function ColumnRowEditor({
                 <button
                   className="column-row-editor__discrepancy-btn column-row-editor__discrepancy-btn--accept"
                   onClick={(e) => { e.stopPropagation(); onAcceptDiscrepancy?.(); }}
-                  title="Accept manifest value as correct"
+                  title={column.discrepancy.structural ? 'Accept and resolve' : 'Accept manifest value as correct'}
                 >
                   Accept
                 </button>
                 <button
                   className="column-row-editor__discrepancy-btn column-row-editor__discrepancy-btn--reject"
                   onClick={(e) => { e.stopPropagation(); onRejectDiscrepancy?.(); }}
-                  title="Flag manifest value as non-conforming"
+                  title={column.discrepancy.structural ? 'Flag as non-conforming' : 'Flag manifest value as non-conforming'}
                 >
                   Reject
                 </button>
