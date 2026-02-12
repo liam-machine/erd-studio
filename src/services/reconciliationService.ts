@@ -108,6 +108,9 @@ export class ReconciliationService {
     const isModelApproved = model.approved === true;
     const columns = this.resolveColumns(model, manifestModel, fkColumns, isModelApproved);
 
+    // Count unresolved discrepancies for the model badge
+    const discrepancyCount = columns.filter((c) => c.discrepancy).length;
+
     return {
       name: model.name,
       status,
@@ -115,6 +118,7 @@ export class ReconciliationService {
       description: manifestModel?.description ?? model.description ?? '',
       columns,
       approved: model.approved ?? false,
+      ...(discrepancyCount > 0 ? { discrepancyCount } : {}),
     };
   }
 
@@ -166,6 +170,20 @@ export class ReconciliationService {
         const isPk = this.isPrimaryKey(model, col.name);
         // Allow key overrides from planned columns for built columns
         const override = plannedColumnsMap.get(col.name);
+
+        // Detect dataType discrepancy: override has expectedDataType that still differs from manifest
+        let discrepancy: ReconciledColumn['discrepancy'];
+        if (override?.expectedDataType) {
+          const actualType = col.data_type ?? 'unknown';
+          if (override.expectedDataType !== actualType) {
+            discrepancy = {
+              dataType: { expected: override.expectedDataType, actual: actualType },
+              rejected: override.rejected === true,
+            };
+          }
+          // If expectedDataType now matches manifest, discrepancy auto-resolves (not shown)
+        }
+
         columns.push({
           name: col.name,
           dataType: col.data_type ?? 'unknown',
@@ -175,6 +193,7 @@ export class ReconciliationService {
           isForeignKey: override?.isForeignKey === true || fkColumns.has(col.name),
           isNaturalKey: override?.isNaturalKey === true,
           approved: true, // Built columns are always approved
+          ...(discrepancy ? { discrepancy } : {}),
         });
         seenColumns.add(col.name);
       }

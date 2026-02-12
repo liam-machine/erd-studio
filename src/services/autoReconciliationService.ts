@@ -100,6 +100,11 @@ export class AutoReconciliationService {
     const plannedColumns: ColumnDef[] = [];
     const keyOverrides: ColumnDef[] = [];
 
+    // Build manifest column lookup by name for dataType comparison
+    const manifestColumnsByName = new Map(
+      manifestModel.columns.map((c) => [c.name, c]),
+    );
+
     for (const col of inlineColumns) {
       if (!manifestColumnNames.has(col.name)) {
         // Column doesn't exist in manifest yet — keep as planned column.
@@ -114,23 +119,32 @@ export class AutoReconciliationService {
         }
         plannedColumns.push(plannedCol);
       } else {
-        // Column IS in manifest — preserve any key flags as override
-        const hasKeyFlags =
-          col.isPrimaryKey === true ||
-          col.isForeignKey === true ||
-          col.isNaturalKey === true;
+        // Column IS in manifest — preserve key flags and detect dataType discrepancies
+        const manifestCol = manifestColumnsByName.get(col.name);
+        const override = { name: col.name } as ColumnDef;
+        let hasOverrides = false;
 
-        if (hasKeyFlags) {
-          const override = { name: col.name } as ColumnDef;
-          if (col.isPrimaryKey === true) {
-            override.isPrimaryKey = true;
-          }
-          if (col.isForeignKey === true) {
-            override.isForeignKey = true;
-          }
-          if (col.isNaturalKey === true) {
-            override.isNaturalKey = true;
-          }
+        // Store expected dataType if it differs from manifest
+        if (manifestCol && col.dataType && col.dataType !== (manifestCol.data_type ?? 'unknown')) {
+          override.expectedDataType = col.dataType;
+          hasOverrides = true;
+        }
+
+        // Preserve key flags as before
+        if (col.isPrimaryKey === true) {
+          override.isPrimaryKey = true;
+          hasOverrides = true;
+        }
+        if (col.isForeignKey === true) {
+          override.isForeignKey = true;
+          hasOverrides = true;
+        }
+        if (col.isNaturalKey === true) {
+          override.isNaturalKey = true;
+          hasOverrides = true;
+        }
+
+        if (hasOverrides) {
           keyOverrides.push(override);
         }
       }

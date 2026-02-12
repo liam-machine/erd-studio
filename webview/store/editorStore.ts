@@ -111,6 +111,8 @@ export interface EditorState {
     currentX: number;
     currentY: number;
   } | null;
+  /** Model name for the discrepancy review dialog, or null if closed. */
+  discrepancyReviewModel: string | null;
 }
 
 export interface EditorActions {
@@ -161,6 +163,8 @@ export interface EditorActions {
   updateDragLineMouse: (mouseX: number, mouseY: number) => void;
   /** End drag line (on drop or cancel). */
   endDragLine: () => void;
+  /** Open/close the discrepancy review dialog for a model. */
+  setDiscrepancyReviewModel: (modelName: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +196,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   legendOpen: false,
   welcomeModalOpen: false,
   dragLineState: null,
+  discrepancyReviewModel: null,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -250,4 +255,5 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
         : {},
     ),
   endDragLine: () => set({ dragLineState: null }),
+  setDiscrepancyReviewModel: (modelName) => set({ discrepancyReviewModel: modelName }),
 }));

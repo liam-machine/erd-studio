@@ -244,7 +244,7 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, approved, layer, layerConfig, columns, dimmed, isExpanded = false, onToggleExpansion } = data;
+  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, dimmed, isExpanded = false, onToggleExpansion } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
 
   // F405: Compute visible columns based on expansion state
@@ -302,6 +302,14 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         <span className="model-node__name" title={modelName}>
           {modelName}
         </span>
+        {discrepancyCount && discrepancyCount > 0 ? (
+          <span
+            className="model-node__discrepancy-badge"
+            title={`${discrepancyCount} datatype discrepanc${discrepancyCount > 1 ? 'ies' : 'y'} detected`}
+          >
+            ⚠ {discrepancyCount}
+          </span>
+        ) : null}
         <span
           className="model-node__badge"
           style={layerConfig?.color ? {

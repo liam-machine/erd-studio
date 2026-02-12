@@ -367,6 +367,53 @@ export interface EditRelationshipMessage {
   };
 }
 
+/**
+ * Request to accept a column dataType discrepancy.
+ * Removes the expectedDataType from the plannedColumns override — manifest becomes truth.
+ */
+export interface AcceptDiscrepancyMessage {
+  type: 'acceptDiscrepancy';
+  payload: {
+    modelName: string;
+    columnName: string;
+  };
+}
+
+/**
+ * Request to reject a column dataType discrepancy.
+ * Marks the override as rejected — the manifest value is non-conforming.
+ */
+export interface RejectDiscrepancyMessage {
+  type: 'rejectDiscrepancy';
+  payload: {
+    modelName: string;
+    columnName: string;
+  };
+}
+
+/**
+ * Request to unreject a previously rejected discrepancy.
+ * Clears the rejected flag, returning it to unresolved state.
+ */
+export interface UnrejectDiscrepancyMessage {
+  type: 'unrejectDiscrepancy';
+  payload: {
+    modelName: string;
+    columnName: string;
+  };
+}
+
+/**
+ * Request to accept all column discrepancies for a model.
+ * Removes all expectedDataType fields from plannedColumns overrides.
+ */
+export interface AcceptAllDiscrepanciesMessage {
+  type: 'acceptAllDiscrepancies';
+  payload: {
+    modelName: string;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -392,7 +439,11 @@ export type WebviewMessage =
   | UnapproveColumnMessage
   | ApproveRelationshipMessage
   | UnapproveRelationshipMessage
-  | ToggleColumnKeyMessage;
+  | ToggleColumnKeyMessage
+  | AcceptDiscrepancyMessage
+  | RejectDiscrepancyMessage
+  | UnrejectDiscrepancyMessage
+  | AcceptAllDiscrepanciesMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

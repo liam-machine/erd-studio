@@ -38,6 +38,7 @@ import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { NewModelDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
+import { DiscrepancyReviewDialog } from './components/DiscrepancyReviewDialog/DiscrepancyReviewDialog';
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
@@ -610,6 +611,7 @@ function EditorCanvas() {
         <NewModelDialog />
         <NewFkDialog />
         <AddExistingModelDialog />
+        <DiscrepancyReviewDialog />
       </ReactFlow>
 
       {toastMessage && (

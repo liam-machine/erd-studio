@@ -85,6 +85,19 @@
   color: var(--button-fg);
 }
 
+.model-node__discrepancy-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(204, 167, 0, 0.2);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
 
 /* -----------------------------------------------------------------------
    Columns

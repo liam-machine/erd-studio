@@ -63,6 +63,8 @@ export type ModelNodeData = {
   layerConfig?: LayerConfig;
   /** Columns to display, enriched with PK/FK flags. */
   columns: ColumnDisplay[];
+  /** Number of columns with unresolved discrepancies (for warning badge). */
+  discrepancyCount?: number;
   /** Whether the node is dimmed (doesn't match current search query). */
   dimmed?: boolean;
   /**

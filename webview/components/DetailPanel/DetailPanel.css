@@ -471,6 +471,19 @@
   border-color: rgba(239, 68, 68, 0.4);
 }
 
+.detail-panel__button--warning {
+  align-self: flex-start;
+  background: rgba(204, 167, 0, 0.1);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  border-color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.detail-panel__button--warning:hover {
+  background: rgba(204, 167, 0, 0.2);
+}
+
 .detail-panel__confirm-label {
   font-size: 11px;
   color: var(--editor-fg);

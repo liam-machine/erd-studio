@@ -294,6 +294,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'acceptDiscrepancy': {
+            const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
+            if (payload) {
+              await this.handleAcceptDiscrepancy(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'rejectDiscrepancy': {
+            const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
+            if (payload) {
+              await this.handleRejectDiscrepancy(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'unrejectDiscrepancy': {
+            const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
+            if (payload) {
+              await this.handleUnrejectDiscrepancy(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'acceptAllDiscrepancies': {
+            const payload = (message as { payload?: { modelName: string } }).payload;
+            if (payload) {
+              await this.handleAcceptAllDiscrepancies(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
         }
       },
     );
@@ -1982,6 +2010,231 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to unapprove relationship: ${message}` },
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Discrepancy handlers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Accept a column dataType discrepancy — removes the expectedDataType from
+   * the plannedColumns override, making manifest the source of truth.
+   */
+  private async handleAcceptDiscrepancy(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model || model.source !== 'built') {
+            throw new Error('Model not found or not built.');
+          }
+
+          const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+          const colIndex = plannedColumns.findIndex((c) => c.name === payload.columnName);
+          if (colIndex === -1) {
+            return; // No override to remove
+          }
+
+          const col = plannedColumns[colIndex];
+          delete col.expectedDataType;
+          delete col.rejected;
+
+          // Remove entry if no overrides remain (key flags or other data)
+          const hasKeyOverrides =
+            col.isPrimaryKey === true || col.isForeignKey === true || col.isNaturalKey === true;
+          const hasOtherData =
+            col.dataType !== undefined || col.description !== undefined || col.approved !== undefined;
+
+          if (!hasKeyOverrides && !hasOtherData) {
+            plannedColumns.splice(colIndex, 1);
+          }
+
+          // Remove empty plannedColumns array
+          if (plannedColumns.length === 0) {
+            delete model.plannedColumns;
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to accept discrepancy.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Accept discrepancy failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to accept discrepancy: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Reject a column dataType discrepancy — marks the override as rejected
+   * to indicate the manifest value is non-conforming.
+   */
+  private async handleRejectDiscrepancy(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model || model.source !== 'built') {
+            throw new Error('Model not found or not built.');
+          }
+
+          const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+          const col = plannedColumns.find((c) => c.name === payload.columnName);
+          if (!col || !col.expectedDataType) {
+            return; // No expectation to reject
+          }
+
+          col.rejected = true;
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to reject discrepancy.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Reject discrepancy failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to reject discrepancy: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Un-reject a previously rejected discrepancy — clears the rejected flag,
+   * returning it to unresolved state.
+   */
+  private async handleUnrejectDiscrepancy(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; columnName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model || model.source !== 'built') {
+            throw new Error('Model not found or not built.');
+          }
+
+          const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+          const col = plannedColumns.find((c) => c.name === payload.columnName);
+          if (!col) {
+            return;
+          }
+
+          delete col.rejected;
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to unreject discrepancy.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Unreject discrepancy failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to unreject discrepancy: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Accept all column discrepancies for a model — removes all expectedDataType
+   * fields and rejected flags from plannedColumns overrides.
+   */
+  private async handleAcceptAllDiscrepancies(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model || model.source !== 'built') {
+            throw new Error('Model not found or not built.');
+          }
+
+          const plannedColumns = (model.plannedColumns ?? []) as Array<Record<string, unknown>>;
+
+          // Remove expectations and clean up empty entries (iterate in reverse for safe splice)
+          for (let i = plannedColumns.length - 1; i >= 0; i--) {
+            const col = plannedColumns[i];
+            if (!col.expectedDataType) {
+              continue; // No expectation on this entry
+            }
+
+            delete col.expectedDataType;
+            delete col.rejected;
+
+            // Remove entry if no overrides remain
+            const hasKeyOverrides =
+              col.isPrimaryKey === true || col.isForeignKey === true || col.isNaturalKey === true;
+            const hasOtherData =
+              col.dataType !== undefined || col.description !== undefined || col.approved !== undefined;
+
+            if (!hasKeyOverrides && !hasOtherData) {
+              plannedColumns.splice(i, 1);
+            }
+          }
+
+          // Remove empty plannedColumns array
+          if (plannedColumns.length === 0) {
+            delete model.plannedColumns;
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to accept all discrepancies.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Accept all discrepancies failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to accept all discrepancies: ${message}` },
       });
     }
   }

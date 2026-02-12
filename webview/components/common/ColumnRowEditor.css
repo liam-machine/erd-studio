@@ -352,3 +352,99 @@
   color: var(--vscode-descriptionForeground, #888);
   opacity: 0.7;
 }
+
+/* ---------------------------------------------------------------------------
+   Discrepancy Indicator
+   --------------------------------------------------------------------------- */
+
+.column-row-editor__discrepancy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 28px; /* 28px left aligns with column name */
+  background: rgba(204, 167, 0, 0.08);
+  border-top: 1px solid rgba(204, 167, 0, 0.2);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.column-row-editor__discrepancy--rejected {
+  background: rgba(239, 68, 68, 0.06);
+  border-top-color: rgba(239, 68, 68, 0.2);
+}
+
+.column-row-editor__discrepancy-icon {
+  flex-shrink: 0;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 12px;
+}
+
+.column-row-editor__discrepancy--rejected .column-row-editor__discrepancy-icon {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.column-row-editor__discrepancy-detail {
+  flex: 1;
+  min-width: 0;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.column-row-editor__discrepancy-label {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-weight: 600;
+}
+
+.column-row-editor__discrepancy--rejected .column-row-editor__discrepancy-label {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.column-row-editor__discrepancy-expected {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.column-row-editor__discrepancy-actual {
+  color: var(--vscode-descriptionForeground, #888);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.column-row-editor__discrepancy-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+}
+
+.column-row-editor__discrepancy-btn {
+  padding: 1px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.column-row-editor__discrepancy-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.column-row-editor__discrepancy-btn--accept {
+  border-color: var(--model-approved, #14b8a6);
+  color: var(--model-approved, #14b8a6);
+}
+
+.column-row-editor__discrepancy-btn--accept:hover {
+  background: var(--model-approved-bg, rgba(20, 184, 166, 0.15));
+}
+
+.column-row-editor__discrepancy-btn--reject {
+  border-color: var(--vscode-errorForeground, #f48771);
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.column-row-editor__discrepancy-btn--reject:hover {
+  background: rgba(239, 68, 68, 0.15);
+}

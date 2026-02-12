@@ -31,6 +31,11 @@ export interface ColumnRowEditorColumn {
   status?: 'built' | 'approved' | 'planned' | 'missing';
   /** Whether the column has been approved for build. */
   approved?: boolean;
+  /** Discrepancy between approved design and built manifest. */
+  discrepancy?: {
+    dataType: { expected: string; actual: string };
+    rejected: boolean;
+  };
 }
 
 export interface ColumnRowEditorProps {
@@ -68,6 +73,12 @@ export interface ColumnRowEditorProps {
   expanded?: boolean;
   /** Callback when the expand/collapse chevron is clicked. */
   onToggleExpand?: () => void;
+  /** Callback when user accepts a discrepancy (manifest is correct). */
+  onAcceptDiscrepancy?: () => void;
+  /** Callback when user rejects a discrepancy (manifest is wrong). */
+  onRejectDiscrepancy?: () => void;
+  /** Callback when user un-rejects a previously rejected discrepancy. */
+  onUnrejectDiscrepancy?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +131,9 @@ export function ColumnRowEditor({
   showMultiplePKWarning = false,
   expanded = false,
   onToggleExpand,
+  onAcceptDiscrepancy,
+  onRejectDiscrepancy,
+  onUnrejectDiscrepancy,
 }: ColumnRowEditorProps) {
   // Local state for editing
   const [localColumn, setLocalColumn] = useState<ColumnDef>({
@@ -498,6 +512,50 @@ export function ColumnRowEditor({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Discrepancy indicator — shown for built columns with dataType mismatch */}
+      {column.discrepancy && (
+        <div className={`column-row-editor__discrepancy ${column.discrepancy.rejected ? 'column-row-editor__discrepancy--rejected' : ''}`}>
+          <span className="column-row-editor__discrepancy-icon">⚠</span>
+          <span className="column-row-editor__discrepancy-detail">
+            <span className="column-row-editor__discrepancy-label">
+              {column.discrepancy.rejected ? 'Non-conforming:' : 'Expected:'}
+            </span>
+            {' '}
+            <code className="column-row-editor__discrepancy-expected">{column.discrepancy.dataType.expected}</code>
+            {' → '}
+            <code className="column-row-editor__discrepancy-actual">{column.discrepancy.dataType.actual}</code>
+          </span>
+          <span className="column-row-editor__discrepancy-actions">
+            {column.discrepancy.rejected ? (
+              <button
+                className="column-row-editor__discrepancy-btn"
+                onClick={(e) => { e.stopPropagation(); onUnrejectDiscrepancy?.(); }}
+                title="Clear rejection — return to unresolved"
+              >
+                Undo
+              </button>
+            ) : (
+              <>
+                <button
+                  className="column-row-editor__discrepancy-btn column-row-editor__discrepancy-btn--accept"
+                  onClick={(e) => { e.stopPropagation(); onAcceptDiscrepancy?.(); }}
+                  title="Accept manifest value as correct"
+                >
+                  Accept
+                </button>
+                <button
+                  className="column-row-editor__discrepancy-btn column-row-editor__discrepancy-btn--reject"
+                  onClick={(e) => { e.stopPropagation(); onRejectDiscrepancy?.(); }}
+                  title="Flag manifest value as non-conforming"
+                >
+                  Reject
+                </button>
+              </>
+            )}
+          </span>
         </div>
       )}
 

@@ -11,7 +11,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import { groupColumnsByStatus } from '../../lib/columnGrouping';
-import type { ModelStatus, ReconciledColumn } from '../../../src/types/reconciled';
+import type { ModelStatus, ReconciledColumn, ReconciledModel } from '../../../src/types/reconciled';
 import type { ColumnDef } from '../../../src/types/semantic';
 import type { ColumnKeyType } from '../../../src/types/messages';
 import './ColumnEditor.css';
@@ -25,13 +25,15 @@ export interface ColumnEditorProps {
   modelStatus: ModelStatus;
   modelApproved: boolean;
   columns: ReconciledColumn[];
+  /** Number of columns with unresolved discrepancies. */
+  discrepancyCount?: number;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }: ColumnEditorProps) {
+export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, discrepancyCount }: ColumnEditorProps) {
   const { send } = useMessageBus(() => {});
 
   // State for whether we're adding a new column
@@ -154,6 +156,47 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
     [send, modelName],
   );
 
+  // Handle accepting a discrepancy
+  const handleAcceptDiscrepancy = useCallback(
+    (columnName: string) => {
+      send({
+        type: 'acceptDiscrepancy',
+        payload: { modelName, columnName },
+      });
+    },
+    [send, modelName],
+  );
+
+  // Handle rejecting a discrepancy
+  const handleRejectDiscrepancy = useCallback(
+    (columnName: string) => {
+      send({
+        type: 'rejectDiscrepancy',
+        payload: { modelName, columnName },
+      });
+    },
+    [send, modelName],
+  );
+
+  // Handle un-rejecting a discrepancy
+  const handleUnrejectDiscrepancy = useCallback(
+    (columnName: string) => {
+      send({
+        type: 'unrejectDiscrepancy',
+        payload: { modelName, columnName },
+      });
+    },
+    [send, modelName],
+  );
+
+  // Handle accepting all discrepancies for this model
+  const handleAcceptAllDiscrepancies = useCallback(() => {
+    send({
+      type: 'acceptAllDiscrepancies',
+      payload: { modelName },
+    });
+  }, [send, modelName]);
+
   // Compute whether model has multiple PKs (for warning display)
   const pkColumnNames = useMemo(
     () => columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
@@ -215,6 +258,15 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
               )}
             </div>
           )}
+          {discrepancyCount && discrepancyCount > 0 ? (
+            <button
+              className="column-editor__accept-all-btn"
+              onClick={handleAcceptAllDiscrepancies}
+              title={`Accept all ${discrepancyCount} discrepanc${discrepancyCount > 1 ? 'ies' : 'y'}`}
+            >
+              Accept All ({discrepancyCount})
+            </button>
+          ) : null}
           {isEditable && (
             <button
               className="column-editor__add-btn"
@@ -249,6 +301,9 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns }:
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={() => handleToggleExpand(col.name)}
+            onAcceptDiscrepancy={col.discrepancy ? () => handleAcceptDiscrepancy(col.name) : undefined}
+            onRejectDiscrepancy={col.discrepancy && !col.discrepancy.rejected ? () => handleRejectDiscrepancy(col.name) : undefined}
+            onUnrejectDiscrepancy={col.discrepancy?.rejected ? () => handleUnrejectDiscrepancy(col.name) : undefined}
           />
         ))}
 

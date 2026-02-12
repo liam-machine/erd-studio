@@ -42,6 +42,7 @@ export function DetailPanel() {
   const pendingDeleteConfirmation = useEditorStore((s) => s.pendingDeleteConfirmation);
   const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
+  const setDiscrepancyReviewModel = useEditorStore((s) => s.setDiscrepancyReviewModel);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // Handle pending delete confirmation from keyboard shortcut
@@ -293,8 +294,22 @@ export function DetailPanel() {
           modelStatus={model.status}
           modelApproved={model.approved}
           columns={model.columns}
+          discrepancyCount={model.discrepancyCount}
         />
       </div>
+
+      {/* Review All Discrepancies button */}
+      {model.discrepancyCount && model.discrepancyCount > 0 && (
+        <div className="detail-panel__section detail-panel__section--actions">
+          <button
+            className="detail-panel__button detail-panel__button--warning"
+            onClick={() => setDiscrepancyReviewModel(model.name)}
+            title="Open discrepancy review dialog"
+          >
+            Review All Discrepancies ({model.discrepancyCount})
+          </button>
+        </div>
+      )}
 
       {/* Relationships */}
       {totalRelationships > 0 && (

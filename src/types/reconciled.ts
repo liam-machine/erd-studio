@@ -72,6 +72,16 @@ export interface ReconciledColumn {
   isNaturalKey: boolean;
   /** Whether this column has been approved for build. */
   approved: boolean;
+  /**
+   * Discrepancy between the approved design and the built manifest.
+   * Present only for built columns where the manifest value differs from the design expectation.
+   */
+  discrepancy?: {
+    /** Expected dataType from the approved design vs actual from manifest. */
+    dataType: { expected: string; actual: string };
+    /** Whether the user has explicitly rejected this discrepancy (manifest is non-conforming). */
+    rejected: boolean;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +104,12 @@ export interface ReconciledModel {
   columns: ReconciledColumn[];
   /** Whether this model has been approved for build. */
   approved: boolean;
+  /**
+   * Number of columns with unresolved discrepancies (expected vs actual dataType).
+   * Used by the webview to show a warning badge on the model node.
+   * Only present when > 0.
+   */
+  discrepancyCount?: number;
 }
 
 // ---------------------------------------------------------------------------

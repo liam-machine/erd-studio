@@ -32,6 +32,17 @@ export interface ColumnDef {
   isNaturalKey?: boolean;
   /** Whether this column has been approved for build. */
   approved?: boolean;
+  /**
+   * Expected dataType from the approved design (set during design→built transition).
+   * Stored in plannedColumns overrides when the manifest dataType differs from design.
+   * Used by ReconciliationService to detect discrepancies.
+   */
+  expectedDataType?: string;
+  /**
+   * Whether this discrepancy has been explicitly rejected (manifest is non-conforming).
+   * When true, the discrepancy is still shown but with a "rejected" visual indicator.
+   */
+  rejected?: boolean;
 }
 
 // ---------------------------------------------------------------------------

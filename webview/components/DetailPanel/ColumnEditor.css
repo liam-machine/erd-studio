@@ -180,3 +180,23 @@
   margin-top: 6px;
   justify-content: center;
 }
+
+/* ---------------------------------------------------------------------------
+   Accept All Discrepancies Button
+   --------------------------------------------------------------------------- */
+
+.column-editor__accept-all-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-editorWarning-foreground, #cca700);
+  border-radius: 3px;
+  background: rgba(204, 167, 0, 0.1);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.column-editor__accept-all-btn:hover {
+  background: rgba(204, 167, 0, 0.2);
+}
