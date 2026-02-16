@@ -61,6 +61,11 @@ interface ColumnRowProps {
 }
 
 function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
+  // Highlight when this column is involved in a selected edge
+  const isHighlighted = useEditorStore(
+    (s) => s.highlightedColumns.has(`${modelName}:${column.name}`)
+  );
+
   // Store actions for drag line visualization
   const startDragLine = useEditorStore((s) => s.startDragLine);
   const updateDragLineMouse = useEditorStore((s) => s.updateDragLineMouse);
@@ -195,11 +200,12 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
   const pressClass = isPressing ? 'model-node__column--pressing' : '';
   const dragClass = isDragging ? 'model-node__column--dragging' : '';
   const dropTargetClass = isDropTarget ? 'model-node__column--drop-target' : '';
+  const highlightClass = isHighlighted ? 'model-node__column--relationship-highlight' : '';
 
   return (
     <div
       ref={elementRef}
-      className={`model-node__column ${statusClass} ${pressClass} ${dragClass} ${dropTargetClass} nodrag`.trim()}
+      className={`model-node__column ${statusClass} ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} nodrag`.trim()}
       data-column-name={column.name}
       onMouseEnter={handleMouseEnter}
       {...handlers}

@@ -108,6 +108,7 @@ function EditorCanvas() {
   const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
   const selectedEdges = useEditorStore((s) => s.selectedEdges);
   const setSelectedEdges = useEditorStore((s) => s.setSelectedEdges);
+  const setHighlightedColumns = useEditorStore((s) => s.setHighlightedColumns);
   // Dialog state for Escape key handling
   const newModelDialogOpen = useEditorStore((s) => s.newModelDialogOpen);
   const newFkDialogOpen = useEditorStore((s) => s.newFkDialogOpen);
@@ -468,15 +469,30 @@ function EditorCanvas() {
     (_event: React.MouseEvent, node: ModelFlowNode) => {
       selectNode(node.id);
       setDetailPanelOpen(true);
+      setHighlightedColumns(new Set());
     },
-    [selectNode, setDetailPanelOpen],
+    [selectNode, setDetailPanelOpen, setHighlightedColumns],
+  );
+
+  // Handle edge clicks to highlight the FK columns involved.
+  const onEdgeClick = useCallback(
+    (_event: React.MouseEvent, edge: FkFlowEdge) => {
+      if (edge.data) {
+        const cols = new Set<string>();
+        cols.add(`${edge.data.fromModel}:${edge.data.fromColumn}`);
+        cols.add(`${edge.data.toModel}:${edge.data.toColumn}`);
+        setHighlightedColumns(cols);
+      }
+    },
+    [setHighlightedColumns],
   );
 
   // Handle clicks on blank canvas to close the detail panel and clear selection.
   const onPaneClick = useCallback(() => {
     setDetailPanelOpen(false);
     selectNode(null);
-  }, [setDetailPanelOpen, selectNode]);
+    setHighlightedColumns(new Set());
+  }, [setDetailPanelOpen, selectNode, setHighlightedColumns]);
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).
@@ -569,6 +585,7 @@ function EditorCanvas() {
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
         onPaneClick={handlePaneClick}
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}

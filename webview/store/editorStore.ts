@@ -113,6 +113,8 @@ export interface EditorState {
   } | null;
   /** Model name for the discrepancy review dialog, or null if closed. */
   discrepancyReviewModel: string | null;
+  /** Set of "modelName:columnName" keys for columns involved in selected edges. */
+  highlightedColumns: Set<string>;
 }
 
 export interface EditorActions {
@@ -165,6 +167,8 @@ export interface EditorActions {
   endDragLine: () => void;
   /** Open/close the discrepancy review dialog for a model. */
   setDiscrepancyReviewModel: (modelName: string | null) => void;
+  /** Set highlighted columns (for edge click). */
+  setHighlightedColumns: (columns: Set<string>) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +201,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   welcomeModalOpen: false,
   dragLineState: null,
   discrepancyReviewModel: null,
+  highlightedColumns: new Set<string>(),
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -256,4 +261,5 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     ),
   endDragLine: () => set({ dragLineState: null }),
   setDiscrepancyReviewModel: (modelName) => set({ discrepancyReviewModel: modelName }),
+  setHighlightedColumns: (columns) => set({ highlightedColumns: columns }),
 }));

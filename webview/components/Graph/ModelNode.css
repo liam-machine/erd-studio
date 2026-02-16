@@ -156,6 +156,14 @@
   transition: box-shadow 0.1s ease, background 0.1s ease;
 }
 
+/* Relationship highlight — column involved in a selected FK edge */
+.model-node__column--relationship-highlight {
+  background: var(--selection-bg) !important;
+  box-shadow: inset 0 0 0 1.5px var(--focus-border), 0 0 6px 1px rgba(0, 127, 212, 0.25);
+  filter: brightness(1.15);
+  transition: box-shadow 0.15s ease, background 0.15s ease, filter 0.15s ease;
+}
+
 /* Column status variants — use CSS variables for palette support */
 .model-node__column--built {
   background: var(--model-built-bg);
