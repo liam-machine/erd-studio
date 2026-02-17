@@ -46,6 +46,77 @@
   min-width: 0;
 }
 
+.detail-panel__title--editable {
+  cursor: pointer;
+}
+
+.detail-panel__title--editable:hover {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.detail-panel__title-input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  background: var(--input-bg, var(--vscode-input-background, #3c3c3c));
+  border: 1px solid var(--focus-border, var(--vscode-focusBorder, #007fd4));
+  border-radius: 3px;
+  outline: none;
+  font-family: inherit;
+}
+
+.detail-panel__title-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail-panel__title-input--error {
+  border-color: var(--vscode-errorForeground, #f48771);
+}
+
+.detail-panel__title-error {
+  font-size: 10px;
+  color: var(--vscode-errorForeground, #f48771);
+  line-height: 1.2;
+}
+
+.detail-panel__title-edit-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__header:hover .detail-panel__title-edit-btn {
+  opacity: 1;
+}
+
+.detail-panel__title-edit-btn:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
 .detail-panel__close {
   flex-shrink: 0;
   display: flex;
@@ -511,4 +582,120 @@
 .detail-panel__confirm-actions .detail-panel__button--danger:hover {
   background: rgba(239, 68, 68, 0.2);
   border-color: #ef4444;
+}
+
+/* ---------------------------------------------------------------------------
+   AI Rationale
+   --------------------------------------------------------------------------- */
+
+.detail-panel__ai-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__ai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.detail-panel__ai-edit-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__ai-section:hover .detail-panel__ai-edit-btn {
+  opacity: 1;
+}
+
+.detail-panel__ai-edit-btn:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.detail-panel__ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-panel__ai-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8b5cf6;
+}
+
+.detail-panel__ai-text {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--editor-fg);
+  white-space: pre-wrap;
+}
+
+.detail-panel__ai-textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 6px;
+  border: 1px solid var(--focus-border, var(--vscode-focusBorder, #007fd4));
+  border-radius: 3px;
+  background: var(--input-bg, var(--vscode-input-background, #3c3c3c));
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.detail-panel__ai-textarea::placeholder {
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.6;
+}
+
+.detail-panel__ai-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.detail-panel__ai-actions .detail-panel__button {
+  flex: 1;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.detail-panel__ai-add-btn {
+  padding: 6px 12px;
+  border: 1px dashed var(--vscode-descriptionForeground, #888);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+
+.detail-panel__ai-add-btn:hover {
+  background: rgba(139, 92, 246, 0.08);
+  color: #8b5cf6;
+  border-color: #8b5cf6;
 }

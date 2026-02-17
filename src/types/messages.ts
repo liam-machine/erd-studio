@@ -12,7 +12,7 @@
  */
 
 import type { ReconciledDomain } from './reconciled';
-import type { Cardinality, ColumnDef, DesignModel, LayoutOptions } from './semantic';
+import type { AiRationale, Cardinality, ColumnDef, DesignModel, LayoutOptions } from './semantic';
 
 // ---------------------------------------------------------------------------
 // Extension → Webview messages
@@ -142,6 +142,19 @@ export interface AddRelationshipMessage {
     toModel: string;
     toColumn: string;
     cardinality: Cardinality;
+  };
+}
+
+/**
+ * Request to rename a design model.
+ * Cascades to update all relationship references and viewConfig positions.
+ * Only allowed for design-status models (source === 'design').
+ */
+export interface RenameModelMessage {
+  type: 'renameModel';
+  payload: {
+    oldName: string;
+    newName: string;
   };
 }
 
@@ -456,6 +469,18 @@ export interface UnrejectStructuralDiscrepancyMessage {
   };
 }
 
+/**
+ * Request to update the AI rationale (what/why) fields for a model.
+ * If both fields are empty/cleared, the `ai` key is removed from the JSON entirely.
+ */
+export interface UpdateModelAiMessage {
+  type: 'updateModelAi';
+  payload: {
+    modelName: string;
+    ai: AiRationale;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -464,6 +489,7 @@ export type WebviewMessage =
   | RemoveColumnMessage
   | UpdateColumnMessage
   | AddRelationshipMessage
+  | RenameModelMessage
   | RemoveModelMessage
   | RemoveRelationshipMessage
   | UpdateRelationshipMessage
@@ -488,7 +514,8 @@ export type WebviewMessage =
   | AcceptAllDiscrepanciesMessage
   | AcceptStructuralDiscrepancyMessage
   | RejectStructuralDiscrepancyMessage
-  | UnrejectStructuralDiscrepancyMessage;
+  | UnrejectStructuralDiscrepancyMessage
+  | UpdateModelAiMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

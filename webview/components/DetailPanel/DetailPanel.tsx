@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
+import { AiRationale } from './AiRationale';
 import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
@@ -44,6 +45,9 @@ export function DetailPanel() {
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
   const setDiscrepancyReviewModel = useEditorStore((s) => s.setDiscrepancyReviewModel);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const [nameError, setNameError] = useState('');
 
   // Handle pending delete confirmation from keyboard shortcut
   useEffect(() => {
@@ -53,11 +57,77 @@ export function DetailPanel() {
     }
   }, [pendingDeleteConfirmation, detailPanelOpen, setPendingDeleteConfirmation]);
 
+  // Reset rename state when selected node changes
+  useEffect(() => {
+    setEditingName(false);
+    setNameValue('');
+    setNameError('');
+  }, [selectedNode]);
+
   const handleClose = useCallback(() => {
     setDetailPanelOpen(false);
     selectNode(null);
     setConfirmingDelete(false);
   }, [setDetailPanelOpen, selectNode]);
+
+  const validateModelName = useCallback(
+    (value: string): string => {
+      const trimmed = value.trim();
+      if (!trimmed) return 'Name cannot be empty';
+      if (/\s/.test(trimmed)) return 'Name cannot contain spaces';
+      if (!/^[a-z]/.test(trimmed)) return 'Must start with a lowercase letter';
+      if (!/^[a-z][a-z0-9_]*$/.test(trimmed)) return 'Only lowercase letters, numbers, and underscores';
+      if (domain && trimmed !== selectedNode && domain.models.some((m) => m.name === trimmed)) {
+        return 'A model with this name already exists';
+      }
+      return '';
+    },
+    [domain, selectedNode],
+  );
+
+  const handleStartRename = useCallback(() => {
+    if (!selectedNode) return;
+    setNameValue(selectedNode);
+    setNameError('');
+    setEditingName(true);
+  }, [selectedNode]);
+
+  const handleCancelRename = useCallback(() => {
+    setEditingName(false);
+    setNameValue('');
+    setNameError('');
+  }, []);
+
+  const handleNameChange = useCallback(
+    (value: string) => {
+      setNameValue(value);
+      setNameError(validateModelName(value));
+    },
+    [validateModelName],
+  );
+
+  const handleSubmitRename = useCallback(() => {
+    if (!selectedNode) return;
+    const trimmed = nameValue.trim();
+    if (!trimmed || trimmed === selectedNode) {
+      setEditingName(false);
+      setNameError('');
+      return;
+    }
+    const error = validateModelName(nameValue);
+    if (error) {
+      setNameError(error);
+      return;
+    }
+    vscode.postMessage({
+      type: 'renameModel',
+      payload: { oldName: selectedNode, newName: trimmed },
+    });
+    // Optimistically update selection to the new name so the panel stays open
+    selectNode(trimmed);
+    setEditingName(false);
+    setNameError('');
+  }, [selectedNode, nameValue, vscode, selectNode, validateModelName]);
 
   const handleDeleteModel = useCallback(() => {
     if (!selectedNode) return;
@@ -191,6 +261,7 @@ export function DetailPanel() {
 
   const { outgoing, incoming } = relationships;
   const totalRelationships = outgoing.length + incoming.length;
+  const isDesignModel = model.status === 'design' || model.status === 'approved';
 
   // --- Render ------------------------------------------------------------
 
@@ -198,9 +269,54 @@ export function DetailPanel() {
     <Panel position="top-right" className="detail-panel">
       {/* Header */}
       <div className="detail-panel__header">
-        <h3 className="detail-panel__title" title={model.name}>
-          {model.name}
-        </h3>
+        {editingName ? (
+          <div className="detail-panel__title-edit">
+            <input
+              className={`detail-panel__title-input${nameError ? ' detail-panel__title-input--error' : ''}`}
+              value={nameValue}
+              onChange={(e) => handleNameChange(e.target.value)}
+              onBlur={() => {
+                if (nameError) {
+                  handleCancelRename();
+                } else {
+                  handleSubmitRename();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSubmitRename();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  handleCancelRename();
+                }
+              }}
+              autoFocus
+              spellCheck={false}
+            />
+            {nameError && (
+              <span className="detail-panel__title-error">{nameError}</span>
+            )}
+          </div>
+        ) : (
+          <h3
+            className={`detail-panel__title${isDesignModel ? ' detail-panel__title--editable' : ''}`}
+            title={isDesignModel ? 'Double-click to rename' : model.name}
+            onDoubleClick={isDesignModel ? handleStartRename : undefined}
+          >
+            {model.name}
+          </h3>
+        )}
+        {isDesignModel && !editingName && (
+          <button
+            className="detail-panel__title-edit-btn"
+            onClick={handleStartRename}
+            title="Rename model"
+            aria-label="Rename model"
+          >
+            ✎
+          </button>
+        )}
         <button
           className="detail-panel__close"
           onClick={handleClose}
@@ -247,6 +363,11 @@ export function DetailPanel() {
         {model.description && (
           <p className="detail-panel__description">{model.description}</p>
         )}
+      </div>
+
+      {/* AI Rationale (what/why) */}
+      <div className="detail-panel__section">
+        <AiRationale modelName={model.name} ai={model.ai} />
       </div>
 
       {/* Remove from Domain button (design and built models) */}

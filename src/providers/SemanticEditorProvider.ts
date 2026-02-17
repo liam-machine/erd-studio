@@ -25,7 +25,7 @@ import { AutoReconciliationService } from '../services/autoReconciliationService
 import { LayerService } from '../services/layerService';
 import { SchemaTagService } from '../services/schemaTagService';
 import type { ManifestData } from '../types/manifest';
-import type { Cardinality, ColumnDef, DesignModel } from '../types/semantic';
+import type { AiRationale, Cardinality, ColumnDef, DesignModel } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -197,6 +197,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'renameModel': {
+            const payload = (message as { payload?: { oldName: string; newName: string } }).payload;
+            if (payload) {
+              await this.handleRenameModel(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
           case 'removeModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
@@ -340,6 +347,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
             if (payload) {
               await this.handleUnrejectStructuralDiscrepancy(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
+          case 'updateModelAi': {
+            const payload = (message as { payload?: { modelName: string; ai: AiRationale } }).payload;
+            if (payload) {
+              await this.handleUpdateModelAi(document, webviewPanel.webview, payload);
             }
             break;
           }
@@ -1157,6 +1171,131 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to add relationship: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle a `renameModel` message from the webview.
+   *
+   * Renames a design model and cascades the name change to all
+   * relationship references (fromModel/toModel) and viewConfig positions.
+   * Only allowed for models with source === 'design'.
+   */
+  private async handleRenameModel(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { oldName: string; newName: string },
+  ): Promise<void> {
+    try {
+      const trimmedNew = payload.newName.trim();
+
+      // Validate: new name is not empty
+      if (!trimmedNew) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Model name cannot be empty.' },
+        });
+        return;
+      }
+
+      // Validate: name must use lowercase snake_case
+      if (!/^[a-z][a-z0-9_]*$/.test(trimmedNew)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Model name must start with a letter and use lowercase letters, numbers, and underscores.' },
+        });
+        return;
+      }
+
+      // Validate: new name differs from old
+      if (trimmedNew === payload.oldName) {
+        return; // No-op, not an error
+      }
+
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+
+      // Find the model to rename
+      const model = models.find((m) => m.name === payload.oldName);
+      if (!model) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${payload.oldName}" not found.` },
+        });
+        return;
+      }
+
+      // Guard: only design models can be renamed
+      if (model.source !== 'design') {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Only design models can be renamed.' },
+        });
+        return;
+      }
+
+      // Uniqueness check
+      if (models.some((m) => m.name === trimmedNew)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: `Model "${trimmedNew}" already exists in this domain.` },
+        });
+        return;
+      }
+
+      // Rename the model
+      model.name = trimmedNew;
+
+      // Cascade: update all relationship references
+      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+      for (const rel of relationships) {
+        if (rel.fromModel === payload.oldName) {
+          rel.fromModel = trimmedNew;
+        }
+        if (rel.toModel === payload.oldName) {
+          rel.toModel = trimmedNew;
+        }
+      }
+
+      // Cascade: update viewConfig positions
+      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
+      if (payload.oldName in positions) {
+        positions[trimmedNew] = positions[payload.oldName];
+        delete positions[payload.oldName];
+      }
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      const fullRange = new vscode.Range(
+        document.positionAt(0),
+        document.positionAt(text.length),
+      );
+      edit.replace(document.uri, fullRange, updatedText);
+
+      this.pendingUpdates.set(document.uri.toString(), true);
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdates.delete(document.uri.toString());
+        await this.sendDomainData(document, webview);
+      } else {
+        this.pendingUpdates.delete(document.uri.toString());
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to rename model.' },
+        });
+      }
+    } catch (err) {
+      this.pendingUpdates.delete(document.uri.toString());
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Rename model failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to rename model: ${message}` },
       });
     }
   }
@@ -2496,6 +2635,59 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to unreject structural discrepancy: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle an `updateModelAi` message from the webview.
+   *
+   * Updates the AI rationale (what/why) fields on a model.
+   * If both fields are empty after trimming, the `ai` key is removed entirely
+   * to keep the JSON clean.
+   */
+  private async handleUpdateModelAi(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; ai: AiRationale },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model) {
+            throw new Error(`Model "${payload.modelName}" not found.`);
+          }
+
+          const what = payload.ai.what?.trim() || undefined;
+          const why = payload.ai.why?.trim() || undefined;
+
+          if (what || why) {
+            const ai: Record<string, string> = {};
+            if (what) ai.what = what;
+            if (why) ai.why = why;
+            model.ai = ai;
+          } else {
+            delete model.ai;
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to update AI rationale.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update AI rationale failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to update AI rationale: ${message}` },
       });
     }
   }

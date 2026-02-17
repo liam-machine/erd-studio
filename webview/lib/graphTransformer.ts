@@ -130,6 +130,7 @@ export function transformDomain(domain: ReconciledDomain): TransformResult {
         layerConfig,
         columns,
         ...(model.discrepancyCount ? { discrepancyCount: model.discrepancyCount } : {}),
+        ...(model.ai && (model.ai.what || model.ai.why) ? { hasAiRationale: true } : {}),
       },
     };
   });

@@ -75,6 +75,8 @@ export type ModelNodeData = {
   isExpanded?: boolean;
   /** Callback to toggle expansion state (F405). Receives model name as argument. */
   onToggleExpansion?: (modelName: string) => void;
+  /** Whether this model has AI rationale (what/why) metadata. */
+  hasAiRationale?: boolean;
   /** Index signature required by React Flow's Node generic. */
   [key: string]: unknown;
 };

@@ -63,7 +63,7 @@ interface ColumnRowProps {
 function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
   // Highlight when this column is involved in a selected edge
   const isHighlighted = useEditorStore(
-    (s) => s.highlightedColumns.has(`${modelName}:${column.name}`)
+    (s) => s.highlightedColumns?.has?.(`${modelName}:${column.name}`) ?? false
   );
 
   // Store actions for drag line visualization
@@ -250,7 +250,7 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, dimmed, isExpanded = false, onToggleExpansion } = data;
+  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, hasAiRationale, dimmed, isExpanded = false, onToggleExpansion } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
 
   // F405: Compute visible columns based on expansion state
@@ -316,6 +316,9 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
             ⚠ {discrepancyCount}
           </span>
         ) : null}
+        {hasAiRationale && (
+          <span className="model-node__ai-badge" title="AI rationale available">AI</span>
+        )}
         <span
           className="model-node__badge"
           style={layerConfig?.color ? {

@@ -52,6 +52,18 @@ export interface ColumnDef {
 }
 
 // ---------------------------------------------------------------------------
+// AI rationale
+// ---------------------------------------------------------------------------
+
+/** AI-generated rationale metadata for a model. */
+export interface AiRationale {
+  /** What requirements or purpose this model fulfils. */
+  what?: string;
+  /** Why this model was designed the way it was. */
+  why?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
 
@@ -99,6 +111,8 @@ export interface SemanticModel {
    * Only present on models that transitioned from design to built.
    */
   designedColumns?: string[];
+  /** AI-generated rationale: what this model does and why it was designed this way. */
+  ai?: AiRationale;
 }
 
 /**

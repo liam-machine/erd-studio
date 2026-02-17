@@ -98,6 +98,17 @@
   color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
+.model-node__ai-badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: rgba(139, 92, 246, 0.2);
+  color: #8b5cf6;
+}
+
 
 /* -----------------------------------------------------------------------
    Columns
