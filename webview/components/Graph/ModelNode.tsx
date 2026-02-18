@@ -250,7 +250,7 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, hasAiRationale, dimmed, isExpanded = false, onToggleExpansion } = data;
+  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, hasAiRationale, grain, dimmed, isExpanded = false, onToggleExpansion } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
 
   // F405: Compute visible columns based on expansion state
@@ -329,6 +329,13 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
           {layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
       </div>
+
+      {/* Grain subtitle */}
+      {grain && (
+        <div className="model-node__grain" title={grain}>
+          {grain}
+        </div>
+      )}
 
       {/* Columns — ordered: built -> approved -> planned with separators */}
       <div className="model-node__columns">

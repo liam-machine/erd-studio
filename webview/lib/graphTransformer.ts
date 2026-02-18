@@ -131,6 +131,7 @@ export function transformDomain(domain: ReconciledDomain): TransformResult {
         columns,
         ...(model.discrepancyCount ? { discrepancyCount: model.discrepancyCount } : {}),
         ...(model.ai && (model.ai.what || model.ai.why) ? { hasAiRationale: true } : {}),
+        ...(model.grain ? { grain: model.grain } : {}),
       },
     };
   });

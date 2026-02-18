@@ -117,6 +117,8 @@ export interface ReconciledModel {
   discrepancyCount?: number;
   /** AI-generated rationale: what this model does and why it was designed this way. */
   ai?: AiRationale;
+  /** Grain statement — "One row per ___". */
+  grain?: string;
 }
 
 // ---------------------------------------------------------------------------

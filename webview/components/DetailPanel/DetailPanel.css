@@ -699,3 +699,17 @@
   color: #8b5cf6;
   border-color: #8b5cf6;
 }
+
+/* ---------------------------------------------------------------------------
+   Grain Editor
+   --------------------------------------------------------------------------- */
+
+.detail-panel__grain-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__grain-section:hover .detail-panel__ai-edit-btn {
+  opacity: 1;
+}

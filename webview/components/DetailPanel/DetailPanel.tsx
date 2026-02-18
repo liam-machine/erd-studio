@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { AiRationale } from './AiRationale';
+import { GrainEditor } from './GrainEditor';
 import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
@@ -363,6 +364,11 @@ export function DetailPanel() {
         {model.description && (
           <p className="detail-panel__description">{model.description}</p>
         )}
+      </div>
+
+      {/* Grain statement */}
+      <div className="detail-panel__section">
+        <GrainEditor modelName={model.name} grain={model.grain} />
       </div>
 
       {/* AI Rationale (what/why) */}

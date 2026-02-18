@@ -120,6 +120,7 @@ export class ReconciliationService {
       approved: model.approved ?? false,
       ...(discrepancyCount > 0 ? { discrepancyCount } : {}),
       ...(model.ai ? { ai: model.ai } : {}),
+      ...(model.grain ? { grain: model.grain } : {}),
     };
   }
 

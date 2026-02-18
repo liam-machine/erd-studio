@@ -113,6 +113,8 @@ export interface SemanticModel {
   designedColumns?: string[];
   /** AI-generated rationale: what this model does and why it was designed this way. */
   ai?: AiRationale;
+  /** Grain statement — "One row per ___". The single most critical design decision. */
+  grain?: string;
 }
 
 /**

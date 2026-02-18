@@ -481,6 +481,18 @@ export interface UpdateModelAiMessage {
   };
 }
 
+/**
+ * Request to update the grain statement for a model.
+ * If the grain is empty/cleared, the `grain` key is removed from the JSON entirely.
+ */
+export interface UpdateModelGrainMessage {
+  type: 'updateModelGrain';
+  payload: {
+    modelName: string;
+    grain: string;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -515,7 +527,8 @@ export type WebviewMessage =
   | AcceptStructuralDiscrepancyMessage
   | RejectStructuralDiscrepancyMessage
   | UnrejectStructuralDiscrepancyMessage
-  | UpdateModelAiMessage;
+  | UpdateModelAiMessage
+  | UpdateModelGrainMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

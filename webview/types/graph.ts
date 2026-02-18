@@ -77,6 +77,8 @@ export type ModelNodeData = {
   onToggleExpansion?: (modelName: string) => void;
   /** Whether this model has AI rationale (what/why) metadata. */
   hasAiRationale?: boolean;
+  /** Grain statement — "One row per ___". Shown as subtitle on node. */
+  grain?: string;
   /** Index signature required by React Flow's Node generic. */
   [key: string]: unknown;
 };

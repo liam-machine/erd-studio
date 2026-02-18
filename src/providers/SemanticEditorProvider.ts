@@ -357,6 +357,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'updateModelGrain': {
+            const payload = (message as { payload?: { modelName: string; grain: string } }).payload;
+            if (payload) {
+              await this.handleUpdateModelGrain(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
         }
       },
     );
@@ -2688,6 +2695,55 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to update AI rationale: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle an `updateModelGrain` message from the webview.
+   *
+   * Updates the grain statement on a model.
+   * If the grain is empty after trimming, the `grain` key is removed entirely
+   * to keep the JSON clean.
+   */
+  private async handleUpdateModelGrain(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; grain: string },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model) {
+            throw new Error(`Model "${payload.modelName}" not found.`);
+          }
+
+          const grain = payload.grain?.trim() || undefined;
+
+          if (grain) {
+            model.grain = grain;
+          } else {
+            delete model.grain;
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to update grain statement.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update grain failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to update grain: ${message}` },
       });
     }
   }
