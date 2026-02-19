@@ -470,14 +470,20 @@ export interface UnrejectStructuralDiscrepancyMessage {
 }
 
 /**
- * Request to update the AI rationale (what/why) fields for a model.
- * If both fields are empty/cleared, the `ai` key is removed from the JSON entirely.
+ * Request to update AI rationale fields on a model.
+ *
+ * Uses a field-patch pattern: each message carries one or more field updates
+ * that are merged into the existing on-disk `ai` object by the extension host.
+ * This avoids stale-closure races when multiple reasoning fields are edited
+ * in quick succession. If all fields end up empty after the patch, the `ai`
+ * key is removed entirely to keep the JSON clean.
  */
 export interface UpdateModelAiMessage {
   type: 'updateModelAi';
   payload: {
     modelName: string;
-    ai: AiRationale;
+    /** Partial patch — only the fields being updated need to be present. */
+    ai: Partial<AiRationale>;
   };
 }
 

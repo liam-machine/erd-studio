@@ -33,6 +33,7 @@ export function AiRationale({ modelName, ai }: AiRationaleProps) {
   const hasContent = !!(ai?.what || ai?.why);
 
   const handleSave = useCallback(() => {
+    // Send only what/why as a partial patch — extension host merges on disk
     vscode.postMessage({
       type: 'updateModelAi',
       payload: { modelName, ai: { what: what.trim() || undefined, why: why.trim() || undefined } },

@@ -91,6 +91,14 @@ export interface AiRationale {
   what?: string;
   /** Why this model was designed the way it was. */
   why?: string;
+  /** Why this grain was chosen over alternatives. */
+  grain?: string;
+  /** Why this model role / fact type was selected. */
+  classification?: string;
+  /** Overall SCD strategy explanation across dimension attributes. */
+  scd?: string;
+  /** Why measures are structured this way — additive type choices, component storage. */
+  measures?: string;
 }
 
 // ---------------------------------------------------------------------------

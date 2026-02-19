@@ -2659,14 +2659,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Handle an `updateModelAi` message from the webview.
    *
-   * Updates the AI rationale (what/why) fields on a model.
-   * If both fields are empty after trimming, the `ai` key is removed entirely
-   * to keep the JSON clean.
+   * Uses a field-patch pattern: each message carries one or more field updates
+   * that are merged into the existing on-disk `ai` object. This avoids
+   * stale-closure races when multiple reasoning fields are edited in quick
+   * succession. If all fields end up empty after the patch, the `ai` key is
+   * removed entirely to keep the JSON clean.
    */
   private async handleUpdateModelAi(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    payload: { modelName: string; ai: AiRationale },
+    payload: { modelName: string; ai: Partial<AiRationale> },
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -2678,14 +2680,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             throw new Error(`Model "${payload.modelName}" not found.`);
           }
 
-          const what = payload.ai.what?.trim() || undefined;
-          const why = payload.ai.why?.trim() || undefined;
+          // Start from existing on-disk ai, then merge the partial patch
+          const existing = (model.ai ?? {}) as Record<string, string | undefined>;
+          const patched = { ...existing };
 
-          if (what || why) {
-            const ai: Record<string, string> = {};
-            if (what) ai.what = what;
-            if (why) ai.why = why;
-            model.ai = ai;
+          // Apply each field from the patch (trim non-empty, delete empty)
+          for (const [key, val] of Object.entries(payload.ai)) {
+            const trimmed = typeof val === 'string' ? val.trim() : undefined;
+            if (trimmed) {
+              patched[key] = trimmed;
+            } else {
+              delete patched[key];
+            }
+          }
+
+          // If any fields remain, keep the ai object; otherwise remove it entirely
+          if (Object.keys(patched).length > 0) {
+            model.ai = patched;
           } else {
             delete model.ai;
           }

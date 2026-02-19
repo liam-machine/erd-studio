@@ -933,7 +933,7 @@
       "name": "Expand AI reasoning fields for modelling decisions",
       "description": "Expand the AiRationale interface with additional reasoning fields that explain the structural metadata decisions from F500-F502. New fields: `ai.grain` (why this grain was chosen over alternatives), `ai.classification` (why this model role/fact type was selected), `ai.scd` (overall SCD strategy explanation across all dimension attributes), `ai.measures` (why measures are structured this way — additive type choices, why components stored separately). These are freeform strings where AI explains its design reasoning — the structured fields (grain, modelRole, scdType, additiveType) hold the decisions, while these ai fields hold the justification. Expand the AiRationale component in the DetailPanel to show these fields contextually: `ai.grain` appears in the Grain section, `ai.classification` appears in the Role section, `ai.scd` and `ai.measures` appear in a new 'Design Reasoning' subsection of the AI panel. All fields are editable with the same edit mode pattern as ai.what/ai.why. Empty fields are hidden (not shown as empty placeholders).",
       "phase": "phase-5",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F502"],
       "validation_criteria": [

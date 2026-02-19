@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { AiRationale } from './AiRationale';
+import { AiReasoningField } from './AiReasoningField';
 import { GrainEditor } from './GrainEditor';
 import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
@@ -372,15 +373,64 @@ export function DetailPanel() {
         <RoleEditor modelName={model.name} modelRole={model.modelRole} />
       </div>
 
+      {/* Classification reasoning — shown when model has a role */}
+      {model.modelRole && (
+        <div className="detail-panel__section">
+          <AiReasoningField
+            modelName={model.name}
+            ai={model.ai}
+            fieldKey="classification"
+            label="Classification Reasoning"
+            placeholder="Why was this model role selected?"
+          />
+        </div>
+      )}
+
       {/* Grain statement */}
       <div className="detail-panel__section">
         <GrainEditor modelName={model.name} grain={model.grain} />
       </div>
 
+      {/* Grain reasoning — shown when model has a grain */}
+      {model.grain && (
+        <div className="detail-panel__section">
+          <AiReasoningField
+            modelName={model.name}
+            ai={model.ai}
+            fieldKey="grain"
+            label="Grain Reasoning"
+            placeholder="Why was this grain chosen over alternatives?"
+          />
+        </div>
+      )}
+
       {/* AI Rationale (what/why) */}
       <div className="detail-panel__section">
         <AiRationale modelName={model.name} ai={model.ai} />
       </div>
+
+      {/* Design reasoning (SCD strategy / measures) — shown when model has a role */}
+      {model.modelRole && (
+        <div className="detail-panel__section">
+          <h4 className="detail-panel__section-title" style={{ margin: '0 0 4px' }}>
+            Design Reasoning
+          </h4>
+          <AiReasoningField
+            modelName={model.name}
+            ai={model.ai}
+            fieldKey="scd"
+            label="SCD Strategy"
+            placeholder="Overall SCD strategy across dimension attributes"
+          />
+          <AiReasoningField
+            modelName={model.name}
+            ai={model.ai}
+            fieldKey="measures"
+            label="Measures"
+            placeholder="Why measures are structured this way"
+          />
+        </div>
+      )}
 
       {/* Remove from Domain button (design and built models) */}
       {(model.status === 'design' || model.status === 'built') && (
