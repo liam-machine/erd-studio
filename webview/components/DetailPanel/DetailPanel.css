@@ -585,23 +585,66 @@
 }
 
 /* ---------------------------------------------------------------------------
-   AI Rationale
+   Design Rationale
    --------------------------------------------------------------------------- */
 
-.detail-panel__ai-section {
+.detail-panel__rationale-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.detail-panel__ai-header {
+.detail-panel__rationale-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: inherit;
+}
+
+.detail-panel__rationale-toggle:hover {
+  color: var(--editor-fg);
+}
+
+.detail-panel__rationale-chevron {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.detail-panel__rationale-chevron--open {
+  transform: rotate(90deg);
+}
+
+.detail-panel__rationale-count {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.7;
+}
+
+.detail-panel__rationale-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__rationale-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
 }
 
-.detail-panel__ai-edit-btn {
+.detail-panel__rationale-edit-btn {
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -620,22 +663,22 @@
   transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
 }
 
-.detail-panel__ai-section:hover .detail-panel__ai-edit-btn {
+.detail-panel__rationale-section:hover .detail-panel__rationale-edit-btn {
   opacity: 1;
 }
 
-.detail-panel__ai-edit-btn:hover {
+.detail-panel__rationale-edit-btn:hover {
   background: var(--button-bg);
   color: var(--button-fg);
 }
 
-.detail-panel__ai-field {
+.detail-panel__rationale-field {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.detail-panel__ai-label {
+.detail-panel__rationale-label {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -643,7 +686,7 @@
   color: #8b5cf6;
 }
 
-.detail-panel__ai-text {
+.detail-panel__rationale-text {
   margin: 0;
   font-size: 11px;
   line-height: 1.5;
@@ -651,7 +694,7 @@
   white-space: pre-wrap;
 }
 
-.detail-panel__ai-textarea {
+.detail-panel__rationale-textarea {
   width: 100%;
   min-height: 40px;
   padding: 4px 6px;
@@ -667,23 +710,23 @@
   box-sizing: border-box;
 }
 
-.detail-panel__ai-textarea::placeholder {
+.detail-panel__rationale-textarea::placeholder {
   color: var(--vscode-descriptionForeground, #888);
   opacity: 0.6;
 }
 
-.detail-panel__ai-actions {
+.detail-panel__rationale-actions {
   display: flex;
   gap: 6px;
 }
 
-.detail-panel__ai-actions .detail-panel__button {
+.detail-panel__rationale-actions .detail-panel__button {
   flex: 1;
   padding: 4px 10px;
   font-size: 11px;
 }
 
-.detail-panel__ai-add-btn {
+.detail-panel__rationale-add-btn {
   padding: 6px 12px;
   border: 1px dashed var(--vscode-descriptionForeground, #888);
   border-radius: 4px;
@@ -694,7 +737,7 @@
   transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
 }
 
-.detail-panel__ai-add-btn:hover {
+.detail-panel__rationale-add-btn:hover {
   background: rgba(139, 92, 246, 0.08);
   color: #8b5cf6;
   border-color: #8b5cf6;
@@ -736,6 +779,6 @@
   gap: 8px;
 }
 
-.detail-panel__grain-section:hover .detail-panel__ai-edit-btn {
+.detail-panel__grain-section:hover .detail-panel__rationale-edit-btn {
   opacity: 1;
 }

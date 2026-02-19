@@ -307,7 +307,7 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, hasAiRationale, grain, modelRole, dimmed, isExpanded = false, onToggleExpansion } = data;
+  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, hasRationale, grain, modelRole, dimmed, isExpanded = false, onToggleExpansion } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
 
   // F405: Compute visible columns based on expansion state
@@ -373,8 +373,8 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
             ⚠ {discrepancyCount}
           </span>
         ) : null}
-        {hasAiRationale && (
-          <span className="model-node__ai-badge" title="AI rationale available">AI</span>
+        {hasRationale && (
+          <span className="model-node__rationale-badge" title="Design rationale available">R</span>
         )}
         {modelRole && ROLE_BADGE_LABEL[modelRole] && (
           <span

@@ -6,7 +6,7 @@
  * 2. Read — shows grain text with pencil edit button on hover
  * 3. Edit — textarea with Save/Cancel buttons
  *
- * Follows the same pattern as AiRationale.tsx.
+ * Follows the same pattern as ModelRationale.tsx.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -65,7 +65,7 @@ export function GrainEditor({ modelName, grain }: GrainEditorProps) {
     return (
       <div className="detail-panel__grain-section">
         <button
-          className="detail-panel__ai-add-btn"
+          className="detail-panel__rationale-add-btn"
           onClick={() => setEditing(true)}
           title="Add grain statement (One row per ___)"
         >
@@ -79,13 +79,13 @@ export function GrainEditor({ modelName, grain }: GrainEditorProps) {
   if (editing) {
     return (
       <div className="detail-panel__grain-section">
-        <div className="detail-panel__ai-header">
+        <div className="detail-panel__rationale-header">
           <h4 className="detail-panel__section-title" style={{ margin: 0 }}>
             Grain
           </h4>
         </div>
         <textarea
-          className="detail-panel__ai-textarea"
+          className="detail-panel__rationale-textarea"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -93,7 +93,7 @@ export function GrainEditor({ modelName, grain }: GrainEditorProps) {
           rows={2}
           autoFocus
         />
-        <div className="detail-panel__ai-actions">
+        <div className="detail-panel__rationale-actions">
           <button className="detail-panel__button" onClick={handleSave}>
             Save
           </button>
@@ -108,12 +108,12 @@ export function GrainEditor({ modelName, grain }: GrainEditorProps) {
   // --- Read mode ---
   return (
     <div className="detail-panel__grain-section">
-      <div className="detail-panel__ai-header">
+      <div className="detail-panel__rationale-header">
         <h4 className="detail-panel__section-title" style={{ margin: 0 }}>
           Grain
         </h4>
         <button
-          className="detail-panel__ai-edit-btn"
+          className="detail-panel__rationale-edit-btn"
           onClick={() => setEditing(true)}
           title="Edit grain statement"
           aria-label="Edit grain statement"
@@ -122,10 +122,10 @@ export function GrainEditor({ modelName, grain }: GrainEditorProps) {
         </button>
       </div>
       <div
-        className="detail-panel__ai-field"
+        className="detail-panel__rationale-field"
         onDoubleClick={() => setEditing(true)}
       >
-        <p className="detail-panel__ai-text">{grain}</p>
+        <p className="detail-panel__rationale-text">{grain}</p>
       </div>
     </div>
   );

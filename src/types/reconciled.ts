@@ -10,7 +10,7 @@
  * The webview receives ReconciledDomain instead of raw SemanticDomain.
  */
 
-import type { AiRationale, Cardinality, Layer, ModelRole, ModelTemplate, ViewConfig } from './semantic';
+import type { Rationale, Cardinality, Layer, ModelRole, ModelTemplate, ViewConfig } from './semantic';
 import type { LayerConfig } from './layer';
 
 // ---------------------------------------------------------------------------
@@ -119,8 +119,8 @@ export interface ReconciledModel {
    * Only present when > 0.
    */
   discrepancyCount?: number;
-  /** AI-generated rationale: what this model does and why it was designed this way. */
-  ai?: AiRationale;
+  /** Design rationale: what this model does and why it was designed this way. */
+  rationale?: Rationale;
   /** Grain statement — "One row per ___". */
   grain?: string;
   /** Model's role in the data warehouse architecture. */

@@ -82,21 +82,21 @@ export type ModelRole =
   | 'gold-dim';            // Flattened Gold dimension view
 
 // ---------------------------------------------------------------------------
-// AI rationale
+// Design rationale
 // ---------------------------------------------------------------------------
 
-/** AI-generated rationale metadata for a model. */
-export interface AiRationale {
+/** Design rationale metadata for a model — explains architectural decisions. */
+export interface Rationale {
   /** What requirements or purpose this model fulfils. */
-  what?: string;
+  purpose?: string;
   /** Why this model was designed the way it was. */
-  why?: string;
+  design?: string;
   /** Why this grain was chosen over alternatives. */
-  grain?: string;
+  grainChoice?: string;
   /** Why this model role / fact type was selected. */
-  classification?: string;
+  roleChoice?: string;
   /** Overall SCD strategy explanation across dimension attributes. */
-  scd?: string;
+  scdStrategy?: string;
   /** Why measures are structured this way — additive type choices, component storage. */
   measures?: string;
 }
@@ -149,8 +149,8 @@ export interface SemanticModel {
    * Only present on models that transitioned from design to built.
    */
   designedColumns?: string[];
-  /** AI-generated rationale: what this model does and why it was designed this way. */
-  ai?: AiRationale;
+  /** Design rationale: what this model does and why it was designed this way. */
+  rationale?: Rationale;
   /** Grain statement — "One row per ___". The single most critical design decision. */
   grain?: string;
   /** Model's role in the data warehouse architecture (e.g. conformed-dim, transaction-fact). */

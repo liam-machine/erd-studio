@@ -25,7 +25,7 @@ import { AutoReconciliationService } from '../services/autoReconciliationService
 import { LayerService } from '../services/layerService';
 import { SchemaTagService } from '../services/schemaTagService';
 import type { ManifestData } from '../types/manifest';
-import type { AiRationale, Cardinality, ColumnDef, DesignModel } from '../types/semantic';
+import type { Rationale, Cardinality, ColumnDef, DesignModel } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -350,10 +350,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
-          case 'updateModelAi': {
-            const payload = (message as { payload?: { modelName: string; ai: AiRationale } }).payload;
+          case 'updateModelRationale': {
+            const payload = (message as { payload?: { modelName: string; rationale: Rationale } }).payload;
             if (payload) {
-              await this.handleUpdateModelAi(document, webviewPanel.webview, payload);
+              await this.handleUpdateModelRationale(document, webviewPanel.webview, payload);
             }
             break;
           }
@@ -2657,18 +2657,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * Handle an `updateModelAi` message from the webview.
+   * Handle an `updateModelRationale` message from the webview.
    *
    * Uses a field-patch pattern: each message carries one or more field updates
-   * that are merged into the existing on-disk `ai` object. This avoids
+   * that are merged into the existing on-disk `rationale` object. This avoids
    * stale-closure races when multiple reasoning fields are edited in quick
-   * succession. If all fields end up empty after the patch, the `ai` key is
+   * succession. If all fields end up empty after the patch, the `rationale` key is
    * removed entirely to keep the JSON clean.
    */
-  private async handleUpdateModelAi(
+  private async handleUpdateModelRationale(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    payload: { modelName: string; ai: Partial<AiRationale> },
+    payload: { modelName: string; rationale: Partial<Rationale> },
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -2680,12 +2680,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             throw new Error(`Model "${payload.modelName}" not found.`);
           }
 
-          // Start from existing on-disk ai, then merge the partial patch
-          const existing = (model.ai ?? {}) as Record<string, string | undefined>;
+          // Start from existing on-disk rationale, then merge the partial patch
+          const existing = (model.rationale ?? {}) as Record<string, string | undefined>;
           const patched = { ...existing };
 
           // Apply each field from the patch (trim non-empty, delete empty)
-          for (const [key, val] of Object.entries(payload.ai)) {
+          for (const [key, val] of Object.entries(payload.rationale)) {
             const trimmed = typeof val === 'string' ? val.trim() : undefined;
             if (trimmed) {
               patched[key] = trimmed;
@@ -2694,11 +2694,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
           }
 
-          // If any fields remain, keep the ai object; otherwise remove it entirely
+          // If any fields remain, keep the rationale object; otherwise remove it entirely
           if (Object.keys(patched).length > 0) {
-            model.ai = patched;
+            model.rationale = patched;
           } else {
-            delete model.ai;
+            delete model.rationale;
           }
         },
         { webview },
@@ -2707,15 +2707,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!success) {
         webview.postMessage({
           type: 'error',
-          payload: { message: 'Failed to update AI rationale.' },
+          payload: { message: 'Failed to update design rationale.' },
         });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Update AI rationale failed: ${message}`);
+      console.error(`[SemanticEditorProvider] Update design rationale failed: ${message}`);
       webview.postMessage({
         type: 'error',
-        payload: { message: `Failed to update AI rationale: ${message}` },
+        payload: { message: `Failed to update design rationale: ${message}` },
       });
     }
   }

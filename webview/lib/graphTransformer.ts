@@ -132,7 +132,7 @@ export function transformDomain(domain: ReconciledDomain): TransformResult {
         layerConfig,
         columns,
         ...(model.discrepancyCount ? { discrepancyCount: model.discrepancyCount } : {}),
-        ...(model.ai && (model.ai.what || model.ai.why || model.ai.grain || model.ai.classification || model.ai.scd || model.ai.measures) ? { hasAiRationale: true } : {}),
+        ...(model.rationale && (model.rationale.purpose || model.rationale.design || model.rationale.grainChoice || model.rationale.roleChoice || model.rationale.scdStrategy || model.rationale.measures) ? { hasRationale: true } : {}),
         ...(model.grain ? { grain: model.grain } : {}),
         ...(model.modelRole ? { modelRole: model.modelRole } : {}),
       },

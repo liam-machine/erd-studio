@@ -12,7 +12,7 @@
  */
 
 import type { ReconciledDomain } from './reconciled';
-import type { AiRationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole } from './semantic';
+import type { Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole } from './semantic';
 
 // ---------------------------------------------------------------------------
 // Extension → Webview messages
@@ -470,20 +470,20 @@ export interface UnrejectStructuralDiscrepancyMessage {
 }
 
 /**
- * Request to update AI rationale fields on a model.
+ * Request to update design rationale fields on a model.
  *
  * Uses a field-patch pattern: each message carries one or more field updates
- * that are merged into the existing on-disk `ai` object by the extension host.
+ * that are merged into the existing on-disk `rationale` object by the extension host.
  * This avoids stale-closure races when multiple reasoning fields are edited
- * in quick succession. If all fields end up empty after the patch, the `ai`
+ * in quick succession. If all fields end up empty after the patch, the `rationale`
  * key is removed entirely to keep the JSON clean.
  */
-export interface UpdateModelAiMessage {
-  type: 'updateModelAi';
+export interface UpdateModelRationaleMessage {
+  type: 'updateModelRationale';
   payload: {
     modelName: string;
     /** Partial patch — only the fields being updated need to be present. */
-    ai: Partial<AiRationale>;
+    rationale: Partial<Rationale>;
   };
 }
 
@@ -545,7 +545,7 @@ export type WebviewMessage =
   | AcceptStructuralDiscrepancyMessage
   | RejectStructuralDiscrepancyMessage
   | UnrejectStructuralDiscrepancyMessage
-  | UpdateModelAiMessage
+  | UpdateModelRationaleMessage
   | UpdateModelGrainMessage
   | UpdateModelRoleMessage;
 

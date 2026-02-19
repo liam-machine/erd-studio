@@ -79,8 +79,8 @@ export type ModelNodeData = {
   isExpanded?: boolean;
   /** Callback to toggle expansion state (F405). Receives model name as argument. */
   onToggleExpansion?: (modelName: string) => void;
-  /** Whether this model has AI rationale (what/why) metadata. */
-  hasAiRationale?: boolean;
+  /** Whether this model has design rationale metadata. */
+  hasRationale?: boolean;
   /** Grain statement — "One row per ___". Shown as subtitle on node. */
   grain?: string;
   /** Model's role in the data warehouse architecture. Shown as badge on node. */
