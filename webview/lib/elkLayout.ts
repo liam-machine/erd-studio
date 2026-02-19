@@ -19,8 +19,10 @@ import type { NodePosition, LayoutOptions } from '../../src/types/semantic';
 // Node size estimation (matches ModelNode CSS)
 // ---------------------------------------------------------------------------
 
-/** Fixed width for all model cards in the ELK layout. */
+/** Default width — used as fallback by edgeDistribution.ts. */
 export const NODE_WIDTH = 280;
+
+// --- Height estimation constants ---
 
 /** Height of the header section (name + layer badge). */
 const NODE_HEADER_HEIGHT = 29;
@@ -47,6 +49,79 @@ function estimateNodeHeight(columnCount: number): number {
       : NODE_COLUMNS_PADDING + NODE_EMPTY_ROW_HEIGHT;
 
   return NODE_BORDER + NODE_HEADER_HEIGHT + columnsHeight + NODE_FOOTER_HEIGHT;
+}
+
+// --- Width estimation constants (approximates ModelNode CSS rendering) ---
+
+/** Average pixel width per character in 12px system sans-serif (body text). */
+const CHAR_WIDTH_BODY = 7;
+
+/** Average pixel width per character in 11px monospace (data type labels). */
+const CHAR_WIDTH_MONO = 6.8;
+
+/** Width of a single key badge (PK / FK / NK). */
+const KEY_BADGE_WIDTH = 20;
+
+/** Horizontal padding inside a column row (10px left + 10px right). */
+const COL_ROW_PADDING = 20;
+
+/** Approximate total flex gap between items in a column row. */
+const COL_ROW_GAPS = 24;
+
+/** Width of an SCD or additive type badge. */
+const EXTRA_BADGE_WIDTH = 30;
+
+/** Header horizontal padding (10px each side) + layer badge + gap. */
+const HEADER_PADDING = 20;
+
+/** Layer badge approximate width. */
+const LAYER_BADGE_WIDTH = 36;
+
+/** Minimum node width (matches CSS min-width). */
+const MIN_NODE_WIDTH = 200;
+
+/** Maximum node width (matches CSS max-width). */
+const MAX_NODE_WIDTH = 480;
+
+/**
+ * Estimate the pixel width a node needs to display its content without
+ * truncation. Examines the header and each column row, returning the
+ * widest value clamped to [MIN_NODE_WIDTH, MAX_NODE_WIDTH].
+ */
+function estimateNodeWidth(node: ModelFlowNode): number {
+  const { modelName, columns } = node.data;
+
+  // Header: name + layer badge + padding
+  const headerWidth =
+    HEADER_PADDING + modelName.length * CHAR_WIDTH_BODY + LAYER_BADGE_WIDTH;
+
+  // Find the widest column row
+  let maxColWidth = 0;
+  for (const col of columns) {
+    const keyBadges =
+      (col.isPrimaryKey ? 1 : 0) +
+      (col.isForeignKey ? 1 : 0) +
+      (col.isNaturalKey ? 1 : 0);
+
+    const extraBadges =
+      (col.scdType !== undefined ? 1 : 0) +
+      (col.additiveType !== undefined ? 1 : 0);
+
+    const colWidth =
+      COL_ROW_PADDING +
+      keyBadges * KEY_BADGE_WIDTH +
+      col.name.length * CHAR_WIDTH_BODY +
+      col.dataType.length * CHAR_WIDTH_MONO +
+      extraBadges * EXTRA_BADGE_WIDTH +
+      COL_ROW_GAPS;
+
+    if (colWidth > maxColWidth) {
+      maxColWidth = colWidth;
+    }
+  }
+
+  const rawWidth = Math.max(headerWidth, maxColWidth);
+  return Math.round(Math.max(MIN_NODE_WIDTH, Math.min(MAX_NODE_WIDTH, rawWidth)));
 }
 
 // ---------------------------------------------------------------------------
@@ -111,12 +186,13 @@ function getElk(): IELK {
 
 /**
  * Convert React Flow nodes into ELK children nodes.
- * Each node gets a fixed width and an estimated height based on column count.
+ * Each node gets an estimated width (based on content) and height (based on
+ * column count) so the layered layout reserves the correct amount of space.
  */
 function toElkChildren(nodes: ModelFlowNode[]): ElkNode[] {
   return nodes.map((node) => ({
     id: node.id,
-    width: NODE_WIDTH,
+    width: estimateNodeWidth(node),
     height: estimateNodeHeight(node.data.columns.length),
   }));
 }

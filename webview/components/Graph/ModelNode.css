@@ -10,8 +10,9 @@
    ----------------------------------------------------------------------- */
 
 .model-node {
+  width: max-content;
   min-width: 200px;
-  max-width: 320px;
+  max-width: 480px;
   background: var(--editor-bg);
   border: 2px solid var(--panel-border);
   border-radius: 6px;
@@ -69,8 +70,6 @@
 
 .model-node__name {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -272,8 +271,6 @@
 
 .model-node__col-name {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
