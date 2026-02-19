@@ -12,7 +12,7 @@ import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import { groupColumnsByStatus } from '../../lib/columnGrouping';
 import type { ModelStatus, ReconciledColumn, ReconciledModel } from '../../../src/types/reconciled';
-import type { ColumnDef } from '../../../src/types/semantic';
+import type { ColumnDef, ModelRole } from '../../../src/types/semantic';
 import type { ColumnKeyType } from '../../../src/types/messages';
 import './ColumnEditor.css';
 
@@ -27,13 +27,15 @@ export interface ColumnEditorProps {
   columns: ReconciledColumn[];
   /** Number of columns with unresolved discrepancies. */
   discrepancyCount?: number;
+  /** Parent model's role — passed to column rows for conditional SCD/additive dropdowns. */
+  modelRole?: ModelRole;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, discrepancyCount }: ColumnEditorProps) {
+export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, discrepancyCount, modelRole }: ColumnEditorProps) {
   const { send } = useMessageBus(() => {});
 
   // State for whether we're adding a new column
@@ -320,6 +322,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
             onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
             onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
+            modelRole={modelRole}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={() => handleToggleExpand(col.name)}
             onAcceptDiscrepancy={col.discrepancy ? () => handleAcceptDiscrepancy(col) : undefined}
@@ -353,6 +356,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
             onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
             onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
+            modelRole={modelRole}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={() => handleToggleExpand(col.name)}
           />
@@ -383,6 +387,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
             onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
             onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
+            modelRole={modelRole}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={() => handleToggleExpand(col.name)}
             onAcceptDiscrepancy={col.discrepancy ? () => handleAcceptDiscrepancy(col) : undefined}
@@ -402,6 +407,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
             onCancel={handleCancelNew}
             showIndicators={true}
             showDelete={false}
+            modelRole={modelRole}
             expanded={true}
             onToggleExpand={() => {}}
           />

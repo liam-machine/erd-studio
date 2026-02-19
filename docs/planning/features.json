@@ -910,7 +910,7 @@
       "name": "Add column-level SCD type and additive type with badges",
       "description": "Add `scdType` (0 | 1 | 2) to ColumnDef for dimension columns, and `additiveType` ('additive' | 'semi-additive' | 'non-additive') to ColumnDef for fact measure columns. These are per-attribute design decisions from the modelling workflow — SCD strategy determines how dimension attributes handle changes over time, and additive type determines how fact measures can be aggregated across dimensions. Display tiny badges in the ModelNode column rows: SCD type shows as a circled number (⓪①②) for dimension columns, additive type shows as a symbol (Σ for additive, ~ for semi-additive, ÷ for non-additive) for fact columns. In the DetailPanel column editor, add dropdowns for these fields — SCD type dropdown appears when the parent model's role is a dimension type, additive type dropdown appears when the parent model's role is a fact type. These fields are optional and only shown when relevant to the model's role.",
       "phase": "phase-5",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F501"],
       "validation_criteria": [

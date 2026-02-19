@@ -428,6 +428,7 @@ export function DetailPanel() {
           modelApproved={model.approved}
           columns={model.columns}
           discrepancyCount={model.discrepancyCount}
+          modelRole={model.modelRole}
         />
       </div>
 

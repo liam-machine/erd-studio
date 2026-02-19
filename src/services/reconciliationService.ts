@@ -160,6 +160,8 @@ export class ReconciliationService {
           isForeignKey: col.isForeignKey === true || fkColumns.has(col.name),
           isNaturalKey: col.isNaturalKey === true,
           approved: isApproved,
+          ...(col.scdType != null ? { scdType: col.scdType } : {}),
+          ...(col.additiveType ? { additiveType: col.additiveType } : {}),
         });
         seenColumns.add(col.name);
       }
@@ -212,6 +214,8 @@ export class ReconciliationService {
           isForeignKey: override?.isForeignKey === true || fkColumns.has(col.name),
           isNaturalKey: override?.isNaturalKey === true,
           approved: true, // Built columns are always approved
+          ...(override?.scdType != null ? { scdType: override.scdType } : {}),
+          ...(override?.additiveType ? { additiveType: override.additiveType } : {}),
           ...(discrepancy ? { discrepancy } : {}),
         });
         seenColumns.add(col.name);
@@ -245,6 +249,8 @@ export class ReconciliationService {
             isForeignKey: col.isForeignKey === true || fkColumns.has(col.name),
             isNaturalKey: col.isNaturalKey === true,
             approved: isApproved,
+            ...(col.scdType != null ? { scdType: col.scdType } : {}),
+            ...(col.additiveType ? { additiveType: col.additiveType } : {}),
             ...(discrepancy ? { discrepancy } : {}),
           });
           seenColumns.add(col.name);

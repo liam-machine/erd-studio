@@ -354,6 +354,45 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Column Metadata (SCD Type, Additive Type) — F502
+   --------------------------------------------------------------------------- */
+
+.column-row-editor__metadata-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px 3px 28px; /* 28px left aligns with column name */
+}
+
+.column-row-editor__metadata-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  min-width: 60px;
+}
+
+.column-row-editor__metadata-select {
+  flex: 1;
+  padding: 2px 4px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-editorGroup-border, #444));
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #ccc);
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.column-row-editor__metadata-select:focus {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+
+.column-row-editor__metadata-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------------------
    Discrepancy Indicator
    --------------------------------------------------------------------------- */
 

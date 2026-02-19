@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { DataTypeSelect } from './DataTypeSelect';
 import { KeyBadgeGroup } from './KeyBadgeGroup';
 import { useFocusWithinRow } from '../../hooks/useFocusWithinRow';
-import type { ColumnDef } from '../../../src/types/semantic';
+import type { ColumnDef, ModelRole } from '../../../src/types/semantic';
 import './ColumnRowEditor.css';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,10 @@ export interface ColumnRowEditorColumn {
     structural?: 'extra' | 'missing';
     rejected: boolean;
   };
+  /** SCD type for dimension columns (0 = never changes, 1 = overwrite, 2 = track history). */
+  scdType?: 0 | 1 | 2;
+  /** Additive type for fact measure columns. */
+  additiveType?: 'additive' | 'semi-additive' | 'non-additive';
 }
 
 export interface ColumnRowEditorProps {
@@ -70,6 +74,8 @@ export interface ColumnRowEditorProps {
   onToggleNK?: () => void;
   /** Show warning if multiple PKs exist in model. */
   showMultiplePKWarning?: boolean;
+  /** Parent model's role — determines whether SCD/additive dropdowns are shown. */
+  modelRole?: ModelRole;
   /** Whether the description area is expanded. */
   expanded?: boolean;
   /** Callback when the expand/collapse chevron is clicked. */
@@ -130,6 +136,7 @@ export function ColumnRowEditor({
   onToggleFK,
   onToggleNK,
   showMultiplePKWarning = false,
+  modelRole,
   expanded = false,
   onToggleExpand,
   onAcceptDiscrepancy,
@@ -144,6 +151,8 @@ export function ColumnRowEditor({
     isPrimaryKey: column.isPrimaryKey,
     isForeignKey: column.isForeignKey,
     isNaturalKey: column.isNaturalKey,
+    scdType: column.scdType,
+    additiveType: column.additiveType,
   });
   const [editingField, setEditingField] = useState<'name' | 'dataType' | 'description' | null>(
     mode === 'new' ? 'name' : null
@@ -170,6 +179,8 @@ export function ColumnRowEditor({
         isPrimaryKey: column.isPrimaryKey,
         isForeignKey: column.isForeignKey,
         isNaturalKey: column.isNaturalKey,
+        scdType: column.scdType,
+        additiveType: column.additiveType,
       });
     }
     isSavingRef.current = false;
@@ -180,6 +191,8 @@ export function ColumnRowEditor({
     column.isPrimaryKey,
     column.isForeignKey,
     column.isNaturalKey,
+    column.scdType,
+    column.additiveType,
   ]);
 
   // Auto-focus when entering edit mode or when mode is 'new'
@@ -223,6 +236,8 @@ export function ColumnRowEditor({
       isPrimaryKey: localColumn.isPrimaryKey,
       isForeignKey: localColumn.isForeignKey,
       isNaturalKey: localColumn.isNaturalKey,
+      ...(localColumn.scdType != null ? { scdType: localColumn.scdType } : {}),
+      ...(localColumn.additiveType ? { additiveType: localColumn.additiveType } : {}),
     });
     setEditingField(null);
   }, [mode, localColumn, existingColumnNames, column.name, onUpdate]);
@@ -281,6 +296,8 @@ export function ColumnRowEditor({
             isPrimaryKey: column.isPrimaryKey,
             isForeignKey: column.isForeignKey,
             isNaturalKey: column.isNaturalKey,
+            scdType: column.scdType,
+            additiveType: column.additiveType,
           });
           setEditingField(null);
         }
@@ -311,6 +328,8 @@ export function ColumnRowEditor({
             isPrimaryKey: localColumn.isPrimaryKey,
             isForeignKey: localColumn.isForeignKey,
             isNaturalKey: localColumn.isNaturalKey,
+            ...(localColumn.scdType != null ? { scdType: localColumn.scdType } : {}),
+            ...(localColumn.additiveType ? { additiveType: localColumn.additiveType } : {}),
           });
         }
       }
@@ -325,6 +344,53 @@ export function ColumnRowEditor({
       onDelete?.();
     },
     [onDelete]
+  );
+
+  // Handle SCD type change — auto-saves immediately
+  const handleScdTypeChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const raw = e.target.value;
+      const value = raw === '' ? undefined : (Number(raw) as 0 | 1 | 2);
+      setLocalColumn((prev) => ({ ...prev, scdType: value }));
+      // Auto-save
+      if (localColumn.name.trim() && mode !== 'readonly') {
+        isSavingRef.current = true;
+        onUpdate?.({
+          name: localColumn.name.trim(),
+          dataType: localColumn.dataType,
+          description: localColumn.description.trim(),
+          isPrimaryKey: localColumn.isPrimaryKey,
+          isForeignKey: localColumn.isForeignKey,
+          isNaturalKey: localColumn.isNaturalKey,
+          ...(value != null ? { scdType: value } : {}),
+          ...(localColumn.additiveType ? { additiveType: localColumn.additiveType } : {}),
+        });
+      }
+    },
+    [mode, localColumn, onUpdate],
+  );
+
+  // Handle additive type change — auto-saves immediately
+  const handleAdditiveTypeChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const value = (e.target.value || undefined) as ColumnDef['additiveType'];
+      setLocalColumn((prev) => ({ ...prev, additiveType: value }));
+      // Auto-save
+      if (localColumn.name.trim() && mode !== 'readonly') {
+        isSavingRef.current = true;
+        onUpdate?.({
+          name: localColumn.name.trim(),
+          dataType: localColumn.dataType,
+          description: localColumn.description.trim(),
+          isPrimaryKey: localColumn.isPrimaryKey,
+          isForeignKey: localColumn.isForeignKey,
+          isNaturalKey: localColumn.isNaturalKey,
+          ...(localColumn.scdType != null ? { scdType: localColumn.scdType } : {}),
+          ...(value ? { additiveType: value } : {}),
+        });
+      }
+    },
+    [mode, localColumn, onUpdate],
   );
 
   // Handle chevron toggle click
@@ -343,6 +409,10 @@ export function ColumnRowEditor({
 
   // Check if description exists
   const hasDescription = Boolean(localColumn.description?.trim());
+
+  // Determine which metadata dropdowns to show based on parent model role
+  const isDimRole = modelRole?.includes('dim') || modelRole === 'reference';
+  const isFactRole = modelRole?.includes('fact') || modelRole?.includes('snapshot');
 
   const rowClasses = [
     'column-row-editor',
@@ -511,6 +581,42 @@ export function ColumnRowEditor({
               {localColumn.description || (
                 mode !== 'readonly' ? 'Click to add description...' : 'No description'
               )}
+            </div>
+          )}
+
+          {/* SCD Type dropdown — shown for dimension-role models */}
+          {isDimRole && (
+            <div className="column-row-editor__metadata-row">
+              <label className="column-row-editor__metadata-label">SCD Type</label>
+              <select
+                className="column-row-editor__metadata-select"
+                value={localColumn.scdType != null ? String(localColumn.scdType) : ''}
+                onChange={handleScdTypeChange}
+                disabled={mode === 'readonly'}
+              >
+                <option value="">Not set</option>
+                <option value="0">Type 0 — Never changes</option>
+                <option value="1">Type 1 — Overwrite</option>
+                <option value="2">Type 2 — Track history</option>
+              </select>
+            </div>
+          )}
+
+          {/* Additive Type dropdown — shown for fact-role models */}
+          {isFactRole && (
+            <div className="column-row-editor__metadata-row">
+              <label className="column-row-editor__metadata-label">Additive</label>
+              <select
+                className="column-row-editor__metadata-select"
+                value={localColumn.additiveType ?? ''}
+                onChange={handleAdditiveTypeChange}
+                disabled={mode === 'readonly'}
+              >
+                <option value="">Not set</option>
+                <option value="additive">Additive — Sum across all dims</option>
+                <option value="semi-additive">Semi-additive — Not across time</option>
+                <option value="non-additive">Non-additive — Store components</option>
+              </select>
             </div>
           )}
         </div>

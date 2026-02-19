@@ -52,6 +52,8 @@ function mapColumns(model: ReconciledModel): ColumnDisplay[] {
     isNaturalKey: col.isNaturalKey,
     status: col.status,
     approved: col.approved,
+    ...(col.scdType != null ? { scdType: col.scdType } : {}),
+    ...(col.additiveType ? { additiveType: col.additiveType } : {}),
   }));
   return sortColumnsByKeyPriority(mapped);
 }

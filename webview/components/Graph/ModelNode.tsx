@@ -64,6 +64,20 @@ const ROLE_BADGE_COLOR: Record<ModelRole, string> = {
   'gold-dim': '#d97706',
 };
 
+/** Unicode circled numbers for SCD type badges. */
+const SCD_BADGE: Record<number, string> = {
+  0: '\u24EA', // ⓪
+  1: '\u2460', // ①
+  2: '\u2461', // ②
+};
+
+/** Symbols for additive type badges. */
+const ADDITIVE_BADGE: Record<string, string> = {
+  'additive': '\u03A3',      // Σ
+  'semi-additive': '~',
+  'non-additive': '\u00F7',  // ÷
+};
+
 /**
  * Node-level handles — invisible connection points on each side of the card.
  * FkEdge connects to these for Power BI-style routing (least bends).
@@ -268,6 +282,22 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
         {column.name}
       </span>
       <span className="model-node__col-type">{column.dataType}</span>
+      {column.scdType != null && SCD_BADGE[column.scdType] && (
+        <span
+          className="model-node__col-badge model-node__col-badge--scd"
+          title={`SCD Type ${column.scdType}`}
+        >
+          {SCD_BADGE[column.scdType]}
+        </span>
+      )}
+      {column.additiveType && ADDITIVE_BADGE[column.additiveType] && (
+        <span
+          className="model-node__col-badge model-node__col-badge--additive"
+          title={column.additiveType}
+        >
+          {ADDITIVE_BADGE[column.additiveType]}
+        </span>
+      )}
     </div>
   );
 }

@@ -43,6 +43,10 @@ export interface ColumnDisplay {
   status: ColumnStatus;
   /** Whether this column has been approved for build. */
   approved: boolean;
+  /** SCD type for dimension columns (0 = never changes, 1 = overwrite, 2 = track history). */
+  scdType?: 0 | 1 | 2;
+  /** Additive type for fact measure columns. */
+  additiveType?: 'additive' | 'semi-additive' | 'non-additive';
 }
 
 // ---------------------------------------------------------------------------

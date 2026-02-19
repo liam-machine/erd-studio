@@ -49,6 +49,17 @@ export interface ColumnDef {
    * not part of the original design (extra columns flagged as unwanted).
    */
   structuralRejected?: boolean;
+  /**
+   * SCD type for dimension columns: how this attribute handles changes over time.
+   * 0 = Never changes, 1 = Overwrite, 2 = Track history.
+   * Only meaningful on dimension-role models but stored unconditionally.
+   */
+  scdType?: 0 | 1 | 2;
+  /**
+   * Additive type for fact measure columns: how this measure aggregates across dimensions.
+   * Only meaningful on fact-role models but stored unconditionally.
+   */
+  additiveType?: 'additive' | 'semi-additive' | 'non-additive';
 }
 
 // ---------------------------------------------------------------------------

@@ -917,6 +917,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         ...(newFK ? { isForeignKey: true } : {}),
         ...(newNK ? { isNaturalKey: true } : {}),
         ...(newApproved ? { approved: true } : {}),
+        ...(payload.column.scdType != null ? { scdType: payload.column.scdType } : {}),
+        ...(payload.column.additiveType ? { additiveType: payload.column.additiveType } : {}),
       };
 
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
