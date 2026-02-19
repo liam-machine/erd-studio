@@ -19,6 +19,7 @@
 import { memo, useCallback, useMemo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
+import type { ModelRole } from '../../../src/types/semantic';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
@@ -35,6 +36,32 @@ const LAYER_BADGE_FALLBACK: Record<string, string> = {
   bronze: 'BRZ',
   silver: 'SLV',
   gold: 'GLD',
+};
+
+/** Short abbreviations for model role badges. */
+const ROLE_BADGE_LABEL: Record<ModelRole, string> = {
+  'conformed-dim': 'CONF',
+  'domain-dim': 'DIM',
+  'transaction-fact': 'TXN',
+  'periodic-snapshot': 'PER',
+  'accumulating-snapshot': 'ACC',
+  'factless-fact': 'BRG',
+  'reference': 'REF',
+  'gold-fact': 'GFCT',
+  'gold-dim': 'GDIM',
+};
+
+/** Colour for each model role badge (text + background at 20% opacity). */
+const ROLE_BADGE_COLOR: Record<ModelRole, string> = {
+  'conformed-dim': '#6366f1',
+  'domain-dim': '#6366f1',
+  'transaction-fact': '#e11d48',
+  'periodic-snapshot': '#e11d48',
+  'accumulating-snapshot': '#e11d48',
+  'factless-fact': '#a855f7',
+  'reference': '#059669',
+  'gold-fact': '#d97706',
+  'gold-dim': '#d97706',
 };
 
 /**
@@ -250,7 +277,7 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, hasAiRationale, grain, dimmed, isExpanded = false, onToggleExpansion } = data;
+  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, hasAiRationale, grain, modelRole, dimmed, isExpanded = false, onToggleExpansion } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
 
   // F405: Compute visible columns based on expansion state
@@ -318,6 +345,18 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         ) : null}
         {hasAiRationale && (
           <span className="model-node__ai-badge" title="AI rationale available">AI</span>
+        )}
+        {modelRole && ROLE_BADGE_LABEL[modelRole] && (
+          <span
+            className="model-node__role-badge"
+            style={{
+              backgroundColor: `${ROLE_BADGE_COLOR[modelRole]}33`,
+              color: ROLE_BADGE_COLOR[modelRole],
+            }}
+            title={modelRole}
+          >
+            {ROLE_BADGE_LABEL[modelRole]}
+          </span>
         )}
         <span
           className="model-node__badge"

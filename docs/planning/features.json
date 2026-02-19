@@ -887,7 +887,7 @@
       "name": "Add model role enum with role-aware badges",
       "description": "Add a `modelRole` enum field to SemanticModel that classifies each model according to its role in the data warehouse architecture. Roles map directly to the modelling workflow entity classifications: `conformed-dim` (shared dimension reused across domains), `domain-dim` (new dimension specific to this domain), `transaction-fact` (discrete event fact), `periodic-snapshot` (recurring measurement per period), `accumulating-snapshot` (lifecycle with milestones), `factless-fact` (M:M bridge table, FKs only), `reference` (low-cardinality lookup), `gold-fact` (pre-joined Gold view), `gold-dim` (flattened Gold dimension view). Display a role badge on each ModelNode next to the existing layer badge. The role badge uses a short abbreviation (e.g., TXN, DIM, CONF, BRG, PER, ACC, REF, GLD) with role-specific colours. Role is editable in the DetailPanel via a dropdown. When role is not set, no badge is shown (graceful degradation for existing domains). The New Model dialog should auto-suggest a role based on the selected template (Dimension template → domain-dim, Fact template → transaction-fact, Bridge template → factless-fact).",
       "phase": "phase-5",
-      "status": "pending",
+      "status": "completed",
       "skip": false,
       "dependencies": ["F500"],
       "validation_criteria": [

@@ -7,7 +7,7 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { Cardinality, Layer } from '../../src/types/semantic';
+import type { Cardinality, Layer, ModelRole } from '../../src/types/semantic';
 import type { LayerConfig } from '../../src/types/layer';
 
 // ---------------------------------------------------------------------------
@@ -79,6 +79,8 @@ export type ModelNodeData = {
   hasAiRationale?: boolean;
   /** Grain statement — "One row per ___". Shown as subtitle on node. */
   grain?: string;
+  /** Model's role in the data warehouse architecture. Shown as badge on node. */
+  modelRole?: ModelRole;
   /** Index signature required by React Flow's Node generic. */
   [key: string]: unknown;
 };

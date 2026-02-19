@@ -121,6 +121,7 @@ export class ReconciliationService {
       ...(discrepancyCount > 0 ? { discrepancyCount } : {}),
       ...(model.ai ? { ai: model.ai } : {}),
       ...(model.grain ? { grain: model.grain } : {}),
+      ...(model.modelRole ? { modelRole: model.modelRole } : {}),
     };
   }
 

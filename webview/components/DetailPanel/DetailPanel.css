@@ -701,6 +701,32 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Role Editor
+   --------------------------------------------------------------------------- */
+
+.detail-panel__role-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-panel__role-select {
+  padding: 4px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.detail-panel__role-select:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* ---------------------------------------------------------------------------
    Grain Editor
    --------------------------------------------------------------------------- */
 

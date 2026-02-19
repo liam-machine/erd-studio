@@ -364,6 +364,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'updateModelRole': {
+            const payload = (message as { payload?: { modelName: string; modelRole: unknown } }).payload;
+            if (payload) {
+              await this.handleUpdateModelRole(document, webviewPanel.webview, payload);
+            }
+            break;
+          }
         }
       },
     );
@@ -680,6 +687,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         schema: model.schema,
         description: model.description,
         columns: model.columns,
+        ...(model.modelRole ? { modelRole: model.modelRole } : {}),
       });
 
       parsed.models = models;
@@ -2744,6 +2752,49 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview.postMessage({
         type: 'error',
         payload: { message: `Failed to update grain: ${message}` },
+      });
+    }
+  }
+
+  /**
+   * Handle updateModelRole — set or remove the modelRole field on a model.
+   */
+  private async handleUpdateModelRole(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; modelRole: string | null },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (parsed) => {
+          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model) {
+            throw new Error(`Model "${payload.modelName}" not found.`);
+          }
+
+          if (payload.modelRole) {
+            model.modelRole = payload.modelRole;
+          } else {
+            delete model.modelRole;
+          }
+        },
+        { webview },
+      );
+
+      if (!success) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Failed to update model role.' },
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update model role failed: ${message}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to update model role: ${message}` },
       });
     }
   }

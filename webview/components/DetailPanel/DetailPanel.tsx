@@ -12,6 +12,7 @@ import { Panel } from '@xyflow/react';
 
 import { AiRationale } from './AiRationale';
 import { GrainEditor } from './GrainEditor';
+import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
@@ -364,6 +365,11 @@ export function DetailPanel() {
         {model.description && (
           <p className="detail-panel__description">{model.description}</p>
         )}
+      </div>
+
+      {/* Model role */}
+      <div className="detail-panel__section">
+        <RoleEditor modelName={model.name} modelRole={model.modelRole} />
       </div>
 
       {/* Grain statement */}

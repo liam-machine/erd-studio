@@ -52,6 +52,25 @@ export interface ColumnDef {
 }
 
 // ---------------------------------------------------------------------------
+// Model role
+// ---------------------------------------------------------------------------
+
+/**
+ * Classifies a model's role in the data warehouse architecture.
+ * Maps to entity types from dimensional modelling methodology.
+ */
+export type ModelRole =
+  | 'conformed-dim'        // Shared dimension reused across domains
+  | 'domain-dim'           // New dimension specific to this domain
+  | 'transaction-fact'     // Discrete event fact
+  | 'periodic-snapshot'    // Recurring measurement per period
+  | 'accumulating-snapshot'// Lifecycle with milestones
+  | 'factless-fact'        // M:M bridge table, FKs only
+  | 'reference'            // Low-cardinality lookup
+  | 'gold-fact'            // Pre-joined Gold view
+  | 'gold-dim';            // Flattened Gold dimension view
+
+// ---------------------------------------------------------------------------
 // AI rationale
 // ---------------------------------------------------------------------------
 
@@ -115,6 +134,8 @@ export interface SemanticModel {
   ai?: AiRationale;
   /** Grain statement — "One row per ___". The single most critical design decision. */
   grain?: string;
+  /** Model's role in the data warehouse architecture (e.g. conformed-dim, transaction-fact). */
+  modelRole?: ModelRole;
 }
 
 /**
@@ -126,6 +147,8 @@ export interface DesignModel {
   schema?: string;
   description: string;
   columns: ColumnDef[];
+  /** Model's role in the data warehouse architecture. Auto-suggested from template. */
+  modelRole?: ModelRole;
 }
 
 // ---------------------------------------------------------------------------

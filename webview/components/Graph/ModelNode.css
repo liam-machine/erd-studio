@@ -109,6 +109,15 @@
   color: #8b5cf6;
 }
 
+.model-node__role-badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
 
 /* -----------------------------------------------------------------------
    Grain subtitle

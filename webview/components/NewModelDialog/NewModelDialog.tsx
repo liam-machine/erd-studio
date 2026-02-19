@@ -17,7 +17,7 @@ import { Panel } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import { KeyBadgeGroup } from '../common/KeyBadgeGroup';
-import type { ColumnDef, DesignModel, ModelTemplate } from '../../../src/types/semantic';
+import type { ColumnDef, DesignModel, ModelRole, ModelTemplate } from '../../../src/types/semantic';
 import './NewModelDialog.css';
 
 // ---------------------------------------------------------------------------
@@ -98,6 +98,14 @@ function validateForm(
 
   return errors;
 }
+
+/** Auto-suggested model role based on template ID. */
+const TEMPLATE_ROLE_MAP: Record<string, ModelRole> = {
+  dimension: 'domain-dim',
+  fact: 'transaction-fact',
+  bridge: 'factless-fact',
+  scd2: 'domain-dim',
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -192,10 +200,12 @@ export function NewModelDialog() {
     const validCustomColumns = customColumns.filter((col) => col.name.trim() !== '');
     const finalColumns = [...templateCols, ...validCustomColumns];
 
+    const suggestedRole = TEMPLATE_ROLE_MAP[templateId];
     const newModel: DesignModel = {
       name: modelName.trim(),
       description: description.trim(),
       columns: finalColumns,
+      ...(suggestedRole ? { modelRole: suggestedRole } : {}),
     };
 
     send({

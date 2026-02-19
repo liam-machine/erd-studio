@@ -12,7 +12,7 @@
  */
 
 import type { ReconciledDomain } from './reconciled';
-import type { AiRationale, Cardinality, ColumnDef, DesignModel, LayoutOptions } from './semantic';
+import type { AiRationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole } from './semantic';
 
 // ---------------------------------------------------------------------------
 // Extension → Webview messages
@@ -493,6 +493,18 @@ export interface UpdateModelGrainMessage {
   };
 }
 
+/**
+ * Request to update the model role for a model.
+ * If the role is null/empty, the `modelRole` key is removed from the JSON entirely.
+ */
+export interface UpdateModelRoleMessage {
+  type: 'updateModelRole';
+  payload: {
+    modelName: string;
+    modelRole: ModelRole | null;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -528,7 +540,8 @@ export type WebviewMessage =
   | RejectStructuralDiscrepancyMessage
   | UnrejectStructuralDiscrepancyMessage
   | UpdateModelAiMessage
-  | UpdateModelGrainMessage;
+  | UpdateModelGrainMessage
+  | UpdateModelRoleMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types
