@@ -64,6 +64,8 @@ export interface EditorState {
   selectedNode: string | null;
   /** IDs of currently selected edges. */
   selectedEdges: string[];
+  /** Edge ID selected for dimming (highlights endpoints, dims everything else). */
+  selectedEdge: string | null;
   /** React Flow viewport (pan + zoom). */
   viewport: Viewport;
   /** Whether the detail panel is open. */
@@ -121,6 +123,7 @@ export interface EditorActions {
   setSearchQuery: (query: string) => void;
   selectNode: (nodeName: string | null) => void;
   setSelectedEdges: (edgeIds: string[]) => void;
+  setSelectedEdge: (edgeId: string | null) => void;
   setViewport: (viewport: Viewport) => void;
   setDetailPanelOpen: (open: boolean) => void;
   setNewModelDialogOpen: (open: boolean) => void;
@@ -180,6 +183,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   searchQuery: '',
   selectedNode: null,
   selectedEdges: [],
+  selectedEdge: null,
   viewport: { x: 0, y: 0, zoom: 1 },
   detailPanelOpen: false,
   newModelDialogOpen: false,
@@ -207,6 +211,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
   selectNode: (nodeName) => set({ selectedNode: nodeName }),
   setSelectedEdges: (edgeIds) => set({ selectedEdges: edgeIds }),
+  setSelectedEdge: (edgeId) => set({ selectedEdge: edgeId }),
   setViewport: (viewport) => set({ viewport }),
   setDetailPanelOpen: (open) => set({ detailPanelOpen: open }),
   setNewModelDialogOpen: (open) => set({ newModelDialogOpen: open }),

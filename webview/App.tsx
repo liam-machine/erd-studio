@@ -109,6 +109,8 @@ function EditorCanvas() {
   const selectedEdges = useEditorStore((s) => s.selectedEdges);
   const setSelectedEdges = useEditorStore((s) => s.setSelectedEdges);
   const setHighlightedColumns = useEditorStore((s) => s.setHighlightedColumns);
+  const selectedEdge = useEditorStore((s) => s.selectedEdge);
+  const setSelectedEdge = useEditorStore((s) => s.setSelectedEdge);
   // Dialog state for Escape key handling
   const newModelDialogOpen = useEditorStore((s) => s.newModelDialogOpen);
   const newFkDialogOpen = useEditorStore((s) => s.newFkDialogOpen);
@@ -257,10 +259,12 @@ function EditorCanvas() {
         }
 
         // No dialogs open — deselect nodes and edges
-        if (selectedNode || selectedEdges.length > 0) {
+        if (selectedNode || selectedEdges.length > 0 || selectedEdge) {
           selectNode(null);
           setDetailPanelOpen(false);
           setSelectedEdges([]);
+          setSelectedEdge(null);
+          setHighlightedColumns(new Set());
         }
         return;
       }
@@ -337,6 +341,7 @@ function EditorCanvas() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     selectedNode,
+    selectedEdge,
     selectedEdges,
     domain,
     detailPanelOpen,
@@ -351,7 +356,9 @@ function EditorCanvas() {
     clearFkDialogPrefill,
     clearFkDialogEditData,
     selectNode,
+    setSelectedEdge,
     setSelectedEdges,
+    setHighlightedColumns,
     setToastMessage,
     focusSearchInput,
     legendOpen,
@@ -371,7 +378,8 @@ function EditorCanvas() {
       let { nodes: newNodes, edges: newEdges } = transformDomain(domain);
 
       // Compute connected nodes for selection dimming.
-      // When a node is selected, only the selected node and its direct neighbors stay bright.
+      // When a node is selected, the selected node and its direct neighbors stay bright.
+      // When an edge is selected, only the two endpoint nodes stay bright.
       const connectedNodeIds = new Set<string>();
       if (currentSelectedNode) {
         connectedNodeIds.add(currentSelectedNode);
@@ -386,14 +394,22 @@ function EditorCanvas() {
             }
           }
         });
+      } else if (selectedEdge) {
+        // Edge selection: only the two endpoint models stay bright
+        const edge = newEdges.find((e) => e.id === selectedEdge);
+        if (edge?.data) {
+          connectedNodeIds.add(edge.data.fromModel);
+          connectedNodeIds.add(edge.data.toModel);
+        }
       }
 
       // F402: Search dimming + selection dimming (additive)
       // F405: Inject column expansion state into node data
+      const hasSelection = currentSelectedNode !== null || selectedEdge !== null;
       const query = searchQuery.trim() ? searchQuery.toLowerCase() : '';
       newNodes = newNodes.map((node) => {
         const searchDimmed = query ? !node.data.modelName.toLowerCase().includes(query) : false;
-        const selectionDimmed = currentSelectedNode !== null && !connectedNodeIds.has(node.id);
+        const selectionDimmed = hasSelection && !connectedNodeIds.has(node.id);
 
         return {
           ...node,
@@ -410,13 +426,15 @@ function EditorCanvas() {
       });
 
       // Apply selection dimming to edges.
-      // An edge is bright only if both endpoints are in the connected set.
+      // For node selection: an edge is bright only if both endpoints are in the connected set.
+      // For edge selection: only the selected edge stays bright.
       newEdges = newEdges.map((edge) => ({
         ...edge,
         data: edge.data ? {
           ...edge.data,
-          dimmed: currentSelectedNode !== null &&
-            (!connectedNodeIds.has(edge.data.fromModel) || !connectedNodeIds.has(edge.data.toModel)),
+          dimmed: hasSelection && (selectedEdge
+            ? edge.id !== selectedEdge
+            : !connectedNodeIds.has(edge.data.fromModel) || !connectedNodeIds.has(edge.data.toModel)),
         } : edge.data,
       }));
 
@@ -429,18 +447,21 @@ function EditorCanvas() {
       }
 
       // Clear stale edge selections (edges that no longer exist after domain update)
+      const newEdgeIds = new Set(newEdges.map((e) => e.id));
       if (selectedEdges.length > 0) {
-        const newEdgeIds = new Set(newEdges.map((e) => e.id));
         const validEdges = selectedEdges.filter((id) => newEdgeIds.has(id));
         if (validEdges.length !== selectedEdges.length) {
           setSelectedEdges(validEdges);
         }
       }
+      if (selectedEdge && !newEdgeIds.has(selectedEdge)) {
+        setSelectedEdge(null);
+      }
 
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges, setSelectedEdges, selectedEdges, currentSelectedNode, searchQuery, isExpanded, toggleExpansion]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, selectedEdges, currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -470,11 +491,12 @@ function EditorCanvas() {
       selectNode(node.id);
       setDetailPanelOpen(true);
       setHighlightedColumns(new Set());
+      setSelectedEdge(null);
     },
-    [selectNode, setDetailPanelOpen, setHighlightedColumns],
+    [selectNode, setDetailPanelOpen, setHighlightedColumns, setSelectedEdge],
   );
 
-  // Handle edge clicks to highlight the FK columns involved.
+  // Handle edge clicks to highlight the FK columns involved and dim unrelated nodes/edges.
   const onEdgeClick = useCallback(
     (_event: React.MouseEvent, edge: FkFlowEdge) => {
       if (edge.data) {
@@ -482,9 +504,13 @@ function EditorCanvas() {
         cols.add(`${edge.data.fromModel}:${edge.data.fromColumn}`);
         cols.add(`${edge.data.toModel}:${edge.data.toColumn}`);
         setHighlightedColumns(cols);
+        // Clear node selection and activate edge dimming
+        selectNode(null);
+        setDetailPanelOpen(false);
+        setSelectedEdge(edge.id);
       }
     },
-    [setHighlightedColumns],
+    [setHighlightedColumns, selectNode, setDetailPanelOpen, setSelectedEdge],
   );
 
   // Handle clicks on blank canvas to close the detail panel and clear selection.
@@ -492,7 +518,8 @@ function EditorCanvas() {
     setDetailPanelOpen(false);
     selectNode(null);
     setHighlightedColumns(new Set());
-  }, [setDetailPanelOpen, selectNode, setHighlightedColumns]);
+    setSelectedEdge(null);
+  }, [setDetailPanelOpen, selectNode, setHighlightedColumns, setSelectedEdge]);
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).
@@ -503,6 +530,9 @@ function EditorCanvas() {
       setSelectedEdges(selectedEdgesInFlow.map((e) => e.id));
 
       if (selectedNodes.length !== 1) {
+        // Don't interfere if an edge dimming selection is active (onEdgeClick handles state)
+        if (selectedEdge !== null) return;
+
         // Check if our stored selection still exists in the domain
         // If so, this is likely a domain update, not a user deselection
         if (currentSelectedNode && domain?.models.some((m) => m.name === currentSelectedNode)) {
@@ -513,7 +543,7 @@ function EditorCanvas() {
         selectNode(null);
       }
     },
-    [selectNode, setDetailPanelOpen, setSelectedEdges, currentSelectedNode, domain],
+    [selectNode, setDetailPanelOpen, setSelectedEdges, currentSelectedNode, selectedEdge, domain],
   );
 
   // Handle long-press column drag to create relationships.
