@@ -2,7 +2,7 @@
   "name": "dbt-semantic-designer",
   "displayName": "dbt Semantic Designer",
   "description": "Visualise semantic (FK-based) relationships between dbt models within curated business domains, with a design mode for planning new models, columns, and relationships.",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
