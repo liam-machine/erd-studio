@@ -1,18 +1,18 @@
 /**
- * useColumnExpansion — manages column expansion state for ModelNodes.
+ * useColumnExpansion — manages ephemeral column expansion state for ModelNodes.
  *
  * Tracks which model nodes have their columns expanded (showing all columns
- * vs collapsed showing first N columns). State is persisted via the webview
- * state API through useStatePersistence so it survives tab switches.
+ * vs collapsed showing first N columns). State is ephemeral — it resets when
+ * the domain changes because the hook recreates with a fresh Set.
  *
  * Smart collapsing: columns only collapse automatically when there are enough
  * nodes (NODE_THRESHOLD) to warrant performance optimization. Below that
- * threshold, all columns are shown by default on first load.
+ * threshold, all columns are shown by default.
  *
  * @module F405 Performance optimization
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -39,8 +39,6 @@ export interface UseColumnExpansionReturn {
   expandAll: (modelIds: string[]) => void;
   /** Whether columns are in "all expanded" mode. */
   allExpanded: boolean;
-  /** Expanded model IDs as an array (for persistence). */
-  expandedNodeIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -50,18 +48,13 @@ export interface UseColumnExpansionReturn {
 /**
  * Hook to manage column expansion state.
  *
- * Accepts optional initial state for restoration from persisted webview state.
- * Exposes `expandedNodeIds` array for external persistence.
+ * State is local to this hook instance — when the component using this hook
+ * unmounts or re-mounts (e.g., on domain change), all expansion state resets.
  */
-export function useColumnExpansion(
-  initialExpandedNodes?: string[],
-  initialAllExpanded?: boolean,
-): UseColumnExpansionReturn {
-  const [expandedSet, setExpandedSet] = useState<Set<string>>(
-    () => new Set(initialExpandedNodes ?? []),
-  );
+export function useColumnExpansion(): UseColumnExpansionReturn {
+  const [expandedSet, setExpandedSet] = useState<Set<string>>(() => new Set());
   // Track if user has explicitly set "all expanded" mode
-  const [allExpanded, setAllExpanded] = useState(initialAllExpanded ?? false);
+  const [allExpanded, setAllExpanded] = useState(false);
 
   const isExpanded = useCallback(
     (modelId: string) => allExpanded || expandedSet.has(modelId),
@@ -92,8 +85,5 @@ export function useColumnExpansion(
     setExpandedSet(new Set(modelIds));
   }, []);
 
-  // Expose expanded IDs as a stable array for persistence
-  const expandedNodeIds = useMemo(() => Array.from(expandedSet), [expandedSet]);
-
-  return { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded, expandedNodeIds };
+  return { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded };
 }

@@ -24,10 +24,6 @@ interface PersistedState {
   selectedNode: string | null;
   viewport: Viewport;
   detailPanelOpen: boolean;
-  /** Expanded model IDs for column expansion persistence. */
-  expandedNodes?: string[];
-  /** Whether "expand all" mode was active. */
-  allExpanded?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,10 +37,7 @@ const DEBOUNCE_DELAY_MS = 300;
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useStatePersistence(expansionState?: {
-  expandedNodeIds: string[];
-  allExpanded: boolean;
-}): {
+export function useStatePersistence(): {
   shouldSkipFitView: boolean;
   invalidSelectedNode: string | null;
   persistedViewport: Viewport | null;
@@ -90,8 +83,6 @@ export function useStatePersistence(expansionState?: {
   const selectedNodeRef = useRef(selectedNode);
   const viewportRef = useRef(viewport);
   const detailPanelOpenRef = useRef(detailPanelOpen);
-  const expandedNodesRef = useRef(expansionState?.expandedNodeIds ?? []);
-  const allExpandedRef = useRef(expansionState?.allExpanded ?? false);
 
   // Keep refs in sync with state (single effect for efficiency)
   useEffect(() => {
@@ -100,22 +91,12 @@ export function useStatePersistence(expansionState?: {
     detailPanelOpenRef.current = detailPanelOpen;
   }, [selectedNode, viewport, detailPanelOpen]);
 
-  // Sync expansion refs separately (they come from props, not Zustand)
-  useEffect(() => {
-    if (expansionState) {
-      expandedNodesRef.current = expansionState.expandedNodeIds;
-      allExpandedRef.current = expansionState.allExpanded;
-    }
-  }, [expansionState?.expandedNodeIds, expansionState?.allExpanded]);
-
   // Helper to build and write persisted state (avoids duplication)
   const persistState = useCallback(() => {
     const state: PersistedState = {
       selectedNode: selectedNodeRef.current,
       viewport: viewportRef.current,
       detailPanelOpen: detailPanelOpenRef.current,
-      expandedNodes: expandedNodesRef.current,
-      allExpanded: allExpandedRef.current,
     };
     vscode.setState(state);
   }, [vscode]);
@@ -193,7 +174,7 @@ export function useStatePersistence(expansionState?: {
         persistState();
       }
     };
-  }, [selectedNode, viewport, detailPanelOpen, expansionState?.expandedNodeIds, expansionState?.allExpanded, persistState]);
+  }, [selectedNode, viewport, detailPanelOpen, persistState]);
 
   return { shouldSkipFitView, invalidSelectedNode, persistedViewport };
 }
