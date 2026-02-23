@@ -117,6 +117,10 @@ export interface EditorState {
   discrepancyReviewModel: string | null;
   /** Set of "modelName:columnName" keys for columns involved in selected edges. */
   highlightedColumns: Set<string>;
+  /** Set of model IDs with columns expanded. */
+  expandedNodes: Set<string>;
+  /** Whether columns are in global "all expanded" mode. */
+  allExpanded: boolean;
 }
 
 export interface EditorActions {
@@ -172,6 +176,16 @@ export interface EditorActions {
   setDiscrepancyReviewModel: (modelName: string | null) => void;
   /** Set highlighted columns (for edge click). */
   setHighlightedColumns: (columns: Set<string>) => void;
+  /** Expand all listed model IDs (sets allExpanded mode). */
+  expandAll: (modelIds: string[]) => void;
+  /** Expand only new model IDs without resetting existing state. */
+  expandNew: (modelIds: string[]) => void;
+  /** Collapse all models. */
+  collapseAll: () => void;
+  /** Toggle expand/collapse for a single model. */
+  toggleExpansion: (modelId: string) => void;
+  /** Restore expansion state from persisted data. */
+  setExpandedNodes: (nodes: string[], allExpanded: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +220,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   dragLineState: null,
   discrepancyReviewModel: null,
   highlightedColumns: new Set<string>(),
+  expandedNodes: new Set<string>(),
+  allExpanded: false,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -267,4 +283,24 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   endDragLine: () => set({ dragLineState: null }),
   setDiscrepancyReviewModel: (modelName) => set({ discrepancyReviewModel: modelName }),
   setHighlightedColumns: (columns) => set({ highlightedColumns: columns }),
+  expandAll: (modelIds) => set({ expandedNodes: new Set(modelIds), allExpanded: true }),
+  expandNew: (modelIds) =>
+    set((state) => {
+      const next = new Set(state.expandedNodes);
+      modelIds.forEach((id) => next.add(id));
+      return { expandedNodes: next };
+    }),
+  collapseAll: () => set({ expandedNodes: new Set(), allExpanded: false }),
+  toggleExpansion: (modelId) =>
+    set((state) => {
+      const next = new Set(state.expandedNodes);
+      if (next.has(modelId)) {
+        next.delete(modelId);
+      } else {
+        next.add(modelId);
+      }
+      return { expandedNodes: next, allExpanded: false };
+    }),
+  setExpandedNodes: (nodes, allExpanded) =>
+    set({ expandedNodes: new Set(nodes), allExpanded }),
 }));

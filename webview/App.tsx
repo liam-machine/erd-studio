@@ -137,10 +137,16 @@ function EditorCanvas() {
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
 
-  // F405: Column expansion state (ephemeral, resets on domain change)
+  // F405: Column expansion state (persisted in Zustand store via useStatePersistence)
   const { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded } = useColumnExpansion();
+  // Check synchronously on mount if we have persisted expansion state.
+  // Used to distinguish "first ever load" from "returning after tab switch".
+  const [hadPersistedExpansion] = useState(() => {
+    const s = vscode.getState() as { expandedNodes?: string[] } | null | undefined;
+    return s?.expandedNodes !== undefined;
+  });
 
-  // State persistence (zoom, pan, selection, mode, detail panel)
+  // State persistence (zoom, pan, selection, mode, detail panel, expansion)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
     useStatePersistence();
   const { setViewport: setReactFlowViewport } = useReactFlow();
@@ -158,6 +164,27 @@ function EditorCanvas() {
 
   // Memoized callback for toast dismissal (prevents timer re-creation)
   const dismissToast = useCallback(() => setToastMessage(null), []);
+
+  // F405: Auto-expand columns on first-ever domain load.
+  // This effect runs AFTER useStatePersistence's restore effect (React guarantees
+  // effects execute in declaration order within a component). On first-ever load
+  // (no persisted state), expand all if below NODE_THRESHOLD. On restoration
+  // (persisted state exists), skip auto-expand entirely — the persisted state
+  // is the source of truth for which models are expanded.
+  const hasAutoExpandedRef = useRef(false);
+  useEffect(() => {
+    if (!domain || hasAutoExpandedRef.current) return;
+    hasAutoExpandedRef.current = true;
+
+    // If we have persisted expansion state, trust it — don't auto-expand.
+    // This preserves "Collapse All" intent across tab switches.
+    if (hadPersistedExpansion) return;
+
+    // First ever session: expand all if below node threshold for better UX.
+    if (domain.models.length < NODE_THRESHOLD) {
+      expandAll(domain.models.map((m) => m.name));
+    }
+  }, [domain, hadPersistedExpansion, expandAll]);
 
   // Initialize colour palette on mount
   useEffect(() => {
@@ -179,10 +206,8 @@ function EditorCanvas() {
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
           }
-          // F405: Auto-expand all columns if below node threshold for better UX
-          if (msg.payload.models.length < NODE_THRESHOLD) {
-            expandAll(msg.payload.models.map((m) => m.name));
-          }
+          // F405: Auto-expand is now handled by a useEffect that runs after
+          // useStatePersistence restores expansion state (React effect ordering).
           break;
         case 'manifestRefreshed':
           // F304: Auto-reconciliation detected design models that are now built
@@ -205,7 +230,7 @@ function EditorCanvas() {
           break;
       }
     },
-    [setDomain, setError, setTemplates, setManifestModels, setToastMessage, expandAll],
+    [setDomain, setError, setTemplates, setManifestModels, setToastMessage],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);

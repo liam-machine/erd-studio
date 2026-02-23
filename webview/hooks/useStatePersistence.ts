@@ -2,8 +2,9 @@
  * useStatePersistence — persists webview UI state to VS Code's webview state API.
  *
  * Subscribes to relevant Zustand store slices (selectedNode, viewport,
- * detailPanelOpen) and debounces writes to vscode.setState(). On mount, restores
- * state from vscode.getState() if available.
+ * detailPanelOpen, expandedNodes, allExpanded) and debounces writes to
+ * vscode.setState(). On mount, restores state from vscode.getState() if
+ * available.
  *
  * Returns:
  * - shouldSkipFitView: true if viewport was restored (skip React Flow's fitView)
@@ -24,6 +25,8 @@ interface PersistedState {
   selectedNode: string | null;
   viewport: Viewport;
   detailPanelOpen: boolean;
+  expandedNodes: string[];
+  allExpanded: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,11 +52,14 @@ export function useStatePersistence(): {
   const viewport = useEditorStore((s) => s.viewport);
   const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
   const domain = useEditorStore((s) => s.domain);
+  const expandedNodes = useEditorStore((s) => s.expandedNodes);
+  const allExpanded = useEditorStore((s) => s.allExpanded);
 
   // Zustand actions for restoration
   const selectNode = useEditorStore((s) => s.selectNode);
   const setViewport = useEditorStore((s) => s.setViewport);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
+  const setExpandedNodes = useEditorStore((s) => s.setExpandedNodes);
 
   // Check synchronously on mount if we have a persisted viewport (for fitView skip)
   const [initialState] = useState(() => {
@@ -83,13 +89,17 @@ export function useStatePersistence(): {
   const selectedNodeRef = useRef(selectedNode);
   const viewportRef = useRef(viewport);
   const detailPanelOpenRef = useRef(detailPanelOpen);
+  const expandedNodesRef = useRef(expandedNodes);
+  const allExpandedRef = useRef(allExpanded);
 
   // Keep refs in sync with state (single effect for efficiency)
   useEffect(() => {
     selectedNodeRef.current = selectedNode;
     viewportRef.current = viewport;
     detailPanelOpenRef.current = detailPanelOpen;
-  }, [selectedNode, viewport, detailPanelOpen]);
+    expandedNodesRef.current = expandedNodes;
+    allExpandedRef.current = allExpanded;
+  }, [selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded]);
 
   // Helper to build and write persisted state (avoids duplication)
   const persistState = useCallback(() => {
@@ -97,6 +107,8 @@ export function useStatePersistence(): {
       selectedNode: selectedNodeRef.current,
       viewport: viewportRef.current,
       detailPanelOpen: detailPanelOpenRef.current,
+      expandedNodes: [...expandedNodesRef.current],
+      allExpanded: allExpandedRef.current,
     };
     vscode.setState(state);
   }, [vscode]);
@@ -144,7 +156,12 @@ export function useStatePersistence(): {
         setInvalidSelectedNode(restored.selectedNode);
       }
     }
-  }, [domain, vscode, setDetailPanelOpen, setViewport, selectNode]);
+
+    // Restore column expansion state
+    if (restored.expandedNodes !== undefined) {
+      setExpandedNodes(restored.expandedNodes, restored.allExpanded ?? false);
+    }
+  }, [domain, vscode, setDetailPanelOpen, setViewport, selectNode, setExpandedNodes]);
 
   // ---------------------------------------------------------------------------
   // Persist state changes (debounced)
@@ -174,7 +191,7 @@ export function useStatePersistence(): {
         persistState();
       }
     };
-  }, [selectedNode, viewport, detailPanelOpen, persistState]);
+  }, [selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded, persistState]);
 
   return { shouldSkipFitView, invalidSelectedNode, persistedViewport };
 }
