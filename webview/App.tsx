@@ -137,12 +137,26 @@ function EditorCanvas() {
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
 
-  // F405: Column expansion state (ephemeral, resets on domain change)
-  const { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded } = useColumnExpansion();
+  // Read persisted expansion state synchronously on mount (before hooks)
+  const [restoredExpansion] = useState(() => {
+    const restored = vscode.getState() as { expandedNodes?: string[]; allExpanded?: boolean } | null;
+    return {
+      nodes: restored?.expandedNodes,
+      allExpanded: restored?.allExpanded,
+      hasRestoredState: restored?.expandedNodes !== undefined,
+    };
+  });
 
-  // State persistence (zoom, pan, selection, mode, detail panel)
+  // F405: Column expansion state — restored from persisted state if available
+  const { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded, expandedNodeIds } =
+    useColumnExpansion(restoredExpansion.nodes, restoredExpansion.allExpanded);
+
+  // Track whether auto-expand has run (to prevent re-expanding on subsequent domainLoaded)
+  const hasAutoExpandedRef = useRef(false);
+
+  // State persistence (zoom, pan, selection, mode, detail panel, column expansion)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
-    useStatePersistence();
+    useStatePersistence({ expandedNodeIds, allExpanded });
   const { setViewport: setReactFlowViewport } = useReactFlow();
 
   // Toast notification for invalid selection after restore
@@ -179,10 +193,12 @@ function EditorCanvas() {
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
           }
-          // F405: Auto-expand all columns if below node threshold for better UX
-          if (msg.payload.models.length < NODE_THRESHOLD) {
+          // F405: Auto-expand all columns if below node threshold for better UX.
+          // Skip if expansion state was restored from persistence or already applied.
+          if (!hasAutoExpandedRef.current && !restoredExpansion.hasRestoredState && msg.payload.models.length < NODE_THRESHOLD) {
             expandAll(msg.payload.models.map((m) => m.name));
           }
+          hasAutoExpandedRef.current = true;
           break;
         case 'manifestRefreshed':
           // F304: Auto-reconciliation detected design models that are now built
