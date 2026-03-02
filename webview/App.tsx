@@ -655,6 +655,8 @@ function EditorCanvas() {
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <MiniMap
           position="bottom-right"
+          pannable
+          zoomable
           nodeColor={(node) => {
             const status = node.data?.status;
             const colors = getPaletteColors(paletteId);
