@@ -68,9 +68,8 @@
       },
       {
         "command": "dbtSemantic.addLayer",
-        "title": "Add Layer",
-        "category": "dbt",
-        "icon": "$(add)"
+        "title": "Layer +",
+        "category": "dbt"
       },
       {
         "command": "dbtSemantic.editLayer",
