@@ -11,7 +11,7 @@ import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
-import type { ManifestModelPreview } from '../../../src/types/reconciled';
+import type { ManifestModelPreview } from '../../../src/types/display';
 import './AddExistingModelDialog.css';
 
 // ---------------------------------------------------------------------------

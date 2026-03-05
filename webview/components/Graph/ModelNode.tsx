@@ -3,8 +3,6 @@
  *
  * Shows model name with a layer badge, a list of columns with PK/FK
  * indicators and data types, and a footer with the total column count.
- * Border colour indicates model status: green (built), orange (design),
- * grey (missing).
  *
  * Provides node-level handles (top/right/bottom/left) used by FkEdge for
  * Power BI-style connections that route to whichever side creates the
@@ -23,7 +21,7 @@ import type { ModelRole } from '../../../src/types/semantic';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
-import { groupColumnsByStatus } from '../../lib/columnGrouping';
+import { sortColumnsByKeyPriority } from '../../lib/columnSort';
 import { KeyBadge } from '../common/KeyBadge';
 import './ModelNode.css';
 
@@ -98,10 +96,9 @@ const NODE_HANDLE_STYLE: CSSProperties = {
 interface ColumnRowProps {
   column: ColumnDisplay;
   modelName: string;
-  isBuilt: boolean;
 }
 
-function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
+function ColumnRow({ column, modelName }: ColumnRowProps) {
   // Highlight when this column is involved in a selected edge
   const isHighlighted = useEditorStore(
     (s) => s.highlightedColumns?.has?.(`${modelName}:${column.name}`) ?? false
@@ -158,10 +155,8 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
     };
 
     const handleGlobalMouseUp = (e: MouseEvent) => {
-      // Guard against unmounted component
       if (!mountedRef.current) return;
 
-      // Find the element under the cursor
       const targetElement = document.elementFromPoint(e.clientX, e.clientY);
       if (!targetElement) {
         endDrag();
@@ -169,7 +164,6 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
         return;
       }
 
-      // Look for a column row element (has data-column-name attribute)
       const columnRow = targetElement.closest('[data-column-name]') as HTMLElement | null;
       const modelNode = targetElement.closest('[data-model-name]') as HTMLElement | null;
 
@@ -178,7 +172,6 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
         const targetModelName = modelNode.dataset.modelName;
 
         if (targetColumnName && targetModelName && targetModelName !== modelName) {
-          // Valid drop target — dispatch custom event for App to handle
           window.dispatchEvent(
             new CustomEvent('column-relationship-drop', {
               detail: {
@@ -190,7 +183,6 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
             }),
           );
         } else if (targetModelName === modelName) {
-          // Dropped on same model — show toast via event
           window.dispatchEvent(
             new CustomEvent('column-relationship-self-drop'),
           );
@@ -201,7 +193,6 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
       endDragLine();
     };
 
-    // Also handle Escape key to cancel drag
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (!mountedRef.current) return;
@@ -228,15 +219,10 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
     if (isValidDropTarget) setIsDropTarget(true);
   }, [isValidDropTarget]);
 
-  // Compose with the long-press hook's onMouseLeave to avoid overwriting it
   const handleMouseLeave = useCallback(() => {
     setIsDropTarget(false);
     handlers.onMouseLeave();
   }, [handlers]);
-
-  const statusClass = isBuilt
-    ? 'model-node__column--built'
-    : `model-node__column--${column.status}`;
 
   const pressClass = isPressing ? 'model-node__column--pressing' : '';
   const dragClass = isDragging ? 'model-node__column--dragging' : '';
@@ -246,7 +232,7 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
   return (
     <div
       ref={elementRef}
-      className={`model-node__column ${statusClass} ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} nodrag`.trim()}
+      className={`model-node__column ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} nodrag`.trim()}
       data-column-name={column.name}
       onMouseEnter={handleMouseEnter}
       {...handlers}
@@ -254,28 +240,13 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
     >
       <span className="model-node__col-indicators">
         {column.isPrimaryKey && (
-          <KeyBadge
-            type="PK"
-            active={true}
-            mode="readonly"
-            status={isBuilt ? 'built' : 'planned'}
-          />
+          <KeyBadge type="PK" active={true} mode="readonly" />
         )}
         {column.isForeignKey && (
-          <KeyBadge
-            type="FK"
-            active={true}
-            mode="readonly"
-            status={isBuilt ? 'built' : 'planned'}
-          />
+          <KeyBadge type="FK" active={true} mode="readonly" />
         )}
         {column.isNaturalKey && (
-          <KeyBadge
-            type="NK"
-            active={true}
-            mode="readonly"
-            status={isBuilt ? 'built' : 'planned'}
-          />
+          <KeyBadge type="NK" active={true} mode="readonly" />
         )}
       </span>
       <span className="model-node__col-name" title={column.name}>
@@ -307,22 +278,21 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, approved, layer, layerConfig, columns, discrepancyCount, hasRationale, grain, modelRole, dimmed, isExpanded = false, onToggleExpansion } = data;
+  const { modelName, stage, layer, layerConfig, columns, hasRationale, grain, modelRole, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
 
   // F405: Compute visible columns based on expansion state
-  const { displayColumns, hiddenCount, isCollapsed } = useMemo(() => {
+  const { displayColumns, hiddenCount } = useMemo(() => {
     const shouldCollapse = columns.length > COLLAPSED_COLUMN_LIMIT && !isExpanded;
     return {
       displayColumns: shouldCollapse ? columns.slice(0, COLLAPSED_COLUMN_LIMIT) : columns,
       hiddenCount: shouldCollapse ? columns.length - COLLAPSED_COLUMN_LIMIT : 0,
-      isCollapsed: shouldCollapse,
     };
   }, [columns, isExpanded]);
 
   // Handler for expand/collapse button
   const handleToggleClick = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent node selection
+    e.stopPropagation();
     onToggleExpansion?.(modelName);
   };
 
@@ -331,22 +301,23 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
     (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      openNodeContextMenu(e.clientX, e.clientY, modelName, status, approved);
+      openNodeContextMenu(e.clientX, e.clientY, modelName);
     },
-    [openNodeContextMenu, modelName, status, approved],
+    [openNodeContextMenu, modelName],
   );
 
-  // Group columns by status: built -> approved -> planned
-  const { built: builtCols, approved: approvedCols, planned: plannedCols } = useMemo(
-    () => groupColumnsByStatus(displayColumns),
+  // Sort columns by key priority
+  const sortedColumns = useMemo(
+    () => sortColumnsByKeyPriority(displayColumns),
     [displayColumns]
   );
-  const showBuiltApprovedSeparator = builtCols.length > 0 && approvedCols.length > 0;
-  const showApprovedPlannedSeparator = (builtCols.length > 0 || approvedCols.length > 0) && plannedCols.length > 0;
+
+  // Determine CSS modifier for stage/ghost
+  const stageClass = isGhost ? 'ghost' : stage;
 
   return (
     <div
-      className={`model-node model-node--${status}${dimmed ? ' model-node--dimmed' : ''}`}
+      className={`model-node model-node--${stageClass}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}`}
       data-model-name={modelName}
       onContextMenu={handleContextMenu}
     >
@@ -365,14 +336,6 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         <span className="model-node__name" title={modelName}>
           {modelName}
         </span>
-        {discrepancyCount && discrepancyCount > 0 ? (
-          <span
-            className="model-node__discrepancy-badge"
-            title={`${discrepancyCount} discrepanc${discrepancyCount > 1 ? 'ies' : 'y'} detected`}
-          >
-            ⚠ {discrepancyCount}
-          </span>
-        ) : null}
         {hasRationale && (
           <span className="model-node__rationale-badge" title="Design rationale available">R</span>
         )}
@@ -391,7 +354,7 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         <span
           className="model-node__badge"
           style={layerConfig?.color ? {
-            backgroundColor: `${layerConfig.color}33`, // 20% opacity
+            backgroundColor: `${layerConfig.color}33`,
             color: layerConfig.color,
           } : undefined}
         >
@@ -406,45 +369,13 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         </div>
       )}
 
-      {/* Columns — ordered: built -> approved -> planned with separators */}
+      {/* Columns — sorted by key priority */}
       <div className="model-node__columns">
-        {/* Built columns */}
-        {builtCols.map((col) => (
+        {sortedColumns.map((col) => (
           <ColumnRow
             key={col.name}
             column={col}
             modelName={modelName}
-            isBuilt={true}
-          />
-        ))}
-
-        {/* Separator: built -> approved */}
-        {showBuiltApprovedSeparator && (
-          <div className="model-node__separator model-node__separator--subtle" />
-        )}
-
-        {/* Approved columns */}
-        {approvedCols.map((col) => (
-          <ColumnRow
-            key={col.name}
-            column={col}
-            modelName={modelName}
-            isBuilt={false}
-          />
-        ))}
-
-        {/* Separator: approved -> planned */}
-        {showApprovedPlannedSeparator && (
-          <div className="model-node__separator model-node__separator--subtle" />
-        )}
-
-        {/* Planned columns */}
-        {plannedCols.map((col) => (
-          <ColumnRow
-            key={col.name}
-            column={col}
-            modelName={modelName}
-            isBuilt={false}
           />
         ))}
 

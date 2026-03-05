@@ -15,19 +15,39 @@
 }
 
 /* -----------------------------------------------------------------------
-   Status variants
+   Stage variants
    ----------------------------------------------------------------------- */
 
-.fk-edge--built {
-  stroke: var(--edge-built);
+.fk-edge--conceptual {
+  stroke: var(--stage-conceptual);
 }
 
-.fk-edge--approved {
-  stroke: var(--model-approved);
+.fk-edge--logical {
+  stroke: var(--stage-logical);
 }
 
-.fk-edge--design {
-  stroke: var(--edge-design);
+.fk-edge--physical {
+  stroke: var(--stage-physical);
+}
+
+.fk-edge--ghost {
+  stroke: var(--stage-ghost);
+  stroke-dasharray: 5 3;
+}
+
+/* Discrepancy edge variants */
+.fk-edge--discrepancy-extra {
+  stroke: var(--discrepancy-extra);
+  stroke-dasharray: 5 3;
+}
+
+.fk-edge--discrepancy-missing {
+  stroke: var(--stage-ghost);
+  stroke-dasharray: 5 3;
+}
+
+.fk-edge--discrepancy-cardinality-mismatch {
+  stroke: var(--discrepancy-mismatch);
 }
 
 /* -----------------------------------------------------------------------
@@ -76,16 +96,20 @@
   font-size: 22px;
 }
 
-.fk-edge__label--built {
-  color: var(--edge-built);
+.fk-edge__label--conceptual {
+  color: var(--stage-conceptual);
 }
 
-.fk-edge__label--approved {
-  color: var(--model-approved);
+.fk-edge__label--logical {
+  color: var(--stage-logical);
 }
 
-.fk-edge__label--design {
-  color: var(--edge-design);
+.fk-edge__label--physical {
+  color: var(--stage-physical);
+}
+
+.fk-edge__label--ghost {
+  color: var(--stage-ghost);
 }
 
 .fk-edge__label--dimmed {

@@ -11,7 +11,7 @@
  * Placeholder syntax: {name} = model name minus prefix, {left}/{right} = bridge entity names.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';

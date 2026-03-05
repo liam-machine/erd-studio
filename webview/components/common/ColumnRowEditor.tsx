@@ -27,16 +27,6 @@ export interface ColumnRowEditorColumn {
   isPrimaryKey?: boolean;
   isForeignKey?: boolean;
   isNaturalKey?: boolean;
-  /** Column status for styling. */
-  status?: 'built' | 'approved' | 'planned' | 'missing';
-  /** Whether the column has been approved for build. */
-  approved?: boolean;
-  /** Discrepancy between approved design and built manifest. */
-  discrepancy?: {
-    dataType?: { expected: string; actual: string };
-    structural?: 'extra' | 'missing';
-    rejected: boolean;
-  };
   /** SCD type for dimension columns (0 = never changes, 1 = overwrite, 2 = track history). */
   scdType?: 0 | 1 | 2;
   /** Additive type for fact measure columns. */
@@ -56,12 +46,6 @@ export interface ColumnRowEditorProps {
   onDelete?: () => void;
   /** Callback when new row is cancelled (Escape key). */
   onCancel?: () => void;
-  /** Callback when approve button is clicked. */
-  onApprove?: () => void;
-  /** Callback when unapprove button is clicked. */
-  onUnapprove?: () => void;
-  /** Whether this column can be approved (model is approved or built). */
-  canApprove?: boolean;
   /** Show PK/FK/NK indicator badges. Default true. */
   showIndicators?: boolean;
   /** Show delete button on hover. Default true for editable mode. */
@@ -80,12 +64,6 @@ export interface ColumnRowEditorProps {
   expanded?: boolean;
   /** Callback when the expand/collapse chevron is clicked. */
   onToggleExpand?: () => void;
-  /** Callback when user accepts a discrepancy (manifest is correct). */
-  onAcceptDiscrepancy?: () => void;
-  /** Callback when user rejects a discrepancy (manifest is wrong). */
-  onRejectDiscrepancy?: () => void;
-  /** Callback when user un-rejects a previously rejected discrepancy. */
-  onUnrejectDiscrepancy?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,9 +105,6 @@ export function ColumnRowEditor({
   onUpdate,
   onDelete,
   onCancel,
-  onApprove,
-  onUnapprove,
-  canApprove = false,
   showIndicators = true,
   showDelete = true,
   onTogglePK,
@@ -139,9 +114,6 @@ export function ColumnRowEditor({
   modelRole,
   expanded = false,
   onToggleExpand,
-  onAcceptDiscrepancy,
-  onRejectDiscrepancy,
-  onUnrejectDiscrepancy,
 }: ColumnRowEditorProps) {
   // Local state for editing
   const [localColumn, setLocalColumn] = useState<ColumnDef>({
@@ -405,7 +377,7 @@ export function ColumnRowEditor({
   // --- Render --------------------------------------------------------------
 
   const isEditing = editingField !== null;
-  const status = column.status ?? (mode === 'readonly' ? 'built' : 'planned');
+  const statusClass = mode === 'readonly' ? 'built' : 'planned';
 
   // Check if description exists
   const hasDescription = Boolean(localColumn.description?.trim());
@@ -416,7 +388,7 @@ export function ColumnRowEditor({
 
   const rowClasses = [
     'column-row-editor',
-    `column-row-editor--${status}`,
+    `column-row-editor--${statusClass}`,
     mode !== 'readonly' && 'column-row-editor--editable',
     isEditing && 'column-row-editor--editing',
     validationError && 'column-row-editor--has-error',
@@ -449,7 +421,7 @@ export function ColumnRowEditor({
             isForeignKey={column.isForeignKey ?? false}
             isNaturalKey={column.isNaturalKey ?? false}
             mode={onTogglePK || onToggleFK || onToggleNK ? 'editable' : 'readonly'}
-            status={status}
+            status={statusClass}
             onTogglePK={onTogglePK}
             onToggleFK={onToggleFK}
             onToggleNK={onToggleNK}
@@ -512,25 +484,6 @@ export function ColumnRowEditor({
           >
             {localColumn.dataType}
           </span>
-        )}
-
-        {/* Approval toggle (for planned columns when canApprove is true) */}
-        {mode === 'editable' && canApprove && (
-          <button
-            className={`column-row-editor__approve ${column.approved ? 'column-row-editor__approve--approved' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (column.approved) {
-                onUnapprove?.();
-              } else {
-                onApprove?.();
-              }
-            }}
-            title={column.approved ? 'Remove approval' : 'Approve column for build'}
-            aria-label={column.approved ? 'Unapprove column' : 'Approve column'}
-          >
-            {column.approved ? '✓' : '○'}
-          </button>
         )}
 
         {/* Delete button */}
@@ -619,62 +572,6 @@ export function ColumnRowEditor({
               </select>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Discrepancy indicator — shown for columns with dataType or structural discrepancies */}
-      {column.discrepancy && (
-        <div className={`column-row-editor__discrepancy ${column.discrepancy.rejected ? 'column-row-editor__discrepancy--rejected' : ''} ${column.discrepancy.structural ? 'column-row-editor__discrepancy--structural' : ''}`}>
-          <span className="column-row-editor__discrepancy-icon">⚠</span>
-          <span className="column-row-editor__discrepancy-detail">
-            {column.discrepancy.dataType ? (
-              <>
-                <span className="column-row-editor__discrepancy-label">
-                  {column.discrepancy.rejected ? 'Non-conforming:' : 'Expected:'}
-                </span>
-                {' '}
-                <code className="column-row-editor__discrepancy-expected">{column.discrepancy.dataType.expected}</code>
-                {' → '}
-                <code className="column-row-editor__discrepancy-actual">{column.discrepancy.dataType.actual}</code>
-              </>
-            ) : column.discrepancy.structural === 'extra' ? (
-              <span className="column-row-editor__discrepancy-label">
-                {column.discrepancy.rejected ? 'Rejected extra:' : 'Extra column'} — not in original design
-              </span>
-            ) : column.discrepancy.structural === 'missing' ? (
-              <span className="column-row-editor__discrepancy-label">
-                {column.discrepancy.rejected ? 'Rejected missing:' : 'Missing column'} — designed but not built
-              </span>
-            ) : null}
-          </span>
-          <span className="column-row-editor__discrepancy-actions">
-            {column.discrepancy.rejected ? (
-              <button
-                className="column-row-editor__discrepancy-btn"
-                onClick={(e) => { e.stopPropagation(); onUnrejectDiscrepancy?.(); }}
-                title="Clear rejection — return to unresolved"
-              >
-                Undo
-              </button>
-            ) : (
-              <>
-                <button
-                  className="column-row-editor__discrepancy-btn column-row-editor__discrepancy-btn--accept"
-                  onClick={(e) => { e.stopPropagation(); onAcceptDiscrepancy?.(); }}
-                  title={column.discrepancy.structural ? 'Accept and resolve' : 'Accept manifest value as correct'}
-                >
-                  Accept
-                </button>
-                <button
-                  className="column-row-editor__discrepancy-btn column-row-editor__discrepancy-btn--reject"
-                  onClick={(e) => { e.stopPropagation(); onRejectDiscrepancy?.(); }}
-                  title={column.discrepancy.structural ? 'Flag as non-conforming' : 'Flag manifest value as non-conforming'}
-                >
-                  Reject
-                </button>
-              </>
-            )}
-          </span>
         </div>
       )}
 

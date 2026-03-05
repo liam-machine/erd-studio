@@ -1,8 +1,8 @@
 /**
  * ColumnEditor — editable column list for the DetailPanel.
  *
- * Renders built columns (read-only) and planned columns (editable).
- * Supports adding new planned columns and inline editing.
+ * Renders columns sorted by key priority (PK -> NK -> FK -> non-key).
+ * Supports adding new columns and inline editing.
  * Uses ColumnRowEditor for consistent column row rendering.
  */
 
@@ -10,8 +10,8 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { useMessageBus } from '../../hooks/useMessageBus';
-import { groupColumnsByStatus } from '../../lib/columnGrouping';
-import type { ModelStatus, ReconciledColumn, ReconciledModel } from '../../../src/types/reconciled';
+import { sortColumnsByKeyPriority } from '../../lib/columnSort';
+import type { DisplayColumn } from '../../../src/types/display';
 import type { ColumnDef, ModelRole } from '../../../src/types/semantic';
 import type { ColumnKeyType } from '../../../src/types/messages';
 import './ColumnEditor.css';
@@ -22,11 +22,9 @@ import './ColumnEditor.css';
 
 export interface ColumnEditorProps {
   modelName: string;
-  modelStatus: ModelStatus;
-  modelApproved: boolean;
-  columns: ReconciledColumn[];
-  /** Number of columns with unresolved discrepancies. */
-  discrepancyCount?: number;
+  columns: DisplayColumn[];
+  /** Whether this model/stage is read-only. */
+  readOnly?: boolean;
   /** Parent model's role — passed to column rows for conditional SCD/additive dropdowns. */
   modelRole?: ModelRole;
 }
@@ -35,7 +33,7 @@ export interface ColumnEditorProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, discrepancyCount, modelRole }: ColumnEditorProps) {
+export function ColumnEditor({ modelName, columns, readOnly, modelRole }: ColumnEditorProps) {
   const { send } = useMessageBus(() => {});
 
   // State for whether we're adding a new column
@@ -44,9 +42,9 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
   // State for tracking expanded columns (by column name)
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
 
-  // Group columns by status: built -> approved -> planned, sorted by key priority within each group
-  const { built: builtColumns, approved: approvedColumns, planned: plannedColumns } = useMemo(
-    () => groupColumnsByStatus(columns),
+  // Sort columns by key priority
+  const sortedColumns = useMemo(
+    () => sortColumnsByKeyPriority(columns),
     [columns]
   );
 
@@ -56,12 +54,11 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
     [columns],
   );
 
-  // Determine if model is editable (design, approved, or built models support adding columns)
-  const isEditable = modelStatus === 'design' || modelStatus === 'approved' || modelStatus === 'built';
+  const isEditable = !readOnly;
 
   // Handle adding a new column
   const handleAddColumn = useCallback(() => {
-    if (isAddingColumn) return; // Already adding
+    if (isAddingColumn) return;
     setIsAddingColumn(true);
   }, [isAddingColumn]);
 
@@ -69,14 +66,12 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
   const handleColumnUpdate = useCallback(
     (oldName: string, updated: ColumnDef, isNew: boolean) => {
       if (isNew) {
-        // Adding new column
         send({
           type: 'addColumn',
           payload: { modelName, column: updated },
         });
         setIsAddingColumn(false);
       } else {
-        // Updating existing column
         send({
           type: 'updateColumn',
           payload: { modelName, oldColumnName: oldName, column: updated },
@@ -91,28 +86,6 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
     (columnName: string) => {
       send({
         type: 'removeColumn',
-        payload: { modelName, columnName },
-      });
-    },
-    [send, modelName],
-  );
-
-  // Handle approving a column
-  const handleColumnApprove = useCallback(
-    (columnName: string) => {
-      send({
-        type: 'approveColumn',
-        payload: { modelName, columnName },
-      });
-    },
-    [send, modelName],
-  );
-
-  // Handle unapproving a column
-  const handleColumnUnapprove = useCallback(
-    (columnName: string) => {
-      send({
-        type: 'unapproveColumn',
         payload: { modelName, columnName },
       });
     },
@@ -158,68 +131,6 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
     [send, modelName],
   );
 
-  // Handle accepting a discrepancy (dataType or structural)
-  const handleAcceptDiscrepancy = useCallback(
-    (col: ReconciledColumn) => {
-      if (col.discrepancy?.structural) {
-        send({
-          type: 'acceptStructuralDiscrepancy',
-          payload: { modelName, columnName: col.name, discrepancyType: col.discrepancy.structural },
-        });
-      } else {
-        send({
-          type: 'acceptDiscrepancy',
-          payload: { modelName, columnName: col.name },
-        });
-      }
-    },
-    [send, modelName],
-  );
-
-  // Handle rejecting a discrepancy (dataType or structural)
-  const handleRejectDiscrepancy = useCallback(
-    (col: ReconciledColumn) => {
-      if (col.discrepancy?.structural) {
-        send({
-          type: 'rejectStructuralDiscrepancy',
-          payload: { modelName, columnName: col.name, discrepancyType: col.discrepancy.structural },
-        });
-      } else {
-        send({
-          type: 'rejectDiscrepancy',
-          payload: { modelName, columnName: col.name },
-        });
-      }
-    },
-    [send, modelName],
-  );
-
-  // Handle un-rejecting a discrepancy (dataType or structural)
-  const handleUnrejectDiscrepancy = useCallback(
-    (col: ReconciledColumn) => {
-      if (col.discrepancy?.structural) {
-        send({
-          type: 'unrejectStructuralDiscrepancy',
-          payload: { modelName, columnName: col.name },
-        });
-      } else {
-        send({
-          type: 'unrejectDiscrepancy',
-          payload: { modelName, columnName: col.name },
-        });
-      }
-    },
-    [send, modelName],
-  );
-
-  // Handle accepting all discrepancies for this model
-  const handleAcceptAllDiscrepancies = useCallback(() => {
-    send({
-      type: 'acceptAllDiscrepancies',
-      payload: { modelName },
-    });
-  }, [send, modelName]);
-
   // Compute whether model has multiple PKs (for warning display)
   const pkColumnNames = useMemo(
     () => columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
@@ -231,21 +142,14 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
   const allExpanded = columns.length > 0 && expandedColumns.size === columns.length;
   const anyExpanded = expandedColumns.size > 0;
 
-  // --- Render ----------------------------------------------------------------
-
-  const hasApprovedColumns = approvedColumns.length > 0;
-  const hasPlannedColumns = plannedColumns.length > 0 || isAddingColumn;
-
   // New column template for when user clicks "Add Column"
-  const newColumnTemplate: ReconciledColumn = {
+  const newColumnTemplate: DisplayColumn = {
     name: '',
     dataType: 'STRING',
     description: '',
-    status: 'planned',
     isPrimaryKey: false,
     isForeignKey: false,
     isNaturalKey: false,
-    approved: false,
   };
 
   return (
@@ -281,21 +185,12 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
               )}
             </div>
           )}
-          {discrepancyCount && discrepancyCount > 0 ? (
-            <button
-              className="column-editor__accept-all-btn"
-              onClick={handleAcceptAllDiscrepancies}
-              title={`Accept all ${discrepancyCount} discrepanc${discrepancyCount > 1 ? 'ies' : 'y'}`}
-            >
-              Accept All ({discrepancyCount})
-            </button>
-          ) : null}
           {isEditable && (
             <button
               className="column-editor__add-btn"
               onClick={handleAddColumn}
               disabled={isAddingColumn}
-              title="Add planned column"
+              title="Add column"
             >
               + Add Column
             </button>
@@ -309,15 +204,16 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
           <div className="column-editor__empty">No columns</div>
         )}
 
-        {/* Built columns — editable key types, readonly other fields */}
-        {builtColumns.map((col) => (
+        {sortedColumns.map((col) => (
           <ColumnRowEditor
             key={col.name}
             column={col}
-            mode="readonly"
+            mode={isEditable ? 'editable' : 'readonly'}
             existingColumnNames={existingColumnNames}
+            onUpdate={isEditable ? (updated) => handleColumnUpdate(col.name, updated, false) : undefined}
+            onDelete={isEditable ? () => handleColumnDelete(col.name) : undefined}
             showIndicators={true}
-            showDelete={false}
+            showDelete={isEditable}
             onTogglePK={() => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
             onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
             onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
@@ -325,74 +221,6 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
             modelRole={modelRole}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={() => handleToggleExpand(col.name)}
-            onAcceptDiscrepancy={col.discrepancy ? () => handleAcceptDiscrepancy(col) : undefined}
-            onRejectDiscrepancy={col.discrepancy && !col.discrepancy.rejected ? () => handleRejectDiscrepancy(col) : undefined}
-            onUnrejectDiscrepancy={col.discrepancy?.rejected ? () => handleUnrejectDiscrepancy(col) : undefined}
-          />
-        ))}
-
-        {/* Separator: built -> approved */}
-        {builtColumns.length > 0 && hasApprovedColumns && (
-          <div className="column-editor__separator column-editor__separator--approved">
-            <span className="column-editor__separator-text">APPROVED</span>
-          </div>
-        )}
-
-        {/* Approved columns (editable) */}
-        {approvedColumns.map((col) => (
-          <ColumnRowEditor
-            key={col.name}
-            column={col}
-            mode="editable"
-            existingColumnNames={existingColumnNames}
-            onUpdate={(updated) => handleColumnUpdate(col.name, updated, false)}
-            onDelete={() => handleColumnDelete(col.name)}
-            onApprove={() => handleColumnApprove(col.name)}
-            onUnapprove={() => handleColumnUnapprove(col.name)}
-            canApprove={modelStatus === 'built' || modelApproved}
-            showIndicators={true}
-            showDelete={true}
-            onTogglePK={() => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
-            onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
-            onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
-            showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
-            modelRole={modelRole}
-            expanded={expandedColumns.has(col.name)}
-            onToggleExpand={() => handleToggleExpand(col.name)}
-          />
-        ))}
-
-        {/* Separator: approved -> planned */}
-        {(builtColumns.length > 0 || approvedColumns.length > 0) && hasPlannedColumns && (
-          <div className="column-editor__separator">
-            <span className="column-editor__separator-text">PLANNED</span>
-          </div>
-        )}
-
-        {/* Planned columns (editable) */}
-        {plannedColumns.map((col) => (
-          <ColumnRowEditor
-            key={col.name}
-            column={col}
-            mode="editable"
-            existingColumnNames={existingColumnNames}
-            onUpdate={(updated) => handleColumnUpdate(col.name, updated, false)}
-            onDelete={() => handleColumnDelete(col.name)}
-            onApprove={() => handleColumnApprove(col.name)}
-            onUnapprove={() => handleColumnUnapprove(col.name)}
-            canApprove={modelStatus === 'built' || modelApproved}
-            showIndicators={true}
-            showDelete={true}
-            onTogglePK={() => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
-            onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
-            onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
-            showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
-            modelRole={modelRole}
-            expanded={expandedColumns.has(col.name)}
-            onToggleExpand={() => handleToggleExpand(col.name)}
-            onAcceptDiscrepancy={col.discrepancy ? () => handleAcceptDiscrepancy(col) : undefined}
-            onRejectDiscrepancy={col.discrepancy && !col.discrepancy.rejected ? () => handleRejectDiscrepancy(col) : undefined}
-            onUnrejectDiscrepancy={col.discrepancy?.rejected ? () => handleUnrejectDiscrepancy(col) : undefined}
           />
         ))}
 
@@ -420,7 +248,7 @@ export function ColumnEditor({ modelName, modelStatus, modelApproved, columns, d
           className="column-editor__add-btn column-editor__add-btn--bottom"
           onClick={handleAddColumn}
           disabled={isAddingColumn}
-          title="Add planned column"
+          title="Add column"
         >
           + Add Column
         </button>

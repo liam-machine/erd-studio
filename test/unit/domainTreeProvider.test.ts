@@ -66,10 +66,13 @@ describe('DomainTreeProvider', () => {
     it('returns domain nodes for silver layer', () => {
       const children = provider.getChildren({ type: 'layer', layer: 'silver' })!;
 
-      // work-lots domain + "New Domain..." item
-      expect(children).toHaveLength(2);
-      expect(children[0].type).toBe('domain');
-      expect(children[1].type).toBe('newDomain');
+      // 5 silver domains (bob, ncr, ppw-work-lot, sdd, ttt) + "New Domain..." item
+      expect(children).toHaveLength(6);
+      // All but last should be domain nodes
+      for (let i = 0; i < 5; i++) {
+        expect(children[i].type).toBe('domain');
+      }
+      expect(children[5].type).toBe('newDomain');
     });
 
     it('returns domain nodes for gold layer', () => {
@@ -87,14 +90,18 @@ describe('DomainTreeProvider', () => {
       expect(children).toHaveLength(0);
     });
 
-    it('returns correct model counts for work-lots domain', () => {
+    it('returns correct model counts for ppw-work-lot domain', () => {
       const children = provider.getChildren({ type: 'layer', layer: 'silver' })!;
-      const domain = children[0];
+      // Find ppw-work-lot domain node
+      const domain = children.find(
+        (c) => c.type === 'domain' && c.summary.domain === 'ppw-work-lot',
+      );
 
-      expect(domain.type).toBe('domain');
-      if (domain.type === 'domain') {
-        expect(domain.modelCount).toBe(4);
-        expect(domain.designCount).toBe(2);
+      expect(domain).toBeDefined();
+      expect(domain!.type).toBe('domain');
+      if (domain!.type === 'domain') {
+        expect(domain!.modelCount).toBe(39);
+        expect(domain!.designCount).toBe(0);
       }
     });
 

@@ -378,3 +378,17 @@
   opacity: 1;
   transition-delay: 0.15s; /* Very short delay - appears quickly */
 }
+
+/* ---------------------------------------------------------------------------
+   Active dropdown trigger (e.g., discrepancy toggle when ON)
+   --------------------------------------------------------------------------- */
+
+.toolbar__dropdown-trigger--active {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  color: #000;
+}
+
+.toolbar__dropdown-trigger--active:hover {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  opacity: 0.85;
+}

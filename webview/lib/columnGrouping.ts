@@ -1,68 +1,46 @@
 /**
- * Column grouping utility — groups columns by status into three categories.
+ * Column grouping utility — sorts columns by key priority.
  *
- * Groups columns into built, approved, and planned, applying key priority
- * sorting (PK -> NK -> FK -> non-key) within each group.
+ * In the stage architecture, columns no longer have a status field.
+ * This module provides a simple passthrough that applies key priority
+ * sorting (PK -> NK -> FK -> non-key).
  *
  * Used by ModelNode (canvas) and ColumnEditor (detail panel) to ensure
- * consistent grouping logic.
+ * consistent sorting logic.
  */
 
 import { sortColumnsByKeyPriority } from './columnSort';
 
 /**
- * Minimal interface for columns that can be grouped by status.
- * Works with both ReconciledColumn and ColumnDisplay.
+ * Minimal interface for columns that can be sorted by key type.
  */
 export interface GroupableColumn {
-  status: 'built' | 'approved' | 'planned' | 'missing';
   isPrimaryKey: boolean;
   isForeignKey: boolean;
   isNaturalKey: boolean;
 }
 
 /**
- * Result of grouping columns by status.
+ * Sort columns by key priority: PK -> NK -> FK -> non-key.
+ *
+ * This replaces the old groupColumnsByStatus which categorized by
+ * built/approved/planned. In the stage architecture, all columns in
+ * a domain file are equal — the stage directory determines lifecycle.
  */
-export interface ColumnGroups<T extends GroupableColumn> {
-  /** Columns that exist in the manifest (status === 'built'). */
-  built: T[];
-  /** Columns approved for build (status === 'approved'). */
-  approved: T[];
-  /** Columns planned or missing (status === 'planned' or 'missing'). */
-  planned: T[];
+export function sortColumns<T extends GroupableColumn>(columns: T[]): T[] {
+  return sortColumnsByKeyPriority(columns);
 }
 
 /**
- * Group columns into built, approved, and planned categories.
- *
- * Each group is sorted by key priority: PK -> NK -> FK -> non-key.
- * The 'missing' status is treated as planned for grouping purposes.
- *
- * @param columns - Array of columns to group
- * @returns Object with three sorted arrays: built, approved, planned
+ * @deprecated Use sortColumns instead. Kept for backward compatibility
+ * during migration — returns all columns in a single "planned" bucket.
  */
 export function groupColumnsByStatus<T extends GroupableColumn>(
   columns: T[]
-): ColumnGroups<T> {
-  const built: T[] = [];
-  const approved: T[] = [];
-  const planned: T[] = [];
-
-  for (const col of columns) {
-    if (col.status === 'built') {
-      built.push(col);
-    } else if (col.status === 'approved') {
-      approved.push(col);
-    } else {
-      // 'planned' or 'missing' — both go in planned group
-      planned.push(col);
-    }
-  }
-
+): { built: T[]; approved: T[]; planned: T[] } {
   return {
-    built: sortColumnsByKeyPriority(built),
-    approved: sortColumnsByKeyPriority(approved),
-    planned: sortColumnsByKeyPriority(planned),
+    built: [],
+    approved: [],
+    planned: sortColumnsByKeyPriority(columns),
   };
 }

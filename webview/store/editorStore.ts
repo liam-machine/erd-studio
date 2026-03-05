@@ -9,10 +9,10 @@
 
 import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
-import type { ManifestModelPreview, ReconciledDomain } from '../../src/types/reconciled';
+import type { DisplayDomain, ManifestModelPreview } from '../../src/types/display';
+import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { ModelFlowNode, FkFlowEdge, FkEdgeData } from '../types/graph';
-import type { ModelTemplate } from '../../src/types/semantic';
-import type { PaletteId } from '../lib/colorPalettes';
+import type { ModelTemplate, Stage } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,8 +50,6 @@ export interface NodeContextMenu {
   x: number;
   y: number;
   modelName: string;
-  modelStatus: 'built' | 'approved' | 'design' | 'missing';
-  isApproved: boolean;
 }
 
 /** Union of context menu states. */
@@ -83,7 +81,7 @@ export interface EditorState {
   /** Whether the add existing model dialog is open. */
   addExistingModelDialogOpen: boolean;
   /** The loaded domain data from the extension host (already reconciled with manifest). */
-  domain: ReconciledDomain | null;
+  domain: DisplayDomain | null;
   /** Error message from the extension host, if any. */
   error: string | null;
   /** React Flow nodes (local state for selection/drag). */
@@ -98,8 +96,6 @@ export interface EditorState {
   contextMenu: ContextMenuState;
   /** Internal: registered search focus function (not persisted). */
   _searchFocusFn: (() => void) | null;
-  /** Current colour palette ID. */
-  paletteId: PaletteId;
   /** Whether the legend panel is visible. */
   legendOpen: boolean;
   /** Whether the welcome modal is visible. */
@@ -113,8 +109,12 @@ export interface EditorState {
     currentX: number;
     currentY: number;
   } | null;
-  /** Model name for the discrepancy review dialog, or null if closed. */
-  discrepancyReviewModel: string | null;
+  /** Whether the cross-stage discrepancy overlay is visible. */
+  discrepancyVisible: boolean;
+  /** The stage being compared against when discrepancy is active. */
+  discrepancyCompareStage: Stage | null;
+  /** The active discrepancy report from the extension, or null. */
+  discrepancyReport: DiscrepancyReport | null;
   /** Set of "modelName:columnName" keys for columns involved in selected edges. */
   highlightedColumns: Set<string>;
   /** Set of model IDs with columns expanded. */
@@ -144,7 +144,7 @@ export interface EditorActions {
   setPendingDeleteConfirmation: (pending: boolean) => void;
   /** Open/close the add existing model dialog. */
   setAddExistingModelDialogOpen: (open: boolean) => void;
-  setDomain: (domain: ReconciledDomain) => void;
+  setDomain: (domain: DisplayDomain) => void;
   setError: (error: string | null) => void;
   setNodes: (nodes: ModelFlowNode[]) => void;
   setEdges: (edges: FkFlowEdge[]) => void;
@@ -153,15 +153,13 @@ export interface EditorActions {
   /** Open context menu for an edge at the given position. */
   openEdgeContextMenu: (x: number, y: number, data: FkEdgeData) => void;
   /** Open context menu for a node at the given position. */
-  openNodeContextMenu: (x: number, y: number, modelName: string, modelStatus: 'built' | 'approved' | 'design' | 'missing', isApproved: boolean) => void;
+  openNodeContextMenu: (x: number, y: number, modelName: string) => void;
   /** Close the context menu. */
   closeContextMenu: () => void;
   /** Register a function to focus the search input (called by Toolbar on mount). */
   registerSearchFocus: (focusFn: (() => void) | null) => void;
   /** Focus the search input (called by keyboard handler). */
   focusSearchInput: () => void;
-  /** Set the colour palette. */
-  setPaletteId: (paletteId: PaletteId) => void;
   /** Toggle the legend panel visibility. */
   setLegendOpen: (open: boolean) => void;
   /** Toggle the welcome modal visibility. */
@@ -172,8 +170,12 @@ export interface EditorActions {
   updateDragLineMouse: (mouseX: number, mouseY: number) => void;
   /** End drag line (on drop or cancel). */
   endDragLine: () => void;
-  /** Open/close the discrepancy review dialog for a model. */
-  setDiscrepancyReviewModel: (modelName: string | null) => void;
+  /** Toggle the discrepancy overlay visibility. */
+  setDiscrepancyVisible: (visible: boolean) => void;
+  /** Set the stage being compared against. */
+  setDiscrepancyCompareStage: (stage: Stage | null) => void;
+  /** Set the discrepancy report from the extension. */
+  setDiscrepancyReport: (report: DiscrepancyReport | null) => void;
   /** Set highlighted columns (for edge click). */
   setHighlightedColumns: (columns: Set<string>) => void;
   /** Expand all listed model IDs (sets allExpanded mode). */
@@ -214,11 +216,12 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   manifestModels: [],
   contextMenu: null,
   _searchFocusFn: null,
-  paletteId: 'coolWarm',
   legendOpen: false,
   welcomeModalOpen: false,
   dragLineState: null,
-  discrepancyReviewModel: null,
+  discrepancyVisible: false,
+  discrepancyCompareStage: null,
+  discrepancyReport: null,
   highlightedColumns: new Set<string>(),
   expandedNodes: new Set<string>(),
   allExpanded: false,
@@ -240,21 +243,27 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   clearFkDialogEditData: () => set({ fkDialogEditData: null }),
   setPendingDeleteConfirmation: (pending) => set({ pendingDeleteConfirmation: pending }),
   setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
-  setDomain: (domain) => set({ domain, error: null }),
+  setDomain: (domain) => set((state) => ({
+    domain,
+    error: null,
+    // Clear discrepancy when switching stages (stage changed)
+    ...(state.domain && state.domain.stage !== domain.stage
+      ? { discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null }
+      : {}),
+  })),
   setError: (error) => set({ error }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),
   openEdgeContextMenu: (x, y, data) => set({ contextMenu: { type: 'edge', x, y, data } }),
-  openNodeContextMenu: (x, y, modelName, modelStatus, isApproved) => set({ contextMenu: { type: 'node', x, y, modelName, modelStatus, isApproved } }),
+  openNodeContextMenu: (x, y, modelName) => set({ contextMenu: { type: 'node', x, y, modelName } }),
   closeContextMenu: () => set({ contextMenu: null }),
   registerSearchFocus: (focusFn) => set({ _searchFocusFn: focusFn }),
   focusSearchInput: () => {
     const { _searchFocusFn } = useEditorStore.getState();
     if (_searchFocusFn) _searchFocusFn();
   },
-  setPaletteId: (paletteId) => set({ paletteId }),
   setLegendOpen: (open) => set({ legendOpen: open }),
   setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
   startDragLine: (modelName, columnName, sourceX, sourceY) =>
@@ -281,7 +290,9 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
         : {},
     ),
   endDragLine: () => set({ dragLineState: null }),
-  setDiscrepancyReviewModel: (modelName) => set({ discrepancyReviewModel: modelName }),
+  setDiscrepancyVisible: (visible) => set({ discrepancyVisible: visible }),
+  setDiscrepancyCompareStage: (stage) => set({ discrepancyCompareStage: stage }),
+  setDiscrepancyReport: (report) => set({ discrepancyReport: report }),
   setHighlightedColumns: (columns) => set({ highlightedColumns: columns }),
   expandAll: (modelIds) => set({ expandedNodes: new Set(modelIds), allExpanded: true }),
   expandNew: (modelIds) =>

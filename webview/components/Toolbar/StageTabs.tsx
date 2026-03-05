@@ -1,0 +1,76 @@
+/**
+ * StageTabs — stage tab switcher for the toolbar.
+ *
+ * Renders three tabs (Conceptual / Logical / Physical) with the active
+ * tab highlighted. Clicking a tab sends a switchStage message to the
+ * extension host.
+ *
+ * Keyboard shortcuts: Alt+1 = Conceptual, Alt+2 = Logical, Alt+3 = Physical
+ * (handled in App.tsx keyboard handler).
+ */
+
+import { useCallback } from 'react';
+
+import { useVsCodeApi } from '../../hooks/useVsCodeApi';
+import type { Stage } from '../../../src/types/semantic';
+import type { WebviewMessage } from '../../hooks/useMessageBus';
+import './StageTabs.css';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const STAGE_LABELS: { stage: Stage; label: string; shortcut: string }[] = [
+  { stage: 'conceptual', label: 'Conceptual', shortcut: 'Alt+1' },
+  { stage: 'logical', label: 'Logical', shortcut: 'Alt+2' },
+  { stage: 'physical', label: 'Physical', shortcut: 'Alt+3' },
+];
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+interface StageTabsProps {
+  activeStage: Stage;
+  readOnly: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function StageTabs({ activeStage, readOnly }: StageTabsProps) {
+  const vscode = useVsCodeApi();
+
+  const handleTabClick = useCallback(
+    (stage: Stage) => {
+      if (stage === activeStage) return;
+      const message: WebviewMessage = {
+        type: 'switchStage',
+        payload: { stage },
+      };
+      vscode.postMessage(message);
+    },
+    [activeStage, vscode],
+  );
+
+  return (
+    <div className="stage-tabs" role="tablist" aria-label="Design stage">
+      {STAGE_LABELS.map(({ stage, label, shortcut }) => (
+        <button
+          key={stage}
+          className={`stage-tabs__tab${stage === activeStage ? ' stage-tabs__tab--active' : ''}`}
+          onClick={() => handleTabClick(stage)}
+          role="tab"
+          aria-selected={stage === activeStage}
+          title={`${label} stage (${shortcut})`}
+        >
+          {label}
+        </button>
+      ))}
+      {readOnly && (
+        <span className="stage-tabs__readonly-badge">Read-only</span>
+      )}
+    </div>
+  );
+}

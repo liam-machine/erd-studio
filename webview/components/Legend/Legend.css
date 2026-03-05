@@ -175,41 +175,42 @@
   overflow: hidden;
 }
 
-.legend__model-card--built {
-  border-color: var(--model-built);
+.legend__model-card--conceptual {
+  border-color: var(--stage-conceptual);
 }
 
-.legend__model-card--approved {
-  border-color: var(--model-approved);
+.legend__model-card--logical {
+  border-color: var(--stage-logical);
 }
 
-.legend__model-card--design {
-  border-color: var(--model-design);
+.legend__model-card--physical {
+  border-color: var(--stage-physical);
 }
 
-.legend__model-card--missing {
-  border-color: var(--model-missing);
-  opacity: 0.6;
+.legend__model-card--ghost {
+  border-color: var(--stage-ghost);
+  border-style: dashed;
+  opacity: 0.5;
 }
 
 .legend__model-header {
   height: 8px;
 }
 
-.legend__model-header--built {
-  background: var(--model-built);
+.legend__model-header--conceptual {
+  background: var(--stage-conceptual);
 }
 
-.legend__model-header--approved {
-  background: var(--model-approved);
+.legend__model-header--logical {
+  background: var(--stage-logical);
 }
 
-.legend__model-header--design {
-  background: var(--model-design);
+.legend__model-header--physical {
+  background: var(--stage-physical);
 }
 
-.legend__model-header--missing {
-  background: var(--model-missing);
+.legend__model-header--ghost {
+  background: var(--stage-ghost);
 }
 
 /* ---------------------------------------------------------------------------
@@ -226,16 +227,16 @@
   stroke-width: 2;
 }
 
-.legend__edge--built {
-  stroke: var(--edge-built);
+.legend__edge--conceptual {
+  stroke: var(--stage-conceptual);
 }
 
-.legend__edge--approved {
-  stroke: var(--model-approved);
+.legend__edge--logical {
+  stroke: var(--stage-logical);
 }
 
-.legend__edge--design {
-  stroke: var(--edge-design);
+.legend__edge--physical {
+  stroke: var(--stage-physical);
 }
 
 .legend__edge--dashed {
@@ -265,7 +266,7 @@
 .legend__cardinality-label {
   font-size: 12px;
   font-weight: 700;
-  color: var(--edge-built);
+  color: var(--stage-logical);
   min-width: 10px;
   text-align: center;
 }
@@ -296,5 +297,5 @@
 
 .legend__badge--fk {
   background: rgba(96, 165, 250, 0.2);
-  color: var(--edge-built);
+  color: var(--stage-logical);
 }

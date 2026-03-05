@@ -73,8 +73,8 @@ export function usePositionPersistence(): {
         timeoutRef.current = null;
       }
 
-      // Flush pending changes to extension host.
-      if (pendingChangesRef.current.size > 0 && domainRef.current) {
+      // Flush pending changes to extension host (skip in read-only mode).
+      if (pendingChangesRef.current.size > 0 && domainRef.current && !domainRef.current.readOnly) {
         const latestDomain = domainRef.current;
         const existingPositions = latestDomain.viewConfig.positions ?? {};
         const updatedPositions = {
@@ -107,6 +107,11 @@ export function usePositionPersistence(): {
       // Apply all changes to nodes (handles selection, position, etc.).
       const updatedNodes = applyNodeChanges(changes, nodesRef.current);
       setNodes(updatedNodes as ModelFlowNode[]);
+
+      // Skip position persistence in read-only mode (physical stage)
+      if (domainRef.current?.readOnly) {
+        return;
+      }
 
       // Extract position changes for persistence.
       const dragEndChanges = changes.filter(

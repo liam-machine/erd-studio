@@ -182,15 +182,13 @@ export class DomainTreeProvider
 
     const domainNodes: DomainNode[] = layerDomains.map(summary => {
       let modelCount = 0;
-      let designCount = 0;
       try {
         const domain = this.domainService.getDomain(summary.filePath);
         modelCount = domain.models.length;
-        designCount = domain.models.filter(m => m.source === 'design').length;
       } catch (err) {
         console.warn(`[DomainTreeProvider] Failed to load ${summary.filePath}:`, err);
       }
-      return { type: 'domain' as const, summary, modelCount, designCount };
+      return { type: 'domain' as const, summary, modelCount, designCount: 0 };
     });
 
     const children: TreeElement[] = [...domainNodes];

@@ -109,7 +109,7 @@ function FkEdgeComponent({
   }, [nodeLookup]);
 
   if (!data) return null;
-  const { cardinality, status, fromModel, toModel, dimmed } = data;
+  const { cardinality, stage, discrepancyStatus, fromModel, toModel, dimmed } = data;
 
   // Parse which side each handle is on (top/right/bottom/left)
   const sourceSide = parseSideFromHandle(sourceHandleId);
@@ -166,7 +166,9 @@ function FkEdgeComponent({
     borderRadius: 8,
   });
 
-  const statusClass = `fk-edge--${status}`;
+  const statusClass = discrepancyStatus
+    ? `fk-edge--discrepancy-${discrepancyStatus}`
+    : `fk-edge--${stage ?? 'logical'}`;
   // Apply special styling for one-to-one (dashed) and many-to-many (dotted)
   let cardinalityClass = '';
   if (cardinality === 'one-to-one') {
@@ -228,7 +230,7 @@ function FkEdgeComponent({
       />
       <EdgeLabelRenderer>
         <span
-          className={`fk-edge__label fk-edge__label--${status}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+          className={`fk-edge__label fk-edge__label--${stage ?? 'logical'}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
           style={{
             transform: `translate(-50%, -50%) translate(${srcLabel.x}px, ${srcLabel.y}px)`,
           }}
@@ -236,7 +238,7 @@ function FkEdgeComponent({
           {sourceLabel}
         </span>
         <span
-          className={`fk-edge__label fk-edge__label--${status}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+          className={`fk-edge__label fk-edge__label--${stage ?? 'logical'}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
           style={{
             transform: `translate(-50%, -50%) translate(${tgtLabel.x}px, ${tgtLabel.y}px)`,
           }}

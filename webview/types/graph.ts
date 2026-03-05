@@ -2,33 +2,18 @@
  * Types for React Flow graph nodes and edges.
  *
  * These types define the data payloads for custom React Flow node and edge
- * components. The graph transformer (F108) converts SemanticDomain data into
+ * components. The graph transformer converts DisplayDomain data into
  * these shapes.
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { Cardinality, Layer, ModelRole } from '../../src/types/semantic';
+import type { Cardinality, Layer, ModelRole, Stage } from '../../src/types/semantic';
 import type { LayerConfig } from '../../src/types/layer';
-
-// ---------------------------------------------------------------------------
-// Model status
-// ---------------------------------------------------------------------------
-
-/** Reconciled model status (determined by comparing domain JSON with manifest). */
-export type ModelStatus = 'built' | 'approved' | 'design' | 'missing';
+import type { ModelDiscrepancy } from '../../src/types/discrepancy';
 
 // ---------------------------------------------------------------------------
 // Column display
 // ---------------------------------------------------------------------------
-
-/**
- * Column status for styling:
- * - `built` — exists in manifest (blue)
- * - `approved` — approved for build (teal)
- * - `planned` — in plannedColumns but not manifest (orange)
- * - `missing` — PK/FK reference to non-existent column (orange ghost)
- */
-export type ColumnStatus = 'built' | 'approved' | 'planned' | 'missing';
 
 /** Column data enriched with PK/FK/NK indicators for display in ModelNode. */
 export interface ColumnDisplay {
@@ -39,10 +24,6 @@ export interface ColumnDisplay {
   isForeignKey: boolean;
   /** True if this column is a natural key (business identifier). */
   isNaturalKey: boolean;
-  /** Column status for row styling. */
-  status: ColumnStatus;
-  /** Whether this column has been approved for build. */
-  approved: boolean;
   /** SCD type for dimension columns (0 = never changes, 1 = overwrite, 2 = track history). */
   scdType?: 0 | 1 | 2;
   /** Additive type for fact measure columns. */
@@ -57,27 +38,23 @@ export interface ColumnDisplay {
 export type ModelNodeData = {
   /** Model name (unique within a domain). */
   modelName: string;
-  /** Model status: built (blue), approved (teal), design (orange), or missing (grey). */
-  status: ModelStatus;
-  /** Whether this model has been approved for build. */
-  approved: boolean;
+  /** The active design stage. */
+  stage: Stage;
   /** Data warehouse layer. */
   layer: Layer;
   /** Layer configuration for dynamic badge styling (color, abbreviation). */
   layerConfig?: LayerConfig;
   /** Columns to display, enriched with PK/FK flags. */
   columns: ColumnDisplay[];
-  /** Number of columns with unresolved discrepancies (for warning badge). */
-  discrepancyCount?: number;
   /** Whether the node is dimmed (doesn't match current search query). */
   dimmed?: boolean;
   /**
-   * Whether columns are expanded (F405).
+   * Whether columns are expanded.
    * When false, only first N columns are shown with node-level handles only.
    * Ephemeral state — not persisted, resets on domain refresh.
    */
   isExpanded?: boolean;
-  /** Callback to toggle expansion state (F405). Receives model name as argument. */
+  /** Callback to toggle expansion state. Receives model name as argument. */
   onToggleExpansion?: (modelName: string) => void;
   /** Whether this model has design rationale metadata. */
   hasRationale?: boolean;
@@ -85,6 +62,12 @@ export type ModelNodeData = {
   grain?: string;
   /** Model's role in the data warehouse architecture. Shown as badge on node. */
   modelRole?: ModelRole;
+  /** Whether this stage is read-only (physical). */
+  readOnly?: boolean;
+  /** True if model doesn't exist in manifest (physical stage ghost node). */
+  isGhost?: boolean;
+  /** Per-model discrepancy data when a cross-stage comparison report is active. */
+  discrepancy?: ModelDiscrepancy;
   /** Index signature required by React Flow's Node generic. */
   [key: string]: unknown;
 };
@@ -96,9 +79,6 @@ export type ModelFlowNode = Node<ModelNodeData, 'model'>;
 // FkEdge
 // ---------------------------------------------------------------------------
 
-/** Relationship status for edge colouring: built (blue), approved (teal), or design (orange). */
-export type RelationshipStatus = 'built' | 'approved' | 'design';
-
 /** Data payload for an FkEdge React Flow edge. */
 export type FkEdgeData = {
   fromModel: string;
@@ -106,9 +86,10 @@ export type FkEdgeData = {
   toModel: string;
   toColumn: string;
   cardinality: Cardinality;
-  status: RelationshipStatus;
-  /** Whether this relationship has been approved for build. */
-  approved: boolean;
+  /** Stage of the owning domain canvas — drives CSS colour class. */
+  stage?: Stage;
+  /** Discrepancy status for ghost/extra/mismatch edges. */
+  discrepancyStatus?: 'extra' | 'missing' | 'cardinality-mismatch';
   /** Whether the edge is dimmed (not connected to current selection). */
   dimmed?: boolean;
   /** Index signature required by React Flow's Edge generic. */

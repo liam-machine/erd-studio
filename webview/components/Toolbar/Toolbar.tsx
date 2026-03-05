@@ -16,13 +16,9 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
 import { runElkLayout } from '../../lib/elkLayout';
-import {
-  PALETTES,
-  applyPalette,
-  persistPalette,
-  type PaletteId,
-} from '../../lib/colorPalettes';
+import { StageTabs } from './StageTabs';
 import type { ModelFlowNode, FkFlowEdge } from '../../types/graph';
+import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './Toolbar.css';
 
@@ -69,9 +65,6 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
-  const paletteId = useEditorStore((s) => s.paletteId);
-  const setPaletteId = useEditorStore((s) => s.setPaletteId);
-
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -82,13 +75,17 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   // Refresh manifest state
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Discrepancy toggle state
+  const discrepancyVisible = useEditorStore((s) => s.discrepancyVisible);
+  const discrepancyCompareStage = useEditorStore((s) => s.discrepancyCompareStage);
+  const setDiscrepancyVisible = useEditorStore((s) => s.setDiscrepancyVisible);
+  const setDiscrepancyCompareStage = useEditorStore((s) => s.setDiscrepancyCompareStage);
+  const [discrepancyDropdownOpen, setDiscrepancyDropdownOpen] = useState(false);
+  const discrepancyDropdownRef = useRef<HTMLDivElement>(null);
+
   // Model dropdown state
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Palette dropdown state
-  const [paletteDropdownOpen, setPaletteDropdownOpen] = useState(false);
-  const paletteDropdownRef = useRef<HTMLDivElement>(null);
 
   // Search input ref (for Ctrl+F focus)
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -139,35 +136,68 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [modelDropdownOpen]);
 
-  // --- Palette dropdown click-outside handler -------------------------------
+  // --- Discrepancy dropdown click-outside handler --------------------------
 
   useEffect(() => {
-    if (!paletteDropdownOpen) return;
+    if (!discrepancyDropdownOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       if (
-        paletteDropdownRef.current &&
-        !paletteDropdownRef.current.contains(e.target as Node)
+        discrepancyDropdownRef.current &&
+        !discrepancyDropdownRef.current.contains(e.target as Node)
       ) {
-        setPaletteDropdownOpen(false);
+        setDiscrepancyDropdownOpen(false);
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [paletteDropdownOpen]);
+  }, [discrepancyDropdownOpen]);
 
-  // --- Palette change handler ------------------------------------------------
+  // --- Discrepancy toggle handlers -----------------------------------------
 
-  const handlePaletteChange = useCallback(
-    (newPalette: PaletteId) => {
-      setPaletteId(newPalette);
-      applyPalette(newPalette);
-      persistPalette(newPalette);
-      setPaletteDropdownOpen(false);
+  /** Get comparison options for the active stage. */
+  const discrepancyOptions = useMemo((): { stage: Stage; label: string }[] => {
+    if (!domain) return [];
+    switch (domain.stage) {
+      case 'physical':
+        return [{ stage: 'logical', label: 'Compare to Logical' }];
+      case 'logical':
+        return [
+          { stage: 'physical', label: 'Compare to Physical' },
+          { stage: 'conceptual', label: 'Compare to Conceptual' },
+        ];
+      case 'conceptual':
+        return [{ stage: 'logical', label: 'Compare to Logical' }];
+      default:
+        return [];
+    }
+  }, [domain]);
+
+  const handleDiscrepancySelect = useCallback(
+    (compareAgainst: Stage) => {
+      setDiscrepancyDropdownOpen(false);
+      setDiscrepancyCompareStage(compareAgainst);
+      setDiscrepancyVisible(true);
+      const message: WebviewMessage = {
+        type: 'toggleDiscrepancy',
+        payload: { enabled: true, compareAgainst },
+      };
+      vscode.postMessage(message);
     },
-    [setPaletteId],
+    [vscode, setDiscrepancyCompareStage, setDiscrepancyVisible],
   );
+
+  const handleDiscrepancyOff = useCallback(() => {
+    setDiscrepancyDropdownOpen(false);
+    setDiscrepancyVisible(false);
+    setDiscrepancyCompareStage(null);
+    const message: WebviewMessage = {
+      type: 'toggleDiscrepancy',
+      payload: { enabled: false },
+    };
+    vscode.postMessage(message);
+  }, [vscode, setDiscrepancyVisible, setDiscrepancyCompareStage]);
 
   // --- Search handlers -----------------------------------------------------
 
@@ -221,7 +251,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   // --- Auto Layout handlers ------------------------------------------------
 
   const runLayout = useCallback(async () => {
-    if (!domain || nodes.length === 0 || isLayouting) {
+    if (!domain || domain.readOnly || nodes.length === 0 || isLayouting) {
       return;
     }
 
@@ -301,6 +331,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     return null;
   }
 
+  const isReadOnly = domain.readOnly;
+
   // Use layerConfig for dynamic abbreviation and color, with fallbacks
   const layerAbbrev = domain.layerConfig?.abbreviation
     ?? LAYER_ABBREV_FALLBACK[domain.layer]
@@ -324,6 +356,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
           {layerAbbrev}
         </span>
       </div>
+
+      {/* Divider */}
+      <div className="toolbar__divider" />
+
+      {/* Stage tabs */}
+      <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
 
       {/* Divider */}
       <div className="toolbar__divider" />
@@ -357,43 +395,47 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         </button>
       </div>
 
+      {/* Undo/Redo — hidden in read-only mode */}
+      {!isReadOnly && (
+        <>
+          <div className="toolbar__divider" />
+          <div className="toolbar__section toolbar__undo-redo">
+            <button
+              className="toolbar__button"
+              onClick={handleUndo}
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+            >
+              ↶
+            </button>
+            <button
+              className="toolbar__button"
+              onClick={handleRedo}
+              title="Redo (Ctrl+Shift+Z)"
+              aria-label="Redo"
+            >
+              ↷
+            </button>
+          </div>
+        </>
+      )}
+
       {/* Divider */}
       <div className="toolbar__divider" />
 
-      {/* Undo/Redo */}
-      <div className="toolbar__section toolbar__undo-redo">
-        <button
-          className="toolbar__button"
-          onClick={handleUndo}
-          title="Undo (Ctrl+Z)"
-          aria-label="Undo"
-        >
-          ↶
-        </button>
-        <button
-          className="toolbar__button"
-          onClick={handleRedo}
-          title="Redo (Ctrl+Shift+Z)"
-          aria-label="Redo"
-        >
-          ↷
-        </button>
-      </div>
-
-      {/* Divider */}
-      <div className="toolbar__divider" />
-
-      {/* Auto Layout */}
+      {/* Auto Layout — disabled in read-only, Refresh Manifest always visible */}
       <div className="toolbar__section">
-        <button
-          className="toolbar__button toolbar__button--tooltip"
-          onClick={handleAutoLayout}
-          disabled={isLayouting || nodes.length === 0}
-          data-tooltip="Auto Layout"
-          aria-label="Auto-layout nodes using ELK algorithm"
-        >
-          {isLayouting ? <span className="toolbar__spinner" /> : '⊞'}
-        </button>
+        {!isReadOnly && (
+          <button
+            className="toolbar__button toolbar__button--tooltip"
+            onClick={handleAutoLayout}
+            disabled={isLayouting || nodes.length === 0}
+            data-tooltip="Auto Layout"
+            aria-label="Auto-layout nodes using ELK algorithm"
+          >
+            {isLayouting ? <span className="toolbar__spinner" /> : '⊞'}
+          </button>
+        )}
 
         {/* Refresh Manifest */}
         <button
@@ -401,7 +443,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
           onClick={handleRefreshManifest}
           disabled={isRefreshing}
           data-tooltip="Refresh"
-          aria-label="Refresh manifest and re-reconcile domains"
+          aria-label="Refresh manifest data"
         >
           {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
         </button>
@@ -441,118 +483,100 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         </button>
       </div>
 
-      {/* Palette Dropdown */}
-      <div className="toolbar__section">
-        <div className="toolbar__dropdown" ref={paletteDropdownRef}>
-          <button
-            className="toolbar__dropdown-trigger toolbar__dropdown-trigger--palette"
-            onClick={() => setPaletteDropdownOpen(!paletteDropdownOpen)}
-            title="Change colour palette"
-            aria-label="Change colour palette"
-            aria-haspopup="menu"
-            aria-expanded={paletteDropdownOpen}
-          >
-            <span
-              className="toolbar__palette-swatch"
-              style={{ backgroundColor: PALETTES[paletteId].colors.modelBuilt }}
-              title="Built"
-            />
-            <span
-              className="toolbar__palette-swatch"
-              style={{ backgroundColor: PALETTES[paletteId].colors.modelApproved }}
-              title="Approved"
-            />
-            <span
-              className="toolbar__palette-swatch"
-              style={{ backgroundColor: PALETTES[paletteId].colors.modelDesign }}
-              title="Design"
-            />
-            <span className="toolbar__dropdown-arrow">▾</span>
-          </button>
-          {paletteDropdownOpen && (
-            <div className="toolbar__dropdown-menu toolbar__dropdown-menu--palette" role="menu">
-              {(Object.keys(PALETTES) as PaletteId[]).map((id) => {
-                const palette = PALETTES[id];
-                const isSelected = paletteId === id;
-                return (
+      {/* Discrepancy toggle */}
+      {discrepancyOptions.length > 0 && (
+        <>
+          <div className="toolbar__divider" />
+          <div className="toolbar__section">
+            <div className="toolbar__dropdown" ref={discrepancyDropdownRef}>
+              <button
+                className={`toolbar__dropdown-trigger${discrepancyVisible ? ' toolbar__dropdown-trigger--active' : ''}`}
+                onClick={() => {
+                  if (discrepancyVisible) {
+                    handleDiscrepancyOff();
+                  } else if (discrepancyOptions.length === 1) {
+                    handleDiscrepancySelect(discrepancyOptions[0].stage);
+                  } else {
+                    setDiscrepancyDropdownOpen(!discrepancyDropdownOpen);
+                  }
+                }}
+                title={discrepancyVisible
+                  ? `Comparing to ${discrepancyCompareStage ?? ''} — click to disable`
+                  : 'Compare across stages'}
+                aria-label="Toggle cross-stage comparison"
+                aria-haspopup={discrepancyOptions.length > 1 ? 'menu' : undefined}
+                aria-expanded={discrepancyDropdownOpen}
+              >
+                {discrepancyVisible ? '⊘ Diff' : '⊕ Diff'}
+                {!discrepancyVisible && discrepancyOptions.length > 1 && (
+                  <span className="toolbar__dropdown-arrow">▾</span>
+                )}
+              </button>
+              {discrepancyDropdownOpen && !discrepancyVisible && (
+                <div className="toolbar__dropdown-menu" role="menu">
+                  {discrepancyOptions.map(({ stage, label }) => (
+                    <button
+                      key={stage}
+                      className="toolbar__dropdown-item"
+                      onClick={() => handleDiscrepancySelect(stage)}
+                      role="menuitem"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Add Dropdown — hidden in read-only mode */}
+      {!isReadOnly && (
+        <>
+          <div className="toolbar__divider" />
+          <div className="toolbar__section">
+            <div className="toolbar__dropdown" ref={modelDropdownRef}>
+              <button
+                className="toolbar__dropdown-trigger"
+                onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
+                title="Add model or relationship"
+                aria-label="Add model or relationship"
+                aria-haspopup="menu"
+                aria-expanded={modelDropdownOpen}
+              >
+                + Add
+                <span className="toolbar__dropdown-arrow">▾</span>
+              </button>
+              {modelDropdownOpen && (
+                <div className="toolbar__dropdown-menu" role="menu">
                   <button
-                    key={id}
-                    className={`toolbar__dropdown-item toolbar__dropdown-item--palette${isSelected ? ' toolbar__dropdown-item--selected' : ''}`}
-                    onClick={() => handlePaletteChange(id)}
+                    className="toolbar__dropdown-item"
+                    onClick={handleNewModel}
                     role="menuitem"
-                    aria-checked={isSelected}
                   >
-                    <span className="toolbar__palette-preview">
-                      <span
-                        className="toolbar__palette-swatch"
-                        style={{ backgroundColor: palette.colors.modelBuilt }}
-                        title="Built"
-                      />
-                      <span
-                        className="toolbar__palette-swatch"
-                        style={{ backgroundColor: palette.colors.modelApproved }}
-                        title="Approved"
-                      />
-                      <span
-                        className="toolbar__palette-swatch"
-                        style={{ backgroundColor: palette.colors.modelDesign }}
-                        title="Design"
-                      />
-                    </span>
-                    <span className="toolbar__palette-name">{palette.name}</span>
-                    {isSelected && <span className="toolbar__check">✓</span>}
+                    New Design Model
                   </button>
-                );
-              })}
+                  <button
+                    className="toolbar__dropdown-item"
+                    onClick={handleAddExistingModel}
+                    role="menuitem"
+                  >
+                    Add Existing Model
+                  </button>
+                  <button
+                    className="toolbar__dropdown-item"
+                    onClick={() => { setModelDropdownOpen(false); handleNewRelationship(); }}
+                    role="menuitem"
+                  >
+                    New Relationship
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* Divider */}
-      <div className="toolbar__divider" />
-
-      {/* Add Dropdown (Models + Relationships) */}
-      <div className="toolbar__section">
-        <div className="toolbar__dropdown" ref={modelDropdownRef}>
-          <button
-            className="toolbar__dropdown-trigger"
-            onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-            title="Add model or relationship"
-            aria-label="Add model or relationship"
-            aria-haspopup="menu"
-            aria-expanded={modelDropdownOpen}
-          >
-            + Add
-            <span className="toolbar__dropdown-arrow">▾</span>
-          </button>
-          {modelDropdownOpen && (
-            <div className="toolbar__dropdown-menu" role="menu">
-              <button
-                className="toolbar__dropdown-item"
-                onClick={handleNewModel}
-                role="menuitem"
-              >
-                New Design Model
-              </button>
-              <button
-                className="toolbar__dropdown-item"
-                onClick={handleAddExistingModel}
-                role="menuitem"
-              >
-                Add Existing Model
-              </button>
-              <button
-                className="toolbar__dropdown-item"
-                onClick={() => { setModelDropdownOpen(false); handleNewRelationship(); }}
-                role="menuitem"
-              >
-                New Relationship
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
     </Panel>
   );
 }

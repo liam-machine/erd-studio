@@ -278,7 +278,7 @@ export function calculateEdgeOffset(
   edgeId: string,
   nodeId: string,
   side: Side,
-  isSource: boolean,
+  _isSource: boolean,
   allEdges: Edge[],
   sideLength: number,
   nodePositions?: NodePositionMap,

@@ -38,45 +38,17 @@ import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { NewModelDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
-import { DiscrepancyReviewDialog } from './components/DiscrepancyReviewDialog/DiscrepancyReviewDialog';
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { transformDomain } from './lib/graphTransformer';
-import {
-  applyPalette,
-  loadPersistedPalette,
-  getPaletteColors,
-} from './lib/colorPalettes';
+import { stageNodeColor } from './lib/stageColors';
 import type { ModelFlowNode, FkFlowEdge } from './types/graph';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Build and show a toast notification for newly built models/relationships.
- */
-function showBuiltNotification(
-  models: string[],
-  relationships: Array<{ fromModel: string; fromColumn: string; toModel: string; toColumn: string }>,
-  setToastMessage: (msg: string) => void,
-): void {
-  const modelCount = models.length;
-  const relCount = relationships.length;
-
-  if (modelCount === 0 && relCount === 0) return;
-
-  const parts: string[] = [];
-  if (modelCount > 0) {
-    parts.push(`Models: ${models.join(', ')}`);
-  }
-  if (relCount > 0) {
-    parts.push(`${relCount} relationship${relCount > 1 ? 's' : ''}`);
-  }
-  setToastMessage(`Built: ${parts.join(' | ')}`);
-}
 
 // ---------------------------------------------------------------------------
 // Inner component (must be inside ReactFlowProvider)
@@ -130,10 +102,6 @@ function EditorCanvas() {
   // Legend state
   const legendOpen = useEditorStore((s) => s.legendOpen);
   const setLegendOpen = useEditorStore((s) => s.setLegendOpen);
-  // Palette state
-  const paletteId = useEditorStore((s) => s.paletteId);
-  const setPaletteId = useEditorStore((s) => s.setPaletteId);
-
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
 
@@ -186,51 +154,50 @@ function EditorCanvas() {
     }
   }, [domain, hadPersistedExpansion, expandAll]);
 
-  // Initialize colour palette on mount
-  useEffect(() => {
-    const savedPalette = loadPersistedPalette();
-    setPaletteId(savedPalette);
-    applyPalette(savedPalette);
-  }, [setPaletteId]);
+  // Discrepancy state
+  const setDiscrepancyReport = useEditorStore((s) => s.setDiscrepancyReport);
+  const discrepancyReport = useEditorStore((s) => s.discrepancyReport);
+  const discrepancyVisible = useEditorStore((s) => s.discrepancyVisible);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
       switch (msg.type) {
         case 'domainLoaded':
           setDomain(msg.payload);
-          // Extract and store templates from the payload
           if (msg.payload.templates) {
             setTemplates(msg.payload.templates);
           }
-          // Extract and store manifest models for "Add Existing Model" dialog
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
           }
-          // F405: Auto-expand is now handled by a useEffect that runs after
-          // useStatePersistence restores expansion state (React effect ordering).
           break;
-        case 'manifestRefreshed':
-          // F304: Auto-reconciliation detected design models that are now built
-          setDomain(msg.payload.domain);
-          if (msg.payload.domain.templates) {
-            setTemplates(msg.payload.domain.templates);
+        case 'domainUpdated':
+          setDomain(msg.payload);
+          if (msg.payload.templates) {
+            setTemplates(msg.payload.templates);
           }
-          if (msg.payload.domain.manifestModels) {
-            setManifestModels(msg.payload.domain.manifestModels);
+          if (msg.payload.manifestModels) {
+            setManifestModels(msg.payload.manifestModels);
           }
-          // Show toast notification for newly built models and relationships
-          showBuiltNotification(
-            msg.payload.newlyBuiltModels,
-            msg.payload.newlyBuiltRelationships ?? [],
-            setToastMessage,
-          );
+          break;
+        case 'stageData':
+          setDomain(msg.payload);
+          if (msg.payload.templates) {
+            setTemplates(msg.payload.templates);
+          }
+          if (msg.payload.manifestModels) {
+            setManifestModels(msg.payload.manifestModels);
+          }
+          break;
+        case 'discrepancyReport':
+          setDiscrepancyReport(msg.payload);
           break;
         case 'error':
           setError(msg.payload.message);
           break;
       }
     },
-    [setDomain, setError, setTemplates, setManifestModels, setToastMessage],
+    [setDomain, setError, setTemplates, setManifestModels, setDiscrepancyReport],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
@@ -294,39 +261,43 @@ function EditorCanvas() {
         return;
       }
 
+      // Alt+1/2/3: Switch stage tabs
+      if (e.altKey && (e.key === '1' || e.key === '2' || e.key === '3')) {
+        e.preventDefault();
+        const stageMap: Record<string, import('../src/types/semantic').Stage> = {
+          '1': 'conceptual',
+          '2': 'logical',
+          '3': 'physical',
+        };
+        const targetStage = stageMap[e.key];
+        if (targetStage && domain && domain.stage !== targetStage) {
+          vscode.postMessage({ type: 'switchStage', payload: { stage: targetStage } });
+        }
+        return;
+      }
+
       // DELETE KEY: Delete selected design models or edges
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (!domain) return;
+        if (!domain || domain.readOnly) return;
 
         // Priority 1: Remove selected node (with confirmation)
         if (selectedNode) {
           const model = domain.models.find((m) => m.name === selectedNode);
           if (model) {
-            if (model.status === 'design' || model.status === 'built') {
-              e.preventDefault();
-              // Open detail panel if closed and trigger confirmation mode
-              if (!detailPanelOpen) {
-                setDetailPanelOpen(true);
-              }
-              setPendingDeleteConfirmation(true);
-              return;
-            } else {
-              // Missing model — show toast
-              e.preventDefault();
-              setToastMessage('Cannot remove missing models');
-              return;
+            e.preventDefault();
+            if (!detailPanelOpen) {
+              setDetailPanelOpen(true);
             }
+            setPendingDeleteConfirmation(true);
+            return;
           }
         }
 
         // Priority 2: Delete selected edges (no confirmation, immediate)
         if (selectedEdges.length > 0) {
           e.preventDefault();
-          let deletedCount = 0;
-          let builtCount = 0;
 
           for (const edgeId of selectedEdges) {
-            // Find the relationship in domain data by edge ID
             const rel = domain.relationships.find((r) => {
               const expectedId = `fk-${r.fromModel}-${r.fromColumn}-${r.toModel}-${r.toColumn}`;
               return expectedId === edgeId;
@@ -334,28 +305,15 @@ function EditorCanvas() {
 
             if (!rel) continue;
 
-            if (rel.status === 'design') {
-              // Delete design relationship immediately
-              vscode.postMessage({
-                type: 'removeRelationship',
-                payload: {
-                  fromModel: rel.fromModel,
-                  fromColumn: rel.fromColumn,
-                  toModel: rel.toModel,
-                  toColumn: rel.toColumn,
-                },
-              });
-              deletedCount++;
-            } else {
-              builtCount++;
-            }
-          }
-
-          // Show toast feedback
-          if (builtCount > 0 && deletedCount === 0) {
-            setToastMessage('Cannot delete built relationships');
-          } else if (builtCount > 0 && deletedCount > 0) {
-            setToastMessage(`Deleted ${deletedCount} design relationship(s). Cannot delete ${builtCount} built relationship(s).`);
+            vscode.postMessage({
+              type: 'removeRelationship',
+              payload: {
+                fromModel: rel.fromModel,
+                fromColumn: rel.fromColumn,
+                toModel: rel.toModel,
+                toColumn: rel.toColumn,
+              },
+            });
           }
           return;
         }
@@ -400,7 +358,10 @@ function EditorCanvas() {
   // Apply search dimming (F402), selection dimming, and column expansion (F405).
   useEffect(() => {
     if (domain) {
-      let { nodes: newNodes, edges: newEdges } = transformDomain(domain);
+      const transformOptions = discrepancyVisible && discrepancyReport
+        ? { discrepancyReport }
+        : undefined;
+      let { nodes: newNodes, edges: newEdges } = transformDomain(domain, transformOptions);
 
       // Compute connected nodes for selection dimming.
       // When a node is selected, the selected node and its direct neighbors stay bright.
@@ -486,7 +447,7 @@ function EditorCanvas() {
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, selectedEdges, currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, selectedEdges, currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, discrepancyVisible, discrepancyReport]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -573,7 +534,10 @@ function EditorCanvas() {
 
   // Handle long-press column drag to create relationships.
   // Listens for custom events dispatched by ColumnRow in ModelNode.
+  // Disabled in read-only mode (physical stage).
   useEffect(() => {
+    if (domain?.readOnly) return;
+
     const handleColumnRelationshipDrop = (e: Event) => {
       const { fromModel, fromColumn, toModel, toColumn } = (e as CustomEvent).detail;
       openFkDialogWithPrefill({ fromModel, fromColumn, toModel, toColumn });
@@ -590,7 +554,7 @@ function EditorCanvas() {
       window.removeEventListener('column-relationship-drop', handleColumnRelationshipDrop);
       window.removeEventListener('column-relationship-self-drop', handleColumnRelationshipSelfDrop);
     };
-  }, [openFkDialogWithPrefill, setToastMessage]);
+  }, [openFkDialogWithPrefill, setToastMessage, domain?.readOnly]);
 
   // Handle right-click on edges to show context menu (F401)
   const onEdgeContextMenu = useCallback(
@@ -647,8 +611,9 @@ function EditorCanvas() {
         onEdgeContextMenu={onEdgeContextMenu}
         fitView={!shouldSkipFitView}
         minZoom={0.05}
-        selectionOnDrag
+        selectionOnDrag={!domain.readOnly}
         selectionMode={SelectionMode.Partial}
+        nodesDraggable={!domain.readOnly}
         panOnDrag={[1, 2]}
         proOptions={{ hideAttribution: true }}
       >
@@ -658,13 +623,8 @@ function EditorCanvas() {
           pannable
           zoomable
           nodeColor={(node) => {
-            const status = node.data?.status;
-            const colors = getPaletteColors(paletteId);
-            if (status === 'built') return colors.modelBuilt;
-            if (status === 'approved') return colors.modelApproved;
-            if (status === 'design') return colors.modelDesign;
-            if (status === 'missing') return colors.modelMissing;
-            return colors.modelMissing;
+            const d = (node as ModelFlowNode).data;
+            return stageNodeColor(d.stage, d.isGhost);
           }}
           maskColor="rgba(0, 0, 0, 0.2)"
           style={{
@@ -685,7 +645,6 @@ function EditorCanvas() {
         <NewModelDialog />
         <NewFkDialog />
         <AddExistingModelDialog />
-        <DiscrepancyReviewDialog />
       </ReactFlow>
 
       {toastMessage && (

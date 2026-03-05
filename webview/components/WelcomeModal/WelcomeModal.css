@@ -141,24 +141,32 @@
   overflow: hidden;
 }
 
-.welcome-modal__model-sample--built {
-  border-color: var(--model-built);
+.welcome-modal__model-sample--conceptual {
+  border-color: var(--stage-conceptual);
 }
 
-.welcome-modal__model-sample--design {
-  border-color: var(--model-design);
+.welcome-modal__model-sample--logical {
+  border-color: var(--stage-logical);
+}
+
+.welcome-modal__model-sample--physical {
+  border-color: var(--stage-physical);
 }
 
 .welcome-modal__model-header {
   height: 9px;
 }
 
-.welcome-modal__model-header--built {
-  background: var(--model-built);
+.welcome-modal__model-header--conceptual {
+  background: var(--stage-conceptual);
 }
 
-.welcome-modal__model-header--design {
-  background: var(--model-design);
+.welcome-modal__model-header--logical {
+  background: var(--stage-logical);
+}
+
+.welcome-modal__model-header--physical {
+  background: var(--stage-physical);
 }
 
 /* Edge samples */
@@ -171,12 +179,8 @@
   stroke-width: 2;
 }
 
-.welcome-modal__edge--built {
-  stroke: var(--edge-built);
-}
-
-.welcome-modal__edge--design {
-  stroke: var(--edge-design);
+.welcome-modal__edge--logical {
+  stroke: var(--stage-logical);
 }
 
 /* ---------------------------------------------------------------------------
@@ -203,21 +207,21 @@
 .welcome-modal__cardinality-symbol {
   font-weight: 700;
   font-size: 13px;
-  color: var(--edge-built);
+  color: var(--stage-logical);
 }
 
 .welcome-modal__cardinality-line {
   display: inline-block;
   width: 16px;
   height: 2px;
-  background: var(--edge-built);
+  background: var(--stage-logical);
 }
 
 .welcome-modal__cardinality-line--dashed {
   background: linear-gradient(
     to right,
-    var(--edge-built) 0%,
-    var(--edge-built) 60%,
+    var(--stage-logical) 0%,
+    var(--stage-logical) 60%,
     transparent 60%,
     transparent 100%
   );
@@ -227,75 +231,12 @@
 .welcome-modal__cardinality-line--dotted {
   background: linear-gradient(
     to right,
-    var(--edge-built) 0%,
-    var(--edge-built) 30%,
+    var(--stage-logical) 0%,
+    var(--stage-logical) 30%,
     transparent 30%,
     transparent 100%
   );
   background-size: 6px 2px;
-}
-
-/* ---------------------------------------------------------------------------
-   Palette Selector
-   --------------------------------------------------------------------------- */
-
-.welcome-modal__palette-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.welcome-modal__palette-option {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 2px solid var(--panel-border);
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-  text-align: left;
-}
-
-.welcome-modal__palette-option:hover {
-  border-color: var(--focus-border);
-  background: rgba(128, 128, 128, 0.05);
-}
-
-.welcome-modal__palette-option--selected {
-  border-color: var(--focus-border);
-  background: rgba(128, 128, 128, 0.1);
-}
-
-.welcome-modal__palette-preview {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.welcome-modal__palette-swatch {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-}
-
-.welcome-modal__palette-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.welcome-modal__palette-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--editor-fg);
-}
-
-.welcome-modal__palette-desc {
-  font-size: 11px;
-  color: var(--editor-fg);
-  opacity: 0.6;
 }
 
 /* ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { DataTypeSelect } from '../common/DataTypeSelect';
-import type { ReconciledColumn } from '../../../src/types/reconciled';
+import type { DisplayColumn } from '../../../src/types/display';
 import type { ColumnDef } from '../../../src/types/semantic';
 import './EditableColumnRow.css';
 
@@ -18,7 +18,7 @@ import './EditableColumnRow.css';
 // ---------------------------------------------------------------------------
 
 export interface EditableColumnRowProps {
-  column: ReconciledColumn;
+  column: DisplayColumn;
   editable: boolean;
   existingColumnNames: string[];
   isNew?: boolean;
@@ -219,7 +219,7 @@ export function EditableColumnRow({
 
   // --- Render ----------------------------------------------------------------
 
-  const statusClass = column.status === 'built' ? 'built' : 'planned';
+  const statusClass = 'planned';
   const rowClasses = [
     'editable-column-row',
     `editable-column-row--${statusClass}`,

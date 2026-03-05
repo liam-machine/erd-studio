@@ -2,17 +2,19 @@
  * Message protocol types for extension ↔ webview communication.
  *
  * Messages are categorised by direction:
- *   Extension → Webview:  domainLoaded, domainUpdated, manifestRefreshed, error
+ *   Extension → Webview:  domainLoaded, domainUpdated, stageData, discrepancyReport, error
  *   Webview → Extension:  ready, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel, removeRelationship, editRelationship, updateViewConfig,
- *                         addExistingModel, updatePositions, runAutoLayout
+ *                         addExistingModel, updatePositions, runAutoLayout, switchStage,
+ *                         toggleDiscrepancy
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
  */
 
-import type { ReconciledDomain } from './reconciled';
-import type { Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole } from './semantic';
+import type { DisplayDomain } from './display';
+import type { DiscrepancyReport } from './discrepancy';
+import type { Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole, Stage } from './semantic';
 
 // ---------------------------------------------------------------------------
 // Extension → Webview messages
@@ -20,38 +22,20 @@ import type { Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, Mod
 
 /**
  * Sent when the domain is initially loaded or refreshed.
- * Contains the fully reconciled domain ready for rendering.
+ * Contains the display-ready domain for rendering.
  */
 export interface DomainLoadedMessage {
   type: 'domainLoaded';
-  payload: ReconciledDomain;
+  payload: DisplayDomain;
 }
 
 /**
  * Sent when the domain is updated due to a mutation (add/remove model, etc.).
- * Contains the updated reconciled domain.
+ * Contains the updated display domain.
  */
 export interface DomainUpdatedMessage {
   type: 'domainUpdated';
-  payload: ReconciledDomain;
-}
-
-/**
- * Sent when the manifest is refreshed and design models/relationships may have transitioned.
- * Contains the updated domain and lists of newly built items.
- */
-export interface ManifestRefreshedMessage {
-  type: 'manifestRefreshed';
-  payload: {
-    domain: ReconciledDomain;
-    newlyBuiltModels: string[];
-    newlyBuiltRelationships: Array<{
-      fromModel: string;
-      fromColumn: string;
-      toModel: string;
-      toColumn: string;
-    }>;
-  };
+  payload: DisplayDomain;
 }
 
 /**
@@ -64,11 +48,30 @@ export interface ErrorMessage {
   };
 }
 
+/**
+ * Sent in response to a switchStage request.
+ * Contains the display domain for the requested stage.
+ */
+export interface StageDataMessage {
+  type: 'stageData';
+  payload: DisplayDomain;
+}
+
+/**
+ * Sent in response to a toggleDiscrepancy request.
+ * Contains the cross-stage comparison report, or null when cleared.
+ */
+export interface DiscrepancyReportMessage {
+  type: 'discrepancyReport';
+  payload: DiscrepancyReport | null;
+}
+
 /** Union of all messages the extension can send to the webview. */
 export type ExtensionMessage =
   | DomainLoadedMessage
   | DomainUpdatedMessage
-  | ManifestRefreshedMessage
+  | StageDataMessage
+  | DiscrepancyReportMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------
@@ -83,8 +86,7 @@ export interface ReadyMessage {
 }
 
 /**
- * Request to add a new design model to the domain.
- * Phase 2: Design Mode.
+ * Request to add a new model to the domain.
  */
 export interface AddModelMessage {
   type: 'addModel';
@@ -92,8 +94,7 @@ export interface AddModelMessage {
 }
 
 /**
- * Request to add a column to an existing design model.
- * Phase 2: Design Mode.
+ * Request to add a column to an existing model.
  */
 export interface AddColumnMessage {
   type: 'addColumn';
@@ -104,8 +105,7 @@ export interface AddColumnMessage {
 }
 
 /**
- * Request to remove a column from an existing design model.
- * Phase 2: Design Mode.
+ * Request to remove a column from an existing model.
  */
 export interface RemoveColumnMessage {
   type: 'removeColumn';
@@ -117,9 +117,6 @@ export interface RemoveColumnMessage {
 
 /**
  * Request to update an existing column in a model.
- * For repo models, updates the plannedColumns array.
- * For design models, updates the columns array.
- * Phase 2: Design Mode.
  */
 export interface UpdateColumnMessage {
   type: 'updateColumn';
@@ -132,7 +129,6 @@ export interface UpdateColumnMessage {
 
 /**
  * Request to add an FK relationship between two models.
- * Phase 2: Design Mode.
  */
 export interface AddRelationshipMessage {
   type: 'addRelationship';
@@ -146,9 +142,8 @@ export interface AddRelationshipMessage {
 }
 
 /**
- * Request to rename a design model.
+ * Request to rename a model.
  * Cascades to update all relationship references and viewConfig positions.
- * Only allowed for design-status models (source === 'design').
  */
 export interface RenameModelMessage {
   type: 'renameModel';
@@ -159,9 +154,8 @@ export interface RenameModelMessage {
 }
 
 /**
- * Request to remove a design model from the domain.
+ * Request to remove a model from the domain.
  * Also cascades to remove relationships involving this model.
- * Phase 2: Design Mode.
  */
 export interface RemoveModelMessage {
   type: 'removeModel';
@@ -173,7 +167,6 @@ export interface RemoveModelMessage {
 /**
  * Request to remove an FK relationship.
  * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
- * Phase 2: Design Mode.
  */
 export interface RemoveRelationshipMessage {
   type: 'removeRelationship';
@@ -188,11 +181,30 @@ export interface RemoveRelationshipMessage {
 /**
  * Request to update a relationship's cardinality.
  * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
- * Works for both design and built relationships.
  */
 export interface UpdateRelationshipMessage {
   type: 'updateRelationship';
   payload: {
+    fromModel: string;
+    fromColumn: string;
+    toModel: string;
+    toColumn: string;
+    cardinality: Cardinality;
+  };
+}
+
+/**
+ * Request to edit a relationship (change any field including the composite key).
+ */
+export interface EditRelationshipMessage {
+  type: 'editRelationship';
+  payload: {
+    /** Original composite key to find the relationship */
+    originalFromModel: string;
+    originalFromColumn: string;
+    originalToModel: string;
+    originalToColumn: string;
+    /** New values (may be same as original) */
     fromModel: string;
     fromColumn: string;
     toModel: string;
@@ -214,8 +226,6 @@ export interface UpdateViewConfigMessage {
 
 /**
  * Request to add an existing model from the manifest to the domain.
- * The model is added with source: 'built'.
- * Phase 3: Domain Management.
  */
 export interface AddExistingModelMessage {
   type: 'addExistingModel';
@@ -237,16 +247,13 @@ export interface UpdatePositionsMessage {
 
 /**
  * Request to run ELK auto-layout on the graph.
- * Phase 1: F109 ELK Layout.
  */
 export interface RunAutoLayoutMessage {
   type: 'runAutoLayout';
 }
 
 /**
- * Request to refresh the manifest and re-reconcile all open domains.
- * Useful when the file watcher misses a change or user wants to force refresh.
- * Phase 3: F305 Manual Refresh Manifest.
+ * Request to refresh the manifest and update physical views.
  */
 export interface RefreshManifestMessage {
   type: 'refreshManifest';
@@ -268,51 +275,6 @@ export interface RedoMessage {
   type: 'redo';
 }
 
-/**
- * Request to approve a model and all its existing columns.
- * Sets model.approved = true and column.approved = true for all columns.
- */
-export interface ApproveModelMessage {
-  type: 'approveModel';
-  payload: {
-    modelName: string;
-  };
-}
-
-/**
- * Request to unapprove a model.
- * Sets model.approved = false but leaves column approval states unchanged.
- */
-export interface UnapproveModelMessage {
-  type: 'unapproveModel';
-  payload: {
-    modelName: string;
-  };
-}
-
-/**
- * Request to approve a single column.
- * Requires the model to be approved first.
- */
-export interface ApproveColumnMessage {
-  type: 'approveColumn';
-  payload: {
-    modelName: string;
-    columnName: string;
-  };
-}
-
-/**
- * Request to unapprove a single column.
- */
-export interface UnapproveColumnMessage {
-  type: 'unapproveColumn';
-  payload: {
-    modelName: string;
-    columnName: string;
-  };
-}
-
 /** Key type for column key toggles. */
 export type ColumnKeyType = 'PK' | 'FK' | 'NK';
 
@@ -331,152 +293,10 @@ export interface ToggleColumnKeyMessage {
 }
 
 /**
- * Request to approve a relationship.
- * Sets relationship.approved = true.
- */
-export interface ApproveRelationshipMessage {
-  type: 'approveRelationship';
-  payload: {
-    fromModel: string;
-    fromColumn: string;
-    toModel: string;
-    toColumn: string;
-  };
-}
-
-/**
- * Request to unapprove a relationship.
- * Removes relationship.approved field.
- */
-export interface UnapproveRelationshipMessage {
-  type: 'unapproveRelationship';
-  payload: {
-    fromModel: string;
-    fromColumn: string;
-    toModel: string;
-    toColumn: string;
-  };
-}
-
-/**
- * Request to edit a relationship (change any field including the composite key).
- * Preserves source and approved status while allowing full modification.
- * Only works for design/approved relationships (not built).
- */
-export interface EditRelationshipMessage {
-  type: 'editRelationship';
-  payload: {
-    /** Original composite key to find the relationship */
-    originalFromModel: string;
-    originalFromColumn: string;
-    originalToModel: string;
-    originalToColumn: string;
-    /** New values (may be same as original) */
-    fromModel: string;
-    fromColumn: string;
-    toModel: string;
-    toColumn: string;
-    cardinality: Cardinality;
-  };
-}
-
-/**
- * Request to accept a column dataType discrepancy.
- * Removes the expectedDataType from the plannedColumns override — manifest becomes truth.
- */
-export interface AcceptDiscrepancyMessage {
-  type: 'acceptDiscrepancy';
-  payload: {
-    modelName: string;
-    columnName: string;
-  };
-}
-
-/**
- * Request to reject a column dataType discrepancy.
- * Marks the override as rejected — the manifest value is non-conforming.
- */
-export interface RejectDiscrepancyMessage {
-  type: 'rejectDiscrepancy';
-  payload: {
-    modelName: string;
-    columnName: string;
-  };
-}
-
-/**
- * Request to unreject a previously rejected discrepancy.
- * Clears the rejected flag, returning it to unresolved state.
- */
-export interface UnrejectDiscrepancyMessage {
-  type: 'unrejectDiscrepancy';
-  payload: {
-    modelName: string;
-    columnName: string;
-  };
-}
-
-/**
- * Request to accept all column discrepancies for a model.
- * Removes all expectedDataType fields from plannedColumns overrides.
- * Also clears structural discrepancies: removes extras from designedColumns,
- * removes missing from both plannedColumns and designedColumns.
- */
-export interface AcceptAllDiscrepanciesMessage {
-  type: 'acceptAllDiscrepancies';
-  payload: {
-    modelName: string;
-  };
-}
-
-/**
- * Request to accept a structural discrepancy (extra or missing column).
- * - Extra: removes column name from designedColumns (acknowledge the column exists)
- * - Missing: removes column from plannedColumns AND designedColumns (stop expecting it)
- */
-export interface AcceptStructuralDiscrepancyMessage {
-  type: 'acceptStructuralDiscrepancy';
-  payload: {
-    modelName: string;
-    columnName: string;
-    discrepancyType: 'extra' | 'missing';
-  };
-}
-
-/**
- * Request to reject a structural discrepancy (extra or missing column).
- * - Extra: creates/updates plannedColumns override with structuralRejected: true
- * - Missing: sets structuralRejected: true on existing plannedColumns entry
- */
-export interface RejectStructuralDiscrepancyMessage {
-  type: 'rejectStructuralDiscrepancy';
-  payload: {
-    modelName: string;
-    columnName: string;
-    discrepancyType: 'extra' | 'missing';
-  };
-}
-
-/**
- * Request to un-reject a structural discrepancy.
- * Clears structuralRejected flag and removes empty overrides.
- */
-export interface UnrejectStructuralDiscrepancyMessage {
-  type: 'unrejectStructuralDiscrepancy';
-  payload: {
-    modelName: string;
-    columnName: string;
-  };
-}
-
-/**
  * Request to update design rationale fields on a model.
  *
  * Uses a field-patch pattern: each message carries one or more field updates
  * that are merged into the existing on-disk `rationale` object by the extension host.
- * This avoids stale-closure races when multiple reasoning fields are edited
- * in quick succession. If all fields end up empty after the patch, the `rationale`
- * key is removed entirely to keep the JSON clean.
  */
 export interface UpdateModelRationaleMessage {
   type: 'updateModelRationale';
@@ -511,6 +331,25 @@ export interface UpdateModelRoleMessage {
   };
 }
 
+/**
+ * Request to switch the active stage in the editor.
+ * The extension resolves the sibling domain data and sends a stageData response.
+ */
+export interface SwitchStageMessage {
+  type: 'switchStage';
+  payload: { stage: Stage };
+}
+
+/**
+ * Request to toggle cross-stage discrepancy comparison.
+ * When enabled, the extension runs DiscrepancyService.compare() and sends back
+ * a discrepancyReport message. When disabled, sends null to clear the overlay.
+ */
+export interface ToggleDiscrepancyMessage {
+  type: 'toggleDiscrepancy';
+  payload: { enabled: boolean; compareAgainst?: Stage };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -531,23 +370,12 @@ export type WebviewMessage =
   | RefreshManifestMessage
   | UndoMessage
   | RedoMessage
-  | ApproveModelMessage
-  | UnapproveModelMessage
-  | ApproveColumnMessage
-  | UnapproveColumnMessage
-  | ApproveRelationshipMessage
-  | UnapproveRelationshipMessage
   | ToggleColumnKeyMessage
-  | AcceptDiscrepancyMessage
-  | RejectDiscrepancyMessage
-  | UnrejectDiscrepancyMessage
-  | AcceptAllDiscrepanciesMessage
-  | AcceptStructuralDiscrepancyMessage
-  | RejectStructuralDiscrepancyMessage
-  | UnrejectStructuralDiscrepancyMessage
   | UpdateModelRationaleMessage
   | UpdateModelGrainMessage
-  | UpdateModelRoleMessage;
+  | UpdateModelRoleMessage
+  | SwitchStageMessage
+  | ToggleDiscrepancyMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

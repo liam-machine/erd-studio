@@ -22,24 +22,25 @@
 }
 
 /* -----------------------------------------------------------------------
-   Status variants
+   Stage variants
    ----------------------------------------------------------------------- */
 
-.model-node--built {
-  border-color: var(--model-built);
+.model-node--conceptual {
+  border-color: var(--stage-conceptual);
 }
 
-.model-node--approved {
-  border-color: var(--model-approved);
+.model-node--logical {
+  border-color: var(--stage-logical);
 }
 
-.model-node--design {
-  border-color: var(--model-design);
+.model-node--physical {
+  border-color: var(--stage-physical);
 }
 
-.model-node--missing {
-  border-color: var(--model-missing);
-  opacity: 0.8;
+.model-node--ghost {
+  border-color: var(--stage-ghost);
+  border-style: dashed;
+  opacity: 0.5;
 }
 
 /* Search dimming (F402) — applied when node doesn't match search query */
@@ -180,13 +181,13 @@
 .model-node__column--dragging {
   cursor: grabbing;
   opacity: 0.6;
-  box-shadow: inset 0 0 0 2px var(--edge-design);
+  box-shadow: inset 0 0 0 2px var(--focus-border);
 }
 
 /* Drop target — column under cursor during cross-model drag */
 .model-node__column--drop-target {
-  background: rgba(234, 88, 12, 0.18) !important;
-  box-shadow: inset 0 0 0 2px var(--edge-design), 0 0 10px 2px rgba(234, 88, 12, 0.35);
+  background: rgba(0, 127, 212, 0.18) !important;
+  box-shadow: inset 0 0 0 2px var(--focus-border), 0 0 10px 2px rgba(0, 127, 212, 0.35);
   filter: brightness(1.2);
   cursor: crosshair;
   transition: box-shadow 0.1s ease, background 0.1s ease;
@@ -200,46 +201,16 @@
   transition: box-shadow 0.15s ease, background 0.15s ease, filter 0.15s ease;
 }
 
-/* Column status variants — use CSS variables for palette support */
-.model-node__column--built {
-  background: var(--model-built-bg);
-}
-
-.model-node__column--built:hover {
-  background: var(--model-built-bg);
-  filter: brightness(1.15);
-}
-
-.model-node__column--approved {
-  background: var(--model-approved-bg);
-}
-
-.model-node__column--approved:hover {
-  background: var(--model-approved-bg);
-  filter: brightness(1.15);
-}
-
-.model-node__column--planned,
-.model-node__column--missing {
-  background: var(--model-design-bg);
-}
-
-.model-node__column--planned:hover,
-.model-node__column--missing:hover {
-  background: var(--model-design-bg);
-  filter: brightness(1.15);
-}
-
-/* Separator between status groups */
+/* Separator between column groups */
 .model-node__separator {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 10px;
   margin: 2px 0;
-  border-top: 1px dashed var(--model-design);
-  border-bottom: 1px dashed var(--model-design);
-  background: var(--model-design-bg);
+  border-top: 1px dashed var(--warning-fg);
+  border-bottom: 1px dashed var(--warning-fg);
+  background: rgba(204, 167, 0, 0.08);
 }
 
 .model-node__separator-label {
@@ -247,7 +218,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--model-design);
+  color: var(--warning-fg);
 }
 
 /* Subtle separator variant (no label, just a line) for canvas view */

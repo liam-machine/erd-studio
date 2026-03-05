@@ -1,10 +1,9 @@
 /**
  * Types for semantic domain JSON files.
  *
- * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
+ * Domain files live at {dbt_project}/erd-studio/{stage}/{layer}/{domain}.json
  * and describe FK-based relationships between dbt models within a business
- * domain. Models are either sourced from the repo (columns resolved from
- * manifest at runtime) or designed inline (columns defined in the JSON).
+ * domain at a particular design stage (conceptual, logical, or physical).
  */
 
 /**
@@ -13,14 +12,17 @@
  */
 export type Layer = string;
 
+/** The three design stages of a domain. */
+export type Stage = 'conceptual' | 'logical' | 'physical';
+
 /** The current schema version written by this extension. */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 // ---------------------------------------------------------------------------
-// Column definitions (used by design models)
+// Column definitions
 // ---------------------------------------------------------------------------
 
-/** Column definition for a design model. */
+/** Column definition for a model. */
 export interface ColumnDef {
   name: string;
   dataType: string;
@@ -30,25 +32,6 @@ export interface ColumnDef {
   isForeignKey?: boolean;
   /** Natural key flag — business identifier like email, SKU, customer_code. */
   isNaturalKey?: boolean;
-  /** Whether this column has been approved for build. */
-  approved?: boolean;
-  /**
-   * Expected dataType from the approved design (set during design→built transition).
-   * Stored in plannedColumns overrides when the manifest dataType differs from design.
-   * Used by ReconciliationService to detect discrepancies.
-   */
-  expectedDataType?: string;
-  /**
-   * Whether this discrepancy has been explicitly rejected (manifest is non-conforming).
-   * When true, the discrepancy is still shown but with a "rejected" visual indicator.
-   */
-  rejected?: boolean;
-  /**
-   * Whether a structural discrepancy (extra column) has been explicitly rejected.
-   * Used on plannedColumns overrides for columns that exist in manifest but were
-   * not part of the original design (extra columns flagged as unwanted).
-   */
-  structuralRejected?: boolean;
   /**
    * SCD type for dimension columns: how this attribute handles changes over time.
    * 0 = Never changes, 1 = Overwrite, 2 = Track history.
@@ -108,47 +91,18 @@ export interface Rationale {
 /**
  * A model entry in a semantic domain.
  *
- * - `source: "built"` — exists in the dbt project; columns are resolved from
- *   the compiled manifest at runtime. Use `primaryKey` to designate the PK
- *   and `plannedColumns` for columns not yet built.
- * - `source: "design"` — a planned model that doesn't exist yet; columns,
- *   schema, and description are defined inline.
+ * In the stage architecture, models are simple data containers.
+ * The stage (conceptual/logical/physical) is determined by the
+ * directory the domain file lives in, not by a field on the model.
  */
 export interface SemanticModel {
   name: string;
-  source: 'built' | 'design';
-  /** Schema the model will be materialised in (design models only). */
+  /** Schema the model will be materialised in. */
   schema?: string;
-  /** Model description (design models only — repo models use manifest). */
+  /** Model description. */
   description?: string;
-  /** Inline column definitions (design models only). */
+  /** Column definitions. */
   columns?: ColumnDef[];
-  /**
-   * Primary key column name (repo models only).
-   * For design models, use `isPrimaryKey: true` in the columns array.
-   */
-  primaryKey?: string;
-  /**
-   * Planned columns not yet in manifest (repo models only).
-   * These are displayed as orange rows until they appear in manifest.
-   * Once a planned column exists in manifest, the manifest version is shown
-   * instead (overlay semantics — manifest always wins).
-   */
-  plannedColumns?: ColumnDef[];
-  /**
-   * Whether this model has been approved for build.
-   * Approving a model auto-approves all existing columns.
-   * New columns added after approval start as unapproved.
-   */
-  approved?: boolean;
-  /**
-   * Original design column names captured during design→built transition.
-   * Used by ReconciliationService to detect structural discrepancies:
-   * - Extra columns: in manifest but not in designedColumns
-   * - Missing columns: in designedColumns but not in manifest
-   * Only present on models that transitioned from design to built.
-   */
-  designedColumns?: string[];
   /** Design rationale: what this model does and why it was designed this way. */
   rationale?: Rationale;
   /** Grain statement — "One row per ___". The single most critical design decision. */
@@ -158,8 +112,7 @@ export interface SemanticModel {
 }
 
 /**
- * A design model definition used when creating new models via addModel message.
- * All design models have source: 'design' and define columns inline.
+ * A model definition used when creating new models via addModel message.
  */
 export interface DesignModel {
   name: string;
@@ -181,8 +134,6 @@ export type Cardinality = 'many-to-one' | 'one-to-one' | 'one-to-many' | 'many-t
  * An FK relationship between two models in a domain.
  *
  * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
- * The optional `source` field marks design-time relationships; repo
- * relationships omit it (or default to repo-like behaviour).
  */
 export interface Relationship {
   fromModel: string;
@@ -190,10 +141,6 @@ export interface Relationship {
   toModel: string;
   toColumn: string;
   cardinality: Cardinality;
-  /** Present and set to `"design"` for relationships created in design mode. */
-  source?: 'design';
-  /** Whether this relationship has been approved for build. */
-  approved?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +173,7 @@ export interface SemanticDomain {
   schemaVersion: number;
   domain: string;
   layer: Layer;
+  stage: Stage;
   description: string;
   /**
    * Optional folder filter for models (e.g., "models/silver").
@@ -249,6 +197,8 @@ export interface DomainSummary {
   domain: string;
   /** Layer derived from parent directory name. */
   layer: Layer;
+  /** Stage derived from grandparent directory name. */
+  stage: Stage;
   /** Absolute path to the domain JSON file. */
   filePath: string;
 }

@@ -1,7 +1,7 @@
 /**
  * ContextMenu — context menu for graph elements.
  *
- * Currently supports FK edges only.
+ * Supports FK edges and model nodes.
  * Shows relationship details, cardinality editing, edit option, and delete option.
  * Positioned at cursor location, closes on click-outside or Escape.
  */
@@ -41,8 +41,9 @@ export function ContextMenu() {
 
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
-  const domain = useEditorStore((s) => s.domain);
   const openFkDialogForEdit = useEditorStore((s) => s.openFkDialogForEdit);
+  const domain = useEditorStore((s) => s.domain);
+  const isReadOnly = domain?.readOnly ?? false;
 
   // Track whether cardinality dropdown is open
   const [cardinalityOpen, setCardinalityOpen] = useState(false);
@@ -68,7 +69,6 @@ export function ContextMenu() {
   useLayoutEffect(() => {
     if (!contextMenu || !menuRef.current) return;
 
-    // Reset confirmation state when menu opens at new position
     setConfirmingDelete(false);
 
     const menu = menuRef.current;
@@ -79,19 +79,14 @@ export function ContextMenu() {
     let newX = contextMenu.x;
     let newY = contextMenu.y;
 
-    // Check if menu overflows right edge - flip to left of click point
     if (contextMenu.x + menuRect.width > viewportWidth - VIEWPORT_PADDING) {
-      // Position menu to the left of the click point
       newX = contextMenu.x - menuRect.width;
     }
 
-    // Check if menu overflows bottom edge - flip to above click point
     if (contextMenu.y + menuRect.height > viewportHeight - VIEWPORT_PADDING) {
-      // Position menu above the click point
       newY = contextMenu.y - menuRect.height;
     }
 
-    // Final safety: ensure menu is within bounds
     newX = Math.max(VIEWPORT_PADDING, Math.min(newX, viewportWidth - menuRect.width - VIEWPORT_PADDING));
     newY = Math.max(VIEWPORT_PADDING, Math.min(newY, viewportHeight - menuRect.height - VIEWPORT_PADDING));
 
@@ -109,12 +104,10 @@ export function ContextMenu() {
     const dropdownRect = dropdownRef.current.getBoundingClientRect();
     const viewportHeight = window.innerHeight;
 
-    // Check if dropdown would overflow bottom of viewport
     const spaceBelow = viewportHeight - buttonRect.bottom;
     const spaceAbove = buttonRect.top;
     const dropdownHeight = dropdownRect.height;
 
-    // Flip upward if not enough space below but enough space above
     if (spaceBelow < dropdownHeight + VIEWPORT_PADDING && spaceAbove > dropdownHeight + VIEWPORT_PADDING) {
       setDropdownFlipped(true);
     } else {
@@ -132,7 +125,6 @@ export function ContextMenu() {
       }
     };
 
-    // Use mousedown for immediate response
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [contextMenu, closeContextMenu]);
@@ -161,10 +153,8 @@ export function ContextMenu() {
     if (!contextMenu || contextMenu.type !== 'edge') return;
 
     if (!confirmingDelete) {
-      // First click: show confirmation
       setConfirmingDelete(true);
     } else {
-      // Second click: actually delete
       const { fromModel, fromColumn, toModel, toColumn } = contextMenu.data;
       vscode.postMessage({
         type: 'removeRelationship',
@@ -211,8 +201,7 @@ export function ContextMenu() {
 
   // --- Node context menu ---
   if (contextMenu.type === 'node') {
-    const { modelName, modelStatus, isApproved } = contextMenu;
-    const canApprove = modelStatus === 'design' || modelStatus === 'approved';
+    const { modelName } = contextMenu;
 
     const displayX = adjustedPosition?.x ?? contextMenu.x;
     const displayY = adjustedPosition?.y ?? contextMenu.y;
@@ -230,70 +219,18 @@ export function ContextMenu() {
       >
         <div className="context-menu__header">
           <span className="context-menu__title">{modelName}</span>
-          <span className={`context-menu__status context-menu__status--${modelStatus}`}>
-            {modelStatus}
-          </span>
         </div>
-
-        {canApprove && (
-          <div className="context-menu__info">
-            {isApproved ? (
-              <button
-                className="context-menu__action-button context-menu__action-button--unapprove"
-                onClick={() => {
-                  vscode.postMessage({
-                    type: 'unapproveModel',
-                    payload: { modelName },
-                  });
-                  closeContextMenu();
-                }}
-                role="menuitem"
-              >
-                Unapprove Model
-              </button>
-            ) : (
-              <button
-                className="context-menu__action-button context-menu__action-button--approve"
-                onClick={() => {
-                  vscode.postMessage({
-                    type: 'approveModel',
-                    payload: { modelName },
-                  });
-                  closeContextMenu();
-                }}
-                role="menuitem"
-              >
-                Approve Model
-              </button>
-            )}
-          </div>
-        )}
       </div>
     );
   }
 
   // --- Edge context menu ---
   const edge = contextMenu.data as FkEdgeData;
-  const isDesign = edge.status === 'design';
-  const isApprovedRel = edge.status === 'approved';
-
-  // Check if both models are built or approved (not design or missing)
-  const canApproveRelationship = (): boolean => {
-    if (!domain) return false;
-    const fromModel = domain.models.find((m) => m.name === edge.fromModel);
-    const toModel = domain.models.find((m) => m.name === edge.toModel);
-    const isApprovable = (status: string | undefined) =>
-      status === 'built' || status === 'approved';
-    return isApprovable(fromModel?.status) && isApprovable(toModel?.status);
-  };
-
-  const canApproveRel = (isDesign || isApprovedRel) && canApproveRelationship();
 
   // Get current cardinality label
   const currentOption = CARDINALITY_OPTIONS.find((opt) => opt.value === edge.cardinality);
   const cardinalityLabel = currentOption?.label ?? edge.cardinality;
 
-  // Use adjusted position if available, otherwise use original position
   const displayX = adjustedPosition?.x ?? contextMenu.x;
   const displayY = adjustedPosition?.y ?? contextMenu.y;
 
@@ -304,7 +241,6 @@ export function ContextMenu() {
       style={{
         left: displayX,
         top: displayY,
-        // Hide until position is calculated to prevent flash at wrong position
         visibility: adjustedPosition ? 'visible' : 'hidden',
       }}
       role="menu"
@@ -312,9 +248,8 @@ export function ContextMenu() {
       {/* Relationship details header */}
       <div className="context-menu__header">
         <span className="context-menu__title">Relationship</span>
-        <div className="context-menu__header-actions">
-          {/* Edit button - only for design or approved relationships (not built) */}
-          {(isDesign || isApprovedRel) && (
+        {!isReadOnly && (
+          <div className="context-menu__header-actions">
             <button
               className="context-menu__edit-link"
               onClick={handleEditClick}
@@ -322,8 +257,6 @@ export function ContextMenu() {
             >
               Edit...
             </button>
-          )}
-          {isDesign && (
             <button
               className={`context-menu__delete-link${confirmingDelete ? ' context-menu__delete-link--confirming' : ''}`}
               onClick={handleDeleteClick}
@@ -331,11 +264,8 @@ export function ContextMenu() {
             >
               {confirmingDelete ? 'Confirm?' : 'Remove'}
             </button>
-          )}
-          <span className={`context-menu__status context-menu__status--${edge.status}`}>
-            {edge.status}
-          </span>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Relationship info */}
@@ -353,90 +283,48 @@ export function ContextMenu() {
           </span>
         </div>
 
-        {/* Cardinality with dropdown */}
+        {/* Cardinality with dropdown (editable) or label (read-only) */}
         <div className="context-menu__row context-menu__row--cardinality">
           <span className="context-menu__label">Cardinality</span>
-          <div className="context-menu__cardinality-wrapper">
-            <button
-              ref={cardinalityButtonRef}
-              className="context-menu__cardinality-button"
-              onClick={() => setCardinalityOpen(!cardinalityOpen)}
-              aria-haspopup="listbox"
-              aria-expanded={cardinalityOpen}
-            >
-              {cardinalityLabel}
-              <span className={`context-menu__cardinality-arrow${dropdownFlipped ? ' context-menu__cardinality-arrow--flipped' : ''}`}>▾</span>
-            </button>
-            {cardinalityOpen && (
-              <ul
-                ref={dropdownRef}
-                className={`context-menu__cardinality-dropdown${dropdownFlipped ? ' context-menu__cardinality-dropdown--flipped' : ''}`}
-                role="listbox"
+          {isReadOnly ? (
+            <span className="context-menu__value">{cardinalityLabel}</span>
+          ) : (
+            <div className="context-menu__cardinality-wrapper">
+              <button
+                ref={cardinalityButtonRef}
+                className="context-menu__cardinality-button"
+                onClick={() => setCardinalityOpen(!cardinalityOpen)}
+                aria-haspopup="listbox"
+                aria-expanded={cardinalityOpen}
               >
-                {CARDINALITY_OPTIONS.map((option) => (
-                  <li
-                    key={option.value}
-                    className={`context-menu__cardinality-option${
-                      option.value === edge.cardinality ? ' context-menu__cardinality-option--selected' : ''
-                    }`}
-                    role="option"
-                    aria-selected={option.value === edge.cardinality}
-                    onClick={() => handleCardinalityChange(option.value)}
-                  >
-                    {option.label}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                {cardinalityLabel}
+                <span className={`context-menu__cardinality-arrow${dropdownFlipped ? ' context-menu__cardinality-arrow--flipped' : ''}`}>▾</span>
+              </button>
+              {cardinalityOpen && (
+                <ul
+                  ref={dropdownRef}
+                  className={`context-menu__cardinality-dropdown${dropdownFlipped ? ' context-menu__cardinality-dropdown--flipped' : ''}`}
+                  role="listbox"
+                >
+                  {CARDINALITY_OPTIONS.map((option) => (
+                    <li
+                      key={option.value}
+                      className={`context-menu__cardinality-option${
+                        option.value === edge.cardinality ? ' context-menu__cardinality-option--selected' : ''
+                      }`}
+                      role="option"
+                      aria-selected={option.value === edge.cardinality}
+                      onClick={() => handleCardinalityChange(option.value)}
+                    >
+                      {option.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
-
-        {/* Approve/Unapprove button for design relationships */}
-        {canApproveRel && (
-          <div className="context-menu__row">
-            {isApprovedRel ? (
-              <button
-                className="context-menu__action-button context-menu__action-button--unapprove"
-                onClick={() => {
-                  vscode.postMessage({
-                    type: 'unapproveRelationship',
-                    payload: {
-                      fromModel: edge.fromModel,
-                      fromColumn: edge.fromColumn,
-                      toModel: edge.toModel,
-                      toColumn: edge.toColumn,
-                    },
-                  });
-                  closeContextMenu();
-                }}
-                role="menuitem"
-              >
-                Unapprove Relationship
-              </button>
-            ) : (
-              <button
-                className="context-menu__action-button context-menu__action-button--approve"
-                onClick={() => {
-                  vscode.postMessage({
-                    type: 'approveRelationship',
-                    payload: {
-                      fromModel: edge.fromModel,
-                      fromColumn: edge.fromColumn,
-                      toModel: edge.toModel,
-                      toColumn: edge.toColumn,
-                    },
-                  });
-                  closeContextMenu();
-                }}
-                role="menuitem"
-              >
-                Approve Relationship
-              </button>
-            )}
-          </div>
-        )}
       </div>
-
     </div>
   );
 }

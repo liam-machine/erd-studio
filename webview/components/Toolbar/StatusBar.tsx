@@ -24,22 +24,18 @@ export function StatusBar() {
     }
 
     const totalModels = domain.models.length;
-    const designModels = domain.models.filter((m) => m.status === 'design').length;
     const totalRelationships = domain.relationships.length;
 
-    return { totalModels, designModels, totalRelationships };
+    return { totalModels, totalRelationships };
   }, [domain]);
 
   if (!stats) {
     return null;
   }
 
-  const { totalModels, designModels, totalRelationships } = stats;
+  const { totalModels, totalRelationships } = stats;
 
-  // Build model count string
-  const modelText = designModels > 0
-    ? `${totalModels} models (${designModels} design)`
-    : `${totalModels} models`;
+  const modelText = `${totalModels} models`;
 
   // Build relationship count string
   const relationshipText = `${totalRelationships} relationship${totalRelationships !== 1 ? 's' : ''}`;
