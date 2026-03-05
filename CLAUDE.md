@@ -8,7 +8,11 @@ The extension display name is **ERD Studio** (package name `erd-studio`).
 
 ### Directory Structure
 
-ERD domain files live at `{project_root}/erd-studio/{layer}/{domain}.json`. The custom editor activates for files matching the glob `**/erd-studio/**/*.json`. The default is configurable via the `dbtSemantic.semanticDir` setting.
+ERD domain files live at `{project_root}/erd-studio/{stage}/{layer}/{domain}.json`. The custom editor activates for files matching:
+- `**/erd-studio/conceptual/**/*.json`
+- `**/erd-studio/logical/**/*.json`
+
+The base directory is configurable via the `dbtSemantic.semanticDir` setting (default: `erd-studio`).
 
 ### Legacy Internal Identifiers
 
@@ -17,7 +21,7 @@ The following internal identifiers still use the legacy `dbtSemantic` prefix and
 - **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.switchTreeStage`
 - **View IDs**: `dbt-semantic` (activity bar container), `dbtSemantic.domainTree`
 - **Custom editor viewType**: `dbtSemantic.domainEditor`
-- **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`, `dbtSemantic.autoReconcile`
+- **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`
 - **Color IDs**: `dbtSemantic.layer.bronze`, `dbtSemantic.layer.silver`, `dbtSemantic.layer.gold`, `dbtSemantic.layer.platinum`, `dbtSemantic.layer.custom`
 - **Command category**: `"category": "dbt"` in package.json command contributions
 
@@ -44,27 +48,44 @@ VS Code extension with dual build targets:
 
 Built with esbuild (`esbuild.js`). Two TypeScript configs: `tsconfig.json` (Node.js) and `tsconfig.webview.json` (DOM). The webview tsconfig includes `src/types/**/*` so types are shared.
 
+### Three-Stage Architecture
+
+The extension uses three design stages, each with a distinct purpose:
+
+| Stage | Color | Purpose | Editable |
+|-------|-------|---------|----------|
+| **Conceptual** | Violet (`#8b5cf6`) | High-level entity design — model names, descriptions, entity-level relationships | Yes |
+| **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | Yes |
+| **Physical** | Green (`#22c55e`) | What exists in dbt — auto-derived from `manifest.json`, fully read-only | No |
+
+Stage colors are defined in `webview/lib/stageColors.ts`.
+
 ### Data Flow
 
 ```
-manifest.json ─┐
-                ├─→ ReconciliationService ─→ ReconciledDomain ─→ [message] ─→ graphTransformer ─→ React Flow
-domain.json ───┘
+                         ┌─ conceptual/{layer}/{domain}.json ─→ DisplayDomain
+DomainService reads ─────┤
+                         └─ logical/{layer}/{domain}.json ────→ DisplayDomain
+                                                                     │
+manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ──→ DisplayDomain
+                                                                     │
+                                              [message] ─→ graphTransformer ─→ React Flow
 ```
 
 1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`)
-2. **DomainService** reads semantic domain JSON from `erd-studio/**/*.json`
-3. **ReconciliationService** merges both into a `ReconciledDomain` with resolved statuses
-4. Extension sends `domainLoaded` message to webview
-5. **graphTransformer** converts `ReconciledDomain` → React Flow nodes + edges
-6. **elkLayout** runs ELK auto-layout in a Web Worker (injected at build time as `__ELK_WORKER_CODE__`)
+2. **DomainService** reads domain JSON from `erd-studio/{stage}/{layer}/*.json` and converts to `DisplayDomain`
+3. For physical stage: `DomainService.buildPhysicalDomain()` derives data from logical domain + manifest
+4. **DiscrepancyService** compares two `DisplayDomain` objects to produce a `DiscrepancyReport`
+5. Extension sends `domainLoaded` / `stageData` message to webview
+6. **graphTransformer** converts `DisplayDomain` → React Flow nodes + edges (with optional discrepancy overlays)
+7. **elkLayout** runs ELK auto-layout in a Web Worker (injected at build time as `__ELK_WORKER_CODE__`)
 
 ### Extension Host (`src/`)
 
 | Directory | Purpose |
 |-----------|---------|
 | `providers/` | `SemanticEditorProvider` (custom editor), `DomainTreeProvider` (sidebar tree) |
-| `services/` | Business logic — manifest parsing, domain I/O, reconciliation, layers, templates |
+| `services/` | Business logic — manifest parsing, domain I/O, discrepancy comparison, layers, templates |
 | `watchers/` | `FileWatcherService` — debounced watchers for manifest, domains, project config |
 | `types/` | Shared type definitions (imported by both host and webview) |
 
@@ -72,19 +93,19 @@ domain.json ───┘
 
 | Directory | Purpose |
 |-----------|---------|
-| `components/` | React components — `Graph/` (ModelNode, FkEdge), `DetailPanel/`, dialogs, toolbar |
-| `store/` | Zustand store (`editorStore.ts`) — UI state, selection, dialogs |
+| `components/` | React components — `Graph/` (ModelNode, ConceptualModelNode, FkEdge), `DetailPanel/`, `DiscrepancyPanel/`, `WelcomeModal/`, `Toolbar/` (StageTabs), dialogs |
+| `store/` | Zustand store (`editorStore.ts`) — UI state, selection, dialogs, active stage, discrepancy |
 | `hooks/` | `useMessageBus` (extension comms), `useVsCodeApi`, position/state persistence |
-| `lib/` | Pure functions — `graphTransformer`, `elkLayout`, `colorPalettes`, `columnSort` |
+| `lib/` | Pure functions — `graphTransformer`, `elkLayout`, `stageColors`, `columnSort` |
 | `styles/` | `theme.css` — CSS custom properties mapping VS Code theme vars |
 
 ### Message Protocol (`src/types/messages.ts`)
 
-Extension ↔ Webview communication uses discriminated unions on `type` field:
-- **Extension → Webview**: `domainLoaded`, `domainUpdated`, `manifestRefreshed`, `error`
-- **Webview → Extension**: `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `approveModel`, `unapproveModel`, `updatePositions`, `runAutoLayout`, etc.
+Extension <-> Webview communication uses discriminated unions on `type` field:
+- **Extension -> Webview**: `domainLoaded`, `domainUpdated`, `stageData`, `discrepancyReport`, `error`
+- **Webview -> Extension**: `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `renameModel`, `removeModel`, `updatePositions`, `runAutoLayout`, `switchStage`, `toggleDiscrepancy`, `refreshManifest`, `undo`, `redo`, etc.
 
-All mutations go through `WorkspaceEdit` for undo/redo integration.
+All mutations go through `WorkspaceEdit` for undo/redo integration. Physical stage silently rejects all mutation messages.
 
 ## Key Conventions
 
@@ -94,51 +115,20 @@ All mutations go through `WorkspaceEdit` for undo/redo integration.
 - React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
 - Extension host writes use `WorkspaceEdit` for undo/redo integration
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
+- Stage switching sends `switchStage` message; extension resolves sibling domain file and responds with `stageData`
+- Physical stage is derived at runtime — no files on disk, positions inherited from logical domain
 
-## Status Lifecycle
+## Discrepancy System
 
-Models, columns, and relationships follow a progression from design to built:
+Cross-stage comparison is handled by `DiscrepancyService.compare(source, target)`:
 
-### Model Status: `design` → `approved` → `built`
+| Active Stage | Available Comparisons |
+|-------------|----------------------|
+| Physical | Compare to Logical |
+| Logical | Compare to Physical, Compare to Conceptual |
+| Conceptual | Compare to Logical |
 
-| Status | Description | Color | Source |
-|--------|-------------|-------|--------|
-| `design` | Planned model not yet in dbt | Orange | `source: 'design'` in JSON |
-| `approved` | Ready for build, reviewed | Teal | `source: 'design'` + `approved: true` |
-| `built` | Exists in dbt manifest | Blue | `source: 'built'` and found in manifest |
-| `missing` | Referenced but not in manifest | Grey | `source: 'built'` but not in manifest |
-
-### Column Status: `planned` → `approved` → `built`
-
-| Status | Description | Color |
-|--------|-------------|-------|
-| `planned` | Column defined but not in manifest | Orange |
-| `approved` | Column approved for build | Teal |
-| `built` | Column exists in manifest | Blue |
-
-### Relationship Status: `design` → `approved` → `built`
-
-| Status | Description | Color |
-|--------|-------------|-------|
-| `design` | Planned FK relationship | Orange |
-| `approved` | Relationship approved for build | Teal |
-| `built` | Relationship test exists in manifest | Blue |
-
-### Approval Rules
-
-1. **Models**: Can be approved via DetailPanel button or right-click context menu
-2. **Columns**:
-   - On design models: require model approval first
-   - On built models: can be approved independently (for planned columns)
-3. **Relationships**: Can only be approved when **both** connected models are `built` or `approved`
-
-### Cascade Behavior
-
-When **unapproving a model**, the following cascades automatically:
-- All columns in that model become unapproved
-- All relationships connected to that model become unapproved
-
-This maintains the invariant that approved items must have their dependencies also approved.
+Discrepancy statuses for models/columns/relationships: `matched`, `extra`, `missing`, `type-mismatch` (columns), `cardinality-mismatch` (relationships). Ghost nodes appear for missing models.
 
 ## Testing the Webview UI in Chrome
 
@@ -200,9 +190,10 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
                  window.postMessage({
                    type: 'domainLoaded',
                    payload: {
-                     schemaVersion: 1, domain: 'preview', layer: 'silver',
+                     schemaVersion: 2, domain: 'preview', layer: 'silver',
+                     stage: 'logical',
                      description: 'Dev preview', models: [], relationships: [],
-                     viewConfig: {}
+                     viewConfig: {}, readOnly: false
                    }
                  }, '*');
                }, 100);
@@ -224,7 +215,7 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
    ```
    Then navigate to `http://localhost:8765/dev-preview.html`
 
-4. **Add test models/relationships** to the `domainLoaded` payload in `dev-preview.html` to render sample nodes and edges. The graph transformer converts `SemanticDomain` data into React Flow nodes/edges automatically.
+4. **Add test models/relationships** to the `domainLoaded` payload in `dev-preview.html` to render sample nodes and edges. The graph transformer converts `DisplayDomain` data into React Flow nodes/edges automatically.
 
 5. **Use Chrome browser automation** (claude-in-chrome) to take screenshots and verify visual output.
 
@@ -238,18 +229,15 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
 
 ## Dev Mock Data
 
-`dev-preview.html` contains **mock SemanticDomain data** in its `domainLoaded` payload for visual development. This provides four models and three FK relationships demonstrating:
-- Built many-to-one (blue solid with crow's foot)
-- Design many-to-one (orange solid with crow's foot)
-- Design one-to-one (orange dashed with perpendicular bars)
-
-The graph transformer (`webview/lib/graphTransformer.ts`) converts the SemanticDomain data into React Flow nodes/edges. The colour scheme logic lives in `webview/lib/colorPalettes.ts`.
+`dev-preview.html` contains **mock DisplayDomain data** in its `domainLoaded` payload for visual development. The graph transformer (`webview/lib/graphTransformer.ts`) converts the DisplayDomain data into React Flow nodes/edges. The stage colour logic lives in `webview/lib/stageColors.ts`.
 
 To preview in Chrome: create `dev-preview.html` (see instructions above), run `npm run build`, serve with `npx http-server -p 8765 --cors -c-1`, and open `http://localhost:8765/dev-preview.html`.
 
 ## Publishing to VS Code Marketplace
 
 **Marketplace:** https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio
+
+The old `liamwynne.dbt-semantic-designer` extension has been unpublished and removed from the marketplace. Only `liamwynne.erd-studio` exists now.
 
 ### Publish a New Version
 
@@ -258,5 +246,12 @@ To preview in Chrome: create `dev-preview.html` (see instructions above), run `n
    ```bash
    source .env && npx @vscode/vsce publish --pat "$AZURE_PAT"
    ```
+3. Commit the version bump and push.
 
 PAT is stored in `.env` as `AZURE_PAT`. Manage at https://dev.azure.com/LiamWynne/_usersSettings/tokens
+
+### Unpublish an Extension
+
+```bash
+source .env && npx @vscode/vsce unpublish <publisher>.<extension-id> --pat "$AZURE_PAT" --force
+```
