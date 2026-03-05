@@ -14,7 +14,7 @@ const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const FIXTURES_PROJECT_DIR = path.resolve(FIXTURES_DIR, 'dbt-project');
 const FIXTURE_DOMAIN_PATH = path.resolve(
   FIXTURES_DIR,
-  'dbt-project/models/semantic/silver/work-lots.json',
+  'dbt-project/erd-studio/silver/work-lots.json',
 );
 
 /** Minimal mock of ExtensionContext — only the fields used by the provider. */

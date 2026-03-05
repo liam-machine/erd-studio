@@ -1,7 +1,7 @@
 {
-  "name": "dbt-semantic-designer",
-  "displayName": "dbt Semantic Designer",
-  "description": "Visualise semantic (FK-based) relationships between dbt models within curated business domains, with a design mode for planning new models, columns, and relationships.",
+  "name": "erd-studio",
+  "displayName": "ERD Studio",
+  "description": "Visual ERD studio for data warehouse projects. Design, approve, and track models, columns, and FK relationships through a full design-to-built lifecycle. Works with dbt manifests.",
   "version": "0.1.18",
   "publisher": "liamwynne",
   "license": "MIT",
@@ -164,7 +164,7 @@
         "displayName": "Semantic Domain Editor",
         "selector": [
           {
-            "filenamePattern": "**/models/semantic/**/*.json"
+            "filenamePattern": "**/erd-studio/**/*.json"
           }
         ],
         "priority": "default"
@@ -207,7 +207,7 @@
       ]
     },
     "configuration": {
-      "title": "dbt Semantic Designer",
+      "title": "ERD Studio",
       "properties": {
         "dbtSemantic.projectPath": {
           "type": "string",
@@ -216,8 +216,8 @@
         },
         "dbtSemantic.semanticDir": {
           "type": "string",
-          "default": "models/semantic",
-          "description": "Relative path to semantic domain files within the dbt project"
+          "default": "erd-studio",
+          "description": "Relative path to ERD domain files within the project"
         },
         "dbtSemantic.autoReconcile": {
           "type": "boolean",

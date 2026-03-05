@@ -2,6 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Naming
+
+The extension display name is **ERD Studio** (package name `erd-studio`).
+
+### Directory Structure
+
+ERD domain files live at `{project_root}/erd-studio/{layer}/{domain}.json`. The custom editor activates for files matching the glob `**/erd-studio/**/*.json`. The default is configurable via the `dbtSemantic.semanticDir` setting.
+
+### Legacy Internal Identifiers
+
+The following internal identifiers still use the legacy `dbtSemantic` prefix and must **not** be renamed (doing so would break existing user settings, keybindings, and stored state):
+
+- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.syncDomainTags`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`
+- **View IDs**: `dbt-semantic` (activity bar container), `dbtSemantic.domainTree`
+- **Custom editor viewType**: `dbtSemantic.domainEditor`
+- **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`, `dbtSemantic.autoReconcile`
+- **Color IDs**: `dbtSemantic.layer.bronze`, `dbtSemantic.layer.silver`, `dbtSemantic.layer.gold`, `dbtSemantic.layer.platinum`, `dbtSemantic.layer.custom`
+- **Command category**: `"category": "dbt"` in package.json command contributions
+
 ## Build & Test Commands
 
 ```bash
@@ -34,7 +53,7 @@ domain.json ───┘
 ```
 
 1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`)
-2. **DomainService** reads semantic domain JSON from `models/semantic/**/*.json`
+2. **DomainService** reads semantic domain JSON from `erd-studio/**/*.json`
 3. **ReconciliationService** merges both into a `ReconciledDomain` with resolved statuses
 4. Extension sends `domainLoaded` message to webview
 5. **graphTransformer** converts `ReconciledDomain` → React Flow nodes + edges
@@ -230,7 +249,7 @@ To preview in Chrome: create `dev-preview.html` (see instructions above), run `n
 
 ## Publishing to VS Code Marketplace
 
-**Marketplace:** https://marketplace.visualstudio.com/items?itemName=liamwynne.dbt-semantic-designer
+**Marketplace:** https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio
 
 ### Publish a New Version
 

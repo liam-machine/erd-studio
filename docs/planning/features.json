@@ -1,6 +1,6 @@
 {
   "project": {
-    "name": "dbt Semantic Designer",
+    "name": "ERD Studio",
     "description": "A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains, and enables interactive design of new models, columns, and relationships before they are built. Built items appear in green; planned items appear in orange. The dbt repo becomes the single source of truth for both lineage and semantic relationships.",
     "version": "0.1.0",
     "platform": "web",
@@ -69,7 +69,7 @@
         "Open project in VS Code and press F5 — Extension Development Host window launches",
         "Verify package.json contains all contribution points: commands, viewsContainers, views, customEditors, configuration, activationEvents"
       ],
-      "implementation_notes": "esbuild.js handles dual build targets. Extension host targets Node.js, webview targets browser/DOM. Use 'workspaceContains:**/dbt_project.yml' as activation event. Custom editor selector: '**/models/semantic/**/*.json' with priority 'option'.",
+      "implementation_notes": "esbuild.js handles dual build targets. Extension host targets Node.js, webview targets browser/DOM. Use 'workspaceContains:**/dbt_project.yml' as activation event. Custom editor selector: '**/erd-studio/**/*.json' with priority 'option'.",
       "category": "infrastructure",
       "estimated_effort": "medium"
     },
@@ -95,18 +95,18 @@
     {
       "id": "F102",
       "name": "Implement DomainService for reading semantic domain JSON",
-      "description": "Create DomainService (src/services/domainService.ts) with read operations: listDomains() to discover all domain JSON files under models/semantic/, getDomain(layer, domain) to read and parse a specific domain file. Return typed SemanticDomain objects. Define TypeScript types in src/types/semantic.ts covering the full semantic domain JSON schema (schemaVersion, domain, layer, description, models, relationships, viewConfig).",
+      "description": "Create DomainService (src/services/domainService.ts) with read operations: listDomains() to discover all domain JSON files under erd-studio/, getDomain(layer, domain) to read and parse a specific domain file. Return typed SemanticDomain objects. Define TypeScript types in src/types/semantic.ts covering the full semantic domain JSON schema (schemaVersion, domain, layer, description, models, relationships, viewConfig).",
       "phase": "phase-1",
       "status": "completed",
       "skip": false,
       "dependencies": ["F100"],
       "validation_criteria": [
-        "Unit test: listDomains discovers all .json files under models/semantic/ grouped by layer",
+        "Unit test: listDomains discovers all .json files under erd-studio/ grouped by layer",
         "Unit test: getDomain reads and parses a valid domain file into a typed SemanticDomain object",
         "Unit test: getDomain handles missing files with appropriate error",
         "Verify TypeScript types match the semantic domain JSON schema from the plan"
       ],
-      "implementation_notes": "Files live at {dbt_project}/models/semantic/{layer}/{domain}.json. Use VS Code workspace APIs for file access. Types in src/types/semantic.ts should include: SemanticDomain, SemanticModel (with source: 'repo' | 'design'), ColumnDef, Relationship, ViewConfig. Include schemaVersion checking.",
+      "implementation_notes": "Files live at {dbt_project}/erd-studio/{layer}/{domain}.json. Use VS Code workspace APIs for file access. Types in src/types/semantic.ts should include: SemanticDomain, SemanticModel (with source: 'repo' | 'design'), ColumnDef, Relationship, ViewConfig. Include schemaVersion checking.",
       "category": "infrastructure",
       "estimated_effort": "medium"
     },
@@ -131,7 +131,7 @@
     {
       "id": "F104",
       "name": "Create SemanticEditorProvider (custom text editor)",
-      "description": "Implement SemanticEditorProvider (src/providers/SemanticEditorProvider.ts) as a CustomTextEditorProvider that opens semantic JSON files in a React webview instead of the default JSON editor. Register with viewType 'dbtSemantic.domainEditor' and selector '**/models/semantic/**/*.json' with priority 'option'. Handle the extension-webview message protocol: listen for 'ready' message from webview, send 'domainLoaded' with reconciled domain data.",
+      "description": "Implement SemanticEditorProvider (src/providers/SemanticEditorProvider.ts) as a CustomTextEditorProvider that opens semantic JSON files in a React webview instead of the default JSON editor. Register with viewType 'dbtSemantic.domainEditor' and selector '**/erd-studio/**/*.json' with priority 'option'. Handle the extension-webview message protocol: listen for 'ready' message from webview, send 'domainLoaded' with reconciled domain data.",
       "phase": "phase-1",
       "status": "completed",
       "skip": false,
@@ -537,7 +537,7 @@
     {
       "id": "F300",
       "name": "Implement Create Domain command",
-      "description": "Create the 'Create Semantic Domain' command (src/commands/createDomain.ts) that opens a dialog for creating a new domain. Fields: domain name (slug), layer (bronze/silver/gold dropdown), description. Creates the JSON file at models/semantic/{layer}/{domain}.json with the initial schema (schemaVersion: 1, empty models/relationships, default viewConfig). Updates the tree view to show the new domain.",
+      "description": "Create the 'Create Semantic Domain' command (src/commands/createDomain.ts) that opens a dialog for creating a new domain. Fields: domain name (slug), layer (bronze/silver/gold dropdown), description. Creates the JSON file at erd-studio/{layer}/{domain}.json with the initial schema (schemaVersion: 1, empty models/relationships, default viewConfig). Updates the tree view to show the new domain.",
       "phase": "phase-3",
       "status": "completed",
       "skip": false,
@@ -591,7 +591,7 @@
     {
       "id": "F303",
       "name": "Implement file watchers for manifest and semantic files",
-      "description": "Create file watchers (src/watchers/fileWatchers.ts) that monitor: (1) target/manifest.json for changes (dbt compile ran), triggering reconciliation and graph refresh; (2) models/semantic/**/*.json for external changes (AI tools, git operations), triggering tree view and editor refresh; (3) dbt_project.yml for project config changes, triggering project root re-detection.",
+      "description": "Create file watchers (src/watchers/fileWatchers.ts) that monitor: (1) target/manifest.json for changes (dbt compile ran), triggering reconciliation and graph refresh; (2) erd-studio/**/*.json for external changes (AI tools, git operations), triggering tree view and editor refresh; (3) dbt_project.yml for project config changes, triggering project root re-detection.",
       "phase": "phase-3",
       "status": "completed",
       "skip": false,
@@ -788,7 +788,7 @@
     {
       "id": "F407",
       "name": "Implement extension settings UI",
-      "description": "Wire up the extension configuration settings defined in package.json: dbtSemantic.projectPath (path to dbt project root, auto-detected), dbtSemantic.semanticDir (relative path to semantic domain files, default 'models/semantic'), dbtSemantic.autoReconcile (toggle automatic design→built transition, default true). Ensure all services respect these settings and react to changes.",
+      "description": "Wire up the extension configuration settings defined in package.json: dbtSemantic.projectPath (path to dbt project root, auto-detected), dbtSemantic.semanticDir (relative path to semantic domain files, default 'erd-studio'), dbtSemantic.autoReconcile (toggle automatic design→built transition, default true). Ensure all services respect these settings and react to changes.",
       "phase": "phase-4",
       "status": "pending",
       "skip": true,
@@ -806,7 +806,7 @@
     {
       "id": "F408",
       "name": "Implement welcome experience for new projects",
-      "description": "Add a welcome experience for when a dbt project is opened but no semantic directory exists yet. Show a welcome message in the sidebar tree view with a 'Get Started' action that creates the models/semantic/ directory structure (with bronze, silver, gold subdirectories) and guides the user to create their first domain.",
+      "description": "Add a welcome experience for when a dbt project is opened but no semantic directory exists yet. Show a welcome message in the sidebar tree view with a 'Get Started' action that creates the erd-studio/ directory structure (with bronze, silver, gold subdirectories) and guides the user to create their first domain.",
       "phase": "phase-4",
       "status": "completed",
       "skip": false,

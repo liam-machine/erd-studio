@@ -144,22 +144,22 @@ function validateDomainSlug(
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  console.log('dbt Semantic Designer is now active');
+  console.log('ERD Studio is now active');
 
   const workspaceRoot = findDbtProjectRoot();
   if (!workspaceRoot) {
     void vscode.window.showWarningMessage(
-      'dbt Semantic Designer: No dbt project found. ' +
+      'ERD Studio: No dbt project found. ' +
         'Open a folder containing dbt_project.yml to activate.',
     );
     return;
   }
 
-  console.log(`dbt Semantic Designer: Found dbt project at ${workspaceRoot}`);
+  console.log(`ERD Studio: Found dbt project at ${workspaceRoot}`);
 
   // Read configuration for semantic directory path
   const config = vscode.workspace.getConfiguration('dbtSemantic');
-  const semanticDir = config.get<string>('semanticDir', 'models/semantic');
+  const semanticDir = config.get<string>('semanticDir', 'erd-studio');
 
   // LayerService must be instantiated first as other services depend on it
   const layerService = new LayerService(workspaceRoot, semanticDir);

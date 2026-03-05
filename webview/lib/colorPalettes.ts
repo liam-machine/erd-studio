@@ -145,7 +145,7 @@ export function getPaletteColors(paletteId: PaletteId): ColorPalette['colors'] {
 // Persistence
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY = 'dbt-semantic-designer:palette';
+const STORAGE_KEY = 'erd-studio:palette';
 
 /**
  * Load the persisted palette ID from localStorage, or return default.

@@ -38,7 +38,7 @@ Claude generates a complete semantic domain:
 - Relationships with cardinalities
 - Column definitions with data types
 
-The design is written to a `.json` file in `models/semantic/`.
+The design is written to a `.json` file in `erd-studio/`.
 
 ### 3. Data Engineer Reviews in VS Code
 **Actor:** Human

@@ -1,6 +1,6 @@
-# dbt Semantic Designer
+# ERD Studio
 
-Visualize and design FK (foreign key) relationships between dbt models within curated business domains.
+Visual ERD studio for data warehouse projects. Design, approve, and track models, columns, and FK relationships through a full design-to-built lifecycle. Works with dbt manifests.
 
 ## Features
 
@@ -45,7 +45,7 @@ Visualize and design FK (foreign key) relationships between dbt models within cu
 ## Extension Settings
 
 - `dbtSemantic.projectPath`: Path to dbt project root (auto-detected)
-- `dbtSemantic.semanticDir`: Relative path to semantic domain files (default: `models/semantic`)
+- `dbtSemantic.semanticDir`: Relative path to semantic domain files (default: `erd-studio`)
 - `dbtSemantic.autoReconcile`: Auto-transition design models to built when detected
 
 ## License

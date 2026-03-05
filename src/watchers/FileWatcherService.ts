@@ -3,7 +3,7 @@
  *
  * Watches:
  * - target/manifest.json (dbt compile output) → triggers manifest cache invalidation
- * - models/semantic/**\/*.json (semantic domain files) → triggers tree and editor refresh
+ * - erd-studio/**\/*.json (semantic domain files) → triggers tree and editor refresh
  * - dbt_project.yml (project configuration) → shows reload warning
  *
  * All change events are debounced by 300ms to prevent rapid-fire triggers
@@ -70,13 +70,13 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch models/semantic/**\/*.json for changes.
+   * Watch erd-studio/**\/*.json for changes.
    * Fires when domain files are created, modified, or deleted externally.
    */
   private setupSemanticWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'models/semantic/**/*.json',
+      'erd-studio/**/*.json',
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 

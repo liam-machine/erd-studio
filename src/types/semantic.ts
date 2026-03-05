@@ -1,7 +1,7 @@
 /**
  * Types for semantic domain JSON files.
  *
- * Domain files live at {dbt_project}/models/semantic/{layer}/{domain}.json
+ * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
  * and describe FK-based relationships between dbt models within a business
  * domain. Models are either sourced from the repo (columns resolved from
  * manifest at runtime) or designed inline (columns defined in the JSON).

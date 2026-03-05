@@ -51,18 +51,45 @@
           "isPrimaryKey": true
         }
       ]
+    },
+    {
+      "name": "klk",
+      "source": "design",
+      "description": "",
+      "columns": []
     }
   ],
-  "relationships": [],
+  "relationships": [
+    {
+      "fromModel": "dim_project",
+      "fromColumn": "project_name",
+      "toModel": "sdcsdferw",
+      "toColumn": "ewfw4ef",
+      "cardinality": "many-to-one",
+      "source": "design"
+    },
+    {
+      "fromModel": "sdcsdferw",
+      "fromColumn": "ewfw4ef",
+      "toModel": "dim_project",
+      "toColumn": "project_id",
+      "cardinality": "many-to-one",
+      "source": "design"
+    }
+  ],
   "viewConfig": {
     "positions": {
       "sdcsdferw": {
-        "x": -138,
-        "y": -114
+        "x": 292,
+        "y": 158
       },
       "dim_project": {
-        "x": -272,
-        "y": -451
+        "x": 12,
+        "y": 127
+      },
+      "klk": {
+        "x": 12,
+        "y": 12
       }
     }
   }

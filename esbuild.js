@@ -1,4 +1,4 @@
-// esbuild.js — Dual-target build for dbt Semantic Designer VS Code extension
+// esbuild.js — Dual-target build for ERD Studio VS Code extension
 // Targets: Extension host (Node.js, CJS) + Webview (Browser, IIFE with React)
 
 const esbuild = require('esbuild');

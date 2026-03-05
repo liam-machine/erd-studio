@@ -39,7 +39,7 @@ describe('DomainService', () => {
   });
 
   describe('listDomains', () => {
-    it('discovers all .json files under models/semantic/ grouped by layer', () => {
+    it('discovers all .json files under erd-studio/ grouped by layer', () => {
       const domains = service.listDomains(FIXTURE_PROJECT_PATH);
 
       expect(domains.length).toBe(2);
@@ -60,11 +60,11 @@ describe('DomainService', () => {
 
       expect(workLots).toBeDefined();
       expect(workLots!.filePath).toBe(
-        path.join(FIXTURE_PROJECT_PATH, 'models', 'semantic', 'silver', 'work-lots.json')
+        path.join(FIXTURE_PROJECT_PATH, 'erd-studio', 'silver', 'work-lots.json')
       );
     });
 
-    it('returns empty array when semantic directory does not exist', () => {
+    it('returns empty array when erd-studio directory does not exist', () => {
       const domains = service.listDomains('/nonexistent/path');
       expect(domains).toEqual([]);
     });
@@ -77,7 +77,7 @@ describe('DomainService', () => {
     });
 
     it('supports custom semantic directory', () => {
-      const domains = service.listDomains(FIXTURE_PROJECT_PATH, 'models/semantic');
+      const domains = service.listDomains(FIXTURE_PROJECT_PATH, 'erd-studio');
       expect(domains.length).toBeGreaterThan(0);
     });
 
@@ -95,7 +95,7 @@ describe('DomainService', () => {
   describe('getDomain', () => {
     it('reads and parses a valid domain file into a typed SemanticDomain', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'models', 'semantic', 'silver', 'work-lots.json'
+        FIXTURE_PROJECT_PATH, 'erd-studio', 'silver', 'work-lots.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -107,7 +107,7 @@ describe('DomainService', () => {
 
     it('parses models correctly', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'models', 'semantic', 'silver', 'work-lots.json'
+        FIXTURE_PROJECT_PATH, 'erd-studio', 'silver', 'work-lots.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -127,7 +127,7 @@ describe('DomainService', () => {
 
     it('parses relationships correctly', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'models', 'semantic', 'silver', 'work-lots.json'
+        FIXTURE_PROJECT_PATH, 'erd-studio', 'silver', 'work-lots.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -142,7 +142,7 @@ describe('DomainService', () => {
 
     it('parses viewConfig correctly', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'models', 'semantic', 'silver', 'work-lots.json'
+        FIXTURE_PROJECT_PATH, 'erd-studio', 'silver', 'work-lots.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -161,28 +161,28 @@ describe('DomainService', () => {
 
     it('handles invalid JSON with descriptive error', () => {
       const filePath = path.join(
-        MALFORMED_PROJECT_PATH, 'models', 'semantic', 'silver', 'broken.json'
+        MALFORMED_PROJECT_PATH, 'erd-studio', 'silver', 'broken.json'
       );
       expect(() => service.getDomain(filePath)).toThrow('Invalid JSON');
     });
 
     it('throws when schemaVersion is missing', () => {
       const filePath = path.join(
-        SPARSE_PROJECT_PATH, 'models', 'semantic', 'silver', 'no-schema-version.json'
+        SPARSE_PROJECT_PATH, 'erd-studio', 'silver', 'no-schema-version.json'
       );
       expect(() => service.getDomain(filePath)).toThrow('schemaVersion');
     });
 
     it('throws when schemaVersion is from the future', () => {
       const filePath = path.join(
-        SPARSE_PROJECT_PATH, 'models', 'semantic', 'silver', 'future-version.json'
+        SPARSE_PROJECT_PATH, 'erd-studio', 'silver', 'future-version.json'
       );
       expect(() => service.getDomain(filePath)).toThrow('update the extension');
     });
 
     it('applies defaults for missing optional fields', () => {
       const filePath = path.join(
-        SPARSE_PROJECT_PATH, 'models', 'semantic', 'silver', 'minimal.json'
+        SPARSE_PROJECT_PATH, 'erd-studio', 'silver', 'minimal.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -197,7 +197,7 @@ describe('DomainService', () => {
 
     it('parses a domain with minimal viewConfig (no layoutOptions)', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'models', 'semantic', 'gold', 'finance.json'
+        FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
       );
       const domain = service.getDomain(filePath);
 

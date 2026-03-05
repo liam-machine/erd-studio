@@ -1,7 +1,7 @@
 /**
  * DomainService — reads semantic domain JSON files from disk.
  *
- * Domain files live at {dbt_project}/models/semantic/{layer}/{domain}.json
+ * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
  * where layer is one of bronze, silver, gold.
  *
  * Provides read operations for Phase 1:
@@ -18,17 +18,17 @@ import type { DomainSummary, Layer, SemanticDomain } from '../types/semantic';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
 import type { LayerService } from './layerService';
 
-const DEFAULT_SEMANTIC_DIR = 'models/semantic';
+const DEFAULT_SEMANTIC_DIR = 'erd-studio';
 
 export class DomainService {
   constructor(private readonly layerService: LayerService) {}
 
   /**
-   * Discover all semantic domain JSON files under models/semantic/,
+   * Discover all semantic domain JSON files under erd-studio/,
    * grouped by layer. Returns lightweight summaries (no full parse).
    *
    * Directory structure expected:
-   *   models/semantic/{layer}/*.json
+   *   erd-studio/{layer}/*.json
    * where {layer} is defined in layers.json configuration.
    */
   listDomains(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): DomainSummary[] {

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "domain": "sdd",
+  "layer": "silver",
+  "description": "",
+  "models": [
+    {
+      "name": "sdfg",
+      "source": "design",
+      "description": "",
+      "columns": []
+    }
+  ],
+  "relationships": [],
+  "viewConfig": {}
+}

@@ -960,12 +960,12 @@
   "viewConfig": {
     "positions": {
       "dim_iv_attachment": {
-        "x": 312,
-        "y": 2933
+        "x": 125,
+        "y": 2972
       },
       "dim_pour_record": {
-        "x": 1242,
-        "y": 3340
+        "x": 1134,
+        "y": 3344
       },
       "dim_project": {
         "x": 1602,
@@ -976,8 +976,8 @@
         "y": 1535
       },
       "dim_work_lot": {
-        "x": 1242,
-        "y": 2983
+        "x": 718,
+        "y": 2609
       },
       "dim_work_lot_action": {
         "x": 672,

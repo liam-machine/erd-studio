@@ -5,7 +5,7 @@
 ## File Layout
 
 ```
-models/semantic/
+erd-studio/
   layers.json                          # Layer configuration (medallion architecture)
   templates/
     dimension.json                     # Model templates (optional, preset column patterns)
@@ -14,7 +14,7 @@ models/semantic/
     {domain}.json                      # Semantic domain files (one per business domain)
 ```
 
-## Domain File (`models/semantic/{layer}/{domain}.json`)
+## Domain File (`erd-studio/{layer}/{domain}.json`)
 
 ### Top-Level Schema
 
@@ -204,7 +204,7 @@ Persisted UI layout state. Safe to omit or leave empty — the extension will au
 
 When generating new domains, omit `positions` — the extension auto-layouts on first open.
 
-## Layers File (`models/semantic/layers.json`)
+## Layers File (`erd-studio/layers.json`)
 
 ```jsonc
 {
@@ -234,7 +234,7 @@ When generating new domains, omit `positions` — the extension auto-layouts on 
 
 **Known layers with defaults:** `bronze` (`#cd7f32`, creatable: false), `silver`, `gold`.
 
-## Model Templates (`models/semantic/templates/{id}.json`)
+## Model Templates (`erd-studio/templates/{id}.json`)
 
 Templates provide preset columns when creating new models.
 

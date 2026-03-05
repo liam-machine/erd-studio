@@ -49,7 +49,7 @@ export type TreeElement = LayerNode | DomainNode | NewDomainNode;
 // ---------------------------------------------------------------------------
 
 /** Default semantic directory relative to project root. */
-const DEFAULT_SEMANTIC_DIR = 'models/semantic';
+const DEFAULT_SEMANTIC_DIR = 'erd-studio';
 
 export class DomainTreeProvider
   implements vscode.TreeDataProvider<TreeElement>, vscode.TreeDragAndDropController<TreeElement> {

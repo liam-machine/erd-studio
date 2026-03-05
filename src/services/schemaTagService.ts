@@ -244,7 +244,7 @@ export class SchemaTagService {
    *
    * @param domainService - DomainService to discover all domains
    * @param workspaceRoot - dbt project root path
-   * @param semanticDir - Semantic directory relative path (e.g., "models/semantic")
+   * @param semanticDir - Semantic directory relative path (e.g., "erd-studio")
    * @returns Number of tags added
    */
   async syncAllDomainTags(
