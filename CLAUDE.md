@@ -14,7 +14,7 @@ ERD domain files live at `{project_root}/erd-studio/{layer}/{domain}.json`. The 
 
 The following internal identifiers still use the legacy `dbtSemantic` prefix and must **not** be renamed (doing so would break existing user settings, keybindings, and stored state):
 
-- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.syncDomainTags`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`
+- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.switchTreeStage`
 - **View IDs**: `dbt-semantic` (activity bar container), `dbtSemantic.domainTree`
 - **Custom editor viewType**: `dbtSemantic.domainEditor`
 - **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`, `dbtSemantic.autoReconcile`

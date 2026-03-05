@@ -487,6 +487,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /**
+   * Switch the stage of an open editor panel identified by its document URI.
+   * Called by extension.ts when opening a domain from the tree in physical stage.
+   * Uses a small delay to allow the webview to initialise first.
+   */
+  switchStageForUri(uri: vscode.Uri, stage: Stage): void {
+    const panelKey = uri.toString();
+
+    // The panel may not be registered yet if the editor is still initialising.
+    // Retry a few times with a short delay.
+    let attempts = 0;
+    const trySwitch = () => {
+      const panel = this.openPanels.get(panelKey);
+      if (panel) {
+        void this.handleSwitchStage(panelKey, panel.document, panel.webview, stage);
+        return;
+      }
+      attempts++;
+      if (attempts < 10) {
+        setTimeout(trySwitch, 100);
+      } else {
+        console.error(`[SemanticEditorProvider] switchStageForUri: panel not found for ${panelKey} after ${attempts} attempts`);
+      }
+    };
+    trySwitch();
+  }
+
   // -------------------------------------------------------------------------
   // Mutation handlers
   // -------------------------------------------------------------------------

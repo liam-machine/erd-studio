@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD studio for data warehouse projects. Design, approve, and track models, columns, and FK relationships through a full design-to-built lifecycle. Works with dbt manifests.",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -57,10 +57,10 @@
         "category": "dbt"
       },
       {
-        "command": "dbtSemantic.syncDomainTags",
-        "title": "Sync Domain Tags to Schema Files",
+        "command": "dbtSemantic.switchTreeStage",
+        "title": "Switch Stage",
         "category": "dbt",
-        "icon": "$(sync)"
+        "icon": "$(layers)"
       },
       {
         "command": "dbtSemantic.renameDomain",
@@ -164,7 +164,10 @@
         "displayName": "Semantic Domain Editor",
         "selector": [
           {
-            "filenamePattern": "**/erd-studio/**/*.json"
+            "filenamePattern": "**/erd-studio/conceptual/**/*.json"
+          },
+          {
+            "filenamePattern": "**/erd-studio/logical/**/*.json"
           }
         ],
         "priority": "default"
@@ -195,7 +198,7 @@
       ],
       "view/title": [
         {
-          "command": "dbtSemantic.syncDomainTags",
+          "command": "dbtSemantic.switchTreeStage",
           "when": "view == dbtSemantic.domainTree",
           "group": "navigation@1"
         },
@@ -218,11 +221,6 @@
           "type": "string",
           "default": "erd-studio",
           "description": "Relative path to ERD domain files within the project"
-        },
-        "dbtSemantic.autoReconcile": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically transition design models to built when detected in manifest"
         }
       }
     }

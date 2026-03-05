@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { TreeItemCollapsibleState } from 'vscode';
 import { DomainService } from '../../src/services/domainService';
 import { DomainTreeProvider, type TreeElement } from '../../src/providers/DomainTreeProvider';
@@ -29,15 +30,31 @@ function createMockLayerService(): LayerService {
   } as LayerService;
 }
 
+/** Create a minimal mock ExtensionContext with in-memory workspaceState. */
+function createMockContext(): vscode.ExtensionContext {
+  const state = new Map<string, unknown>();
+  return {
+    workspaceState: {
+      get: <T>(key: string, defaultValue?: T) => (state.get(key) as T) ?? defaultValue,
+      update: async (key: string, value: unknown) => { state.set(key, value); },
+      keys: () => [...state.keys()],
+    },
+  } as unknown as vscode.ExtensionContext;
+}
+
 describe('DomainTreeProvider', () => {
   let service: DomainService;
   let layerService: LayerService;
   let provider: DomainTreeProvider;
+  let mockContext: vscode.ExtensionContext;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     layerService = createMockLayerService();
     service = new DomainService(layerService);
-    provider = new DomainTreeProvider(service, layerService, FIXTURE_PROJECT_PATH);
+    mockContext = createMockContext();
+    provider = new DomainTreeProvider(service, layerService, FIXTURE_PROJECT_PATH, mockContext);
+    // Fixture domains are under conceptual/
+    await provider.setStage('conceptual');
   });
 
   describe('getChildren (root)', () => {
@@ -53,8 +70,7 @@ describe('DomainTreeProvider', () => {
     });
 
     it('returns empty array when semantic directory does not exist (F408 welcome)', () => {
-      // Use a non-existent path to simulate missing semantic directory
-      const providerNoSemantic = new DomainTreeProvider(service, layerService, '/nonexistent/path');
+      const providerNoSemantic = new DomainTreeProvider(service, layerService, '/nonexistent/path', mockContext);
       const children = providerNoSemantic.getChildren(undefined);
 
       expect(children).toHaveLength(0);
@@ -122,15 +138,25 @@ describe('DomainTreeProvider', () => {
 
       expect(newDomain).toEqual({ type: 'newDomain', layer: 'silver' });
     });
+
+    it('hides New Domain node when stage is physical', async () => {
+      await provider.setStage('physical');
+      // Physical mirrors logical — fixtures only have conceptual so no domains will show
+      // but the key assertion is that newDomain items are never added for physical
+      const children = provider.getChildren({ type: 'layer', layer: 'silver' })!;
+      const hasNewDomain = children.some(c => c.type === 'newDomain');
+      expect(hasNewDomain).toBe(false);
+    });
   });
 
   describe('getChildren (leaf)', () => {
     it('returns undefined for domain nodes', () => {
       const children = provider.getChildren({
         type: 'domain',
-        summary: { domain: 'test', layer: 'silver', filePath: '/test.json' },
+        summary: { domain: 'test', layer: 'silver', stage: 'conceptual', filePath: '/test.json' },
         modelCount: 0,
         designCount: 0,
+        openAsStage: 'conceptual',
       });
       expect(children).toBeUndefined();
     });
@@ -153,9 +179,10 @@ describe('DomainTreeProvider', () => {
     it('creates domain item with badge showing design count', () => {
       const element: TreeElement = {
         type: 'domain',
-        summary: { domain: 'work-lots', layer: 'silver', filePath: '/test.json' },
+        summary: { domain: 'work-lots', layer: 'silver', stage: 'conceptual', filePath: '/test.json' },
         modelCount: 12,
         designCount: 3,
+        openAsStage: 'conceptual',
       };
       const item = provider.getTreeItem(element);
 
@@ -168,9 +195,10 @@ describe('DomainTreeProvider', () => {
     it('creates domain item with badge omitting design when zero', () => {
       const element: TreeElement = {
         type: 'domain',
-        summary: { domain: 'finance', layer: 'gold', filePath: '/test.json' },
+        summary: { domain: 'finance', layer: 'gold', stage: 'conceptual', filePath: '/test.json' },
         modelCount: 5,
         designCount: 0,
+        openAsStage: 'conceptual',
       };
       const item = provider.getTreeItem(element);
 
@@ -180,28 +208,30 @@ describe('DomainTreeProvider', () => {
     it('uses singular "model" when count is 1', () => {
       const element: TreeElement = {
         type: 'domain',
-        summary: { domain: 'test', layer: 'gold', filePath: '/test.json' },
+        summary: { domain: 'test', layer: 'gold', stage: 'conceptual', filePath: '/test.json' },
         modelCount: 1,
         designCount: 0,
+        openAsStage: 'conceptual',
       };
       const item = provider.getTreeItem(element);
 
       expect(item.description).toBe('1 model');
     });
 
-    it('sets openDomain command on domain items', () => {
+    it('sets openDomain command on domain items with stage argument', () => {
       const element: TreeElement = {
         type: 'domain',
-        summary: { domain: 'test', layer: 'silver', filePath: '/path/to/test.json' },
+        summary: { domain: 'test', layer: 'silver', stage: 'conceptual', filePath: '/path/to/test.json' },
         modelCount: 0,
         designCount: 0,
+        openAsStage: 'conceptual',
       };
       const item = provider.getTreeItem(element);
 
       expect(item.command).toEqual({
         command: 'dbtSemantic.openDomain',
         title: 'Open Domain',
-        arguments: ['/path/to/test.json'],
+        arguments: ['/path/to/test.json', 'conceptual'],
       });
     });
 
@@ -221,13 +251,51 @@ describe('DomainTreeProvider', () => {
     it('sets tooltip on domain items', () => {
       const element: TreeElement = {
         type: 'domain',
-        summary: { domain: 'work-lots', layer: 'silver', filePath: '/test.json' },
+        summary: { domain: 'work-lots', layer: 'silver', stage: 'conceptual', filePath: '/test.json' },
         modelCount: 2,
         designCount: 1,
+        openAsStage: 'conceptual',
       };
       const item = provider.getTreeItem(element);
 
       expect(item.tooltip).toBe('Silver / work-lots');
+    });
+  });
+
+  describe('stage management', () => {
+    it('defaults to logical when workspace state is empty', () => {
+      const freshContext = createMockContext();
+      const freshProvider = new DomainTreeProvider(service, layerService, FIXTURE_PROJECT_PATH, freshContext);
+      expect(freshProvider.getStage()).toBe('logical');
+    });
+
+    it('reads persisted stage from workspace state', () => {
+      // beforeEach called setStage('conceptual'), so mockContext has it persisted
+      const freshProvider = new DomainTreeProvider(service, layerService, FIXTURE_PROJECT_PATH, mockContext);
+      expect(freshProvider.getStage()).toBe('conceptual');
+    });
+
+    it('persists stage selection to workspace state', async () => {
+      await provider.setStage('physical');
+      expect(provider.getStage()).toBe('physical');
+
+      // New provider reads persisted value
+      const freshProvider = new DomainTreeProvider(service, layerService, FIXTURE_PROJECT_PATH, mockContext);
+      expect(freshProvider.getStage()).toBe('physical');
+    });
+
+    it('filters domains by current stage', async () => {
+      // conceptual has fixtures
+      await provider.setStage('conceptual');
+      const conceptualChildren = provider.getChildren({ type: 'layer', layer: 'silver' })!;
+      const conceptualDomains = conceptualChildren.filter(c => c.type === 'domain');
+      expect(conceptualDomains.length).toBeGreaterThan(0);
+
+      // logical has no fixtures
+      await provider.setStage('logical');
+      const logicalChildren = provider.getChildren({ type: 'layer', layer: 'silver' })!;
+      const logicalDomains = logicalChildren.filter(c => c.type === 'domain');
+      expect(logicalDomains.length).toBe(0);
     });
   });
 

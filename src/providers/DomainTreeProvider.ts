@@ -2,11 +2,11 @@
  * DomainTreeProvider — VS Code TreeDataProvider for the sidebar.
  *
  * Displays semantic domains grouped by layer (bronze, silver, gold).
- * Each domain shows a badge with model count and design model count.
- * "New Domain..." items appear inside silver and gold layer folders
- * (bronze is raw/staging and not used for semantic domain design).
+ * Each domain shows a badge with model count.
+ * "New Domain..." items appear inside creatable layers (not in physical stage).
  *
- * Supports drag-and-drop to reorder layers.
+ * Supports drag-and-drop to reorder layers and stage filtering via
+ * a title-bar button that opens a QuickPick.
  */
 
 import * as vscode from 'vscode';
@@ -14,12 +14,15 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { DomainSummary, Layer } from '../types/semantic';
+import type { DomainSummary, Layer, Stage } from '../types/semantic';
 import { DomainService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 
 /** MIME type for layer drag-drop within the tree. */
 const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
+
+/** Workspace state key for persisting the selected stage across sessions. */
+const STAGE_STATE_KEY = 'dbtSemantic.treeStage';
 
 // ---------------------------------------------------------------------------
 // Tree element types (discriminated union)
@@ -35,6 +38,11 @@ interface DomainNode {
   readonly summary: DomainSummary;
   readonly modelCount: number;
   readonly designCount: number;
+  /**
+   * The stage to open this domain in. For physical stage in the tree,
+   * we open the logical file and then switch to physical in the editor.
+   */
+  readonly openAsStage: Stage;
 }
 
 interface NewDomainNode {
@@ -43,6 +51,16 @@ interface NewDomainNode {
 }
 
 export type TreeElement = LayerNode | DomainNode | NewDomainNode;
+
+// ---------------------------------------------------------------------------
+// Stage labels for UI
+// ---------------------------------------------------------------------------
+
+const STAGE_LABELS: Record<Stage, string> = {
+  conceptual: 'Conceptual',
+  logical: 'Logical',
+  physical: 'Physical',
+};
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -56,6 +74,8 @@ export class DomainTreeProvider
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<TreeElement | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private readonly semanticDir: string;
+  private currentStage: Stage;
+  private treeView: vscode.TreeView<TreeElement> | undefined;
 
   // TreeDragAndDropController properties
   readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
@@ -65,9 +85,33 @@ export class DomainTreeProvider
     private readonly domainService: DomainService,
     private readonly layerService: LayerService,
     private readonly projectPath: string,
+    private readonly context: vscode.ExtensionContext,
     semanticDir?: string,
   ) {
     this.semanticDir = semanticDir ?? DEFAULT_SEMANTIC_DIR;
+    this.currentStage = this.context.workspaceState.get<Stage>(STAGE_STATE_KEY) ?? 'logical';
+  }
+
+  /**
+   * Set the tree view reference so we can update its description.
+   * Must be called after createTreeView().
+   */
+  setTreeView(treeView: vscode.TreeView<TreeElement>): void {
+    this.treeView = treeView;
+    this.updateTreeViewDescription();
+  }
+
+  /** Get the currently active stage. */
+  getStage(): Stage {
+    return this.currentStage;
+  }
+
+  /** Switch the active stage and refresh the tree. */
+  async setStage(stage: Stage): Promise<void> {
+    this.currentStage = stage;
+    await this.context.workspaceState.update(STAGE_STATE_KEY, stage);
+    this.updateTreeViewDescription();
+    this.refresh();
   }
 
   // -------------------------------------------------------------------------
@@ -178,7 +222,10 @@ export class DomainTreeProvider
 
   private getLayerChildren(layer: Layer): TreeElement[] {
     const summaries = this.domainService.listDomains(this.projectPath, this.semanticDir);
-    const layerDomains = summaries.filter(s => s.layer === layer);
+
+    // For physical stage, show logical domain list (physical mirrors logical)
+    const filterStage: Stage = this.currentStage === 'physical' ? 'logical' : this.currentStage;
+    const layerDomains = summaries.filter(s => s.layer === layer && s.stage === filterStage);
 
     const domainNodes: DomainNode[] = layerDomains.map(summary => {
       let modelCount = 0;
@@ -188,13 +235,19 @@ export class DomainTreeProvider
       } catch (err) {
         console.warn(`[DomainTreeProvider] Failed to load ${summary.filePath}:`, err);
       }
-      return { type: 'domain' as const, summary, modelCount, designCount: 0 };
+      return {
+        type: 'domain' as const,
+        summary,
+        modelCount,
+        designCount: 0,
+        openAsStage: this.currentStage,
+      };
     });
 
     const children: TreeElement[] = [...domainNodes];
 
-    // Check if this layer allows creating new domains
-    if (this.layerService.isCreatable(layer)) {
+    // "New Domain..." only appears in editable stages (not physical)
+    if (this.currentStage !== 'physical' && this.layerService.isCreatable(layer)) {
       children.push({ type: 'newDomain', layer });
     }
 
@@ -234,7 +287,7 @@ export class DomainTreeProvider
     item.command = {
       command: 'dbtSemantic.openDomain',
       title: 'Open Domain',
-      arguments: [element.summary.filePath],
+      arguments: [element.summary.filePath, element.openAsStage],
     };
 
     return item;
@@ -253,6 +306,12 @@ export class DomainTreeProvider
       arguments: [element.layer],
     };
     return item;
+  }
+
+  private updateTreeViewDescription(): void {
+    if (this.treeView) {
+      this.treeView.description = STAGE_LABELS[this.currentStage];
+    }
   }
 
   dispose(): void {
