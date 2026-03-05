@@ -50,7 +50,11 @@ interface NewDomainNode {
   readonly layer: Layer;
 }
 
-export type TreeElement = LayerNode | DomainNode | NewDomainNode;
+interface StageHeaderNode {
+  readonly type: 'stageHeader';
+}
+
+export type TreeElement = LayerNode | DomainNode | NewDomainNode | StageHeaderNode;
 
 // ---------------------------------------------------------------------------
 // Stage labels for UI
@@ -187,6 +191,8 @@ export class DomainTreeProvider
 
   getTreeItem(element: TreeElement): vscode.TreeItem {
     switch (element.type) {
+      case 'stageHeader':
+        return this.createStageHeaderItem();
       case 'layer':
         return this.createLayerItem(element);
       case 'domain':
@@ -204,9 +210,10 @@ export class DomainTreeProvider
       if (!fs.existsSync(fullSemanticDir)) {
         return [];
       }
-      // Load layers dynamically from LayerService
+      // Stage header + layers
       const layers = this.layerService.getAllLayers();
-      return layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
+      const layerNodes: TreeElement[] = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
+      return [{ type: 'stageHeader' } as StageHeaderNode, ...layerNodes];
     }
 
     if (element.type === 'layer') {
@@ -252,6 +259,19 @@ export class DomainTreeProvider
     }
 
     return children;
+  }
+
+  private createStageHeaderItem(): vscode.TreeItem {
+    const stageLabel = STAGE_LABELS[this.currentStage];
+    const item = new vscode.TreeItem(stageLabel, vscode.TreeItemCollapsibleState.None);
+    item.description = 'click to switch';
+    item.iconPath = new vscode.ThemeIcon('list-tree');
+    item.contextValue = 'stageHeader';
+    item.command = {
+      command: 'dbtSemantic.switchTreeStage',
+      title: 'Switch Stage',
+    };
+    return item;
   }
 
   private createLayerItem(element: LayerNode): vscode.TreeItem {
@@ -309,9 +329,8 @@ export class DomainTreeProvider
   }
 
   private updateTreeViewDescription(): void {
-    if (this.treeView) {
-      this.treeView.description = STAGE_LABELS[this.currentStage];
-    }
+    // message/description not reliably visible in single-view containers;
+    // stage is shown via the stageHeader tree item instead.
   }
 
   dispose(): void {

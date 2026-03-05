@@ -128,6 +128,19 @@ function validateDomainSlug(
 /** Valid editable stages for domain creation. */
 const EDITABLE_STAGES: Stage[] = ['conceptual', 'logical'];
 
+/** Shared color options for layer creation and editing. */
+const LAYER_COLOR_OPTIONS = [
+  { label: '⚪ Silver', value: '#a0a0a0' },
+  { label: '🟡 Gold', value: '#d4a800' },
+  { label: '🔵 Blue', value: '#3b82f6' },
+  { label: '🟢 Green', value: '#22c55e' },
+  { label: '🟣 Purple', value: '#a855f7' },
+  { label: '🟠 Orange', value: '#f97316' },
+  { label: '🩵 Cyan', value: '#06b6d4' },
+  { label: '🔴 Red', value: '#ef4444' },
+  { label: '$(edit) Custom hex color...', value: 'custom' },
+];
+
 export function activate(context: vscode.ExtensionContext): void {
   console.log('ERD Studio is now active');
 
@@ -160,6 +173,10 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   const decorationProvider = new SemanticFileDecorationProvider();
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
+
+  // Set context key so view/title menus only show when semantic dir exists
+  const fullSemanticDirPath = path.join(workspaceRoot, semanticDir);
+  void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
 
   // -------------------------------------------------------------------------
   // File watchers
@@ -508,9 +525,11 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
+        // Update context key so view/title menus appear
+        void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasSemanticDir', true);
         treeProvider.refresh();
         await new Promise(resolve => setTimeout(resolve, 100));
-        void vscode.window.showInformationMessage('Semantic domains directory created! Now create your first domain.');
+        void vscode.window.showInformationMessage('ERD Studio directory created! Now create your first domain.');
         await vscode.commands.executeCommand('dbtSemantic.createDomain');
       },
     ),
@@ -520,12 +539,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'dbtSemantic.addLayer',
       async () => {
+        // Step 1: Layer ID
         const id = await vscode.window.showInputBox({
-          prompt: 'Layer ID (lowercase, e.g., platinum)',
+          prompt: 'Layer name (lowercase, e.g., platinum)',
           placeHolder: 'e.g., platinum, staging, raw',
           ignoreFocusOut: true,
           validateInput: (value: string) => {
-            if (!value || !value.trim()) { return 'Layer ID is required'; }
+            if (!value || !value.trim()) { return 'Layer name is required'; }
             if (!/^[a-z][a-z0-9_-]*$/.test(value.trim())) { return 'Must start with lowercase letter, contain only lowercase letters, numbers, hyphens, underscores'; }
             if (layerService.hasLayer(value.trim())) { return `Layer "${value.trim()}" already exists`; }
             return undefined;
@@ -534,38 +554,9 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!id) return;
         const layerId = id.trim();
 
-        const label = await vscode.window.showInputBox({
-          prompt: 'Layer display name',
-          value: layerId.charAt(0).toUpperCase() + layerId.slice(1),
-          ignoreFocusOut: true,
-        });
-        if (label === undefined) return;
-
-        const abbreviation = await vscode.window.showInputBox({
-          prompt: 'Abbreviation for badges (3 characters)',
-          value: layerId.slice(0, 3).toUpperCase(),
-          ignoreFocusOut: true,
-          validateInput: (value: string) => {
-            if (!value || value.trim().length === 0) { return 'Abbreviation is required'; }
-            if (value.trim().length > 4) { return 'Abbreviation should be 3-4 characters'; }
-            return undefined;
-          },
-        });
-        if (abbreviation === undefined) return;
-
-        const colorOptions = [
-          { label: '⚪ Silver', value: '#a0a0a0' },
-          { label: '🟡 Gold', value: '#d4a800' },
-          { label: '🔵 Blue', value: '#3b82f6' },
-          { label: '🟢 Green', value: '#22c55e' },
-          { label: '🟣 Purple', value: '#a855f7' },
-          { label: '🟠 Orange', value: '#f97316' },
-          { label: '🔵 Cyan', value: '#06b6d4' },
-          { label: '🔴 Red', value: '#ef4444' },
-          { label: '$(edit) Custom hex color...', value: 'custom' },
-        ];
-        const colorPick = await vscode.window.showQuickPick(colorOptions, {
-          placeHolder: 'Select layer color',
+        // Step 2: Color
+        const colorPick = await vscode.window.showQuickPick(LAYER_COLOR_OPTIONS, {
+          placeHolder: `Select color for "${layerId}" layer`,
           ignoreFocusOut: true,
         });
         if (!colorPick) return;
@@ -585,25 +576,20 @@ export function activate(context: vscode.ExtensionContext): void {
           color = customColor;
         }
 
-        const creatablePick = await vscode.window.showQuickPick([
-          { label: 'Yes - allow creating domains in this layer', value: true },
-          { label: 'No - read-only layer (e.g., raw/staging)', value: false },
-        ], {
-          placeHolder: 'Allow creating domains in this layer?',
-          ignoreFocusOut: true,
-        });
-        if (!creatablePick) return;
+        // Auto-generate label and abbreviation from ID
+        const label = layerId.charAt(0).toUpperCase() + layerId.slice(1);
+        const abbreviation = layerId.slice(0, 3).toUpperCase();
 
         try {
           await layerService.addLayer({
             id: layerId,
-            label: label.trim() || layerId.charAt(0).toUpperCase() + layerId.slice(1),
-            abbreviation: abbreviation.trim().toUpperCase(),
+            label,
+            abbreviation,
             color,
-            creatable: creatablePick.value,
+            creatable: true,
           });
 
-          // Create directories for both stages
+          // Create directories for both editable stages
           for (const stage of EDITABLE_STAGES) {
             const layerDir = path.join(workspaceRoot, semanticDir, stage, layerId);
             if (!fs.existsSync(layerDir)) {
@@ -613,7 +599,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
           treeProvider.refresh();
           layerDecorationProvider.refresh();
-          void vscode.window.showInformationMessage(`Layer "${label.trim() || layerId}" added successfully.`);
+          void vscode.window.showInformationMessage(`Layer "${label}" added. Use Edit Layer to customize display name or abbreviation.`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to add layer: ${msg}`);
@@ -646,7 +632,6 @@ export function activate(context: vscode.ExtensionContext): void {
           { label: '$(edit) Rename Layer', value: 'rename' },
           { label: '$(symbol-color) Change Color', value: 'color' },
           { label: '$(tag) Change Abbreviation', value: 'abbreviation' },
-          { label: layer.creatable ? '$(lock) Make Non-Creatable' : '$(unlock) Make Creatable', value: 'creatable' },
         ];
         const editChoice = await vscode.window.showQuickPick(editOptions, {
           placeHolder: `Edit layer: ${layer.label}`,
@@ -662,14 +647,7 @@ export function activate(context: vscode.ExtensionContext): void {
               break;
             }
             case 'color': {
-              const colorOptions = [
-                { label: '⚪ Silver', value: '#a0a0a0' }, { label: '🟡 Gold', value: '#d4a800' },
-                { label: '🔵 Blue', value: '#3b82f6' }, { label: '🟢 Green', value: '#22c55e' },
-                { label: '🟣 Purple', value: '#a855f7' }, { label: '🟠 Orange', value: '#f97316' },
-                { label: '🔵 Cyan', value: '#06b6d4' }, { label: '🔴 Red', value: '#ef4444' },
-                { label: '$(edit) Custom hex color...', value: 'custom' },
-              ];
-              const colorPick = await vscode.window.showQuickPick(colorOptions, { placeHolder: 'Select new color' });
+              const colorPick = await vscode.window.showQuickPick(LAYER_COLOR_OPTIONS, { placeHolder: 'Select new color' });
               if (!colorPick) return;
               let color = colorPick.value;
               if (color === 'custom') {
@@ -694,10 +672,6 @@ export function activate(context: vscode.ExtensionContext): void {
               });
               if (newAbbrev === undefined) return;
               await layerService.updateLayer(layerId, { abbreviation: newAbbrev.trim().toUpperCase() });
-              break;
-            }
-            case 'creatable': {
-              await layerService.updateLayer(layerId, { creatable: !layer.creatable });
               break;
             }
           }
@@ -833,7 +807,11 @@ export function activate(context: vscode.ExtensionContext): void {
         'Save Config', 'Later',
       ).then(async (choice) => {
         if (choice === 'Save Config') {
-          await vscode.commands.executeCommand('dbtSemantic.initializeLayerConfig');
+          await layerService.saveConfig(detected);
+          layerService.invalidateCache();
+          treeProvider.refresh();
+          layerDecorationProvider.refresh();
+          void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
         }
       });
     }

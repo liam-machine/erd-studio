@@ -59,8 +59,7 @@
       {
         "command": "dbtSemantic.switchTreeStage",
         "title": "Switch Stage",
-        "category": "dbt",
-        "icon": "$(layers)"
+        "category": "dbt"
       },
       {
         "command": "dbtSemantic.renameDomain",
@@ -70,7 +69,8 @@
       {
         "command": "dbtSemantic.addLayer",
         "title": "Add Layer",
-        "category": "dbt"
+        "category": "dbt",
+        "icon": "$(add)"
       },
       {
         "command": "dbtSemantic.editLayer",
@@ -92,7 +92,7 @@
       "activitybar": [
         {
           "id": "dbt-semantic",
-          "title": "Semantic Domains",
+          "title": "ERD Studio",
           "icon": "media/icon.svg"
         }
       ]
@@ -101,7 +101,7 @@
       "dbt-semantic": [
         {
           "id": "dbtSemantic.domainTree",
-          "name": "Domains"
+          "name": "ERD Studio"
         }
       ]
     },
@@ -155,7 +155,7 @@
     "viewsWelcome": [
       {
         "view": "dbtSemantic.domainTree",
-        "contents": "No semantic domains found in this dbt project.\n\nSemantic domains help you visualize and design FK relationships between models, with built models shown in green and planned models in orange.\n\n[Get Started](command:dbtSemantic.setupSemanticDirectory)\n\nThis will create the directory structure and guide you to create your first domain."
+        "contents": "No ERD domains found in this project.\n\nERD Studio lets you design and visualise models, columns, and FK relationships through a full design-to-built lifecycle.\n\n[Set Up ERD Studio](command:dbtSemantic.setupSemanticDirectory)\n\nThis will create the directory structure and guide you to create your first domain."
       }
     ],
     "customEditors": [
@@ -198,14 +198,9 @@
       ],
       "view/title": [
         {
-          "command": "dbtSemantic.switchTreeStage",
-          "when": "view == dbtSemantic.domainTree",
-          "group": "navigation@1"
-        },
-        {
           "command": "dbtSemantic.addLayer",
-          "when": "view == dbtSemantic.domainTree",
-          "group": "navigation@2"
+          "when": "view == dbtSemantic.domainTree && dbtSemantic.hasSemanticDir",
+          "group": "navigation@1"
         }
       ]
     },

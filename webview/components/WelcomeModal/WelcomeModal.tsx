@@ -9,61 +9,34 @@ import { useCallback, useEffect } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
+import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import './WelcomeModal.css';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const STORAGE_KEY = 'dbt-semantic-designer:welcome-dismissed';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Check if the welcome modal should be shown (first time user).
- */
-function shouldShowWelcome(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== 'true';
-  } catch {
-    return true; // Show if localStorage unavailable
-  }
-}
-
-/**
- * Mark the welcome modal as dismissed.
- */
-function dismissWelcome(): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, 'true');
-  } catch {
-    // Ignore if localStorage unavailable
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function WelcomeModal() {
+  const vscode = useVsCodeApi();
   const domain = useEditorStore((s) => s.domain);
   const welcomeModalOpen = useEditorStore((s) => s.welcomeModalOpen);
   const setWelcomeModalOpen = useEditorStore((s) => s.setWelcomeModalOpen);
 
-  // Show welcome modal on first domain load
+  // Show welcome modal on first domain load (check vscode state for dismissal)
   useEffect(() => {
-    if (domain && shouldShowWelcome()) {
+    if (!domain) return;
+    const state = vscode.getState() as Record<string, unknown> | null;
+    if (!state?.welcomeDismissed) {
       setWelcomeModalOpen(true);
     }
-  }, [domain, setWelcomeModalOpen]);
+  }, [domain, vscode, setWelcomeModalOpen]);
 
-  // Handle "Get Started" button
+  // Handle "Get Started" button — persist dismissal to vscode state
   const handleGetStarted = useCallback(() => {
-    dismissWelcome();
+    const existing = (vscode.getState() as Record<string, unknown> | null) ?? {};
+    vscode.setState({ ...existing, welcomeDismissed: true });
     setWelcomeModalOpen(false);
-  }, [setWelcomeModalOpen]);
+  }, [vscode, setWelcomeModalOpen]);
 
   if (!welcomeModalOpen) {
     return null;
