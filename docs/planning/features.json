@@ -1,7 +1,7 @@
 {
   "project": {
     "name": "ERD Studio",
-    "description": "A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains, and enables interactive design of new models, columns, and relationships before they are built. Built items appear in green; planned items appear in orange. The dbt repo becomes the single source of truth for both lineage and semantic relationships.",
+    "description": "A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains using a three-stage architecture: Conceptual (violet), Logical (blue), and Physical (green). Engineers design models, columns, and relationships in the Logical stage and compare against the Physical stage to identify discrepancies -- missing columns, extra columns, and type mismatches. The dbt repo becomes the single source of truth for both lineage and semantic relationships.",
     "version": "0.1.0",
     "platform": "web",
     "tech_stack": {

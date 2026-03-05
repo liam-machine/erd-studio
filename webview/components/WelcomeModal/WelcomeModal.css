@@ -90,6 +90,73 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Stages List (vertical)
+   --------------------------------------------------------------------------- */
+
+.welcome-modal__stages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.welcome-modal__stage-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Steps (numbered workflow)
+   --------------------------------------------------------------------------- */
+
+.welcome-modal__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.welcome-modal__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.welcome-modal__step-number {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.welcome-modal__step-text {
+  font-size: 12px;
+  color: var(--editor-fg);
+  opacity: 0.85;
+  line-height: 20px;
+}
+
+.welcome-modal__step-text kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--input-bg);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
    Visual Guide Grid
    --------------------------------------------------------------------------- */
 
