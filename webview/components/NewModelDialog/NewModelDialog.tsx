@@ -127,9 +127,10 @@ export function NewModelDialog() {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [customColumns, setCustomColumns] = useState<ColumnDef[]>([]);
 
-  // Derived state — find the selected template from the store
+  // Derived state — find the selected template from the store.
+  // Fallback to a minimal empty template when no templates are loaded (e.g., physical stage).
   const template = useMemo(
-    () => templates.find((t) => t.id === templateId) ?? templates[0],
+    () => templates.find((t) => t.id === templateId) ?? templates[0] ?? { id: 'blank', label: 'Blank', prefix: '', description: '', columns: [] as import('../../../src/types/semantic').ColumnDef[] },
     [templateId, templates],
   );
 
@@ -141,9 +142,9 @@ export function NewModelDialog() {
     [domain],
   );
 
-  // Validation
+  // Validation (guard: template may be undefined when no templates are loaded)
   const errors = useMemo(
-    () => validateForm(modelName, template, leftEntity, rightEntity, existingModelNames),
+    () => template ? validateForm(modelName, template, leftEntity, rightEntity, existingModelNames) : {},
     [modelName, template, leftEntity, rightEntity, existingModelNames],
   );
 

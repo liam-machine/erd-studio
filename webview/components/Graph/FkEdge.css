@@ -112,6 +112,36 @@
   color: var(--stage-ghost);
 }
 
+/* Discrepancy label colour variants */
+.fk-edge__label--discrepancy-extra {
+  color: var(--discrepancy-extra);
+}
+
+.fk-edge__label--discrepancy-missing {
+  color: var(--stage-ghost);
+}
+
+.fk-edge__label--discrepancy-cardinality-mismatch {
+  color: var(--discrepancy-mismatch);
+}
+
+/* Cardinality mismatch midpoint badge */
+.fk-edge__mismatch-badge {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--discrepancy-mismatch);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(239, 68, 68, 0.4);
+}
+
 .fk-edge__label--dimmed {
   opacity: 0.25;
   filter: grayscale(0.4);

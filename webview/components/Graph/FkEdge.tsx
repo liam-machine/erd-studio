@@ -111,6 +111,10 @@ function FkEdgeComponent({
   if (!data) return null;
   const { cardinality, stage, discrepancyStatus, fromModel, toModel, dimmed } = data;
 
+  // For cardinality mismatch edges, pull the mismatch details from the report
+  // The edge data only has status — we need to find the original relationship discrepancy
+  // to get both cardinalities. For now, we show a visual indicator on the edge itself.
+
   // Parse which side each handle is on (top/right/bottom/left)
   const sourceSide = parseSideFromHandle(sourceHandleId);
   const targetSide = parseSideFromHandle(targetHandleId);
@@ -208,10 +212,19 @@ function FkEdgeComponent({
   const srcLabelClass = sourceLabel === '*' ? ' fk-edge__label--many' : '';
   const tgtLabelClass = targetLabel === '*' ? ' fk-edge__label--many' : '';
 
+  // Use discrepancy colour for labels when edge has a discrepancy status
+  const labelColorClass = discrepancyStatus
+    ? `fk-edge__label--discrepancy-${discrepancyStatus}`
+    : `fk-edge__label--${stage ?? 'logical'}`;
+
   // Labels sit close to the node, in the gap before the shortened path.
   // Use adjusted coordinates so labels align with distributed connection points.
   const srcLabel = offsetPoint(adjustedSourceX, adjustedSourceY, sourcePosition, LABEL_OFFSET);
   const tgtLabel = offsetPoint(adjustedTargetX, adjustedTargetY, targetPosition, LABEL_OFFSET);
+
+  // Midpoint for cardinality mismatch badge
+  const midX = (adjustedSourceX + adjustedTargetX) / 2;
+  const midY = (adjustedSourceY + adjustedTargetY) / 2;
 
   return (
     <>
@@ -230,7 +243,7 @@ function FkEdgeComponent({
       />
       <EdgeLabelRenderer>
         <span
-          className={`fk-edge__label fk-edge__label--${stage ?? 'logical'}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+          className={`fk-edge__label ${labelColorClass}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
           style={{
             transform: `translate(-50%, -50%) translate(${srcLabel.x}px, ${srcLabel.y}px)`,
           }}
@@ -238,13 +251,24 @@ function FkEdgeComponent({
           {sourceLabel}
         </span>
         <span
-          className={`fk-edge__label fk-edge__label--${stage ?? 'logical'}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+          className={`fk-edge__label ${labelColorClass}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
           style={{
             transform: `translate(-50%, -50%) translate(${tgtLabel.x}px, ${tgtLabel.y}px)`,
           }}
         >
           {targetLabel}
         </span>
+        {discrepancyStatus === 'cardinality-mismatch' && (
+          <span
+            className="fk-edge__mismatch-badge"
+            style={{
+              transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
+            }}
+            title="Cardinality differs between stages"
+          >
+            !
+          </span>
+        )}
       </EdgeLabelRenderer>
     </>
   );

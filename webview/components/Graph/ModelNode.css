@@ -43,6 +43,11 @@
   opacity: 0.5;
 }
 
+/* Discrepancy: extra model — amber glow (model exists here but not in comparison) */
+.model-node--disc-extra {
+  box-shadow: 0 0 0 2px var(--discrepancy-extra), 0 0 12px 2px rgba(245, 158, 11, 0.35);
+}
+
 /* Search dimming (F402) — applied when node doesn't match search query */
 .model-node--dimmed {
   opacity: 0.25;
@@ -201,6 +206,61 @@
   transition: box-shadow 0.15s ease, background 0.15s ease, filter 0.15s ease;
 }
 
+/* Column discrepancy: extra — amber left highlight */
+.model-node__column--disc-extra {
+  background: rgba(245, 158, 11, 0.1);
+  border-left: 2px solid var(--discrepancy-extra);
+}
+
+/* Column discrepancy: type mismatch — red left highlight */
+.model-node__column--disc-mismatch {
+  background: rgba(239, 68, 68, 0.08);
+  border-left: 2px solid var(--discrepancy-mismatch);
+}
+
+/* Column discrepancy: missing — ghost row */
+.model-node__column--disc-missing {
+  opacity: 0.45;
+  cursor: default;
+  font-style: italic;
+}
+
+.model-node__column--disc-missing .model-node__col-name {
+  text-decoration: line-through;
+  color: var(--stage-ghost);
+}
+
+/* Column discrepancy badge (inline small label) */
+.model-node__col-disc-badge {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.model-node__col-disc-badge--extra {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--discrepancy-extra);
+}
+
+.model-node__col-disc-badge--missing {
+  background: rgba(156, 163, 175, 0.2);
+  color: var(--stage-ghost);
+}
+
+/* Type mismatch arrow indicator */
+.model-node__col-type--mismatch {
+  color: var(--discrepancy-mismatch);
+}
+
+.model-node__col-type-arrow {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
 /* Separator between column groups */
 .model-node__separator {
   display: flex;
@@ -219,6 +279,17 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--warning-fg);
+}
+
+/* Discrepancy separator variant — uses ghost colours */
+.model-node__separator--disc {
+  border-top: 1px dashed var(--stage-ghost);
+  border-bottom: 1px dashed var(--stage-ghost);
+  background: rgba(156, 163, 175, 0.06);
+}
+
+.model-node__separator-label--missing {
+  color: var(--stage-ghost);
 }
 
 /* Subtle separator variant (no label, just a line) for canvas view */
@@ -316,6 +387,11 @@
   text-align: center;
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #888);
+}
+
+.model-node__footer-disc {
+  color: var(--discrepancy-extra);
+  font-weight: 500;
 }
 
 /* -----------------------------------------------------------------------

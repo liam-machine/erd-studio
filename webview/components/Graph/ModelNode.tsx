@@ -18,6 +18,7 @@ import { memo, useCallback, useMemo, useEffect, useRef, useState, type CSSProper
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
 import type { ModelRole } from '../../../src/types/semantic';
+import type { ColumnDiscrepancy } from '../../../src/types/discrepancy';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
@@ -96,9 +97,11 @@ const NODE_HANDLE_STYLE: CSSProperties = {
 interface ColumnRowProps {
   column: ColumnDisplay;
   modelName: string;
+  /** Column-level discrepancy indicator (from cross-stage comparison). */
+  discrepancy?: ColumnDiscrepancy;
 }
 
-function ColumnRow({ column, modelName }: ColumnRowProps) {
+function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
   // Highlight when this column is involved in a selected edge
   const isHighlighted = useEditorStore(
     (s) => s.highlightedColumns?.has?.(`${modelName}:${column.name}`) ?? false
@@ -228,11 +231,14 @@ function ColumnRow({ column, modelName }: ColumnRowProps) {
   const dragClass = isDragging ? 'model-node__column--dragging' : '';
   const dropTargetClass = isDropTarget ? 'model-node__column--drop-target' : '';
   const highlightClass = isHighlighted ? 'model-node__column--relationship-highlight' : '';
+  const discrepancyClass = discrepancy?.status === 'extra' ? 'model-node__column--disc-extra'
+    : discrepancy?.status === 'type-mismatch' ? 'model-node__column--disc-mismatch'
+    : '';
 
   return (
     <div
       ref={elementRef}
-      className={`model-node__column ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} nodrag`.trim()}
+      className={`model-node__column ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} ${discrepancyClass} nodrag`.trim()}
       data-column-name={column.name}
       onMouseEnter={handleMouseEnter}
       {...handlers}
@@ -252,7 +258,16 @@ function ColumnRow({ column, modelName }: ColumnRowProps) {
       <span className="model-node__col-name" title={column.name}>
         {column.name}
       </span>
-      <span className="model-node__col-type">{column.dataType}</span>
+      {discrepancy?.status === 'type-mismatch' ? (
+        <span className="model-node__col-type model-node__col-type--mismatch" title={`${discrepancy.sourceDataType} in this stage, ${discrepancy.targetDataType} in comparison`}>
+          {discrepancy.sourceDataType} <span className="model-node__col-type-arrow">&rarr;</span> {discrepancy.targetDataType}
+        </span>
+      ) : (
+        <span className="model-node__col-type">{column.dataType}</span>
+      )}
+      {discrepancy?.status === 'extra' && (
+        <span className="model-node__col-disc-badge model-node__col-disc-badge--extra" title="Not in comparison stage">extra</span>
+      )}
       {column.scdType != null && SCD_BADGE[column.scdType] && (
         <span
           className="model-node__col-badge model-node__col-badge--scd"
@@ -278,7 +293,7 @@ function ColumnRow({ column, modelName }: ColumnRowProps) {
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, stage, layer, layerConfig, columns, hasRationale, grain, modelRole, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion } = data;
+  const { modelName, stage, layer, layerConfig, columns, hasRationale, grain, modelRole, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion, discrepancy } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
 
   // F405: Compute visible columns based on expansion state
@@ -312,12 +327,29 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
     [displayColumns]
   );
 
+  // Build column discrepancy lookup (keyed by column name)
+  const columnDiscrepancyMap = useMemo(() => {
+    if (!discrepancy?.columns?.length) return undefined;
+    const map = new Map<string, ColumnDiscrepancy>();
+    for (const cd of discrepancy.columns) {
+      map.set(cd.name, cd);
+    }
+    return map;
+  }, [discrepancy]);
+
+  // Missing columns (ghost rows) — only shown when expanded
+  const missingColumns = useMemo(() => {
+    if (!isExpanded || !columnDiscrepancyMap) return [];
+    return (discrepancy?.columns ?? []).filter((cd) => cd.status === 'missing');
+  }, [isExpanded, columnDiscrepancyMap, discrepancy]);
+
   // Determine CSS modifier for stage/ghost
+  const isDiscExtra = discrepancy?.status === 'extra';
   const stageClass = isGhost ? 'ghost' : stage;
 
   return (
     <div
-      className={`model-node model-node--${stageClass}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}`}
+      className={`model-node model-node--${stageClass}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}`}
       data-model-name={modelName}
       onContextMenu={handleContextMenu}
     >
@@ -360,6 +392,11 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         >
           {layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
+        {isDiscExtra && (
+          <span className="model-node__discrepancy-badge" title="Model not in comparison stage">
+            extra
+          </span>
+        )}
       </div>
 
       {/* Grain subtitle */}
@@ -376,6 +413,7 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
             key={col.name}
             column={col}
             modelName={modelName}
+            discrepancy={columnDiscrepancyMap?.get(col.name)}
           />
         ))}
 
@@ -401,7 +439,23 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
           </button>
         )}
 
-        {columns.length === 0 && (
+        {/* Ghost rows for missing columns (discrepancy overlay) */}
+        {missingColumns.length > 0 && (
+          <>
+            <div className="model-node__separator model-node__separator--disc">
+              <span className="model-node__separator-label model-node__separator-label--missing">missing in this stage</span>
+            </div>
+            {missingColumns.map((cd) => (
+              <div key={`ghost-${cd.name}`} className="model-node__column model-node__column--disc-missing nodrag">
+                <span className="model-node__col-name">{cd.name}</span>
+                <span className="model-node__col-type">{cd.targetDataType ?? ''}</span>
+                <span className="model-node__col-disc-badge model-node__col-disc-badge--missing">missing</span>
+              </div>
+            ))}
+          </>
+        )}
+
+        {columns.length === 0 && !missingColumns.length && (
           <div className="model-node__empty">No columns</div>
         )}
       </div>
@@ -409,6 +463,14 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
       {/* Footer */}
       <div className="model-node__footer">
         {columns.length} {columns.length === 1 ? 'column' : 'columns'}
+        {discrepancy && discrepancy.columns.length > 0 && (() => {
+          const issues = discrepancy.columns.filter((c) => c.status !== 'matched').length;
+          return issues > 0 ? (
+            <span className="model-node__footer-disc" title={`${issues} column discrepanc${issues === 1 ? 'y' : 'ies'}`}>
+              {' '}&middot; {issues} diff{issues !== 1 ? 's' : ''}
+            </span>
+          ) : null;
+        })()}
       </div>
     </div>
   );

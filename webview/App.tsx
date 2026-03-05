@@ -41,6 +41,7 @@ import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddE
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
+import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { transformDomain } from './lib/graphTransformer';
 import { stageNodeColor } from './lib/stageColors';
@@ -656,6 +657,9 @@ function EditorCanvas() {
 
       {/* Edge context menu (F401) */}
       {contextMenu && <ContextMenu />}
+
+      {/* Discrepancy summary panel (bottom-left, above legend) */}
+      <DiscrepancyPanel />
 
       {/* Legend panel (bottom-left) */}
       <Legend />
