@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { DomainService } from './services/domainService';
 import { LayerService } from './services/layerService';
 import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type SemanticDomain, type Stage } from './types/semantic';
+import { hasLegacyLayout, scanV2Domains, migrateV2ToV3 } from './services/migrationService';
 import { ManifestService } from './services/manifestService';
 import { TemplateService } from './services/templateService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
@@ -791,6 +792,51 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         if (pick) {
           await treeProvider.setStage(pick.value);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'dbtSemantic.migrateDomains',
+      async () => {
+        if (!hasLegacyLayout(workspaceRoot, semanticDir)) {
+          void vscode.window.showInformationMessage(
+            'No legacy domain directories found. Your project is already using the unified format.',
+          );
+          return;
+        }
+
+        const scan = scanV2Domains(workspaceRoot, semanticDir);
+        if (scan.domains.length === 0) {
+          void vscode.window.showInformationMessage(
+            'Legacy directories exist but contain no domain files.',
+          );
+          return;
+        }
+
+        const layerSummary = new Map<string, number>();
+        for (const d of scan.domains) {
+          layerSummary.set(d.layer, (layerSummary.get(d.layer) ?? 0) + 1);
+        }
+        const layerLines = Array.from(layerSummary.entries())
+          .map(([layer, count]) => `  ${layer}: ${count} domain(s)`)
+          .join('\n');
+
+        const confirm = await vscode.window.showWarningMessage(
+          `Migrate ${scan.domains.length} domain(s) from ${scan.fileCount} files to unified v3 format?\n\n${layerLines}\n\nThis will merge conceptual + logical files and remove old stage directories.`,
+          { modal: true },
+          'Migrate',
+        );
+        if (confirm !== 'Migrate') { return; }
+
+        try {
+          const count = migrateV2ToV3(workspaceRoot, semanticDir);
+          treeProvider.refresh();
+          void vscode.window.showInformationMessage(
+            `Successfully migrated ${count} domain(s) to unified format.`,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Migration failed: ${msg}`);
         }
       },
     ),

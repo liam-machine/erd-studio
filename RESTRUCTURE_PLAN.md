@@ -75,8 +75,8 @@ Stages move entirely into the editor (tabs), no longer in the tree.
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | Types & Schema | Not started |
-| 2 | Migration Function | Not started |
+| 1 | Types & Schema | ✅ Complete |
+| 2 | Migration Function | ✅ Complete |
 | 3 | DomainService Rewrite | Not started |
 | 4 | Extension Commands | Not started |
 | 5 | SemanticEditorProvider | Not started |

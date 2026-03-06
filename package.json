@@ -85,6 +85,11 @@
         "command": "dbtSemantic.initializeLayerConfig",
         "title": "Initialize Layer Configuration",
         "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.migrateDomains",
+        "title": "Migrate Domains to Unified Format (v3)",
+        "category": "dbt"
       }
     ],
     "viewsContainers": {

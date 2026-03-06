@@ -79,7 +79,6 @@ export class DomainTreeProvider
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private readonly semanticDir: string;
   private currentStage: Stage;
-  private treeView: vscode.TreeView<TreeElement> | undefined;
 
   // TreeDragAndDropController properties
   readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
@@ -100,8 +99,7 @@ export class DomainTreeProvider
    * Set the tree view reference so we can update its description.
    * Must be called after createTreeView().
    */
-  setTreeView(treeView: vscode.TreeView<TreeElement>): void {
-    this.treeView = treeView;
+  setTreeView(_treeView: vscode.TreeView<TreeElement>): void {
     this.updateTreeViewDescription();
   }
 

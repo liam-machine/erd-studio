@@ -16,7 +16,7 @@ export type Layer = string;
 export type Stage = 'conceptual' | 'logical' | 'physical';
 
 /** The current schema version written by this extension. */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Column definitions
@@ -165,6 +165,17 @@ export interface ViewConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Stage data (shared structure for conceptual/logical sections)
+// ---------------------------------------------------------------------------
+
+/** The models, relationships, and view config for a single design stage. */
+export interface StageData {
+  models: SemanticModel[];
+  relationships: Relationship[];
+  viewConfig: ViewConfig;
+}
+
+// ---------------------------------------------------------------------------
 // Top-level domain
 // ---------------------------------------------------------------------------
 
@@ -187,6 +198,23 @@ export interface SemanticDomain {
   viewConfig: ViewConfig;
 }
 
+/**
+ * Unified domain file format (v3).
+ *
+ * A single JSON file at erd-studio/{layer}/{domain}.json containing both
+ * conceptual and logical stage data. Replaces the v2 layout where each
+ * stage had its own file in a separate directory.
+ */
+export interface UnifiedDomain {
+  schemaVersion: number;
+  domain: string;
+  layer: Layer;
+  description: string;
+  modelFolder?: string;
+  conceptual: StageData;
+  logical: StageData;
+}
+
 // ---------------------------------------------------------------------------
 // Summary (lightweight, for tree view listing)
 // ---------------------------------------------------------------------------
@@ -197,8 +225,12 @@ export interface DomainSummary {
   domain: string;
   /** Layer derived from parent directory name. */
   layer: Layer;
-  /** Stage derived from grandparent directory name. */
-  stage: Stage;
+  /**
+   * Stage derived from path. Optional in v3 unified format where a single
+   * file contains both stages — will be removed entirely once all consumers
+   * are migrated (Phase 6/9).
+   */
+  stage?: Stage;
   /** Absolute path to the domain JSON file. */
   filePath: string;
 }

@@ -58,11 +58,12 @@ describe('DomainTreeProvider', () => {
   });
 
   describe('getChildren (root)', () => {
-    it('returns three layer nodes at root', () => {
+    it('returns stage header plus three layer nodes at root', () => {
       const children = provider.getChildren(undefined);
 
-      expect(children).toHaveLength(3);
+      expect(children).toHaveLength(4);
       expect(children).toEqual([
+        { type: 'stageHeader' },
         { type: 'layer', layer: 'bronze' },
         { type: 'layer', layer: 'silver' },
         { type: 'layer', layer: 'gold' },
