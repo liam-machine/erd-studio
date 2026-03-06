@@ -347,21 +347,19 @@ describe('DomainService', () => {
       expect(pkCol!.isPrimaryKey).toBe(true);
     });
 
-    it('marks missing models as ghosts with existsInManifest=false', () => {
+    it('excludes models not found in manifest from physical domain', () => {
       const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
 
       const orders = result.models.find(m => m.name === 'fct_orders');
-      expect(orders).toBeDefined();
-      expect(orders!.existsInManifest).toBe(false);
-      expect(orders!.columns).toHaveLength(2); // keeps logical columns
+      expect(orders).toBeUndefined();
+      expect(result.models).toHaveLength(1); // only dim_customer
     });
 
-    it('copies relationships from logical domain', () => {
+    it('excludes relationships referencing models not in manifest', () => {
       const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
 
-      expect(result.relationships).toHaveLength(1);
-      expect(result.relationships[0].fromModel).toBe('fct_orders');
-      expect(result.relationships[0].cardinality).toBe('many-to-one');
+      // fct_orders is not in manifest, so the relationship from fct_orders → dim_customer is excluded
+      expect(result.relationships).toHaveLength(0);
     });
 
     it('copies viewConfig positions from logical domain', () => {

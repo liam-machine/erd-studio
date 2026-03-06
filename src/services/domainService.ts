@@ -167,10 +167,14 @@ export class DomainService {
   ): DisplayDomain {
     const logicalStage = unifiedDomain.logical;
 
-    const models: DisplayModel[] = logicalStage.models.map(model => {
-      const manifestModel = manifest.models.get(model.name);
+    const manifestModelNames = new Set<string>();
 
-      if (manifestModel) {
+    const models: DisplayModel[] = logicalStage.models
+      .filter(model => manifest.models.has(model.name))
+      .map(model => {
+        const manifestModel = manifest.models.get(model.name)!;
+        manifestModelNames.add(model.name);
+
         const columns: DisplayColumn[] = manifestModel.columns.map(col => ({
           name: col.name,
           dataType: col.data_type ?? '',
@@ -203,37 +207,18 @@ export class DomainService {
           modelRole: model.modelRole,
           existsInManifest: true,
         };
-      }
+      });
 
-      // Ghost model — not found in manifest
-      return {
-        name: model.name,
-        schema: model.schema ?? '',
-        description: model.description ?? '',
-        columns: (model.columns ?? []).map(col => ({
-          name: col.name,
-          dataType: col.dataType,
-          description: col.description,
-          isPrimaryKey: col.isPrimaryKey ?? false,
-          isForeignKey: col.isForeignKey ?? false,
-          isNaturalKey: col.isNaturalKey ?? false,
-          scdType: col.scdType,
-          additiveType: col.additiveType,
-        })),
-        rationale: model.rationale,
-        grain: model.grain,
-        modelRole: model.modelRole,
-        existsInManifest: false,
-      };
-    });
-
-    const relationships: DisplayRelationship[] = logicalStage.relationships.map(rel => ({
-      fromModel: rel.fromModel,
-      fromColumn: rel.fromColumn,
-      toModel: rel.toModel,
-      toColumn: rel.toColumn,
-      cardinality: rel.cardinality,
-    }));
+    // Only include relationships where both models exist in the manifest
+    const relationships: DisplayRelationship[] = logicalStage.relationships
+      .filter(rel => manifestModelNames.has(rel.fromModel) && manifestModelNames.has(rel.toModel))
+      .map(rel => ({
+        fromModel: rel.fromModel,
+        fromColumn: rel.fromColumn,
+        toModel: rel.toModel,
+        toColumn: rel.toColumn,
+        cardinality: rel.cardinality,
+      }));
 
     return {
       schemaVersion: unifiedDomain.schemaVersion,

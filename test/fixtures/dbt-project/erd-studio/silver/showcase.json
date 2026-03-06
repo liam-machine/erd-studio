@@ -178,6 +178,11 @@
             "name": "event_type",
             "dataType": "VARCHAR",
             "description": "Type of event — extra column not in physical"
+          },
+          {
+            "name": "test",
+            "dataType": "STRING",
+            "description": ""
           }
         ]
       },
@@ -214,6 +219,27 @@
         "rationale": {
           "purpose": "k"
         }
+      },
+      {
+        "name": "abc",
+        "description": "",
+        "columns": [
+          {
+            "name": "sefsewwefwef",
+            "dataType": "STRING",
+            "description": ""
+          },
+          {
+            "name": "wefew",
+            "dataType": "INT",
+            "description": ""
+          },
+          {
+            "name": "wefewf",
+            "dataType": "STRING",
+            "description": ""
+          }
+        ]
       }
     ],
     "relationships": [
@@ -229,6 +255,13 @@
         "fromColumn": "work_lot_id",
         "toModel": "dim_work_lot",
         "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "abc",
+        "fromColumn": "wefew",
+        "toModel": "dim_location",
+        "toColumn": "site_name",
         "cardinality": "many-to-one"
       }
     ],
@@ -249,6 +282,10 @@
         "dim_location": {
           "x": 771,
           "y": 303
+        },
+        "abc": {
+          "x": 517,
+          "y": 34
         }
       }
     }
