@@ -56,21 +56,23 @@ export function StageTabs({ activeStage, readOnly }: StageTabsProps) {
 
   return (
     <div className="stage-tabs" role="tablist" aria-label="Design stage">
-      {STAGE_LABELS.map(({ stage, label, shortcut }) => (
-        <button
-          key={stage}
-          className={`stage-tabs__tab${stage === activeStage ? ' stage-tabs__tab--active' : ''}`}
-          onClick={() => handleTabClick(stage)}
-          role="tab"
-          aria-selected={stage === activeStage}
-          title={`${label} stage (${shortcut})`}
-        >
-          {label}
-        </button>
-      ))}
-      {readOnly && (
-        <span className="stage-tabs__readonly-badge">Read-only</span>
-      )}
+      {STAGE_LABELS.map(({ stage, label, shortcut }) => {
+        const isActive = stage === activeStage;
+        const showLock = isActive && readOnly;
+        return (
+          <button
+            key={stage}
+            className={`stage-tabs__tab${isActive ? ' stage-tabs__tab--active' : ''}${showLock ? ' stage-tabs__tab--readonly' : ''}`}
+            onClick={() => handleTabClick(stage)}
+            role="tab"
+            aria-selected={isActive}
+            title={`${label} stage (${shortcut})${showLock ? ' — read-only' : ''}`}
+          >
+            {showLock && <span className="stage-tabs__lock" aria-hidden="true">🔒</span>}
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }

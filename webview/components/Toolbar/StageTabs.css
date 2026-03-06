@@ -8,10 +8,14 @@
 .stage-tabs {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 2px;
-  background: rgba(128, 128, 128, 0.08);
-  border-radius: 4px;
-  padding: 2px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 4px 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .stage-tabs__tab {
@@ -44,9 +48,7 @@
   color: var(--button-fg);
 }
 
-.stage-tabs__readonly-badge {
-  font-size: 10px;
-  opacity: 0.7;
-  margin-left: 4px;
-  font-style: italic;
+.stage-tabs__lock {
+  font-size: 9px;
+  line-height: 1;
 }

@@ -5,6 +5,15 @@
  * tokens from webview/styles/theme.css for consistent dark/light support.
  */
 
+/* Outer container: stacks controls above stage tabs, no gap (attached look) */
+.toolbar-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* Inner controls row */
 .toolbar {
   display: flex;
   align-items: center;
@@ -14,6 +23,13 @@
   border: 1px solid var(--panel-border);
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* When toolbar is attached to stage tabs below, flatten bottom corners */
+.toolbar--attached-bottom {
+  border-radius: 6px 6px 0 0;
+  border-bottom: none;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
 }
 
 /* ---------------------------------------------------------------------------

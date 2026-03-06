@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 3,
+  "domain": "showcase",
+  "layer": "silver",
+  "description": "Showcase domain for developer testing — has data across all three stages with deliberate discrepancies",
+  "modelFolder": "models/silver",
+  "conceptual": {
+    "models": [
+      {
+        "name": "dim_project",
+        "description": "Project dimension — tracks construction projects"
+      },
+      {
+        "name": "dim_work_lot",
+        "description": "Work lot dimension — individual work packages within a project"
+      },
+      {
+        "name": "dim_contractor",
+        "description": "Contractor dimension — exists only in conceptual (missing from logical/physical)"
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "dim_work_lot",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "one-to-one"
+      },
+      {
+        "fromModel": "dim_contractor",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot",
+        "fromColumn": "contractor_id",
+        "toModel": "dim_contractor",
+        "toColumn": "contractor_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "dim_project": {
+          "x": 449,
+          "y": 210
+        },
+        "dim_work_lot": {
+          "x": 100,
+          "y": 300
+        },
+        "dim_contractor": {
+          "x": 500,
+          "y": 500
+        }
+      }
+    }
+  },
+  "logical": {
+    "models": [
+      {
+        "name": "dim_project",
+        "schema": "silver",
+        "description": "Project dimension table",
+        "grain": "One row per project",
+        "modelRole": "conformed-dim",
+        "rationale": {
+          "purpose": "Central project reference shared across domains",
+          "design": "Conformed dimension for consistent project attributes",
+          "grainChoice": "Natural grain — each project is uniquely identified"
+        },
+        "columns": [
+          {
+            "name": "project_id",
+            "dataType": "INT",
+            "description": "Surrogate key for project",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "project_name",
+            "dataType": "VARCHAR",
+            "description": "Project name"
+          },
+          {
+            "name": "project_code",
+            "dataType": "VARCHAR",
+            "description": "Business project code — extra column not in physical (discrepancy)"
+          },
+          {
+            "name": "region",
+            "dataType": "VARCHAR",
+            "description": "Geographic region — extra column not in physical",
+            "isNaturalKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_work_lot",
+        "schema": "silver",
+        "description": "Work lot dimension table",
+        "grain": "One row per work lot",
+        "modelRole": "domain-dim",
+        "rationale": {
+          "purpose": "Tracks individual work packages and their lifecycle",
+          "design": "SCD Type 2 on status to track historical state changes",
+          "scdStrategy": "Status changes tracked via SCD2; name is Type 1 overwrite"
+        },
+        "columns": [
+          {
+            "name": "work_lot_id",
+            "dataType": "INT",
+            "description": "Surrogate key for work lot",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "project_id",
+            "dataType": "INT",
+            "description": "FK to dim_project",
+            "isForeignKey": true
+          },
+          {
+            "name": "name",
+            "dataType": "VARCHAR",
+            "description": "Work lot name",
+            "scdType": 1
+          },
+          {
+            "name": "status",
+            "dataType": "STRING",
+            "description": "Current status — type mismatch vs physical (STRING vs VARCHAR)",
+            "scdType": 2
+          },
+          {
+            "name": "priority",
+            "dataType": "INT",
+            "description": "Work lot priority level — extra column not in physical"
+          }
+        ]
+      },
+      {
+        "name": "fct_work_events",
+        "schema": "silver",
+        "description": "Work events fact table — exists in logical and physical but missing from conceptual",
+        "grain": "One row per work event",
+        "modelRole": "transaction-fact",
+        "rationale": {
+          "purpose": "Records discrete work events against work lots",
+          "measures": "Amount is fully additive across all dimensions"
+        },
+        "columns": [
+          {
+            "name": "event_id",
+            "dataType": "INT",
+            "description": "Event surrogate key",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "dataType": "INT",
+            "description": "FK to dim_work_lot",
+            "isForeignKey": true
+          },
+          {
+            "name": "event_date",
+            "dataType": "DATE",
+            "description": "Date of the event"
+          },
+          {
+            "name": "amount",
+            "dataType": "NUMERIC",
+            "description": "Event amount",
+            "additiveType": "additive"
+          },
+          {
+            "name": "event_type",
+            "dataType": "VARCHAR",
+            "description": "Type of event — extra column not in physical"
+          }
+        ]
+      },
+      {
+        "name": "dim_location",
+        "schema": "silver",
+        "description": "Location dimension — exists only in logical (missing from conceptual and physical)",
+        "grain": "One row per location",
+        "modelRole": "domain-dim",
+        "columns": [
+          {
+            "name": "location_id",
+            "dataType": "INT",
+            "description": "Location surrogate key",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "site_name",
+            "dataType": "VARCHAR",
+            "description": "Construction site name",
+            "isNaturalKey": true
+          },
+          {
+            "name": "latitude",
+            "dataType": "FLOAT",
+            "description": "GPS latitude"
+          },
+          {
+            "name": "longitude",
+            "dataType": "FLOAT",
+            "description": "GPS longitude"
+          }
+        ],
+        "rationale": {
+          "purpose": "k"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "dim_work_lot",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_events",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "dim_project": {
+          "x": 449,
+          "y": 606
+        },
+        "dim_work_lot": {
+          "x": 100,
+          "y": 300
+        },
+        "fct_work_events": {
+          "x": 24,
+          "y": -44
+        },
+        "dim_location": {
+          "x": 771,
+          "y": 303
+        }
+      }
+    }
+  }
+}

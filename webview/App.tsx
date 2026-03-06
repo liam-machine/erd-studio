@@ -171,6 +171,9 @@ function EditorCanvas() {
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
           }
+          if (!msg.welcomeDismissed) {
+            useEditorStore.getState().setWelcomeModalOpen(true);
+          }
           break;
         case 'domainUpdated':
           setDomain(msg.payload);
@@ -658,7 +661,7 @@ function EditorCanvas() {
       {/* Edge context menu (F401) */}
       {contextMenu && <ContextMenu />}
 
-      {/* Discrepancy summary panel (bottom-left, above legend) */}
+      {/* Discrepancy summary panel (bottom-right, avoids legend overlap) */}
       <DiscrepancyPanel />
 
       {/* Legend panel (bottom-left) */}

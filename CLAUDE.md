@@ -149,6 +149,17 @@ The extension migrated from a **stage-first** layout (`erd-studio/{stage}/{layer
 - **In-memory v2 compat** — `getDomain()` can read v2 files and convert in memory. Write path always produces v3.
 - **Missing siblings** — if only one stage file exists (e.g. conceptual but no logical), the missing stage gets empty defaults.
 
+## Developer Testing in VS Code
+
+To test the extension in development mode, open the **fixture dbt project** as the workspace:
+
+1. Press **F5** in the extension project to launch the Extension Development Host
+2. In the dev host, open `test/fixtures/dbt-project` as the workspace folder
+3. The sidebar tree shows domains under Silver and Gold layers
+4. Open **ppw-work-lot** for the richest sample data (35+ models, 40 relationships)
+
+This fixture project contains `dbt_project.yml`, a `target/manifest.json`, layer config, templates, and several domain files across silver/gold layers.
+
 ## Testing the Webview UI in Chrome
 
 The webview runs inside VS Code's sandboxed iframe, making it hard to inspect visually. Use this workflow to render the full webview in a regular Chrome tab using browser automation tools.

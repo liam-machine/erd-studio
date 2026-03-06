@@ -27,6 +27,8 @@ import type { Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, Mod
 export interface DomainLoadedMessage {
   type: 'domainLoaded';
   payload: DisplayDomain;
+  /** Whether the user has already dismissed the welcome modal (persisted in globalState). */
+  welcomeDismissed?: boolean;
 }
 
 /**
@@ -350,9 +352,18 @@ export interface ToggleDiscrepancyMessage {
   payload: { enabled: boolean; compareAgainst?: Stage };
 }
 
+/**
+ * Notification that the user dismissed the welcome modal.
+ * Extension persists this in globalState so it never shows again.
+ */
+export interface DismissWelcomeMessage {
+  type: 'dismissWelcome';
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
+  | DismissWelcomeMessage
   | AddModelMessage
   | AddColumnMessage
   | RemoveColumnMessage

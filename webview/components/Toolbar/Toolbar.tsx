@@ -7,6 +7,9 @@
  * - Auto Layout button
  * - New Model button (Phase 2)
  *
+ * Stage tabs sit above the controls in a stacked two-row layout, all within
+ * a single top-center Panel to avoid overlap when the sidebar narrows the editor.
+ *
  * Uses React Flow's zoom/pan APIs and the editor store for domain data.
  */
 
@@ -342,241 +345,241 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   // --- Render --------------------------------------------------------------
 
   return (
-    <Panel position="top-center" className="toolbar">
-      {/* Domain info */}
-      <div className="toolbar__section toolbar__domain">
-        <span className="toolbar__domain-name">{domain.domain}</span>
-        <span
-          className={`toolbar__layer-badge${layerColor ? '' : ` toolbar__layer-badge--${domain.layer}`}`}
-          style={layerColor ? {
-            backgroundColor: `${layerColor}33`, // 20% opacity
-            color: layerColor,
-          } : undefined}
-        >
-          {layerAbbrev}
-        </span>
-      </div>
+      <Panel position="top-center" className="toolbar-container">
+        {/* Row 1: Controls */}
+        <div className="toolbar toolbar--attached-bottom">
+        {/* Domain info */}
+        <div className="toolbar__section toolbar__domain">
+          <span className="toolbar__domain-name">{domain.domain}</span>
+          <span
+            className={`toolbar__layer-badge${layerColor ? '' : ` toolbar__layer-badge--${domain.layer}`}`}
+            style={layerColor ? {
+              backgroundColor: `${layerColor}33`, // 20% opacity
+              color: layerColor,
+            } : undefined}
+          >
+            {layerAbbrev}
+          </span>
+        </div>
 
-      {/* Divider */}
-      <div className="toolbar__divider" />
+        {/* Divider */}
+        <div className="toolbar__divider" />
 
-      {/* Stage tabs */}
-      <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
+        {/* Zoom controls */}
+        <div className="toolbar__section toolbar__zoom">
+          <button
+            className="toolbar__button"
+            onClick={handleZoomOut}
+            title="Zoom out"
+            aria-label="Zoom out"
+          >
+            −
+          </button>
+          <span className="toolbar__zoom-level">{zoomPercent}%</span>
+          <button
+            className="toolbar__button"
+            onClick={handleZoomIn}
+            title="Zoom in"
+            aria-label="Zoom in"
+          >
+            +
+          </button>
+          <button
+            className="toolbar__button toolbar__button--text"
+            onClick={handleFitView}
+            title="Fit view to show all nodes"
+            aria-label="Fit view to show all nodes"
+          >
+            Fit
+          </button>
+        </div>
 
-      {/* Divider */}
-      <div className="toolbar__divider" />
-
-      {/* Zoom controls */}
-      <div className="toolbar__section toolbar__zoom">
-        <button
-          className="toolbar__button"
-          onClick={handleZoomOut}
-          title="Zoom out"
-          aria-label="Zoom out"
-        >
-          −
-        </button>
-        <span className="toolbar__zoom-level">{zoomPercent}%</span>
-        <button
-          className="toolbar__button"
-          onClick={handleZoomIn}
-          title="Zoom in"
-          aria-label="Zoom in"
-        >
-          +
-        </button>
-        <button
-          className="toolbar__button toolbar__button--text"
-          onClick={handleFitView}
-          title="Fit view to show all nodes"
-          aria-label="Fit view to show all nodes"
-        >
-          Fit
-        </button>
-      </div>
-
-      {/* Undo/Redo — hidden in read-only mode */}
-      {!isReadOnly && (
-        <>
-          <div className="toolbar__divider" />
-          <div className="toolbar__section toolbar__undo-redo">
-            <button
-              className="toolbar__button"
-              onClick={handleUndo}
-              title="Undo (Ctrl+Z)"
-              aria-label="Undo"
-            >
-              ↶
-            </button>
-            <button
-              className="toolbar__button"
-              onClick={handleRedo}
-              title="Redo (Ctrl+Shift+Z)"
-              aria-label="Redo"
-            >
-              ↷
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* Divider */}
-      <div className="toolbar__divider" />
-
-      {/* Auto Layout — disabled in read-only, Refresh Manifest always visible */}
-      <div className="toolbar__section">
+        {/* Undo/Redo — hidden in read-only mode */}
         {!isReadOnly && (
+          <>
+            <div className="toolbar__divider" />
+            <div className="toolbar__section toolbar__undo-redo">
+              <button
+                className="toolbar__button"
+                onClick={handleUndo}
+                title="Undo (Ctrl+Z)"
+                aria-label="Undo"
+              >
+                ↶
+              </button>
+              <button
+                className="toolbar__button"
+                onClick={handleRedo}
+                title="Redo (Ctrl+Shift+Z)"
+                aria-label="Redo"
+              >
+                ↷
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Divider */}
+        <div className="toolbar__divider" />
+
+        {/* Auto Layout — disabled in read-only, Refresh Manifest always visible */}
+        <div className="toolbar__section">
+          {!isReadOnly && (
+            <button
+              className="toolbar__button toolbar__button--tooltip"
+              onClick={handleAutoLayout}
+              disabled={isLayouting || nodes.length === 0}
+              data-tooltip="Auto Layout"
+              aria-label="Auto-layout nodes using ELK algorithm"
+            >
+              {isLayouting ? <span className="toolbar__spinner" /> : '⊞'}
+            </button>
+          )}
+
+          {/* Refresh Manifest */}
           <button
             className="toolbar__button toolbar__button--tooltip"
-            onClick={handleAutoLayout}
-            disabled={isLayouting || nodes.length === 0}
-            data-tooltip="Auto Layout"
-            aria-label="Auto-layout nodes using ELK algorithm"
+            onClick={handleRefreshManifest}
+            disabled={isRefreshing}
+            data-tooltip="Refresh"
+            aria-label="Refresh manifest data"
           >
-            {isLayouting ? <span className="toolbar__spinner" /> : '⊞'}
+            {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
           </button>
-        )}
+        </div>
 
-        {/* Refresh Manifest */}
-        <button
-          className="toolbar__button toolbar__button--tooltip"
-          onClick={handleRefreshManifest}
-          disabled={isRefreshing}
-          data-tooltip="Refresh"
-          aria-label="Refresh manifest data"
-        >
-          {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
-        </button>
-      </div>
+        {/* Search (F402) */}
+        <div className="toolbar__section toolbar__search">
+          <input
+            ref={searchInputRef}
+            type="text"
+            className="toolbar__search-input"
+            placeholder="Search models…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            aria-label="Search models"
+          />
+          {searchQuery && (
+            <span className="toolbar__search-count">
+              {matchingNodeIds.length}
+            </span>
+          )}
+        </div>
 
-      {/* Search (F402) */}
-      <div className="toolbar__section toolbar__search">
-        <input
-          ref={searchInputRef}
-          type="text"
-          className="toolbar__search-input"
-          placeholder="Search models…"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={handleSearchKeyDown}
-          aria-label="Search models"
-        />
-        {searchQuery && (
-          <span className="toolbar__search-count">
-            {matchingNodeIds.length}
-          </span>
-        )}
-      </div>
+        {/* Divider */}
+        <div className="toolbar__divider" />
 
-      {/* Divider */}
-      <div className="toolbar__divider" />
+        {/* Column Expansion Toggle (F405) */}
+        <div className="toolbar__section">
+          <button
+            className="toolbar__button toolbar__button--tooltip"
+            onClick={allExpanded ? onCollapseAll : onExpandAll}
+            data-tooltip={allExpanded ? 'Collapse All' : 'Expand All'}
+            aria-label={allExpanded ? 'Collapse all columns' : 'Expand all columns'}
+          >
+            {allExpanded ? '⊟' : '⊞'}
+          </button>
+        </div>
 
-      {/* Column Expansion Toggle (F405) */}
-      <div className="toolbar__section">
-        <button
-          className="toolbar__button toolbar__button--tooltip"
-          onClick={allExpanded ? onCollapseAll : onExpandAll}
-          data-tooltip={allExpanded ? 'Collapse All' : 'Expand All'}
-          aria-label={allExpanded ? 'Collapse all columns' : 'Expand all columns'}
-        >
-          {allExpanded ? '⊟' : '⊞'}
-        </button>
-      </div>
-
-      {/* Discrepancy toggle */}
-      {discrepancyOptions.length > 0 && (
-        <>
-          <div className="toolbar__divider" />
-          <div className="toolbar__section">
-            <div className="toolbar__dropdown" ref={discrepancyDropdownRef}>
-              <button
-                className={`toolbar__dropdown-trigger${discrepancyVisible ? ' toolbar__dropdown-trigger--active' : ''}`}
-                onClick={() => {
-                  if (discrepancyVisible) {
-                    handleDiscrepancyOff();
-                  } else if (discrepancyOptions.length === 1) {
-                    handleDiscrepancySelect(discrepancyOptions[0].stage);
-                  } else {
-                    setDiscrepancyDropdownOpen(!discrepancyDropdownOpen);
-                  }
-                }}
-                title={discrepancyVisible
-                  ? `Comparing to ${discrepancyCompareStage ?? ''} — click to disable`
-                  : 'Compare across stages'}
-                aria-label="Toggle cross-stage comparison"
-                aria-haspopup={discrepancyOptions.length > 1 ? 'menu' : undefined}
-                aria-expanded={discrepancyDropdownOpen}
-              >
-                {discrepancyVisible ? '⊘ Diff' : '⊕ Diff'}
-                {!discrepancyVisible && discrepancyOptions.length > 1 && (
-                  <span className="toolbar__dropdown-arrow">▾</span>
+        {/* Discrepancy toggle */}
+        {discrepancyOptions.length > 0 && (
+          <>
+            <div className="toolbar__divider" />
+            <div className="toolbar__section">
+              <div className="toolbar__dropdown" ref={discrepancyDropdownRef}>
+                <button
+                  className={`toolbar__dropdown-trigger${discrepancyVisible ? ' toolbar__dropdown-trigger--active' : ''}`}
+                  onClick={() => {
+                    if (discrepancyVisible) {
+                      handleDiscrepancyOff();
+                    } else if (discrepancyOptions.length === 1) {
+                      handleDiscrepancySelect(discrepancyOptions[0].stage);
+                    } else {
+                      setDiscrepancyDropdownOpen(!discrepancyDropdownOpen);
+                    }
+                  }}
+                  title={discrepancyVisible
+                    ? `Comparing to ${discrepancyCompareStage ?? ''} — click to disable`
+                    : 'Compare across stages'}
+                  aria-label="Toggle cross-stage comparison"
+                  aria-haspopup={discrepancyOptions.length > 1 ? 'menu' : undefined}
+                  aria-expanded={discrepancyDropdownOpen}
+                >
+                  {discrepancyVisible ? '⊘ Diff' : '⊕ Diff'}
+                  {!discrepancyVisible && discrepancyOptions.length > 1 && (
+                    <span className="toolbar__dropdown-arrow">▾</span>
+                  )}
+                </button>
+                {discrepancyDropdownOpen && !discrepancyVisible && (
+                  <div className="toolbar__dropdown-menu" role="menu">
+                    {discrepancyOptions.map(({ stage, label }) => (
+                      <button
+                        key={stage}
+                        className="toolbar__dropdown-item"
+                        onClick={() => handleDiscrepancySelect(stage)}
+                        role="menuitem"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 )}
-              </button>
-              {discrepancyDropdownOpen && !discrepancyVisible && (
-                <div className="toolbar__dropdown-menu" role="menu">
-                  {discrepancyOptions.map(({ stage, label }) => (
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Add Dropdown — hidden in read-only mode */}
+        {!isReadOnly && (
+          <>
+            <div className="toolbar__divider" />
+            <div className="toolbar__section">
+              <div className="toolbar__dropdown" ref={modelDropdownRef}>
+                <button
+                  className="toolbar__dropdown-trigger"
+                  onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
+                  title="Add model or relationship"
+                  aria-label="Add model or relationship"
+                  aria-haspopup="menu"
+                  aria-expanded={modelDropdownOpen}
+                >
+                  + Add
+                  <span className="toolbar__dropdown-arrow">▾</span>
+                </button>
+                {modelDropdownOpen && (
+                  <div className="toolbar__dropdown-menu" role="menu">
                     <button
-                      key={stage}
                       className="toolbar__dropdown-item"
-                      onClick={() => handleDiscrepancySelect(stage)}
+                      onClick={handleNewModel}
                       role="menuitem"
                     >
-                      {label}
+                      New Design Model
                     </button>
-                  ))}
-                </div>
-              )}
+                    <button
+                      className="toolbar__dropdown-item"
+                      onClick={handleAddExistingModel}
+                      role="menuitem"
+                    >
+                      Add Existing Model
+                    </button>
+                    <button
+                      className="toolbar__dropdown-item"
+                      onClick={() => { setModelDropdownOpen(false); handleNewRelationship(); }}
+                      role="menuitem"
+                    >
+                      New Relationship
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        )}
+        </div>
 
-      {/* Add Dropdown — hidden in read-only mode */}
-      {!isReadOnly && (
-        <>
-          <div className="toolbar__divider" />
-          <div className="toolbar__section">
-            <div className="toolbar__dropdown" ref={modelDropdownRef}>
-              <button
-                className="toolbar__dropdown-trigger"
-                onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-                title="Add model or relationship"
-                aria-label="Add model or relationship"
-                aria-haspopup="menu"
-                aria-expanded={modelDropdownOpen}
-              >
-                + Add
-                <span className="toolbar__dropdown-arrow">▾</span>
-              </button>
-              {modelDropdownOpen && (
-                <div className="toolbar__dropdown-menu" role="menu">
-                  <button
-                    className="toolbar__dropdown-item"
-                    onClick={handleNewModel}
-                    role="menuitem"
-                  >
-                    New Design Model
-                  </button>
-                  <button
-                    className="toolbar__dropdown-item"
-                    onClick={handleAddExistingModel}
-                    role="menuitem"
-                  >
-                    Add Existing Model
-                  </button>
-                  <button
-                    className="toolbar__dropdown-item"
-                    onClick={() => { setModelDropdownOpen(false); handleNewRelationship(); }}
-                    role="menuitem"
-                  >
-                    New Relationship
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-    </Panel>
+        {/* Row 2: Stage tabs (attached below toolbar) */}
+        <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
+      </Panel>
   );
 }

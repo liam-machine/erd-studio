@@ -168,7 +168,7 @@ export function DiscrepancyPanel() {
     + relIssueCount;
 
   return (
-    <Panel position="bottom-left" className="disc-panel">
+    <Panel position="bottom-right" className="disc-panel">
       <div className="disc-panel__header">
         <span className="disc-panel__title">
           {stageName(sourceStage)} vs {stageName(targetStage)}

@@ -1,12 +1,13 @@
 /**
  * WelcomeModal — first-time user onboarding dialog.
  *
- * Shows on first domain load (tracks in localStorage). Explains what ERD Studio
- * does, the three design stages, how to get started, and the cardinality
- * notation used on relationship edges.
+ * Shows on first domain load. Dismissal is persisted in the extension's
+ * globalState so it only ever shows once across all panels and sessions.
+ * The extension sends `welcomeDismissed` on the `domainLoaded` message;
+ * App.tsx opens this modal when that flag is false.
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
@@ -19,23 +20,12 @@ import './WelcomeModal.css';
 
 export function WelcomeModal() {
   const vscode = useVsCodeApi();
-  const domain = useEditorStore((s) => s.domain);
   const welcomeModalOpen = useEditorStore((s) => s.welcomeModalOpen);
   const setWelcomeModalOpen = useEditorStore((s) => s.setWelcomeModalOpen);
 
-  // Show welcome modal on first domain load (check vscode state for dismissal)
-  useEffect(() => {
-    if (!domain) return;
-    const state = vscode.getState() as Record<string, unknown> | null;
-    if (!state?.welcomeDismissed) {
-      setWelcomeModalOpen(true);
-    }
-  }, [domain, vscode, setWelcomeModalOpen]);
-
-  // Handle "Get Started" button — persist dismissal to vscode state
+  // Handle "Get Started" button — tell extension to persist dismissal in globalState
   const handleGetStarted = useCallback(() => {
-    const existing = (vscode.getState() as Record<string, unknown> | null) ?? {};
-    vscode.setState({ ...existing, welcomeDismissed: true });
+    vscode.postMessage({ type: 'dismissWelcome' });
     setWelcomeModalOpen(false);
   }, [vscode, setWelcomeModalOpen]);
 

@@ -130,7 +130,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const panel = this.openPanels.get(panelKey);
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
-          'refreshManifest', 'undo', 'redo', 'updateViewConfig',
+          'refreshManifest', 'undo', 'redo', 'updateViewConfig', 'dismissWelcome',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           return;
@@ -142,6 +142,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         switch (message.type) {
           case 'ready':
             await this.sendDomainData(document, webviewPanel.webview, panelKey);
+            break;
+          case 'dismissWelcome':
+            await this.context.globalState.update('welcomeDismissed', true);
             break;
           case 'updatePositions': {
             const payload = (message as Record<string, unknown>).payload as
@@ -468,17 +471,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const activeStage = panel?.activeStage ?? 'logical';
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
 
       if (activeStage === 'physical') {
         const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
         const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
-        webview.postMessage({ type: 'domainLoaded', payload: physicalDomain });
+        webview.postMessage({ type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
       } else {
         const domain = this.domainService.getDomainStage(document.uri.fsPath, activeStage);
         const displayDomain = this.buildDisplayDomain(domain, manifest);
-        webview.postMessage({ type: 'domainLoaded', payload: displayDomain });
+        webview.postMessage({ type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
