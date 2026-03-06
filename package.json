@@ -163,10 +163,7 @@
         "displayName": "Semantic Domain Editor",
         "selector": [
           {
-            "filenamePattern": "**/erd-studio/conceptual/**/*.json"
-          },
-          {
-            "filenamePattern": "**/erd-studio/logical/**/*.json"
+            "filenamePattern": "**/erd-studio/*/*.json"
           }
         ],
         "priority": "default"
