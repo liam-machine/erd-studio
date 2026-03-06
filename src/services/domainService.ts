@@ -1,8 +1,11 @@
 /**
  * DomainService — reads semantic domain JSON files from disk.
  *
- * Domain files live at {dbt_project}/erd-studio/{stage}/{layer}/{domain}.json
- * where stage is conceptual or logical, and layer is defined in layers.json.
+ * v3 layout: domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
+ * Each file is a UnifiedDomain containing both conceptual and logical stage data.
+ *
+ * v1/v2 layout (legacy): {dbt_project}/erd-studio/{stage}/{layer}/{domain}.json
+ * These are auto-upgraded in memory when read via getDomain().
  *
  * Physical domains are not stored on disk — they are derived at runtime
  * by projecting a logical domain's model list through the dbt manifest
@@ -12,29 +15,27 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { DomainSummary, Layer, SemanticDomain, Stage } from '../types/semantic';
+import type { DomainSummary, Layer, SemanticDomain, StageData, UnifiedDomain } from '../types/semantic';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship } from '../types/display';
 import type { ManifestData } from '../types/manifest';
 import type { LayerService } from './layerService';
+import { hasLegacyLayout } from './migrationService';
 
 const DEFAULT_SEMANTIC_DIR = 'erd-studio';
-
-/** Stages that are stored as files on disk. */
-const DISK_STAGES: Stage[] = ['conceptual', 'logical'];
 
 export class DomainService {
   constructor(private readonly layerService: LayerService) {}
 
   /**
    * Discover all semantic domain JSON files under erd-studio/,
-   * grouped by stage and layer. Returns lightweight summaries (no full parse).
+   * grouped by layer. Returns lightweight summaries (no full parse).
    *
-   * Directory structure expected:
-   *   erd-studio/{stage}/{layer}/*.json
-   * where {stage} is conceptual or logical, and {layer} is defined in layers.json.
+   * v3 directory structure:
+   *   erd-studio/{layer}/*.json
    *
-   * Physical domains are not discovered — they are derived from the manifest.
+   * Only scans v3 paths. Callers should use hasLegacyDomains() to
+   * detect unmigrated v1/v2 layouts and prompt the user to migrate.
    */
   listDomains(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): DomainSummary[] {
     const basePath = path.join(projectPath, semanticDir);
@@ -46,42 +47,40 @@ export class DomainService {
     const summaries: DomainSummary[] = [];
     const layers = this.layerService.getAllLayers();
 
-    for (const stage of DISK_STAGES) {
-      const stageDir = path.join(basePath, stage);
-      if (!fs.existsSync(stageDir)) {
+    for (const layerConfig of layers) {
+      const layer = layerConfig.id;
+      const layerDir = path.join(basePath, layer);
+      if (!fs.existsSync(layerDir)) {
         continue;
       }
 
-      for (const layerConfig of layers) {
-        const layer = layerConfig.id;
-        const layerDir = path.join(stageDir, layer);
-        if (!fs.existsSync(layerDir)) {
+      // Skip directories that are old stage directories (conceptual/logical)
+      // to avoid treating them as layer directories
+      if (layer === 'conceptual' || layer === 'logical') {
+        continue;
+      }
+
+      let entries: string[];
+      try {
+        entries = fs.readdirSync(layerDir);
+      } catch (err) {
+        console.warn(
+          `[DomainService] Unable to read directory ${layerDir}: ` +
+          `${err instanceof Error ? err.message : String(err)}`
+        );
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (!entry.endsWith('.json')) {
           continue;
         }
 
-        let entries: string[];
-        try {
-          entries = fs.readdirSync(layerDir);
-        } catch (err) {
-          console.warn(
-            `[DomainService] Unable to read directory ${layerDir}: ` +
-            `${err instanceof Error ? err.message : String(err)}`
-          );
-          continue;
-        }
-
-        for (const entry of entries) {
-          if (!entry.endsWith('.json')) {
-            continue;
-          }
-
-          summaries.push({
-            domain: path.basename(entry, '.json'),
-            layer,
-            stage,
-            filePath: path.join(layerDir, entry),
-          });
-        }
+        summaries.push({
+          domain: path.basename(entry, '.json'),
+          layer,
+          filePath: path.join(layerDir, entry),
+        });
       }
     }
 
@@ -89,15 +88,21 @@ export class DomainService {
   }
 
   /**
-   * Read and parse a semantic domain JSON file.
-   *
-   * Validates the schemaVersion field. Throws if the file does not exist,
-   * contains invalid JSON, or has an unsupported schema version.
-   *
-   * The stage is inferred from the grandparent directory name:
-   *   erd-studio/{stage}/{layer}/{domain}.json
+   * Check whether legacy v1/v2 stage directories exist and contain domains.
+   * Delegates to migrationService.hasLegacyLayout().
    */
-  getDomain(filePath: string): SemanticDomain {
+  hasLegacyDomains(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): boolean {
+    return hasLegacyLayout(projectPath, semanticDir);
+  }
+
+  /**
+   * Read and parse a domain JSON file, returning a UnifiedDomain.
+   *
+   * Supports both v3 (unified) and v1/v2 (flat) formats. Legacy files
+   * are auto-upgraded in memory: the flat content is placed into the
+   * stage section inferred from the file path.
+   */
+  getDomain(filePath: string): UnifiedDomain {
     if (!fs.existsSync(filePath)) {
       throw new Error(`Domain file not found: ${filePath}`);
     }
@@ -122,21 +127,47 @@ export class DomainService {
   }
 
   /**
-   * Build a physical DisplayDomain by projecting a logical domain's model list
-   * through the dbt manifest.
+   * Extract a single stage from a UnifiedDomain, returning a SemanticDomain.
+   *
+   * This is what the editor calls to get stage-specific data for display.
+   * For conceptual/logical: extracts the corresponding section.
+   * Physical stage is not supported here — use buildPhysicalDomain() instead.
+   */
+  getDomainStage(filePath: string, stage: 'conceptual' | 'logical'): SemanticDomain {
+    const unified = this.getDomain(filePath);
+    const stageData = unified[stage];
+
+    return {
+      schemaVersion: unified.schemaVersion,
+      domain: unified.domain,
+      layer: unified.layer,
+      stage,
+      description: unified.description,
+      ...(unified.modelFolder ? { modelFolder: unified.modelFolder } : {}),
+      models: stageData.models,
+      relationships: stageData.relationships,
+      viewConfig: stageData.viewConfig,
+    };
+  }
+
+  /**
+   * Build a physical DisplayDomain by projecting a unified domain's logical
+   * stage through the dbt manifest.
    *
    * Physical domains are not stored on disk — they are derived at runtime.
-   * For each model in the logical domain:
+   * For each model in the logical stage:
    *   - If found in manifest: creates a DisplayModel with manifest columns
    *   - If not found: creates a ghost DisplayModel with existsInManifest=false
    *
-   * Copies viewConfig.positions from the logical domain so layout mirrors logical.
+   * Copies viewConfig.positions from the logical stage so layout mirrors logical.
    */
   buildPhysicalDomain(
-    logicalDomain: SemanticDomain,
+    unifiedDomain: UnifiedDomain,
     manifest: ManifestData,
   ): DisplayDomain {
-    const models: DisplayModel[] = logicalDomain.models.map(model => {
+    const logicalStage = unifiedDomain.logical;
+
+    const models: DisplayModel[] = logicalStage.models.map(model => {
       const manifestModel = manifest.models.get(model.name);
 
       if (manifestModel) {
@@ -196,7 +227,7 @@ export class DomainService {
       };
     });
 
-    const relationships: DisplayRelationship[] = logicalDomain.relationships.map(rel => ({
+    const relationships: DisplayRelationship[] = logicalStage.relationships.map(rel => ({
       fromModel: rel.fromModel,
       fromColumn: rel.fromColumn,
       toModel: rel.toModel,
@@ -205,25 +236,27 @@ export class DomainService {
     }));
 
     return {
-      schemaVersion: logicalDomain.schemaVersion,
-      domain: logicalDomain.domain,
-      layer: logicalDomain.layer,
+      schemaVersion: unifiedDomain.schemaVersion,
+      domain: unifiedDomain.domain,
+      layer: unifiedDomain.layer,
       stage: 'physical',
-      description: logicalDomain.description,
-      modelFolder: logicalDomain.modelFolder,
+      description: unifiedDomain.description,
+      modelFolder: unifiedDomain.modelFolder,
       models,
       relationships,
-      viewConfig: logicalDomain.viewConfig,
+      viewConfig: logicalStage.viewConfig,
       readOnly: true,
     };
   }
 
   /**
-   * Validate parsed JSON and return a typed SemanticDomain.
-   * Applies defaults for optional fields.
-   * Infers stage from grandparent directory name.
+   * Validate parsed JSON and return a typed UnifiedDomain.
+   *
+   * For v3 files: validates root fields and each stage section.
+   * For v1/v2 files: wraps flat content into the appropriate stage section,
+   * inferring stage from the grandparent directory name.
    */
-  private validateDomain(data: unknown, filePath: string): SemanticDomain {
+  private validateDomain(data: unknown, filePath: string): UnifiedDomain {
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       throw new Error(`Domain file ${filePath} does not contain a JSON object`);
     }
@@ -245,41 +278,93 @@ export class DomainService {
       );
     }
 
-    const domain: SemanticDomain = {
-      schemaVersion: obj.schemaVersion,
-      domain: typeof obj.domain === 'string' ? obj.domain : path.basename(filePath, '.json'),
-      layer: this.parseLayer(obj.layer, filePath),
-      stage: this.parseStage(obj.stage, filePath),
-      description: typeof obj.description === 'string' ? obj.description : '',
-      // Optional folder filter for models (e.g., "models/silver")
-      ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
-      models: Array.isArray(obj.models) ? (obj.models as SemanticDomain['models']) : [],
-      relationships: Array.isArray(obj.relationships) ? (obj.relationships as SemanticDomain['relationships']) : [],
-      viewConfig: this.parseViewConfig(obj.viewConfig),
-    };
+    // v3 unified format — has conceptual/logical sections
+    if (obj.schemaVersion >= 3) {
+      return this.validateV3Domain(obj, filePath);
+    }
 
-    return domain;
+    // v1/v2 legacy flat format — auto-upgrade in memory
+    return this.upgradeV2Domain(obj, filePath);
   }
 
   /**
-   * Parse and validate the stage field.
-   * Falls back to inferring from the grandparent directory name.
+   * Validate a v3 unified domain file.
    */
-  private parseStage(value: unknown, filePath: string): Stage {
-    const validStages: Stage[] = ['conceptual', 'logical', 'physical'];
+  private validateV3Domain(obj: Record<string, unknown>, filePath: string): UnifiedDomain {
+    const domain = typeof obj.domain === 'string' ? obj.domain : path.basename(filePath, '.json');
+    const layer = this.parseLayer(obj.layer, filePath);
 
-    if (typeof value === 'string' && validStages.includes(value as Stage)) {
-      return value as Stage;
-    }
+    const emptyStage: StageData = { models: [], relationships: [], viewConfig: {} };
 
-    // Infer from grandparent directory: erd-studio/{stage}/{layer}/{domain}.json
+    return {
+      schemaVersion: obj.schemaVersion as number,
+      domain,
+      layer,
+      description: typeof obj.description === 'string' ? obj.description : '',
+      ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
+      conceptual: this.parseStageData(obj.conceptual) ?? { ...emptyStage },
+      logical: this.parseStageData(obj.logical) ?? { ...emptyStage },
+    };
+  }
+
+  /**
+   * Upgrade a v1/v2 flat domain file to UnifiedDomain in memory.
+   *
+   * The flat file's content (models, relationships, viewConfig) is placed
+   * into the stage section inferred from the grandparent directory name.
+   * The other stage gets empty defaults.
+   */
+  private upgradeV2Domain(obj: Record<string, unknown>, filePath: string): UnifiedDomain {
+    const domain = typeof obj.domain === 'string' ? obj.domain : path.basename(filePath, '.json');
+    const layer = this.parseLayer(obj.layer, filePath);
+    const stage = this.inferStageFromPath(filePath);
+
+    const stageData: StageData = {
+      models: Array.isArray(obj.models) ? (obj.models as StageData['models']) : [],
+      relationships: Array.isArray(obj.relationships) ? (obj.relationships as StageData['relationships']) : [],
+      viewConfig: this.parseViewConfig(obj.viewConfig),
+    };
+
+    const emptyStage: StageData = { models: [], relationships: [], viewConfig: {} };
+
+    return {
+      schemaVersion: obj.schemaVersion as number,
+      domain,
+      layer,
+      description: typeof obj.description === 'string' ? obj.description : '',
+      ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
+      conceptual: stage === 'conceptual' ? stageData : { ...emptyStage },
+      logical: stage === 'logical' ? stageData : { ...emptyStage },
+    };
+  }
+
+  /**
+   * Infer stage from grandparent directory for v1/v2 files.
+   * Falls back to 'conceptual' if not determinable.
+   */
+  private inferStageFromPath(filePath: string): 'conceptual' | 'logical' {
     const grandparentDir = path.basename(path.dirname(path.dirname(filePath)));
-    if (validStages.includes(grandparentDir as Stage)) {
-      return grandparentDir as Stage;
+    if (grandparentDir === 'logical') {
+      return 'logical';
+    }
+    return 'conceptual';
+  }
+
+  /**
+   * Parse a stage data section from a v3 unified domain.
+   * Returns null if the section is missing or invalid.
+   */
+  private parseStageData(value: unknown): StageData | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
     }
 
-    // Default to conceptual for backward compatibility with v1 files
-    return 'conceptual';
+    const obj = value as Record<string, unknown>;
+    return {
+      models: Array.isArray(obj.models) ? (obj.models as StageData['models']) : [],
+      relationships: Array.isArray(obj.relationships) ? (obj.relationships as StageData['relationships']) : [],
+      viewConfig: this.parseViewConfig(obj.viewConfig),
+    };
   }
 
   private parseLayer(value: unknown, filePath: string): Layer {
@@ -300,7 +385,7 @@ export class DomainService {
     );
   }
 
-  private parseViewConfig(value: unknown): SemanticDomain['viewConfig'] {
+  private parseViewConfig(value: unknown): StageData['viewConfig'] {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return {};
     }
