@@ -24,6 +24,9 @@ import {
 
 const LAYERS_CONFIG_FILE = 'layers.json';
 
+/** Reserved stage names that must never be detected as user-defined layers. */
+const STAGE_DIR_NAMES = new Set(['conceptual', 'logical', 'physical']);
+
 export class LayerService {
   private config: LayersConfigFile | null = null;
   private readonly configPath: string;
@@ -224,7 +227,8 @@ export class LayerService {
       .filter(entry =>
         entry.isDirectory() &&
         !entry.name.startsWith('.') &&
-        entry.name !== 'templates',
+        entry.name !== 'templates' &&
+        !STAGE_DIR_NAMES.has(entry.name),
       )
       .map(entry => entry.name)
       .filter(name => /^[a-z][a-z0-9_-]*$/.test(name)); // Valid layer ID format

@@ -8,17 +8,27 @@ The extension display name is **ERD Studio** (package name `erd-studio`).
 
 ### Directory Structure
 
-ERD domain files live at `{project_root}/erd-studio/{stage}/{layer}/{domain}.json`. The custom editor activates for files matching:
-- `**/erd-studio/conceptual/**/*.json`
-- `**/erd-studio/logical/**/*.json`
+ERD domain files live at `{project_root}/erd-studio/{layer}/{domain}.json`. Each file is a unified v3 format containing both conceptual and logical stages as sections. The custom editor activates for files matching:
+- `**/erd-studio/*/*.json`
 
 The base directory is configurable via the `dbtSemantic.semanticDir` setting (default: `erd-studio`).
+
+```
+erd-studio/
+├── layers.json
+├── templates/
+├── silver/
+│   ├── customer-360.json   ← unified domain (conceptual + logical)
+│   └── orders.json
+└── gold/
+    └── reporting.json
+```
 
 ### Legacy Internal Identifiers
 
 The following internal identifiers still use the legacy `dbtSemantic` prefix and must **not** be renamed (doing so would break existing user settings, keybindings, and stored state):
 
-- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.switchTreeStage`
+- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.migrateDomains`
 - **View IDs**: `dbt-semantic` (activity bar container), `dbtSemantic.domainTree`
 - **Custom editor viewType**: `dbtSemantic.domainEditor`
 - **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`
@@ -52,29 +62,29 @@ Built with esbuild (`esbuild.js`). Two TypeScript configs: `tsconfig.json` (Node
 
 The extension uses three design stages, each with a distinct purpose:
 
-| Stage | Color | Purpose | Editable |
-|-------|-------|---------|----------|
-| **Conceptual** | Violet (`#8b5cf6`) | High-level entity design — model names, descriptions, entity-level relationships | Yes |
-| **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | Yes |
-| **Physical** | Green (`#22c55e`) | What exists in dbt — auto-derived from `manifest.json`, fully read-only | No |
+| Stage | Color | Purpose | Storage |
+|-------|-------|---------|---------|
+| **Conceptual** | Violet (`#8b5cf6`) | High-level entity design — model names, descriptions, entity-level relationships | `conceptual` section in unified domain file |
+| **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | `logical` section in unified domain file |
+| **Physical** | Green (`#22c55e`) | What exists in dbt — auto-derived from `manifest.json`, fully read-only | Derived at runtime, no file on disk |
 
-Stage colors are defined in `webview/lib/stageColors.ts`.
+Both editable stages (conceptual, logical) live in the same JSON file. Stage switching in the editor reads a different section of the same file — no sibling file resolution needed. Stage colors are defined in `webview/lib/stageColors.ts`.
 
 ### Data Flow
 
 ```
-                         ┌─ conceptual/{layer}/{domain}.json ─→ DisplayDomain
-DomainService reads ─────┤
-                         └─ logical/{layer}/{domain}.json ────→ DisplayDomain
-                                                                     │
-manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ──→ DisplayDomain
-                                                                     │
-                                              [message] ─→ graphTransformer ─→ React Flow
+                                              ┌─ .conceptual → DisplayDomain
+{layer}/{domain}.json ─→ getDomain() ─→ UnifiedDomain ─┤
+                                              └─ .logical    → DisplayDomain
+                                                                    │
+manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ DisplayDomain
+                                                                    │
+                                             [message] ─→ graphTransformer ─→ React Flow
 ```
 
 1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`)
-2. **DomainService** reads domain JSON from `erd-studio/{stage}/{layer}/*.json` and converts to `DisplayDomain`
-3. For physical stage: `DomainService.buildPhysicalDomain()` derives data from logical domain + manifest
+2. **DomainService** reads unified domain JSON from `erd-studio/{layer}/*.json` → `UnifiedDomain`, then extracts a stage section via `getDomainStage()` → `DisplayDomain`
+3. For physical stage: `DomainService.buildPhysicalDomain()` derives data from logical stage section + manifest
 4. **DiscrepancyService** compares two `DisplayDomain` objects to produce a `DiscrepancyReport`
 5. Extension sends `domainLoaded` / `stageData` message to webview
 6. **graphTransformer** converts `DisplayDomain` → React Flow nodes + edges (with optional discrepancy overlays)
@@ -103,7 +113,7 @@ manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ──→ Disp
 
 Extension <-> Webview communication uses discriminated unions on `type` field:
 - **Extension -> Webview**: `domainLoaded`, `domainUpdated`, `stageData`, `discrepancyReport`, `error`
-- **Webview -> Extension**: `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `renameModel`, `removeModel`, `updatePositions`, `runAutoLayout`, `switchStage`, `toggleDiscrepancy`, `refreshManifest`, `undo`, `redo`, etc.
+- **Webview -> Extension**: `ready`, `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `editRelationship`, `updateRelationship`, `renameModel`, `removeModel`, `addExistingModel`, `toggleColumnKey`, `updateModelRationale`, `updateModelGrain`, `updateModelRole`, `updateViewConfig`, `updatePositions`, `runAutoLayout`, `switchStage`, `toggleDiscrepancy`, `refreshManifest`, `undo`, `redo`
 
 All mutations go through `WorkspaceEdit` for undo/redo integration. Physical stage silently rejects all mutation messages.
 
@@ -115,8 +125,9 @@ All mutations go through `WorkspaceEdit` for undo/redo integration. Physical sta
 - React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
 - Extension host writes use `WorkspaceEdit` for undo/redo integration
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
-- Stage switching sends `switchStage` message; extension resolves sibling domain file and responds with `stageData`
+- Stage switching sends `switchStage` message; extension extracts the target stage section from the same unified file and responds with `stageData`
 - Physical stage is derived at runtime — no files on disk, positions inherited from logical domain
+- Mutation handlers target `parsed[activeStage].models` / `.relationships` within the unified file
 
 ## Discrepancy System
 
@@ -190,7 +201,7 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
                  window.postMessage({
                    type: 'domainLoaded',
                    payload: {
-                     schemaVersion: 2, domain: 'preview', layer: 'silver',
+                     schemaVersion: 3, domain: 'preview', layer: 'silver',
                      stage: 'logical',
                      description: 'Dev preview', models: [], relationships: [],
                      viewConfig: {}, readOnly: false

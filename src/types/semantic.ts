@@ -1,7 +1,7 @@
 /**
  * Types for semantic domain JSON files.
  *
- * Domain files live at {dbt_project}/erd-studio/{stage}/{layer}/{domain}.json
+ * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
  * and describe FK-based relationships between dbt models within a business
  * domain at a particular design stage (conceptual, logical, or physical).
  */
@@ -92,8 +92,8 @@ export interface Rationale {
  * A model entry in a semantic domain.
  *
  * In the stage architecture, models are simple data containers.
- * The stage (conceptual/logical/physical) is determined by the
- * directory the domain file lives in, not by a field on the model.
+ * The stage is determined by the section (conceptual/logical) within
+ * the unified domain file, not by a field on the model.
  */
 export interface SemanticModel {
   name: string;
