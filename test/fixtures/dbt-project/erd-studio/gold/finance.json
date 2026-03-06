@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 3,
+  "domain": "finance",
+  "layer": "gold",
+  "description": "Finance reporting domain",
+  "conceptual": {
+    "models": [
+      {
+        "name": "fct_transactions",
+        "source": "built"
+      }
+    ],
+    "relationships": [],
+    "viewConfig": {
+      "positions": {
+        "fct_transactions": {
+          "x": 12,
+          "y": 12
+        }
+      }
+    }
+  },
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}

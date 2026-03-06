@@ -1,0 +1,1127 @@
+{
+  "schemaVersion": 3,
+  "domain": "ppw-work-lot",
+  "layer": "silver",
+  "description": "PPW PPW WORK LOT data model",
+  "modelFolder": "models/silver",
+  "conceptual": {
+    "models": [
+      {
+        "name": "dim_iv_attachment",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "iv_attachment_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_iv_comment_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_pour_record",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "pour_record_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "project_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "supplier_company_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "supplied_to_company_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "entry_contact_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "approved_mix_design_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_project",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "project_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "ref_country_code",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_sub_lot",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "sub_lot_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_work_lot",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "ref_region_code",
+            "isForeignKey": true
+          },
+          {
+            "name": "project_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "responsible_engineer_contact_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "entry_contact_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "compliance_submitted_by_contact_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "compliance_closed_by_contact_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_work_lot_action",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_action_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "project_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "assigned_to_contact_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "verification_by_contact_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "raised_by_contact_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_work_lot_attachment",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_attachment_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "attached_by_contact_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_work_lot_client_review_comment",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_client_review_comment_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "author_contact_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_work_lot_compliance_comment",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_compliance_comment_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "author_contact_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "dim_work_lot_iv_comment",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_iv_comment_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "author_contact_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_child_work_lot",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "child_work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_oia_work_lot",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "oia_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_pour_test_requirement",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "pour_record_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "pour_test_requirement",
+            "isPrimaryKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_project_operational_organisational_unit",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "project_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "organisational_unit_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_related_work_lot",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "related_work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_action_lifecycle",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_action_lifecycle_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "ref_action_status_code",
+            "isForeignKey": true
+          },
+          {
+            "name": "work_lot_action_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "project_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_ams",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "ams_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_checklist",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "checklist_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_completion_report",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "completion_report_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_compliance_tag",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "compliance_tag_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_defect_list",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "defect_list_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_editor",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "editor_contact_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_hold_witness_point",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "hold_witness_point_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_item_quantities",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_item_quantity_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "project_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_itp",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "itp_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_lifecycle",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_lifecycle_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isForeignKey": true
+          },
+          {
+            "name": "project_id",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_permit",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "permit_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_pour_record",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "pour_record_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_product_ncr",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "product_ncr_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_progressive_status",
+        "source": "built"
+      },
+      {
+        "name": "fct_work_lot_project_activity",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "project_activity",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_id_1",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_punch_list",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "punch_list_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_subcontract",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "subcontract_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "fct_work_lot_subcontractor",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "company_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "ref_action_status",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "ref_action_status_code",
+            "isPrimaryKey": true
+          }
+        ]
+      },
+      {
+        "name": "ref_country",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "ref_country_code",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "ref_currency_code",
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "ref_region",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "ref_region_code",
+            "isPrimaryKey": true
+          }
+        ]
+      },
+      {
+        "name": "work_lot_action_attachment",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_action_attachment_id",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "work_lot_action_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          }
+        ]
+      },
+      {
+        "name": "work_lot_action_tag",
+        "source": "built",
+        "plannedColumns": [
+          {
+            "name": "work_lot_action_id",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "action_ref_tag_code",
+            "isForeignKey": true
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "fct_work_lot_hold_witness_point",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_defect_list",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_related_work_lot",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_punch_list",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_compliance_tag",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_completion_report",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_checklist",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_editor",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_subcontractor",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_itp",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_ams",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_item_quantities",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_item_quantities",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_subcontract",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_permit",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_sub_lot",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot_attachment",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot_client_review_comment",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot_compliance_comment",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot_iv_comment",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_project",
+        "fromColumn": "ref_country_code",
+        "toModel": "ref_country",
+        "toColumn": "ref_country_code",
+        "cardinality": "many-to-many"
+      },
+      {
+        "fromModel": "fct_oia_work_lot",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_iv_attachment",
+        "fromColumn": "work_lot_iv_comment_id",
+        "toModel": "dim_work_lot_iv_comment",
+        "toColumn": "work_lot_iv_comment_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_project_operational_organisational_unit",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_pour_test_requirement",
+        "fromColumn": "pour_record_id",
+        "toModel": "dim_pour_record",
+        "toColumn": "pour_record_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_pour_record",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_pour_record",
+        "fromColumn": "pour_record_id",
+        "toModel": "dim_pour_record",
+        "toColumn": "pour_record_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_pour_record",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_lifecycle",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_lifecycle",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_product_ncr",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot",
+        "fromColumn": "ref_region_code",
+        "toModel": "ref_region",
+        "toColumn": "ref_region_code",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "work_lot_action_attachment",
+        "fromColumn": "work_lot_action_id",
+        "toModel": "dim_work_lot_action",
+        "toColumn": "work_lot_action_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "work_lot_action_tag",
+        "fromColumn": "work_lot_action_id",
+        "toModel": "dim_work_lot_action",
+        "toColumn": "work_lot_action_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot_action",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_work_lot_action",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_action_lifecycle",
+        "fromColumn": "ref_action_status_code",
+        "toModel": "ref_action_status",
+        "toColumn": "ref_action_status_code",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_action_lifecycle",
+        "fromColumn": "work_lot_action_id",
+        "toModel": "dim_work_lot_action",
+        "toColumn": "work_lot_action_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_action_lifecycle",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_child_work_lot",
+        "fromColumn": "work_lot_id",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_work_lot_project_activity",
+        "fromColumn": "work_lot_id_1",
+        "toModel": "dim_work_lot",
+        "toColumn": "work_lot_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "dim_iv_attachment": {
+          "x": 125,
+          "y": 2972
+        },
+        "dim_pour_record": {
+          "x": 1134,
+          "y": 3344
+        },
+        "dim_project": {
+          "x": 1602,
+          "y": 3469
+        },
+        "dim_sub_lot": {
+          "x": 672,
+          "y": 1535
+        },
+        "dim_work_lot": {
+          "x": 718,
+          "y": 2609
+        },
+        "dim_work_lot_action": {
+          "x": 672,
+          "y": 2785
+        },
+        "dim_work_lot_attachment": {
+          "x": 672,
+          "y": 785
+        },
+        "dim_work_lot_client_review_comment": {
+          "x": 672,
+          "y": 1785
+        },
+        "dim_work_lot_compliance_comment": {
+          "x": 1658,
+          "y": 2081
+        },
+        "dim_work_lot_iv_comment": {
+          "x": 672,
+          "y": 2933
+        },
+        "fct_child_work_lot": {
+          "x": 672,
+          "y": 1410
+        },
+        "fct_oia_work_lot": {
+          "x": 672,
+          "y": 1285
+        },
+        "fct_pour_test_requirement": {
+          "x": 590,
+          "y": 3358
+        },
+        "fct_project_operational_organisational_unit": {
+          "x": 1242,
+          "y": 3489
+        },
+        "fct_related_work_lot": {
+          "x": 672,
+          "y": 1660
+        },
+        "fct_work_lot_action_lifecycle": {
+          "x": 312,
+          "y": 3461
+        },
+        "fct_work_lot_ams": {
+          "x": 672,
+          "y": 2410
+        },
+        "fct_work_lot_checklist": {
+          "x": 672,
+          "y": 535
+        },
+        "fct_work_lot_completion_report": {
+          "x": 672,
+          "y": 410
+        },
+        "fct_work_lot_compliance_tag": {
+          "x": 672,
+          "y": 2035
+        },
+        "fct_work_lot_defect_list": {
+          "x": 672,
+          "y": 2160
+        },
+        "fct_work_lot_editor": {
+          "x": 672,
+          "y": 2660
+        },
+        "fct_work_lot_hold_witness_point": {
+          "x": 672,
+          "y": 160
+        },
+        "fct_work_lot_item_quantities": {
+          "x": 672,
+          "y": 3206
+        },
+        "fct_work_lot_itp": {
+          "x": 672,
+          "y": 1910
+        },
+        "fct_work_lot_lifecycle": {
+          "x": 672,
+          "y": 12
+        },
+        "fct_work_lot_permit": {
+          "x": 672,
+          "y": 1035
+        },
+        "fct_work_lot_pour_record": {
+          "x": 672,
+          "y": 3058
+        },
+        "fct_work_lot_product_ncr": {
+          "x": 672,
+          "y": 910
+        },
+        "fct_work_lot_progressive_status": {
+          "x": 12,
+          "y": 12
+        },
+        "fct_work_lot_project_activity": {
+          "x": 672,
+          "y": 1160
+        },
+        "fct_work_lot_punch_list": {
+          "x": 672,
+          "y": 2535
+        },
+        "fct_work_lot_subcontract": {
+          "x": 672,
+          "y": 660
+        },
+        "fct_work_lot_subcontractor": {
+          "x": 672,
+          "y": 285
+        },
+        "ref_action_status": {
+          "x": 674,
+          "y": 3524
+        },
+        "ref_country": {
+          "x": 1962,
+          "y": 3487
+        },
+        "ref_region": {
+          "x": 1602,
+          "y": 3025
+        },
+        "work_lot_action_attachment": {
+          "x": 312,
+          "y": 2797
+        },
+        "work_lot_action_tag": {
+          "x": 312,
+          "y": 2672
+        }
+      }
+    }
+  },
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}

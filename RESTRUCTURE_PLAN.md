@@ -82,8 +82,8 @@ Stages move entirely into the editor (tabs), no longer in the tree.
 | 5 | SemanticEditorProvider | ✅ Complete |
 | 6 | DomainTreeProvider | ✅ Complete |
 | 7 | package.json | ✅ Complete |
-| 8 | File Watchers (verify) | Not started |
-| 9 | Tests & Fixtures | Not started |
+| 8 | File Watchers (verify) | ✅ Complete |
+| 9 | Tests & Fixtures | ✅ Complete |
 | 10 | Documentation & Cleanup | Not started |
 
 ---

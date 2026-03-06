@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 3,
+  "domain": "bob",
+  "layer": "silver",
+  "description": "",
+  "modelFolder": "models/silver",
+  "conceptual": {
+    "models": [
+      {
+        "name": "dim_work_lot",
+        "source": "built"
+      }
+    ],
+    "relationships": [],
+    "viewConfig": {
+      "positions": {
+        "dim_work_lot": { "x": 100, "y": 100 }
+      }
+    }
+  },
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}
