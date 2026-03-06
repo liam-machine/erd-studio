@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 
 import { DomainService } from './services/domainService';
 import { LayerService } from './services/layerService';
-import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type SemanticDomain, type Stage } from './types/semantic';
+import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
 import { hasLegacyLayout, scanV2Domains, migrateV2ToV3 } from './services/migrationService';
 import { ManifestService } from './services/manifestService';
 import { TemplateService } from './services/templateService';
@@ -126,9 +126,6 @@ function validateDomainSlug(
   return undefined;
 }
 
-/** Valid editable stages for domain creation. */
-const EDITABLE_STAGES: Stage[] = ['conceptual', 'logical'];
-
 /** Shared color options for layer creation and editing. */
 const LAYER_COLOR_OPTIONS = [
   { label: '⚪ Silver', value: '#a0a0a0' },
@@ -233,18 +230,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.window.registerFileDecorationProvider(layerDecorationProvider),
     vscode.commands.registerCommand('dbtSemantic.openDomain', async (filePath: string, stage?: Stage) => {
-      // For physical stage, open the logical file then switch to physical in the editor
-      let openPath = filePath;
-      if (stage === 'physical') {
-        openPath = filePath.replace(/[\\/]conceptual[\\/]/, path.sep + 'logical' + path.sep);
-      }
+      const fileUri = vscode.Uri.file(filePath);
       await vscode.commands.executeCommand(
         'vscode.openWith',
-        vscode.Uri.file(openPath),
+        fileUri,
         'dbtSemantic.domainEditor',
       );
       if (stage === 'physical') {
-        editorProvider.switchStageForUri(vscode.Uri.file(openPath), 'physical');
+        editorProvider.switchStageForUri(fileUri, 'physical');
       }
     }),
     vscode.commands.registerCommand(
@@ -308,52 +301,48 @@ export function activate(context: vscode.ExtensionContext): void {
           console.warn('[createDomain] Failed to load manifest for folder detection, skipping folder picker');
         }
 
-        // Step 5: Create files in both conceptual/ and logical/ directories
-        for (const stage of EDITABLE_STAGES) {
-          const stageLayerDir = path.join(workspaceRoot, semanticDir, stage, layer);
-          const filePath = path.join(stageLayerDir, `${slug}.json`);
+        // Step 5: Create unified v3 domain file
+        const layerDir = path.join(workspaceRoot, semanticDir, layer);
+        const filePath = path.join(layerDir, `${slug}.json`);
 
-          try {
-            if (!fs.existsSync(stageLayerDir)) {
-              fs.mkdirSync(stageLayerDir, { recursive: true });
-            }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            void vscode.window.showErrorMessage(`Failed to create directory: ${msg}`);
-            return;
+        try {
+          if (!fs.existsSync(layerDir)) {
+            fs.mkdirSync(layerDir, { recursive: true });
           }
-
-          const domainData: Record<string, unknown> = {
-            schemaVersion: CURRENT_SCHEMA_VERSION,
-            domain: slug,
-            layer,
-            stage,
-            description: description.trim(),
-            ...(modelFolder ? { modelFolder } : {}),
-            models: [],
-            relationships: [],
-            viewConfig: {},
-          };
-
-          try {
-            fs.writeFileSync(filePath, JSON.stringify(domainData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
-          } catch (err) {
-            if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
-              void vscode.window.showErrorMessage(`Domain "${slug}" already exists in ${layer} layer (${stage} stage)`);
-              return;
-            }
-            const msg = err instanceof Error ? err.message : String(err);
-            void vscode.window.showErrorMessage(`Failed to create domain file: ${msg}`);
-            return;
-          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to create directory: ${msg}`);
+          return;
         }
 
-        // Step 6: Refresh tree and auto-open logical domain
+        const emptyStage: StageData = { models: [], relationships: [], viewConfig: {} };
+        const domainData: UnifiedDomain = {
+          schemaVersion: CURRENT_SCHEMA_VERSION,
+          domain: slug,
+          layer,
+          description: description.trim(),
+          ...(modelFolder ? { modelFolder } : {}),
+          conceptual: { ...emptyStage },
+          logical: { ...emptyStage },
+        };
+
+        try {
+          fs.writeFileSync(filePath, JSON.stringify(domainData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
+        } catch (err) {
+          if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
+            void vscode.window.showErrorMessage(`Domain "${slug}" already exists in the ${layer} layer`);
+            return;
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to create domain file: ${msg}`);
+          return;
+        }
+
+        // Step 6: Refresh tree and auto-open domain
         treeProvider.refresh();
-        const logicalFilePath = path.join(workspaceRoot, semanticDir, 'logical', layer, `${slug}.json`);
         await vscode.commands.executeCommand(
           'vscode.openWith',
-          vscode.Uri.file(logicalFilePath),
+          vscode.Uri.file(filePath),
           'dbtSemantic.domainEditor',
         );
       },
@@ -374,7 +363,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!shouldProceed) { return; }
 
         const confirm = await vscode.window.showWarningMessage(
-          `Are you sure you want to delete domain "${domainName}"? This will delete both conceptual and logical files.`,
+          `Are you sure you want to delete domain "${domainName}"?`,
           { modal: true },
           'Delete',
         );
@@ -386,24 +375,12 @@ export function activate(context: vscode.ExtensionContext): void {
           await vscode.window.tabGroups.close(matchingTabs, true);
         }
 
-        // Delete files in both conceptual and logical directories
-        const layer = element.summary.layer;
-        for (const stage of EDITABLE_STAGES) {
-          const stageFilePath = path.join(workspaceRoot, semanticDir, stage, layer, `${domainName}.json`);
-          const stageFileUri = vscode.Uri.file(stageFilePath);
-          try {
-            if (fs.existsSync(stageFilePath)) {
-              // Close any tabs for this stage file too
-              const stageTabs = findMatchingTabs(stageFileUri);
-              if (stageTabs.length > 0) {
-                await vscode.window.tabGroups.close(stageTabs, true);
-              }
-              await vscode.workspace.fs.delete(stageFileUri);
-            }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            void vscode.window.showErrorMessage(`Failed to delete domain (${stage}): ${msg}`);
-          }
+        // Delete the unified domain file
+        try {
+          await vscode.workspace.fs.delete(fileUri);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to delete domain: ${msg}`);
         }
 
         treeProvider.refresh();
@@ -437,32 +414,28 @@ export function activate(context: vscode.ExtensionContext): void {
         const newSlug = newDomainSlug.trim();
         if (newSlug === oldDomainName) { return; }
 
-        // Rename in both stage directories
-        const edit = new vscode.WorkspaceEdit();
-        for (const stage of EDITABLE_STAGES) {
-          const oldStageFilePath = path.join(workspaceRoot, semanticDir, stage, layer, `${oldDomainName}.json`);
-          const newStageFilePath = path.join(workspaceRoot, semanticDir, stage, layer, `${newSlug}.json`);
-
-          if (!fs.existsSync(oldStageFilePath)) { continue; }
-
-          const oldStageUri = vscode.Uri.file(oldStageFilePath);
-          const newStageUri = vscode.Uri.file(newStageFilePath);
-
-          // Read and update domain field
-          let domainData: SemanticDomain;
-          try {
-            domainData = domainService.getDomain(oldStageFilePath);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            void vscode.window.showErrorMessage(`Failed to read domain file (${stage}): ${msg}`);
-            return;
-          }
-          domainData.domain = newSlug;
-
-          edit.createFile(newStageUri, { overwrite: false, ignoreIfExists: false });
-          edit.insert(newStageUri, new vscode.Position(0, 0), JSON.stringify(domainData, null, 2) + '\n');
-          edit.deleteFile(oldStageUri, { ignoreIfNotExists: false });
+        // Read and update domain name in the unified file
+        let domainData: UnifiedDomain;
+        try {
+          domainData = domainService.getDomain(oldFilePath);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to read domain file: ${msg}`);
+          return;
         }
+        domainData.domain = newSlug;
+
+        // Close old editor tabs before applying the edit (file will be deleted)
+        const oldTabs = findMatchingTabs(oldFileUri);
+        if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }
+
+        const newFilePath = path.join(workspaceRoot, semanticDir, layer, `${newSlug}.json`);
+        const newFileUri = vscode.Uri.file(newFilePath);
+
+        const edit = new vscode.WorkspaceEdit();
+        edit.createFile(newFileUri, { overwrite: false, ignoreIfExists: false });
+        edit.insert(newFileUri, new vscode.Position(0, 0), JSON.stringify(domainData, null, 2) + '\n');
+        edit.deleteFile(oldFileUri, { ignoreIfNotExists: false });
 
         const success = await vscode.workspace.applyEdit(edit);
         if (!success) {
@@ -470,16 +443,8 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        // Close old editor tabs
-        for (const stage of EDITABLE_STAGES) {
-          const oldStageUri = vscode.Uri.file(path.join(workspaceRoot, semanticDir, stage, layer, `${oldDomainName}.json`));
-          const tabs = findMatchingTabs(oldStageUri);
-          if (tabs.length > 0) { await vscode.window.tabGroups.close(tabs, true); }
-        }
-
-        // Auto-open renamed domain (logical)
-        const newLogicalUri = vscode.Uri.file(path.join(workspaceRoot, semanticDir, 'logical', layer, `${newSlug}.json`));
-        await vscode.commands.executeCommand('vscode.openWith', newLogicalUri, 'dbtSemantic.domainEditor');
+        // Auto-open renamed domain
+        await vscode.commands.executeCommand('vscode.openWith', newFileUri, 'dbtSemantic.domainEditor');
       },
     ),
     vscode.commands.registerCommand('dbtSemantic.refreshManifest', async () => {
@@ -509,13 +474,11 @@ export function activate(context: vscode.ExtensionContext): void {
             fs.mkdirSync(fullSemanticDir, { recursive: true });
           }
 
-          // Create stage/layer directories
-          for (const stage of EDITABLE_STAGES) {
-            for (const layer of defaultLayers) {
-              const layerDir = path.join(fullSemanticDir, stage, layer.id);
-              if (!fs.existsSync(layerDir)) {
-                fs.mkdirSync(layerDir, { recursive: true });
-              }
+          // Create layer directories
+          for (const layer of defaultLayers) {
+            const layerDir = path.join(fullSemanticDir, layer.id);
+            if (!fs.existsSync(layerDir)) {
+              fs.mkdirSync(layerDir, { recursive: true });
             }
           }
 
@@ -590,12 +553,10 @@ export function activate(context: vscode.ExtensionContext): void {
             creatable: true,
           });
 
-          // Create directories for both editable stages
-          for (const stage of EDITABLE_STAGES) {
-            const layerDir = path.join(workspaceRoot, semanticDir, stage, layerId);
-            if (!fs.existsSync(layerDir)) {
-              fs.mkdirSync(layerDir, { recursive: true });
-            }
+          // Create layer directory
+          const layerDir = path.join(workspaceRoot, semanticDir, layerId);
+          if (!fs.existsSync(layerDir)) {
+            fs.mkdirSync(layerDir, { recursive: true });
           }
 
           treeProvider.refresh();
@@ -727,12 +688,10 @@ export function activate(context: vscode.ExtensionContext): void {
         try {
           await layerService.removeLayer(layerId);
 
-          // Remove directories for both stages
-          for (const stage of EDITABLE_STAGES) {
-            const layerDir = path.join(workspaceRoot, semanticDir, stage, layerId);
-            if (fs.existsSync(layerDir)) {
-              await vscode.workspace.fs.delete(vscode.Uri.file(layerDir), { recursive: true });
-            }
+          // Remove layer directory
+          const layerDir = path.join(workspaceRoot, semanticDir, layerId);
+          if (fs.existsSync(layerDir)) {
+            await vscode.workspace.fs.delete(vscode.Uri.file(layerDir), { recursive: true });
           }
 
           treeProvider.refresh();
