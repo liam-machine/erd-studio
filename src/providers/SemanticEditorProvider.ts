@@ -17,8 +17,6 @@
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 
-import * as path from 'path';
-
 import { DomainService } from '../services/domainService';
 import { compare as compareStages } from '../services/discrepancyService';
 import { ManifestService } from '../services/manifestService';
@@ -115,10 +113,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
 
-    // Track this panel — infer initial stage from the file path
+    // Track this panel — default to logical stage (v3 unified files have no stage in path)
     const panelKey = document.uri.toString();
-    const initialStage = this.inferStageFromPath(document.uri.fsPath);
-    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: initialStage });
+    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical' });
 
     // --- Subscriptions (disposed when the panel closes) ---------------------
 
@@ -139,19 +136,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           return;
         }
 
+        // Resolve active stage for mutation handlers (physical is already guarded above)
+        const activeStage = (panel?.activeStage === 'conceptual' ? 'conceptual' : 'logical') as 'conceptual' | 'logical';
+
         switch (message.type) {
           case 'ready':
-            await this.sendDomainData(document, webviewPanel.webview);
+            await this.sendDomainData(document, webviewPanel.webview, panelKey);
             break;
           case 'updatePositions': {
             const payload = (message as Record<string, unknown>).payload as
               | { positions: Record<string, { x: number; y: number }> }
               | undefined;
             if (payload?.positions) {
+              const currentPanel = this.openPanels.get(panelKey);
               await this.handleUpdatePositions(
                 document,
                 webviewPanel.webview,
                 payload.positions,
+                currentPanel?.activeStage ?? 'logical',
               );
             }
             break;
@@ -159,84 +161,84 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'addModel': {
             const payload = (message as { payload?: DesignModel }).payload;
             if (payload) {
-              await this.handleAddModel(document, webviewPanel.webview, payload);
+              await this.handleAddModel(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'addColumn': {
             const payload = (message as { payload?: { modelName: string; column: ColumnDef } }).payload;
             if (payload) {
-              await this.handleAddColumn(document, webviewPanel.webview, payload);
+              await this.handleAddColumn(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'updateColumn': {
             const payload = (message as { payload?: { modelName: string; oldColumnName: string; column: ColumnDef } }).payload;
             if (payload) {
-              await this.handleUpdateColumn(document, webviewPanel.webview, payload);
+              await this.handleUpdateColumn(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'removeColumn': {
             const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
             if (payload) {
-              await this.handleRemoveColumn(document, webviewPanel.webview, payload);
+              await this.handleRemoveColumn(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'toggleColumnKey': {
             const payload = (message as { payload?: { modelName: string; columnName: string; keyType: 'PK' | 'FK' | 'NK'; value: boolean } }).payload;
             if (payload) {
-              await this.handleToggleColumnKey(document, webviewPanel.webview, payload);
+              await this.handleToggleColumnKey(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'addRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
-              await this.handleAddRelationship(document, webviewPanel.webview, payload);
+              await this.handleAddRelationship(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'renameModel': {
             const payload = (message as { payload?: { oldName: string; newName: string } }).payload;
             if (payload) {
-              await this.handleRenameModel(document, webviewPanel.webview, payload);
+              await this.handleRenameModel(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'removeModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
-              await this.handleRemoveModel(document, webviewPanel.webview, payload);
+              await this.handleRemoveModel(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'removeRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string } }).payload;
             if (payload) {
-              await this.handleRemoveRelationship(document, webviewPanel.webview, payload);
+              await this.handleRemoveRelationship(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'updateRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
-              await this.handleUpdateRelationship(document, webviewPanel.webview, payload);
+              await this.handleUpdateRelationship(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'editRelationship': {
             const payload = (message as { payload?: { originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string; fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
-              await this.handleEditRelationship(document, webviewPanel.webview, payload);
+              await this.handleEditRelationship(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'addExistingModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
-              await this.handleAddExistingModel(document, webviewPanel.webview, payload);
+              await this.handleAddExistingModel(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
@@ -247,33 +249,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'undo': {
             await vscode.commands.executeCommand('undo');
             await document.save();
-            await this.sendDomainData(document, webviewPanel.webview);
+            await this.sendDomainData(document, webviewPanel.webview, panelKey);
             break;
           }
           case 'redo': {
             await vscode.commands.executeCommand('redo');
             await document.save();
-            await this.sendDomainData(document, webviewPanel.webview);
+            await this.sendDomainData(document, webviewPanel.webview, panelKey);
             break;
           }
           case 'updateModelRationale': {
             const payload = (message as { payload?: { modelName: string; rationale: Rationale } }).payload;
             if (payload) {
-              await this.handleUpdateModelRationale(document, webviewPanel.webview, payload);
+              await this.handleUpdateModelRationale(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'updateModelGrain': {
             const payload = (message as { payload?: { modelName: string; grain: string } }).payload;
             if (payload) {
-              await this.handleUpdateModelGrain(document, webviewPanel.webview, payload);
+              await this.handleUpdateModelGrain(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
           case 'updateModelRole': {
             const payload = (message as { payload?: { modelName: string; modelRole: string | null } }).payload;
             if (payload) {
-              await this.handleUpdateModelRole(document, webviewPanel.webview, payload);
+              await this.handleUpdateModelRole(document, webviewPanel.webview, payload, activeStage);
             }
             break;
           }
@@ -305,7 +307,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (document.isDirty) {
         await document.save();
       }
-      await this.sendDomainData(document, webviewPanel.webview);
+      await this.sendDomainData(document, webviewPanel.webview, panelKey);
     });
 
     webviewPanel.onDidDispose(() => {
@@ -320,21 +322,36 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   // -------------------------------------------------------------------------
 
   /**
-   * Generic helper to apply a mutation to the domain JSON and persist it.
+   * Extract a stage section from parsed v3 domain JSON.
+   * Returns a reference — mutations to the returned object mutate the parent.
+   */
+  private getStageSection(
+    parsed: Record<string, unknown>,
+    stage: 'conceptual' | 'logical',
+  ): Record<string, unknown> {
+    if (!parsed[stage] || typeof parsed[stage] !== 'object') {
+      parsed[stage] = { models: [], relationships: [], viewConfig: {} };
+    }
+    return parsed[stage] as Record<string, unknown>;
+  }
+
+  /**
+   * Generic helper to apply a stage-scoped mutation to the domain JSON and persist it.
    * Handles the common WorkspaceEdit pattern used by all mutation handlers.
    */
   private async applyDomainEdit(
     document: vscode.TextDocument,
-    mutator: (parsed: Record<string, unknown>) => void,
-    options: { refreshWebview?: boolean; webview?: vscode.Webview } = {},
+    mutator: (section: Record<string, unknown>, parsed: Record<string, unknown>) => void,
+    options: { refreshWebview?: boolean; webview?: vscode.Webview; stage: 'conceptual' | 'logical' },
   ): Promise<boolean> {
-    const { refreshWebview = true, webview } = options;
+    const { refreshWebview = true, webview, stage } = options;
     const panelKey = document.uri.toString();
 
     const text = document.getText();
     const parsed = JSON.parse(text) as Record<string, unknown>;
+    const section = this.getStageSection(parsed, stage);
 
-    mutator(parsed);
+    mutator(section, parsed);
 
     const updatedText = JSON.stringify(parsed, null, 2) + '\n';
     const edit = new vscode.WorkspaceEdit();
@@ -437,22 +454,32 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * Parse the document, build display domain, and send to webview.
+   * Parse the document, build display domain for the active stage, and send to webview.
    * On parse failure, sends an error message instead.
    */
   private async sendDomainData(
     document: vscode.TextDocument,
     webview: vscode.Webview,
+    panelKey?: string,
   ): Promise<void> {
     try {
-      const domain = this.domainService.getDomain(document.uri.fsPath);
-      const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
-      const displayDomain = this.buildDisplayDomain(domain, manifest);
+      const key = panelKey ?? document.uri.toString();
+      const panel = this.openPanels.get(key);
+      const activeStage = panel?.activeStage ?? 'logical';
 
-      webview.postMessage({
-        type: 'domainLoaded',
-        payload: displayDomain,
-      });
+      const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+
+      if (activeStage === 'physical') {
+        const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
+        const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
+        if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
+        webview.postMessage({ type: 'domainLoaded', payload: physicalDomain });
+      } else {
+        const domain = this.domainService.getDomainStage(document.uri.fsPath, activeStage);
+        const displayDomain = this.buildDisplayDomain(domain, manifest);
+        webview.postMessage({ type: 'domainLoaded', payload: displayDomain });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
@@ -472,7 +499,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // Re-derive physical from logical + manifest
           await this.handleSwitchStage(panelKey, document, webview, 'physical');
         } else {
-          await this.sendDomainData(document, webview);
+          await this.sendDomainData(document, webview, panelKey);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -522,12 +549,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     model: DesignModel,
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
+      const section = this.getStageSection(parsed, stage);
 
-      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+      const models = (section.models ?? []) as Array<Record<string, unknown>>;
 
       if (models.some((m) => m.name === model.name)) {
         webview.postMessage({
@@ -545,7 +574,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         ...(model.modelRole ? { modelRole: model.modelRole } : {}),
       });
 
-      parsed.models = models;
+      section.models = models;
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
 
       const edit = new vscode.WorkspaceEdit();
@@ -598,6 +627,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; column: ColumnDef },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const validationError = this.validateColumnDef(payload.column);
@@ -608,7 +638,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+      const section = this.getStageSection(parsed, stage);
+      const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
       if (!model) {
         webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found.` } });
@@ -659,6 +690,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; oldColumnName: string; column: ColumnDef },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const validationError = this.validateColumnDef(payload.column);
@@ -669,7 +701,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+      const section = this.getStageSection(parsed, stage);
+      const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
       if (!model) {
         webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found.` } });
@@ -735,11 +768,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; columnName: string },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+      const section = this.getStageSection(parsed, stage);
+      const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
       if (!model) {
         webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found.` } });
@@ -784,11 +819,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; columnName: string; keyType: 'PK' | 'FK' | 'NK'; value: boolean },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+      const section = this.getStageSection(parsed, stage);
+      const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
       if (!model) {
         webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found.` } });
@@ -839,12 +876,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
         document,
-        (parsed) => {
-          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+        (section) => {
+          const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
           const isDuplicate = relationships.some(
             (rel) =>
               rel.fromModel === payload.fromModel &&
@@ -863,9 +901,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             toColumn: payload.toColumn,
             cardinality: payload.cardinality,
           });
-          parsed.relationships = relationships;
+          section.relationships = relationships;
         },
-        { webview },
+        { webview, stage },
       );
 
       if (!success) {
@@ -882,6 +920,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { oldName: string; newName: string },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const trimmedNew = payload.newName.trim();
@@ -899,7 +938,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+      const section = this.getStageSection(parsed, stage);
+      const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.oldName);
       if (!model) {
         webview.postMessage({ type: 'error', payload: { message: `Model "${payload.oldName}" not found.` } });
@@ -912,15 +952,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       model.name = trimmedNew;
 
-      // Cascade: update relationship references
-      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+      // Cascade: update relationship references within this stage
+      const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
       for (const rel of relationships) {
         if (rel.fromModel === payload.oldName) { rel.fromModel = trimmedNew; }
         if (rel.toModel === payload.oldName) { rel.toModel = trimmedNew; }
       }
 
-      // Cascade: update viewConfig positions
-      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      // Cascade: update viewConfig positions within this stage
+      const viewConfig = (section.viewConfig ?? {}) as Record<string, unknown>;
       const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
       if (payload.oldName in positions) {
         positions[trimmedNew] = positions[payload.oldName];
@@ -955,11 +995,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+      const section = this.getStageSection(parsed, stage);
+      const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const modelIndex = models.findIndex((m) => m.name === payload.modelName);
       if (modelIndex === -1) {
         webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found.` } });
@@ -967,20 +1009,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       models.splice(modelIndex, 1);
-      parsed.models = models;
+      section.models = models;
 
-      // Cascade: remove relationships involving this model
-      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
-      parsed.relationships = relationships.filter(
+      // Cascade: remove relationships involving this model within this stage
+      const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
+      section.relationships = relationships.filter(
         (rel) => rel.fromModel !== payload.modelName && rel.toModel !== payload.modelName,
       );
 
-      // Remove positions for deleted model
-      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      // Remove positions for deleted model within this stage
+      const viewConfig = (section.viewConfig ?? {}) as Record<string, unknown>;
       const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
       delete positions[payload.modelName];
       viewConfig.positions = positions;
-      parsed.viewConfig = viewConfig;
+      section.viewConfig = viewConfig;
 
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
       const edit = new vscode.WorkspaceEdit();
@@ -1013,12 +1055,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
         document,
-        (parsed) => {
-          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+        (section) => {
+          const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
           const relIndex = relationships.findIndex(
             (rel) =>
               rel.fromModel === payload.fromModel &&
@@ -1030,9 +1073,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             throw new Error('Relationship not found.');
           }
           relationships.splice(relIndex, 1);
-          parsed.relationships = relationships;
+          section.relationships = relationships;
         },
-        { webview },
+        { webview, stage },
       );
 
       if (!success) {
@@ -1049,12 +1092,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
         document,
-        (parsed) => {
-          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+        (section) => {
+          const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
           const relIndex = relationships.findIndex(
             (rel) =>
               rel.fromModel === payload.fromModel &&
@@ -1067,7 +1111,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           relationships[relIndex].cardinality = payload.cardinality;
         },
-        { webview },
+        { webview, stage },
       );
 
       if (!success) {
@@ -1087,12 +1131,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string;
       fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality;
     },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
         document,
-        (parsed) => {
-          const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+        (section) => {
+          const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
           const relIndex = relationships.findIndex(
             (rel) =>
               rel.fromModel === payload.originalFromModel &&
@@ -1133,7 +1178,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             cardinality: payload.cardinality,
           };
         },
-        { webview },
+        { webview, stage },
       );
 
       if (!success) {
@@ -1150,12 +1195,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     positions: Record<string, { x: number; y: number }>,
+    activeStage: Stage,
   ): Promise<void> {
     try {
+      // Physical stage positions are stored in the logical section
+      const targetStage: 'conceptual' | 'logical' = activeStage === 'physical' ? 'logical' : activeStage;
+
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
-      parsed.viewConfig = { ...viewConfig, positions };
+      const section = this.getStageSection(parsed, targetStage);
+      const viewConfig = (section.viewConfig ?? {}) as Record<string, unknown>;
+      section.viewConfig = { ...viewConfig, positions };
 
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
       const edit = new vscode.WorkspaceEdit();
@@ -1184,6 +1234,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
@@ -1199,7 +1250,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+      const section = this.getStageSection(parsed, stage);
+      const models = (section.models ?? []) as Array<Record<string, unknown>>;
 
       if (models.some((m) => m.name === payload.modelName)) {
         webview.postMessage({
@@ -1210,7 +1262,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       // Find open position
-      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const viewConfig = (section.viewConfig ?? {}) as Record<string, unknown>;
       const existingPositions = (viewConfig.positions ?? {}) as Record<string, { x: number; y: number }>;
       const newPosition = this.findOpenPosition(existingPositions);
 
@@ -1229,7 +1281,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       });
 
       // Auto-create relationships from manifest tests
-      const relationships = (parsed.relationships ?? []) as Array<Record<string, unknown>>;
+      const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
       const modelNames = new Set(models.map((m) => m.name as string));
       const relationshipTests = this.manifestService.getRelationshipTests();
 
@@ -1257,11 +1309,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           });
         }
       }
-      parsed.relationships = relationships;
+      section.relationships = relationships;
 
       const updatedPositions = { ...existingPositions, [payload.modelName]: newPosition };
-      parsed.models = models;
-      parsed.viewConfig = { ...viewConfig, positions: updatedPositions };
+      section.models = models;
+      section.viewConfig = { ...viewConfig, positions: updatedPositions };
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
 
       const edit = new vscode.WorkspaceEdit();
@@ -1298,12 +1350,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; rationale: Partial<Rationale> },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
         document,
-        (parsed) => {
-          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+        (section) => {
+          const models = (section.models ?? []) as Array<Record<string, unknown>>;
           const model = models.find((m) => m.name === payload.modelName);
           if (!model) { throw new Error(`Model "${payload.modelName}" not found.`); }
 
@@ -1316,7 +1369,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
           if (Object.keys(patched).length > 0) { model.rationale = patched; } else { delete model.rationale; }
         },
-        { webview },
+        { webview, stage },
       );
 
       if (!success) {
@@ -1333,19 +1386,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; grain: string },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
         document,
-        (parsed) => {
-          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+        (section) => {
+          const models = (section.models ?? []) as Array<Record<string, unknown>>;
           const model = models.find((m) => m.name === payload.modelName);
           if (!model) { throw new Error(`Model "${payload.modelName}" not found.`); }
 
           const grain = payload.grain?.trim() || undefined;
           if (grain) { model.grain = grain; } else { delete model.grain; }
         },
-        { webview },
+        { webview, stage },
       );
 
       if (!success) {
@@ -1362,18 +1416,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; modelRole: string | null },
+    stage: 'conceptual' | 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
         document,
-        (parsed) => {
-          const models = (parsed.models ?? []) as Array<Record<string, unknown>>;
+        (section) => {
+          const models = (section.models ?? []) as Array<Record<string, unknown>>;
           const model = models.find((m) => m.name === payload.modelName);
           if (!model) { throw new Error(`Model "${payload.modelName}" not found.`); }
 
           if (payload.modelRole) { model.modelRole = payload.modelRole; } else { delete model.modelRole; }
         },
-        { webview },
+        { webview, stage },
       );
 
       if (!success) {
@@ -1427,38 +1482,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   // Stage switching & discrepancy
   // -------------------------------------------------------------------------
 
-  /**
-   * Infer the stage from a file path.
-   * Path pattern: erd-studio/{stage}/{layer}/{domain}.json
-   */
-  private inferStageFromPath(filePath: string): Stage {
-    const grandparent = path.basename(path.dirname(path.dirname(filePath)));
-    if (grandparent === 'logical') return 'logical';
-    if (grandparent === 'physical') return 'physical';
-    return 'conceptual';
-  }
-
-  /**
-   * Get the domain name and layer from the currently open document.
-   * Infers from path: erd-studio/{stage}/{layer}/{domain}.json
-   */
-  private parseDomainPath(filePath: string): { domainName: string; layer: string } {
-    return {
-      domainName: path.basename(filePath, '.json'),
-      layer: path.basename(path.dirname(filePath)),
-    };
-  }
-
-  /**
-   * Resolve the file path for a sibling domain at a different stage.
-   * E.g., switching from conceptual/silver/orders.json → logical/silver/orders.json
-   */
-  private resolveSiblingPath(currentFilePath: string, targetStage: Stage): string {
-    const { domainName, layer } = this.parseDomainPath(currentFilePath);
-    const config = vscode.workspace.getConfiguration('dbtSemantic');
-    const semanticDir = config.get<string>('semanticDir', 'erd-studio');
-    return path.join(this.workspaceRoot, semanticDir, targetStage, layer, `${domainName}.json`);
-  }
 
   /**
    * Handle a switchStage message from the webview.
@@ -1480,19 +1503,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
 
       if (targetStage === 'physical') {
-        // Physical stage is derived from logical domain + manifest
-        const logicalPath = this.resolveSiblingPath(document.uri.fsPath, 'logical');
-        const logicalDomain = this.domainService.getDomain(logicalPath);
-        const physicalDomain = this.domainService.buildPhysicalDomain(logicalDomain, manifest);
-        const layerConfig = this.layerService.getLayer(logicalDomain.layer);
+        // Physical stage is derived from same unified file's logical section + manifest
+        const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
+        const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) {
           physicalDomain.layerConfig = layerConfig;
         }
         webview.postMessage({ type: 'stageData', payload: physicalDomain });
       } else {
-        // Conceptual or logical — read from disk
-        const siblingPath = this.resolveSiblingPath(document.uri.fsPath, targetStage);
-        const domain = this.domainService.getDomain(siblingPath);
+        // Conceptual or logical — extract from same unified file
+        const domain = this.domainService.getDomainStage(document.uri.fsPath, targetStage);
         const displayDomain = this.buildDisplayDomain(domain, manifest);
         webview.postMessage({ type: 'stageData', payload: displayDomain });
       }
@@ -1547,8 +1568,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Build a DisplayDomain for any stage, given the current document as context.
-   * For physical, derives from logical domain + manifest.
-   * For conceptual/logical, reads the sibling file from disk.
+   * For physical, derives from the unified file's logical section + manifest.
+   * For conceptual/logical, extracts the stage section from the same unified file.
    */
   private async buildStageDisplayDomain(
     document: vscode.TextDocument,
@@ -1556,12 +1577,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     manifest: ManifestData,
   ): Promise<DisplayDomain> {
     if (stage === 'physical') {
-      const logicalPath = this.resolveSiblingPath(document.uri.fsPath, 'logical');
-      const logicalDomain = this.domainService.getDomain(logicalPath);
-      return this.domainService.buildPhysicalDomain(logicalDomain, manifest);
+      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+      return this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
     }
-    const filePath = this.resolveSiblingPath(document.uri.fsPath, stage);
-    const domain = this.domainService.getDomain(filePath);
+    const domain = this.domainService.getDomainStage(document.uri.fsPath, stage);
     return this.buildDisplayDomain(domain, manifest);
   }
 

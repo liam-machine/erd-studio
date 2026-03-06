@@ -79,7 +79,7 @@ Stages move entirely into the editor (tabs), no longer in the tree.
 | 2 | Migration Function | ✅ Complete |
 | 3 | DomainService Rewrite | ✅ Complete |
 | 4 | Extension Commands | ✅ Complete |
-| 5 | SemanticEditorProvider | Not started |
+| 5 | SemanticEditorProvider | ✅ Complete |
 | 6 | DomainTreeProvider | Not started |
 | 7 | package.json | Not started |
 | 8 | File Watchers (verify) | Not started |
