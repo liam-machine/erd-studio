@@ -80,7 +80,7 @@ Stages move entirely into the editor (tabs), no longer in the tree.
 | 3 | DomainService Rewrite | ✅ Complete |
 | 4 | Extension Commands | ✅ Complete |
 | 5 | SemanticEditorProvider | ✅ Complete |
-| 6 | DomainTreeProvider | Not started |
+| 6 | DomainTreeProvider | ✅ Complete |
 | 7 | package.json | Not started |
 | 8 | File Watchers (verify) | Not started |
 | 9 | Tests & Fixtures | Not started |

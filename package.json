@@ -57,11 +57,6 @@
         "category": "dbt"
       },
       {
-        "command": "dbtSemantic.switchTreeStage",
-        "title": "Switch Stage",
-        "category": "dbt"
-      },
-      {
         "command": "dbtSemantic.renameDomain",
         "title": "Rename Semantic Domain",
         "category": "dbt"

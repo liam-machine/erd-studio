@@ -160,7 +160,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const domainService = new DomainService(layerService);
   const manifestService = new ManifestService();
   const templateService = new TemplateService();
-  const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, context, semanticDir);
+  const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
     domainService,
@@ -223,7 +223,6 @@ export function activate(context: vscode.ExtensionContext): void {
         dragAndDropController: treeProvider,
         canSelectMany: false,
       });
-      treeProvider.setTreeView(treeView);
       return treeView;
     })(),
     vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
@@ -730,27 +729,6 @@ export function activate(context: vscode.ExtensionContext): void {
           await layerService.saveConfig(detected);
           const uri = vscode.Uri.file(layerService.getConfigPath());
           await vscode.commands.executeCommand('vscode.open', uri);
-        }
-      },
-    ),
-    vscode.commands.registerCommand(
-      'dbtSemantic.switchTreeStage',
-      async () => {
-        const stages: Array<{ label: string; value: Stage; description?: string }> = [
-          { label: '$(lightbulb) Conceptual', value: 'conceptual', description: 'High-level entity design' },
-          { label: '$(list-tree) Logical', value: 'logical', description: 'Detailed data model design' },
-          { label: '$(database) Physical', value: 'physical', description: 'Built models from dbt manifest' },
-        ];
-        const current = treeProvider.getStage();
-        const pick = await vscode.window.showQuickPick(
-          stages.map(s => ({
-            ...s,
-            description: s.value === current ? `${s.description} (current)` : s.description,
-          })),
-          { placeHolder: 'Select stage to view in sidebar' },
-        );
-        if (pick) {
-          await treeProvider.setStage(pick.value);
         }
       },
     ),

@@ -225,12 +225,6 @@ export interface DomainSummary {
   domain: string;
   /** Layer derived from parent directory name. */
   layer: Layer;
-  /**
-   * Stage derived from path. Optional in v3 unified format where a single
-   * file contains both stages — will be removed entirely once all consumers
-   * are migrated (Phase 6/9).
-   */
-  stage?: Stage;
   /** Absolute path to the domain JSON file. */
   filePath: string;
 }
