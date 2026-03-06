@@ -95,7 +95,7 @@ manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ Display
 | Directory | Purpose |
 |-----------|---------|
 | `providers/` | `SemanticEditorProvider` (custom editor), `DomainTreeProvider` (sidebar tree) |
-| `services/` | Business logic — manifest parsing, domain I/O, discrepancy comparison, layers, templates |
+| `services/` | Business logic — manifest parsing, domain I/O, discrepancy comparison, layers, templates, v2→v3 migration |
 | `watchers/` | `FileWatcherService` — debounced watchers for manifest, domains, project config |
 | `types/` | Shared type definitions (imported by both host and webview) |
 
@@ -140,6 +140,14 @@ Cross-stage comparison is handled by `DiscrepancyService.compare(source, target)
 | Conceptual | Compare to Logical |
 
 Discrepancy statuses for models/columns/relationships: `matched`, `extra`, `missing`, `type-mismatch` (columns), `cardinality-mismatch` (relationships). Ghost nodes appear for missing models.
+
+## V2 to V3 Migration
+
+The extension migrated from a **stage-first** layout (`erd-studio/{stage}/{layer}/{domain}.json` — two files per domain) to a **layer-first unified** layout (`erd-studio/{layer}/{domain}.json` — one file per domain). `migrationService.ts` handles conversion:
+
+- **`dbtSemantic.migrateDomains` command** — user-triggered batch migration with confirmation dialog. Scans `conceptual/` and `logical/` directories, merges sibling pairs into v3 `UnifiedDomain` files, and removes old stage directories.
+- **In-memory v2 compat** — `getDomain()` can read v2 files and convert in memory. Write path always produces v3.
+- **Missing siblings** — if only one stage file exists (e.g. conceptual but no logical), the missing stage gets empty defaults.
 
 ## Testing the Webview UI in Chrome
 
