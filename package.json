@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt projects. Model your data warehouse across three stages — Conceptual entities, Logical columns and types, Physical manifest view — with cross-stage discrepancy comparison.",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
