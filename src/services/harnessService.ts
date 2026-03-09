@@ -15,6 +15,28 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // ---------------------------------------------------------------------------
+// Version marker — embedded in every generated harness file
+// ---------------------------------------------------------------------------
+
+/** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
+export const HARNESS_VERSION = '1';
+
+const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
+const VERSION_MARKER_SUFFIX = ' -->';
+
+function buildVersionMarker(): string {
+  return `${VERSION_MARKER_PREFIX} ${HARNESS_VERSION}${VERSION_MARKER_SUFFIX}`;
+}
+
+/**
+ * Extract the harness version from file content, or `null` if no marker found.
+ */
+export function extractHarnessVersion(content: string): string | null {
+  const match = content.match(/<!-- erd-studio-harness: (.+?) -->/);
+  return match ? match[1] : null;
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -213,7 +235,8 @@ FK columns match the PK name of the referenced table.`;
 // ---------------------------------------------------------------------------
 
 function generateClaudeSkill(): string {
-  return `---
+  return `${buildVersionMarker()}
+---
 name: erd-studio
 description: Reference schema for ERD Studio domain files (v3 unified format). Defines model structure, column metadata, relationships, naming conventions, and model roles. Use when creating or validating data model design files.
 ---
@@ -223,7 +246,8 @@ ${SCHEMA_CONTENT}
 }
 
 function generateCopilotInstructions(): string {
-  return `---
+  return `${buildVersionMarker()}
+---
 name: 'ERD Studio Schema'
 description: 'Schema reference for ERD Studio domain files — models, columns, relationships, naming conventions'
 applyTo: '**/erd-studio/**/*.json'
@@ -234,7 +258,8 @@ ${SCHEMA_CONTENT}
 }
 
 function generateGeminiStyleguide(): string {
-  return `${SCHEMA_CONTENT}
+  return `${buildVersionMarker()}
+${SCHEMA_CONTENT}
 
 ## Code Review Rules for ERD Studio Files
 
@@ -251,7 +276,8 @@ When reviewing changes to \`erd-studio/**/*.json\` files:
 }
 
 function generateCodexAgents(): string {
-  return `
+  return `${buildVersionMarker()}
+
 ## ERD Studio Domain Files
 
 ${SCHEMA_CONTENT}
@@ -353,5 +379,31 @@ export class HarnessService {
       result.set(target.id, fs.existsSync(filePath));
     }
     return result;
+  }
+
+  /**
+   * Detect installed harness files whose embedded version differs from the
+   * current HARNESS_VERSION.  Returns only targets that exist AND are stale
+   * (missing marker or older version).
+   */
+  detectStale(workspaceRoot: string): HarnessTarget[] {
+    const stale: HarnessTarget[] = [];
+    for (const target of HARNESS_TARGETS) {
+      const filePath = path.join(workspaceRoot, target.relativePath);
+      if (!fs.existsSync(filePath)) { continue; }
+
+      const content = fs.readFileSync(filePath, 'utf-8');
+
+      // For Codex, only consider it an ERD Studio harness if our section exists
+      if (target.id === 'codex' && !content.includes('## ERD Studio Domain Files')) {
+        continue;
+      }
+
+      const version = extractHarnessVersion(content);
+      if (version !== HARNESS_VERSION) {
+        stale.push(target);
+      }
+    }
+    return stale;
   }
 }

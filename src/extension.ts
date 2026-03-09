@@ -13,7 +13,7 @@ import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
-import { HarnessService, HARNESS_TARGETS } from './services/harnessService';
+import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/harnessService';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -787,14 +787,23 @@ export function activate(context: vscode.ExtensionContext): void {
       async () => {
         const harnessService = new HarnessService();
         const existing = harnessService.detectExisting(workspaceRoot);
+        const staleTargets = harnessService.detectStale(workspaceRoot);
+        const staleIds = new Set(staleTargets.map(t => t.id));
 
-        // Build QuickPick items with existing status
+        // Build QuickPick items with existing/outdated status
         const items = HARNESS_TARGETS.map(target => {
           const exists = existing.get(target.id);
+          const isStale = staleIds.has(target.id);
+          let description = target.description;
+          if (exists && isStale) {
+            description = '$(warning) outdated — update available';
+          } else if (exists) {
+            description = '$(check) installed (v' + HARNESS_VERSION + ')';
+          }
           return {
             label: target.label,
-            description: exists ? '$(check) installed' : target.description,
-            picked: false,
+            description,
+            picked: isStale, // Pre-select outdated targets
             target,
             exists,
           };
@@ -851,6 +860,32 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
   );
+
+  // Stale harness check — prompt users with outdated AI coding harness files
+  {
+    const harnessService = new HarnessService();
+    const staleTargets = harnessService.detectStale(workspaceRoot);
+    if (staleTargets.length > 0) {
+      const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
+      void vscode.window.showWarningMessage(
+        `ERD Studio: AI coding harness outdated for ${names}. Update to v${HARNESS_VERSION}?`,
+        'Update All',
+        'Choose…',
+        'Dismiss',
+      ).then(choice => {
+        if (choice === 'Update All') {
+          for (const target of staleTargets) {
+            harnessService.install(workspaceRoot, target, true);
+          }
+          void vscode.window.showInformationMessage(
+            `Updated ${staleTargets.length} AI coding harness file(s) to v${HARNESS_VERSION}.`,
+          );
+        } else if (choice === 'Choose…') {
+          void vscode.commands.executeCommand('dbtSemantic.installCodingHarness');
+        }
+      });
+    }
+  }
 
   // First-run check
   const fullSemanticDir = path.join(workspaceRoot, semanticDir);

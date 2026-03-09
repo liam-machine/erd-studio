@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { HarnessService, HARNESS_TARGETS } from '../../src/services/harnessService';
+import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion } from '../../src/services/harnessService';
 
 describe('HarnessService', () => {
   let service: HarnessService;
@@ -65,6 +65,14 @@ describe('HarnessService', () => {
         expect(content).toContain('conceptual');
         expect(content).toContain('logical');
         expect(content).toContain('erd-studio/{layer}/{domain}.json');
+      }
+    });
+
+    it('all formats embed a version marker', () => {
+      for (const target of HARNESS_TARGETS) {
+        const content = service.generateContent(target.id);
+        const version = extractHarnessVersion(content);
+        expect(version).toBe(HARNESS_VERSION);
       }
     });
   });
@@ -177,6 +185,76 @@ describe('HarnessService', () => {
       const existing = service.detectExisting(tmpDir);
       expect(existing.get('claude')).toBe(true);
       expect(existing.get('copilot')).toBe(false);
+    });
+  });
+
+  describe('extractHarnessVersion', () => {
+    it('extracts version from marker', () => {
+      expect(extractHarnessVersion('<!-- erd-studio-harness: 1 -->\nsome content')).toBe('1');
+    });
+
+    it('returns null when no marker present', () => {
+      expect(extractHarnessVersion('# Just a markdown file\nno marker here')).toBeNull();
+    });
+  });
+
+  describe('detectStale', () => {
+    it('returns empty array when no harnesses installed', () => {
+      expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('returns empty array when installed harnesses are current', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('detects harness with missing version marker as stale', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      const filePath = path.join(tmpDir, target.relativePath);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, '# Old content with no version marker\n');
+
+      const stale = service.detectStale(tmpDir);
+      expect(stale).toHaveLength(1);
+      expect(stale[0].id).toBe('claude');
+    });
+
+    it('detects harness with old version as stale', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'copilot')!;
+      const filePath = path.join(tmpDir, target.relativePath);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, '<!-- erd-studio-harness: 0 -->\n# Old schema\n');
+
+      const stale = service.detectStale(tmpDir);
+      expect(stale).toHaveLength(1);
+      expect(stale[0].id).toBe('copilot');
+    });
+
+    it('ignores AGENTS.md without ERD Studio section', () => {
+      const agentsPath = path.join(tmpDir, 'AGENTS.md');
+      fs.writeFileSync(agentsPath, '# My agents\nNo ERD Studio here.\n');
+
+      expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('detects stale Codex when ERD Studio section exists with old version', () => {
+      const agentsPath = path.join(tmpDir, 'AGENTS.md');
+      fs.writeFileSync(agentsPath, '<!-- erd-studio-harness: 0 -->\n\n## ERD Studio Domain Files\nold content\n');
+
+      const stale = service.detectStale(tmpDir);
+      expect(stale).toHaveLength(1);
+      expect(stale[0].id).toBe('codex');
+    });
+
+    it('does not flag current-version harnesses as stale', () => {
+      // Install all targets
+      for (const target of HARNESS_TARGETS) {
+        service.install(tmpDir, target);
+      }
+
+      expect(service.detectStale(tmpDir)).toEqual([]);
     });
   });
 });

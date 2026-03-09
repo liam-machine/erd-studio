@@ -119,7 +119,7 @@ All mutations go through `WorkspaceEdit` for undo/redo integration. Physical sta
 
 ## Key Conventions
 
-- **Schema changes must update harness content** — the domain JSON schema (model structure, column fields, relationships, viewConfig, naming conventions) is embedded as a string constant in `src/services/harnessService.ts` (`SCHEMA_CONTENT`). When you change the domain file schema (e.g. add/remove/rename fields in `src/types/semantic.ts`, change file layout, update naming conventions), you **must** also update the `SCHEMA_CONTENT` constant and the format-specific generators (`generateClaudeSkill`, `generateCopilotInstructions`, `generateGeminiStyleguide`, `generateCodexAgents`) in that file. The harness content is what AI coding assistants see when users install the schema reference into their repos.
+- **Schema changes must update harness content AND bump `HARNESS_VERSION`** — the domain JSON schema (model structure, column fields, relationships, viewConfig, naming conventions) is embedded as a string constant in `src/services/harnessService.ts` (`SCHEMA_CONTENT`). When you change the domain file schema (e.g. add/remove/rename fields in `src/types/semantic.ts`, change file layout, update naming conventions), you **must**: (1) update the `SCHEMA_CONTENT` constant, (2) update the format-specific generators if needed (`generateClaudeSkill`, `generateCopilotInstructions`, `generateGeminiStyleguide`, `generateCodexAgents`), and (3) **bump the `HARNESS_VERSION` constant** in the same file. This version is embedded as `<!-- erd-studio-harness: {version} -->` in generated files. On activation, the extension compares installed files' embedded version against the current `HARNESS_VERSION` and prompts users to update if they differ. See "Harness Versioning" section below for details.
 - Shared types live in `src/types/` and are included in both tsconfigs
 - Webview components use BEM CSS class naming
 - All colours use CSS custom properties from `webview/styles/theme.css`
@@ -149,6 +149,26 @@ The extension migrated from a **stage-first** layout (`erd-studio/{stage}/{layer
 - **`dbtSemantic.migrateDomains` command** — user-triggered batch migration with confirmation dialog. Scans `conceptual/` and `logical/` directories, merges sibling pairs into v3 `UnifiedDomain` files, and removes old stage directories.
 - **In-memory v2 compat** — `getDomain()` can read v2 files and convert in memory. Write path always produces v3.
 - **Missing siblings** — if only one stage file exists (e.g. conceptual but no logical), the missing stage gets empty defaults.
+
+## Harness Versioning
+
+AI coding harness files (installed via `dbtSemantic.installCodingHarness`) embed a version marker to track staleness:
+
+```
+<!-- erd-studio-harness: 1 -->
+```
+
+**Key components in `src/services/harnessService.ts`:**
+
+| Export | Purpose |
+|--------|---------|
+| `HARNESS_VERSION` | Current version string — bump when `SCHEMA_CONTENT` or generators change |
+| `extractHarnessVersion(content)` | Parses version from file content, returns `null` if no marker |
+| `detectStale(workspaceRoot)` | Returns installed `HarnessTarget[]` whose embedded version ≠ `HARNESS_VERSION` |
+
+**Activation flow** (`src/extension.ts`): on startup, `detectStale()` runs. If stale targets are found, a warning notification offers "Update All" (overwrites immediately), "Choose…" (opens QuickPick with outdated targets pre-selected), or "Dismiss".
+
+**When to bump `HARNESS_VERSION`:** any change to `SCHEMA_CONTENT`, the generator functions, or naming conventions that would make previously installed harness files incorrect. Do **not** bump for unrelated extension changes — the version is independent of `package.json` version.
 
 ## Developer Testing in VS Code
 
