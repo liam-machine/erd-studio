@@ -349,31 +349,32 @@ The discrepancy overlay in ERD Studio compares stages. Common issues when compar
 // ---------------------------------------------------------------------------
 
 function generateClaudeSkill(): string {
-  return `${buildVersionMarker()}
----
+  return `---
 name: erd-studio
 description: Data modeling guide for ERD Studio — covers conceptual/logical domain JSON format, dbt YAML tests for physical model relationships and cardinality, naming conventions, and design workflow. Use when creating, editing, or validating data models or dbt schema files.
 ---
 
 ${SCHEMA_CONTENT}
+
+${buildVersionMarker()}
 `;
 }
 
 function generateCopilotInstructions(): string {
-  return `${buildVersionMarker()}
----
+  return `---
 name: 'ERD Studio'
 description: 'Data modeling guide for ERD Studio — domain JSON format, dbt YAML tests for physical model, naming conventions'
 applyTo: '**/erd-studio/**/*.json'
 ---
 
 ${SCHEMA_CONTENT}
+
+${buildVersionMarker()}
 `;
 }
 
 function generateGeminiStyleguide(): string {
-  return `${buildVersionMarker()}
-${SCHEMA_CONTENT}
+  return `${SCHEMA_CONTENT}
 
 ## Code Review Rules
 
@@ -392,15 +393,18 @@ ${SCHEMA_CONTENT}
 8. **PK columns** in logical model should have \`unique\` + \`not_null\` tests in dbt YAML
 9. **FK columns** in logical model should have a \`relationships\` test pointing to the PK model/column
 10. **Composite keys** should use \`dbt_utils.unique_combination_of_columns\` model-level test
+
+${buildVersionMarker()}
 `;
 }
 
 function generateCodexAgents(): string {
-  return `${buildVersionMarker()}
-
+  return `
 ## ERD Studio Domain Files
 
 ${SCHEMA_CONTENT}
+
+${buildVersionMarker()}
 `;
 }
 
