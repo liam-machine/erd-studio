@@ -66,7 +66,7 @@ The extension uses three design stages, each with a distinct purpose:
 |-------|-------|---------|---------|
 | **Conceptual** | Violet (`#8b5cf6`) | High-level entity design — model names, descriptions, entity-level relationships | `conceptual` section in unified domain file |
 | **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | `logical` section in unified domain file |
-| **Physical** | Green (`#22c55e`) | What exists in dbt — auto-derived from `manifest.json`, fully read-only | Derived at runtime, no file on disk |
+| **Physical** | Green (`#22c55e`) | What exists in dbt — models from logical filtered by manifest; relationships & cardinality derived entirely from manifest test nodes; fully read-only | Derived at runtime, no file on disk |
 
 Both editable stages (conceptual, logical) live in the same JSON file. Stage switching in the editor reads a different section of the same file — no sibling file resolution needed. Stage colors are defined in `webview/lib/stageColors.ts`.
 
@@ -82,9 +82,9 @@ manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ Display
                                              [message] ─→ graphTransformer ─→ React Flow
 ```
 
-1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`)
+1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`). Extracts model nodes, relationship test nodes (`relationships`, `relationships_where`, custom), `unique` tests, and `unique_combination_of_columns` tests.
 2. **DomainService** reads unified domain JSON from `erd-studio/{layer}/*.json` → `UnifiedDomain`, then extracts a stage section via `getDomainStage()` → `DisplayDomain`
-3. For physical stage: `DomainService.buildPhysicalDomain()` derives data from logical stage section + manifest
+3. For physical stage: `DomainService.buildPhysicalDomain()` derives models from logical filtered by manifest. **Relationships are derived entirely from manifest relationship tests** (not copied from logical). Cardinality is inferred from manifest `unique`/`unique_combination_of_columns` tests (no unique test = "many" side). Relationships are scoped to models within the domain to prevent conformed dimensions from pulling in external edges. See `derivePhysicalRelationships()` in `domainService.ts`.
 4. **DiscrepancyService** compares two `DisplayDomain` objects to produce a `DiscrepancyReport`
 5. Extension sends `domainLoaded` / `stageData` message to webview
 6. **graphTransformer** converts `DisplayDomain` → React Flow nodes + edges (with optional discrepancy overlays)
@@ -127,7 +127,7 @@ All mutations go through `WorkspaceEdit` for undo/redo integration. Physical sta
 - Extension host writes use `WorkspaceEdit` for undo/redo integration
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
 - Stage switching sends `switchStage` message; extension extracts the target stage section from the same unified file and responds with `stageData`
-- Physical stage is derived at runtime — no files on disk, positions inherited from logical domain
+- Physical stage is derived at runtime — no files on disk, positions inherited from logical domain. Models come from logical filtered by manifest; **relationships come from manifest test nodes** (not logical), with cardinality derived from `unique`/`unique_combination_of_columns` tests
 - Mutation handlers target `parsed[activeStage].models` / `.relationships` within the unified file
 
 ## Discrepancy System

@@ -105,6 +105,60 @@
       "depends_on": { "nodes": ["model.my_dbt_project.dim_work_lot"] },
       "config": {}
     },
+    "test.my_dbt_project.unique_dim_work_lot_work_lot_id": {
+      "unique_id": "test.my_dbt_project.unique_dim_work_lot_work_lot_id",
+      "name": "unique_dim_work_lot_work_lot_id",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "work_lot_id",
+          "model": "ref('dim_work_lot')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.dim_work_lot",
+      "depends_on": { "nodes": ["model.my_dbt_project.dim_work_lot"] },
+      "columns": {},
+      "config": {}
+    },
+    "test.my_dbt_project.unique_dim_project_project_id": {
+      "unique_id": "test.my_dbt_project.unique_dim_project_project_id",
+      "name": "unique_dim_project_project_id",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "project_id",
+          "model": "ref('dim_project')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.dim_project",
+      "depends_on": { "nodes": ["model.my_dbt_project.dim_project"] },
+      "columns": {},
+      "config": {}
+    },
+    "test.my_dbt_project.unique_fct_work_events_event_id": {
+      "unique_id": "test.my_dbt_project.unique_fct_work_events_event_id",
+      "name": "unique_fct_work_events_event_id",
+      "resource_type": "test",
+      "schema": "gold",
+      "description": "",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "event_id",
+          "model": "ref('fct_work_events')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.fct_work_events",
+      "depends_on": { "nodes": ["model.my_dbt_project.fct_work_events"] },
+      "columns": {},
+      "config": {}
+    },
     "test.my_dbt_project.relationships_dim_work_lot_project_id__project_id__ref_dim_project_": {
       "unique_id": "test.my_dbt_project.relationships_dim_work_lot_project_id__project_id__ref_dim_project_",
       "name": "relationships_dim_work_lot_project_id__project_id__ref_dim_project_",

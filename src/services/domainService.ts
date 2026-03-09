@@ -18,7 +18,8 @@ import * as path from 'path';
 import type { DomainSummary, Layer, SemanticDomain, StageData, UnifiedDomain, ViewConfig } from '../types/semantic';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship } from '../types/display';
-import type { ManifestData } from '../types/manifest';
+import type { ManifestData, ManifestRelationshipTest } from '../types/manifest';
+import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
 import { hasLegacyLayout } from './migrationService';
 
@@ -166,13 +167,14 @@ export class DomainService {
   ): DisplayDomain {
     const logicalStage = unifiedDomain.logical;
 
-    const manifestModelNames = new Set<string>();
+    // Physical models = logical models that exist in the manifest
+    const physicalModelNames = new Set<string>();
 
     const models: DisplayModel[] = logicalStage.models
       .filter(model => manifest.models.has(model.name))
       .map(model => {
         const manifestModel = manifest.models.get(model.name)!;
-        manifestModelNames.add(model.name);
+        physicalModelNames.add(model.name);
 
         const columns: DisplayColumn[] = manifestModel.columns.map(col => ({
           name: col.name,
@@ -208,16 +210,14 @@ export class DomainService {
         };
       });
 
-    // Only include relationships where both models exist in the manifest
-    const relationships: DisplayRelationship[] = logicalStage.relationships
-      .filter(rel => manifestModelNames.has(rel.fromModel) && manifestModelNames.has(rel.toModel))
-      .map(rel => ({
-        fromModel: rel.fromModel,
-        fromColumn: rel.fromColumn,
-        toModel: rel.toModel,
-        toColumn: rel.toColumn,
-        cardinality: rel.cardinality,
-      }));
+    // Derive relationships entirely from manifest relationship tests,
+    // scoped to models within this domain's physical model set
+    const relationships = derivePhysicalRelationships(
+      manifest.relationshipTests,
+      physicalModelNames,
+      manifest.uniqueColumns,
+      manifest.compositeUniqueGroups,
+    );
 
     return {
       schemaVersion: unifiedDomain.schemaVersion,
@@ -393,4 +393,122 @@ export class DomainService {
         : undefined,
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Physical relationship derivation (manifest-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive physical relationships entirely from manifest relationship tests.
+ *
+ * Each manifest relationship test becomes one edge. Cardinality is derived
+ * from uniqueness tests in the manifest:
+ * - `unique` test on a column → that side is "one"
+ * - `unique_combination_of_columns` → side is "one" if all columns in the
+ *   composite group are covered by relationship tests between the same model pair
+ * - No uniqueness test → that side defaults to "many"
+ *
+ * Results are scoped to only models present in the domain's physical model set,
+ * preventing conformed dimensions from pulling in relationships to models
+ * outside the current domain.
+ */
+export function derivePhysicalRelationships(
+  relationshipTests: ManifestRelationshipTest[],
+  physicalModelNames: Set<string>,
+  uniqueColumns: Map<string, Set<string>>,
+  compositeUniqueGroups: Map<string, string[][]>,
+): DisplayRelationship[] {
+  // Filter to relationships where both models are in this domain
+  const domainTests = relationshipTests.filter(
+    rel => physicalModelNames.has(rel.fromModel) && physicalModelNames.has(rel.toModel),
+  );
+
+  // Group tests by (fromModel, toModel) pair for composite unique checks
+  const pairKey = (from: string, to: string) => `${from}\0${to}`;
+  const testsByPair = new Map<string, ManifestRelationshipTest[]>();
+  for (const test of domainTests) {
+    const key = pairKey(test.fromModel, test.toModel);
+    let group = testsByPair.get(key);
+    if (!group) {
+      group = [];
+      testsByPair.set(key, group);
+    }
+    group.push(test);
+  }
+
+  return domainTests.map(rel => ({
+    fromModel: rel.fromModel,
+    fromColumn: rel.fromColumn,
+    toModel: rel.toModel,
+    toColumn: rel.toColumn,
+    cardinality: deriveCardinality(
+      rel,
+      testsByPair.get(pairKey(rel.fromModel, rel.toModel)) ?? [],
+      uniqueColumns,
+      compositeUniqueGroups,
+    ),
+  }));
+}
+
+/**
+ * Derive cardinality for a single relationship edge based on uniqueness tests.
+ */
+function deriveCardinality(
+  rel: ManifestRelationshipTest,
+  allTestsBetweenPair: ManifestRelationshipTest[],
+  uniqueColumns: Map<string, Set<string>>,
+  compositeUniqueGroups: Map<string, string[][]>,
+): Cardinality {
+  const fromUnique = isColumnEffectivelyUnique(
+    rel.fromModel, rel.fromColumn, 'from',
+    allTestsBetweenPair, uniqueColumns, compositeUniqueGroups,
+  );
+  const toUnique = isColumnEffectivelyUnique(
+    rel.toModel, rel.toColumn, 'to',
+    allTestsBetweenPair, uniqueColumns, compositeUniqueGroups,
+  );
+
+  if (fromUnique && toUnique) { return 'one-to-one'; }
+  if (!fromUnique && toUnique) { return 'many-to-one'; }
+  if (fromUnique && !toUnique) { return 'one-to-many'; }
+  return 'many-to-many';
+}
+
+/**
+ * Check if a column is effectively unique for cardinality purposes.
+ *
+ * A column is "unique" if:
+ * 1. It has a standalone `unique` test in the manifest, OR
+ * 2. It's part of a `unique_combination_of_columns` group where ALL columns
+ *    in that group are covered by relationship tests between the same model pair
+ *    (meaning the full composite key is present in the relationship edges).
+ */
+function isColumnEffectivelyUnique(
+  model: string,
+  column: string,
+  side: 'from' | 'to',
+  allTestsBetweenPair: ManifestRelationshipTest[],
+  uniqueColumns: Map<string, Set<string>>,
+  compositeUniqueGroups: Map<string, string[][]>,
+): boolean {
+  // 1. Single-column unique test
+  if (uniqueColumns.get(model)?.has(column)) {
+    return true;
+  }
+
+  // 2. Composite unique — column must be in the group, and ALL columns in
+  //    the group must be covered by relationship tests for this model pair
+  const groups = compositeUniqueGroups.get(model) ?? [];
+  const pairColumns = new Set(
+    allTestsBetweenPair.map(t => side === 'from' ? t.fromColumn : t.toColumn),
+  );
+
+  for (const group of groups) {
+    if (group.includes(column) && group.every(col => pairColumns.has(col))) {
+      return true;
+    }
+  }
+
+  return false;
 }

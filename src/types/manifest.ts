@@ -54,4 +54,12 @@ export interface ManifestData {
   models: Map<string, ManifestModelInfo>;
   /** Relationship tests extracted from manifest test nodes */
   relationshipTests: ManifestRelationshipTest[];
+  /** Columns with a standalone `unique` test, indexed by model name */
+  uniqueColumns: Map<string, Set<string>>;
+  /**
+   * Composite unique groups from `unique_combination_of_columns` tests,
+   * indexed by model name. Each entry is an array of column names that
+   * are unique together.
+   */
+  compositeUniqueGroups: Map<string, string[][]>;
 }

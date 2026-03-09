@@ -33,20 +33,20 @@ describe('HarnessService', () => {
       const content = service.generateContent('claude');
       expect(content).toContain('---\nname: erd-studio');
       expect(content).toContain('description:');
-      expect(content).toContain('# ERD Studio JSON Schema');
+      expect(content).toContain('# ERD Studio');
       expect(content).toContain('schemaVersion');
     });
 
     it('generates Copilot instructions with applyTo glob', () => {
       const content = service.generateContent('copilot');
       expect(content).toContain("applyTo: '**/erd-studio/**/*.json'");
-      expect(content).toContain("name: 'ERD Studio Schema'");
-      expect(content).toContain('# ERD Studio JSON Schema');
+      expect(content).toContain("name: 'ERD Studio'");
+      expect(content).toContain('# ERD Studio');
     });
 
     it('generates Gemini styleguide with review rules', () => {
       const content = service.generateContent('gemini');
-      expect(content).toContain('# ERD Studio JSON Schema');
+      expect(content).toContain('# ERD Studio');
       expect(content).toContain('Code Review Rules');
       expect(content).toContain('Schema version');
     });
@@ -54,7 +54,7 @@ describe('HarnessService', () => {
     it('generates Codex AGENTS.md section', () => {
       const content = service.generateContent('codex');
       expect(content).toContain('## ERD Studio Domain Files');
-      expect(content).toContain('# ERD Studio JSON Schema');
+      expect(content).toContain('# ERD Studio');
     });
 
     it('all formats include v3 schema content', () => {

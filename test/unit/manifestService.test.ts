@@ -316,4 +316,30 @@ describe('ManifestService', () => {
       expect(service.getRelationshipTests()).toEqual([]);
     });
   });
+
+  describe('unique test extraction', () => {
+    it('extracts unique tests from manifest', async () => {
+      const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
+
+      expect(data.uniqueColumns).toBeInstanceOf(Map);
+      // dim_work_lot.work_lot_id, dim_project.project_id, fct_work_events.event_id
+      expect(data.uniqueColumns.get('dim_work_lot')?.has('work_lot_id')).toBe(true);
+      expect(data.uniqueColumns.get('dim_project')?.has('project_id')).toBe(true);
+      expect(data.uniqueColumns.get('fct_work_events')?.has('event_id')).toBe(true);
+    });
+
+    it('does not include non-unique columns', async () => {
+      const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
+
+      // project_id on dim_work_lot has a not_null test but not a unique test
+      expect(data.uniqueColumns.get('dim_work_lot')?.has('project_id')).toBeFalsy();
+    });
+
+    it('returns empty maps when no unique tests exist', async () => {
+      const data = await service.loadManifest(SPARSE_PROJECT_PATH);
+
+      expect(data.uniqueColumns.size).toBe(0);
+      expect(data.compositeUniqueGroups.size).toBe(0);
+    });
+  });
 });

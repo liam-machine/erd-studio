@@ -60,6 +60,66 @@ Each domain is a single JSON file containing both `conceptual` and `logical` sec
 
 For the Physical stage to populate, run `dbt compile` or `dbt build` so that `manifest.json` exists in your `target/` directory.
 
+## Physical Stage — How It Works
+
+The physical stage is entirely derived from the dbt manifest at runtime. Nothing is stored on disk for the physical stage.
+
+### Models
+
+Physical models are the intersection of your **logical domain** and the **manifest**: only logical models that also exist in `manifest.json` appear. Columns come from the manifest (data types, descriptions), while PK/FK/NK flags, SCD types, grain, model role, and rationale are carried forward from the logical domain.
+
+### Relationships
+
+Physical relationships are derived from **dbt relationship tests** in the manifest — they are **not** copied from the logical stage. When you define a `relationships` test in your dbt YAML schema, it appears in the manifest as a test node. ERD Studio extracts these and renders them as edges.
+
+This means: if a relationship exists in your logical model but has no `relationships` test in dbt, it will **not** appear in the physical stage. This is intentional — the physical stage reflects what dbt actually validates.
+
+**Supported test types:**
+- `relationships` (dbt built-in)
+- `relationships_where` (dbt_utils) and other custom tests with the same kwargs signature (`column_name`, `field`, `to`)
+
+**Example dbt YAML that produces a physical relationship:**
+
+```yaml
+models:
+  - name: fct_orders
+    columns:
+      - name: customer_id
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+```
+
+### Cardinality
+
+dbt's `relationships` test only validates referential integrity — it doesn't encode cardinality. ERD Studio derives cardinality from **uniqueness tests** in the manifest:
+
+| FK column has `unique` test? | PK column has `unique` test? | Derived Cardinality |
+|------------------------------|------------------------------|---------------------|
+| No | Yes | `many-to-one` |
+| Yes | Yes | `one-to-one` |
+| Yes | No | `one-to-many` |
+| No | No | `many-to-many` |
+
+**No `unique` test = "many" side.** If you want `many-to-one` to appear on the physical model, add a `unique` test to the PK column on the referenced model:
+
+```yaml
+models:
+  - name: dim_customer
+    columns:
+      - name: customer_id
+        tests:
+          - unique       # ← Makes this side "one"
+          - not_null
+```
+
+**Composite keys** are also supported via `dbt_utils.unique_combination_of_columns`. If all columns in a composite unique group are covered by relationship tests between the same model pair, that side is treated as "one".
+
+### Domain scoping
+
+Physical relationships are scoped to models within the current domain. If `dim_customer` is a conformed dimension referenced by 50 models across your dbt project, only relationships to other models **in the same domain's logical stage** appear — preventing the graph from pulling in unrelated models.
+
 ## AI Coding Harness
 
 ERD Studio can install its domain file schema reference into your repo so AI coding assistants understand the format and can create or validate models for you.

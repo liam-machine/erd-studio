@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as path from 'path';
-import { DomainService } from '../../src/services/domainService';
+import { DomainService, derivePhysicalRelationships } from '../../src/services/domainService';
 import type { LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
-import type { ManifestData } from '../../src/types/manifest';
+import type { ManifestData, ManifestRelationshipTest } from '../../src/types/manifest';
 import type { UnifiedDomain, StageData } from '../../src/types/semantic';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
@@ -315,6 +315,50 @@ describe('DomainService', () => {
           }],
         ]),
         relationshipTests: [],
+        uniqueColumns: new Map(),
+        compositeUniqueGroups: new Map(),
+      };
+    }
+
+    function createManifestWithBothModels(): ManifestData {
+      return {
+        models: new Map([
+          ['dim_customer', {
+            name: 'dim_customer',
+            uniqueId: 'model.my_project.dim_customer',
+            projectName: 'my_project',
+            schema: 'silver_schema',
+            description: 'Customer dimension from manifest',
+            columns: [
+              { name: 'customer_id', data_type: 'bigint', description: 'Primary key' },
+              { name: 'customer_name', data_type: 'text', description: 'Customer name' },
+            ],
+          }],
+          ['fct_orders', {
+            name: 'fct_orders',
+            uniqueId: 'model.my_project.fct_orders',
+            projectName: 'my_project',
+            schema: 'silver_schema',
+            description: 'Order facts from manifest',
+            columns: [
+              { name: 'order_id', data_type: 'bigint', description: 'Primary key' },
+              { name: 'customer_id', data_type: 'bigint', description: 'FK to customer' },
+            ],
+          }],
+        ]),
+        relationshipTests: [
+          {
+            fromModel: 'fct_orders',
+            fromColumn: 'customer_id',
+            toModel: 'dim_customer',
+            toColumn: 'customer_id',
+          },
+        ],
+        uniqueColumns: new Map([
+          ['dim_customer', new Set(['customer_id'])],
+          ['fct_orders', new Set(['order_id'])],
+        ]),
+        compositeUniqueGroups: new Map(),
       };
     }
 
@@ -354,11 +398,23 @@ describe('DomainService', () => {
       expect(result.models).toHaveLength(1); // only dim_customer
     });
 
-    it('excludes relationships referencing models not in manifest', () => {
+    it('excludes relationships when referenced models not in manifest', () => {
       const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
 
-      // fct_orders is not in manifest, so the relationship from fct_orders → dim_customer is excluded
+      // fct_orders is not in manifest, so no relationship tests can match
       expect(result.relationships).toHaveLength(0);
+    });
+
+    it('derives relationships from manifest relationship tests with cardinality', () => {
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifestWithBothModels());
+
+      expect(result.relationships).toHaveLength(1);
+      expect(result.relationships[0].fromModel).toBe('fct_orders');
+      expect(result.relationships[0].fromColumn).toBe('customer_id');
+      expect(result.relationships[0].toModel).toBe('dim_customer');
+      expect(result.relationships[0].toColumn).toBe('customer_id');
+      // customer_id is unique on dim_customer but NOT on fct_orders → many-to-one
+      expect(result.relationships[0].cardinality).toBe('many-to-one');
     });
 
     it('uses global viewConfig positions', () => {
@@ -383,6 +439,129 @@ describe('DomainService', () => {
       const customer = result.models.find(m => m.name === 'dim_customer');
       expect(customer!.grain).toBe('One row per customer');
       expect(customer!.modelRole).toBe('domain-dim');
+    });
+  });
+
+  describe('derivePhysicalRelationships', () => {
+    const models = new Set(['dim_customer', 'fct_orders', 'dim_product']);
+
+    it('derives many-to-one when toColumn is unique and fromColumn is not', () => {
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' },
+      ];
+      const unique = new Map([['dim_customer', new Set(['customer_id'])]]);
+
+      const result = derivePhysicalRelationships(tests, models, unique, new Map());
+
+      expect(result).toHaveLength(1);
+      expect(result[0].cardinality).toBe('many-to-one');
+    });
+
+    it('derives one-to-one when both columns are unique', () => {
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' },
+      ];
+      const unique = new Map([
+        ['dim_customer', new Set(['customer_id'])],
+        ['fct_orders', new Set(['customer_id'])],
+      ]);
+
+      const result = derivePhysicalRelationships(tests, models, unique, new Map());
+
+      expect(result[0].cardinality).toBe('one-to-one');
+    });
+
+    it('derives one-to-many when fromColumn is unique and toColumn is not', () => {
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'fct_orders', fromColumn: 'order_id', toModel: 'dim_customer', toColumn: 'customer_name' },
+      ];
+      const unique = new Map([['fct_orders', new Set(['order_id'])]]);
+
+      const result = derivePhysicalRelationships(tests, models, unique, new Map());
+
+      expect(result[0].cardinality).toBe('one-to-many');
+    });
+
+    it('derives many-to-many when neither column has unique test', () => {
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_name' },
+      ];
+
+      const result = derivePhysicalRelationships(tests, models, new Map(), new Map());
+
+      expect(result[0].cardinality).toBe('many-to-many');
+    });
+
+    it('scopes relationships to domain models (conformed dim safety)', () => {
+      // dim_customer is a conformed dim. fct_orders is in domain, but dim_product is in domain too.
+      // A relationship from an outside model should be excluded.
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' },
+        { fromModel: 'fct_external', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' },
+      ];
+      const unique = new Map([['dim_customer', new Set(['customer_id'])]]);
+
+      const result = derivePhysicalRelationships(tests, models, unique, new Map());
+
+      // fct_external is NOT in the domain model set
+      expect(result).toHaveLength(1);
+      expect(result[0].fromModel).toBe('fct_orders');
+    });
+
+    it('handles multiple independent FKs between same model pair', () => {
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'fct_orders', fromColumn: 'billing_customer_id', toModel: 'dim_customer', toColumn: 'customer_id' },
+        { fromModel: 'fct_orders', fromColumn: 'shipping_customer_id', toModel: 'dim_customer', toColumn: 'customer_id' },
+      ];
+      const unique = new Map([['dim_customer', new Set(['customer_id'])]]);
+
+      const result = derivePhysicalRelationships(tests, models, unique, new Map());
+
+      expect(result).toHaveLength(2);
+      expect(result[0].cardinality).toBe('many-to-one');
+      expect(result[1].cardinality).toBe('many-to-one');
+    });
+
+    it('uses composite unique groups for cardinality derivation', () => {
+      // dim_product has a composite unique on (product_id, region_id)
+      // Two relationship tests from fct_orders cover both columns
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'fct_orders', fromColumn: 'product_id', toModel: 'dim_product', toColumn: 'product_id' },
+        { fromModel: 'fct_orders', fromColumn: 'region_id', toModel: 'dim_product', toColumn: 'region_id' },
+      ];
+      const compositeGroups = new Map([
+        ['dim_product', [['product_id', 'region_id']]],
+      ]);
+
+      const result = derivePhysicalRelationships(tests, models, new Map(), compositeGroups);
+
+      // Both toColumns covered by composite unique → to side is "one"
+      // fromColumns have no unique → from side is "many"
+      expect(result).toHaveLength(2);
+      expect(result[0].cardinality).toBe('many-to-one');
+      expect(result[1].cardinality).toBe('many-to-one');
+    });
+
+    it('composite unique does not apply when not all columns are covered', () => {
+      // dim_product has composite unique on (product_id, region_id)
+      // Only ONE relationship test exists — partial coverage
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'fct_orders', fromColumn: 'product_id', toModel: 'dim_product', toColumn: 'product_id' },
+      ];
+      const compositeGroups = new Map([
+        ['dim_product', [['product_id', 'region_id']]],
+      ]);
+
+      const result = derivePhysicalRelationships(tests, models, new Map(), compositeGroups);
+
+      // Only one of two composite columns present → NOT unique → many-to-many
+      expect(result).toHaveLength(1);
+      expect(result[0].cardinality).toBe('many-to-many');
+    });
+
+    it('returns empty array when no relationship tests exist', () => {
+      const result = derivePhysicalRelationships([], models, new Map(), new Map());
+      expect(result).toEqual([]);
     });
   });
 });
