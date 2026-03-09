@@ -166,7 +166,7 @@ describe('MigrationService', () => {
       expect(result.logical.models).toHaveLength(1);
       expect(result.logical.models[0].name).toBe('dim_a');
       expect(result.logical.relationships).toHaveLength(1);
-      expect(result.logical.viewConfig.positions).toBeDefined();
+      expect(result.viewConfig.positions).toBeDefined();
     });
 
     it('produces empty stages when both paths are null', () => {

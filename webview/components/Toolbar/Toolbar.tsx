@@ -254,7 +254,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   // --- Auto Layout handlers ------------------------------------------------
 
   const runLayout = useCallback(async () => {
-    if (!domain || domain.readOnly || nodes.length === 0 || isLayouting) {
+    if (!domain || nodes.length === 0 || isLayouting) {
       return;
     }
 
@@ -422,19 +422,17 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         {/* Divider */}
         <div className="toolbar__divider" />
 
-        {/* Auto Layout — disabled in read-only, Refresh Manifest always visible */}
+        {/* Auto Layout + Refresh Manifest */}
         <div className="toolbar__section">
-          {!isReadOnly && (
-            <button
-              className="toolbar__button toolbar__button--tooltip"
-              onClick={handleAutoLayout}
-              disabled={isLayouting || nodes.length === 0}
-              data-tooltip="Auto Layout"
-              aria-label="Auto-layout nodes using ELK algorithm"
-            >
-              {isLayouting ? <span className="toolbar__spinner" /> : '⊞'}
-            </button>
-          )}
+          <button
+            className="toolbar__button toolbar__button--tooltip"
+            onClick={handleAutoLayout}
+            disabled={isLayouting || nodes.length === 0}
+            data-tooltip="Auto Layout"
+            aria-label="Auto-layout nodes using ELK algorithm"
+          >
+            {isLayouting ? <span className="toolbar__spinner" /> : '⊞'}
+          </button>
 
           {/* Refresh Manifest */}
           <button

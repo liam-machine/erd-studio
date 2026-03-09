@@ -73,27 +73,26 @@ export function usePositionPersistence(): {
         timeoutRef.current = null;
       }
 
-      // Flush pending changes to extension host (skip in read-only mode).
-      if (pendingChangesRef.current.size > 0 && domainRef.current && !domainRef.current.readOnly) {
+      // Flush pending changes to extension host.
+      if (pendingChangesRef.current.size > 0 && domainRef.current) {
         const latestDomain = domainRef.current;
-        const existingPositions = latestDomain.viewConfig.positions ?? {};
-        const updatedPositions = {
-          ...existingPositions,
-          ...Object.fromEntries(pendingChangesRef.current),
-        };
+        const changedPositions = Object.fromEntries(pendingChangesRef.current);
 
+        // Send only the delta — extension merges over disk positions to avoid
+        // concurrent tabs clobbering each other's saves.
         const message: WebviewMessage = {
           type: 'updatePositions',
-          payload: { positions: updatedPositions },
+          payload: { positions: changedPositions },
         };
         vscode.postMessage(message);
 
-        // Update domain state locally for consistency
+        // Optimistic local update with full merge for correct UI rendering
+        const existingPositions = latestDomain.viewConfig.positions ?? {};
         setDomain({
           ...latestDomain,
           viewConfig: {
             ...latestDomain.viewConfig,
-            positions: updatedPositions,
+            positions: { ...existingPositions, ...changedPositions },
           },
         });
 
@@ -107,11 +106,6 @@ export function usePositionPersistence(): {
       // Apply all changes to nodes (handles selection, position, etc.).
       const updatedNodes = applyNodeChanges(changes, nodesRef.current);
       setNodes(updatedNodes as ModelFlowNode[]);
-
-      // Skip position persistence in read-only mode (physical stage)
-      if (domainRef.current?.readOnly) {
-        return;
-      }
 
       // Extract position changes for persistence.
       const dragEndChanges = changes.filter(
@@ -165,26 +159,23 @@ export function usePositionPersistence(): {
             return;
           }
 
-          const existingPositions = latestDomain.viewConfig.positions ?? {};
-          const updatedPositions = {
-            ...existingPositions,
-            ...Object.fromEntries(pendingChangesRef.current),
-          };
+          const changedPositions = Object.fromEntries(pendingChangesRef.current);
 
-          // Persist to extension host (writes to JSON via WorkspaceEdit).
+          // Send only the delta — extension merges over disk positions to avoid
+          // concurrent tabs clobbering each other's saves.
           const message: WebviewMessage = {
             type: 'updatePositions',
-            payload: { positions: updatedPositions },
+            payload: { positions: changedPositions },
           };
           vscode.postMessage(message);
 
-          // Update domain state locally so subsequent saves use correct base positions.
-          // This prevents stale positions from overwriting recently saved ones.
+          // Optimistic local update with full merge for correct UI rendering.
+          const existingPositions = latestDomain.viewConfig.positions ?? {};
           setDomain({
             ...latestDomain,
             viewConfig: {
               ...latestDomain.viewConfig,
-              positions: updatedPositions,
+              positions: { ...existingPositions, ...changedPositions },
             },
           });
 

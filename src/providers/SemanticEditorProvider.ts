@@ -151,12 +151,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               | { positions: Record<string, { x: number; y: number }> }
               | undefined;
             if (payload?.positions) {
-              const currentPanel = this.openPanels.get(panelKey);
               await this.handleUpdatePositions(
                 document,
                 webviewPanel.webview,
                 payload.positions,
-                currentPanel?.activeStage ?? 'logical',
               );
             }
             break;
@@ -333,7 +331,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'conceptual' | 'logical',
   ): Record<string, unknown> {
     if (!parsed[stage] || typeof parsed[stage] !== 'object') {
-      parsed[stage] = { models: [], relationships: [], viewConfig: {} };
+      parsed[stage] = { models: [], relationships: [] };
     }
     return parsed[stage] as Record<string, unknown>;
   }
@@ -385,10 +383,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Convert a SemanticDomain to a DisplayDomain for the webview.
+   * viewConfig is passed separately since it lives at the unified domain root level.
    */
   private buildDisplayDomain(
     domain: import('../types/semantic').SemanticDomain,
     manifest: ManifestData,
+    viewConfig: import('../types/semantic').ViewConfig,
   ): DisplayDomain {
     // Build FK column set for isForeignKey computation
     const fkColumnsByModel = new Map<string, Set<string>>();
@@ -448,11 +448,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       modelFolder: domain.modelFolder,
       models,
       relationships,
-      viewConfig: domain.viewConfig,
+      viewConfig,
       templates,
       manifestModels,
       layerConfig,
       readOnly: domain.stage === 'physical',
+      positionDraggable: true,
     };
   }
 
@@ -473,15 +474,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
 
+      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+
       if (activeStage === 'physical') {
-        const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
         const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
         webview.postMessage({ type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
       } else {
         const domain = this.domainService.getDomainStage(document.uri.fsPath, activeStage);
-        const displayDomain = this.buildDisplayDomain(domain, manifest);
+        const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
         webview.postMessage({ type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
       }
     } catch (err) {
@@ -963,8 +965,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (rel.toModel === payload.oldName) { rel.toModel = trimmedNew; }
       }
 
-      // Cascade: update viewConfig positions within this stage
-      const viewConfig = (section.viewConfig ?? {}) as Record<string, unknown>;
+      // Cascade: update global viewConfig positions
+      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
       const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
       if (payload.oldName in positions) {
         positions[trimmedNew] = positions[payload.oldName];
@@ -1021,12 +1023,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         (rel) => rel.fromModel !== payload.modelName && rel.toModel !== payload.modelName,
       );
 
-      // Remove positions for deleted model within this stage
-      const viewConfig = (section.viewConfig ?? {}) as Record<string, unknown>;
+      // Remove position for deleted model from global viewConfig
+      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
       const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
       delete positions[payload.modelName];
       viewConfig.positions = positions;
-      section.viewConfig = viewConfig;
+      parsed.viewConfig = viewConfig;
 
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
       const edit = new vscode.WorkspaceEdit();
@@ -1199,17 +1201,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     positions: Record<string, { x: number; y: number }>,
-    activeStage: Stage,
   ): Promise<void> {
     try {
-      // Physical stage positions are stored in the logical section
-      const targetStage: 'conceptual' | 'logical' = activeStage === 'physical' ? 'logical' : activeStage;
-
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const section = this.getStageSection(parsed, targetStage);
-      const viewConfig = (section.viewConfig ?? {}) as Record<string, unknown>;
-      section.viewConfig = { ...viewConfig, positions };
+      const existingViewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const existingPositions = (existingViewConfig.positions ?? {}) as Record<string, unknown>;
+      // Merge incoming positions over disk positions — prevents concurrent tabs from
+      // clobbering each other's saves when using the shared global viewConfig.
+      const mergedPositions = { ...existingPositions, ...positions };
+      parsed.viewConfig = { ...existingViewConfig, positions: mergedPositions };
 
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
       const edit = new vscode.WorkspaceEdit();
@@ -1265,8 +1266,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      // Find open position
-      const viewConfig = (section.viewConfig ?? {}) as Record<string, unknown>;
+      // Find open position from global viewConfig
+      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
       const existingPositions = (viewConfig.positions ?? {}) as Record<string, { x: number; y: number }>;
       const newPosition = this.findOpenPosition(existingPositions);
 
@@ -1317,7 +1318,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const updatedPositions = { ...existingPositions, [payload.modelName]: newPosition };
       section.models = models;
-      section.viewConfig = { ...viewConfig, positions: updatedPositions };
+      parsed.viewConfig = { ...viewConfig, positions: updatedPositions };
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
 
       const edit = new vscode.WorkspaceEdit();
@@ -1506,9 +1507,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
 
+      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+
       if (targetStage === 'physical') {
         // Physical stage is derived from same unified file's logical section + manifest
-        const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
         const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) {
@@ -1518,7 +1520,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       } else {
         // Conceptual or logical — extract from same unified file
         const domain = this.domainService.getDomainStage(document.uri.fsPath, targetStage);
-        const displayDomain = this.buildDisplayDomain(domain, manifest);
+        const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
         webview.postMessage({ type: 'stageData', payload: displayDomain });
       }
     } catch (err) {
@@ -1580,12 +1582,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: Stage,
     manifest: ManifestData,
   ): Promise<DisplayDomain> {
+    const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
     if (stage === 'physical') {
-      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
       return this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
     }
     const domain = this.domainService.getDomainStage(document.uri.fsPath, stage);
-    return this.buildDisplayDomain(domain, manifest);
+    return this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {

@@ -168,11 +168,10 @@ export interface ViewConfig {
 // Stage data (shared structure for conceptual/logical sections)
 // ---------------------------------------------------------------------------
 
-/** The models, relationships, and view config for a single design stage. */
+/** The models and relationships for a single design stage. */
 export interface StageData {
   models: SemanticModel[];
   relationships: Relationship[];
-  viewConfig: ViewConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +194,6 @@ export interface SemanticDomain {
   modelFolder?: string;
   models: SemanticModel[];
   relationships: Relationship[];
-  viewConfig: ViewConfig;
 }
 
 /**
@@ -213,6 +211,8 @@ export interface UnifiedDomain {
   modelFolder?: string;
   conceptual: StageData;
   logical: StageData;
+  /** Global view configuration shared across all stages. */
+  viewConfig: ViewConfig;
 }
 
 // ---------------------------------------------------------------------------

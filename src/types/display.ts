@@ -93,6 +93,8 @@ export interface DisplayDomain {
   manifestModels?: ManifestModelPreview[];
   /** Layer config for badge styling. */
   layerConfig?: LayerConfig;
-  /** Whether this stage is read-only (physical). */
+  /** Whether this stage is read-only for data mutations (physical). */
   readOnly: boolean;
+  /** Whether nodes can be dragged to reposition (true for all stages). */
+  positionDraggable: boolean;
 }

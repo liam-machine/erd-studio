@@ -10,19 +10,18 @@
         "source": "built"
       }
     ],
-    "relationships": [],
-    "viewConfig": {
-      "positions": {
-        "fct_transactions": {
-          "x": 12,
-          "y": 12
-        }
-      }
-    }
+    "relationships": []
   },
   "logical": {
     "models": [],
-    "relationships": [],
-    "viewConfig": {}
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "fct_transactions": {
+        "x": 12,
+        "y": 12
+      }
+    }
   }
 }

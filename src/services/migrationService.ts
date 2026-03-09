@@ -34,7 +34,6 @@ export interface MigrationDomainEntry {
 const EMPTY_STAGE_DATA: StageData = {
   models: [],
   relationships: [],
-  viewConfig: {},
 };
 
 /**
@@ -122,6 +121,9 @@ export function mergeV2Siblings(
   // Prefer logical for shared metadata, fall back to conceptual
   const primary = logicalData ?? conceptualData;
 
+  // Hoist viewConfig to root level — prefer logical, then conceptual
+  const viewConfig = (logicalData?.viewConfig ?? conceptualData?.viewConfig ?? {}) as import('../types/semantic').ViewConfig;
+
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     domain,
@@ -130,6 +132,7 @@ export function mergeV2Siblings(
     ...(primary?.modelFolder ? { modelFolder: primary.modelFolder } : {}),
     conceptual: extractStageData(conceptualData),
     logical: extractStageData(logicalData),
+    viewConfig,
   };
 }
 
@@ -246,6 +249,5 @@ function extractStageData(data: OldDomainFile | null): StageData {
   return {
     models: data.models as StageData['models'],
     relationships: data.relationships as StageData['relationships'],
-    viewConfig: data.viewConfig as StageData['viewConfig'],
   };
 }

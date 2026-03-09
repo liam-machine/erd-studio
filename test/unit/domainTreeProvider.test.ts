@@ -41,7 +41,7 @@ function createMockLayerService(): LayerService {
   } as LayerService;
 }
 
-const emptyStageData: StageData = { models: [], relationships: [], viewConfig: { positions: {} } };
+const emptyStageData: StageData = { models: [], relationships: [] };
 
 function makeUnifiedDomain(overrides: Partial<UnifiedDomain> = {}): UnifiedDomain {
   return {
@@ -51,6 +51,7 @@ function makeUnifiedDomain(overrides: Partial<UnifiedDomain> = {}): UnifiedDomai
     description: '',
     conceptual: { ...emptyStageData },
     logical: { ...emptyStageData },
+    viewConfig: { positions: {} },
     ...overrides,
   };
 }
@@ -92,7 +93,6 @@ function buildDomainMap(): Map<string, UnifiedDomain> {
     logical: {
       models: [{ name: 'dim_customer' }, { name: 'fct_orders' }] as any,
       relationships: [],
-      viewConfig: { positions: {} },
     },
   }));
   map.set('/project/erd-studio/silver/orders.json', makeUnifiedDomain({
@@ -101,7 +101,6 @@ function buildDomainMap(): Map<string, UnifiedDomain> {
     logical: {
       models: [{ name: 'fct_order_lines' }] as any,
       relationships: [],
-      viewConfig: { positions: {} },
     },
   }));
   map.set('/project/erd-studio/gold/reporting.json', makeUnifiedDomain({
@@ -110,7 +109,6 @@ function buildDomainMap(): Map<string, UnifiedDomain> {
     logical: {
       models: [] as any,
       relationships: [],
-      viewConfig: { positions: {} },
     },
   }));
   return map;

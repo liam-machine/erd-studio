@@ -617,7 +617,7 @@ function EditorCanvas() {
         minZoom={0.05}
         selectionOnDrag={!domain.readOnly}
         selectionMode={SelectionMode.Partial}
-        nodesDraggable={!domain.readOnly}
+        nodesDraggable={domain.positionDraggable ?? !domain.readOnly}
         panOnDrag={[1, 2]}
         proOptions={{ hideAttribution: true }}
       >

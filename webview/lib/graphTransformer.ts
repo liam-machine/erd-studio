@@ -37,8 +37,6 @@ export interface TransformResult {
 export interface TransformOptions {
   /** Active cross-stage discrepancy report (e.g., physical vs logical). */
   discrepancyReport?: DiscrepancyReport;
-  /** Positions for ghost nodes (models in the comparison but not in the current stage). */
-  ghostPositions?: Record<string, { x: number; y: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,13 +153,13 @@ export function transformDomain(
     };
   });
 
-  // Ghost nodes for 'missing' models from discrepancy report
+  // Ghost nodes for 'missing' models from discrepancy report.
+  // Uses global positions map first, falls back to stacked row above canvas.
   if (options?.discrepancyReport) {
-    const ghostPositions = options.ghostPositions ?? {};
     let ghostIndex = 0;
     for (const md of options.discrepancyReport.models) {
       if (md.status === 'missing') {
-        const position = ghostPositions[md.name] ?? { x: 50 + ghostIndex * 260, y: -150 };
+        const position = positions[md.name] ?? { x: 50 + ghostIndex * 260, y: -150 };
         ghostIndex++;
         positionMap.set(md.name, position);
         nodes.push({

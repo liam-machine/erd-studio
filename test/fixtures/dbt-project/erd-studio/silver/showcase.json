@@ -41,23 +41,7 @@
         "toColumn": "contractor_id",
         "cardinality": "many-to-one"
       }
-    ],
-    "viewConfig": {
-      "positions": {
-        "dim_project": {
-          "x": 449,
-          "y": 210
-        },
-        "dim_work_lot": {
-          "x": 100,
-          "y": 300
-        },
-        "dim_contractor": {
-          "x": 500,
-          "y": 500
-        }
-      }
-    }
+    ]
   },
   "logical": {
     "models": [
@@ -264,29 +248,33 @@
         "toColumn": "site_name",
         "cardinality": "many-to-one"
       }
-    ],
-    "viewConfig": {
-      "positions": {
-        "dim_project": {
-          "x": 449,
-          "y": 606
-        },
-        "dim_work_lot": {
-          "x": 100,
-          "y": 300
-        },
-        "fct_work_events": {
-          "x": 24,
-          "y": -44
-        },
-        "dim_location": {
-          "x": 771,
-          "y": 303
-        },
-        "abc": {
-          "x": 517,
-          "y": 34
-        }
+    ]
+  },
+  "viewConfig": {
+    "positions": {
+      "dim_project": {
+        "x": 449,
+        "y": 606
+      },
+      "dim_work_lot": {
+        "x": 112,
+        "y": 596
+      },
+      "dim_contractor": {
+        "x": 474,
+        "y": 281
+      },
+      "abc": {
+        "x": 819,
+        "y": -55
+      },
+      "fct_work_events": {
+        "x": 23,
+        "y": -116
+      },
+      "dim_location": {
+        "x": 771,
+        "y": 303
       }
     }
   }

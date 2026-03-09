@@ -124,15 +124,15 @@ describe('DomainService', () => {
       expect(domain.logical.models).toHaveLength(0);
     });
 
-    it('parses viewConfig correctly from conceptual section', () => {
+    it('parses viewConfig correctly from top-level', () => {
       const filePath = path.join(
         FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.conceptual.viewConfig).toBeDefined();
-      expect(domain.conceptual.viewConfig.positions).toBeDefined();
-      expect(domain.conceptual.viewConfig.positions!['fct_transactions']).toEqual({ x: 12, y: 12 });
+      expect(domain.viewConfig).toBeDefined();
+      expect(domain.viewConfig.positions).toBeDefined();
+      expect(domain.viewConfig.positions!['fct_transactions']).toEqual({ x: 12, y: 12 });
     });
 
     it('handles missing files with descriptive error', () => {
@@ -255,7 +255,6 @@ describe('DomainService', () => {
         conceptual: {
           models: [],
           relationships: [],
-          viewConfig: {},
         },
         logical: {
           models: [
@@ -289,11 +288,11 @@ describe('DomainService', () => {
               cardinality: 'many-to-one',
             },
           ],
-          viewConfig: {
-            positions: {
-              dim_customer: { x: 100, y: 200 },
-              fct_orders: { x: 300, y: 200 },
-            },
+        },
+        viewConfig: {
+          positions: {
+            dim_customer: { x: 100, y: 200 },
+            fct_orders: { x: 300, y: 200 },
           },
         },
       };
@@ -362,7 +361,7 @@ describe('DomainService', () => {
       expect(result.relationships).toHaveLength(0);
     });
 
-    it('copies viewConfig positions from logical domain', () => {
+    it('uses global viewConfig positions', () => {
       const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
 
       expect(result.viewConfig.positions).toEqual({

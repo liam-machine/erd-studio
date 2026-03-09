@@ -15,7 +15,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { DomainSummary, Layer, SemanticDomain, StageData, UnifiedDomain } from '../types/semantic';
+import type { DomainSummary, Layer, SemanticDomain, StageData, UnifiedDomain, ViewConfig } from '../types/semantic';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship } from '../types/display';
 import type { ManifestData } from '../types/manifest';
@@ -146,7 +146,6 @@ export class DomainService {
       ...(unified.modelFolder ? { modelFolder: unified.modelFolder } : {}),
       models: stageData.models,
       relationships: stageData.relationships,
-      viewConfig: stageData.viewConfig,
     };
   }
 
@@ -159,7 +158,7 @@ export class DomainService {
    *   - If found in manifest: creates a DisplayModel with manifest columns
    *   - If not found: creates a ghost DisplayModel with existsInManifest=false
    *
-   * Copies viewConfig.positions from the logical stage so layout mirrors logical.
+   * Uses the global viewConfig for positions so layout is consistent across all stages.
    */
   buildPhysicalDomain(
     unifiedDomain: UnifiedDomain,
@@ -229,8 +228,9 @@ export class DomainService {
       modelFolder: unifiedDomain.modelFolder,
       models,
       relationships,
-      viewConfig: logicalStage.viewConfig,
+      viewConfig: unifiedDomain.viewConfig,
       readOnly: true,
+      positionDraggable: true,
     };
   }
 
@@ -279,7 +279,14 @@ export class DomainService {
     const domain = typeof obj.domain === 'string' ? obj.domain : path.basename(filePath, '.json');
     const layer = this.parseLayer(obj.layer, filePath);
 
-    const emptyStage: StageData = { models: [], relationships: [], viewConfig: {} };
+    const emptyStage: StageData = { models: [], relationships: [] };
+
+    // Global viewConfig — fall back to stage-level viewConfig for existing files
+    const globalViewConfig = this.parseViewConfig(
+      obj.viewConfig
+        ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig
+        ?? (obj.conceptual as Record<string, unknown> | undefined)?.viewConfig,
+    );
 
     return {
       schemaVersion: obj.schemaVersion as number,
@@ -289,6 +296,7 @@ export class DomainService {
       ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
       conceptual: this.parseStageData(obj.conceptual) ?? { ...emptyStage },
       logical: this.parseStageData(obj.logical) ?? { ...emptyStage },
+      viewConfig: globalViewConfig,
     };
   }
 
@@ -307,10 +315,9 @@ export class DomainService {
     const stageData: StageData = {
       models: Array.isArray(obj.models) ? (obj.models as StageData['models']) : [],
       relationships: Array.isArray(obj.relationships) ? (obj.relationships as StageData['relationships']) : [],
-      viewConfig: this.parseViewConfig(obj.viewConfig),
     };
 
-    const emptyStage: StageData = { models: [], relationships: [], viewConfig: {} };
+    const emptyStage: StageData = { models: [], relationships: [] };
 
     return {
       schemaVersion: obj.schemaVersion as number,
@@ -320,6 +327,7 @@ export class DomainService {
       ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
       conceptual: stage === 'conceptual' ? stageData : { ...emptyStage },
       logical: stage === 'logical' ? stageData : { ...emptyStage },
+      viewConfig: this.parseViewConfig(obj.viewConfig),
     };
   }
 
@@ -348,7 +356,6 @@ export class DomainService {
     return {
       models: Array.isArray(obj.models) ? (obj.models as StageData['models']) : [],
       relationships: Array.isArray(obj.relationships) ? (obj.relationships as StageData['relationships']) : [],
-      viewConfig: this.parseViewConfig(obj.viewConfig),
     };
   }
 
@@ -370,7 +377,7 @@ export class DomainService {
     );
   }
 
-  private parseViewConfig(value: unknown): StageData['viewConfig'] {
+  private parseViewConfig(value: unknown): ViewConfig {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return {};
     }

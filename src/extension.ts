@@ -314,7 +314,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        const emptyStage: StageData = { models: [], relationships: [], viewConfig: {} };
+        const emptyStage: StageData = { models: [], relationships: [] };
         const domainData: UnifiedDomain = {
           schemaVersion: CURRENT_SCHEMA_VERSION,
           domain: slug,
@@ -323,6 +323,7 @@ export function activate(context: vscode.ExtensionContext): void {
           ...(modelFolder ? { modelFolder } : {}),
           conceptual: { ...emptyStage },
           logical: { ...emptyStage },
+          viewConfig: {},
         };
 
         try {
