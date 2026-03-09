@@ -13,6 +13,7 @@ import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
+import { HarnessService, HARNESS_TARGETS } from './services/harnessService';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -775,6 +776,77 @@ export function activate(context: vscode.ExtensionContext): void {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Migration failed: ${msg}`);
+        }
+      },
+    ),
+    // -------------------------------------------------------------------------
+    // AI Coding Harness Installation
+    // -------------------------------------------------------------------------
+    vscode.commands.registerCommand(
+      'dbtSemantic.installCodingHarness',
+      async () => {
+        const harnessService = new HarnessService();
+        const existing = harnessService.detectExisting(workspaceRoot);
+
+        // Build QuickPick items with existing status
+        const items = HARNESS_TARGETS.map(target => {
+          const exists = existing.get(target.id);
+          return {
+            label: target.label,
+            description: exists ? '$(check) installed' : target.description,
+            picked: false,
+            target,
+            exists,
+          };
+        });
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select AI coding harnesses to install ERD Studio schema into',
+          canPickMany: true,
+          ignoreFocusOut: true,
+        });
+
+        if (!selected || selected.length === 0) { return; }
+
+        // Check for existing files that would be overwritten
+        const existingTargets = selected.filter(s => s.exists && s.target.id !== 'codex');
+        let overwrite = false;
+        if (existingTargets.length > 0) {
+          const names = existingTargets.map(s => s.target.relativePath).join(', ');
+          const choice = await vscode.window.showWarningMessage(
+            `The following files already exist: ${names}. Overwrite?`,
+            { modal: true },
+            'Overwrite',
+            'Skip Existing',
+          );
+          if (choice === undefined) { return; }
+          overwrite = choice === 'Overwrite';
+        }
+
+        const results = selected.map(s =>
+          harnessService.install(workspaceRoot, s.target, overwrite),
+        );
+
+        const succeeded = results.filter(r => r.success);
+        const failed = results.filter(r => !r.success && r.error !== 'File already exists');
+        const skipped = results.filter(r => !r.success && r.error === 'File already exists');
+
+        const parts: string[] = [];
+        if (succeeded.length > 0) {
+          parts.push(`${succeeded.length} installed`);
+        }
+        if (skipped.length > 0) {
+          parts.push(`${skipped.length} skipped (already exist)`);
+        }
+        if (failed.length > 0) {
+          parts.push(`${failed.length} failed`);
+        }
+
+        if (failed.length > 0) {
+          const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
+          void vscode.window.showErrorMessage(`Harness install: ${parts.join(', ')}. Errors: ${errors}`);
+        } else {
+          void vscode.window.showInformationMessage(`AI coding harness: ${parts.join(', ')}.`);
         }
       },
     ),

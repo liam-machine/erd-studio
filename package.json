@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt projects. Model your data warehouse across three stages — Conceptual entities, Logical columns and types, Physical manifest view — with cross-stage discrepancy comparison.",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -85,6 +85,12 @@
         "command": "dbtSemantic.migrateDomains",
         "title": "Migrate Domains to Unified Format (v3)",
         "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.installCodingHarness",
+        "title": "Install AI Coding Harness",
+        "category": "dbt",
+        "icon": "$(hubot)"
       }
     ],
     "viewsContainers": {
@@ -154,7 +160,7 @@
     "viewsWelcome": [
       {
         "view": "dbtSemantic.domainTree",
-        "contents": "No ERD domains found.\n\nERD Studio lets you design your data warehouse visually across three stages:\n\n**Conceptual** — high-level entities and relationships\n**Logical** — detailed columns, data types, and FK keys\n**Physical** — read-only view of what's built in dbt\n\n[Set Up ERD Studio](command:dbtSemantic.setupSemanticDirectory)\n\nCreates the erd-studio directory structure and your first domain."
+        "contents": "No ERD domains found.\n\nERD Studio lets you design your data warehouse visually across three stages:\n\n**Conceptual** — high-level entities and relationships\n**Logical** — detailed columns, data types, and FK keys\n**Physical** — read-only view of what's built in dbt\n\n[Set Up ERD Studio](command:dbtSemantic.setupSemanticDirectory)\n\nCreates the erd-studio directory structure and your first domain.\n\n[Install AI Coding Harness](command:dbtSemantic.installCodingHarness)\n\nAdd ERD Studio schema reference to Claude, Copilot, Gemini, or Codex."
       }
     ],
     "customEditors": [
@@ -193,6 +199,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "dbtSemantic.installCodingHarness",
+          "when": "view == dbtSemantic.domainTree && dbtSemantic.hasSemanticDir",
+          "group": "navigation@0"
+        },
         {
           "command": "dbtSemantic.addLayer",
           "when": "view == dbtSemantic.domainTree && dbtSemantic.hasSemanticDir",

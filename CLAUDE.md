@@ -28,7 +28,7 @@ erd-studio/
 
 The following internal identifiers still use the legacy `dbtSemantic` prefix and must **not** be renamed (doing so would break existing user settings, keybindings, and stored state):
 
-- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.migrateDomains`
+- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.migrateDomains`, `dbtSemantic.installCodingHarness`
 - **View IDs**: `dbt-semantic` (activity bar container), `dbtSemantic.domainTree`
 - **Custom editor viewType**: `dbtSemantic.domainEditor`
 - **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`
@@ -119,6 +119,7 @@ All mutations go through `WorkspaceEdit` for undo/redo integration. Physical sta
 
 ## Key Conventions
 
+- **Schema changes must update harness content** — the domain JSON schema (model structure, column fields, relationships, viewConfig, naming conventions) is embedded as a string constant in `src/services/harnessService.ts` (`SCHEMA_CONTENT`). When you change the domain file schema (e.g. add/remove/rename fields in `src/types/semantic.ts`, change file layout, update naming conventions), you **must** also update the `SCHEMA_CONTENT` constant and the format-specific generators (`generateClaudeSkill`, `generateCopilotInstructions`, `generateGeminiStyleguide`, `generateCodexAgents`) in that file. The harness content is what AI coding assistants see when users install the schema reference into their repos.
 - Shared types live in `src/types/` and are included in both tsconfigs
 - Webview components use BEM CSS class naming
 - All colours use CSS custom properties from `webview/styles/theme.css`
