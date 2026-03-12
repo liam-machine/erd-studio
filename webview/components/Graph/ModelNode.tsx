@@ -24,6 +24,7 @@ import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
 import { sortColumnsByKeyPriority } from '../../lib/columnSort';
 import { KeyBadge } from '../common/KeyBadge';
+import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
 import './ModelNode.css';
 
 // ---------------------------------------------------------------------------
@@ -117,6 +118,11 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
 
   // Track whether cursor is over this column during a cross-model drag
   const [isDropTarget, setIsDropTarget] = useState(false);
+
+  // Tooltip hover state — delayed show, instant hide
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipEligible = hasTooltipContent(column);
 
   // Reset drop target state when drag ends
   useEffect(() => {
@@ -218,12 +224,32 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
   // Drop target: highlight when dragging from a different model and hovering this column
   const isValidDropTarget = dragSourceModel !== null && dragSourceModel !== modelName;
 
+  // Hide tooltip when drag/press starts
+  useEffect(() => {
+    if (isPressing || isDragging) {
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+      setShowTooltip(false);
+    }
+  }, [isPressing, isDragging]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    };
+  }, []);
+
   const handleMouseEnter = useCallback(() => {
     if (isValidDropTarget) setIsDropTarget(true);
-  }, [isValidDropTarget]);
+    if (tooltipEligible && !isDragging && !isPressing) {
+      tooltipTimerRef.current = setTimeout(() => setShowTooltip(true), 450);
+    }
+  }, [isValidDropTarget, tooltipEligible, isDragging, isPressing]);
 
   const handleMouseLeave = useCallback(() => {
     setIsDropTarget(false);
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    setShowTooltip(false);
     handlers.onMouseLeave();
   }, [handlers]);
 
@@ -284,6 +310,7 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
           {ADDITIVE_BADGE[column.additiveType]}
         </span>
       )}
+      <ColumnTooltip column={column} anchorRef={elementRef} visible={showTooltip} />
     </div>
   );
 }

@@ -19,6 +19,8 @@ import type { ModelDiscrepancy } from '../../src/types/discrepancy';
 export interface ColumnDisplay {
   name: string;
   dataType: string;
+  /** Column description (optional — shown in tooltip on hover). */
+  description?: string;
   isPrimaryKey: boolean;
   /** True if this column is the source of an FK relationship. */
   isForeignKey: boolean;

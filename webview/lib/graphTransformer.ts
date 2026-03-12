@@ -54,6 +54,7 @@ function mapColumns(model: DisplayModel): ColumnDisplay[] {
   const mapped = model.columns.map((col) => ({
     name: col.name,
     dataType: col.dataType,
+    ...(col.description ? { description: col.description } : {}),
     isPrimaryKey: col.isPrimaryKey,
     isForeignKey: col.isForeignKey,
     isNaturalKey: col.isNaturalKey,
