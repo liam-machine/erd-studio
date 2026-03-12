@@ -1,30 +1,29 @@
 ---
 name: erd-studio
-description: Data modeling guide for ERD Studio — covers conceptual/logical domain JSON format, dbt YAML tests for physical model relationships and cardinality, naming conventions, and design workflow. Use when creating, editing, or validating data models or dbt schema files.
+description: Data modeling guide for ERD Studio — covers logical domain JSON format, dbt YAML tests for physical model relationships and cardinality, naming conventions, and design workflow. Use when creating, editing, or validating data models or dbt schema files.
 ---
 
 # ERD Studio — AI Data Modeling Guide
 
-Design data warehouse models across three stages: conceptual → logical → physical. This guide covers the domain JSON format and how to write dbt YAML that produces a correct physical model.
+Design data warehouse models across two stages: logical → physical. This guide covers the domain JSON format and how to write dbt YAML that produces a correct physical model.
 
 ## Quick Reference
 
-**File:** `erd-studio/{layer}/{domain}.json` — one file per domain containing `conceptual` and `logical` sections.
+**File:** `erd-studio/{layer}/{domain}.json` — one file per domain containing the `logical` section.
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "domain": "{domain}",
   "layer": "silver",
   "description": "Domain description",
   "modelFolder": "models/silver",
-  "conceptual": { "models": [], "relationships": [] },
   "logical": { "models": [], "relationships": [] },
   "viewConfig": {}
 }
 ```
 
-Required fields: `schemaVersion`, `domain`, `layer`, `conceptual`, `logical`, `viewConfig`.
+Required fields: `schemaVersion`, `domain`, `layer`, `logical`, `viewConfig`.
 
 **viewConfig** lives at the root level and applies to all stages. Leave empty for new domains — the extension auto-layouts on first open.
 
@@ -34,32 +33,7 @@ Required fields: `schemaVersion`, `domain`, `layer`, `conceptual`, `logical`, `v
 
 ---
 
-## Stage 1: Conceptual Design
-
-The `conceptual` section is for high-level entity identification. Models can omit `columns` entirely.
-
-**What to include:** model names, descriptions, entity-level relationships, model roles.
-**What to omit:** columns, data types, grain, rationale.
-
-```json
-"conceptual": {
-  "models": [
-    { "name": "dim_customer", "description": "Customer master data", "modelRole": "conformed-dim" },
-    { "name": "fct_orders", "description": "Customer order transactions", "modelRole": "transaction-fact" }
-  ],
-  "relationships": [
-    {
-      "fromModel": "fct_orders", "fromColumn": "customer_id",
-      "toModel": "dim_customer", "toColumn": "customer_id",
-      "cardinality": "many-to-one"
-    }
-  ]
-}
-```
-
----
-
-## Stage 2: Logical Design
+## Stage 1: Logical Design
 
 The `logical` section is the detailed blueprint. Models should have full columns with data types, PK/FK/NK flags, grain, model role, and rationale.
 
@@ -141,7 +115,7 @@ FK columns match the PK name of the referenced table.
 
 ---
 
-## Stage 3: Physical Realization via dbt
+## Stage 2: Physical Realization via dbt
 
 The physical stage is **read-only** and has **no files on disk**. It is derived entirely from the dbt manifest (`target/manifest.json`) after running `dbt compile` or `dbt build`.
 
@@ -253,4 +227,4 @@ The discrepancy overlay in ERD Studio compares stages. Common issues when compar
 | Missing model in physical | Model not compiled into manifest | Run `dbt compile` or check model is not disabled |
 | Extra column in physical | Column in manifest but not in logical | Add the column to the logical model, or remove from dbt model |
 
-<!-- erd-studio-harness: 2 -->
+<!-- erd-studio-harness: 3 -->
