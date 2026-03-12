@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt projects. Design your data warehouse across two stages — Logical (columns, types, FK design) and Physical (read-only manifest view) — with cross-stage discrepancy comparison.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
