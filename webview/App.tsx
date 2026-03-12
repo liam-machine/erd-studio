@@ -265,13 +265,12 @@ function EditorCanvas() {
         return;
       }
 
-      // Alt+1/2/3: Switch stage tabs
-      if (e.altKey && (e.key === '1' || e.key === '2' || e.key === '3')) {
+      // Alt+1/2: Switch stage tabs
+      if (e.altKey && (e.key === '1' || e.key === '2')) {
         e.preventDefault();
         const stageMap: Record<string, import('../src/types/semantic').Stage> = {
-          '1': 'conceptual',
-          '2': 'logical',
-          '3': 'physical',
+          '1': 'logical',
+          '2': 'physical',
         };
         const targetStage = stageMap[e.key];
         if (targetStage && domain && domain.stage !== targetStage) {

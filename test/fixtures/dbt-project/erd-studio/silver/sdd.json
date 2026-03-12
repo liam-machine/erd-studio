@@ -1,20 +1,8 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "domain": "sdd",
   "layer": "silver",
   "description": "",
-  "conceptual": {
-    "models": [
-      {
-        "name": "sdfg",
-        "source": "design",
-        "description": "",
-        "columns": []
-      }
-    ],
-    "relationships": [],
-    "viewConfig": {}
-  },
   "logical": {
     "models": [],
     "relationships": [],

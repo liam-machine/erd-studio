@@ -166,12 +166,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       case 'physical':
         return [{ stage: 'logical', label: 'Compare to Logical' }];
       case 'logical':
-        return [
-          { stage: 'physical', label: 'Compare to Physical' },
-          { stage: 'conceptual', label: 'Compare to Conceptual' },
-        ];
-      case 'conceptual':
-        return [{ stage: 'logical', label: 'Compare to Logical' }];
+        return [{ stage: 'physical', label: 'Compare to Physical' }];
       default:
         return [];
     }

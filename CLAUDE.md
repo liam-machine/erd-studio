@@ -8,7 +8,7 @@ The extension display name is **ERD Studio** (package name `erd-studio`).
 
 ### Directory Structure
 
-ERD domain files live at `{project_root}/erd-studio/{layer}/{domain}.json`. Each file is a unified v3 format containing both conceptual and logical stages as sections. The custom editor activates for files matching:
+ERD domain files live at `{project_root}/erd-studio/{layer}/{domain}.json`. Each file is a unified domain containing the logical stage data. The custom editor activates for files matching:
 - `**/erd-studio/*/*.json`
 
 The base directory is configurable via the `dbtSemantic.semanticDir` setting (default: `erd-studio`).
@@ -18,7 +18,7 @@ erd-studio/
 ├── layers.json
 ├── templates/
 ├── silver/
-│   ├── customer-360.json   ← unified domain (conceptual + logical)
+│   ├── customer-360.json   ← domain file (logical stage)
 │   └── orders.json
 └── gold/
     └── reporting.json
@@ -28,7 +28,7 @@ erd-studio/
 
 The following internal identifiers still use the legacy `dbtSemantic` prefix and must **not** be renamed (doing so would break existing user settings, keybindings, and stored state):
 
-- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.migrateDomains`, `dbtSemantic.installCodingHarness`
+- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.installCodingHarness`
 - **View IDs**: `dbt-semantic` (activity bar container), `dbtSemantic.domainTree`
 - **Custom editor viewType**: `dbtSemantic.domainEditor`
 - **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`
@@ -58,28 +58,25 @@ VS Code extension with dual build targets:
 
 Built with esbuild (`esbuild.js`). Two TypeScript configs: `tsconfig.json` (Node.js) and `tsconfig.webview.json` (DOM). The webview tsconfig includes `src/types/**/*` so types are shared.
 
-### Three-Stage Architecture
+### Two-Stage Architecture
 
-The extension uses three design stages, each with a distinct purpose:
+The extension uses two design stages, each with a distinct purpose:
 
 | Stage | Color | Purpose | Storage |
 |-------|-------|---------|---------|
-| **Conceptual** | Violet (`#8b5cf6`) | High-level entity design — model names, descriptions, entity-level relationships | `conceptual` section in unified domain file |
-| **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | `logical` section in unified domain file |
+| **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | `logical` section in domain file |
 | **Physical** | Green (`#22c55e`) | What exists in dbt — models from logical filtered by manifest; relationships & cardinality derived entirely from manifest test nodes; fully read-only | Derived at runtime, no file on disk |
 
-Both editable stages (conceptual, logical) live in the same JSON file. Stage switching in the editor reads a different section of the same file — no sibling file resolution needed. Stage colors are defined in `webview/lib/stageColors.ts`.
+The logical stage is the editable stage stored in the domain JSON file. Physical is derived at runtime. Stage colors are defined in `webview/lib/stageColors.ts`.
 
 ### Data Flow
 
 ```
-                                              ┌─ .conceptual → DisplayDomain
-{layer}/{domain}.json ─→ getDomain() ─→ UnifiedDomain ─┤
-                                              └─ .logical    → DisplayDomain
-                                                                    │
+{layer}/{domain}.json ─→ getDomain() ─→ UnifiedDomain ─→ .logical → DisplayDomain
+                                                                          │
 manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ DisplayDomain
-                                                                    │
-                                             [message] ─→ graphTransformer ─→ React Flow
+                                                                          │
+                                               [message] ─→ graphTransformer ─→ React Flow
 ```
 
 1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`). Extracts model nodes, relationship test nodes (`relationships`, `relationships_where`, custom), `unique` tests, and `unique_combination_of_columns` tests.
@@ -95,7 +92,7 @@ manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ Display
 | Directory | Purpose |
 |-----------|---------|
 | `providers/` | `SemanticEditorProvider` (custom editor), `DomainTreeProvider` (sidebar tree) |
-| `services/` | Business logic — manifest parsing, domain I/O, discrepancy comparison, layers, templates, v2→v3 migration |
+| `services/` | Business logic — manifest parsing, domain I/O, discrepancy comparison, layers, templates |
 | `watchers/` | `FileWatcherService` — debounced watchers for manifest, domains, project config |
 | `types/` | Shared type definitions (imported by both host and webview) |
 
@@ -103,7 +100,7 @@ manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ Display
 
 | Directory | Purpose |
 |-----------|---------|
-| `components/` | React components — `Graph/` (ModelNode, ConceptualModelNode, FkEdge), `DetailPanel/`, `DiscrepancyPanel/`, `WelcomeModal/`, `Toolbar/` (StageTabs), dialogs |
+| `components/` | React components — `Graph/` (ModelNode, FkEdge), `DetailPanel/`, `DiscrepancyPanel/`, `WelcomeModal/`, `Toolbar/` (StageTabs), dialogs |
 | `store/` | Zustand store (`editorStore.ts`) — UI state, selection, dialogs, active stage, discrepancy |
 | `hooks/` | `useMessageBus` (extension comms), `useVsCodeApi`, position/state persistence |
 | `lib/` | Pure functions — `graphTransformer`, `elkLayout`, `stageColors`, `columnSort` |
@@ -128,7 +125,7 @@ All mutations go through `WorkspaceEdit` for undo/redo integration. Physical sta
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
 - Stage switching sends `switchStage` message; extension extracts the target stage section from the same unified file and responds with `stageData`
 - Physical stage is derived at runtime — no files on disk, positions inherited from logical domain. Models come from logical filtered by manifest; **relationships come from manifest test nodes** (not logical), with cardinality derived from `unique`/`unique_combination_of_columns` tests
-- Mutation handlers target `parsed[activeStage].models` / `.relationships` within the unified file
+- Mutation handlers target `parsed.logical.models` / `.relationships` within the domain file
 
 ## Discrepancy System
 
@@ -137,18 +134,9 @@ Cross-stage comparison is handled by `DiscrepancyService.compare(source, target)
 | Active Stage | Available Comparisons |
 |-------------|----------------------|
 | Physical | Compare to Logical |
-| Logical | Compare to Physical, Compare to Conceptual |
-| Conceptual | Compare to Logical |
+| Logical | Compare to Physical |
 
 Discrepancy statuses for models/columns/relationships: `matched`, `extra`, `missing`, `type-mismatch` (columns), `cardinality-mismatch` (relationships). Ghost nodes appear for missing models.
-
-## V2 to V3 Migration
-
-The extension migrated from a **stage-first** layout (`erd-studio/{stage}/{layer}/{domain}.json` — two files per domain) to a **layer-first unified** layout (`erd-studio/{layer}/{domain}.json` — one file per domain). `migrationService.ts` handles conversion:
-
-- **`dbtSemantic.migrateDomains` command** — user-triggered batch migration with confirmation dialog. Scans `conceptual/` and `logical/` directories, merges sibling pairs into v3 `UnifiedDomain` files, and removes old stage directories.
-- **In-memory v2 compat** — `getDomain()` can read v2 files and convert in memory. Write path always produces v3.
-- **Missing siblings** — if only one stage file exists (e.g. conceptual but no logical), the missing stage gets empty defaults.
 
 ## Harness Versioning
 
@@ -241,7 +229,7 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
                  window.postMessage({
                    type: 'domainLoaded',
                    payload: {
-                     schemaVersion: 3, domain: 'preview', layer: 'silver',
+                     schemaVersion: 4, domain: 'preview', layer: 'silver',
                      stage: 'logical',
                      description: 'Dev preview', models: [], relationships: [],
                      viewConfig: {}, readOnly: false

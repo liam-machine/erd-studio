@@ -1,48 +1,9 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "domain": "showcase",
   "layer": "silver",
   "description": "Showcase domain for developer testing — has data across all three stages with deliberate discrepancies",
   "modelFolder": "models/silver",
-  "conceptual": {
-    "models": [
-      {
-        "name": "dim_project",
-        "description": "Project dimension — tracks construction projects"
-      },
-      {
-        "name": "dim_work_lot",
-        "description": "Work lot dimension — individual work packages within a project"
-      },
-      {
-        "name": "dim_contractor",
-        "description": "Contractor dimension — exists only in conceptual (missing from logical/physical)"
-      }
-    ],
-    "relationships": [
-      {
-        "fromModel": "dim_work_lot",
-        "fromColumn": "project_id",
-        "toModel": "dim_project",
-        "toColumn": "project_id",
-        "cardinality": "one-to-one"
-      },
-      {
-        "fromModel": "dim_contractor",
-        "fromColumn": "project_id",
-        "toModel": "dim_project",
-        "toColumn": "project_id",
-        "cardinality": "many-to-one"
-      },
-      {
-        "fromModel": "dim_work_lot",
-        "fromColumn": "contractor_id",
-        "toModel": "dim_contractor",
-        "toColumn": "contractor_id",
-        "cardinality": "many-to-one"
-      }
-    ]
-  },
   "logical": {
     "models": [
       {
@@ -203,27 +164,6 @@
         "rationale": {
           "purpose": "k"
         }
-      },
-      {
-        "name": "abc",
-        "description": "",
-        "columns": [
-          {
-            "name": "sefsewwefwef",
-            "dataType": "STRING",
-            "description": ""
-          },
-          {
-            "name": "wefew",
-            "dataType": "INT",
-            "description": ""
-          },
-          {
-            "name": "wefewf",
-            "dataType": "STRING",
-            "description": ""
-          }
-        ]
       }
     ],
     "relationships": [
@@ -242,10 +182,10 @@
         "cardinality": "many-to-one"
       },
       {
-        "fromModel": "abc",
-        "fromColumn": "wefew",
+        "fromModel": "fct_work_events",
+        "fromColumn": "amount",
         "toModel": "dim_location",
-        "toColumn": "site_name",
+        "toColumn": "latitude",
         "cardinality": "many-to-one"
       }
     ]
@@ -253,28 +193,24 @@
   "viewConfig": {
     "positions": {
       "dim_project": {
-        "x": 449,
-        "y": 606
+        "x": 477,
+        "y": 612
       },
       "dim_work_lot": {
         "x": 112,
         "y": 596
       },
       "dim_contractor": {
-        "x": 474,
-        "y": 281
-      },
-      "abc": {
-        "x": 819,
-        "y": -55
+        "x": 476,
+        "y": 296
       },
       "fct_work_events": {
-        "x": 23,
-        "y": -116
+        "x": 89,
+        "y": 226
       },
       "dim_location": {
-        "x": 771,
-        "y": 303
+        "x": 486,
+        "y": 274
       }
     }
   }

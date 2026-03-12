@@ -1,11 +1,10 @@
 /**
  * StageTabs — stage tab switcher for the toolbar.
  *
- * Renders three tabs (Conceptual / Logical / Physical) with the active
- * tab highlighted. Clicking a tab sends a switchStage message to the
- * extension host.
+ * Renders two tabs (Logical / Physical) with the active tab highlighted.
+ * Clicking a tab sends a switchStage message to the extension host.
  *
- * Keyboard shortcuts: Alt+1 = Conceptual, Alt+2 = Logical, Alt+3 = Physical
+ * Keyboard shortcuts: Alt+1 = Logical, Alt+2 = Physical
  * (handled in App.tsx keyboard handler).
  */
 
@@ -21,9 +20,8 @@ import './StageTabs.css';
 // ---------------------------------------------------------------------------
 
 const STAGE_LABELS: { stage: Stage; label: string; shortcut: string }[] = [
-  { stage: 'conceptual', label: 'Conceptual', shortcut: 'Alt+1' },
-  { stage: 'logical', label: 'Logical', shortcut: 'Alt+2' },
-  { stage: 'physical', label: 'Physical', shortcut: 'Alt+3' },
+  { stage: 'logical', label: 'Logical', shortcut: 'Alt+1' },
+  { stage: 'physical', label: 'Physical', shortcut: 'Alt+2' },
 ];
 
 // ---------------------------------------------------------------------------

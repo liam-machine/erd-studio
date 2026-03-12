@@ -3,7 +3,7 @@
  *
  * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
  * and describe FK-based relationships between dbt models within a business
- * domain at a particular design stage (conceptual, logical, or physical).
+ * domain at a particular design stage (logical or physical).
  */
 
 /**
@@ -12,11 +12,11 @@
  */
 export type Layer = string;
 
-/** The three design stages of a domain. */
-export type Stage = 'conceptual' | 'logical' | 'physical';
+/** The two design stages of a domain. */
+export type Stage = 'logical' | 'physical';
 
 /** The current schema version written by this extension. */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Column definitions
@@ -92,7 +92,7 @@ export interface Rationale {
  * A model entry in a semantic domain.
  *
  * In the stage architecture, models are simple data containers.
- * The stage is determined by the section (conceptual/logical) within
+ * The stage is determined by the section (logical) within
  * the unified domain file, not by a field on the model.
  */
 export interface SemanticModel {
@@ -165,10 +165,10 @@ export interface ViewConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Stage data (shared structure for conceptual/logical sections)
+// Stage data (structure for the logical section)
 // ---------------------------------------------------------------------------
 
-/** The models and relationships for a single design stage. */
+/** The models and relationships for a design stage. */
 export interface StageData {
   models: SemanticModel[];
   relationships: Relationship[];
@@ -197,11 +197,11 @@ export interface SemanticDomain {
 }
 
 /**
- * Unified domain file format (v3).
+ * Unified domain file format (v4).
  *
- * A single JSON file at erd-studio/{layer}/{domain}.json containing both
- * conceptual and logical stage data. Replaces the v2 layout where each
- * stage had its own file in a separate directory.
+ * A single JSON file at erd-studio/{layer}/{domain}.json containing
+ * logical stage data. Physical stage is derived at runtime from
+ * the logical models projected through the dbt manifest.
  */
 export interface UnifiedDomain {
   schemaVersion: number;
@@ -209,7 +209,6 @@ export interface UnifiedDomain {
   layer: Layer;
   description: string;
   modelFolder?: string;
-  conceptual: StageData;
   logical: StageData;
   /** Global view configuration shared across all stages. */
   viewConfig: ViewConfig;

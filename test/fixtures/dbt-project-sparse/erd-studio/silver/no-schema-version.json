@@ -2,6 +2,9 @@
   "domain": "no-schema-version",
   "layer": "silver",
   "description": "Missing schemaVersion field",
-  "conceptual": { "models": [], "relationships": [], "viewConfig": {} },
-  "logical": { "models": [], "relationships": [], "viewConfig": {} }
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
 }

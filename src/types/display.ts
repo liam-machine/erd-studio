@@ -3,7 +3,7 @@
  *
  * These types replace the old ReconciledDomain/ReconciledModel/ReconciledColumn
  * types. In the stage architecture, there is no manifest-merge reconciliation;
- * instead, each stage (conceptual/logical/physical) produces a DisplayDomain
+ * instead, each stage (logical/physical) produces a DisplayDomain
  * directly from its data source.
  */
 

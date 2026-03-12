@@ -1,36 +1,9 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "domain": "ttt",
   "layer": "silver",
   "description": "",
   "modelFolder": "models/silver",
-  "conceptual": {
-    "models": [
-      {
-        "name": "kkk",
-        "source": "design",
-        "description": "",
-        "columns": [
-          { "name": "kk", "dataType": "VARCHAR", "description": "" }
-        ]
-      },
-      {
-        "name": "jjkkk_jkndpwe",
-        "source": "design",
-        "description": "",
-        "columns": [
-          { "name": "as", "dataType": "STRING", "description": "" }
-        ]
-      }
-    ],
-    "relationships": [],
-    "viewConfig": {
-      "positions": {
-        "kkk": { "x": -3, "y": 143 },
-        "jjkkk_jkndpwe": { "x": -157, "y": -29 }
-      }
-    }
-  },
   "logical": {
     "models": [],
     "relationships": [],

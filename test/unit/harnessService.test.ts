@@ -57,12 +57,11 @@ describe('HarnessService', () => {
       expect(content).toContain('# ERD Studio');
     });
 
-    it('all formats include v3 schema content', () => {
+    it('all formats include schema content', () => {
       for (const target of HARNESS_TARGETS) {
         const content = service.generateContent(target.id);
         expect(content).toContain('schemaVersion');
         expect(content).toContain('viewConfig');
-        expect(content).toContain('conceptual');
         expect(content).toContain('logical');
         expect(content).toContain('erd-studio/{layer}/{domain}.json');
       }

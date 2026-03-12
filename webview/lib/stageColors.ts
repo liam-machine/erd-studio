@@ -1,9 +1,7 @@
 /**
  * Stage colour constants.
  *
- * Fixed colour scheme for the three design stages. Replaces the old
- * multi-palette system (coolWarm/cicd/trafficLight) which was designed
- * around the now-removed built/approved/design status lifecycle.
+ * Fixed colour scheme for the two design stages.
  *
  * CSS classes use `var(--stage-*)` custom properties defined in theme.css.
  * This module provides raw hex values for contexts that cannot use CSS
@@ -12,7 +10,6 @@
 
 /** Hex border colours keyed by stage name (or 'ghost' for missing nodes). */
 export const STAGE_HEX: Record<string, string> = {
-  conceptual: '#8b5cf6',  // Violet-500
   logical:    '#60a5fa',  // Blue-400
   physical:   '#22c55e',  // Green-500
   ghost:      '#9ca3af',  // Gray-400

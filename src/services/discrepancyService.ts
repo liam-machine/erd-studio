@@ -6,7 +6,6 @@
  *
  * Usage:
  *   compare(physicalDomain, logicalDomain) → DiscrepancyReport
- *   compare(logicalDomain, conceptualDomain) → DiscrepancyReport
  */
 
 import type { DisplayDomain, DisplayModel, DisplayRelationship } from '../types/display';

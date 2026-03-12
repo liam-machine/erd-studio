@@ -25,7 +25,7 @@ import {
 const LAYERS_CONFIG_FILE = 'layers.json';
 
 /** Reserved stage names that must never be detected as user-defined layers. */
-const STAGE_DIR_NAMES = new Set(['conceptual', 'logical', 'physical']);
+const STAGE_DIR_NAMES = new Set(['logical', 'physical']);
 
 export class LayerService {
   private config: LayersConfigFile | null = null;

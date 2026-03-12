@@ -136,8 +136,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           return;
         }
 
-        // Resolve active stage for mutation handlers (physical is already guarded above)
-        const activeStage = (panel?.activeStage === 'conceptual' ? 'conceptual' : 'logical') as 'conceptual' | 'logical';
+        // Mutations always target the logical stage (physical is already guarded above)
+        const activeStage = 'logical' as const;
 
         switch (message.type) {
           case 'ready':
@@ -323,17 +323,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   // -------------------------------------------------------------------------
 
   /**
-   * Extract a stage section from parsed v3 domain JSON.
+   * Extract the logical stage section from parsed domain JSON.
    * Returns a reference — mutations to the returned object mutate the parent.
    */
   private getStageSection(
     parsed: Record<string, unknown>,
-    stage: 'conceptual' | 'logical',
+    _stage: 'logical',
   ): Record<string, unknown> {
-    if (!parsed[stage] || typeof parsed[stage] !== 'object') {
-      parsed[stage] = { models: [], relationships: [] };
+    if (!parsed.logical || typeof parsed.logical !== 'object') {
+      parsed.logical = { models: [], relationships: [] };
     }
-    return parsed[stage] as Record<string, unknown>;
+    return parsed.logical as Record<string, unknown>;
   }
 
   /**
@@ -343,7 +343,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async applyDomainEdit(
     document: vscode.TextDocument,
     mutator: (section: Record<string, unknown>, parsed: Record<string, unknown>) => void,
-    options: { refreshWebview?: boolean; webview?: vscode.Webview; stage: 'conceptual' | 'logical' },
+    options: { refreshWebview?: boolean; webview?: vscode.Webview; stage: 'logical' },
   ): Promise<boolean> {
     const { refreshWebview = true, webview, stage } = options;
     const panelKey = document.uri.toString();
@@ -482,7 +482,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
         webview.postMessage({ type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
       } else {
-        const domain = this.domainService.getDomainStage(document.uri.fsPath, activeStage);
+        const domain = this.domainService.getDomainStage(document.uri.fsPath);
         const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
         webview.postMessage({ type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
       }
@@ -555,7 +555,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     model: DesignModel,
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const text = document.getText();
@@ -633,7 +633,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; column: ColumnDef },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const validationError = this.validateColumnDef(payload.column);
@@ -696,7 +696,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; oldColumnName: string; column: ColumnDef },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const validationError = this.validateColumnDef(payload.column);
@@ -774,7 +774,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; columnName: string },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const text = document.getText();
@@ -825,7 +825,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; columnName: string; keyType: 'PK' | 'FK' | 'NK'; value: boolean },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const text = document.getText();
@@ -882,7 +882,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -926,7 +926,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { oldName: string; newName: string },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const trimmedNew = payload.newName.trim();
@@ -1001,7 +1001,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const text = document.getText();
@@ -1061,7 +1061,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -1098,7 +1098,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -1137,7 +1137,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string;
       fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality;
     },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -1239,7 +1239,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
@@ -1355,7 +1355,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; rationale: Partial<Rationale> },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -1391,7 +1391,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; grain: string },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -1421,7 +1421,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string; modelRole: string | null },
-    stage: 'conceptual' | 'logical',
+    stage: 'logical',
   ): Promise<void> {
     try {
       const success = await this.applyDomainEdit(
@@ -1518,8 +1518,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
         webview.postMessage({ type: 'stageData', payload: physicalDomain });
       } else {
-        // Conceptual or logical — extract from same unified file
-        const domain = this.domainService.getDomainStage(document.uri.fsPath, targetStage);
+        // Logical — extract from unified file
+        const domain = this.domainService.getDomainStage(document.uri.fsPath);
         const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
         webview.postMessage({ type: 'stageData', payload: displayDomain });
       }
@@ -1575,7 +1575,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Build a DisplayDomain for any stage, given the current document as context.
    * For physical, derives from the unified file's logical section + manifest.
-   * For conceptual/logical, extracts the stage section from the same unified file.
+   * For logical, extracts the logical section from the unified file.
    */
   private async buildStageDisplayDomain(
     document: vscode.TextDocument,
@@ -1586,7 +1586,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (stage === 'physical') {
       return this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
     }
-    const domain = this.domainService.getDomainStage(document.uri.fsPath, stage);
+    const domain = this.domainService.getDomainStage(document.uri.fsPath);
     return this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
   }
 

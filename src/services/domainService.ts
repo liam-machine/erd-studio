@@ -1,11 +1,8 @@
 /**
  * DomainService — reads semantic domain JSON files from disk.
  *
- * v3 layout: domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
- * Each file is a UnifiedDomain containing both conceptual and logical stage data.
- *
- * v1/v2 layout (legacy): {dbt_project}/erd-studio/{stage}/{layer}/{domain}.json
- * These are auto-upgraded in memory when read via getDomain().
+ * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
+ * Each file is a UnifiedDomain containing logical stage data.
  *
  * Physical domains are not stored on disk — they are derived at runtime
  * by projecting a logical domain's model list through the dbt manifest
@@ -21,7 +18,6 @@ import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship } 
 import type { ManifestData, ManifestRelationshipTest } from '../types/manifest';
 import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
-import { hasLegacyLayout } from './migrationService';
 
 const DEFAULT_SEMANTIC_DIR = 'erd-studio';
 
@@ -32,11 +28,8 @@ export class DomainService {
    * Discover all semantic domain JSON files under erd-studio/,
    * grouped by layer. Returns lightweight summaries (no full parse).
    *
-   * v3 directory structure:
+   * Directory structure:
    *   erd-studio/{layer}/*.json
-   *
-   * Only scans v3 paths. Callers should use hasLegacyDomains() to
-   * detect unmigrated v1/v2 layouts and prompt the user to migrate.
    */
   listDomains(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): DomainSummary[] {
     const basePath = path.join(projectPath, semanticDir);
@@ -52,12 +45,6 @@ export class DomainService {
       const layer = layerConfig.id;
       const layerDir = path.join(basePath, layer);
       if (!fs.existsSync(layerDir)) {
-        continue;
-      }
-
-      // Skip directories that are old stage directories (conceptual/logical)
-      // to avoid treating them as layer directories
-      if (layer === 'conceptual' || layer === 'logical') {
         continue;
       }
 
@@ -89,19 +76,7 @@ export class DomainService {
   }
 
   /**
-   * Check whether legacy v1/v2 stage directories exist and contain domains.
-   * Delegates to migrationService.hasLegacyLayout().
-   */
-  hasLegacyDomains(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): boolean {
-    return hasLegacyLayout(projectPath, semanticDir);
-  }
-
-  /**
    * Read and parse a domain JSON file, returning a UnifiedDomain.
-   *
-   * Supports both v3 (unified) and v1/v2 (flat) formats. Legacy files
-   * are auto-upgraded in memory: the flat content is placed into the
-   * stage section inferred from the file path.
    */
   getDomain(filePath: string): UnifiedDomain {
     if (!fs.existsSync(filePath)) {
@@ -128,21 +103,19 @@ export class DomainService {
   }
 
   /**
-   * Extract a single stage from a UnifiedDomain, returning a SemanticDomain.
+   * Extract the logical stage from a UnifiedDomain, returning a SemanticDomain.
    *
-   * This is what the editor calls to get stage-specific data for display.
-   * For conceptual/logical: extracts the corresponding section.
    * Physical stage is not supported here — use buildPhysicalDomain() instead.
    */
-  getDomainStage(filePath: string, stage: 'conceptual' | 'logical'): SemanticDomain {
+  getDomainStage(filePath: string): SemanticDomain {
     const unified = this.getDomain(filePath);
-    const stageData = unified[stage];
+    const stageData = unified.logical;
 
     return {
       schemaVersion: unified.schemaVersion,
       domain: unified.domain,
       layer: unified.layer,
-      stage,
+      stage: 'logical',
       description: unified.description,
       ...(unified.modelFolder ? { modelFolder: unified.modelFolder } : {}),
       models: stageData.models,
@@ -236,10 +209,6 @@ export class DomainService {
 
   /**
    * Validate parsed JSON and return a typed UnifiedDomain.
-   *
-   * For v3 files: validates root fields and each stage section.
-   * For v1/v2 files: wraps flat content into the appropriate stage section,
-   * inferring stage from the grandparent directory name.
    */
   private validateDomain(data: unknown, filePath: string): UnifiedDomain {
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -263,19 +232,13 @@ export class DomainService {
       );
     }
 
-    // v3 unified format — has conceptual/logical sections
-    if (obj.schemaVersion >= 3) {
-      return this.validateV3Domain(obj, filePath);
-    }
-
-    // v1/v2 legacy flat format — auto-upgrade in memory
-    return this.upgradeV2Domain(obj, filePath);
+    return this.validateDomainFields(obj, filePath);
   }
 
   /**
-   * Validate a v3 unified domain file.
+   * Validate a unified domain file.
    */
-  private validateV3Domain(obj: Record<string, unknown>, filePath: string): UnifiedDomain {
+  private validateDomainFields(obj: Record<string, unknown>, filePath: string): UnifiedDomain {
     const domain = typeof obj.domain === 'string' ? obj.domain : path.basename(filePath, '.json');
     const layer = this.parseLayer(obj.layer, filePath);
 
@@ -284,8 +247,7 @@ export class DomainService {
     // Global viewConfig — fall back to stage-level viewConfig for existing files
     const globalViewConfig = this.parseViewConfig(
       obj.viewConfig
-        ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig
-        ?? (obj.conceptual as Record<string, unknown> | undefined)?.viewConfig,
+        ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig,
     );
 
     return {
@@ -294,53 +256,9 @@ export class DomainService {
       layer,
       description: typeof obj.description === 'string' ? obj.description : '',
       ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
-      conceptual: this.parseStageData(obj.conceptual) ?? { ...emptyStage },
       logical: this.parseStageData(obj.logical) ?? { ...emptyStage },
       viewConfig: globalViewConfig,
     };
-  }
-
-  /**
-   * Upgrade a v1/v2 flat domain file to UnifiedDomain in memory.
-   *
-   * The flat file's content (models, relationships, viewConfig) is placed
-   * into the stage section inferred from the grandparent directory name.
-   * The other stage gets empty defaults.
-   */
-  private upgradeV2Domain(obj: Record<string, unknown>, filePath: string): UnifiedDomain {
-    const domain = typeof obj.domain === 'string' ? obj.domain : path.basename(filePath, '.json');
-    const layer = this.parseLayer(obj.layer, filePath);
-    const stage = this.inferStageFromPath(filePath);
-
-    const stageData: StageData = {
-      models: Array.isArray(obj.models) ? (obj.models as StageData['models']) : [],
-      relationships: Array.isArray(obj.relationships) ? (obj.relationships as StageData['relationships']) : [],
-    };
-
-    const emptyStage: StageData = { models: [], relationships: [] };
-
-    return {
-      schemaVersion: obj.schemaVersion as number,
-      domain,
-      layer,
-      description: typeof obj.description === 'string' ? obj.description : '',
-      ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
-      conceptual: stage === 'conceptual' ? stageData : { ...emptyStage },
-      logical: stage === 'logical' ? stageData : { ...emptyStage },
-      viewConfig: this.parseViewConfig(obj.viewConfig),
-    };
-  }
-
-  /**
-   * Infer stage from grandparent directory for v1/v2 files.
-   * Falls back to 'conceptual' if not determinable.
-   */
-  private inferStageFromPath(filePath: string): 'conceptual' | 'logical' {
-    const grandparentDir = path.basename(path.dirname(path.dirname(filePath)));
-    if (grandparentDir === 'logical') {
-      return 'logical';
-    }
-    return 'conceptual';
   }
 
   /**

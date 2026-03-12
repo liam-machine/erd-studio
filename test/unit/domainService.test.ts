@@ -99,28 +99,25 @@ describe('DomainService', () => {
   });
 
   describe('getDomain', () => {
-    it('reads and parses a valid v3 domain file into a UnifiedDomain', () => {
+    it('reads and parses a valid domain file into a UnifiedDomain', () => {
       const filePath = path.join(
         FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.schemaVersion).toBe(3);
+      expect(domain.schemaVersion).toBe(4);
       expect(domain.domain).toBe('finance');
       expect(domain.layer).toBe('gold');
       expect(domain.description).toContain('Finance');
     });
 
-    it('returns both conceptual and logical stage sections', () => {
+    it('returns logical stage section', () => {
       const filePath = path.join(
         FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.conceptual).toBeDefined();
       expect(domain.logical).toBeDefined();
-      expect(domain.conceptual.models).toHaveLength(1);
-      expect(domain.conceptual.models[0].name).toBe('fct_transactions');
       expect(domain.logical.models).toHaveLength(0);
     });
 
@@ -162,71 +159,27 @@ describe('DomainService', () => {
       expect(() => service.getDomain(filePath)).toThrow('update the extension');
     });
 
-    it('applies defaults for missing optional fields in v3', () => {
+    it('applies defaults for missing optional fields', () => {
       const filePath = path.join(
         SPARSE_PROJECT_PATH, 'erd-studio', 'silver', 'minimal.json'
       );
       const domain = service.getDomain(filePath);
 
-      expect(domain.schemaVersion).toBe(3);
       expect(domain.layer).toBe('silver');
       // Domain name defaults to filename
       expect(domain.domain).toBe('minimal');
       expect(domain.description).toBe('');
-      expect(domain.conceptual.models).toEqual([]);
-      expect(domain.conceptual.relationships).toEqual([]);
       expect(domain.logical.models).toEqual([]);
       expect(domain.logical.relationships).toEqual([]);
     });
   });
 
-  describe('getDomain (v2 backward compatibility)', () => {
-    it('auto-upgrades a v1/v2 file to UnifiedDomain in memory', () => {
-      const filePath = path.join(
-        LEGACY_PROJECT_PATH, 'erd-studio', 'conceptual', 'gold', 'finance.json'
-      );
-      const domain = service.getDomain(filePath);
-
-      // Should have been wrapped into a UnifiedDomain
-      expect(domain.domain).toBe('finance');
-      expect(domain.layer).toBe('gold');
-      expect(domain.conceptual.models).toHaveLength(1);
-      expect(domain.conceptual.models[0].name).toBe('fct_transactions');
-      // Logical side should be empty (only conceptual file existed)
-      expect(domain.logical.models).toHaveLength(0);
-    });
-
-    it('infers stage from grandparent directory for v2 files', () => {
-      const filePath = path.join(
-        LEGACY_PROJECT_PATH, 'erd-studio', 'conceptual', 'silver', 'ncr.json'
-      );
-      const domain = service.getDomain(filePath);
-
-      // Content should be in the conceptual section
-      expect(domain.conceptual.models.length).toBeGreaterThan(0);
-      expect(domain.logical.models).toHaveLength(0);
-    });
-  });
-
   describe('getDomainStage', () => {
-    it('extracts conceptual stage from unified domain', () => {
-      const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
-      );
-      const stage = service.getDomainStage(filePath, 'conceptual');
-
-      expect(stage.stage).toBe('conceptual');
-      expect(stage.domain).toBe('finance');
-      expect(stage.layer).toBe('gold');
-      expect(stage.models).toHaveLength(1);
-      expect(stage.models[0].name).toBe('fct_transactions');
-    });
-
     it('extracts logical stage from unified domain', () => {
       const filePath = path.join(
         FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
       );
-      const stage = service.getDomainStage(filePath, 'logical');
+      const stage = service.getDomainStage(filePath);
 
       expect(stage.stage).toBe('logical');
       expect(stage.domain).toBe('finance');
@@ -237,25 +190,20 @@ describe('DomainService', () => {
       const filePath = path.join(
         FIXTURE_PROJECT_PATH, 'erd-studio', 'silver', 'ncr.json'
       );
-      const stage = service.getDomainStage(filePath, 'conceptual');
+      const stage = service.getDomainStage(filePath);
 
       expect(stage.description).toBe('ncr');
       expect(stage.modelFolder).toBe('models/silver');
-      expect(stage.schemaVersion).toBe(3);
     });
   });
 
   describe('buildPhysicalDomain', () => {
     function createUnifiedDomain(): UnifiedDomain {
       return {
-        schemaVersion: 3,
+        schemaVersion: 4,
         domain: 'test-domain',
         layer: 'silver',
         description: 'Test domain',
-        conceptual: {
-          models: [],
-          relationships: [],
-        },
         logical: {
           models: [
             {

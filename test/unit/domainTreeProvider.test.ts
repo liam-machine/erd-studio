@@ -45,11 +45,10 @@ const emptyStageData: StageData = { models: [], relationships: [] };
 
 function makeUnifiedDomain(overrides: Partial<UnifiedDomain> = {}): UnifiedDomain {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     domain: 'test',
     layer: 'silver',
     description: '',
-    conceptual: { ...emptyStageData },
     logical: { ...emptyStageData },
     viewConfig: { positions: {} },
     ...overrides,

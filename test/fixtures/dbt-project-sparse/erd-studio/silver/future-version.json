@@ -3,6 +3,9 @@
   "domain": "future-version",
   "layer": "silver",
   "description": "Future schema version",
-  "conceptual": { "models": [], "relationships": [], "viewConfig": {} },
-  "logical": { "models": [], "relationships": [], "viewConfig": {} }
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
 }

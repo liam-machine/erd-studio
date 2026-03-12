@@ -42,32 +42,17 @@ export function WelcomeModal() {
         <div className="welcome-modal__header">
           <h2 className="welcome-modal__title">Welcome to ERD Studio</h2>
           <p className="welcome-modal__subtitle">
-            Design your data warehouse visually across three stages, then
-            compare what you designed to what's built.
+            Design your data warehouse visually, then compare what you
+            designed to what's built.
           </p>
         </div>
 
         <div className="welcome-modal__content">
           {/* Three Stages */}
           <section className="welcome-modal__section">
-            <h3 className="welcome-modal__section-title">The Three Stages</h3>
+            <h3 className="welcome-modal__section-title">The Two Stages</h3>
 
             <div className="welcome-modal__stages-list">
-              <div className="welcome-modal__stage-row">
-                <div className="welcome-modal__guide-icon">
-                  <div className="welcome-modal__model-sample welcome-modal__model-sample--conceptual">
-                    <div className="welcome-modal__model-header welcome-modal__model-header--conceptual" />
-                  </div>
-                </div>
-                <div className="welcome-modal__guide-text">
-                  <strong>Conceptual</strong>
-                  <span>
-                    Define business entities and how they relate — no column
-                    details needed
-                  </span>
-                </div>
-              </div>
-
               <div className="welcome-modal__stage-row">
                 <div className="welcome-modal__guide-icon">
                   <div className="welcome-modal__model-sample welcome-modal__model-sample--logical">
@@ -109,13 +94,13 @@ export function WelcomeModal() {
                 <span className="welcome-modal__step-number">1</span>
                 <span className="welcome-modal__step-text">
                   Switch stages using the tabs in the toolbar
-                  (<kbd>Alt+1</kbd> / <kbd>Alt+2</kbd> / <kbd>Alt+3</kbd>)
+                  (<kbd>Alt+1</kbd> / <kbd>Alt+2</kbd>)
                 </span>
               </li>
               <li className="welcome-modal__step">
                 <span className="welcome-modal__step-number">2</span>
                 <span className="welcome-modal__step-text">
-                  Design models and relationships in Conceptual or Logical stages
+                  Design models and relationships in the Logical stage
                 </span>
               </li>
               <li className="welcome-modal__step">

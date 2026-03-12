@@ -208,10 +208,6 @@
   overflow: hidden;
 }
 
-.welcome-modal__model-sample--conceptual {
-  border-color: var(--stage-conceptual);
-}
-
 .welcome-modal__model-sample--logical {
   border-color: var(--stage-logical);
 }
@@ -222,10 +218,6 @@
 
 .welcome-modal__model-header {
   height: 9px;
-}
-
-.welcome-modal__model-header--conceptual {
-  background: var(--stage-conceptual);
 }
 
 .welcome-modal__model-header--logical {

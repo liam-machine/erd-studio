@@ -25,10 +25,6 @@
    Stage variants
    ----------------------------------------------------------------------- */
 
-.model-node--conceptual {
-  border-color: var(--stage-conceptual);
-}
-
 .model-node--logical {
   border-color: var(--stage-logical);
 }

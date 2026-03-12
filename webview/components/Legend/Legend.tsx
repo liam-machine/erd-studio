@@ -64,15 +64,6 @@ export function Legend() {
           <h3 className="legend__section-title">Design Stages</h3>
           <div className="legend__items">
             <div className="legend__item">
-              <div className="legend__model-card legend__model-card--conceptual">
-                <div className="legend__model-header legend__model-header--conceptual" />
-              </div>
-              <div className="legend__item-text">
-                <span className="legend__item-label">Conceptual</span>
-                <span className="legend__item-desc">High-level entity design</span>
-              </div>
-            </div>
-            <div className="legend__item">
               <div className="legend__model-card legend__model-card--logical">
                 <div className="legend__model-header legend__model-header--logical" />
               </div>

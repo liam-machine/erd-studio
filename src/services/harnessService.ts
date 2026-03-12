@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '2';
+export const HARNESS_VERSION = '3';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -96,26 +96,25 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
 
 const SCHEMA_CONTENT = `# ERD Studio — AI Data Modeling Guide
 
-Design data warehouse models across three stages: conceptual → logical → physical. This guide covers the domain JSON format and how to write dbt YAML that produces a correct physical model.
+Design data warehouse models across two stages: logical → physical. This guide covers the domain JSON format and how to write dbt YAML that produces a correct physical model.
 
 ## Quick Reference
 
-**File:** \`erd-studio/{layer}/{domain}.json\` — one file per domain containing \`conceptual\` and \`logical\` sections.
+**File:** \`erd-studio/{layer}/{domain}.json\` — one file per domain containing a \`logical\` section.
 
 \`\`\`json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "domain": "{domain}",
   "layer": "silver",
   "description": "Domain description",
   "modelFolder": "models/silver",
-  "conceptual": { "models": [], "relationships": [] },
   "logical": { "models": [], "relationships": [] },
   "viewConfig": {}
 }
 \`\`\`
 
-Required fields: \`schemaVersion\`, \`domain\`, \`layer\`, \`conceptual\`, \`logical\`, \`viewConfig\`.
+Required fields: \`schemaVersion\`, \`domain\`, \`layer\`, \`logical\`, \`viewConfig\`.
 
 **viewConfig** lives at the root level and applies to all stages. Leave empty for new domains — the extension auto-layouts on first open.
 
@@ -125,32 +124,7 @@ Required fields: \`schemaVersion\`, \`domain\`, \`layer\`, \`conceptual\`, \`log
 
 ---
 
-## Stage 1: Conceptual Design
-
-The \`conceptual\` section is for high-level entity identification. Models can omit \`columns\` entirely.
-
-**What to include:** model names, descriptions, entity-level relationships, model roles.
-**What to omit:** columns, data types, grain, rationale.
-
-\`\`\`json
-"conceptual": {
-  "models": [
-    { "name": "dim_customer", "description": "Customer master data", "modelRole": "conformed-dim" },
-    { "name": "fct_orders", "description": "Customer order transactions", "modelRole": "transaction-fact" }
-  ],
-  "relationships": [
-    {
-      "fromModel": "fct_orders", "fromColumn": "customer_id",
-      "toModel": "dim_customer", "toColumn": "customer_id",
-      "cardinality": "many-to-one"
-    }
-  ]
-}
-\`\`\`
-
----
-
-## Stage 2: Logical Design
+## Logical Design
 
 The \`logical\` section is the detailed blueprint. Models should have full columns with data types, PK/FK/NK flags, grain, model role, and rationale.
 
@@ -232,7 +206,7 @@ FK columns match the PK name of the referenced table.
 
 ---
 
-## Stage 3: Physical Realization via dbt
+## Physical Realization via dbt
 
 The physical stage is **read-only** and has **no files on disk**. It is derived entirely from the dbt manifest (\`target/manifest.json\`) after running \`dbt compile\` or \`dbt build\`.
 
@@ -351,7 +325,7 @@ The discrepancy overlay in ERD Studio compares stages. Common issues when compar
 function generateClaudeSkill(): string {
   return `---
 name: erd-studio
-description: Data modeling guide for ERD Studio — covers conceptual/logical domain JSON format, dbt YAML tests for physical model relationships and cardinality, naming conventions, and design workflow. Use when creating, editing, or validating data models or dbt schema files.
+description: Data modeling guide for ERD Studio — covers logical domain JSON format, dbt YAML tests for physical model relationships and cardinality, naming conventions, and design workflow. Use when creating, editing, or validating data models or dbt schema files.
 ---
 
 ${SCHEMA_CONTENT}
@@ -380,12 +354,12 @@ function generateGeminiStyleguide(): string {
 
 ### ERD Studio Domain Files (\`erd-studio/**/*.json\`)
 
-1. **Schema version** must be \`3\`
-2. **Required sections**: \`conceptual\`, \`logical\`, and \`viewConfig\` must all be present at root level
+1. **Schema version** must be \`4\`
+2. **Required sections**: \`logical\` and \`viewConfig\` must both be present at root level
 3. **Model names** must follow naming conventions: \`dim_\`, \`fct_\`, \`ref_\`, or \`brg_\` prefixes
 4. **Relationships**: \`fromModel\` is always the FK side, \`toModel\` is the PK side
 5. **Logical columns** must have \`dataType\` and \`description\`
-6. **viewConfig** must be at root level (not inside conceptual or logical sections)
+6. **viewConfig** must be at root level (not inside the logical section)
 7. **Boolean key flags** (\`isPrimaryKey\`, \`isForeignKey\`, \`isNaturalKey\`) should only be present when \`true\`
 
 ### dbt YAML Schema Files

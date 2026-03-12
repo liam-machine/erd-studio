@@ -175,10 +175,6 @@
   overflow: hidden;
 }
 
-.legend__model-card--conceptual {
-  border-color: var(--stage-conceptual);
-}
-
 .legend__model-card--logical {
   border-color: var(--stage-logical);
 }
@@ -195,10 +191,6 @@
 
 .legend__model-header {
   height: 8px;
-}
-
-.legend__model-header--conceptual {
-  background: var(--stage-conceptual);
 }
 
 .legend__model-header--logical {
@@ -225,10 +217,6 @@
 
 .legend__edge {
   stroke-width: 2;
-}
-
-.legend__edge--conceptual {
-  stroke: var(--stage-conceptual);
 }
 
 .legend__edge--logical {
