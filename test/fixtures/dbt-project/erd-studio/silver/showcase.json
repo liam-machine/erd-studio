@@ -2,7 +2,7 @@
   "schemaVersion": 4,
   "domain": "showcase",
   "layer": "silver",
-  "description": "Showcase domain for developer testing — has data across all three stages with deliberate discrepancies",
+  "description": "Showcase domain for developer testing — has data across both stages with deliberate discrepancies",
   "modelFolder": "models/silver",
   "logical": {
     "models": [

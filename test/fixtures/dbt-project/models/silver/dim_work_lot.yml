@@ -1,0 +1,16 @@
+version: 2
+models:
+  - name: dim_work_lot
+    description: Work lot dimension table
+    config:
+      tags:
+        - silver
+    columns:
+      - name: work_lot_id
+        description: Surrogate key for work lot
+      - name: project_id
+        description: FK to dim_project
+      - name: name
+        description: Work lot name
+      - name: status
+        description: Current status

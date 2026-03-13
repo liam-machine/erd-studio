@@ -6,6 +6,7 @@ export const workspace = {
     get: (key: string, defaultValue?: unknown) => defaultValue,
   }),
   workspaceFolders: [],
+  textDocuments: [] as unknown[],
   createFileSystemWatcher: () => ({
     onDidCreate: () => ({ dispose: () => {} }),
     onDidChange: () => ({ dispose: () => {} }),
