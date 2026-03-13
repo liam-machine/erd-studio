@@ -1,28 +1,27 @@
 # ERD Studio
 
-A VS Code extension for visually designing data warehouse models across three stages: conceptual, logical, and physical — with dbt manifest integration.
+A VS Code extension for visually designing data warehouse models across two stages: logical and physical — with dbt manifest integration.
 
 ## How It Works
 
-ERD Studio organizes your data warehouse design into three stages, each serving a distinct purpose:
+ERD Studio organizes your data warehouse design into two stages, each serving a distinct purpose:
 
 ```
-Conceptual          Logical             Physical
-(what exists?)  --> (full detail)   --> (what dbt built)
+Logical             Physical
+(model design)  --> (what dbt built)
 ```
 
 | Stage | Color | Purpose | Editable |
 |-------|-------|---------|----------|
-| **Conceptual** | Purple | High-level entity design. Models show as simplified boxes with name and description only. Define what entities exist and how they relate. | Yes |
 | **Logical** | Blue | Detailed data model. Full column definitions with data types, PK/FK/NK badges, SCD types, grain, model roles, and rationale. | Yes |
 | **Physical** | Green | What actually exists in dbt. Auto-derived from `manifest.json`, scoped to models in the logical domain. | Positions only |
 
-Switch between stages using the toolbar tabs or keyboard shortcuts: `Alt+1` (Conceptual), `Alt+2` (Logical), `Alt+3` (Physical).
+Switch between stages using the toolbar tabs or keyboard shortcuts: `Alt+1` (Logical), `Alt+2` (Physical).
 
 ## Key Features
 
-- **Three-stage design** -- Separate conceptual thinking from detailed modeling from physical reality
-- **Global positioning** -- Node positions are shared across all three stages, so your layout stays consistent
+- **Two-stage design** -- Separate detailed modeling from physical reality
+- **Global positioning** -- Node positions are shared across both stages, so your layout stays consistent
 - **Drag-to-relate** -- Drag from a column handle to create FK relationships with cardinality
 - **Discrepancy overlay** -- Compare stages to spot differences (extra/missing columns, type mismatches, missing models shown as ghost nodes)
 - **Layer organization** -- Medallion layers (bronze, silver, gold, platinum) plus custom layers
@@ -34,20 +33,20 @@ Switch between stages using the toolbar tabs or keyboard shortcuts: `Alt+1` (Con
 
 ## Directory Structure
 
-ERD Studio stores domain files alongside your dbt project in a unified v3 format:
+ERD Studio stores domain files alongside your dbt project:
 
 ```
 erd-studio/
 ├── layers.json              ← layer configuration
 ├── templates/               ← model templates
 ├── silver/
-│   ├── customer-360.json    ← unified domain (conceptual + logical)
+│   ├── customer-360.json    ← domain file (logical stage)
 │   └── orders.json
 └── gold/
     └── reporting.json
 ```
 
-Each domain is a single JSON file containing both `conceptual` and `logical` sections, with a shared `viewConfig` for node positions across all stages. The physical stage has no files on disk -- it is derived from `manifest.json` at runtime.
+Each domain is a single JSON file containing the `logical` section and a `viewConfig` for node positions. The physical stage has no files on disk -- it is derived from `manifest.json` at runtime.
 
 ## Getting Started
 
@@ -56,7 +55,7 @@ Each domain is a single JSON file containing both `conceptual` and `logical` sec
 3. **Set up the directory** -- follow the prompt to initialize the `erd-studio/` folder in your project.
 4. **Create your first domain** -- use the command palette (`Cmd+Shift+P`) and run **dbt: Create Semantic Domain**, then pick a name and layer.
 5. **Add models and columns** -- right-click the canvas to add models, then define columns in the detail panel.
-6. **Switch stages** -- use the toolbar tabs or `Alt+1/2/3` to move between Conceptual, Logical, and Physical views.
+6. **Switch stages** -- use the toolbar tabs or `Alt+1/2` to move between Logical and Physical views.
 
 For the Physical stage to populate, run `dbt compile` or `dbt build` so that `manifest.json` exists in your `target/` directory.
 
@@ -142,7 +141,6 @@ Each file contains the ERD Studio JSON schema reference — model structure, col
 The discrepancy overlay lets you compare adjacent stages side by side:
 
 - **Physical vs Logical** -- See which columns or models exist in dbt but are missing from your logical design, and vice versa.
-- **Logical vs Conceptual** -- Check that your detailed model aligns with the conceptual plan.
 
 Differences are highlighted directly on the graph: extra columns, missing columns, data type mismatches, and missing models (shown as ghost nodes).
 

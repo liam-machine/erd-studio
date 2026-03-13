@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt projects. Design your data warehouse across two stages — Logical (columns, types, FK design) and Physical (read-only manifest view) — with cross-stage discrepancy comparison.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -86,6 +86,11 @@
         "title": "Install AI Coding Harness",
         "category": "dbt",
         "icon": "$(hubot)"
+      },
+      {
+        "command": "dbtSemantic.syncDomainTags",
+        "title": "Sync Domain Tags to dbt Schema Files",
+        "category": "dbt"
       }
     ],
     "viewsContainers": {
@@ -258,6 +263,7 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "stream-json": "^1.8.0",
+    "yaml": "^2.8.2",
     "zustand": "^5.0.0"
   }
 }

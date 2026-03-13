@@ -13,6 +13,7 @@ import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorati
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/harnessService';
+import { SchemaTagService } from './services/schemaTagService';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -160,6 +161,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const domainService = new DomainService(layerService);
   const manifestService = new ManifestService();
   const templateService = new TemplateService();
+  const schemaTagService = new SchemaTagService(manifestService, domainService, workspaceRoot, semanticDir);
   const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
@@ -168,6 +170,7 @@ export function activate(context: vscode.ExtensionContext): void {
     templateService,
     layerService,
     workspaceRoot,
+    schemaTagService,
   );
   const decorationProvider = new SemanticFileDecorationProvider();
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
@@ -458,6 +461,36 @@ export function activate(context: vscode.ExtensionContext): void {
           await manifestService.loadManifest(workspaceRoot);
           await editorProvider.refreshAllOpenDomains();
           void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest model data.');
+        },
+      );
+    }),
+    // Sync domain tags to dbt schema YAML files
+    vscode.commands.registerCommand('dbtSemantic.syncDomainTags', async () => {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Syncing domain tags to dbt schema files...',
+          cancellable: false,
+        },
+        async () => {
+          // Ensure manifest is loaded before reconciling
+          await manifestService.loadManifest(workspaceRoot);
+          const result = await schemaTagService.reconcileAll();
+          const parts: string[] = [];
+          if (result.added > 0) { parts.push(`${result.added} added`); }
+          if (result.removed > 0) { parts.push(`${result.removed} removed`); }
+          if (result.skipped > 0) { parts.push(`${result.skipped} skipped`); }
+          const summary = parts.length > 0 ? parts.join(', ') : 'all tags up to date';
+          if (result.errors.length > 0) {
+            void vscode.window.showWarningMessage(
+              `Domain tags synced (${summary}). ${result.errors.length} error(s) — see Output for details.`,
+            );
+            for (const err of result.errors) {
+              console.error(`[SchemaTagService] ${err}`);
+            }
+          } else {
+            void vscode.window.showInformationMessage(`Domain tags synced: ${summary}.`);
+          }
         },
       );
     }),

@@ -15,6 +15,7 @@
  */
 
 import * as crypto from 'crypto';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { DomainService } from '../services/domainService';
@@ -22,6 +23,7 @@ import { compare as compareStages } from '../services/discrepancyService';
 import { ManifestService } from '../services/manifestService';
 import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
+import { SchemaTagService } from '../services/schemaTagService';
 import type { ManifestData } from '../types/manifest';
 import type { DisplayDomain } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignModel, Stage } from '../types/semantic';
@@ -48,6 +50,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     { document: vscode.TextDocument; webview: vscode.Webview; activeStage: Stage }
   >();
 
+  /**
+   * Track model names per document for diff-based tag sync.
+   * When models are added/removed (including via undo/redo), the diff
+   * triggers tag sync to keep YAML files consistent.
+   */
+  private readonly previousModels = new Map<string, Set<string>>();
+
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly domainService: DomainService,
@@ -55,6 +64,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly templateService: TemplateService,
     private readonly layerService: LayerService,
     private readonly workspaceRoot: string,
+    private readonly schemaTagService: SchemaTagService,
   ) {}
 
   /**
@@ -315,6 +325,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       messageSubscription.dispose();
       changeSubscription.dispose();
       this.openPanels.delete(panelKey);
+      this.previousModels.delete(document.uri.toString());
     });
   }
 
@@ -476,6 +487,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
 
+      // Diff-based tag sync: detect model membership changes and sync YAML tags
+      void this.diffAndSyncTags(document, unifiedDomain);
+
       if (activeStage === 'physical') {
         const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
@@ -490,6 +504,45 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
       webview.postMessage({ type: 'error', payload: { message } });
+    }
+  }
+
+  /**
+   * Compare current model list against the previous snapshot and sync domain
+   * tags for any models that were added or removed. Handles undo/redo, external
+   * edits, and direct mutations uniformly.
+   */
+  private diffAndSyncTags(
+    document: vscode.TextDocument,
+    unifiedDomain: { domain: string; logical: { models: Array<{ name: string }> } },
+  ): void {
+    const docKey = document.uri.toString();
+    const domainName = path.basename(document.uri.fsPath, '.json');
+    const currentModels = new Set(unifiedDomain.logical.models.map((m) => m.name));
+    const previousModels = this.previousModels.get(docKey);
+
+    // Always update the snapshot
+    this.previousModels.set(docKey, currentModels);
+
+    // Skip on first load (no previous state to diff against)
+    if (!previousModels) {
+      return;
+    }
+
+    // Models added since last state
+    for (const name of currentModels) {
+      if (!previousModels.has(name)) {
+        void this.schemaTagService.addDomainTag(name, domainName)
+          .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
+      }
+    }
+
+    // Models removed since last state
+    for (const name of previousModels) {
+      if (!currentModels.has(name)) {
+        void this.schemaTagService.removeDomainTag(name, domainName, document.uri.fsPath)
+          .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
+      }
     }
   }
 
