@@ -4,12 +4,17 @@
  * Shows when the discrepancy overlay is active. Displays summary counts
  * and a per-model breakdown. Clicking a model entry navigates to it on
  * the canvas (pan + zoom + select + open detail panel).
+ *
+ * Uses stage-anchored labeling: instead of "extra" / "missing", the panel
+ * says "Only in Logical" / "Only in Physical" (or vice versa) so users
+ * always know which stage each item belongs to.
  */
 
 import { useCallback, useMemo } from 'react';
 import { Panel, useReactFlow } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
+import { STAGE_HEX } from '../../lib/stageColors';
 import type { ModelDiscrepancy, RelationshipDiscrepancy } from '../../../src/types/discrepancy';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './DiscrepancyPanel.css';
@@ -18,9 +23,25 @@ import './DiscrepancyPanel.css';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Human-friendly stage name. */
+/** Human-friendly stage name (capitalised). */
 function stageName(stage: string): string {
   return stage.charAt(0).toUpperCase() + stage.slice(1);
+}
+
+/**
+ * Map a discrepancy status to a user-friendly, stage-anchored label.
+ *
+ * "extra" → "Only in {source}" (exists in current stage, not in comparison)
+ * "missing" → "Only in {target}" (exists in comparison, not in current)
+ */
+function statusLabel(status: string, sourceStage: string, targetStage: string): string {
+  switch (status) {
+    case 'extra': return `Only in ${stageName(sourceStage)}`;
+    case 'missing': return `Only in ${stageName(targetStage)}`;
+    case 'type-mismatch': return 'type mismatch';
+    case 'cardinality-mismatch': return 'cardinality mismatch';
+    default: return status;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -29,14 +50,18 @@ function stageName(stage: string): string {
 
 interface ModelEntryProps {
   model: ModelDiscrepancy;
+  sourceStage: string;
+  targetStage: string;
   onNavigate: (modelName: string) => void;
 }
 
-function ModelEntry({ model, onNavigate }: ModelEntryProps) {
+function ModelEntry({ model, sourceStage, targetStage, onNavigate }: ModelEntryProps) {
   const issues = model.columns.filter((c) => c.status !== 'matched');
   const hasIssues = issues.length > 0 || model.status !== 'matched';
 
   if (!hasIssues) return null;
+
+  const modelStatusLabel = statusLabel(model.status, sourceStage, targetStage);
 
   return (
     <div className="disc-panel__model">
@@ -47,7 +72,7 @@ function ModelEntry({ model, onNavigate }: ModelEntryProps) {
       >
         <span className={`disc-panel__model-status disc-panel__model-status--${model.status}`} />
         <span className="disc-panel__model-name">{model.name}</span>
-        <span className="disc-panel__model-label">{model.status}</span>
+        <span className="disc-panel__model-label">{modelStatusLabel}</span>
       </button>
       {issues.length > 0 && (
         <div className="disc-panel__columns">
@@ -56,11 +81,18 @@ function ModelEntry({ model, onNavigate }: ModelEntryProps) {
               <span className={`disc-panel__col-indicator disc-panel__col-indicator--${col.status}`} />
               <span className="disc-panel__col-name">{col.name}</span>
               {col.status === 'type-mismatch' ? (
-                <span className="disc-panel__col-detail">
-                  {col.sourceDataType} &rarr; {col.targetDataType}
+                <span className="disc-panel__col-detail disc-panel__col-detail--mismatch">
+                  <span className="disc-panel__col-stage-type" style={{ color: STAGE_HEX[sourceStage] ?? 'inherit' }}>
+                    {stageName(sourceStage).toLowerCase()}: {col.sourceDataType}
+                  </span>
+                  <span className="disc-panel__col-stage-type" style={{ color: STAGE_HEX[targetStage] ?? 'inherit' }}>
+                    {stageName(targetStage).toLowerCase()}: {col.targetDataType}
+                  </span>
                 </span>
               ) : (
-                <span className="disc-panel__col-detail">{col.status}</span>
+                <span className="disc-panel__col-detail">
+                  {statusLabel(col.status, sourceStage, targetStage)}
+                </span>
               )}
             </div>
           ))}
@@ -72,11 +104,15 @@ function ModelEntry({ model, onNavigate }: ModelEntryProps) {
 
 interface RelationshipEntryProps {
   rel: RelationshipDiscrepancy;
+  sourceStage: string;
+  targetStage: string;
   onNavigate: (modelName: string) => void;
 }
 
-function RelationshipEntry({ rel, onNavigate }: RelationshipEntryProps) {
+function RelationshipEntry({ rel, sourceStage, targetStage, onNavigate }: RelationshipEntryProps) {
   const statusClass = rel.status === 'cardinality-mismatch' ? 'mismatch' : rel.status;
+  const relStatusLabel = statusLabel(rel.status, sourceStage, targetStage);
+
   return (
     <div className="disc-panel__model">
       <button
@@ -88,16 +124,19 @@ function RelationshipEntry({ rel, onNavigate }: RelationshipEntryProps) {
         <span className="disc-panel__model-name">
           {rel.fromModel}.{rel.fromColumn} &rarr; {rel.toModel}.{rel.toColumn}
         </span>
-        <span className="disc-panel__model-label">
-          {rel.status === 'cardinality-mismatch' ? 'mismatch' : rel.status}
-        </span>
+        <span className="disc-panel__model-label">{relStatusLabel}</span>
       </button>
       {rel.status === 'cardinality-mismatch' && rel.sourceCardinality && rel.targetCardinality && (
         <div className="disc-panel__columns">
           <div className="disc-panel__column">
             <span className="disc-panel__col-indicator disc-panel__col-indicator--type-mismatch" />
-            <span className="disc-panel__col-detail">
-              {rel.sourceCardinality} &rarr; {rel.targetCardinality}
+            <span className="disc-panel__col-detail disc-panel__col-detail--mismatch">
+              <span className="disc-panel__col-stage-type" style={{ color: STAGE_HEX[sourceStage] ?? 'inherit' }}>
+                {stageName(sourceStage).toLowerCase()}: {rel.sourceCardinality}
+              </span>
+              <span className="disc-panel__col-stage-type" style={{ color: STAGE_HEX[targetStage] ?? 'inherit' }}>
+                {stageName(targetStage).toLowerCase()}: {rel.targetCardinality}
+              </span>
             </span>
           </div>
         </div>
@@ -171,7 +210,15 @@ export function DiscrepancyPanel() {
     <Panel position="bottom-right" className="disc-panel">
       <div className="disc-panel__header">
         <span className="disc-panel__title">
-          {stageName(sourceStage)} vs {stageName(targetStage)}
+          <span className="disc-panel__stage-label" style={{ color: STAGE_HEX[sourceStage] ?? 'inherit' }}>
+            {stageName(sourceStage)}
+          </span>
+          <span className="disc-panel__stage-annotation">(current)</span>
+          <span className="disc-panel__stage-vs">vs</span>
+          <span className="disc-panel__stage-label" style={{ color: STAGE_HEX[targetStage] ?? 'inherit' }}>
+            {stageName(targetStage)}
+          </span>
+          <span className="disc-panel__stage-annotation">(target)</span>
         </span>
         {totalIssues === 0 && (
           <span className="disc-panel__all-match">All matched</span>
@@ -196,13 +243,13 @@ export function DiscrepancyPanel() {
           {summary.extraModels > 0 && (
             <div className="disc-panel__stat disc-panel__stat--extra">
               <span className="disc-panel__stat-value">{summary.extraModels}</span>
-              <span className="disc-panel__stat-label">extra</span>
+              <span className="disc-panel__stat-label">{stageName(sourceStage)} only</span>
             </div>
           )}
           {summary.missingModels > 0 && (
             <div className="disc-panel__stat disc-panel__stat--missing">
               <span className="disc-panel__stat-value">{summary.missingModels}</span>
-              <span className="disc-panel__stat-label">missing</span>
+              <span className="disc-panel__stat-label">{stageName(targetStage)} only</span>
             </div>
           )}
           {summary.dataTypeMismatches > 0 && (
@@ -231,7 +278,13 @@ export function DiscrepancyPanel() {
         {modelsWithIssues.length > 0 && (
           <div className="disc-panel__models">
             {modelsWithIssues.map((m) => (
-              <ModelEntry key={m.name} model={m} onNavigate={handleNavigate} />
+              <ModelEntry
+                key={m.name}
+                model={m}
+                sourceStage={sourceStage}
+                targetStage={targetStage}
+                onNavigate={handleNavigate}
+              />
             ))}
           </div>
         )}
@@ -244,6 +297,8 @@ export function DiscrepancyPanel() {
               <RelationshipEntry
                 key={`${r.fromModel}.${r.fromColumn}-${r.toModel}.${r.toColumn}`}
                 rel={r}
+                sourceStage={sourceStage}
+                targetStage={targetStage}
                 onNavigate={handleNavigate}
               />
             ))}

@@ -70,6 +70,10 @@ export type ModelNodeData = {
   isGhost?: boolean;
   /** Per-model discrepancy data when a cross-stage comparison report is active. */
   discrepancy?: ModelDiscrepancy;
+  /** The stage currently being viewed (set when discrepancy overlay is active). */
+  discrepancySourceStage?: Stage;
+  /** The stage being compared against (set when discrepancy overlay is active). */
+  discrepancyTargetStage?: Stage;
   /** Index signature required by React Flow's Node generic. */
   [key: string]: unknown;
 };

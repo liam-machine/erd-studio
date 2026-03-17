@@ -17,7 +17,7 @@
 import { memo, useCallback, useMemo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
-import type { ModelRole } from '../../../src/types/semantic';
+import type { ModelRole, Stage } from '../../../src/types/semantic';
 import type { ColumnDiscrepancy } from '../../../src/types/discrepancy';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
@@ -27,6 +27,7 @@ import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { KeyBadge } from '../common/KeyBadge';
 import { DataTypeSelect } from '../common/DataTypeSelect';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
+import { STAGE_HEX } from '../../lib/stageColors';
 import './ModelNode.css';
 
 // ---------------------------------------------------------------------------
@@ -114,9 +115,13 @@ interface ColumnRowProps {
   isReorderTarget?: boolean;
   /** Whether the parent node is selected (enables single-click editing). */
   nodeSelected?: boolean;
+  /** The stage being viewed (for stage-labeled type mismatches). */
+  discrepancySourceStage?: Stage;
+  /** The stage being compared against (for stage-labeled type mismatches). */
+  discrepancyTargetStage?: Stage;
 }
 
-function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, nodeSelected }: ColumnRowProps) {
+function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, nodeSelected, discrepancySourceStage, discrepancyTargetStage }: ColumnRowProps) {
   const { send } = useMessageBus(() => {});
 
   // Highlight when this column is involved in a selected edge
@@ -448,8 +453,13 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
           autoOpen={true}
         />
       ) : discrepancy?.status === 'type-mismatch' ? (
-        <span className="model-node__col-type model-node__col-type--mismatch" title={`${discrepancy.sourceDataType} in this stage, ${discrepancy.targetDataType} in comparison`}>
-          {discrepancy.sourceDataType} <span className="model-node__col-type-arrow">&rarr;</span> {discrepancy.targetDataType}
+        <span className="model-node__col-type model-node__col-type--mismatch" title={`${discrepancySourceStage ?? 'current'}: ${discrepancy.sourceDataType}, ${discrepancyTargetStage ?? 'target'}: ${discrepancy.targetDataType}`}>
+          <span className="model-node__col-type-line" style={{ color: STAGE_HEX[discrepancySourceStage ?? ''] ?? 'inherit' }}>
+            <span className="model-node__col-type-stage">{discrepancySourceStage ?? 'current'}:</span> {discrepancy.sourceDataType}
+          </span>
+          <span className="model-node__col-type-line" style={{ color: STAGE_HEX[discrepancyTargetStage ?? ''] ?? 'inherit' }}>
+            <span className="model-node__col-type-stage">{discrepancyTargetStage ?? 'target'}:</span> {discrepancy.targetDataType}
+          </span>
         </span>
       ) : (
         <span
@@ -464,7 +474,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
         <span className="model-node__col-edit-error">{editError}</span>
       )}
       {discrepancy?.status === 'extra' && (
-        <span className="model-node__col-disc-badge model-node__col-disc-badge--extra" title="Not in comparison stage">extra</span>
+        <span className="model-node__col-disc-badge model-node__col-disc-badge--extra" title={`Only in ${discrepancySourceStage ?? 'this stage'}`}>only here</span>
       )}
       {column.scdType != null && SCD_BADGE[column.scdType] && (
         <span
@@ -492,7 +502,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, stage, layer, layerConfig, columns, hasRationale, grain, modelRole, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion, discrepancy } = data;
+  const { modelName, stage, layer, layerConfig, columns, hasRationale, grain, modelRole, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const { send } = useMessageBus(() => {});
 
@@ -607,8 +617,8 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
           {layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
         {isDiscExtra && (
-          <span className="model-node__discrepancy-badge" title="Model not in comparison stage">
-            extra
+          <span className="model-node__discrepancy-badge" title={`Only in ${discrepancySourceStage ?? 'this stage'}`}>
+            {discrepancySourceStage ? `${discrepancySourceStage} only` : 'extra'}
           </span>
         )}
       </div>
@@ -634,6 +644,8 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
             isReorderDragging={dragIndex === idx}
             isReorderTarget={dropIndex === idx && dragIndex !== idx}
             nodeSelected={!!selected}
+            discrepancySourceStage={discrepancySourceStage}
+            discrepancyTargetStage={discrepancyTargetStage}
           />
         ))}
 
@@ -663,13 +675,13 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
         {missingColumns.length > 0 && (
           <>
             <div className="model-node__separator model-node__separator--disc">
-              <span className="model-node__separator-label model-node__separator-label--missing">missing in this stage</span>
+              <span className="model-node__separator-label model-node__separator-label--missing">only in {discrepancyTargetStage ?? 'comparison'}</span>
             </div>
             {missingColumns.map((cd) => (
               <div key={`ghost-${cd.name}`} className="model-node__column model-node__column--disc-missing nodrag">
                 <span className="model-node__col-name">{cd.name}</span>
                 <span className="model-node__col-type">{cd.targetDataType ?? ''}</span>
-                <span className="model-node__col-disc-badge model-node__col-disc-badge--missing">missing</span>
+                <span className="model-node__col-disc-badge model-node__col-disc-badge--missing">{discrepancyTargetStage ?? 'target'} only</span>
               </div>
             ))}
           </>

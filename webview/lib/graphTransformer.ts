@@ -148,6 +148,10 @@ export function transformDomain(
         ...(readOnly ? { readOnly: true } : {}),
         ...(model.existsInManifest === false ? { isGhost: true } : {}),
         ...(disc ? { discrepancy: disc } : {}),
+        ...(disc && options?.discrepancyReport ? {
+          discrepancySourceStage: options.discrepancyReport.sourceStage,
+          discrepancyTargetStage: options.discrepancyReport.targetStage,
+        } : {}),
       },
     };
   });
@@ -174,6 +178,8 @@ export function transformDomain(
             isGhost: true,
             readOnly: true,
             discrepancy: md,
+            discrepancySourceStage: options.discrepancyReport.sourceStage,
+            discrepancyTargetStage: options.discrepancyReport.targetStage,
           },
         });
       }

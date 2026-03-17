@@ -36,11 +36,32 @@
 
 .disc-panel__title {
   flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
   font-size: 12px;
   font-weight: 600;
   color: var(--editor-fg);
-  text-transform: uppercase;
   letter-spacing: 0.5px;
+  flex-wrap: wrap;
+}
+
+.disc-panel__stage-label {
+  font-weight: 700;
+}
+
+.disc-panel__stage-annotation {
+  font-size: 9px;
+  font-weight: 400;
+  opacity: 0.5;
+  text-transform: none;
+}
+
+.disc-panel__stage-vs {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.4;
+  margin: 0 2px;
 }
 
 .disc-panel__all-match {
@@ -253,6 +274,19 @@
   opacity: 0.5;
   font-size: 10px;
   font-style: italic;
+}
+
+.disc-panel__col-detail--mismatch {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  opacity: 1;
+  font-style: normal;
+}
+
+.disc-panel__col-stage-type {
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------
