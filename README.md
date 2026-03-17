@@ -20,16 +20,16 @@ Switch between stages using the toolbar tabs or keyboard shortcuts: `Alt+1` (Log
 
 ## Key Features
 
-- **Two-stage design** -- Separate detailed modeling from physical reality
-- **Global positioning** -- Node positions are shared across both stages, so your layout stays consistent
-- **Drag-to-relate** -- Drag from a column handle to create FK relationships with cardinality
-- **Discrepancy overlay** -- Compare stages to spot differences (extra/missing columns, type mismatches, missing models shown as ghost nodes)
+- **Domain tagging for scoped dbt runs** -- When you add a model to a domain, its dbt YAML schema is automatically tagged with `domain:{name}`. Run `dbt build --select tag:domain:customer-360` to build just that domain. Tags stay in sync through undo/redo, model removal, and bulk reconciliation.
+- **AI coding harness** -- Install the ERD Studio schema reference so Claude Code, GitHub Copilot, Google Gemini, or OpenAI Codex can read, create, and validate domain files natively. Each harness is formatted for that assistant's config format — one command installs to one or all.
+- **Two-stage design** -- Logical stage for detailed modeling (columns, types, PK/FK/NK, SCD, grain, roles). Physical stage auto-derived from `manifest.json` showing what dbt actually built.
+- **Discrepancy overlay** -- Compare logical vs physical with stage-colored labels. See exactly which columns, models, or relationships differ and which stage they belong to.
+- **Drag-to-relate** -- Long-press a column and drag to another model to create FK relationships with cardinality
 - **Layer organization** -- Medallion layers (bronze, silver, gold, platinum) plus custom layers
-- **Model templates** -- Presets for dimension, fact, bridge, and reference models
-- **ELK auto-layout** -- Automatic graph layout with manual repositioning
+- **Model templates** -- Presets for dimension, fact, bridge, and reference models with pre-configured columns
+- **ELK auto-layout** -- Automatic graph layout with manual repositioning. Positions shared across stages.
 - **Undo/redo** -- All edits go through VS Code's WorkspaceEdit system
-- **dbt manifest integration** -- Physical stage reads directly from your compiled manifest
-- **AI coding harness** -- Install schema reference for Claude, Copilot, Gemini, or Codex
+- **dbt manifest integration** -- Physical relationships derived from `relationships` tests; cardinality inferred from `unique` tests
 
 ## Directory Structure
 
@@ -136,6 +136,34 @@ Or click the robot icon in the ERD Studio sidebar title bar.
 
 Each file contains the ERD Studio JSON schema reference — model structure, column metadata, relationships, naming conventions, and model roles — formatted for that assistant's native config format. Multi-select is supported: install to multiple harnesses in one action.
 
+## Domain Tagging
+
+When you add a model to a domain, ERD Studio automatically tags the model's dbt YAML schema file with a `domain:` prefixed tag. This lets you run dbt for a specific domain using tag selectors.
+
+**Example:** Adding `dim_customer` to the `customer-360` domain produces:
+
+```yaml
+models:
+  - name: dim_customer
+    config:
+      tags:
+        - domain:customer-360
+```
+
+You can then run dbt scoped to that domain:
+
+```bash
+dbt build --select tag:domain:customer-360
+```
+
+Tags are managed automatically:
+- **Added** when a model is added to a domain (via create or add-existing)
+- **Removed** when a model is removed from all domains that share that tag
+- **Undo/redo aware** — tag sync runs after any domain mutation
+- **Bulk reconciliation** — run `dbt: Reconcile All Domain Tags` from the command palette to fix any drift between domain files and YAML tags
+
+Models that belong to multiple domains receive multiple `domain:` tags. Removing a model from one domain only removes that specific tag — tags for other domains are preserved.
+
 ## Discrepancy Overlay
 
 The discrepancy overlay lets you compare adjacent stages side by side:
@@ -156,6 +184,12 @@ Differences are highlighted directly on the graph: extra columns, missing column
 |---------|-------------|---------|
 | `dbtSemantic.projectPath` | Path to dbt project root | Auto-detected |
 | `dbtSemantic.semanticDir` | Relative path to ERD domain files | `erd-studio` |
+
+## Contributors
+
+| | Name | Contribution |
+|---|------|-------------|
+| <img src="https://github.com/jasonkwe.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jasonkwe](https://github.com/jasonkwe)) | Logo design -- the bronze/silver/gold metallic ERD lettermark |
 
 ## License
 
