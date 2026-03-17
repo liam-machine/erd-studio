@@ -82,6 +82,14 @@ export function useColumnReorder<T extends Column>({
   useEffect(() => {
     if (!isDragging) return;
 
+    // Force grabbing cursor globally so it stays closed over any element.
+    // A <style> with `* { cursor: grabbing !important }` is needed because
+    // setting body.style.cursor alone won't override child elements that
+    // declare their own cursor (e.g. `cursor: grab` on column rows).
+    const cursorStyle = document.createElement('style');
+    cursorStyle.textContent = '* { cursor: grabbing !important; }';
+    document.head.appendChild(cursorStyle);
+
     const handleMouseMove = (e: MouseEvent) => {
       if (!listRef.current) return;
 
@@ -133,6 +141,7 @@ export function useColumnReorder<T extends Column>({
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
+      cursorStyle.remove();
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('keydown', handleKeyDown);
