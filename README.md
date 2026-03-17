@@ -2,12 +2,6 @@
 
 A VS Code extension for visually designing data warehouse models across two stages: logical and physical — with dbt manifest integration.
 
-## Contributors
-
-| | Name | Contribution |
-|---|------|-------------|
-| <img src="https://github.com/jkweee.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jkweee](https://github.com/jkweee)) | Core concept, UI/UX design |
-
 ## How It Works
 
 ERD Studio organizes your data warehouse design into two stages, each serving a distinct purpose:
@@ -190,6 +184,12 @@ Differences are highlighted directly on the graph: extra columns, missing column
 |---------|-------------|---------|
 | `dbtSemantic.projectPath` | Path to dbt project root | Auto-detected |
 | `dbtSemantic.semanticDir` | Relative path to ERD domain files | `erd-studio` |
+
+## Contributors
+
+| | Name | Contribution |
+|---|------|-------------|
+| <img src="https://github.com/jkweee.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jkweee](https://github.com/jkweee)) | Core concept, UI/UX design |
 
 ## License
 
