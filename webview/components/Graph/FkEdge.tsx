@@ -4,7 +4,7 @@
  * Renders a smooth-step path with Power BI-style cardinality labels:
  * `*` for "many" and `1` for "one", positioned near each endpoint.
  * Built relationships are blue; design relationships are orange.
- * One-to-one edges use a dashed line style.
+ * All edges use a solid line style.
  *
  * The edge line stops short of the node so the cardinality label sits
  * in the gap between the line end and the node boundary.
@@ -173,14 +173,6 @@ function FkEdgeComponent({
   const statusClass = discrepancyStatus
     ? `fk-edge--discrepancy-${discrepancyStatus}`
     : `fk-edge--${stage ?? 'logical'}`;
-  // Apply special styling for one-to-one (dashed) and many-to-many (dotted)
-  let cardinalityClass = '';
-  if (cardinality === 'one-to-one') {
-    cardinalityClass = 'fk-edge--one-to-one';
-  } else if (cardinality === 'many-to-many') {
-    cardinalityClass = 'fk-edge--many-to-many';
-  }
-
   // Cardinality labels at each end:
   // - many-to-one: * at source, 1 at target
   // - one-to-one: 1 at both ends
@@ -231,7 +223,7 @@ function FkEdgeComponent({
       <path
         id={id}
         d={edgePath}
-        className={`fk-edge ${statusClass} ${cardinalityClass}${dimmed ? ' fk-edge--dimmed' : ''}`}
+        className={`fk-edge ${statusClass}${dimmed ? ' fk-edge--dimmed' : ''}`}
       />
       {/* Invisible wider path for easier hover/click targeting */}
       <path

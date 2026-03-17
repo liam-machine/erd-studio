@@ -227,14 +227,6 @@
   stroke: var(--stage-physical);
 }
 
-.legend__edge--dashed {
-  stroke-dasharray: 6 3;
-}
-
-.legend__edge--dotted {
-  stroke-dasharray: 2 4;
-}
-
 /* ---------------------------------------------------------------------------
    Cardinality display
    --------------------------------------------------------------------------- */
@@ -286,4 +278,9 @@
 .legend__badge--fk {
   background: rgba(96, 165, 250, 0.2);
   color: var(--stage-logical);
+}
+
+.legend__badge--nk {
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
 }

@@ -111,7 +111,7 @@ export function Legend() {
               <div className="legend__cardinality">
                 <span className="legend__cardinality-label">1</span>
                 <svg className="legend__cardinality-line" viewBox="0 0 32 8" aria-hidden="true">
-                  <line x1="0" y1="4" x2="32" y2="4" className="legend__edge legend__edge--logical legend__edge--dashed" />
+                  <line x1="0" y1="4" x2="32" y2="4" className="legend__edge legend__edge--logical" />
                 </svg>
                 <span className="legend__cardinality-label">1</span>
               </div>
@@ -121,7 +121,7 @@ export function Legend() {
               <div className="legend__cardinality">
                 <span className="legend__cardinality-label legend__cardinality-label--many">*</span>
                 <svg className="legend__cardinality-line" viewBox="0 0 32 8" aria-hidden="true">
-                  <line x1="0" y1="4" x2="32" y2="4" className="legend__edge legend__edge--logical legend__edge--dotted" />
+                  <line x1="0" y1="4" x2="32" y2="4" className="legend__edge legend__edge--logical" />
                 </svg>
                 <span className="legend__cardinality-label legend__cardinality-label--many">*</span>
               </div>
@@ -141,6 +141,10 @@ export function Legend() {
             <div className="legend__item">
               <span className="legend__badge legend__badge--fk">FK</span>
               <span className="legend__item-desc">Foreign key</span>
+            </div>
+            <div className="legend__item">
+              <span className="legend__badge legend__badge--nk">NK</span>
+              <span className="legend__item-desc">Natural key</span>
             </div>
           </div>
         </section>
