@@ -312,11 +312,88 @@
   white-space: nowrap;
 }
 
+.model-node__col-name--editable:hover,
+.model-node__col-type--editable:hover {
+  text-decoration: underline dotted;
+  cursor: text;
+}
+
 .model-node__col-type {
   flex-shrink: 0;
   color: var(--vscode-descriptionForeground, #888);
   font-size: 11px;
   font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* Inline edit input on graph node */
+.model-node__col-edit-input {
+  min-width: 0;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #ccc);
+  border: 1px solid var(--vscode-focusBorder, #007fd4);
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 1px 4px;
+  outline: none;
+  line-height: 1.3;
+}
+
+.model-node__col-edit-input--name {
+  flex: 1;
+}
+
+.model-node__col-edit-input--type {
+  flex: 0 0 auto;
+  width: 80px;
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* Reorder drag handle — visible when node is selected */
+.model-node__col-reorder-handle {
+  flex-shrink: 0;
+  cursor: grab;
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.3;
+  font-size: 10px;
+  user-select: none;
+  line-height: 1;
+  transition: opacity 0.1s ease;
+  padding: 4px 6px;
+  margin: -4px -2px -4px -6px;
+}
+
+.model-node__col-reorder-handle:hover {
+  opacity: 0.85;
+}
+
+.model-node__col-reorder-handle:active {
+  cursor: grabbing;
+  opacity: 1;
+}
+
+/* Row being reorder-dragged */
+.model-node__column--reorder-dragging {
+  opacity: 0.35;
+}
+
+/* Drop indicator — blue top border shows where the row will land */
+.model-node__column--reorder-target {
+  box-shadow: 0 -2px 0 0 var(--vscode-focusBorder, #007fd4);
+}
+
+.model-node__col-edit-error {
+  position: absolute;
+  bottom: -16px;
+  left: 10px;
+  font-size: 10px;
+  color: var(--vscode-errorForeground, #f48771);
+  white-space: nowrap;
+  z-index: 10;
+  background: var(--vscode-editor-background, #1e1e1e);
+  padding: 0 4px;
+  border-radius: 2px;
 }
 
 /* SCD type and additive type column badges (F502) */

@@ -304,6 +304,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'reorderColumns': {
+            const payload = (message as { payload?: { modelName: string; orderedNames: string[] } }).payload;
+            if (payload) {
+              await this.handleReorderColumns(document, webviewPanel.webview, payload, activeStage);
+            }
+            break;
+          }
         }
       },
     );
@@ -928,6 +935,58 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Toggle key failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to toggle key type: ${message}` } });
+    }
+  }
+
+  private async handleReorderColumns(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; orderedNames: string[] },
+    stage: 'logical',
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (section) => {
+          const models = (section.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model) {
+            throw new Error(`Model "${payload.modelName}" not found.`);
+          }
+
+          const columns = (model.columns ?? []) as Array<Record<string, unknown>>;
+
+          // Validate: all names must match existing columns and no duplicates
+          if (payload.orderedNames.length !== columns.length) {
+            throw new Error(`Column count mismatch: expected ${columns.length}, got ${payload.orderedNames.length}.`);
+          }
+
+          const columnMap = new Map<string, Record<string, unknown>>();
+          for (const col of columns) {
+            columnMap.set(col.name as string, col);
+          }
+
+          const reordered: Array<Record<string, unknown>> = [];
+          for (const name of payload.orderedNames) {
+            const col = columnMap.get(name);
+            if (!col) {
+              throw new Error(`Column "${name}" not found in model "${payload.modelName}".`);
+            }
+            reordered.push(col);
+          }
+
+          model.columns = reordered;
+        },
+        { refreshWebview: true, webview, stage },
+      );
+
+      if (!success) {
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to reorder columns.' } });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Reorder columns failed: ${message}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to reorder columns: ${message}` } });
     }
   }
 

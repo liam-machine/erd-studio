@@ -360,6 +360,19 @@ export interface DismissWelcomeMessage {
   type: 'dismissWelcome';
 }
 
+/**
+ * Request to reorder columns within a model.
+ * The orderedNames array defines the new column order.
+ * All existing column names must be present (validated by the extension host).
+ */
+export interface ReorderColumnsMessage {
+  type: 'reorderColumns';
+  payload: {
+    modelName: string;
+    orderedNames: string[];
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -386,7 +399,8 @@ export type WebviewMessage =
   | UpdateModelGrainMessage
   | UpdateModelRoleMessage
   | SwitchStageMessage
-  | ToggleDiscrepancyMessage;
+  | ToggleDiscrepancyMessage
+  | ReorderColumnsMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

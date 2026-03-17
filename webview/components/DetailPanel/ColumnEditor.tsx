@@ -1,7 +1,7 @@
 /**
  * ColumnEditor — editable column list for the DetailPanel.
  *
- * Renders columns sorted by key priority (PK -> NK -> FK -> non-key).
+ * Renders columns in file order (user-controlled via drag-to-reorder).
  * Supports adding new columns and inline editing.
  * Uses ColumnRowEditor for consistent column row rendering.
  */
@@ -10,7 +10,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { useMessageBus } from '../../hooks/useMessageBus';
-import { sortColumnsByKeyPriority } from '../../lib/columnSort';
+import { useColumnReorder } from '../../hooks/useColumnReorder';
 import type { DisplayColumn } from '../../../src/types/display';
 import type { ColumnDef, ModelRole } from '../../../src/types/semantic';
 import type { ColumnKeyType } from '../../../src/types/messages';
@@ -42,12 +42,6 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
   // State for tracking expanded columns (by column name)
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
 
-  // Sort columns by key priority
-  const sortedColumns = useMemo(
-    () => sortColumnsByKeyPriority(columns),
-    [columns]
-  );
-
   // All column names (for duplicate validation)
   const existingColumnNames = useMemo(
     () => columns.map((c) => c.name),
@@ -55,6 +49,22 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
   );
 
   const isEditable = !readOnly;
+
+  // Column reorder via drag handle
+  const handleReorder = useCallback(
+    (orderedNames: string[]) => {
+      send({
+        type: 'reorderColumns',
+        payload: { modelName, orderedNames },
+      });
+    },
+    [send, modelName],
+  );
+
+  const { orderedColumns, dragIndex, dropIndex, getDragHandleProps } = useColumnReorder({
+    columns,
+    onReorder: handleReorder,
+  });
 
   // Handle adding a new column
   const handleAddColumn = useCallback(() => {
@@ -204,7 +214,7 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
           <div className="column-editor__empty">No columns</div>
         )}
 
-        {sortedColumns.map((col) => (
+        {orderedColumns.map((col, idx) => (
           <ColumnRowEditor
             key={col.name}
             column={col}
@@ -221,6 +231,9 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             modelRole={modelRole}
             expanded={expandedColumns.has(col.name)}
             onToggleExpand={() => handleToggleExpand(col.name)}
+            dragHandleProps={isEditable ? getDragHandleProps(idx) : undefined}
+            isDragOver={dropIndex === idx && dragIndex !== idx}
+            isBeingDragged={dragIndex === idx}
           />
         ))}
 

@@ -22,8 +22,6 @@ import type {
   FkFlowEdge,
   ColumnDisplay,
 } from '../types/graph';
-import { sortColumnsByKeyPriority } from './columnSort';
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -61,7 +59,7 @@ function mapColumns(model: DisplayModel): ColumnDisplay[] {
     ...(col.scdType != null ? { scdType: col.scdType } : {}),
     ...(col.additiveType ? { additiveType: col.additiveType } : {}),
   }));
-  return sortColumnsByKeyPriority(mapped);
+  return mapped;
 }
 
 // ---------------------------------------------------------------------------

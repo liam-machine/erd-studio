@@ -22,7 +22,8 @@ import type { ColumnDiscrepancy } from '../../../src/types/discrepancy';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
-import { sortColumnsByKeyPriority } from '../../lib/columnSort';
+import { useMessageBus } from '../../hooks/useMessageBus';
+import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { KeyBadge } from '../common/KeyBadge';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
 import './ModelNode.css';
@@ -98,11 +99,23 @@ const NODE_HANDLE_STYLE: CSSProperties = {
 interface ColumnRowProps {
   column: ColumnDisplay;
   modelName: string;
+  /** Whether this column is read-only (physical stage). */
+  readOnly?: boolean;
+  /** All column names in the model (for duplicate validation during rename). */
+  existingColumnNames?: string[];
   /** Column-level discrepancy indicator (from cross-stage comparison). */
   discrepancy?: ColumnDiscrepancy;
+  /** Props for the drag reorder handle (shown when node is selected). */
+  dragHandleProps?: { onMouseDown: (e: React.MouseEvent) => void };
+  /** Whether this row is being dragged. */
+  isReorderDragging?: boolean;
+  /** Whether the drop indicator should show above this row. */
+  isReorderTarget?: boolean;
 }
 
-function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
+function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget }: ColumnRowProps) {
+  const { send } = useMessageBus(() => {});
+
   // Highlight when this column is involved in a selected edge
   const isHighlighted = useEditorStore(
     (s) => s.highlightedColumns?.has?.(`${modelName}:${column.name}`) ?? false
@@ -123,6 +136,95 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tooltipEligible = hasTooltipContent(column);
+
+  // --- Inline edit state ---
+  const [editingField, setEditingField] = useState<'name' | 'dataType' | null>(null);
+  const [localValue, setLocalValue] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus input when entering edit mode
+  useEffect(() => {
+    if (editingField && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingField]);
+
+  const startEdit = useCallback((field: 'name' | 'dataType') => {
+    if (readOnly) return;
+    setEditingField(field);
+    setLocalValue(field === 'name' ? column.name : column.dataType);
+    setEditError(null);
+  }, [readOnly, column.name, column.dataType]);
+
+  const cancelEdit = useCallback(() => {
+    setEditingField(null);
+    setLocalValue('');
+    setEditError(null);
+  }, []);
+
+  const commitEdit = useCallback((revertOnError = false) => {
+    if (!editingField) return;
+    const trimmed = localValue.trim();
+    const description = (column as unknown as { description?: string }).description ?? '';
+    const baseColumn = {
+      name: column.name,
+      dataType: column.dataType,
+      description,
+      isPrimaryKey: column.isPrimaryKey,
+      isForeignKey: column.isForeignKey,
+      isNaturalKey: column.isNaturalKey,
+    };
+
+    if (editingField === 'name') {
+      if (!trimmed) { cancelEdit(); return; }
+      if (!/^[a-z0-9_]+$/.test(trimmed)) {
+        if (revertOnError) { cancelEdit(); return; }
+        setEditError('Use lowercase letters, numbers, underscores');
+        return;
+      }
+      if (trimmed !== column.name && existingColumnNames?.includes(trimmed)) {
+        if (revertOnError) { cancelEdit(); return; }
+        setEditError('Column name already exists');
+        return;
+      }
+      if (trimmed === column.name) { cancelEdit(); return; }
+      send({
+        type: 'updateColumn',
+        payload: { modelName, oldColumnName: column.name, column: { ...baseColumn, name: trimmed } },
+      });
+    } else {
+      if (!trimmed) { cancelEdit(); return; }
+      if (trimmed === column.dataType) { cancelEdit(); return; }
+      send({
+        type: 'updateColumn',
+        payload: { modelName, oldColumnName: column.name, column: { ...baseColumn, dataType: trimmed } },
+      });
+    }
+    setEditingField(null);
+    setEditError(null);
+  }, [editingField, localValue, column, modelName, existingColumnNames, send, cancelEdit]);
+
+  const handleEditKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+  }, [commitEdit, cancelEdit]);
+
+  // On blur, commit if valid, otherwise silently revert (no error display)
+  const handleEditBlur = useCallback(() => {
+    commitEdit(true);
+  }, [commitEdit]);
+
+  const handleDoubleClickName = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    startEdit('name');
+  }, [startEdit]);
+
+  const handleDoubleClickType = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    startEdit('dataType');
+  }, [startEdit]);
 
   // Reset drop target state when drag ends
   useEffect(() => {
@@ -224,13 +326,13 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
   // Drop target: highlight when dragging from a different model and hovering this column
   const isValidDropTarget = dragSourceModel !== null && dragSourceModel !== modelName;
 
-  // Hide tooltip when drag/press starts
+  // Hide tooltip when drag/press starts or when editing
   useEffect(() => {
-    if (isPressing || isDragging) {
+    if (isPressing || isDragging || editingField) {
       if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
       setShowTooltip(false);
     }
-  }, [isPressing, isDragging]);
+  }, [isPressing, isDragging, editingField]);
 
   // Clean up timer on unmount
   useEffect(() => {
@@ -241,10 +343,10 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
 
   const handleMouseEnter = useCallback(() => {
     if (isValidDropTarget) setIsDropTarget(true);
-    if (tooltipEligible && !isDragging && !isPressing) {
+    if (tooltipEligible && !isDragging && !isPressing && !editingField) {
       tooltipTimerRef.current = setTimeout(() => setShowTooltip(true), 450);
     }
-  }, [isValidDropTarget, tooltipEligible, isDragging, isPressing]);
+  }, [isValidDropTarget, tooltipEligible, isDragging, isPressing, editingField]);
 
   const handleMouseLeave = useCallback(() => {
     setIsDropTarget(false);
@@ -257,6 +359,8 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
   const dragClass = isDragging ? 'model-node__column--dragging' : '';
   const dropTargetClass = isDropTarget ? 'model-node__column--drop-target' : '';
   const highlightClass = isHighlighted ? 'model-node__column--relationship-highlight' : '';
+  const reorderDragClass = isReorderDragging ? 'model-node__column--reorder-dragging' : '';
+  const reorderTargetClass = isReorderTarget ? 'model-node__column--reorder-target' : '';
   const discrepancyClass = discrepancy?.status === 'extra' ? 'model-node__column--disc-extra'
     : discrepancy?.status === 'type-mismatch' ? 'model-node__column--disc-mismatch'
     : '';
@@ -264,12 +368,21 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
   return (
     <div
       ref={elementRef}
-      className={`model-node__column ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} ${discrepancyClass} nodrag`.trim()}
+      className={`model-node__column ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} ${reorderDragClass} ${reorderTargetClass} ${discrepancyClass} nodrag`.trim()}
       data-column-name={column.name}
       onMouseEnter={handleMouseEnter}
       {...handlers}
       onMouseLeave={handleMouseLeave}
     >
+      {dragHandleProps && (
+        <span
+          className="model-node__col-reorder-handle nodrag"
+          onMouseDown={(e) => { e.stopPropagation(); dragHandleProps.onMouseDown(e); }}
+          title="Drag to reorder"
+        >
+          ⠿
+        </span>
+      )}
       <span className="model-node__col-indicators">
         {column.isPrimaryKey && (
           <KeyBadge type="PK" active={true} mode="readonly" />
@@ -281,15 +394,51 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
           <KeyBadge type="NK" active={true} mode="readonly" />
         )}
       </span>
-      <span className="model-node__col-name" title={column.name}>
-        {column.name}
-      </span>
-      {discrepancy?.status === 'type-mismatch' ? (
+      {editingField === 'name' ? (
+        <input
+          ref={editInputRef}
+          className="model-node__col-edit-input model-node__col-edit-input--name nodrag"
+          value={localValue}
+          onChange={(e) => { setLocalValue(e.target.value); setEditError(null); }}
+          onKeyDown={handleEditKeyDown}
+          onBlur={handleEditBlur}
+          onMouseDown={(e) => e.stopPropagation()}
+          placeholder="column_name"
+        />
+      ) : (
+        <span
+          className={`model-node__col-name${!readOnly ? ' model-node__col-name--editable' : ''}`}
+          title={column.name}
+          onDoubleClick={handleDoubleClickName}
+        >
+          {column.name}
+        </span>
+      )}
+      {editingField === 'dataType' ? (
+        <input
+          ref={editInputRef}
+          className="model-node__col-edit-input model-node__col-edit-input--type nodrag"
+          value={localValue}
+          onChange={(e) => setLocalValue(e.target.value.toUpperCase())}
+          onKeyDown={handleEditKeyDown}
+          onBlur={handleEditBlur}
+          onMouseDown={(e) => e.stopPropagation()}
+          placeholder="DATA_TYPE"
+        />
+      ) : discrepancy?.status === 'type-mismatch' ? (
         <span className="model-node__col-type model-node__col-type--mismatch" title={`${discrepancy.sourceDataType} in this stage, ${discrepancy.targetDataType} in comparison`}>
           {discrepancy.sourceDataType} <span className="model-node__col-type-arrow">&rarr;</span> {discrepancy.targetDataType}
         </span>
       ) : (
-        <span className="model-node__col-type">{column.dataType}</span>
+        <span
+          className={`model-node__col-type${!readOnly ? ' model-node__col-type--editable' : ''}`}
+          onDoubleClick={handleDoubleClickType}
+        >
+          {column.dataType}
+        </span>
+      )}
+      {editError && (
+        <span className="model-node__col-edit-error">{editError}</span>
       )}
       {discrepancy?.status === 'extra' && (
         <span className="model-node__col-disc-badge model-node__col-disc-badge--extra" title="Not in comparison stage">extra</span>
@@ -319,9 +468,27 @@ function ColumnRow({ column, modelName, discrepancy }: ColumnRowProps) {
 // ModelNode Component
 // ---------------------------------------------------------------------------
 
-function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
+function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
   const { modelName, stage, layer, layerConfig, columns, hasRationale, grain, modelRole, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion, discrepancy } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  const { send } = useMessageBus(() => {});
+
+  // Show reorder handles when this node is selected and editable
+  const showReorderHandles = !!selected && !readOnly;
+
+  const handleReorder = useCallback(
+    (orderedNames: string[]) => {
+      send({ type: 'reorderColumns', payload: { modelName, orderedNames } });
+    },
+    [send, modelName],
+  );
+
+  const { dragIndex, dropIndex, getDragHandleProps } = useColumnReorder({
+    columns,
+    onReorder: handleReorder,
+    containerSelector: '.model-node__columns',
+    rowSelector: '.model-node__column',
+  });
 
   // F405: Compute visible columns based on expansion state
   const { displayColumns, hiddenCount } = useMemo(() => {
@@ -348,11 +515,8 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
     [openNodeContextMenu, modelName],
   );
 
-  // Sort columns by key priority
-  const sortedColumns = useMemo(
-    () => sortColumnsByKeyPriority(displayColumns),
-    [displayColumns]
-  );
+  // All column names for inline rename duplicate validation
+  const columnNames = useMemo(() => columns.map((c) => c.name), [columns]);
 
   // Build column discrepancy lookup (keyed by column name)
   const columnDiscrepancyMap = useMemo(() => {
@@ -433,14 +597,19 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         </div>
       )}
 
-      {/* Columns — sorted by key priority */}
+      {/* Columns */}
       <div className="model-node__columns">
-        {sortedColumns.map((col) => (
+        {displayColumns.map((col, idx) => (
           <ColumnRow
             key={col.name}
             column={col}
             modelName={modelName}
+            readOnly={readOnly}
+            existingColumnNames={columnNames}
             discrepancy={columnDiscrepancyMap?.get(col.name)}
+            dragHandleProps={showReorderHandles && hiddenCount === 0 ? getDragHandleProps(idx) : undefined}
+            isReorderDragging={dragIndex === idx}
+            isReorderTarget={dropIndex === idx && dragIndex !== idx}
           />
         ))}
 

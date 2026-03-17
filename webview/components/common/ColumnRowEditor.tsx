@@ -64,6 +64,12 @@ export interface ColumnRowEditorProps {
   expanded?: boolean;
   /** Callback when the expand/collapse chevron is clicked. */
   onToggleExpand?: () => void;
+  /** Props to spread onto a drag handle element for reordering. */
+  dragHandleProps?: React.HTMLAttributes<HTMLSpanElement>;
+  /** Whether a dragged row is currently hovering above this row. */
+  isDragOver?: boolean;
+  /** Whether this row is currently being dragged. */
+  isBeingDragged?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +120,9 @@ export function ColumnRowEditor({
   modelRole,
   expanded = false,
   onToggleExpand,
+  dragHandleProps,
+  isDragOver = false,
+  isBeingDragged = false,
 }: ColumnRowEditorProps) {
   // Local state for editing
   const [localColumn, setLocalColumn] = useState<ColumnDef>({
@@ -393,6 +402,8 @@ export function ColumnRowEditor({
     isEditing && 'column-row-editor--editing',
     validationError && 'column-row-editor--has-error',
     expanded && 'column-row-editor--expanded',
+    isDragOver && 'column-row-editor--drag-over',
+    isBeingDragged && 'column-row-editor--dragging',
   ]
     .filter(Boolean)
     .join(' ');
@@ -401,6 +412,10 @@ export function ColumnRowEditor({
     <div className={rowClasses} {...rowProps}>
       {/* Main row content */}
       <div className="column-row-editor__main">
+        {/* Drag handle for reordering */}
+        {dragHandleProps && (
+          <span className="column-row-editor__drag-handle" {...dragHandleProps}>⠿</span>
+        )}
         {/* Expand/collapse chevron */}
         {onToggleExpand && (
           <button

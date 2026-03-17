@@ -487,3 +487,38 @@
 .column-row-editor__discrepancy-btn--reject:hover {
   background: rgba(239, 68, 68, 0.15);
 }
+
+/* ---------------------------------------------------------------------------
+   Drag Handle (column reordering)
+   --------------------------------------------------------------------------- */
+
+.column-row-editor__drag-handle {
+  flex-shrink: 0;
+  cursor: grab;
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.35;
+  padding: 0 2px;
+  font-size: 12px;
+  user-select: none;
+  line-height: 1;
+  transition: opacity 0.1s ease;
+}
+
+.column-row-editor__drag-handle:hover {
+  opacity: 0.85;
+}
+
+.column-row-editor__drag-handle:active {
+  cursor: grabbing;
+  opacity: 1;
+}
+
+/* Row being dragged */
+.column-row-editor--dragging {
+  opacity: 0.4;
+}
+
+/* Drop indicator — top border shows where the row will be inserted */
+.column-row-editor--drag-over {
+  box-shadow: 0 -2px 0 0 var(--vscode-focusBorder, #007fd4);
+}
