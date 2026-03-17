@@ -4,9 +4,9 @@ A VS Code extension for visually designing data warehouse models across two stag
 
 ## Contributors
 
-| | Name |
-|---|------|
-| <img src="https://github.com/jkweee.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jkweee](https://github.com/jkweee)) |
+| | Name | Contribution |
+|---|------|-------------|
+| <img src="https://github.com/jkweee.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jkweee](https://github.com/jkweee)) | Core concept, UI/UX design, logo |
 
 ## How It Works
 
