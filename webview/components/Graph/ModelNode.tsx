@@ -25,6 +25,7 @@ import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { KeyBadge } from '../common/KeyBadge';
+import { DataTypeSelect } from '../common/DataTypeSelect';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
 import './ModelNode.css';
 
@@ -111,9 +112,11 @@ interface ColumnRowProps {
   isReorderDragging?: boolean;
   /** Whether the drop indicator should show above this row. */
   isReorderTarget?: boolean;
+  /** Whether the parent node is selected (enables single-click editing). */
+  nodeSelected?: boolean;
 }
 
-function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget }: ColumnRowProps) {
+function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, nodeSelected }: ColumnRowProps) {
   const { send } = useMessageBus(() => {});
 
   // Highlight when this column is involved in a selected edge
@@ -409,21 +412,40 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
         <span
           className={`model-node__col-name${!readOnly ? ' model-node__col-name--editable' : ''}`}
           title={column.name}
-          onDoubleClick={handleDoubleClickName}
+          onClick={nodeSelected && !readOnly ? handleDoubleClickName : undefined}
+          onDoubleClick={!nodeSelected ? handleDoubleClickName : undefined}
         >
           {column.name}
         </span>
       )}
       {editingField === 'dataType' ? (
-        <input
-          ref={editInputRef}
-          className="model-node__col-edit-input model-node__col-edit-input--type nodrag"
-          value={localValue}
-          onChange={(e) => setLocalValue(e.target.value.toUpperCase())}
-          onKeyDown={handleEditKeyDown}
-          onBlur={handleEditBlur}
-          onMouseDown={(e) => e.stopPropagation()}
-          placeholder="DATA_TYPE"
+        <DataTypeSelect
+          value={column.dataType}
+          onChange={(newType) => {
+            if (newType !== column.dataType) {
+              const description = (column as unknown as { description?: string }).description ?? '';
+              send({
+                type: 'updateColumn',
+                payload: {
+                  modelName,
+                  oldColumnName: column.name,
+                  column: {
+                    name: column.name,
+                    dataType: newType,
+                    description,
+                    isPrimaryKey: column.isPrimaryKey,
+                    isForeignKey: column.isForeignKey,
+                    isNaturalKey: column.isNaturalKey,
+                  },
+                },
+              });
+            }
+            setEditingField(null);
+            setEditError(null);
+          }}
+          onBlur={() => { setEditingField(null); setEditError(null); }}
+          className="nodrag"
+          autoOpen={true}
         />
       ) : discrepancy?.status === 'type-mismatch' ? (
         <span className="model-node__col-type model-node__col-type--mismatch" title={`${discrepancy.sourceDataType} in this stage, ${discrepancy.targetDataType} in comparison`}>
@@ -432,7 +454,8 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
       ) : (
         <span
           className={`model-node__col-type${!readOnly ? ' model-node__col-type--editable' : ''}`}
-          onDoubleClick={handleDoubleClickType}
+          onClick={nodeSelected && !readOnly ? handleDoubleClickType : undefined}
+          onDoubleClick={!nodeSelected ? handleDoubleClickType : undefined}
         >
           {column.dataType}
         </span>
@@ -610,6 +633,7 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
             dragHandleProps={showReorderHandles && hiddenCount === 0 ? getDragHandleProps(idx) : undefined}
             isReorderDragging={dragIndex === idx}
             isReorderTarget={dropIndex === idx && dragIndex !== idx}
+            nodeSelected={!!selected}
           />
         ))}
 
