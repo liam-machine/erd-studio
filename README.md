@@ -189,7 +189,7 @@ Differences are highlighted directly on the graph: extra columns, missing column
 
 | | Name | Contribution |
 |---|------|-------------|
-| <img src="https://github.com/jasonkwe.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jasonkwe](https://github.com/jasonkwe)) | Logo design -- the bronze/silver/gold metallic ERD lettermark |
+| <img src="https://github.com/jkweee.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jkweee](https://github.com/jkweee)) | Logo design -- the bronze/silver/gold metallic ERD lettermark |
 
 ## License
 
