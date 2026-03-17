@@ -280,14 +280,16 @@ The old `liamwynne.dbt-semantic-designer` extension has been unpublished and rem
 
 ### Publish a New Version
 
+**IMPORTANT: Always bump `version` in `package.json` before publishing.** The marketplace rejects re-publishing an existing version number.
+
 1. Bump `version` in `package.json`
-2. Run:
+2. Package and publish (two-step is more reliable than single-step):
    ```bash
-   source .env && npx @vscode/vsce publish --pat "$AZURE_PAT"
+   source .env && npx @vscode/vsce package -o erd-studio.vsix && npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT" && rm erd-studio.vsix
    ```
 3. Commit the version bump and push.
 
-PAT is stored in `.env` as `AZURE_PAT`. Manage at https://dev.azure.com/LiamWynne/_usersSettings/tokens
+PAT is stored in `.env` as `AZURE_PAT`. The PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org. Manage at https://dev.azure.com/LiamWynne/_usersSettings/tokens
 
 ### Unpublish an Extension
 
