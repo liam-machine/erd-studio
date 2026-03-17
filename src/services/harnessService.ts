@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '3';
+export const HARNESS_VERSION = '4';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -96,27 +96,38 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
 
 const SCHEMA_CONTENT = `# ERD Studio — AI Data Modeling Guide
 
-Design data warehouse models across two stages: logical → physical. This guide covers the domain JSON format and how to write dbt YAML that produces a correct physical model.
+Generate domain JSON files that render as ERD canvases in ERD Studio. Each file defines a logical data model with models, columns, and relationships.
 
-## Quick Reference
+## Domain File Structure
 
-**File:** \`erd-studio/{layer}/{domain}.json\` — one file per domain containing a \`logical\` section.
+**File:** \`erd-studio/{layer}/{domain}.json\`
 
 \`\`\`json
 {
   "schemaVersion": 4,
-  "domain": "{domain}",
+  "domain": "customer-360",
   "layer": "silver",
-  "description": "Domain description",
+  "description": "Customer domain — master data and transaction history",
   "modelFolder": "models/silver",
-  "logical": { "models": [], "relationships": [] },
+  "logical": {
+    "models": [],
+    "relationships": []
+  },
   "viewConfig": {}
 }
 \`\`\`
 
-Required fields: \`schemaVersion\`, \`domain\`, \`layer\`, \`logical\`, \`viewConfig\`.
+| Field | Required | Description |
+|-------|----------|-------------|
+| \`schemaVersion\` | Yes | Must be \`4\` |
+| \`domain\` | Yes | Domain slug (matches filename without \`.json\`) |
+| \`layer\` | Yes | Layer name matching parent directory (e.g. \`silver\`, \`gold\`) |
+| \`description\` | No | Human-readable domain description |
+| \`modelFolder\` | No | Filter for "Add Existing Model" dialog (e.g. \`models/silver\`) |
+| \`logical\` | Yes | Contains \`models\` and \`relationships\` arrays |
+| \`viewConfig\` | Yes | Root-level view settings. Leave as \`{}\` — the extension auto-layouts on first open |
 
-**viewConfig** lives at the root level and applies to all stages. Leave empty for new domains — the extension auto-layouts on first open.
+**viewConfig** must be at the root level, not inside \`logical\`. It stores node positions keyed by model name:
 
 \`\`\`json
 "viewConfig": { "positions": { "dim_customer": { "x": 100, "y": 200 } } }
@@ -124,11 +135,7 @@ Required fields: \`schemaVersion\`, \`domain\`, \`layer\`, \`logical\`, \`viewCo
 
 ---
 
-## Logical Design
-
-The \`logical\` section is the detailed blueprint. Models should have full columns with data types, PK/FK/NK flags, grain, model role, and rationale.
-
-### Model
+## Models
 
 \`\`\`json
 {
@@ -138,8 +145,9 @@ The \`logical\` section is the detailed blueprint. Models should have full colum
   "grain": "One row per customer",
   "modelRole": "conformed-dim",
   "columns": [
-    { "name": "customer_id", "dataType": "INTEGER", "description": "Surrogate key", "isPrimaryKey": true, "scdType": 0 },
-    { "name": "email", "dataType": "STRING", "description": "Email address", "isNaturalKey": true, "scdType": 1 }
+    { "name": "customer_id", "dataType": "INT", "description": "Surrogate key", "isPrimaryKey": true, "scdType": 0 },
+    { "name": "email", "dataType": "VARCHAR", "description": "Email address", "isNaturalKey": true, "scdType": 1 },
+    { "name": "full_name", "dataType": "VARCHAR", "description": "Customer display name", "scdType": 2 }
   ],
   "rationale": {
     "purpose": "Customer master data for cross-domain joins",
@@ -148,32 +156,15 @@ The \`logical\` section is the detailed blueprint. Models should have full colum
 }
 \`\`\`
 
-### Column Definition
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| \`name\` | string | Yes | Column identifier |
-| \`dataType\` | string | Logical: Yes | SQL type (STRING, INTEGER, BOOLEAN, DATE, DECIMAL(18,2), TIMESTAMP_NTZ) |
-| \`description\` | string | Logical: Yes | Human-readable description |
-| \`isPrimaryKey\` | boolean | No | Marks as PK. Only include when \`true\`. |
-| \`isForeignKey\` | boolean | No | FK intent flag. Only include when \`true\`. |
-| \`isNaturalKey\` | boolean | No | Business identifier. Only include when \`true\`. |
-| \`scdType\` | \`0\`, \`1\`, \`2\` | No | SCD type for dimension columns |
-| \`additiveType\` | string | No | Fact measures: \`"additive"\`, \`"semi-additive"\`, \`"non-additive"\` |
-
-### Relationships
-
-\`\`\`json
-{
-  "fromModel": "fct_orders", "fromColumn": "customer_id",
-  "toModel": "dim_customer", "toColumn": "customer_id",
-  "cardinality": "many-to-one"
-}
-\`\`\`
-
-\`fromModel\` is the FK side. \`toModel\` is the PK side.
-
-Cardinality values: \`many-to-one\` | \`one-to-one\` | \`one-to-many\` | \`many-to-many\`
+| Field | Required | Description |
+|-------|----------|-------------|
+| \`name\` | Yes | Model name (see naming conventions below) |
+| \`schema\` | No | Target schema for materialization |
+| \`description\` | No | Human-readable model description |
+| \`grain\` | No | Grain statement — "One row per ___" |
+| \`modelRole\` | No | Architecture role (see values below) |
+| \`columns\` | No | Array of column definitions |
+| \`rationale\` | No | Design rationale object (omit if empty) |
 
 ### modelRole Values
 
@@ -191,132 +182,101 @@ Cardinality values: \`many-to-one\` | \`one-to-one\` | \`one-to-many\` | \`many-
 
 ### Design Rationale
 
-Optional \`rationale\` object. All fields are optional strings: \`purpose\`, \`design\`, \`roleChoice\`, \`grainChoice\`, \`scdStrategy\`, \`measures\`. Omit entirely if empty.
+Optional \`rationale\` object — all fields are optional strings. Omit the entire object if no rationale is needed.
 
-### Naming Conventions
-
-| Type | Prefix | PK Pattern | Example |
-|------|--------|-----------|---------|
-| Dimension | \`dim_\` | \`{entity}_id\` | \`dim_project\` → \`project_id\` |
-| Fact | \`fct_\` | \`{entity}_id\` or composite | \`fct_order\` → \`order_id\` |
-| Reference | \`ref_\` | \`ref_{entity}_code\` | \`ref_country\` → \`ref_country_code\` |
-| Bridge | \`brg_\` | composite FK pair | \`brg_project_contact\` |
-
-FK columns match the PK name of the referenced table.
+| Field | Purpose |
+|-------|---------|
+| \`purpose\` | What requirements this model fulfils |
+| \`design\` | Why it was designed this way |
+| \`grainChoice\` | Why this grain was chosen over alternatives |
+| \`roleChoice\` | Why this model role was selected |
+| \`scdStrategy\` | Overall SCD strategy across dimension attributes |
+| \`measures\` | Why measures are structured this way |
 
 ---
 
-## Physical Realization via dbt
+## Columns
 
-The physical stage is **read-only** and has **no files on disk**. It is derived entirely from the dbt manifest (\`target/manifest.json\`) after running \`dbt compile\` or \`dbt build\`.
+| Field | Required | Description |
+|-------|----------|-------------|
+| \`name\` | Yes | Column identifier |
+| \`dataType\` | Yes | SQL type: \`INT\`, \`INTEGER\`, \`VARCHAR\`, \`STRING\`, \`FLOAT\`, \`BOOLEAN\`, \`DATE\`, \`DECIMAL(18,2)\`, \`TIMESTAMP_NTZ\`, etc. |
+| \`description\` | Yes | Human-readable description |
+| \`isPrimaryKey\` | No | Primary key. Only include when \`true\`. |
+| \`isForeignKey\` | No | Foreign key intent. Only include when \`true\`. |
+| \`isNaturalKey\` | No | Business identifier (email, SKU, etc.). Only include when \`true\`. |
+| \`scdType\` | No | SCD type for dimensions: \`0\` = fixed/never changes, \`1\` = overwrite, \`2\` = track history |
+| \`additiveType\` | No | Fact measures: \`"additive"\`, \`"semi-additive"\`, \`"non-additive"\` |
 
-Understanding how the physical stage works is critical for AI-assisted modeling: it tells you what dbt YAML to write so the physical stage matches the logical design.
+**Boolean flags** (\`isPrimaryKey\`, \`isForeignKey\`, \`isNaturalKey\`): omit rather than setting to \`false\`.
 
-### How Physical Models Are Derived
+---
 
-1. **Models**: Logical models that also exist in the manifest appear in the physical stage. Columns come from the manifest; PK/FK/NK flags, grain, and model role carry forward from logical.
-2. **Relationships**: Derived from **dbt relationship tests** in the manifest — NOT copied from logical. Each \`relationships\` test in your YAML becomes one edge.
-3. **Cardinality**: Derived from **uniqueness tests** in the manifest — dbt's \`relationships\` test only checks referential integrity, not cardinality.
+## Relationships
 
-### Cardinality Rules
+\`\`\`json
+{
+  "fromModel": "fct_orders",
+  "fromColumn": "customer_id",
+  "toModel": "dim_customer",
+  "toColumn": "customer_id",
+  "cardinality": "many-to-one"
+}
+\`\`\`
 
-| FK column has \`unique\` test? | PK column has \`unique\` test? | Derived Cardinality |
-|-------------------------------|-------------------------------|---------------------|
+| Field | Required | Description |
+|-------|----------|-------------|
+| \`fromModel\` | Yes | FK side model name |
+| \`fromColumn\` | Yes | FK column name |
+| \`toModel\` | Yes | PK side model name |
+| \`toColumn\` | Yes | PK column name |
+| \`cardinality\` | Yes | \`many-to-one\`, \`one-to-one\`, \`one-to-many\`, or \`many-to-many\` |
+
+**Direction:** \`fromModel\` is always the FK side, \`toModel\` is the PK side. FK column names should match the PK column name of the referenced table.
+
+---
+
+## Naming Conventions
+
+| Type | Prefix | PK Pattern | Example |
+|------|--------|-----------|---------|
+| Dimension | \`dim_\` | \`{entity}_id\` | \`dim_customer\` → PK \`customer_id\` |
+| Fact | \`fct_\` | \`{entity}_id\` or composite | \`fct_order\` → PK \`order_id\` |
+| Reference | \`ref_\` | \`ref_{entity}_code\` | \`ref_country\` → PK \`ref_country_code\` |
+| Bridge | \`brg_\` | composite FK pair | \`brg_project_contact\` |
+
+---
+
+## Physical Stage (Read-Only)
+
+The physical stage has **no files on disk**. It is derived at runtime from the dbt manifest (\`target/manifest.json\`):
+
+1. **Models**: Logical models that exist in the manifest appear in physical. Columns come from the manifest; PK/FK/NK flags, grain, modelRole, scdType, and additiveType carry forward from logical.
+2. **Relationships**: Derived from **dbt relationship tests** — not copied from logical. Each \`relationships\` test becomes an edge.
+3. **Cardinality**: Derived from **uniqueness tests** — no \`unique\` test = "many" side.
+4. **Scoping**: Only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
+
+### Cardinality Derivation
+
+| FK has \`unique\` test? | PK has \`unique\` test? | Result |
+|------------------------|------------------------|--------|
 | No | Yes | \`many-to-one\` |
 | Yes | Yes | \`one-to-one\` |
 | Yes | No | \`one-to-many\` |
 | No | No | \`many-to-many\` |
 
-**No \`unique\` test = "many" side.** This is deliberate — the physical model reflects what is tested, not what is assumed.
+For composite keys, \`dbt_utils.unique_combination_of_columns\` is recognized when **all** columns in the group are covered by relationship tests between the same model pair.
 
-### Writing dbt YAML for Correct Physical Relationships
+Recognized test types: \`relationships\`, \`relationships_where\`, and any test whose name starts with \`relationships\`.
 
-To produce a \`many-to-one\` relationship from \`fct_orders.customer_id\` → \`dim_customer.customer_id\`, write:
-
-\`\`\`yaml
-models:
-  - name: dim_customer
-    columns:
-      - name: customer_id
-        tests:
-          - unique           # Makes this side "one"
-          - not_null
-
-  - name: fct_orders
-    columns:
-      - name: order_id
-        tests:
-          - unique
-          - not_null
-      - name: customer_id
-        tests:
-          - not_null
-          - relationships:   # Creates the edge in the physical model
-              to: ref('dim_customer')
-              field: customer_id
-          # No unique test on FK column → "many" side
-\`\`\`
-
-### Composite Keys
-
-For composite primary keys, use \`dbt_utils.unique_combination_of_columns\`:
-
-\`\`\`yaml
-models:
-  - name: brg_project_contact
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - project_id
-            - contact_id
-    columns:
-      - name: project_id
-        tests:
-          - relationships:
-              to: ref('dim_project')
-              field: project_id
-      - name: contact_id
-        tests:
-          - relationships:
-              to: ref('dim_contact')
-              field: contact_id
-\`\`\`
-
-The composite unique test is recognized when **all** columns in the group are covered by relationship tests between the same model pair.
-
-### Custom Relationship Tests
-
-These test variants are also recognized: \`relationships_where\` (dbt_utils) and any custom test with the standard kwargs signature (\`column_name\`, \`field\`, \`to\`).
-
-### Domain Scoping
-
-Physical relationships are scoped to models within the current domain. If \`dim_customer\` is a conformed dimension referenced by many models, only relationships to other models **in the same domain** appear.
-
----
-
-## Design Workflow
-
-### From Logical to Physical — Checklist
-
-When implementing a logical model in dbt, ensure each logical element has a corresponding dbt test:
+### Implementing Logical → Physical
 
 | Logical Element | dbt YAML Required |
 |----------------|-------------------|
-| PK column (\`isPrimaryKey: true\`) | \`unique\` + \`not_null\` tests on that column |
-| FK column (\`isForeignKey: true\`) | \`relationships\` test pointing to the PK model/column |
-| Relationship with cardinality | \`relationships\` test on FK column + \`unique\` test on PK column |
-| Composite PK | \`dbt_utils.unique_combination_of_columns\` model-level test |
-
-### Discrepancy Resolution
-
-The discrepancy overlay in ERD Studio compares stages. Common issues when comparing physical to logical:
-
-| Discrepancy | Cause | Fix |
-|------------|-------|-----|
-| Missing relationship in physical | No \`relationships\` test in YAML | Add \`relationships\` test to the FK column |
-| Cardinality mismatch (many-to-many vs many-to-one) | PK column missing \`unique\` test | Add \`unique\` test to the PK column |
-| Missing model in physical | Model not compiled into manifest | Run \`dbt compile\` or check model is not disabled |
-| Extra column in physical | Column in manifest but not in logical | Add the column to the logical model, or remove from dbt model |`;
+| PK column | \`unique\` + \`not_null\` tests |
+| FK column | \`relationships\` test to PK model/column |
+| Cardinality | \`unique\` test on PK column + \`relationships\` test on FK column |
+| Composite PK | \`dbt_utils.unique_combination_of_columns\` model-level test |`;
 
 // ---------------------------------------------------------------------------
 // Format-specific generators
