@@ -30,11 +30,13 @@ export class FileWatcherService implements vscode.Disposable {
   // Event emitters (private — fire events internally)
   private readonly _onManifestChanged = new vscode.EventEmitter<void>();
   private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
+  private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
 
   // Public event subscriptions (consumers listen to these)
   readonly onManifestChanged = this._onManifestChanged.event;
   readonly onSemanticFileChanged = this._onSemanticFileChanged.event;
+  readonly onSemanticFileDeleted = this._onSemanticFileDeleted.event;
   readonly onProjectConfigChanged = this._onProjectConfigChanged.event;
 
   constructor(private readonly workspaceRoot: string) {
@@ -88,10 +90,17 @@ export class FileWatcherService implements vscode.Disposable {
       });
     };
 
+    const handleDelete = (uri: vscode.Uri) => {
+      this.debounce(`semantic-del:${uri.toString()}`, () => {
+        console.log(`[FileWatcherService] Semantic file deleted: ${uri.fsPath}`);
+        this.safeFireEvent(() => this._onSemanticFileDeleted.fire({ uri }));
+      });
+    };
+
     // Track event subscriptions for disposal
     this.subscriptions.push(watcher.onDidChange(handleChange));
     this.subscriptions.push(watcher.onDidCreate(handleChange));
-    this.subscriptions.push(watcher.onDidDelete(handleChange));
+    this.subscriptions.push(watcher.onDidDelete(handleDelete));
 
     this.watchers.push(watcher);
   }
@@ -181,6 +190,7 @@ export class FileWatcherService implements vscode.Disposable {
     // Dispose event emitters
     this._onManifestChanged.dispose();
     this._onSemanticFileChanged.dispose();
+    this._onSemanticFileDeleted.dispose();
     this._onProjectConfigChanged.dispose();
   }
 }

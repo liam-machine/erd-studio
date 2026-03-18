@@ -108,7 +108,19 @@ describe('FileWatcherService', () => {
       expect(listener).toHaveBeenCalledWith({ uri });
     });
 
-    it('emits onSemanticFileChanged when semantic file is deleted', () => {
+    it('emits onSemanticFileDeleted when semantic file is deleted', () => {
+      const listener = vi.fn();
+      service.onSemanticFileDeleted(listener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      const uri = vscode.Uri.file('/test/workspace/erd-studio/silver/deleted.json');
+      semanticWatcher._simulateDelete(uri);
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledWith({ uri });
+    });
+
+    it('does not emit onSemanticFileChanged when semantic file is deleted', () => {
       const listener = vi.fn();
       service.onSemanticFileChanged(listener);
 
@@ -117,7 +129,7 @@ describe('FileWatcherService', () => {
       semanticWatcher._simulateDelete(uri);
       vi.advanceTimersByTime(300);
 
-      expect(listener).toHaveBeenCalledWith({ uri });
+      expect(listener).not.toHaveBeenCalled();
     });
 
     it('debounces changes per file independently', () => {

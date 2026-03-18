@@ -200,6 +200,17 @@ export function activate(context: vscode.ExtensionContext): void {
     treeProvider.refresh();
   });
 
+  // Semantic file deleted → refresh tree and clean up orphaned domain tags
+  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(async () => {
+    treeProvider.refresh();
+    const result = await schemaTagService.reconcileAll();
+    if (result.removed > 0) {
+      void vscode.window.showInformationMessage(
+        `Domain file deleted — removed ${result.removed} orphaned tag(s) from YAML files.`,
+      );
+    }
+  });
+
   // dbt_project.yml changed → suggest window reload
   const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
     void vscode.window.showWarningMessage(
@@ -219,6 +230,7 @@ export function activate(context: vscode.ExtensionContext): void {
     fileWatcherService,
     manifestChangedSubscription,
     semanticChangedSubscription,
+    semanticDeletedSubscription,
     projectChangedSubscription,
     (() => {
       const treeView = vscode.window.createTreeView('dbtSemantic.domainTree', {
