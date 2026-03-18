@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { SchemaTagService } from '../../src/services/schemaTagService';
-import type { ManifestService } from '../../src/services/manifestService';
 import type { DomainService } from '../../src/services/domainService';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
@@ -20,20 +19,6 @@ function setupTempYaml(fixtureRelPath: string): { tmpDir: string; yamlPath: stri
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
   fs.copyFileSync(srcPath, destPath);
   return { tmpDir, yamlPath: destPath };
-}
-
-function createMockManifestService(
-  models: Record<string, { originalFilePath?: string }> = {},
-): ManifestService {
-  return {
-    getModel: (name: string) => {
-      const m = models[name];
-      if (!m) { return undefined; }
-      return { name, originalFilePath: m.originalFilePath } as ReturnType<ManifestService['getModel']>;
-    },
-    getModelNames: () => Object.keys(models),
-    loadManifest: vi.fn().mockResolvedValue({ models: new Map() }),
-  } as unknown as ManifestService;
 }
 
 function createMockDomainService(
@@ -72,9 +57,6 @@ describe('SchemaTagService', () => {
       tmpDirs.push(tmpDir);
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_project: { originalFilePath: 'models/silver/dim_project.sql' },
-        }),
         createMockDomainService(),
         tmpDir,
         'erd-studio',
@@ -91,9 +73,6 @@ describe('SchemaTagService', () => {
       tmpDirs.push(tmpDir);
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_project: { originalFilePath: 'models/silver/dim_project.sql' },
-        }),
         createMockDomainService(),
         tmpDir,
         'erd-studio',
@@ -107,9 +86,8 @@ describe('SchemaTagService', () => {
       expect(matches).toHaveLength(1);
     });
 
-    it('skips silently when model is not in manifest', async () => {
+    it('skips silently when no YAML file exists for model', async () => {
       const service = new SchemaTagService(
-        createMockManifestService({}),
         createMockDomainService(),
         '/nonexistent',
         'erd-studio',
@@ -121,9 +99,6 @@ describe('SchemaTagService', () => {
 
     it('skips silently when YAML file does not exist', async () => {
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_project: { originalFilePath: 'models/silver/dim_project.sql' },
-        }),
         createMockDomainService(),
         '/nonexistent',
         'erd-studio',
@@ -142,9 +117,6 @@ describe('SchemaTagService', () => {
       fs.writeFileSync(yamlPath, `version: 2\nmodels:\n  - name: dim_bare\n    description: No config\n`, 'utf-8');
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_bare: { originalFilePath: 'models/silver/dim_bare.sql' },
-        }),
         createMockDomainService(),
         tmpDir,
         'erd-studio',
@@ -177,9 +149,6 @@ describe('SchemaTagService', () => {
       ].join('\n'), 'utf-8');
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_commented: { originalFilePath: 'models/silver/dim_commented.sql' },
-        }),
         createMockDomainService(),
         tmpDir,
         'erd-studio',
@@ -198,9 +167,6 @@ describe('SchemaTagService', () => {
       tmpDirs.push(tmpDir);
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_project: { originalFilePath: 'models/silver/dim_project.sql' },
-        }),
         createMockDomainService(),
         tmpDir,
         'erd-studio',
@@ -222,9 +188,6 @@ describe('SchemaTagService', () => {
       tmpDirs.push(tmpDir);
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          fct_work_events: { originalFilePath: 'models/gold/fct_work_events.sql' },
-        }),
         createMockDomainService([]),
         tmpDir,
         'erd-studio',
@@ -244,9 +207,6 @@ describe('SchemaTagService', () => {
       tmpDirs.push(tmpDir);
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          fct_work_events: { originalFilePath: 'models/gold/fct_work_events.sql' },
-        }),
         createMockDomainService([
           {
             domain: 'work-lots',
@@ -284,9 +244,6 @@ describe('SchemaTagService', () => {
       ].join('\n'), 'utf-8');
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_single_tag: { originalFilePath: 'models/silver/dim_single_tag.sql' },
-        }),
         createMockDomainService([]),
         tmpDir,
         'erd-studio',
@@ -339,9 +296,6 @@ describe('SchemaTagService', () => {
       }), 'utf-8');
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_test: { originalFilePath: 'models/silver/dim_test.sql' },
-        }),
         createMockDomainService([
           {
             domain: 'active-domain',
@@ -368,7 +322,6 @@ describe('SchemaTagService', () => {
 
     it('returns skipped count for models without YAML files', async () => {
       const service = new SchemaTagService(
-        createMockManifestService({}), // no models in manifest
         createMockDomainService([
           {
             domain: 'some-domain',
@@ -407,9 +360,6 @@ describe('SchemaTagService', () => {
       ].join('\n'), 'utf-8');
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_orphan: { originalFilePath: 'models/silver/dim_orphan.sql' },
-        }),
         createMockDomainService([]), // no domains at all
         tmpDir,
         'erd-studio',
@@ -442,9 +392,6 @@ describe('SchemaTagService', () => {
       ].join('\n'), 'utf-8');
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_scalar: { originalFilePath: 'models/silver/dim_scalar.sql' },
-        }),
         createMockDomainService(),
         tmpDir,
         'erd-studio',
@@ -472,9 +419,6 @@ describe('SchemaTagService', () => {
       ].join('\n'), 'utf-8');
 
       const service = new SchemaTagService(
-        createMockManifestService({
-          dim_yaml_ext: { originalFilePath: 'models/silver/dim_yaml_ext.sql' },
-        }),
         createMockDomainService(),
         tmpDir,
         'erd-studio',

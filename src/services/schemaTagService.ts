@@ -8,8 +8,8 @@
  * Tag format: `domain:{domainName}` where domainName is the domain JSON
  * filename without extension (e.g. `domain:work-lots`).
  *
- * YAML path is derived from ManifestModelInfo.originalFilePath by swapping
- * `.sql` → `.yml` (assumes one YAML per SQL convention).
+ * YAML path is resolved by scanning the workspace filesystem for
+ * `{modelName}.yml` or `{modelName}.yaml` (one YAML per model convention).
  */
 
 import * as fs from 'fs';
@@ -17,14 +17,21 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { Document, parseDocument, isSeq, isMap, YAMLMap, YAMLSeq } from 'yaml';
 
-import type { ManifestService } from './manifestService';
 import type { DomainService } from './domainService';
 
 const DOMAIN_TAG_PREFIX = 'domain:';
 
+/** Directories to skip during filesystem walk. */
+const EXCLUDED_DIRS = new Set([
+  'node_modules', 'target', '.git', '.venv', 'venv',
+  '__pycache__', 'dist', '.tox', '.mypy_cache',
+]);
+
 export class SchemaTagService {
+  /** Transient cache populated during a single `reconcileAll` call. */
+  private _yamlCache: Map<string, string> | undefined = undefined;
+
   constructor(
-    private readonly manifestService: ManifestService,
     private readonly domainService: DomainService,
     private readonly workspaceRoot: string,
     private readonly semanticDir: string,
@@ -143,114 +150,227 @@ export class SchemaTagService {
   async reconcileAll(): Promise<{ added: number; removed: number; skipped: number; errors: string[] }> {
     const result = { added: 0, removed: 0, skipped: 0, errors: [] as string[] };
 
-    // Build expected: model → Set<domainName>
-    const expected = new Map<string, Set<string>>();
-    const allDomains = this.domainService.listDomains(this.workspaceRoot, this.semanticDir);
+    try {
+      // Build YAML index once for the entire reconciliation
+      this._yamlCache = this.buildYamlIndex();
 
-    for (const summary of allDomains) {
-      try {
-        const domain = this.domainService.getDomain(summary.filePath);
-        const models = domain.logical?.models ?? [];
-        for (const model of models) {
-          let domains = expected.get(model.name);
-          if (!domains) {
-            domains = new Set();
-            expected.set(model.name, domains);
+      // Build expected: model → Set<domainName>
+      const expected = new Map<string, Set<string>>();
+      const allDomains = this.domainService.listDomains(this.workspaceRoot, this.semanticDir);
+
+      for (const summary of allDomains) {
+        try {
+          const domain = this.domainService.getDomain(summary.filePath);
+          const models = domain.logical?.models ?? [];
+          for (const model of models) {
+            let domains = expected.get(model.name);
+            if (!domains) {
+              domains = new Set();
+              expected.set(model.name, domains);
+            }
+            domains.add(summary.domain);
           }
-          domains.add(summary.domain);
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        result.errors.push(`Failed to read ${summary.filePath}: ${msg}`);
-      }
-    }
-
-    // Sync YAML for all manifest models — both those in domains and those not
-    const allModelNames = new Set([
-      ...expected.keys(),
-      ...this.manifestService.getModelNames(),
-    ]);
-
-    for (const modelName of allModelNames) {
-      const yamlPath = this.resolveYamlPath(modelName);
-      if (!yamlPath) {
-        if (expected.has(modelName)) { result.skipped++; }
-        continue;
-      }
-
-      const doc = this.readYaml(yamlPath);
-      if (!doc) {
-        if (expected.has(modelName)) { result.skipped++; }
-        continue;
-      }
-
-      const modelNode = this.findModelNode(doc, modelName);
-      if (!modelNode) {
-        if (expected.has(modelName)) { result.skipped++; }
-        continue;
-      }
-
-      const domainNames = expected.get(modelName) ?? new Set<string>();
-      let modified = false;
-
-      // Add missing domain tags
-      const tags = this.getOrCreateTagsSeq(doc, modelNode);
-      for (const domainName of domainNames) {
-        const tag = `${DOMAIN_TAG_PREFIX}${domainName}`;
-        if (!this.seqContains(tags, tag)) {
-          tags.add(tag);
-          result.added++;
-          modified = true;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          result.errors.push(`Failed to read ${summary.filePath}: ${msg}`);
         }
       }
 
-      // Remove stale domain tags (tags for domains this model no longer belongs to)
-      for (let i = tags.items.length - 1; i >= 0; i--) {
-        const item = tags.items[i];
-        if (item == null) { continue; }
-        const value = typeof item === 'object' && 'value' in item ? item.value : item;
-        if (typeof value === 'string' && value.startsWith(DOMAIN_TAG_PREFIX)) {
-          const tagDomain = value.slice(DOMAIN_TAG_PREFIX.length);
-          if (!domainNames.has(tagDomain)) {
-            tags.delete(i);
-            result.removed++;
+      // Pass 1 — Forward: sync tags for models currently in domains
+      const processedPaths = new Set<string>();
+
+      for (const modelName of expected.keys()) {
+        const yamlPath = this.resolveYamlPath(modelName);
+        if (!yamlPath) {
+          result.skipped++;
+          continue;
+        }
+
+        const doc = this.readYaml(yamlPath);
+        if (!doc) {
+          result.skipped++;
+          continue;
+        }
+
+        const modelNode = this.findModelNode(doc, modelName);
+        if (!modelNode) {
+          result.skipped++;
+          continue;
+        }
+
+        processedPaths.add(yamlPath);
+        const domainNames = expected.get(modelName)!;
+        let modified = false;
+
+        // Add missing domain tags
+        const tags = this.getOrCreateTagsSeq(doc, modelNode);
+        for (const domainName of domainNames) {
+          const tag = `${DOMAIN_TAG_PREFIX}${domainName}`;
+          if (!this.seqContains(tags, tag)) {
+            tags.add(tag);
+            result.added++;
             modified = true;
           }
         }
-      }
 
-      if (modified) {
-        try {
-          this.writeYaml(yamlPath, doc);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          result.errors.push(`Failed to write ${yamlPath}: ${msg}`);
+        // Remove stale domain tags (tags for domains this model no longer belongs to)
+        modified = this.removeStaleTagsFromNode(tags, domainNames, result) || modified;
+
+        if (modified) {
+          try {
+            this.writeYaml(yamlPath, doc);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            result.errors.push(`Failed to write ${yamlPath}: ${msg}`);
+          }
         }
       }
+
+      // Pass 2 — Reverse: clean orphaned domain tags from YAML files
+      // not already fully processed in Pass 1
+      for (const [, yamlPath] of this._yamlCache) {
+        if (processedPaths.has(yamlPath)) {
+          continue;
+        }
+
+        const doc = this.readYaml(yamlPath);
+        if (!doc) { continue; }
+
+        const modelsNode = doc.get('models');
+        if (!isSeq(modelsNode)) { continue; }
+
+        let fileModified = false;
+        for (const item of modelsNode.items) {
+          if (!isMap(item)) { continue; }
+
+          // Skip models that are still in a domain (handled in Pass 1)
+          const modelName = item.get('name');
+          if (typeof modelName === 'string' && expected.has(modelName)) {
+            continue;
+          }
+
+          const configNode = item.get('config');
+          if (!isMap(configNode)) { continue; }
+          const tagsNode = configNode.get('tags');
+          if (!isSeq(tagsNode)) { continue; }
+
+          const emptyDomains = new Set<string>();
+          if (this.removeStaleTagsFromNode(tagsNode, emptyDomains, result)) {
+            fileModified = true;
+            // Clean up empty tags/config
+            if (tagsNode.items.length === 0) {
+              (configNode as YAMLMap).delete('tags');
+            }
+            if (isMap(configNode) && (configNode as YAMLMap).items.length === 0) {
+              (item as YAMLMap).delete('config');
+            }
+          }
+        }
+
+        if (fileModified) {
+          try {
+            this.writeYaml(yamlPath, doc);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            result.errors.push(`Failed to write ${yamlPath}: ${msg}`);
+          }
+        }
+      }
+    } finally {
+      this.clearYamlCache();
     }
 
     return result;
+  }
+
+  /**
+   * Remove `domain:*` tags from a tags sequence that are not in the allowed set.
+   * Returns true if any tags were removed.
+   */
+  private removeStaleTagsFromNode(
+    tags: YAMLSeq,
+    allowedDomains: Set<string>,
+    result: { removed: number },
+  ): boolean {
+    let modified = false;
+    for (let i = tags.items.length - 1; i >= 0; i--) {
+      const item = tags.items[i];
+      if (item == null) { continue; }
+      const value = typeof item === 'object' && 'value' in item ? item.value : item;
+      if (typeof value === 'string' && value.startsWith(DOMAIN_TAG_PREFIX)) {
+        const tagDomain = value.slice(DOMAIN_TAG_PREFIX.length);
+        if (!allowedDomains.has(tagDomain)) {
+          tags.delete(i);
+          result.removed++;
+          modified = true;
+        }
+      }
+    }
+    return modified;
   }
 
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Resolve a model name to its dbt schema YAML file path by searching
+   * the workspace filesystem. Returns null if no matching file is found.
+   */
   private resolveYamlPath(modelName: string): string | null {
-    const model = this.manifestService.getModel(modelName);
-    if (!model?.originalFilePath) {
-      return null;
+    return this.getYamlIndex().get(modelName) ?? null;
+  }
+
+  /**
+   * Return the YAML index, using the transient cache if available
+   * (during `reconcileAll`), otherwise building a fresh index.
+   */
+  private getYamlIndex(): Map<string, string> {
+    if (this._yamlCache) {
+      return this._yamlCache;
+    }
+    return this.buildYamlIndex();
+  }
+
+  /**
+   * Recursively walk the workspace collecting `.yml`/`.yaml` files into
+   * a Map keyed by filename stem (e.g. `dim_project` → `/abs/path/dim_project.yml`).
+   *
+   * NOTE: dbt requires unique model names across the project, so stem
+   * collisions between directories are not expected in valid projects.
+   * If they do occur the last file encountered wins.
+   */
+  private buildYamlIndex(): Map<string, string> {
+    const index = new Map<string, string>();
+    this.walkDir(this.workspaceRoot, index);
+    return index;
+  }
+
+  private walkDir(dir: string, index: Map<string, string>): void {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // permission error or deleted dir — skip
     }
 
-    const base = model.originalFilePath.replace(/\.sql$/i, '');
-    for (const ext of ['.yml', '.yaml']) {
-      const candidate = path.join(this.workspaceRoot, `${base}${ext}`);
-      if (fs.existsSync(candidate)) {
-        return candidate;
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!EXCLUDED_DIRS.has(entry.name)) {
+          this.walkDir(path.join(dir, entry.name), index);
+        }
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (ext === '.yml' || ext === '.yaml') {
+          const stem = path.basename(entry.name, path.extname(entry.name));
+          index.set(stem, path.join(dir, entry.name));
+        }
       }
     }
+  }
 
-    return null;
+  private clearYamlCache(): void {
+    this._yamlCache = undefined;
   }
 
   private readYaml(yamlPath: string): Document | null {

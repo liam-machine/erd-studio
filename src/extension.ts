@@ -161,7 +161,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const domainService = new DomainService(layerService);
   const manifestService = new ManifestService();
   const templateService = new TemplateService();
-  const schemaTagService = new SchemaTagService(manifestService, domainService, workspaceRoot, semanticDir);
+  const schemaTagService = new SchemaTagService(domainService, workspaceRoot, semanticDir);
   const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
@@ -473,8 +473,6 @@ export function activate(context: vscode.ExtensionContext): void {
           cancellable: false,
         },
         async () => {
-          // Ensure manifest is loaded before reconciling
-          await manifestService.loadManifest(workspaceRoot);
           const result = await schemaTagService.reconcileAll();
           const parts: string[] = [];
           if (result.added > 0) { parts.push(`${result.added} added`); }
