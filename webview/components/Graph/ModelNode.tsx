@@ -28,6 +28,7 @@ import { KeyBadge } from '../common/KeyBadge';
 import { DataTypeSelect } from '../common/DataTypeSelect';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
 import { STAGE_HEX } from '../../lib/stageColors';
+import { getDataTypeColor } from '../../lib/dataTypeColors';
 import './ModelNode.css';
 
 // ---------------------------------------------------------------------------
@@ -464,6 +465,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
       ) : (
         <span
           className={`model-node__col-type${!readOnly ? ' model-node__col-type--editable' : ''}`}
+          style={{ color: getDataTypeColor(column.dataType) }}
           onClick={nodeSelected && !readOnly ? handleDoubleClickType : undefined}
           onDoubleClick={!nodeSelected ? handleDoubleClickType : undefined}
         >
@@ -680,7 +682,7 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
             {missingColumns.map((cd) => (
               <div key={`ghost-${cd.name}`} className="model-node__column model-node__column--disc-missing nodrag">
                 <span className="model-node__col-name">{cd.name}</span>
-                <span className="model-node__col-type">{cd.targetDataType ?? ''}</span>
+                <span className="model-node__col-type" style={{ color: cd.targetDataType ? getDataTypeColor(cd.targetDataType) : undefined }}>{cd.targetDataType ?? ''}</span>
                 <span className="model-node__col-disc-badge model-node__col-disc-badge--missing">{discrepancyTargetStage ?? 'target'} only</span>
               </div>
             ))}

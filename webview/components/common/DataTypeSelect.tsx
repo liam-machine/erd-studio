@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { getDataTypeColor } from '../../lib/dataTypeColors';
 import './DataTypeSelect.css';
 
 // ---------------------------------------------------------------------------
@@ -170,7 +171,7 @@ export function DataTypeSelect({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >
-        <span className="data-type-select__value">{value}</span>
+        <span className="data-type-select__value" style={{ color: getDataTypeColor(value) }}>{value}</span>
         <span className="data-type-select__arrow">▾</span>
       </button>
 
@@ -192,6 +193,7 @@ export function DataTypeSelect({
               aria-selected={dt === value}
               data-value={dt}
               tabIndex={0}
+              style={{ color: getDataTypeColor(dt) }}
               onClick={() => handleSelect(dt)}
               onMouseDown={(e) => e.stopPropagation()}
             >
