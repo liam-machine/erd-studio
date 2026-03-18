@@ -408,3 +408,31 @@
   background: var(--vscode-editorWarning-foreground, #cca700);
   opacity: 0.85;
 }
+
+/* ---------------------------------------------------------------------------
+   View File button (top-right corner)
+   --------------------------------------------------------------------------- */
+
+.toolbar__view-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: background 0.1s ease, opacity 0.1s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.toolbar__view-file:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  opacity: 1;
+}

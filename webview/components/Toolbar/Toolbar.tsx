@@ -337,9 +337,17 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     ?? domain.layer.substring(0, 3).toUpperCase();
   const layerColor = domain.layerConfig?.color;
 
+  // --- View File handler ----------------------------------------------------
+
+  const handleViewFile = useCallback(() => {
+    const message: WebviewMessage = { type: 'viewFile' };
+    vscode.postMessage(message);
+  }, [vscode]);
+
   // --- Render --------------------------------------------------------------
 
   return (
+    <>
       <Panel position="top-center" className="toolbar-container">
         {/* Row 1: Controls */}
         <div className="toolbar toolbar--attached-bottom">
@@ -574,5 +582,18 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         {/* Row 2: Stage tabs (attached below toolbar) */}
         <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
       </Panel>
+
+      {/* View File button — top-right corner */}
+      <Panel position="top-right">
+        <button
+          className="toolbar__view-file"
+          onClick={handleViewFile}
+          title="Open as JSON file"
+          aria-label="Open underlying JSON file in text editor"
+        >
+          {'{ }'} View File
+        </button>
+      </Panel>
+    </>
   );
 }

@@ -373,6 +373,13 @@ export interface ReorderColumnsMessage {
   };
 }
 
+/**
+ * Request to open the underlying JSON file in VS Code's default text editor.
+ */
+export interface ViewFileMessage {
+  type: 'viewFile';
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -400,7 +407,8 @@ export type WebviewMessage =
   | UpdateModelRoleMessage
   | SwitchStageMessage
   | ToggleDiscrepancyMessage
-  | ReorderColumnsMessage;
+  | ReorderColumnsMessage
+  | ViewFileMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

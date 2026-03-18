@@ -141,6 +141,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
           'refreshManifest', 'undo', 'redo', 'updateViewConfig', 'dismissWelcome',
+          'viewFile',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           return;
@@ -255,6 +256,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'refreshManifest': {
             await vscode.commands.executeCommand('dbtSemantic.refreshManifest');
+            break;
+          }
+          case 'viewFile': {
+            await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
             break;
           }
           case 'undo': {
