@@ -614,10 +614,9 @@ function EditorCanvas() {
         onEdgeContextMenu={onEdgeContextMenu}
         fitView={!shouldSkipFitView}
         minZoom={0.05}
-        selectionOnDrag={!domain.readOnly}
         selectionMode={SelectionMode.Partial}
         nodesDraggable={domain.positionDraggable ?? !domain.readOnly}
-        panOnDrag={[1, 2]}
+        panOnDrag
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
