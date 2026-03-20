@@ -41,6 +41,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly pendingUpdates = new Map<string, boolean>();
 
   /**
+   * Serialization queue for document mutations. Ensures concurrent messages
+   * (e.g. updateColumn + updatePositions) are processed sequentially so each
+   * handler reads the latest document text rather than clobbering each other.
+   * Keyed by document URI to allow independent queues for different files.
+   */
+  private readonly editQueues = new Map<string, Promise<void>>();
+
+  /**
+   * Enqueue a mutation so it runs after any pending mutation for the same
+   * document completes. Returns a promise that resolves when `fn` finishes.
+   */
+  private queueEdit(documentUri: string, fn: () => Promise<void>): Promise<void> {
+    const prev = this.editQueues.get(documentUri) ?? Promise.resolve();
+    const next = prev.then(() => fn(), () => fn());
+    this.editQueues.set(documentUri, next);
+    return next;
+  }
+
+  /**
    * Track all open webview panels by document URI.
    * Used by refreshAllOpenDomains() to update all editors when manifest changes.
    * activeStage tracks which stage the webview is currently displaying.
@@ -162,10 +181,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               | { positions: Record<string, { x: number; y: number }> }
               | undefined;
             if (payload?.positions) {
-              await this.handleUpdatePositions(
-                document,
-                webviewPanel.webview,
-                payload.positions,
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdatePositions(
+                  document,
+                  webviewPanel.webview,
+                  payload.positions,
+                ),
               );
             }
             break;
@@ -173,84 +194,96 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'addModel': {
             const payload = (message as { payload?: DesignModel }).payload;
             if (payload) {
-              await this.handleAddModel(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleAddModel(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'addColumn': {
             const payload = (message as { payload?: { modelName: string; column: ColumnDef } }).payload;
             if (payload) {
-              await this.handleAddColumn(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleAddColumn(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'updateColumn': {
             const payload = (message as { payload?: { modelName: string; oldColumnName: string; column: ColumnDef } }).payload;
             if (payload) {
-              await this.handleUpdateColumn(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateColumn(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'removeColumn': {
             const payload = (message as { payload?: { modelName: string; columnName: string } }).payload;
             if (payload) {
-              await this.handleRemoveColumn(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleRemoveColumn(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'toggleColumnKey': {
             const payload = (message as { payload?: { modelName: string; columnName: string; keyType: 'PK' | 'FK' | 'NK'; value: boolean } }).payload;
             if (payload) {
-              await this.handleToggleColumnKey(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleToggleColumnKey(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'addRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
-              await this.handleAddRelationship(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleAddRelationship(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'renameModel': {
             const payload = (message as { payload?: { oldName: string; newName: string } }).payload;
             if (payload) {
-              await this.handleRenameModel(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleRenameModel(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'removeModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
-              await this.handleRemoveModel(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleRemoveModel(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'removeRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string } }).payload;
             if (payload) {
-              await this.handleRemoveRelationship(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleRemoveRelationship(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'updateRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
-              await this.handleUpdateRelationship(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateRelationship(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'editRelationship': {
             const payload = (message as { payload?: { originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string; fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
-              await this.handleEditRelationship(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleEditRelationship(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'addExistingModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
-              await this.handleAddExistingModel(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleAddExistingModel(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
@@ -277,21 +310,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'updateModelRationale': {
             const payload = (message as { payload?: { modelName: string; rationale: Rationale } }).payload;
             if (payload) {
-              await this.handleUpdateModelRationale(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateModelRationale(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'updateModelGrain': {
             const payload = (message as { payload?: { modelName: string; grain: string } }).payload;
             if (payload) {
-              await this.handleUpdateModelGrain(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateModelGrain(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
           case 'updateModelRole': {
             const payload = (message as { payload?: { modelName: string; modelRole: string | null } }).payload;
             if (payload) {
-              await this.handleUpdateModelRole(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateModelRole(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
@@ -312,7 +348,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'reorderColumns': {
             const payload = (message as { payload?: { modelName: string; orderedNames: string[] } }).payload;
             if (payload) {
-              await this.handleReorderColumns(document, webviewPanel.webview, payload, activeStage);
+              await this.queueEdit(panelKey, () =>
+                this.handleReorderColumns(document, webviewPanel.webview, payload, activeStage));
             }
             break;
           }
@@ -810,6 +847,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         ...(payload.column.scdType != null ? { scdType: payload.column.scdType } : {}),
         ...(payload.column.additiveType ? { additiveType: payload.column.additiveType } : {}),
       };
+
+      // Cascade column rename into relationships
+      if (payload.oldColumnName !== payload.column.name) {
+        const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
+        for (const rel of relationships) {
+          if (rel.fromModel === payload.modelName && rel.fromColumn === payload.oldColumnName) {
+            rel.fromColumn = payload.column.name;
+          }
+          if (rel.toModel === payload.modelName && rel.toColumn === payload.oldColumnName) {
+            rel.toColumn = payload.column.name;
+          }
+        }
+      }
 
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
       const edit = new vscode.WorkspaceEdit();

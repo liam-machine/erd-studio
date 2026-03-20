@@ -150,6 +150,12 @@ export function ColumnRowEditor({
   // Track if we're switching between fields (prevents premature save on blur)
   const isSwitchingFieldRef = useRef(false);
 
+  // Track if a field handler (data type, SCD type) already saved — prevents
+  // the blur-triggered handleSave from overwriting with stale closure data.
+  // Unlike isSavingRef (which is reset by the column-prop useEffect on
+  // round-trip), this ref is only cleared by the blur handler itself.
+  const skipNextBlurSaveRef = useRef(false);
+
   // Reset local state when column prop changes (e.g., after successful save)
   useEffect(() => {
     if (!isSavingRef.current) {
@@ -229,6 +235,14 @@ export function ColumnRowEditor({
     if (isSwitchingFieldRef.current) {
       return;
     }
+    // Skip if a field change handler (e.g. data type, SCD type) already saved.
+    // We check skipNextBlurSaveRef (not isSavingRef) because isSavingRef gets
+    // reset by the column-prop useEffect when the round-trip domainLoaded
+    // arrives — which can happen before this rAF-deferred blur callback fires.
+    if (skipNextBlurSaveRef.current) {
+      skipNextBlurSaveRef.current = false;
+      return;
+    }
     if (mode === 'new' || mode === 'editable') {
       // Only save if we have a valid name
       if (localColumn.name.trim()) {
@@ -246,6 +260,12 @@ export function ColumnRowEditor({
       if (mode === 'readonly') return;
       // Mark that we're switching fields to prevent blur handler from saving
       isSwitchingFieldRef.current = true;
+      // DataTypeSelect renders via portal (outside the row DOM), so the row's
+      // blur fires the moment the dropdown opens. Skip that blur save — the
+      // data type handler will save directly when a value is selected.
+      if (field === 'dataType') {
+        skipNextBlurSaveRef.current = true;
+      }
       setEditingField(field);
       setValidationError(null);
       // Clear the flag after React has had time to update
@@ -302,6 +322,7 @@ export function ColumnRowEditor({
         );
         if (!error) {
           isSavingRef.current = true;
+          skipNextBlurSaveRef.current = true;
           onUpdate?.({
             name: localColumn.name.trim(),
             dataType: newType,
@@ -336,6 +357,7 @@ export function ColumnRowEditor({
       // Auto-save
       if (localColumn.name.trim() && mode !== 'readonly') {
         isSavingRef.current = true;
+        skipNextBlurSaveRef.current = true;
         onUpdate?.({
           name: localColumn.name.trim(),
           dataType: localColumn.dataType,
@@ -359,6 +381,7 @@ export function ColumnRowEditor({
       // Auto-save
       if (localColumn.name.trim() && mode !== 'readonly') {
         isSavingRef.current = true;
+        skipNextBlurSaveRef.current = true;
         onUpdate?.({
           name: localColumn.name.trim(),
           dataType: localColumn.dataType,
@@ -486,7 +509,11 @@ export function ColumnRowEditor({
           <DataTypeSelect
             value={localColumn.dataType}
             onChange={handleDataTypeChange}
-            onBlur={() => setEditingField(null)}
+            onBlur={() => {
+              // Dismissed without selecting — allow normal blur saves again
+              skipNextBlurSaveRef.current = false;
+              setEditingField(null);
+            }}
             className="column-row-editor__type-select"
             autoOpen={true}
           />

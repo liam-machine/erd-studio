@@ -160,12 +160,32 @@ AI coding harness files (installed via `dbtSemantic.installCodingHarness`) embed
 
 ## Developer Testing in VS Code
 
-To test the extension in development mode, open the **fixture dbt project** as the workspace:
+To test the extension in development mode, open the **fixture dbt project** as the workspace.
 
-1. Press **F5** in the extension project to launch the Extension Development Host
-2. In the dev host, open `test/fixtures/dbt-project` as the workspace folder
-3. The sidebar tree shows domains under Silver and Gold layers
-4. Open **ppw-work-lot** for the richest sample data (35+ models, 40 relationships)
+### From the terminal (preferred)
+
+Build first, then launch the Extension Development Host directly with the fixtures project:
+
+```bash
+npm run build
+code --extensionDevelopmentPath=/Users/liamwynne/GIT/LIAM/dbt-semantic-designer /Users/liamwynne/GIT/LIAM/dbt-semantic-designer/test/fixtures/dbt-project
+```
+
+This opens the Extension Development Host with the fixtures project loaded and the extension active — no need to manually open a folder.
+
+### From VS Code (alternative)
+
+1. Open the extension project in VS Code
+2. Press **F5** to launch the Extension Development Host
+3. In the dev host, open `test/fixtures/dbt-project` as the workspace folder
+
+**Note:** F5 runs the `npm: watch` pre-launch task. If it hangs, terminate running tasks first (**Cmd+Shift+P** → "Tasks: Terminate Task"), then retry.
+
+### Using the fixtures
+
+- The sidebar tree shows domains under Silver and Gold layers
+- Open **ppw-work-lot** for the richest sample data (35+ models, 40 relationships)
+- Extension host `console.log` output appears in the **Debug Console** (Cmd+Shift+Y) of the main VS Code window (only when launched via F5)
 
 This fixture project contains `dbt_project.yml`, a `target/manifest.json`, layer config, templates, and several domain files across silver/gold layers.
 
