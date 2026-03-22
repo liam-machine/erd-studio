@@ -106,6 +106,25 @@ function EditorCanvas() {
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
 
+  // Track Shift key state for pan/selection mode switching.
+  // React Flow's built-in selectionKeyCode uses useKeyPress which may not
+  // receive keyboard events reliably inside VS Code webview iframes.
+  const [shiftHeld, setShiftHeld] = useState(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.key === 'Shift') setShiftHeld(true); };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Shift') setShiftHeld(false); };
+    // Also reset on blur (e.g. user Shift-tabs away from the webview)
+    const blur = () => setShiftHeld(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, []);
+
   // F405: Column expansion state (persisted in Zustand store via useStatePersistence)
   const { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded } = useColumnExpansion();
   // Check synchronously on mount if we have persisted expansion state.
@@ -616,7 +635,10 @@ function EditorCanvas() {
         minZoom={0.05}
         selectionMode={SelectionMode.Partial}
         nodesDraggable={domain.positionDraggable ?? !domain.readOnly}
-        panOnDrag
+        panOnDrag={!shiftHeld}
+        selectionOnDrag={shiftHeld && !domain.readOnly}
+        selectionKeyCode={null}
+        multiSelectionKeyCode="Shift"
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
