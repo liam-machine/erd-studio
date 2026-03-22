@@ -13,7 +13,7 @@
 import ELK from 'elkjs/lib/elk-api';
 import type { ELK as IELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
 import type { ModelFlowNode, FkFlowEdge } from '../types/graph';
-import type { NodePosition, LayoutOptions } from '../../src/types/semantic';
+import type { NodePosition, LayoutOptions, ModelRole } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
 // Node size estimation (matches ModelNode CSS)
@@ -125,6 +125,44 @@ function estimateNodeWidth(node: ModelFlowNode): number {
 }
 
 // ---------------------------------------------------------------------------
+// Role-aware partitioning
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a model's dimensional role to an ELK partition index.
+ *
+ * Partitions place related model types into spatial bands when ELK's
+ * partitioning feature is active. Lower indices appear earlier in the
+ * layout direction (left for RIGHT direction):
+ *
+ *   0 — Dimensions (conformed-dim, domain-dim)
+ *   1 — Reference / lookup tables
+ *   2 — Facts (transaction, periodic, accumulating) + unassigned models
+ *   3 — Factless facts / bridge tables
+ *   4 — Gold aggregates (gold-dim, gold-fact)
+ */
+export function roleToPartition(role: ModelRole | undefined): number {
+  switch (role) {
+    case 'conformed-dim':
+    case 'domain-dim':
+      return 0;
+    case 'reference':
+      return 1;
+    case 'transaction-fact':
+    case 'periodic-snapshot':
+    case 'accumulating-snapshot':
+      return 2;
+    case 'factless-fact':
+      return 3;
+    case 'gold-dim':
+    case 'gold-fact':
+      return 4;
+    default:
+      return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Default ELK options
 // ---------------------------------------------------------------------------
 
@@ -155,6 +193,18 @@ export const DEFAULT_ELK_OPTIONS: Record<string, string> = {
   'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
   // Post-compaction to minimize edge lengths
   'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH',
+};
+
+/**
+ * Role-aware ELK options — extends defaults with partition activation.
+ *
+ * When active, each node is assigned to a spatial band based on its
+ * `modelRole`, grouping dimensions left, facts center, and gold right.
+ * Used as the default; callers can still override via `viewConfig.layoutOptions`.
+ */
+export const ROLE_AWARE_ELK_OPTIONS: Record<string, string> = {
+  ...DEFAULT_ELK_OPTIONS,
+  'elk.partitioning.activate': 'true',
 };
 
 // ---------------------------------------------------------------------------
@@ -188,13 +238,24 @@ function getElk(): IELK {
  * Convert React Flow nodes into ELK children nodes.
  * Each node gets an estimated width (based on content) and height (based on
  * column count) so the layered layout reserves the correct amount of space.
+ *
+ * When `partitioning` is true, each node also gets a `layoutOptions` entry
+ * assigning it to a spatial partition based on its `modelRole`.
  */
-function toElkChildren(nodes: ModelFlowNode[]): ElkNode[] {
-  return nodes.map((node) => ({
-    id: node.id,
-    width: estimateNodeWidth(node),
-    height: estimateNodeHeight(node.data.columns.length),
-  }));
+function toElkChildren(nodes: ModelFlowNode[], partitioning: boolean): ElkNode[] {
+  return nodes.map((node) => {
+    const elkNode: ElkNode = {
+      id: node.id,
+      width: estimateNodeWidth(node),
+      height: estimateNodeHeight(node.data.columns.length),
+    };
+    if (partitioning) {
+      elkNode.layoutOptions = {
+        'elk.partitioning.partition': String(roleToPartition(node.data.modelRole)),
+      };
+    }
+    return elkNode;
+  });
 }
 
 /** Convert React Flow edges into ELK extended edges. */
@@ -228,14 +289,16 @@ export async function runElkLayout(
   const elk = getElk();
 
   const mergedOptions: Record<string, string> = {
-    ...DEFAULT_ELK_OPTIONS,
+    ...ROLE_AWARE_ELK_OPTIONS,
     ...layoutOptions,
   };
+
+  const partitioning = mergedOptions['elk.partitioning.activate'] === 'true';
 
   const graph: ElkNode = {
     id: 'root',
     layoutOptions: mergedOptions,
-    children: toElkChildren(nodes),
+    children: toElkChildren(nodes, partitioning),
     edges: toElkEdges(edges),
   };
 
