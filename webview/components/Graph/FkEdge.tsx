@@ -14,7 +14,7 @@
  * least bends.
  */
 
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   getSmoothStepPath,
   EdgeLabelRenderer,
@@ -24,6 +24,8 @@ import {
   type EdgeProps,
 } from '@xyflow/react';
 import type { FkFlowEdge } from '../../types/graph';
+import { useVsCodeApi } from '../../hooks/useVsCodeApi';
+import { swapCardinality } from '../../lib/cardinalityUtils';
 import {
   calculateEdgeOffset,
   parseSideFromHandle,
@@ -108,8 +110,29 @@ function FkEdgeComponent({
     return positions;
   }, [nodeLookup]);
 
+  const vscode = useVsCodeApi();
+  const [hovered, setHovered] = useState(false);
+
+  const handleSwap = useCallback(
+    (e: React.MouseEvent) => {
+      if (!data) return;
+      e.stopPropagation();
+      vscode.postMessage({
+        type: 'updateRelationship',
+        payload: {
+          fromModel: data.fromModel,
+          fromColumn: data.fromColumn,
+          toModel: data.toModel,
+          toColumn: data.toColumn,
+          cardinality: swapCardinality(data.cardinality),
+        },
+      });
+    },
+    [vscode, data],
+  );
+
   if (!data) return null;
-  const { cardinality, stage, discrepancyStatus, fromModel, toModel, dimmed } = data;
+  const { cardinality, stage, discrepancyStatus, fromModel, toModel, dimmed, readOnly } = data;
 
   // For cardinality mismatch edges, pull the mismatch details from the report
   // The edge data only has status — we need to find the original relationship discrepancy
@@ -259,6 +282,27 @@ function FkEdgeComponent({
             title="Cardinality differs between stages"
           >
             !
+          </span>
+        )}
+        {!readOnly && !discrepancyStatus && (
+          <span
+            className={`fk-edge__swap-zone${dimmed ? ' fk-edge__swap-zone--dimmed' : ''}`}
+            style={{
+              transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
+            }}
+            onMouseEnter={(e) => { e.stopPropagation(); setHovered(true); }}
+            onMouseLeave={(e) => { e.stopPropagation(); setHovered(false); }}
+          >
+            {hovered && (
+              <button
+                className="fk-edge__swap-btn"
+                onClick={handleSwap}
+                title={`Swap cardinality (${cardinality} → ${swapCardinality(cardinality)})`}
+                aria-label="Swap cardinality direction"
+              >
+                &#x21c4;
+              </button>
+            )}
           </span>
         )}
       </EdgeLabelRenderer>

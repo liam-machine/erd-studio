@@ -246,6 +246,50 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Cardinality control row (dropdown + swap button)
+   --------------------------------------------------------------------------- */
+
+.context-menu__cardinality-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.context-menu__cardinality-control .context-menu__cardinality-wrapper {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Swap cardinality button (context menu)
+   --------------------------------------------------------------------------- */
+
+.context-menu__swap-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--editor-fg);
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.context-menu__swap-btn:hover {
+  opacity: 1;
+  border-color: var(--focus-border);
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
    Subtle edit link in header
    --------------------------------------------------------------------------- */
 

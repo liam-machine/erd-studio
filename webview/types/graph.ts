@@ -98,6 +98,8 @@ export type FkEdgeData = {
   discrepancyStatus?: 'extra' | 'missing' | 'cardinality-mismatch';
   /** Whether the edge is dimmed (not connected to current selection). */
   dimmed?: boolean;
+  /** Whether the edge is in a read-only context (physical stage). */
+  readOnly?: boolean;
   /** Index signature required by React Flow's Edge generic. */
   [key: string]: unknown;
 };

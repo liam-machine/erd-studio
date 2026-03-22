@@ -133,3 +133,48 @@
 .fk-edge:hover {
   stroke-width: 3;
 }
+
+/* -----------------------------------------------------------------------
+   Swap cardinality zone + button (inline on edge, appears on hover)
+   ----------------------------------------------------------------------- */
+
+.fk-edge__swap-zone {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: all;
+}
+
+.fk-edge__swap-zone--dimmed {
+  display: none;
+}
+
+.fk-edge__swap-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--editor-fg);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: all;
+  opacity: 0.85;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: opacity 0.1s ease, border-color 0.1s ease, background 0.1s ease;
+}
+
+.fk-edge__swap-btn:hover {
+  opacity: 1;
+  border-color: var(--focus-border);
+  background: var(--button-bg);
+  color: var(--button-fg);
+}

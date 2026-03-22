@@ -226,6 +226,7 @@ export function transformDomain(
           toColumn: rel.toColumn,
           cardinality: rel.cardinality,
           stage,
+          ...(readOnly ? { readOnly: true } : {}),
           ...(discStatus ? { discrepancyStatus: discStatus } : {}),
         },
       };

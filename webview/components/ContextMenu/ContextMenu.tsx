@@ -12,6 +12,7 @@ import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { FkEdgeData } from '../../types/graph';
 import type { Cardinality } from '../../../src/types/semantic';
 import type { FkDialogEditData } from '../../store/editorStore';
+import { swapCardinality } from '../../lib/cardinalityUtils';
 import './ContextMenu.css';
 
 // ---------------------------------------------------------------------------
@@ -180,6 +181,18 @@ export function ContextMenu() {
     [contextMenu, vscode, closeContextMenu],
   );
 
+  // Handle swap cardinality (flip direction)
+  const handleSwapCardinality = useCallback(() => {
+    if (!contextMenu || contextMenu.type !== 'edge') return;
+
+    const { fromModel, fromColumn, toModel, toColumn, cardinality } = contextMenu.data;
+    vscode.postMessage({
+      type: 'updateRelationship',
+      payload: { fromModel, fromColumn, toModel, toColumn, cardinality: swapCardinality(cardinality) },
+    });
+    closeContextMenu();
+  }, [contextMenu, vscode, closeContextMenu]);
+
   // Handle edit relationship (open the FK dialog in edit mode)
   const handleEditClick = useCallback(() => {
     if (!contextMenu || contextMenu.type !== 'edge') return;
@@ -289,38 +302,48 @@ export function ContextMenu() {
           {isReadOnly ? (
             <span className="context-menu__value">{cardinalityLabel}</span>
           ) : (
-            <div className="context-menu__cardinality-wrapper">
-              <button
-                ref={cardinalityButtonRef}
-                className="context-menu__cardinality-button"
-                onClick={() => setCardinalityOpen(!cardinalityOpen)}
-                aria-haspopup="listbox"
-                aria-expanded={cardinalityOpen}
-              >
-                {cardinalityLabel}
-                <span className={`context-menu__cardinality-arrow${dropdownFlipped ? ' context-menu__cardinality-arrow--flipped' : ''}`}>▾</span>
-              </button>
-              {cardinalityOpen && (
-                <ul
-                  ref={dropdownRef}
-                  className={`context-menu__cardinality-dropdown${dropdownFlipped ? ' context-menu__cardinality-dropdown--flipped' : ''}`}
-                  role="listbox"
+            <div className="context-menu__cardinality-control">
+              <div className="context-menu__cardinality-wrapper">
+                <button
+                  ref={cardinalityButtonRef}
+                  className="context-menu__cardinality-button"
+                  onClick={() => setCardinalityOpen(!cardinalityOpen)}
+                  aria-haspopup="listbox"
+                  aria-expanded={cardinalityOpen}
                 >
-                  {CARDINALITY_OPTIONS.map((option) => (
-                    <li
-                      key={option.value}
-                      className={`context-menu__cardinality-option${
-                        option.value === edge.cardinality ? ' context-menu__cardinality-option--selected' : ''
-                      }`}
-                      role="option"
-                      aria-selected={option.value === edge.cardinality}
-                      onClick={() => handleCardinalityChange(option.value)}
-                    >
-                      {option.label}
-                    </li>
-                  ))}
-                </ul>
-              )}
+                  {cardinalityLabel}
+                  <span className={`context-menu__cardinality-arrow${dropdownFlipped ? ' context-menu__cardinality-arrow--flipped' : ''}`}>▾</span>
+                </button>
+                {cardinalityOpen && (
+                  <ul
+                    ref={dropdownRef}
+                    className={`context-menu__cardinality-dropdown${dropdownFlipped ? ' context-menu__cardinality-dropdown--flipped' : ''}`}
+                    role="listbox"
+                  >
+                    {CARDINALITY_OPTIONS.map((option) => (
+                      <li
+                        key={option.value}
+                        className={`context-menu__cardinality-option${
+                          option.value === edge.cardinality ? ' context-menu__cardinality-option--selected' : ''
+                        }`}
+                        role="option"
+                        aria-selected={option.value === edge.cardinality}
+                        onClick={() => handleCardinalityChange(option.value)}
+                      >
+                        {option.label}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <button
+                className="context-menu__swap-btn"
+                onClick={handleSwapCardinality}
+                title={`Swap to ${swapCardinality(edge.cardinality).replace(/-/g, ' ')}`}
+                aria-label="Swap cardinality direction"
+              >
+                &#x21c4;
+              </button>
             </div>
           )}
         </div>
