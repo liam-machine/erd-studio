@@ -93,7 +93,7 @@
         "modelRole": "domain-dim",
         "columns": [
           {
-            "name": "location_id",
+            "name": "location_idn",
             "dataType": "INT",
             "description": "Location surrogate key",
             "isPrimaryKey": true
@@ -106,7 +106,7 @@
           },
           {
             "name": "latitude",
-            "dataType": "FLOAT",
+            "dataType": "JSON",
             "description": "GPS latitude"
           },
           {
@@ -118,12 +118,59 @@
         "rationale": {
           "purpose": "k"
         }
+      },
+      {
+        "name": "fct_sale",
+        "description": "",
+        "columns": [
+          {
+            "name": "sale_id",
+            "dataType": "INTEGER",
+            "description": "Surrogate key",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "event_date",
+            "dataType": "DATE",
+            "description": "Business event date"
+          },
+          {
+            "name": "amount",
+            "dataType": "DECIMAL(18,2)",
+            "description": "Monetary amount"
+          },
+          {
+            "name": "dwh_inserted_at",
+            "dataType": "TIMESTAMP_NTZ",
+            "description": "Warehouse insert timestamp"
+          },
+          {
+            "name": "dwh_updated_at",
+            "dataType": "TIMESTAMP_NTZ",
+            "description": "Warehouse update timestamp"
+          }
+        ],
+        "modelRole": "transaction-fact"
       }
     ],
     "relationships": [
       {
+        "fromModel": "fct_sale",
+        "fromColumn": "amount",
+        "toModel": "dim_location",
+        "toColumn": "location_idn",
+        "cardinality": "many-to-one"
+      },
+      {
         "fromModel": "dim_work_lot",
-        "fromColumn": "project_id",
+        "fromColumn": "work_lot_id",
+        "toModel": "fct_sale",
+        "toColumn": "amount",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_sale",
+        "fromColumn": "sale_id",
         "toModel": "dim_project",
         "toColumn": "project_id",
         "cardinality": "many-to-one"
@@ -133,20 +180,24 @@
   "viewConfig": {
     "positions": {
       "dim_project": {
-        "x": 477,
-        "y": 612
+        "x": 609,
+        "y": 196
       },
       "dim_work_lot": {
-        "x": 112,
-        "y": 596
+        "x": -40,
+        "y": 20
       },
       "dim_contractor": {
         "x": 476,
         "y": 296
       },
       "dim_location": {
-        "x": 486,
-        "y": 274
+        "x": 609,
+        "y": 12
+      },
+      "fct_sale": {
+        "x": 292,
+        "y": 30
       }
     }
   }

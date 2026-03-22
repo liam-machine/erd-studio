@@ -24,9 +24,11 @@ import { ManifestService } from '../services/manifestService';
 import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SchemaTagService } from '../services/schemaTagService';
+import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
 import type { ManifestData } from '../types/manifest';
 import type { DisplayDomain } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignModel, Stage } from '../types/semantic';
+import type { NodePosition, Relationship } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -534,10 +536,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
 
-      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+      let unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
 
       // Diff-based tag sync: detect model membership changes and sync YAML tags
       void this.diffAndSyncTags(document, unifiedDomain);
+
+      // Auto-assign positions for models that lack them (e.g. added by AI agents)
+      const positionsWritten = await this.autoPositionNewModels(document, unifiedDomain);
+      if (positionsWritten) {
+        // Re-read since we wrote new positions to the file
+        unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+      }
 
       if (activeStage === 'physical') {
         const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
@@ -554,6 +563,62 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
       webview.postMessage({ type: 'error', payload: { message } });
     }
+  }
+
+  /**
+   * Detect models in logical.models that lack entries in viewConfig.positions
+   * and compute positions for them. Writes positions back to the document via
+   * WorkspaceEdit so they persist. Returns true if positions were written.
+   */
+  private async autoPositionNewModels(
+    document: vscode.TextDocument,
+    unifiedDomain: { logical: { models: Array<{ name: string }>; relationships: Relationship[] }; viewConfig: { positions?: Record<string, NodePosition> } },
+  ): Promise<boolean> {
+    const positions = unifiedDomain.viewConfig.positions ?? {};
+    const modelNames = unifiedDomain.logical.models.map((m) => m.name);
+    const newModels = modelNames.filter((name) => !positions[name]);
+
+    if (newModels.length === 0) return false;
+
+    const computed = computeNewModelPositions({
+      newModels,
+      relationships: unifiedDomain.logical.relationships ?? [],
+      existingPositions: positions,
+    });
+
+    if (Object.keys(computed).length === 0) return false;
+
+    // Merge computed positions into document
+    const text = document.getText();
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+    const existingPos = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
+    viewConfig.positions = { ...existingPos, ...computed };
+    parsed.viewConfig = viewConfig;
+
+    const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(
+      document.positionAt(0),
+      document.positionAt(text.length),
+    );
+    edit.replace(document.uri, fullRange, updatedText);
+
+    const docUri = document.uri.toString();
+    this.pendingUpdates.set(docUri, true);
+    const success = await vscode.workspace.applyEdit(edit);
+
+    if (success) {
+      try {
+        await document.save();
+      } finally {
+        this.pendingUpdates.delete(docUri);
+      }
+      return true;
+    }
+
+    this.pendingUpdates.delete(docUri);
+    return false;
   }
 
   /**
@@ -683,6 +748,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       });
 
       section.models = models;
+
+      // Compute position for the new model
+      const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const existingPositions = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
+      const relationships = (section.relationships ?? []) as Relationship[];
+      const computed = computeNewModelPositions({
+        newModels: [model.name],
+        relationships,
+        existingPositions,
+      });
+      if (computed[model.name]) {
+        viewConfig.positions = { ...existingPositions, ...computed };
+        parsed.viewConfig = viewConfig;
+      }
+
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
 
       const edit = new vscode.WorkspaceEdit();
@@ -1435,8 +1515,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       // Find open position from global viewConfig
       const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
-      const existingPositions = (viewConfig.positions ?? {}) as Record<string, { x: number; y: number }>;
-      const newPosition = this.findOpenPosition(existingPositions);
+      const existingPositions = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
+      const newPosition = findOpenPosition(existingPositions);
 
       // Add model with columns from manifest
       const columns = manifestModel.columns.map((col) => ({
@@ -1611,43 +1691,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       console.error(`[SemanticEditorProvider] Update model role failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update model role: ${message}` } });
     }
-  }
-
-  // -------------------------------------------------------------------------
-  // Utility methods
-  // -------------------------------------------------------------------------
-
-  private findOpenPosition(
-    existingPositions: Record<string, { x: number; y: number }>,
-  ): { x: number; y: number } {
-    const NODE_WIDTH = 280;
-    const NODE_HEIGHT = 200;
-    const PADDING = 40;
-    const CELL_WIDTH = NODE_WIDTH + PADDING;
-    const CELL_HEIGHT = NODE_HEIGHT + PADDING;
-
-    if (Object.keys(existingPositions).length === 0) {
-      return { x: 100, y: 100 };
-    }
-
-    const positions = Object.values(existingPositions);
-    const maxX = Math.max(...positions.map((p) => p.x), 0);
-
-    for (let row = 0; row < 20; row++) {
-      for (let col = 0; col < 10; col++) {
-        const candidate = { x: col * CELL_WIDTH + 100, y: row * CELL_HEIGHT + 100 };
-        const isOverlapping = positions.some((existing) => {
-          const dx = Math.abs(candidate.x - existing.x);
-          const dy = Math.abs(candidate.y - existing.y);
-          return dx < CELL_WIDTH && dy < CELL_HEIGHT;
-        });
-        if (!isOverlapping) {
-          return candidate;
-        }
-      }
-    }
-
-    return { x: maxX + CELL_WIDTH, y: 100 };
   }
 
   // -------------------------------------------------------------------------
