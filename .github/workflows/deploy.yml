@@ -1,7 +1,8 @@
 name: Deploy to VS Code Marketplace
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: [main]
 
 concurrency:
@@ -10,7 +11,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -18,6 +19,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-node@v4
         with:
@@ -38,15 +41,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COMMIT_SHA="${{ github.sha }}"
-          PR_NUMBER=$(gh api "/repos/${{ github.repository }}/commits/${COMMIT_SHA}/pulls" \
-            --jq '.[0].number // empty' 2>/dev/null || true)
-
-          if [ -z "$PR_NUMBER" ]; then
-            echo "::warning::No associated PR found for this push. Was this a direct push to main?"
-            echo "approved=skip" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          PR_NUMBER="${{ github.event.pull_request.number }}"
 
           CLAUDE_APPROVED=$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
             --jq '[.[] | select(.user.login == "claude[bot]" and .state == "APPROVED")] | length')

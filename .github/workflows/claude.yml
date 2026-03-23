@@ -26,42 +26,48 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          show_full_output: "true"
           prompt: |
-            Review this pull request with three sequential passes, then post your findings using `gh pr review`.
-            Use `gh pr review <number> --approve --body "<review>"` or `gh pr review <number> --request-changes --body "<review>"` to submit.
+            Review this pull request by performing three analysis passes, then post exactly ONE review.
 
-            ## Pass 1: Change Summary
-            Summarise what changed:
-            - List files modified and the nature of each change
-            - Identify which architectural layer is affected (extension host src/, webview/, shared types, build config, tests)
-            - Note if the change touches the message protocol (src/types/messages.ts) between extension and webview
+            ## Analysis passes
 
-            ## Pass 2: Bug and Logic Error Detection
-            Look for:
-            - Mutations that bypass WorkspaceEdit (all domain file writes must use WorkspaceEdit for undo/redo)
-            - Physical stage mutations that should be rejected (physical is read-only, derived at runtime)
-            - Incorrect React Flow node/edge type registrations (must be module-level constants, not inline)
-            - Missing message types in the discriminated union (src/types/messages.ts)
-            - ELK layout worker issues (worker code is injected at build time via __ELK_WORKER_CODE__)
-            - Zustand store mutations that don't follow existing patterns in editorStore.ts
-            - Type mismatches between the two tsconfigs (Node.js vs DOM)
-            - Off-by-one errors, null/undefined mishandling, race conditions
+            **Pass 1 — Change Summary**: List files changed in a markdown table with columns: File, Layer, Change. Layer is one of: extension host, webview, shared types, build/CI, tests, docs. Note if the message protocol (src/types/messages.ts) is affected.
 
-            ## Pass 3: Security and Code Quality
-            Check for:
-            - Secrets or credentials in code (no .env values, no hardcoded PATs or API keys)
-            - Schema changes that don't update SCHEMA_CONTENT in harnessService.ts or bump HARNESS_VERSION
-            - CSS that uses hardcoded colours instead of CSS custom properties from theme.css
-            - BEM naming violations in webview component CSS
-            - Legacy dbtSemantic prefixes being renamed (these must NOT be renamed — they are stable internal identifiers)
+            **Pass 2 — Bug & Logic Detection**: Check for WorkspaceEdit bypasses, physical stage mutations (must be read-only), inline React Flow type registrations, missing message types in discriminated unions, ELK worker issues, Zustand anti-patterns, null/undefined mishandling, race conditions.
 
-            ## Posting your review
-            After completing all three passes, you MUST post your findings to the pull request:
-            - If no significant issues found: submit an APPROVING review with your summary
-            - If bugs, security issues, or architectural violations found: submit a review that REQUESTS CHANGES
-            - For specific line-level issues, post inline review comments on those lines
-            - Post minor style suggestions as review comments, not change requests
+            **Pass 3 — Security & Quality**: Check for hardcoded secrets, schema changes without HARNESS_VERSION bump, hardcoded CSS colours (should use theme.css vars), BEM violations, renamed dbtSemantic legacy prefixes (must NOT be renamed).
+
+            ## Posting the review
+
+            After analysis, write the review body to /tmp/review.md, then post it with ONE `gh pr review` command. Do NOT run `gh pr review` more than once.
+
+            The review body MUST start with a TLDR section in exactly this format:
+
+            If approving:
+            ```
+            ## TLDR
+            :white_check_mark: **APPROVED** — no bugs, security issues, or architectural violations found.
+            ```
+
+            If requesting changes:
+            ```
+            ## TLDR
+            :x: **CHANGES REQUESTED** — found <N> issue(s) that should be fixed before merging.
+            - <one-line description of each issue>
+            ```
+
+            After the TLDR, include the full three-pass analysis with a table of changes, findings, and any style suggestions.
+
+            To post, write the body to a file first, then use:
+            ```
+            gh pr review <number> --approve --body-file /tmp/review.md
+            ```
+            or:
+            ```
+            gh pr review <number> --request-changes --body-file /tmp/review.md
+            ```
+
+            IMPORTANT: Only call `gh pr review` exactly ONCE. Do not retry or repost.
 
             When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
           claude_args: '--max-turns 50 --allowedTools "Bash(gh pr:*)" "Bash(gh api:*)"'
