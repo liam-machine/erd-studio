@@ -190,6 +190,7 @@ Differences are highlighted directly on the graph: extra columns, missing column
 | | Name | Contribution |
 |---|------|-------------|
 | <img src="https://github.com/jkweee.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jkweee](https://github.com/jkweee)) | Core concept, UI/UX design |
+| <img src="https://github.com/ginny-jhg.png" width="50" height="50" style="border-radius:50%"> | **Ginny** ([@ginny-jhg](https://github.com/ginny-jhg)) | Auto-layout overhaul, depth partitioning |
 
 ## License
 
