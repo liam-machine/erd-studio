@@ -409,82 +409,154 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Layout options panel
+   Layout panel  (.toolbar__lp)
    --------------------------------------------------------------------------- */
 
-/* Invisible full-screen backdrop — catches clicks outside the panel */
-.toolbar__layout-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 99;
-}
-
-.toolbar__layout-options-panel {
+.toolbar__lp {
   position: absolute;
   top: 100%;
   left: 0;
   margin-top: 4px;
-  min-width: 220px;
+  width: 300px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
   z-index: 100;
-  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
-.toolbar__layout-option-row {
+/* ---- Header ---- */
+.toolbar__lp-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--panel-border);
 }
 
-.toolbar__layout-option-label {
-  font-size: 11px;
+.toolbar__lp-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--editor-fg);
+}
+
+.toolbar__lp-kbd {
+  font-size: 10px;
+  font-family: var(--vscode-editor-font-family, monospace);
   color: var(--vscode-descriptionForeground, #888);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.toolbar__layout-option-segment {
-  display: flex;
-  gap: 2px;
-}
-
-.toolbar__layout-seg-btn {
-  padding: 2px 8px;
-  height: 22px;
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--panel-border);
   border-radius: 3px;
+  padding: 1px 6px;
+}
+
+/* ---- Sections ---- */
+.toolbar__lp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.toolbar__lp-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.toolbar__lp-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+/* ---- Body (padded area below header) ---- */
+.toolbar__lp > .toolbar__lp-section,
+.toolbar__lp > .toolbar__lp-columns {
+  padding: 0 14px;
+}
+
+.toolbar__lp > .toolbar__lp-section:first-of-type {
+  padding-top: 12px;
+}
+
+.toolbar__lp > .toolbar__lp-section + .toolbar__lp-section,
+.toolbar__lp > .toolbar__lp-columns + .toolbar__lp-section,
+.toolbar__lp > .toolbar__lp-section + .toolbar__lp-columns {
+  padding-top: 10px;
+}
+
+/* ---- Pill track (segmented control) ---- */
+.toolbar__lp-track {
+  display: flex;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.toolbar__lp-pill {
+  flex: 1;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
   background: transparent;
   color: var(--editor-fg);
   font-family: inherit;
   font-size: 11px;
   cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
   white-space: nowrap;
+  opacity: 0.7;
 }
 
-.toolbar__layout-seg-btn:hover:not(.toolbar__layout-seg-btn--active) {
-  background: var(--selection-bg);
+.toolbar__lp-pill:hover:not(.toolbar__lp-pill--on) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.toolbar__layout-seg-btn--active {
+.toolbar__lp-pill--on {
   background: var(--button-bg);
   color: var(--button-fg);
-  border-color: transparent;
+  opacity: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-.toolbar__layout-option-input {
-  width: 52px;
-  height: 22px;
+/* Highlight the resolved strategy pill when Auto is selected */
+.toolbar__lp-pill--auto-resolved:not(.toolbar__lp-pill--on) {
+  opacity: 1;
+  outline: 1.5px dashed var(--button-bg);
+  outline-offset: -1.5px;
+}
+
+/* ---- Columns (Direction + Spacing side-by-side) ---- */
+.toolbar__lp-columns {
+  display: flex;
+  gap: 12px;
+  padding: 0 14px;
+}
+
+.toolbar__lp-columns > .toolbar__lp-section {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Max-per-layer row ---- */
+.toolbar__lp-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar__lp-input {
+  width: 50px;
+  height: 24px;
   padding: 0 6px;
   border: 1px solid var(--panel-border);
-  border-radius: 3px;
+  border-radius: 4px;
   background: var(--input-bg);
   color: var(--input-fg, var(--editor-fg));
   font-family: inherit;
@@ -492,10 +564,54 @@
   text-align: center;
 }
 
-.toolbar__layout-option-input:focus {
+.toolbar__lp-input:focus {
   outline: 1px solid var(--focus-border);
   outline-offset: -1px;
   border-color: var(--focus-border);
+}
+
+.toolbar__lp-input--auto {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- Apply button ---- */
+.toolbar__lp-apply {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 30px;
+  margin: 12px 14px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 0.1s ease;
+}
+
+.toolbar__lp-apply:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.toolbar__lp-apply--dirty {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  color: #000;
+}
+
+.toolbar__lp-apply:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar__lp-apply-key {
+  font-size: 10px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  opacity: 0.55;
 }
 
 /* Split button group for auto-layout + options caret */

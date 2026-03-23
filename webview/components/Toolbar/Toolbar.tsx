@@ -20,8 +20,9 @@ import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
 import {
   runElkLayout,
+  detectLayerBound,
+  detectStrategy,
   SPACING_PRESETS,
-  LAYOUT_DIRECTIONS,
   type PartitionStrategy,
   type SpacingPreset,
   type LayoutDirection,
@@ -75,6 +76,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
+  const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -285,6 +287,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
     try {
       const sp = SPACING_PRESETS[spacingPreset];
+      const effectiveBound = partitionStrategy === 'auto'
+        ? detectLayerBound(nodes.length)
+        : layerBound;
       const positions = await runElkLayout(
         nodes,
         edges,
@@ -292,7 +297,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
           ...domain.viewConfig.layoutOptions,
           'elk.direction': layoutDirection,
           ...sp,
-          'elk.layered.layering.coffmanGraham.layerBound': String(layerBound),
+          'elk.layered.layering.coffmanGraham.layerBound': String(effectiveBound),
         },
         partitionStrategy,
       );
@@ -332,6 +337,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     }
     runLayout();
   }, [domain, nodes, isLayouting, runLayout]);
+
+  /** Register auto-layout function for Shift+L shortcut */
+  useEffect(() => {
+    registerAutoLayout(handleAutoLayout);
+    return () => registerAutoLayout(null);
+  }, [registerAutoLayout, handleAutoLayout]);
 
   // --- Undo/Redo handlers ----------------------------------------------------
 
@@ -468,7 +479,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               className={`toolbar__split-main${layoutDirty ? ' toolbar__split-main--dirty' : ''}`}
               onClick={handleAutoLayout}
               disabled={isLayouting || nodes.length === 0}
-              title={layoutDirty ? 'Options changed — click to re-run layout' : 'Auto-layout all models'}
+              title={layoutDirty ? 'Options changed — click to re-run layout (Shift+L)' : 'Auto-layout all models (Shift+L)'}
               aria-label="Auto-layout nodes"
             >
               {isLayouting ? <span className="toolbar__spinner" /> : (layoutDirty ? '↺' : '⊞')} Layout
@@ -484,77 +495,127 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
               ▾
             </button>
             {layoutOptionsOpen && (
-              <div className="toolbar__layout-options-panel">
-                <div className="toolbar__layout-option-row">
-                  <span className="toolbar__layout-option-label">Cluster by</span>
-                  <div className="toolbar__layout-option-segment">
-                    {([
-                      ['auto',  'Smart'],
-                      ['role',  'Model type'],
-                      ['depth', 'Join depth'],
-                      ['none',  'None'],
-                    ] as [PartitionStrategy, string][]).map(([s, label]) => (
-                      <button
-                        key={s}
-                        className={`toolbar__layout-seg-btn${partitionStrategy === s ? ' toolbar__layout-seg-btn--active' : ''}`}
-                        onClick={() => { setPartitionStrategy(s); setLayoutDirty(true); }}
-                        title={
-                          s === 'auto'  ? 'Automatically pick the best clustering' :
-                          s === 'role'  ? 'Cluster by model type — dims, facts, reference, gold' :
-                          s === 'depth' ? 'Cluster by how many joins away from source tables' :
-                                          'No clustering — let the layout decide freely'
-                        }
-                      >
-                        {label}
-                      </button>
-                    ))}
+              <div
+                className="toolbar__lp"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); handleAutoLayout(); }
+                }}
+              >
+                {/* Header */}
+                <div className="toolbar__lp-header">
+                  <span className="toolbar__lp-title">Auto Layout</span>
+                  <kbd className="toolbar__lp-kbd">Shift+L</kbd>
+                </div>
+
+                {/* Grouping */}
+                <div className="toolbar__lp-section">
+                  <span className="toolbar__lp-label">Grouping</span>
+                  {(() => {
+                    const resolved = partitionStrategy === 'auto' ? detectStrategy(nodes, edges) : null;
+                    return (
+                      <div className="toolbar__lp-track">
+                        {([
+                          ['auto',  'Auto'],
+                          ['role',  'Model type'],
+                          ['depth', 'Join depth'],
+                          ['none',  'None'],
+                        ] as [PartitionStrategy, string][]).map(([s, label]) => (
+                          <button
+                            key={s}
+                            className={[
+                              'toolbar__lp-pill',
+                              partitionStrategy === s ? 'toolbar__lp-pill--on' : '',
+                              resolved && s === resolved ? 'toolbar__lp-pill--auto-resolved' : '',
+                            ].filter(Boolean).join(' ')}
+                            onClick={() => { setPartitionStrategy(s); setLayoutDirty(true); }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  <span className="toolbar__lp-desc">
+                    {partitionStrategy === 'auto' ? (() => {
+                      const r = detectStrategy(nodes, edges);
+                      return r === 'role'
+                        ? 'Using Model type — your models have roles assigned.'
+                        : r === 'depth'
+                        ? 'Using Join depth — no roles, but relationships exist.'
+                        : 'Using None — no roles or relationships to group by.';
+                    })()
+                    : partitionStrategy === 'role'
+                    ? 'Groups models by their assigned role: dimensions first, then reference tables, facts, bridge tables, and aggregates.'
+                    : partitionStrategy === 'depth'
+                    ? 'Arranges models so that relationship lines flow in one direction, reducing crossings.'
+                    : 'No grouping. Models are placed freely to reduce line crossings.'}
+                  </span>
+                </div>
+
+                {/* Direction + Spacing side by side */}
+                <div className="toolbar__lp-columns">
+                  <div className="toolbar__lp-section">
+                    <span className="toolbar__lp-label">Direction</span>
+                    <div className="toolbar__lp-track">
+                      {(['RIGHT', 'DOWN'] as LayoutDirection[]).map((d) => (
+                        <button
+                          key={d}
+                          className={`toolbar__lp-pill${layoutDirection === d ? ' toolbar__lp-pill--on' : ''}`}
+                          onClick={() => { setLayoutDirection(d); setLayoutDirty(true); }}
+                          title={d === 'RIGHT' ? 'Sources left, derived right' : 'Sources top, derived bottom'}
+                        >
+                          {d === 'RIGHT' ? '→' : '↓'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="toolbar__lp-section">
+                    <span className="toolbar__lp-label">Spacing</span>
+                    <div className="toolbar__lp-track">
+                      {(['S', 'M', 'L'] as SpacingPreset[]).map((p) => (
+                        <button
+                          key={p}
+                          className={`toolbar__lp-pill${spacingPreset === p ? ' toolbar__lp-pill--on' : ''}`}
+                          onClick={() => { setSpacingPreset(p); setLayoutDirty(true); }}
+                          title={p === 'S' ? 'Compact' : p === 'M' ? 'Default' : 'Wide'}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <div className="toolbar__layout-option-row">
-                  <span className="toolbar__layout-option-label">Direction</span>
-                  <div className="toolbar__layout-option-segment">
-                    {(LAYOUT_DIRECTIONS.map((d) => [d, d === 'RIGHT' ? '→ Left to right' : '↓ Top to bottom'] as [LayoutDirection, string])).map(([d, label]) => (
-                      <button
-                        key={d}
-                        className={`toolbar__layout-seg-btn${layoutDirection === d ? ' toolbar__layout-seg-btn--active' : ''}`}
-                        onClick={() => { setLayoutDirection(d); setLayoutDirty(true); }}
-                        title={d === 'RIGHT' ? 'Lay out tables left to right' : 'Lay out tables top to bottom'}
-                      >
-                        {label}
-                      </button>
-                    ))}
+
+                {/* Max per layer */}
+                <div className="toolbar__lp-section">
+                  <span className="toolbar__lp-label">Max per layer</span>
+                  <div className="toolbar__lp-layer-row">
+                    <input
+                      type="number"
+                      className={`toolbar__lp-input${partitionStrategy === 'auto' ? ' toolbar__lp-input--auto' : ''}`}
+                      value={partitionStrategy === 'auto' ? detectLayerBound(nodes.length) : layerBound}
+                      min={1}
+                      max={20}
+                      disabled={partitionStrategy === 'auto'}
+                      onChange={(e) => { setLayerBound(Math.max(1, Math.min(20, Number(e.target.value)))); setLayoutDirty(true); }}
+                    />
+                    {partitionStrategy === 'auto' ? (
+                      <span className="toolbar__lp-desc">auto — {detectLayerBound(nodes.length)} for {nodes.length} models</span>
+                    ) : (
+                      <span className="toolbar__lp-desc">lower = wider layout, higher = taller layout</span>
+                    )}
                   </div>
                 </div>
-                <div className="toolbar__layout-option-row">
-                  <span className="toolbar__layout-option-label">Spacing</span>
-                  <div className="toolbar__layout-option-segment">
-                    {([['S', 'Tight'], ['M', 'Normal'], ['L', 'Wide']] as ['S' | 'M' | 'L', string][]).map(([p, label]) => (
-                      <button
-                        key={p}
-                        className={`toolbar__layout-seg-btn${spacingPreset === p ? ' toolbar__layout-seg-btn--active' : ''}`}
-                        onClick={() => { setSpacingPreset(p); setLayoutDirty(true); }}
-                        title={
-                          p === 'S' ? 'Compact spacing — fits more on screen' :
-                          p === 'M' ? 'Default spacing' :
-                                      'Extra space between tables — easier to read on large displays'
-                        }
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="toolbar__layout-option-row">
-                  <span className="toolbar__layout-option-label">Tables per column</span>
-                  <input
-                    type="number"
-                    className="toolbar__layout-option-input"
-                    value={layerBound}
-                    min={1}
-                    max={20}
-                    onChange={(e) => { setLayerBound(Math.max(1, Math.min(20, Number(e.target.value)))); setLayoutDirty(true); }}
-                  />
-                </div>
+
+                {/* Apply */}
+                <button
+                  className={`toolbar__lp-apply${layoutDirty ? ' toolbar__lp-apply--dirty' : ''}`}
+                  onClick={handleAutoLayout}
+                  disabled={isLayouting || nodes.length === 0}
+                >
+                  {isLayouting ? 'Running...' : layoutDirty ? '↺ Re-apply Layout' : 'Apply Layout'}
+                  <kbd className="toolbar__lp-apply-key">↵</kbd>
+                </button>
               </div>
             )}
           </div>

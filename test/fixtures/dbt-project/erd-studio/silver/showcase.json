@@ -180,24 +180,24 @@
   "viewConfig": {
     "positions": {
       "dim_project": {
-        "x": 609,
-        "y": 196
+        "x": 12,
+        "y": 12
       },
       "dim_work_lot": {
-        "x": -40,
-        "y": 20
+        "x": 341,
+        "y": 197
       },
       "dim_contractor": {
         "x": 476,
         "y": 296
       },
       "dim_location": {
-        "x": 609,
-        "y": 12
+        "x": 708,
+        "y": 424
       },
       "fct_sale": {
-        "x": 292,
-        "y": 30
+        "x": 956,
+        "y": 54
       }
     }
   }

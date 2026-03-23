@@ -432,6 +432,19 @@ const PARTITIONABLE_ROLES = new Set<string>([
 ]);
 
 /**
+ * Compute an optimal layer bound (max models per column) based on graph size.
+ *
+ * Uses √n as the base — this produces a roughly square layout which balances
+ * width and height naturally:
+ *   4 nodes → 2,  9 → 3,  16 → 4,  25 → 5,  36 → 6
+ *
+ * Clamped to [2, 10] to avoid degenerate layouts.
+ */
+export function detectLayerBound(nodeCount: number): number {
+  return Math.max(2, Math.min(10, Math.ceil(Math.sqrt(nodeCount))));
+}
+
+/**
  * Detect the best partition strategy for the given nodes and edges when
  * `partitionStrategy` is 'auto'.
  */

@@ -100,6 +100,7 @@ function EditorCanvas() {
   // Search state (F402)
   const searchQuery = useEditorStore((s) => s.searchQuery);
   const focusSearchInput = useEditorStore((s) => s.focusSearchInput);
+  const triggerAutoLayout = useEditorStore((s) => s.triggerAutoLayout);
   // Legend state
   const legendOpen = useEditorStore((s) => s.legendOpen);
   const setLegendOpen = useEditorStore((s) => s.setLegendOpen);
@@ -284,6 +285,13 @@ function EditorCanvas() {
         return;
       }
 
+      // Shift+L: Trigger auto-layout
+      if (e.shiftKey && e.key === 'L') {
+        e.preventDefault();
+        triggerAutoLayout();
+        return;
+      }
+
       // Alt+1/2: Switch stage tabs
       if (e.altKey && (e.key === '1' || e.key === '2')) {
         e.preventDefault();
@@ -366,6 +374,7 @@ function EditorCanvas() {
     setHighlightedColumns,
     setToastMessage,
     focusSearchInput,
+    triggerAutoLayout,
     legendOpen,
     setLegendOpen,
     // Note: vscode is omitted as it's a stable ref from useVsCodeApi
