@@ -60,4 +60,4 @@ jobs:
             - Post minor style suggestions as comments, not change requests
 
             When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
-          claude_args: "--max-turns 10"
+          claude_args: "--max-turns 30"
