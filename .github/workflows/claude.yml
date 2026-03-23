@@ -31,7 +31,7 @@ jobs:
 
             ## Analysis passes
 
-            **Pass 1 — Change Summary**: List files changed in a markdown table with columns: File, Layer, Change. Layer is one of: extension host, webview, shared types, build/CI, tests, docs. Note if the message protocol (src/types/messages.ts) is affected.
+            **Pass 1 — Change Summary**: List files changed in a markdown table with columns: File, Change. Keep change descriptions concise (under 12 words). Group files by layer using row headers like `**Webview**`, `**Extension Host**`, `**Tests**`, `**Docs**`, `**Build/CI**`. Note if the message protocol (src/types/messages.ts) is affected.
 
             **Pass 2 — Bug & Logic Detection**: Check for WorkspaceEdit bypasses, physical stage mutations (must be read-only), inline React Flow type registrations, missing message types in discriminated unions, ELK worker issues, Zustand anti-patterns, null/undefined mishandling, race conditions.
 
