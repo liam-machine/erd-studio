@@ -359,6 +359,13 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     setTimeout(() => setIsRefreshing(false), 1000);
   }, [isRefreshing, vscode]);
 
+  // --- View File handler ----------------------------------------------------
+
+  const handleViewFile = useCallback(() => {
+    const message: WebviewMessage = { type: 'viewFile' };
+    vscode.postMessage(message);
+  }, [vscode]);
+
   // --- Early return if no domain -------------------------------------------
 
   if (!domain) {
@@ -372,13 +379,6 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     ?? LAYER_ABBREV_FALLBACK[domain.layer]
     ?? domain.layer.substring(0, 3).toUpperCase();
   const layerColor = domain.layerConfig?.color;
-
-  // --- View File handler ----------------------------------------------------
-
-  const handleViewFile = useCallback(() => {
-    const message: WebviewMessage = { type: 'viewFile' };
-    vscode.postMessage(message);
-  }, [vscode]);
 
   // --- Render --------------------------------------------------------------
 
