@@ -1,0 +1,62 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request with three sequential passes. Present your findings in a single review.
+
+            ## Pass 1: Change Summary
+            Summarise what changed:
+            - List files modified and the nature of each change
+            - Identify which architectural layer is affected (extension host src/, webview/, shared types, build config, tests)
+            - Note if the change touches the message protocol (src/types/messages.ts) between extension and webview
+
+            ## Pass 2: Bug and Logic Error Detection
+            Look for:
+            - Mutations that bypass WorkspaceEdit (all domain file writes must use WorkspaceEdit for undo/redo)
+            - Physical stage mutations that should be rejected (physical is read-only, derived at runtime)
+            - Incorrect React Flow node/edge type registrations (must be module-level constants, not inline)
+            - Missing message types in the discriminated union (src/types/messages.ts)
+            - ELK layout worker issues (worker code is injected at build time via __ELK_WORKER_CODE__)
+            - Zustand store mutations that don't follow existing patterns in editorStore.ts
+            - Type mismatches between the two tsconfigs (Node.js vs DOM)
+            - Off-by-one errors, null/undefined mishandling, race conditions
+
+            ## Pass 3: Security and Code Quality
+            Check for:
+            - Secrets or credentials in code (no .env values, no hardcoded PATs or API keys)
+            - Schema changes that don't update SCHEMA_CONTENT in harnessService.ts or bump HARNESS_VERSION
+            - CSS that uses hardcoded colours instead of CSS custom properties from theme.css
+            - BEM naming violations in webview component CSS
+            - Legacy dbtSemantic prefixes being renamed (these must NOT be renamed — they are stable internal identifiers)
+
+            ## Approval
+            - APPROVE if all three passes find no significant issues
+            - REQUEST CHANGES if any bugs, security issues, or architectural violations are found
+            - Post minor style suggestions as comments, not change requests
+
+            When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
+          claude_args: "--max-turns 10"

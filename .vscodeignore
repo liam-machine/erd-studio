@@ -1,4 +1,5 @@
 # Source and build config (not needed at runtime)
+.github/**
 .vscode/**
 .vscode-test/**
 src/**
