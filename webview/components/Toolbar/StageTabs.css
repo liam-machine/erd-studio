@@ -12,8 +12,7 @@
   gap: 2px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-top: none;
-  border-radius: 0 0 6px 6px;
+  border-radius: 6px;
   padding: 4px 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }

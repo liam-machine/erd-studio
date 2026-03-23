@@ -34,13 +34,15 @@ Generate domain JSON files that render as ERD canvases in ERD Studio. Each file 
 | `description` | No | Human-readable domain description |
 | `modelFolder` | No | Filter for "Add Existing Model" dialog (e.g. `models/silver`) |
 | `logical` | Yes | Contains `models` and `relationships` arrays |
-| `viewConfig` | Yes | Root-level view settings. Leave as `{}` — the extension auto-layouts on first open |
+| `viewConfig` | Yes | Root-level view settings. When editing existing files, preserve `viewConfig` as-is. The extension auto-assigns positions for new models |
 
 **viewConfig** must be at the root level, not inside `logical`. It stores node positions keyed by model name:
 
 ```json
 "viewConfig": { "positions": { "dim_customer": { "x": 100, "y": 200 } } }
 ```
+
+> **WARNING — Preserve existing positions:** When adding models to an existing domain file, do NOT clear or overwrite `viewConfig.positions`. The extension automatically computes positions for any new models that lack entries. Clearing existing positions will reset the user's carefully arranged layout.
 
 ---
 
@@ -187,4 +189,4 @@ Recognized test types: `relationships`, `relationships_where`, and any test whos
 | Cardinality | `unique` test on PK column + `relationships` test on FK column |
 | Composite PK | `dbt_utils.unique_combination_of_columns` model-level test |
 
-<!-- erd-studio-harness: 4 -->
+<!-- erd-studio-harness: 5 -->
