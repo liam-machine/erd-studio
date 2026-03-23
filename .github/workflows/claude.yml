@@ -27,8 +27,10 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           show_full_output: "true"
+          additional_permissions: "gh pr,gh api"
           prompt: |
-            Review this pull request with three sequential passes, then post your findings as a PR review comment.
+            Review this pull request with three sequential passes, then post your findings using `gh pr review`.
+            Use `gh pr review <number> --approve --body "<review>"` or `gh pr review <number> --request-changes --body "<review>"` to submit.
 
             ## Pass 1: Change Summary
             Summarise what changed:
