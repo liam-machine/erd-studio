@@ -18,6 +18,15 @@ Logical             Physical
 
 Switch between stages using the toolbar tabs or keyboard shortcuts: `Alt+1` (Logical), `Alt+2` (Physical). Use `Shift+L` to trigger auto-layout.
 
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Alt+1` | Switch to Logical stage |
+| `Alt+2` | Switch to Physical stage |
+| `Shift+L` | Run auto-layout |
+| `Cmd+F` / `Ctrl+F` | Search models |
+
 ## Key Features
 
 - **Domain tagging for scoped dbt runs** -- When you add a model to a domain, its dbt YAML schema is automatically tagged with `domain:{name}`. Run `dbt build --select tag:domain:customer-360` to build just that domain. Tags stay in sync through undo/redo, model removal, and bulk reconciliation.
