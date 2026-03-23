@@ -26,6 +26,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          show_full_output: "true"
           prompt: |
             Review this pull request with three sequential passes. Present your findings in a single review.
 
@@ -60,4 +61,4 @@ jobs:
             - Post minor style suggestions as comments, not change requests
 
             When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
-          claude_args: "--max-turns 30"
+          claude_args: "--max-turns 50"
