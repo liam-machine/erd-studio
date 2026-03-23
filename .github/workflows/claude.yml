@@ -27,7 +27,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           show_full_output: "true"
-          additional_permissions: "gh pr,gh api"
           prompt: |
             Review this pull request with three sequential passes, then post your findings using `gh pr review`.
             Use `gh pr review <number> --approve --body "<review>"` or `gh pr review <number> --request-changes --body "<review>"` to submit.
@@ -65,4 +64,4 @@ jobs:
             - Post minor style suggestions as review comments, not change requests
 
             When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
-          claude_args: "--max-turns 50"
+          claude_args: '--max-turns 50 --allowedTools "Bash(gh pr:*)" "Bash(gh api:*)"'
