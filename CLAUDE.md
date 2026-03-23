@@ -168,7 +168,7 @@ Build first, then launch the Extension Development Host directly with the fixtur
 
 ```bash
 npm run build
-code --extensionDevelopmentPath=/Users/liamwynne/GIT/LIAM/dbt-semantic-designer /Users/liamwynne/GIT/LIAM/dbt-semantic-designer/test/fixtures/dbt-project
+code --extensionDevelopmentPath=/Users/liamwynne/GIT/LIAM/erd-studio /Users/liamwynne/GIT/LIAM/erd-studio/test/fixtures/dbt-project
 ```
 
 This opens the Extension Development Host with the fixtures project loaded and the extension active — no need to manually open a folder.

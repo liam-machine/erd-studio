@@ -60,7 +60,7 @@ A VS Code extension that visualises semantic (FK-based) relationships between db
 
 ```
 /Users/liamwynne/GIT/
-├── dbt-semantic-designer/              ← THIS REPO (VS Code extension)
+├── erd-studio/                         ← THIS REPO (VS Code extension)
 │   ├── plan.md                         # This plan
 │   ├── src/                            # Extension host code
 │   ├── webview/                        # React webview code
@@ -95,7 +95,7 @@ During development of the extension, use VS Code's Extension Development Host:
 
 ```bash
 # In terminal 1: build extension continuously
-cd /Users/liamwynne/GIT/dbt-semantic-designer
+cd /Users/liamwynne/GIT/LIAM/erd-studio
 npm run watch
 
 # Press F5 in VS Code → opens Extension Development Host
@@ -162,7 +162,7 @@ mkdir -p /Users/liamwynne/GIT/edp-app-dataprocessing/erd-studio/gold
 ### Project Structure
 
 ```
-dbt-semantic-designer/
+erd-studio/
 ├── package.json                        # Extension manifest, contribution points
 ├── tsconfig.json                       # Extension host TypeScript config (Node.js)
 ├── tsconfig.webview.json               # Webview TypeScript config (DOM)
