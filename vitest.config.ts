@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['test/unit/**/*.test.ts'],
+    include: ['test/unit/**/*.test.ts', 'test/unit/**/*.test.tsx'],
     alias: {
       vscode: path.resolve(__dirname, 'test/__mocks__/vscode.ts'),
     },
@@ -14,5 +14,8 @@ export default defineConfig({
     alias: {
       vscode: path.resolve(__dirname, 'test/__mocks__/vscode.ts'),
     },
+  },
+  esbuild: {
+    jsx: 'automatic',
   },
 });

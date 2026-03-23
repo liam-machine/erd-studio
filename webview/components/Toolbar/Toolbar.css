@@ -5,12 +5,12 @@
  * tokens from webview/styles/theme.css for consistent dark/light support.
  */
 
-/* Outer container: stacks controls above stage tabs, no gap (attached look) */
+/* Outer container: stacks controls above stage tabs with a small gap */
 .toolbar-container {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0;
+  gap: 4px;
 }
 
 /* Inner controls row */
@@ -25,11 +25,10 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-/* When toolbar is attached to stage tabs below, flatten bottom corners */
+/* When toolbar is attached to stage tabs below, keep a small gap between them */
 .toolbar--attached-bottom {
-  border-radius: 6px 6px 0 0;
-  border-bottom: none;
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 /* ---------------------------------------------------------------------------
@@ -407,6 +406,181 @@
 .toolbar__dropdown-trigger--active:hover {
   background: var(--vscode-editorWarning-foreground, #cca700);
   opacity: 0.85;
+}
+
+/* ---------------------------------------------------------------------------
+   Layout options panel
+   --------------------------------------------------------------------------- */
+
+/* Invisible full-screen backdrop — catches clicks outside the panel */
+.toolbar__layout-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.toolbar__layout-options-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 220px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toolbar__layout-option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.toolbar__layout-option-label {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.toolbar__layout-option-segment {
+  display: flex;
+  gap: 2px;
+}
+
+.toolbar__layout-seg-btn {
+  padding: 2px 8px;
+  height: 22px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  white-space: nowrap;
+}
+
+.toolbar__layout-seg-btn:hover:not(.toolbar__layout-seg-btn--active) {
+  background: var(--selection-bg);
+}
+
+.toolbar__layout-seg-btn--active {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: transparent;
+}
+
+.toolbar__layout-option-input {
+  width: 52px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+}
+
+.toolbar__layout-option-input:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+/* Split button group for auto-layout + options caret */
+.toolbar__split-group {
+  display: flex;
+  gap: 0;
+  position: relative;
+  border-radius: 4px;
+  overflow: visible;
+}
+
+/* Main layout button — filled so it stands out from icon-only toolbar buttons */
+.toolbar__split-main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 4px 0 0 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.toolbar__split-main:hover:not(:disabled) {
+  background: var(--button-hover-bg, var(--button-bg));
+  filter: brightness(1.12);
+}
+
+.toolbar__split-main--dirty {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  color: #000;
+}
+
+.toolbar__split-main--dirty:hover:not(:disabled) {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  filter: brightness(1.08);
+}
+
+.toolbar__split-main:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Thin separator between main button and caret */
+.toolbar__split-sep {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.2);
+  align-self: stretch;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.toolbar__split-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 0 4px 4px 0;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 9px;
+  cursor: pointer;
+  transition: filter 0.1s ease;
+  opacity: 0.85;
+}
+
+.toolbar__split-caret:hover {
+  filter: brightness(1.15);
+  opacity: 1;
+}
+
+.toolbar__split-caret--active {
+  filter: brightness(0.88);
+  opacity: 1;
 }
 
 /* ---------------------------------------------------------------------------
