@@ -28,7 +28,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           show_full_output: "true"
           prompt: |
-            Review this pull request with three sequential passes. Present your findings in a single review.
+            Review this pull request with three sequential passes, then post your findings as a PR review comment.
 
             ## Pass 1: Change Summary
             Summarise what changed:
@@ -55,10 +55,12 @@ jobs:
             - BEM naming violations in webview component CSS
             - Legacy dbtSemantic prefixes being renamed (these must NOT be renamed — they are stable internal identifiers)
 
-            ## Approval
-            - APPROVE if all three passes find no significant issues
-            - REQUEST CHANGES if any bugs, security issues, or architectural violations are found
-            - Post minor style suggestions as comments, not change requests
+            ## Posting your review
+            After completing all three passes, you MUST post your findings to the pull request:
+            - If no significant issues found: submit an APPROVING review with your summary
+            - If bugs, security issues, or architectural violations found: submit a review that REQUESTS CHANGES
+            - For specific line-level issues, post inline review comments on those lines
+            - Post minor style suggestions as review comments, not change requests
 
             When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
           claude_args: "--max-turns 50"
