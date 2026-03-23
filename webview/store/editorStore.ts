@@ -96,6 +96,8 @@ export interface EditorState {
   contextMenu: ContextMenuState;
   /** Internal: registered search focus function (not persisted). */
   _searchFocusFn: (() => void) | null;
+  /** Internal: registered auto-layout function (not persisted). */
+  _autoLayoutFn: (() => void) | null;
   /** Whether the legend panel is visible. */
   legendOpen: boolean;
   /** Whether the welcome modal is visible. */
@@ -160,6 +162,10 @@ export interface EditorActions {
   registerSearchFocus: (focusFn: (() => void) | null) => void;
   /** Focus the search input (called by keyboard handler). */
   focusSearchInput: () => void;
+  /** Register a function to trigger auto-layout (called by Toolbar on mount). */
+  registerAutoLayout: (layoutFn: (() => void) | null) => void;
+  /** Trigger auto-layout (called by keyboard handler). */
+  triggerAutoLayout: () => void;
   /** Toggle the legend panel visibility. */
   setLegendOpen: (open: boolean) => void;
   /** Toggle the welcome modal visibility. */
@@ -216,6 +222,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   manifestModels: [],
   contextMenu: null,
   _searchFocusFn: null,
+  _autoLayoutFn: null,
   legendOpen: false,
   welcomeModalOpen: false,
   dragLineState: null,
@@ -263,6 +270,11 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   focusSearchInput: () => {
     const { _searchFocusFn } = useEditorStore.getState();
     if (_searchFocusFn) _searchFocusFn();
+  },
+  registerAutoLayout: (layoutFn) => set({ _autoLayoutFn: layoutFn }),
+  triggerAutoLayout: () => {
+    const { _autoLayoutFn } = useEditorStore.getState();
+    if (_autoLayoutFn) _autoLayoutFn();
   },
   setLegendOpen: (open) => set({ legendOpen: open }),
   setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),

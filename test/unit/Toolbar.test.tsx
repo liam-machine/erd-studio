@@ -76,6 +76,7 @@ const mockStoreState: Record<string, unknown> = {
   selectNode: noop,
   setDetailPanelOpen: noop,
   registerSearchFocus: noop,
+  registerAutoLayout: noop,
   discrepancyVisible: false,
   discrepancyCompareStage: null,
   setDiscrepancyVisible: noop,
@@ -158,14 +159,14 @@ describe('Toolbar layout-dirty button', () => {
   it('becomes dirty when direction changes', () => {
     render(<Toolbar {...defaultProps} />);
     openOptionsPanel();
-    fireEvent.click(screen.getByRole('button', { name: '↓ Top to bottom' }));
+    fireEvent.click(screen.getByRole('button', { name: '↓' }));
     expect(layoutButton().className).toContain('dirty');
   });
 
   it('becomes dirty when spacing preset changes', () => {
     render(<Toolbar {...defaultProps} />);
     openOptionsPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Tight' }));
+    fireEvent.click(screen.getByRole('button', { name: 'L' }));
     expect(layoutButton().className).toContain('dirty');
   });
 
@@ -180,7 +181,7 @@ describe('Toolbar layout-dirty button', () => {
   it('clears dirty flag after layout runs successfully', async () => {
     render(<Toolbar {...defaultProps} />);
     openOptionsPanel();
-    fireEvent.click(screen.getByRole('button', { name: '↓ Top to bottom' }));
+    fireEvent.click(screen.getByRole('button', { name: '↓' }));
     expect(layoutButton().className).toContain('dirty');
 
     await act(async () => {
@@ -194,7 +195,7 @@ describe('Toolbar layout-dirty button', () => {
   it('dirty button title changes to warn about pending options', () => {
     render(<Toolbar {...defaultProps} />);
     openOptionsPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Tight' }));
+    fireEvent.click(screen.getByRole('button', { name: 'L' }));
     expect(layoutButton().title).toMatch(/options changed/i);
   });
 
