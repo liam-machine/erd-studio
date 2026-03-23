@@ -16,7 +16,7 @@ Logical             Physical
 | **Logical** | Blue | Detailed data model. Full column definitions with data types, PK/FK/NK badges, SCD types, grain, model roles, and rationale. | Yes |
 | **Physical** | Green | What actually exists in dbt. Auto-derived from `manifest.json`, scoped to models in the logical domain. | Positions only |
 
-Switch between stages using the toolbar tabs or keyboard shortcuts: `Alt+1` (Logical), `Alt+2` (Physical).
+Switch between stages using the toolbar tabs or keyboard shortcuts: `Alt+1` (Logical), `Alt+2` (Physical). Use `Shift+L` to trigger auto-layout.
 
 ## Key Features
 
