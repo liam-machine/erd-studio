@@ -603,6 +603,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
           treeProvider.refresh();
           layerDecorationProvider.refresh();
+          decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${label}" added. Use Edit Layer to customize display name or abbreviation.`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -682,6 +683,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
           treeProvider.refresh();
           layerDecorationProvider.refresh();
+          decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${layer.label}" updated.`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -738,6 +740,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
           treeProvider.refresh();
           layerDecorationProvider.refresh();
+          decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${layer.label}" removed.`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -767,6 +770,7 @@ export function activate(context: vscode.ExtensionContext): void {
           layerService.invalidateCache();
           treeProvider.refresh();
           layerDecorationProvider.refresh();
+          decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
         } else if (choice === 'Customize') {
           await layerService.saveConfig(detected);
@@ -898,6 +902,7 @@ export function activate(context: vscode.ExtensionContext): void {
           layerService.invalidateCache();
           treeProvider.refresh();
           layerDecorationProvider.refresh();
+          decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
         }
       });

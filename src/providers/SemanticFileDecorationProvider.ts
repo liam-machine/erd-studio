@@ -112,8 +112,8 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
 
     if (hue >= 0 && hue < 20) return new vscode.ThemeColor('charts.red');
     if (hue >= 20 && hue < 40) return new vscode.ThemeColor('charts.orange');
-    if (hue >= 40 && hue < 65) return new vscode.ThemeColor('charts.yellow');
-    if (hue >= 80 && hue < 160) return new vscode.ThemeColor('charts.green');
+    if (hue >= 40 && hue < 80) return new vscode.ThemeColor('charts.yellow');
+    if (hue >= 80 && hue < 180) return new vscode.ThemeColor('charts.green');
     if (hue >= 180 && hue < 260) return new vscode.ThemeColor('charts.blue');
     if (hue >= 260 && hue < 360) return new vscode.ThemeColor('charts.purple');
 
