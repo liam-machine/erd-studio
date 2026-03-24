@@ -771,7 +771,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         <button
           className="toolbar__view-file"
           onClick={handleViewFile}
-          title="Open as JSON file"
+          title="Open as JaSON file"
           aria-label="Open underlying JSON file in text editor"
         >
           {'{ }'} View File
