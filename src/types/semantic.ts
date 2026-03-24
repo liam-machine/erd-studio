@@ -16,7 +16,10 @@ export type Layer = string;
 export type Stage = 'logical' | 'physical';
 
 /** The current schema version written by this extension. */
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
+
+/** Previous schema version (inline models). */
+export const LEGACY_SCHEMA_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Column definitions
@@ -212,6 +215,64 @@ export interface UnifiedDomain {
   logical: StageData;
   /** Global view configuration shared across all stages. */
   viewConfig: ViewConfig;
+}
+
+// ---------------------------------------------------------------------------
+// V5 on-disk format (model references instead of inline models)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stage data as stored on disk in v5 domain files.
+ * Models are string references (names) that resolve to logical-models/*.yml files.
+ */
+export interface StageDataV5 {
+  models: string[];
+  relationships: Relationship[];
+}
+
+/**
+ * Unified domain file format (v5).
+ *
+ * Same as v4 but `logical.models` contains model name strings instead of
+ * inline SemanticModel objects. Models are stored centrally in
+ * erd-studio/logical-models/{name}.yml.
+ */
+export interface UnifiedDomainV5 {
+  schemaVersion: number;
+  domain: string;
+  layer: Layer;
+  description: string;
+  modelFolder?: string;
+  logical: StageDataV5;
+  viewConfig: ViewConfig;
+}
+
+/**
+ * Raw on-disk domain format — may be v4 (inline models) or v5 (model references).
+ * Used during parsing before version detection.
+ */
+export interface RawDomainFile {
+  schemaVersion: number;
+  domain: string;
+  layer: Layer;
+  description?: string;
+  modelFolder?: string;
+  logical: {
+    models: SemanticModel[] | string[];
+    relationships: Relationship[];
+  };
+  viewConfig?: ViewConfig;
+}
+
+/**
+ * Type guard: returns true if the domain file uses v5 format (model name references).
+ */
+export function isDomainV5(raw: RawDomainFile): boolean {
+  if (raw.schemaVersion >= 5) return true;
+  // Also detect by content: if models array contains strings, it's v5
+  const models = raw.logical?.models ?? [];
+  if (models.length === 0) return true; // empty is ambiguous, treat as v5
+  return typeof models[0] === 'string';
 }
 
 // ---------------------------------------------------------------------------

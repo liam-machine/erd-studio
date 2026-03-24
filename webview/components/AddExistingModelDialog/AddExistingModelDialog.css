@@ -162,6 +162,26 @@
   color: var(--editor-fg);
 }
 
+.add-existing-model-dialog__item-source {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.add-existing-model-dialog__item-source--logical {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+}
+
+.add-existing-model-dialog__item-source--manifest {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
 .add-existing-model-dialog__item-schema {
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #888);

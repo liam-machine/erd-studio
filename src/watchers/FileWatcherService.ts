@@ -32,17 +32,21 @@ export class FileWatcherService implements vscode.Disposable {
   private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
+  private readonly _onLogicalModelChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
 
   // Public event subscriptions (consumers listen to these)
   readonly onManifestChanged = this._onManifestChanged.event;
   readonly onSemanticFileChanged = this._onSemanticFileChanged.event;
   readonly onSemanticFileDeleted = this._onSemanticFileDeleted.event;
   readonly onProjectConfigChanged = this._onProjectConfigChanged.event;
+  /** Fires when a YAML model file in erd-studio/logical-models/ changes. */
+  readonly onLogicalModelChanged = this._onLogicalModelChanged.event;
 
   constructor(private readonly workspaceRoot: string) {
     this.setupManifestWatcher();
     this.setupSemanticWatcher();
     this.setupProjectConfigWatcher();
+    this.setupLogicalModelWatcher();
   }
 
   /**
@@ -131,6 +135,33 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
+   * Watch erd-studio/logical-models/*.yml for changes.
+   * Fires when model definition files are created, modified, or deleted.
+   * Used to refresh open domain editors that reference the changed model.
+   */
+  private setupLogicalModelWatcher(): void {
+    const pattern = new vscode.RelativePattern(
+      this.workspaceRoot,
+      'erd-studio/logical-models/*.yml',
+    );
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+    const handleChange = (uri: vscode.Uri) => {
+      const modelName = uri.fsPath.replace(/^.*[/\\]/, '').replace(/\.yml$/, '');
+      this.debounce(`logical-model:${modelName}`, () => {
+        console.log(`[FileWatcherService] Logical model changed: ${modelName}`);
+        this.safeFireEvent(() => this._onLogicalModelChanged.fire({ uri, modelName }));
+      });
+    };
+
+    this.subscriptions.push(watcher.onDidChange(handleChange));
+    this.subscriptions.push(watcher.onDidCreate(handleChange));
+    this.subscriptions.push(watcher.onDidDelete(handleChange));
+
+    this.watchers.push(watcher);
+  }
+
+  /**
    * Debounce a callback by key.
    * Multiple calls with the same key within DEBOUNCE_DELAY_MS are collapsed into one.
    */
@@ -192,5 +223,6 @@ export class FileWatcherService implements vscode.Disposable {
     this._onSemanticFileChanged.dispose();
     this._onSemanticFileDeleted.dispose();
     this._onProjectConfigChanged.dispose();
+    this._onLogicalModelChanged.dispose();
   }
 }

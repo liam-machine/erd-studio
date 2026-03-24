@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
-import type { DisplayDomain, ManifestModelPreview } from '../../src/types/display';
+import type { DisplayDomain, ExistingModelPreview, ManifestModelPreview } from '../../src/types/display';
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { ModelFlowNode, FkFlowEdge, FkEdgeData } from '../types/graph';
 import type { ModelTemplate, Stage } from '../../src/types/semantic';
@@ -90,8 +90,10 @@ export interface EditorState {
   edges: FkFlowEdge[];
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: ModelTemplate[];
-  /** Manifest models available to add to this domain (not already in domain). */
+  /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
   manifestModels: ManifestModelPreview[];
+  /** Models available to add from logical-models/ and manifest. */
+  existingModels: ExistingModelPreview[];
   /** Context menu state (position and target), or null if closed. */
   contextMenu: ContextMenuState;
   /** Internal: registered search focus function (not persisted). */
@@ -152,6 +154,7 @@ export interface EditorActions {
   setEdges: (edges: FkFlowEdge[]) => void;
   setTemplates: (templates: ModelTemplate[]) => void;
   setManifestModels: (models: ManifestModelPreview[]) => void;
+  setExistingModels: (models: ExistingModelPreview[]) => void;
   /** Open context menu for an edge at the given position. */
   openEdgeContextMenu: (x: number, y: number, data: FkEdgeData) => void;
   /** Open context menu for a node at the given position. */
@@ -220,6 +223,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   edges: [],
   templates: [],
   manifestModels: [],
+  existingModels: [],
   contextMenu: null,
   _searchFocusFn: null,
   _autoLayoutFn: null,
@@ -263,6 +267,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setEdges: (edges) => set({ edges }),
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),
+  setExistingModels: (models) => set({ existingModels: models }),
   openEdgeContextMenu: (x, y, data) => set({ contextMenu: { type: 'edge', x, y, data } }),
   openNodeContextMenu: (x, y, modelName) => set({ contextMenu: { type: 'node', x, y, modelName } }),
   closeContextMenu: () => set({ contextMenu: null }),

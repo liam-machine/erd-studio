@@ -12,17 +12,29 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { DomainSummary, Layer, SemanticDomain, StageData, UnifiedDomain, ViewConfig } from '../types/semantic';
+import type { DomainSummary, Layer, SemanticDomain, SemanticModel, StageData, UnifiedDomain, ViewConfig } from '../types/semantic';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship } from '../types/display';
 import type { ManifestData, ManifestRelationshipTest } from '../types/manifest';
 import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
+import type { LogicalModelService } from './logicalModelService';
 
 const DEFAULT_SEMANTIC_DIR = 'erd-studio';
 
 export class DomainService {
+  private logicalModelService: LogicalModelService | null = null;
+
   constructor(private readonly layerService: LayerService) {}
+
+  /**
+   * Set the LogicalModelService for resolving v5 model references.
+   * Called after construction since DomainService may be instantiated before
+   * LogicalModelService is available (circular dependency avoidance).
+   */
+  setLogicalModelService(service: LogicalModelService): void {
+    this.logicalModelService = service;
+  }
 
   /**
    * Discover all semantic domain JSON files under erd-studio/,
@@ -262,7 +274,9 @@ export class DomainService {
   }
 
   /**
-   * Parse a stage data section from a v3 unified domain.
+   * Parse a stage data section from a domain file.
+   * Handles both v4 (inline SemanticModel[]) and v5 (string[] name references).
+   * For v5, resolves model names via LogicalModelService.
    * Returns null if the section is missing or invalid.
    */
   private parseStageData(value: unknown): StageData | null {
@@ -271,10 +285,36 @@ export class DomainService {
     }
 
     const obj = value as Record<string, unknown>;
-    return {
-      models: Array.isArray(obj.models) ? (obj.models as StageData['models']) : [],
-      relationships: Array.isArray(obj.relationships) ? (obj.relationships as StageData['relationships']) : [],
-    };
+    const rawModels = Array.isArray(obj.models) ? obj.models : [];
+    const relationships = Array.isArray(obj.relationships) ? (obj.relationships as StageData['relationships']) : [];
+
+    // Detect v5 format: models array contains strings (name references)
+    const isV5 = rawModels.length > 0 && typeof rawModels[0] === 'string';
+
+    let models: SemanticModel[];
+    if (isV5 && this.logicalModelService) {
+      // Resolve model name references from logical-models/*.yml
+      models = [];
+      for (const name of rawModels as string[]) {
+        const model = this.logicalModelService.getModel(name);
+        if (model) {
+          models.push(model);
+        } else {
+          // Broken reference — create a placeholder so the UI can show an error
+          console.warn(`[DomainService] Model "${name}" not found in logical-models/`);
+          models.push({ name, columns: [] });
+        }
+      }
+    } else if (isV5) {
+      // v5 format but no LogicalModelService available (e.g., testing)
+      // Create placeholder models from names
+      models = (rawModels as string[]).map(name => ({ name, columns: [] }));
+    } else {
+      // v4 format: inline model objects
+      models = rawModels as SemanticModel[];
+    }
+
+    return { models, relationships };
   }
 
   private parseLayer(value: unknown, filePath: string): Layer {

@@ -75,6 +75,7 @@ function EditorCanvas() {
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const setTemplates = useEditorStore((s) => s.setTemplates);
   const setManifestModels = useEditorStore((s) => s.setManifestModels);
+  const setExistingModels = useEditorStore((s) => s.setExistingModels);
   const openFkDialogWithPrefill = useEditorStore((s) => s.openFkDialogWithPrefill);
   const selectedNode = useEditorStore((s) => s.selectedNode);
   const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
@@ -191,6 +192,9 @@ function EditorCanvas() {
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
           }
+          if (msg.payload.existingModels) {
+            setExistingModels(msg.payload.existingModels);
+          }
           if (!msg.welcomeDismissed) {
             useEditorStore.getState().setWelcomeModalOpen(true);
           }
@@ -203,6 +207,9 @@ function EditorCanvas() {
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
           }
+          if (msg.payload.existingModels) {
+            setExistingModels(msg.payload.existingModels);
+          }
           break;
         case 'stageData':
           setDomain(msg.payload);
@@ -211,6 +218,9 @@ function EditorCanvas() {
           }
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
+          }
+          if (msg.payload.existingModels) {
+            setExistingModels(msg.payload.existingModels);
           }
           break;
         case 'discrepancyReport':
@@ -221,7 +231,7 @@ function EditorCanvas() {
           break;
       }
     },
-    [setDomain, setError, setTemplates, setManifestModels, setDiscrepancyReport],
+    [setDomain, setError, setTemplates, setManifestModels, setExistingModels, setDiscrepancyReport],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);

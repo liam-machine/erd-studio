@@ -11,7 +11,7 @@ import type { Cardinality, Layer, ModelRole, ModelTemplate, Rationale, Stage, Vi
 import type { LayerConfig } from './layer';
 
 // ---------------------------------------------------------------------------
-// Manifest model preview (for Add Existing Model dialog)
+// Existing model preview (for Add Existing Model dialog)
 // ---------------------------------------------------------------------------
 
 /**
@@ -24,6 +24,17 @@ export interface ManifestModelPreview {
   schema: string;
   description: string;
   columnCount: number;
+}
+
+/**
+ * Enhanced model preview for the "Add Existing Model" dialog.
+ * Extends ManifestModelPreview with source information.
+ *
+ * - 'logical': model has a YAML definition in erd-studio/logical-models/
+ * - 'manifest': model exists in compiled manifest only (no logical model file yet)
+ */
+export interface ExistingModelPreview extends ManifestModelPreview {
+  source: 'logical' | 'manifest';
 }
 
 // ---------------------------------------------------------------------------
@@ -89,8 +100,10 @@ export interface DisplayDomain {
   viewConfig: ViewConfig;
   /** Available templates (only for editable stages). */
   templates?: ModelTemplate[];
-  /** Manifest models available to add (only for editable stages). */
+  /** Manifest models available to add (only for editable stages). @deprecated Use existingModels. */
   manifestModels?: ManifestModelPreview[];
+  /** Models available to add from logical-models/ and manifest (only for editable stages). */
+  existingModels?: ExistingModelPreview[];
   /** Layer config for badge styling. */
   layerConfig?: LayerConfig;
   /** Whether this stage is read-only for data mutations (physical). */

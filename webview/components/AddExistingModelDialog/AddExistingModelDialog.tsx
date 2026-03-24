@@ -1,9 +1,12 @@
 /**
- * AddExistingModelDialog — dialog for adding existing manifest models to a domain.
+ * AddExistingModelDialog — dialog for adding existing models to a domain.
  *
- * Displays a searchable list of models from the dbt manifest that are not yet
- * in the current domain. Selecting a model sends the `addExistingModel` message
- * to the extension host, which adds it with source: 'built'.
+ * Displays a searchable list of models from two sources:
+ * - Logical: models with YAML definitions in erd-studio/logical-models/
+ * - Manifest: compiled dbt models not yet designed in ERD Studio
+ *
+ * Each model shows a source badge (Logical in blue, Manifest in green).
+ * Selecting a model sends the `addExistingModel` message to the extension host.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -11,7 +14,7 @@ import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
-import type { ManifestModelPreview } from '../../../src/types/display';
+import type { ExistingModelPreview, ManifestModelPreview } from '../../../src/types/display';
 import './AddExistingModelDialog.css';
 
 // ---------------------------------------------------------------------------
@@ -21,9 +24,14 @@ import './AddExistingModelDialog.css';
 export function AddExistingModelDialog() {
   const isOpen = useEditorStore((s) => s.addExistingModelDialogOpen);
   const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
+  const existingModels = useEditorStore((s) => s.existingModels);
   const manifestModels = useEditorStore((s) => s.manifestModels);
   const modelFolder = useEditorStore((s) => s.domain?.modelFolder);
   const { send } = useMessageBus(() => {});
+
+  // Use existingModels if available (v5), fall back to manifestModels (v4 compat)
+  const models: (ExistingModelPreview | ManifestModelPreview)[] =
+    existingModels.length > 0 ? existingModels : manifestModels;
 
   // Local state
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,16 +40,16 @@ export function AddExistingModelDialog() {
   // Filter models by search query (case-insensitive substring match)
   const filteredModels = useMemo(() => {
     if (!searchQuery.trim()) {
-      return manifestModels;
+      return models;
     }
     const query = searchQuery.toLowerCase();
-    return manifestModels.filter(
+    return models.filter(
       (m) =>
         m.name.toLowerCase().includes(query) ||
         m.schema.toLowerCase().includes(query) ||
         m.description.toLowerCase().includes(query),
     );
-  }, [manifestModels, searchQuery]);
+  }, [models, searchQuery]);
 
   // Handlers
   const handleClose = useCallback(() => {
@@ -81,8 +89,8 @@ export function AddExistingModelDialog() {
     return null;
   }
 
-  // Empty state: no manifest models available
-  if (manifestModels.length === 0) {
+  // Empty state: no models available
+  if (models.length === 0) {
     return (
       <Panel position="top-center" className="add-existing-model-dialog">
         <div className="add-existing-model-dialog__header">
@@ -106,7 +114,7 @@ export function AddExistingModelDialog() {
                 </>
               ) : (
                 <>
-                  Run <code>dbt compile</code> to generate the manifest, or all models may already be in this domain.
+                  Create model files in <code>erd-studio/logical-models/</code> or run <code>dbt compile</code> to generate the manifest.
                 </>
               )}
             </p>
@@ -144,7 +152,7 @@ export function AddExistingModelDialog() {
             autoFocus
           />
           <span className="add-existing-model-dialog__search-count">
-            {filteredModels.length} of {manifestModels.length}
+            {filteredModels.length} of {models.length}
           </span>
         </div>
 
@@ -159,6 +167,7 @@ export function AddExistingModelDialog() {
               <ModelItem
                 key={model.name}
                 model={model}
+                source={'source' in model ? model.source : 'manifest'}
                 isSelected={selectedModel === model.name}
                 onSelect={handleSelect}
                 onDoubleClick={handleDoubleClick}
@@ -194,12 +203,13 @@ export function AddExistingModelDialog() {
 
 interface ModelItemProps {
   model: ManifestModelPreview;
+  source: 'logical' | 'manifest';
   isSelected: boolean;
   onSelect: (name: string) => void;
   onDoubleClick: (name: string) => void;
 }
 
-function ModelItem({ model, isSelected, onSelect, onDoubleClick }: ModelItemProps) {
+function ModelItem({ model, source, isSelected, onSelect, onDoubleClick }: ModelItemProps) {
   const handleClick = useCallback(() => {
     onSelect(model.name);
   }, [onSelect, model.name]);
@@ -218,6 +228,9 @@ function ModelItem({ model, isSelected, onSelect, onDoubleClick }: ModelItemProp
     >
       <div className="add-existing-model-dialog__item-main">
         <span className="add-existing-model-dialog__item-name">{model.name}</span>
+        <span className={`add-existing-model-dialog__item-source add-existing-model-dialog__item-source--${source}`}>
+          {source === 'logical' ? 'Logical' : 'Manifest'}
+        </span>
         <span className="add-existing-model-dialog__item-schema">{model.schema}</span>
       </div>
       <div className="add-existing-model-dialog__item-meta">
@@ -226,7 +239,7 @@ function ModelItem({ model, isSelected, onSelect, onDoubleClick }: ModelItemProp
         </span>
         {model.description && (
           <span className="add-existing-model-dialog__item-desc" title={model.description}>
-            {model.description.length > 60 ? model.description.slice(0, 60) + '…' : model.description}
+            {model.description.length > 60 ? model.description.slice(0, 60) + '...' : model.description}
           </span>
         )}
       </div>

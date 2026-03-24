@@ -14,6 +14,8 @@ import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/harnessService';
 import { SchemaTagService } from './services/schemaTagService';
+import { LogicalModelService } from './services/logicalModelService';
+import { MigrationService } from './services/migrationService';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -159,9 +161,30 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
+  const logicalModelService = new LogicalModelService(workspaceRoot, semanticDir);
+  domainService.setLogicalModelService(logicalModelService);
   const manifestService = new ManifestService();
   const templateService = new TemplateService();
   const schemaTagService = new SchemaTagService(domainService, workspaceRoot, semanticDir);
+
+  // Check for v4 → v5 migration (non-blocking)
+  const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService);
+  if (migrationService.needsMigration()) {
+    void vscode.window.showInformationMessage(
+      'ERD Studio has a new model storage format that enables cross-domain model sharing. Migrate domain files now?',
+      'Migrate Now',
+      'Later',
+    ).then((choice) => {
+      if (choice === 'Migrate Now') {
+        const result = migrationService.migrate();
+        const details: string[] = [];
+        if (result.domainsConverted > 0) details.push(`${result.domainsConverted} domain(s) converted`);
+        if (result.modelsCreated > 0) details.push(`${result.modelsCreated} model file(s) created in logical-models/`);
+        if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved (richest version kept)`);
+        vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
+      }
+    });
+  }
   const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
@@ -171,6 +194,7 @@ export function activate(context: vscode.ExtensionContext): void {
     layerService,
     workspaceRoot,
     schemaTagService,
+    logicalModelService,
   );
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
@@ -211,6 +235,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
+  // Logical model file changed → refresh domains referencing that model
+  const logicalModelChangedSubscription = fileWatcherService.onLogicalModelChanged(
+    async ({ modelName }) => {
+      await editorProvider.refreshDomainsReferencingModel(modelName);
+      treeProvider.refresh();
+    },
+  );
+
   // dbt_project.yml changed → suggest window reload
   const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
     void vscode.window.showWarningMessage(
@@ -231,6 +263,7 @@ export function activate(context: vscode.ExtensionContext): void {
     manifestChangedSubscription,
     semanticChangedSubscription,
     semanticDeletedSubscription,
+    logicalModelChangedSubscription,
     projectChangedSubscription,
     (() => {
       const treeView = vscode.window.createTreeView('dbtSemantic.domainTree', {
@@ -504,6 +537,34 @@ export function activate(context: vscode.ExtensionContext): void {
         },
       );
     }),
+    // Migrate v4 domains to v5 central model store
+    vscode.commands.registerCommand('dbtSemantic.migrateToV5', async () => {
+      if (!migrationService.needsMigration()) {
+        void vscode.window.showInformationMessage('All domain files are already using the v5 central model store format.');
+        return;
+      }
+
+      const v4Count = migrationService.findV4Domains().length;
+      const confirm = await vscode.window.showWarningMessage(
+        `Found ${v4Count} domain file(s) using the legacy inline model format. ` +
+        'Migration will extract models to erd-studio/logical-models/ and convert domain files to use name references. ' +
+        'This cannot be undone automatically.',
+        'Migrate Now',
+        'Cancel',
+      );
+
+      if (confirm !== 'Migrate Now') return;
+
+      const result = migrationService.migrate();
+      const details: string[] = [];
+      if (result.domainsConverted > 0) details.push(`${result.domainsConverted} domain(s) converted`);
+      if (result.modelsCreated > 0) details.push(`${result.modelsCreated} model file(s) created in logical-models/`);
+      if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved`);
+      void vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
+
+      treeProvider.refresh();
+      await editorProvider.refreshAllOpenDomains();
+    }),
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(
       'dbtSemantic.setupSemanticDirectory',
@@ -522,6 +583,12 @@ export function activate(context: vscode.ExtensionContext): void {
             if (!fs.existsSync(layerDir)) {
               fs.mkdirSync(layerDir, { recursive: true });
             }
+          }
+
+          // Create logical-models directory
+          const logicalModelsDir = path.join(fullSemanticDir, 'logical-models');
+          if (!fs.existsSync(logicalModelsDir)) {
+            fs.mkdirSync(logicalModelsDir, { recursive: true });
           }
 
           await layerService.saveConfig(defaultLayers);

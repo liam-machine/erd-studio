@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '5';
+export const HARNESS_VERSION = '6';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -96,7 +96,24 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
 
 const SCHEMA_CONTENT = `# ERD Studio — AI Data Modeling Guide
 
-Generate domain JSON files that render as ERD canvases in ERD Studio. Each file defines a logical data model with models, columns, and relationships.
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`erd-studio/logical-models/\`. Domain JSON files reference models by name and define relationships and layout.
+
+## Architecture Overview
+
+\`\`\`
+erd-studio/
+├── logical-models/           ← Central model definitions (YAML, one per model)
+│   ├── dim_customer.yml
+│   ├── dim_project.yml
+│   └── fct_sale.yml
+├── silver/
+│   ├── customer-360.json     ← Domain file (model references + relationships + layout)
+│   └── orders.json
+└── gold/
+    └── reporting.json
+\`\`\`
+
+**Key principle:** Models are defined ONCE in \`logical-models/\` and referenced from multiple domain files. Editing a model from any domain updates the shared definition.
 
 ## Domain File Structure
 
@@ -104,13 +121,13 @@ Generate domain JSON files that render as ERD canvases in ERD Studio. Each file 
 
 \`\`\`json
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "domain": "customer-360",
   "layer": "silver",
   "description": "Customer domain — master data and transaction history",
   "modelFolder": "models/silver",
   "logical": {
-    "models": [],
+    "models": ["dim_customer", "fct_sale", "dim_product"],
     "relationships": []
   },
   "viewConfig": {}
@@ -119,13 +136,14 @@ Generate domain JSON files that render as ERD canvases in ERD Studio. Each file 
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| \`schemaVersion\` | Yes | Must be \`4\` |
+| \`schemaVersion\` | Yes | Must be \`5\` |
 | \`domain\` | Yes | Domain slug (matches filename without \`.json\`) |
 | \`layer\` | Yes | Layer name matching parent directory (e.g. \`silver\`, \`gold\`) |
 | \`description\` | No | Human-readable domain description |
 | \`modelFolder\` | No | Filter for "Add Existing Model" dialog (e.g. \`models/silver\`) |
-| \`logical\` | Yes | Contains \`models\` and \`relationships\` arrays |
-| \`viewConfig\` | Yes | Root-level view settings. When editing existing files, preserve \`viewConfig\` as-is. The extension auto-assigns positions for new models |
+| \`logical.models\` | Yes | Array of model name strings (references to \`logical-models/*.yml\`) |
+| \`logical.relationships\` | Yes | Array of relationship objects |
+| \`viewConfig\` | Yes | Root-level view settings. The extension auto-assigns positions for new models |
 
 **viewConfig** must be at the root level, not inside \`logical\`. It stores node positions keyed by model name:
 
@@ -139,23 +157,34 @@ Generate domain JSON files that render as ERD canvases in ERD Studio. Each file 
 
 ## Models
 
-\`\`\`json
-{
-  "name": "dim_customer",
-  "schema": "silver",
-  "description": "Customer master data",
-  "grain": "One row per customer",
-  "modelRole": "conformed-dim",
-  "columns": [
-    { "name": "customer_id", "dataType": "INT", "description": "Surrogate key", "isPrimaryKey": true, "scdType": 0 },
-    { "name": "email", "dataType": "VARCHAR", "description": "Email address", "isNaturalKey": true, "scdType": 1 },
-    { "name": "full_name", "dataType": "VARCHAR", "description": "Customer display name", "scdType": 2 }
-  ],
-  "rationale": {
-    "purpose": "Customer master data for cross-domain joins",
-    "roleChoice": "Conformed dimension shared across domains"
-  }
-}
+Model definitions live in \`erd-studio/logical-models/{model_name}.yml\`. Create/edit these YAML files to define models. Then reference them by name in domain files.
+
+**File:** \`erd-studio/logical-models/dim_customer.yml\`
+
+\`\`\`yaml
+name: dim_customer
+schema: silver
+description: Customer master data
+grain: One row per customer
+modelRole: conformed-dim
+rationale:
+  purpose: Customer master data for cross-domain joins
+  roleChoice: Conformed dimension shared across domains
+columns:
+  - name: customer_id
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+    scdType: 0
+  - name: email
+    dataType: VARCHAR
+    description: Email address
+    isNaturalKey: true
+    scdType: 1
+  - name: full_name
+    dataType: VARCHAR
+    description: Customer display name
+    scdType: 2
 \`\`\`
 
 | Field | Required | Description |

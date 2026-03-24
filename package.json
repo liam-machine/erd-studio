@@ -91,6 +91,11 @@
         "command": "dbtSemantic.syncDomainTags",
         "title": "Sync Domain Tags to dbt Schema Files",
         "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.migrateToV5",
+        "title": "Migrate Domains to Central Model Store",
+        "category": "dbt"
       }
     ],
     "viewsContainers": {

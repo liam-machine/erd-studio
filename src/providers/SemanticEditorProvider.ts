@@ -86,11 +86,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly layerService: LayerService,
     private readonly workspaceRoot: string,
     private readonly schemaTagService: SchemaTagService,
+    readonly logicalModelService: import('../services/logicalModelService').LogicalModelService,
   ) {}
 
   /**
    * Build supplementary payload data for webview messages.
-   * Includes templates and list of manifest models not in the domain.
+   * Includes templates and list of available models from logical-models/ and manifest.
    */
   private buildWebviewPayload(
     domain: { models: Array<{ name: string }> },
@@ -104,32 +105,64 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       description: string;
       columnCount: number;
     }>;
+    existingModels: import('../types/display').ExistingModelPreview[];
   } {
     const templates = this.templateService.loadTemplates(this.workspaceRoot);
     const existingModelNames = new Set(domain.models.map((m) => m.name));
 
-    let filteredModels = Array.from(manifest.models.values()).filter(
-      (m) => !existingModelNames.has(m.name),
+    // Build existing models list from two sources: logical-models/ and manifest
+    const existingModels: import('../types/display').ExistingModelPreview[] = [];
+    const addedNames = new Set<string>();
+
+    // 1. Logical models (already designed in ERD Studio)
+    const logicalModels = this.logicalModelService.listModels();
+    for (const model of logicalModels) {
+      if (existingModelNames.has(model.name)) continue; // already in domain
+      existingModels.push({
+        name: model.name,
+        schema: model.schema ?? '',
+        description: model.description ?? '',
+        columnCount: (model.columns ?? []).length,
+        source: 'logical',
+      });
+      addedNames.add(model.name);
+    }
+
+    // 2. Manifest models (not yet designed)
+    let filteredManifest = Array.from(manifest.models.values()).filter(
+      (m) => !existingModelNames.has(m.name) && !addedNames.has(m.name),
     );
 
     // Apply folder filter if configured (prefix match)
     if (modelFolder) {
       const folderPrefix = modelFolder.endsWith('/') ? modelFolder : `${modelFolder}/`;
-      filteredModels = filteredModels.filter(
+      filteredManifest = filteredManifest.filter(
         (m) => m.originalFilePath && m.originalFilePath.startsWith(folderPrefix),
       );
     }
 
-    const manifestModels = filteredModels
-      .map((m) => ({
+    for (const m of filteredManifest) {
+      existingModels.push({
         name: m.name,
         schema: m.schema,
         description: m.description,
         columnCount: m.columns.length,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+        source: 'manifest',
+      });
+    }
 
-    return { templates, manifestModels };
+    // Sort: logical first, then manifest, alphabetical within each group
+    existingModels.sort((a, b) => {
+      if (a.source !== b.source) return a.source === 'logical' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    // Legacy manifestModels (for backward compat with v4 webview until dialog is updated)
+    const manifestModels = existingModels
+      .filter((m) => m.source === 'manifest')
+      .map(({ name, schema, description, columnCount }) => ({ name, schema, description, columnCount }));
+
+    return { templates, manifestModels, existingModels };
   }
 
   async resolveCustomTextEditor(
@@ -399,6 +432,56 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Detect whether a parsed domain document uses v5 format (model name references).
+   */
+  private isDomainV5(parsed: Record<string, unknown>): boolean {
+    const version = parsed.schemaVersion as number;
+    if (version >= 5) return true;
+    const section = this.getStageSection(parsed, 'logical');
+    const models = section.models as unknown[];
+    if (!models || models.length === 0) return false;
+    return typeof models[0] === 'string';
+  }
+
+  /**
+   * Apply a mutation to a model stored in logical-models/{name}.yml (v5 path).
+   * Reads the model, applies the mutator callback, writes back, and refreshes the view.
+   *
+   * For handlers that also need to modify the domain file (e.g., cascade column rename
+   * into relationships), pass a domainMutator callback.
+   */
+  private async applyModelEdit(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    modelName: string,
+    modelMutator: (model: import('../types/semantic').SemanticModel) => void,
+    domainMutator?: (section: Record<string, unknown>, parsed: Record<string, unknown>) => void,
+  ): Promise<boolean> {
+    const model = this.logicalModelService.getModel(modelName);
+    if (!model) {
+      webview.postMessage({ type: 'error', payload: { message: `Model "${modelName}" not found in logical-models/.` } });
+      return false;
+    }
+
+    modelMutator(model);
+    this.logicalModelService.saveModel(model);
+
+    // If there's also a domain-level mutation (e.g., relationship cascade), apply it
+    if (domainMutator) {
+      const success = await this.applyDomainEdit(
+        document,
+        domainMutator,
+        { refreshWebview: true, webview, stage: 'logical' },
+      );
+      return success;
+    }
+
+    // No domain change — just refresh the view
+    await this.sendDomainData(document, webview);
+    return true;
+  }
+
+  /**
    * Generic helper to apply a stage-scoped mutation to the domain JSON and persist it.
    * Handles the common WorkspaceEdit pattern used by all mutation handlers.
    */
@@ -493,7 +576,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       cardinality: rel.cardinality,
     }));
 
-    const { templates, manifestModels } = this.buildWebviewPayload(
+    const { templates, manifestModels, existingModels } = this.buildWebviewPayload(
       { models },
       manifest,
       domain.modelFolder,
@@ -513,6 +596,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       viewConfig,
       templates,
       manifestModels,
+      existingModels,
       layerConfig,
       readOnly: domain.stage === 'physical',
       positionDraggable: true,
@@ -669,7 +753,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
       try {
         if (activeStage === 'physical') {
-          // Re-derive physical from logical + manifest
           await this.handleSwitchStage(panelKey, document, webview, 'physical');
         } else {
           await this.sendDomainData(document, webview, panelKey);
@@ -683,6 +766,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           type: 'error',
           payload: { message: `Refresh failed: ${message}` },
         });
+      }
+    }
+  }
+
+  /**
+   * Refresh all open domain editors that reference a specific model.
+   * Called when a logical-models/*.yml file changes externally (e.g., edited
+   * from another domain, or modified by an AI tool directly).
+   */
+  async refreshDomainsReferencingModel(modelName: string): Promise<void> {
+    for (const [panelKey, { document, webview }] of Array.from(this.openPanels.entries())) {
+      try {
+        const text = document.getText();
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        const section = this.getStageSection(parsed, 'logical');
+        const models = (section.models ?? []) as unknown[];
+
+        // Check if this domain references the changed model
+        const referencesModel = models.some((m) =>
+          typeof m === 'string' ? m === modelName : (m as Record<string, unknown>).name === modelName,
+        );
+
+        if (referencesModel) {
+          await this.sendDomainData(document, webview, panelKey);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[SemanticEditorProvider] Refresh for model "${modelName}" failed: ${message}`);
       }
     }
   }
@@ -729,6 +840,55 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const section = this.getStageSection(parsed, stage);
 
+      // V5: create central model file + add name reference to domain
+      if (this.isDomainV5(parsed)) {
+        const modelNames = (section.models ?? []) as string[];
+        if (modelNames.includes(model.name)) {
+          webview.postMessage({ type: 'error', payload: { message: `Model "${model.name}" already exists in this domain.` } });
+          return;
+        }
+
+        // Create the central model file
+        const semanticModel: import('../types/semantic').SemanticModel = {
+          name: model.name,
+          schema: model.schema,
+          description: model.description,
+          columns: model.columns,
+          ...(model.modelRole ? { modelRole: model.modelRole } : {}),
+        };
+        this.logicalModelService.saveModel(semanticModel);
+
+        // Add name reference + position to domain file
+        const success = await this.applyDomainEdit(
+          document,
+          (sec, p) => {
+            const names = (sec.models ?? []) as string[];
+            names.push(model.name);
+            sec.models = names;
+
+            const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
+            const positions = (vc.positions ?? {}) as Record<string, NodePosition>;
+            const relationships = (sec.relationships ?? []) as Relationship[];
+            const computed = computeNewModelPositions({
+              newModels: [model.name],
+              relationships,
+              existingPositions: positions,
+            });
+            if (computed[model.name]) {
+              vc.positions = { ...positions, ...computed };
+              p.viewConfig = vc;
+            }
+          },
+          { refreshWebview: true, webview, stage },
+        );
+
+        if (!success) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to add model to domain.' } });
+        }
+        return;
+      }
+
+      // V4: legacy inline path
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
 
       if (models.some((m) => m.name === model.name)) {
@@ -824,8 +984,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
+      // V5: write to central model file
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (this.isDomainV5(parsed)) {
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          const columns = model.columns ?? [];
+          if (columns.some((c) => c.name === payload.column.name)) {
+            throw new Error(`Column "${payload.column.name}" already exists.`);
+          }
+          columns.push({
+            name: payload.column.name,
+            dataType: payload.column.dataType,
+            description: payload.column.description,
+            ...(payload.column.isPrimaryKey ? { isPrimaryKey: true } : {}),
+            ...(payload.column.isForeignKey ? { isForeignKey: true } : {}),
+            ...(payload.column.isNaturalKey ? { isNaturalKey: true } : {}),
+          });
+          model.columns = columns;
+        });
+        return;
+      }
+
+      // V4: legacy inline path
       const section = this.getStageSection(parsed, stage);
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
@@ -889,6 +1070,45 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
+
+      // V5: write column update to central model file, cascade rename to domain
+      if (this.isDomainV5(parsed)) {
+        const columnRenamed = payload.oldColumnName !== payload.column.name;
+        const domainMutator = columnRenamed ? (section: Record<string, unknown>) => {
+          const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
+          for (const rel of relationships) {
+            if (rel.fromModel === payload.modelName && rel.fromColumn === payload.oldColumnName) {
+              rel.fromColumn = payload.column.name;
+            }
+            if (rel.toModel === payload.modelName && rel.toColumn === payload.oldColumnName) {
+              rel.toColumn = payload.column.name;
+            }
+          }
+        } : undefined;
+
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          const columns = model.columns ?? [];
+          const columnIndex = columns.findIndex((c) => c.name === payload.oldColumnName);
+          if (columnIndex === -1) throw new Error(`Column "${payload.oldColumnName}" not found.`);
+          if (columnRenamed && columns.some((c) => c.name === payload.column.name)) {
+            throw new Error(`Column "${payload.column.name}" already exists.`);
+          }
+          const existing = columns[columnIndex];
+          columns[columnIndex] = {
+            name: payload.column.name,
+            dataType: payload.column.dataType,
+            description: payload.column.description,
+            ...(payload.column.isPrimaryKey ?? existing.isPrimaryKey ? { isPrimaryKey: true } : {}),
+            ...(payload.column.isForeignKey ?? existing.isForeignKey ? { isForeignKey: true } : {}),
+            ...(payload.column.isNaturalKey ?? existing.isNaturalKey ? { isNaturalKey: true } : {}),
+            ...(payload.column.scdType != null ? { scdType: payload.column.scdType } : {}),
+            ...(payload.column.additiveType ? { additiveType: payload.column.additiveType } : {}),
+          } as ColumnDef;
+        }, domainMutator);
+        return;
+      }
+
+      // V4: legacy inline path
       const section = this.getStageSection(parsed, stage);
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
@@ -974,6 +1194,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
+
+      // V5: write to central model file
+      if (this.isDomainV5(parsed)) {
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          const columns = model.columns ?? [];
+          const idx = columns.findIndex((c) => c.name === payload.columnName);
+          if (idx === -1) throw new Error(`Column "${payload.columnName}" not found.`);
+          columns.splice(idx, 1);
+        });
+        return;
+      }
+
+      // V4: legacy inline path
       const section = this.getStageSection(parsed, stage);
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
@@ -1025,6 +1258,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
+
+      // V5: write to central model file
+      if (this.isDomainV5(parsed)) {
+        const fieldMap: Record<string, keyof ColumnDef> = { PK: 'isPrimaryKey', FK: 'isForeignKey', NK: 'isNaturalKey' };
+        const fieldName = fieldMap[payload.keyType];
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          const columns = model.columns ?? [];
+          const column = columns.find((c) => c.name === payload.columnName);
+          if (!column) throw new Error(`Column "${payload.columnName}" not found.`);
+          if (payload.value) {
+            (column as unknown as Record<string, unknown>)[fieldName] = true;
+          } else {
+            delete (column as unknown as Record<string, unknown>)[fieldName];
+          }
+        });
+        return;
+      }
+
+      // V4: legacy inline path
       const section = this.getStageSection(parsed, stage);
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
@@ -1080,6 +1332,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      // V5: write to central model file
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (this.isDomainV5(parsed)) {
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          const columns = model.columns ?? [];
+          if (payload.orderedNames.length !== columns.length) {
+            throw new Error(`Column count mismatch: expected ${columns.length}, got ${payload.orderedNames.length}.`);
+          }
+          const columnMap = new Map(columns.map((c) => [c.name, c]));
+          model.columns = payload.orderedNames.map((name) => {
+            const col = columnMap.get(name);
+            if (!col) throw new Error(`Column "${name}" not found in model "${payload.modelName}".`);
+            return col;
+          });
+        });
+        return;
+      }
+
+      // V4: legacy inline path
       const success = await this.applyDomainEdit(
         document,
         (section) => {
@@ -1091,7 +1363,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
           const columns = (model.columns ?? []) as Array<Record<string, unknown>>;
 
-          // Validate: all names must match existing columns and no duplicates
           if (payload.orderedNames.length !== columns.length) {
             throw new Error(`Column count mismatch: expected ${columns.length}, got ${payload.orderedNames.length}.`);
           }
@@ -1192,6 +1463,43 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const section = this.getStageSection(parsed, stage);
+
+      // V5: rename central model file + update domain references
+      if (this.isDomainV5(parsed)) {
+        // Rename the model file
+        this.logicalModelService.renameModel(payload.oldName, trimmedNew);
+
+        // Update domain: model reference name, relationships, positions
+        const success = await this.applyDomainEdit(
+          document,
+          (sec, p) => {
+            const names = (sec.models ?? []) as string[];
+            const idx = names.indexOf(payload.oldName);
+            if (idx !== -1) names[idx] = trimmedNew;
+
+            const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
+            for (const rel of relationships) {
+              if (rel.fromModel === payload.oldName) rel.fromModel = trimmedNew;
+              if (rel.toModel === payload.oldName) rel.toModel = trimmedNew;
+            }
+
+            const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
+            const positions = (vc.positions ?? {}) as Record<string, unknown>;
+            if (payload.oldName in positions) {
+              positions[trimmedNew] = positions[payload.oldName];
+              delete positions[payload.oldName];
+            }
+          },
+          { refreshWebview: true, webview, stage },
+        );
+
+        if (!success) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to rename model.' } });
+        }
+        return;
+      }
+
+      // V4: legacy inline path
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.oldName);
       if (!model) {
@@ -1205,14 +1513,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       model.name = trimmedNew;
 
-      // Cascade: update relationship references within this stage
       const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
       for (const rel of relationships) {
         if (rel.fromModel === payload.oldName) { rel.fromModel = trimmedNew; }
         if (rel.toModel === payload.oldName) { rel.toModel = trimmedNew; }
       }
 
-      // Cascade: update global viewConfig positions
       const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
       const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
       if (payload.oldName in positions) {
@@ -1254,6 +1560,51 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const section = this.getStageSection(parsed, stage);
+
+      // V5: remove reference from domain + ask about deleting model file
+      if (this.isDomainV5(parsed)) {
+        // Remove reference, relationships, and position from domain
+        const success = await this.applyDomainEdit(
+          document,
+          (sec, p) => {
+            const names = (sec.models ?? []) as string[];
+            const idx = names.indexOf(payload.modelName);
+            if (idx !== -1) names.splice(idx, 1);
+
+            const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
+            sec.relationships = relationships.filter(
+              (rel) => rel.fromModel !== payload.modelName && rel.toModel !== payload.modelName,
+            );
+
+            const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
+            const positions = (vc.positions ?? {}) as Record<string, unknown>;
+            delete positions[payload.modelName];
+          },
+          { refreshWebview: true, webview, stage },
+        );
+
+        if (!success) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to remove model.' } });
+          return;
+        }
+
+        // Ask: remove from domain only, or delete model file entirely?
+        if (this.logicalModelService.modelExists(payload.modelName)) {
+          void vscode.window.showInformationMessage(
+            `Model "${payload.modelName}" removed from this domain. Delete the model file entirely?`,
+            'Delete Model File',
+            'Keep File',
+          ).then((choice) => {
+            if (choice === 'Delete Model File') {
+              this.logicalModelService.deleteModel(payload.modelName);
+              vscode.window.showInformationMessage(`Deleted logical-models/${payload.modelName}.yml`);
+            }
+          });
+        }
+        return;
+      }
+
+      // V4: legacy inline path
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const modelIndex = models.findIndex((m) => m.name === payload.modelName);
       if (modelIndex === -1) {
@@ -1264,13 +1615,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       models.splice(modelIndex, 1);
       section.models = models;
 
-      // Cascade: remove relationships involving this model within this stage
       const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
       section.relationships = relationships.filter(
         (rel) => rel.fromModel !== payload.modelName && rel.toModel !== payload.modelName,
       );
 
-      // Remove position for deleted model from global viewConfig
       const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
       const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
       delete positions[payload.modelName];
@@ -1489,6 +1838,75 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const section = this.getStageSection(parsed, stage);
+
+      // V5: add model reference to domain (create model file from manifest if needed)
+      if (this.isDomainV5(parsed)) {
+        const modelNames = (section.models ?? []) as string[];
+        if (modelNames.includes(payload.modelName)) {
+          webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" already exists in this domain.` } });
+          return;
+        }
+
+        // Ensure the logical model file exists — create from manifest if needed
+        if (!this.logicalModelService.modelExists(payload.modelName)) {
+          const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+          const created = this.logicalModelService.createFromManifest(payload.modelName, manifest);
+          if (!created) {
+            webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found in manifest or logical-models/. Run 'dbt compile' to refresh.` } });
+            return;
+          }
+        }
+
+        // Add name reference + position + auto-relationships to domain
+        await this.manifestService.loadManifest(this.workspaceRoot);
+        const relationshipTests = this.manifestService.getRelationshipTests();
+
+        const success = await this.applyDomainEdit(
+          document,
+          (sec, p) => {
+            const names = (sec.models ?? []) as string[];
+            names.push(payload.modelName);
+
+            // Auto-create relationships from manifest tests
+            const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
+            const allNames = new Set(names);
+            for (const test of relationshipTests) {
+              if (test.fromModel !== payload.modelName && test.toModel !== payload.modelName) continue;
+              if (!allNames.has(test.fromModel) || !allNames.has(test.toModel)) continue;
+              const alreadyExists = relationships.some(
+                (r) => r.fromModel === test.fromModel && r.fromColumn === test.fromColumn &&
+                        r.toModel === test.toModel && r.toColumn === test.toColumn,
+              );
+              if (!alreadyExists) {
+                relationships.push({
+                  fromModel: test.fromModel, fromColumn: test.fromColumn,
+                  toModel: test.toModel, toColumn: test.toColumn,
+                  cardinality: 'many-to-one',
+                });
+              }
+            }
+            sec.relationships = relationships;
+
+            // Add position
+            const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
+            const positions = (vc.positions ?? {}) as Record<string, NodePosition>;
+            const newPosition = findOpenPosition(positions);
+            vc.positions = { ...positions, [payload.modelName]: newPosition };
+            p.viewConfig = vc;
+          },
+          { refreshWebview: true, webview, stage },
+        );
+
+        if (!success) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to add model to domain.' } });
+        }
+        return;
+      }
+
+      // V4: legacy inline path
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const manifestModel = manifest.models.get(payload.modelName);
 
@@ -1500,9 +1918,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      const text = document.getText();
-      const parsed = JSON.parse(text) as Record<string, unknown>;
-      const section = this.getStageSection(parsed, stage);
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
 
       if (models.some((m) => m.name === payload.modelName)) {
@@ -1513,12 +1928,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      // Find open position from global viewConfig
       const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
       const existingPositions = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
       const newPosition = findOpenPosition(existingPositions);
 
-      // Add model with columns from manifest
       const columns = manifestModel.columns.map((col) => ({
         name: col.name,
         dataType: col.data_type ?? 'unknown',
@@ -1532,31 +1945,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         columns,
       });
 
-      // Auto-create relationships from manifest tests
       const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
       const modelNames = new Set(models.map((m) => m.name as string));
       const relationshipTests = this.manifestService.getRelationshipTests();
 
       for (const test of relationshipTests) {
-        if (test.fromModel !== payload.modelName && test.toModel !== payload.modelName) {
-          continue;
-        }
-        if (!modelNames.has(test.fromModel) || !modelNames.has(test.toModel)) {
-          continue;
-        }
+        if (test.fromModel !== payload.modelName && test.toModel !== payload.modelName) continue;
+        if (!modelNames.has(test.fromModel) || !modelNames.has(test.toModel)) continue;
         const alreadyExists = relationships.some(
-          (r) =>
-            r.fromModel === test.fromModel &&
-            r.fromColumn === test.fromColumn &&
-            r.toModel === test.toModel &&
-            r.toColumn === test.toColumn,
+          (r) => r.fromModel === test.fromModel && r.fromColumn === test.fromColumn &&
+                  r.toModel === test.toModel && r.toColumn === test.toColumn,
         );
         if (!alreadyExists) {
           relationships.push({
-            fromModel: test.fromModel,
-            fromColumn: test.fromColumn,
-            toModel: test.toModel,
-            toColumn: test.toColumn,
+            fromModel: test.fromModel, fromColumn: test.fromColumn,
+            toModel: test.toModel, toColumn: test.toColumn,
             cardinality: 'many-to-one' as const,
           });
         }
@@ -1605,6 +2008,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      // V5: write to central model file
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (this.isDomainV5(parsed)) {
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          const existing = model.rationale ?? {};
+          const patched = { ...existing };
+          for (const [key, val] of Object.entries(payload.rationale)) {
+            const trimmed = typeof val === 'string' ? val.trim() : undefined;
+            if (trimmed) { (patched as Record<string, string | undefined>)[key] = trimmed; } else { delete (patched as Record<string, string | undefined>)[key]; }
+          }
+          if (Object.keys(patched).length > 0) { model.rationale = patched as Rationale; } else { delete model.rationale; }
+        });
+        return;
+      }
+
+      // V4: legacy inline path
       const success = await this.applyDomainEdit(
         document,
         (section) => {
@@ -1641,6 +2061,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      // V5: write to central model file
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (this.isDomainV5(parsed)) {
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          const grain = payload.grain?.trim() || undefined;
+          if (grain) { model.grain = grain; } else { delete model.grain; }
+        });
+        return;
+      }
+
+      // V4: legacy inline path
       const success = await this.applyDomainEdit(
         document,
         (section) => {
@@ -1671,6 +2103,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      // V5: write to central model file
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (this.isDomainV5(parsed)) {
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          if (payload.modelRole) { model.modelRole = payload.modelRole as import('../types/semantic').ModelRole; } else { delete model.modelRole; }
+        });
+        return;
+      }
+
+      // V4: legacy inline path
       const success = await this.applyDomainEdit(
         document,
         (section) => {
