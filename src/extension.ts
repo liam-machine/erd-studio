@@ -172,7 +172,7 @@ export function activate(context: vscode.ExtensionContext): void {
     workspaceRoot,
     schemaTagService,
   );
-  const decorationProvider = new SemanticFileDecorationProvider();
+  const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
 
   // Set context key so view/title menus only show when semantic dir exists
