@@ -105,6 +105,11 @@ function EditorCanvas() {
   // Legend state
   const legendOpen = useEditorStore((s) => s.legendOpen);
   const setLegendOpen = useEditorStore((s) => s.setLegendOpen);
+
+  // Column selection state
+  const selectedColumns = useEditorStore((s) => s.selectedColumns);
+  const clearColumnSelection = useEditorStore((s) => s.clearColumnSelection);
+  const setEditingColumn = useEditorStore((s) => s.setEditingColumn);
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
 
@@ -264,6 +269,13 @@ function EditorCanvas() {
         return;
       }
 
+      // F2: Edit selected column (rename)
+      if (e.key === 'F2' && selectedColumns.length === 1 && detailPanelOpen && domain && !domain.readOnly) {
+        e.preventDefault();
+        setEditingColumn(selectedColumns[0]);
+        return;
+      }
+
       // ESCAPE KEY: Close dialogs first, then deselect
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -281,6 +293,12 @@ function EditorCanvas() {
         }
         if (addExistingModelDialogOpen) {
           setAddExistingModelDialogOpen(false);
+          return;
+        }
+
+        // Clear column selection first (before deselecting model)
+        if (selectedColumns.length > 0) {
+          clearColumnSelection();
           return;
         }
 
@@ -331,6 +349,19 @@ function EditorCanvas() {
             setPendingDeleteConfirmation(true);
             return;
           }
+        }
+
+        // Priority 1.5: Delete selected columns (immediate)
+        if (selectedColumns.length > 0 && detailPanelOpen && selectedNode) {
+          e.preventDefault();
+          for (const colName of selectedColumns) {
+            vscode.postMessage({
+              type: 'removeColumn',
+              payload: { modelName: selectedNode, columnName: colName },
+            });
+          }
+          clearColumnSelection();
+          return;
         }
 
         // Priority 2: Delete selected edges (no confirmation, immediate)
@@ -387,6 +418,9 @@ function EditorCanvas() {
     triggerAutoLayout,
     legendOpen,
     setLegendOpen,
+    selectedColumns,
+    clearColumnSelection,
+    setEditingColumn,
     // Note: vscode is omitted as it's a stable ref from useVsCodeApi
   ]);
 

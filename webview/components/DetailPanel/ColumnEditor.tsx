@@ -6,11 +6,13 @@
  * Uses ColumnRowEditor for consistent column row rendering.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
+import { BulkColumnActions } from './BulkColumnActions';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
+import { useEditorStore } from '../../store/editorStore';
 import type { DisplayColumn } from '../../../src/types/display';
 import type { ColumnDef, ModelRole } from '../../../src/types/semantic';
 import type { ColumnKeyType } from '../../../src/types/messages';
@@ -35,6 +37,14 @@ export interface ColumnEditorProps {
 
 export function ColumnEditor({ modelName, columns, readOnly, modelRole }: ColumnEditorProps) {
   const { send } = useMessageBus(() => {});
+
+  // Column selection state from store
+  const selectedColumns = useEditorStore((s) => s.selectedColumns);
+  const editingColumn = useEditorStore((s) => s.editingColumn);
+  const selectColumn = useEditorStore((s) => s.selectColumn);
+  const toggleColumnSelection = useEditorStore((s) => s.toggleColumnSelection);
+  const selectColumnRange = useEditorStore((s) => s.selectColumnRange);
+  const clearColumnSelection = useEditorStore((s) => s.clearColumnSelection);
 
   // State for whether we're adding a new column
   const [isAddingColumn, setIsAddingColumn] = useState(false);
@@ -130,6 +140,38 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
     setExpandedColumns(new Set());
   }, []);
 
+  // Prune stale selections when columns change (e.g. column deleted externally)
+  useEffect(() => {
+    const currentNames = new Set(columns.map((c) => c.name));
+    const pruned = selectedColumns.filter((n) => currentNames.has(n));
+    if (pruned.length !== selectedColumns.length) {
+      // Some selected columns no longer exist — update store
+      if (pruned.length === 0) {
+        clearColumnSelection();
+      } else {
+        // Directly set to pruned list via selectColumn for single, or rebuild
+        // We use a low-level approach: clear and re-select
+        // Note: This is a rare edge case (column deleted while selected)
+        clearColumnSelection();
+      }
+    }
+  }, [columns, selectedColumns, clearColumnSelection]);
+
+  // Build selection handler that checks modifier keys
+  const handleColumnSelect = useCallback(
+    (columnName: string, e: React.MouseEvent) => {
+      const allNames = orderedColumns.map((c) => c.name);
+      if (e.shiftKey) {
+        selectColumnRange(columnName, allNames);
+      } else if (e.ctrlKey || e.metaKey) {
+        toggleColumnSelection(columnName);
+      } else {
+        selectColumn(columnName);
+      }
+    },
+    [orderedColumns, selectColumn, toggleColumnSelection, selectColumnRange],
+  );
+
   // Handle toggling key type (PK/FK/NK)
   const handleToggleKey = useCallback(
     (columnName: string, keyType: ColumnKeyType, currentValue: boolean) => {
@@ -208,6 +250,16 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
         </div>
       </div>
 
+      {/* Bulk actions toolbar — shown when multiple columns are selected */}
+      {isEditable && selectedColumns.length > 1 && (
+        <BulkColumnActions
+          modelName={modelName}
+          selectedColumns={selectedColumns}
+          columns={columns}
+          onClearSelection={clearColumnSelection}
+        />
+      )}
+
       {/* Column list */}
       <div className="column-editor__list">
         {columns.length === 0 && !isAddingColumn && (
@@ -234,6 +286,9 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             dragHandleProps={isEditable ? getDragHandleProps(idx) : undefined}
             isDragOver={dropIndex === idx && dragIndex !== idx}
             isBeingDragged={dragIndex === idx}
+            isSelected={selectedColumns.includes(col.name)}
+            onSelect={(e) => handleColumnSelect(col.name, e)}
+            isEditingActive={editingColumn === col.name}
           />
         ))}
 

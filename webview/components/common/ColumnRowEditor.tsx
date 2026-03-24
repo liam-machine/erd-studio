@@ -70,6 +70,12 @@ export interface ColumnRowEditorProps {
   isDragOver?: boolean;
   /** Whether this row is currently being dragged. */
   isBeingDragged?: boolean;
+  /** Whether this column is selected (spreadsheet-style selection). */
+  isSelected?: boolean;
+  /** Callback when the row is clicked for selection (receives event for modifier key detection). */
+  onSelect?: (e: React.MouseEvent) => void;
+  /** Whether the store says this column should enter edit mode (F2). */
+  isEditingActive?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +129,9 @@ export function ColumnRowEditor({
   dragHandleProps,
   isDragOver = false,
   isBeingDragged = false,
+  isSelected = false,
+  onSelect,
+  isEditingActive = false,
 }: ColumnRowEditorProps) {
   // Local state for editing
   const [localColumn, setLocalColumn] = useState<ColumnDef>({
@@ -181,6 +190,18 @@ export function ColumnRowEditor({
     column.scdType,
     column.additiveType,
   ]);
+
+  // Enter edit mode when store signals via isEditingActive (F2 key)
+  useEffect(() => {
+    if (isEditingActive && !editingField && mode !== 'readonly') {
+      isSwitchingFieldRef.current = true;
+      setEditingField('name');
+      setValidationError(null);
+      requestAnimationFrame(() => {
+        isSwitchingFieldRef.current = false;
+      });
+    }
+  }, [isEditingActive, editingField, mode]);
 
   // Auto-focus when entering edit mode or when mode is 'new'
   useEffect(() => {
@@ -418,11 +439,31 @@ export function ColumnRowEditor({
   const isDimRole = modelRole?.includes('dim') || modelRole === 'reference';
   const isFactRole = modelRole?.includes('fact') || modelRole?.includes('snapshot');
 
+  // Handle row click for selection (only when not in new-column mode)
+  const handleRowClick = useCallback(
+    (e: React.MouseEvent) => {
+      // Don't select if clicking on interactive elements (buttons, inputs, selects)
+      const target = e.target as HTMLElement;
+      if (
+        target.closest('button') ||
+        target.closest('input') ||
+        target.closest('select') ||
+        target.closest('textarea') ||
+        target.closest('.key-badge-group')
+      ) {
+        return;
+      }
+      onSelect?.(e);
+    },
+    [onSelect],
+  );
+
   const rowClasses = [
     'column-row-editor',
     `column-row-editor--${statusClass}`,
     mode !== 'readonly' && 'column-row-editor--editable',
     isEditing && 'column-row-editor--editing',
+    isSelected && 'column-row-editor--selected',
     validationError && 'column-row-editor--has-error',
     expanded && 'column-row-editor--expanded',
     isDragOver && 'column-row-editor--drag-over',
@@ -432,13 +473,14 @@ export function ColumnRowEditor({
     .join(' ');
 
   return (
-    <div className={rowClasses} {...rowProps}>
+    <div className={rowClasses} {...rowProps} onClick={mode !== 'new' ? handleRowClick : undefined}>
       {/* Main row content */}
       <div className="column-row-editor__main">
-        {/* Drag handle for reordering */}
-        {dragHandleProps && (
-          <span className="column-row-editor__drag-handle" {...dragHandleProps}>⠿</span>
-        )}
+        {/* Drag handle for reordering — always rendered to reserve space, hidden when not editable */}
+        <span
+          className={`column-row-editor__drag-handle${!dragHandleProps ? ' column-row-editor__drag-handle--hidden' : ''}`}
+          {...(dragHandleProps ?? {})}
+        >⠿</span>
         {/* Expand/collapse chevron */}
         {onToggleExpand && (
           <button
@@ -483,9 +525,8 @@ export function ColumnRowEditor({
         ) : (
           <span
             className="column-row-editor__name"
-            onClick={() => handleFieldClick('name')}
-            onMouseDown={(e) => e.preventDefault()} // Prevent blur before click registers
-            title={mode !== 'readonly' ? 'Click to edit' : undefined}
+            onDoubleClick={(e) => { e.stopPropagation(); handleFieldClick('name'); }}
+            title={mode !== 'readonly' ? 'Double-click to edit' : undefined}
           >
             {localColumn.name || (
               <em className="column-row-editor__placeholder">column_name</em>
@@ -520,9 +561,8 @@ export function ColumnRowEditor({
         ) : (
           <span
             className="column-row-editor__type"
-            onClick={() => handleFieldClick('dataType')}
-            onMouseDown={(e) => e.preventDefault()} // Prevent blur before click registers
-            title={mode !== 'readonly' ? 'Click to edit' : undefined}
+            onDoubleClick={(e) => { e.stopPropagation(); handleFieldClick('dataType'); }}
+            title={mode !== 'readonly' ? 'Double-click to edit' : undefined}
           >
             {localColumn.dataType}
           </span>
@@ -570,8 +610,8 @@ export function ColumnRowEditor({
           ) : (
             <div
               className={`column-row-editor__description-text ${!hasDescription ? 'column-row-editor__description-text--empty' : ''}`}
-              onClick={() => handleFieldClick('description')}
-              title={mode !== 'readonly' ? 'Click to edit description' : undefined}
+              onDoubleClick={() => handleFieldClick('description')}
+              title={mode !== 'readonly' ? 'Double-click to edit description' : undefined}
             >
               {localColumn.description || (
                 mode !== 'readonly' ? 'Click to add description...' : 'No description'

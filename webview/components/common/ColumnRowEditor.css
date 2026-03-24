@@ -513,9 +513,28 @@
   opacity: 1;
 }
 
+.column-row-editor__drag-handle--hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Row being dragged */
 .column-row-editor--dragging {
   opacity: 0.4;
+}
+
+/* Selected column highlight (spreadsheet-style selection) */
+.column-row-editor--selected .column-row-editor__main {
+  background: var(--vscode-list-activeSelectionBackground, rgba(4, 57, 94, 0.7));
+}
+
+.column-row-editor--selected .column-row-editor__name,
+.column-row-editor--selected .column-row-editor__type {
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+}
+
+.column-row-editor--selected .column-row-editor__drag-handle {
+  color: var(--vscode-list-activeSelectionForeground, #fff);
 }
 
 /* Drop indicator — top border shows where the row will be inserted */

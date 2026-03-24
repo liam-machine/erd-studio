@@ -125,6 +125,12 @@ export interface EditorState {
   expandedNodes: Set<string>;
   /** Whether columns are in global "all expanded" mode. */
   allExpanded: boolean;
+  /** Selected column names in the DetailPanel (scoped to current model). */
+  selectedColumns: string[];
+  /** Anchor column for Shift+click range selection. */
+  lastSelectedColumn: string | null;
+  /** Column currently in edit mode (name field), or null. */
+  editingColumn: string | null;
 }
 
 export interface EditorActions {
@@ -197,6 +203,16 @@ export interface EditorActions {
   toggleExpansion: (modelId: string) => void;
   /** Restore expansion state from persisted data. */
   setExpandedNodes: (nodes: string[], allExpanded: boolean) => void;
+  /** Select a single column (replaces selection, sets anchor). */
+  selectColumn: (name: string) => void;
+  /** Toggle a column in/out of the selection (Ctrl+click). */
+  toggleColumnSelection: (name: string) => void;
+  /** Select a range of columns from anchor to target (Shift+click). */
+  selectColumnRange: (name: string, allNames: string[]) => void;
+  /** Clear all column selection. */
+  clearColumnSelection: () => void;
+  /** Set the column currently being edited (F2 / double-click). */
+  setEditingColumn: (name: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,10 +252,13 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   highlightedColumns: new Set<string>(),
   expandedNodes: new Set<string>(),
   allExpanded: false,
+  selectedColumns: [],
+  lastSelectedColumn: null,
+  editingColumn: null,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
-  selectNode: (nodeName) => set({ selectedNode: nodeName }),
+  selectNode: (nodeName) => set({ selectedNode: nodeName, selectedColumns: [], lastSelectedColumn: null, editingColumn: null }),
   setSelectedEdges: (edgeIds) => set({ selectedEdges: edgeIds }),
   setSelectedEdge: (edgeId) => set({ selectedEdge: edgeId }),
   setViewport: (viewport) => set({ viewport }),
@@ -257,6 +276,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setDomain: (domain) => set((state) => ({
     domain,
     error: null,
+    // Clear column selection on domain reload
+    selectedColumns: [], lastSelectedColumn: null, editingColumn: null,
     // Clear discrepancy when switching stages (stage changed)
     ...(state.domain && state.domain.stage !== domain.stage
       ? { discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null }
@@ -331,4 +352,28 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     }),
   setExpandedNodes: (nodes, allExpanded) =>
     set({ expandedNodes: new Set(nodes), allExpanded }),
+
+  // Column selection actions
+  selectColumn: (name) => set({ selectedColumns: [name], lastSelectedColumn: name, editingColumn: null }),
+  toggleColumnSelection: (name) =>
+    set((state) => {
+      const idx = state.selectedColumns.indexOf(name);
+      const next = idx >= 0
+        ? state.selectedColumns.filter((n) => n !== name)
+        : [...state.selectedColumns, name];
+      return { selectedColumns: next, lastSelectedColumn: name, editingColumn: null };
+    }),
+  selectColumnRange: (name, allNames) =>
+    set((state) => {
+      const anchor = state.lastSelectedColumn;
+      if (!anchor) return { selectedColumns: [name], lastSelectedColumn: name, editingColumn: null };
+      const anchorIdx = allNames.indexOf(anchor);
+      const targetIdx = allNames.indexOf(name);
+      if (anchorIdx < 0 || targetIdx < 0) return { selectedColumns: [name], lastSelectedColumn: name, editingColumn: null };
+      const start = Math.min(anchorIdx, targetIdx);
+      const end = Math.max(anchorIdx, targetIdx);
+      return { selectedColumns: allNames.slice(start, end + 1), editingColumn: null };
+    }),
+  clearColumnSelection: () => set({ selectedColumns: [], lastSelectedColumn: null, editingColumn: null }),
+  setEditingColumn: (name) => set({ editingColumn: name }),
 }));
