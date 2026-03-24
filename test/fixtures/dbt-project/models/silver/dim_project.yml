@@ -5,10 +5,6 @@ models:
     config:
       tags:
         - silver
-        - domain:work-lots
-        - domain:bill
-        - domain:ncr
-        - domain:ppw-work-lot
     columns:
       - name: project_id
         description: Surrogate key for project

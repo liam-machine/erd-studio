@@ -1,0 +1,119 @@
+name: fct_large_table
+schema: silver
+description: Fact table with many columns to test drag-reorder auto-scroll
+grain: One row per transaction event
+modelRole: fact
+columns:
+  - name: transaction_id
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: event_date
+    dataType: DATE
+    description: Date of the event
+  - name: warehouse_id
+    dataType: INT
+    description: Originating warehouse
+  - name: customer_id
+    dataType: INT
+    description: FK to customer dimension
+    isForeignKey: true
+  - name: delivery_date
+    dataType: DATE
+    description: Date order was delivered
+  - name: project_id
+    dataType: INT
+    description: FK to project dimension
+    isForeignKey: true
+  - name: product_id
+    dataType: INT
+    description: FK to product dimension
+    isForeignKey: true
+  - name: channel_id
+    dataType: INT
+    description: FK to channel dimension
+    isForeignKey: true
+  - name: region_code
+    dataType: VARCHAR
+    description: Geographic region code
+  - name: country_code
+    dataType: VARCHAR
+    description: ISO country code
+  - name: city_name
+    dataType: VARCHAR
+    description: City of the transaction
+  - name: postal_code
+    dataType: VARCHAR
+    description: Postal or ZIP code
+  - name: transaction_type
+    dataType: VARCHAR
+    description: Type of transaction (sale, return, exchange)
+  - name: is_refunded
+    dataType: BOOLEAN
+    description: Whether the transaction was refunded
+  - name: payment_method
+    dataType: VARCHAR
+    description: Payment method used
+  - name: currency_code
+    dataType: VARCHAR
+    description: ISO currency code
+  - name: gross_amount
+    dataType: DECIMAL(18,2)
+    description: Gross transaction amount before tax
+  - name: tax_amount
+    dataType: DECIMAL(18,2)
+    description: Tax component
+  - name: discount_amount
+    dataType: DECIMAL(18,2)
+    description: Discount applied
+  - name: net_amount
+    dataType: DECIMAL(18,2)
+    description: Net amount after tax and discount
+  - name: unit_price
+    dataType: DECIMAL(18,2)
+    description: Price per unit
+  - name: cost_price
+    dataType: DECIMAL(18,2)
+    description: Cost price per unit
+  - name: margin_amount
+    dataType: DECIMAL(18,2)
+    description: Profit margin amount
+  - name: margin_pct
+    dataType: DECIMAL(5,2)
+    description: Profit margin percentage
+  - name: quantity
+    dataType: INT
+    description: Number of units
+  - name: refund_date
+    dataType: DATE
+    description: Date of refund if applicable
+  - name: shipping_cost
+    dataType: DECIMAL(18,2)
+    description: Cost of shipping
+  - name: shipping_method
+    dataType: VARCHAR
+    description: Shipping carrier and method
+  - name: order_status
+    dataType: VARCHAR
+    description: Current status of the order
+  - name: fulfillment_date
+    dataType: DATE
+    description: Date order was fulfilled
+  - name: sales_rep_id
+    dataType: INT
+    description: Assigned sales representative
+  - name: campaign_id
+    dataType: INT
+    description: Marketing campaign attribution
+  - name: source_system
+    dataType: VARCHAR
+    description: Originating source system
+  - name: event_timestamp
+    dataType: TIMESTAMP
+    description: Exact time of the event
+  - name: batch_id
+    dataType: INT
+    description: ETL batch identifier
+  - name: loaded_at
+    dataType: TIMESTAMP
+    description: When the row was loaded

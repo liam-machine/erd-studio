@@ -6,7 +6,6 @@ models:
       tags:
         - gold
         - daily
-        - domain:work-lots
     columns:
       - name: event_id
         description: Event surrogate key
