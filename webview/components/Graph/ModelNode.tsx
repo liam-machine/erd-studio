@@ -17,7 +17,7 @@
 import { memo, useCallback, useMemo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
-import type { ModelRole, Stage } from '../../../src/types/semantic';
+import type { Stage } from '../../../src/types/semantic';
 import type { ColumnDiscrepancy } from '../../../src/types/discrepancy';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
@@ -42,31 +42,6 @@ const LAYER_BADGE_FALLBACK: Record<string, string> = {
   gold: 'GLD',
 };
 
-/** Short abbreviations for model role badges. */
-const ROLE_BADGE_LABEL: Record<ModelRole, string> = {
-  'conformed-dim': 'CONF',
-  'domain-dim': 'DIM',
-  'transaction-fact': 'TXN',
-  'periodic-snapshot': 'PER',
-  'accumulating-snapshot': 'ACC',
-  'factless-fact': 'BRG',
-  'reference': 'REF',
-  'gold-fact': 'GFCT',
-  'gold-dim': 'GDIM',
-};
-
-/** Colour for each model role badge (text + background at 20% opacity). */
-const ROLE_BADGE_COLOR: Record<ModelRole, string> = {
-  'conformed-dim': '#6366f1',
-  'domain-dim': '#6366f1',
-  'transaction-fact': '#e11d48',
-  'periodic-snapshot': '#e11d48',
-  'accumulating-snapshot': '#e11d48',
-  'factless-fact': '#a855f7',
-  'reference': '#059669',
-  'gold-fact': '#d97706',
-  'gold-dim': '#d97706',
-};
 
 /** Unicode circled numbers for SCD type badges. */
 const SCD_BADGE: Record<number, string> = {
@@ -504,7 +479,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, stage, layer, layerConfig, columns, hasRationale, grain, modelRole, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, stage, layer, layerConfig, columns, grain, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const { send } = useMessageBus(() => {});
 
@@ -594,21 +569,6 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
         <span className="model-node__name" title={modelName}>
           {modelName}
         </span>
-        {hasRationale && (
-          <span className="model-node__rationale-badge" title="Design rationale available">R</span>
-        )}
-        {modelRole && ROLE_BADGE_LABEL[modelRole] && (
-          <span
-            className="model-node__role-badge"
-            style={{
-              backgroundColor: `${ROLE_BADGE_COLOR[modelRole]}33`,
-              color: ROLE_BADGE_COLOR[modelRole],
-            }}
-            title={modelRole}
-          >
-            {ROLE_BADGE_LABEL[modelRole]}
-          </span>
-        )}
         <span
           className="model-node__badge"
           style={layerConfig?.color ? {
@@ -618,11 +578,6 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
         >
           {layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
-        {isDiscExtra && (
-          <span className="model-node__discrepancy-badge" title={`Only in ${discrepancySourceStage ?? 'this stage'}`}>
-            {discrepancySourceStage ? `${discrepancySourceStage} only` : 'extra'}
-          </span>
-        )}
       </div>
 
       {/* Grain subtitle */}
