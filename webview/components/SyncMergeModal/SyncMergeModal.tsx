@@ -131,29 +131,19 @@ function ModelRow({ model, sourceStage, targetStage, isCollapsed, hasFoldableCon
     const isSource = side === 'logical';
     const stageColor = STAGE_HEX[isSource ? sourceStage : targetStage];
 
-    if (allResolved) {
-      return (
-        <td className="sync-modal__cell sync-modal__cell--stage sync-modal__cell--model-stage">
-          <span className="sync-modal__exists-check" style={{ color: stageColor }}>✓</span>
-        </td>
-      );
-    }
-
-    // Existence indicator for conflicted models
-    let existenceContent: React.ReactNode;
+    // Existence indicator for conflicted models only (no tick for matched)
+    let existenceContent: React.ReactNode = null;
     if (model.status !== 'matched') {
       const inSource = model.status === 'extra';
       const presentOnThisSide = isSource ? inSource : !inSource;
       existenceContent = presentOnThisSide
         ? <span className="sync-modal__exists-dot" style={{ color: stageColor }}>● Exists</span>
         : <span className="sync-modal__missing-dash" style={{ color: STAGE_HEX.ghost }}>— Not present</span>;
-    } else {
-      existenceContent = <span className="sync-modal__exists-check" style={{ color: stageColor }}>✓</span>;
     }
 
     return (
       <td className="sync-modal__cell sync-modal__cell--stage sync-modal__cell--model-stage">
-        <span className="sync-modal__cell-value">{existenceContent}</span>
+        {existenceContent && <span className="sync-modal__cell-value">{existenceContent}</span>}
         {modelSyncKeys.length > 0 && (
           <button
             className="sync-modal__model-bulk-btn"

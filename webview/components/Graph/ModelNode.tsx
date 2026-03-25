@@ -481,6 +481,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
   const { modelName, stage, layer, layerConfig, columns, grain, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  const isStub = useEditorStore((s) => s.domain?.stubColumns?.includes(modelName) ?? false);
   const { send } = useMessageBus(() => {});
 
   // Show reorder handles when this node is selected and editable
@@ -500,14 +501,17 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
     rowSelector: '.model-node__column',
   });
 
-  // F405: Compute visible columns based on expansion state
+  // Compute visible columns — stub models show only PK/NK; others respect expansion state
   const { displayColumns, hiddenCount } = useMemo(() => {
-    const shouldCollapse = columns.length > COLLAPSED_COLUMN_LIMIT && !isExpanded;
+    const visibleColumns = isStub
+      ? columns.filter((c) => c.isPrimaryKey || c.isNaturalKey)
+      : columns;
+    const shouldCollapse = visibleColumns.length > COLLAPSED_COLUMN_LIMIT && !isExpanded;
     return {
-      displayColumns: shouldCollapse ? columns.slice(0, COLLAPSED_COLUMN_LIMIT) : columns,
-      hiddenCount: shouldCollapse ? columns.length - COLLAPSED_COLUMN_LIMIT : 0,
+      displayColumns: shouldCollapse ? visibleColumns.slice(0, COLLAPSED_COLUMN_LIMIT) : visibleColumns,
+      hiddenCount: shouldCollapse ? visibleColumns.length - COLLAPSED_COLUMN_LIMIT : 0,
     };
-  }, [columns, isExpanded]);
+  }, [columns, isExpanded, isStub]);
 
   // Handler for expand/collapse button
   const handleToggleClick = (e: React.MouseEvent) => {
@@ -651,7 +655,9 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
 
       {/* Footer */}
       <div className="model-node__footer">
-        {columns.length} {columns.length === 1 ? 'column' : 'columns'}
+        {isStub
+          ? `${displayColumns.length} key col${displayColumns.length !== 1 ? 's' : ''} of ${columns.length}`
+          : `${columns.length} ${columns.length === 1 ? 'column' : 'columns'}`}
         {discrepancy && discrepancy.columns.length > 0 && (() => {
           const issues = discrepancy.columns.filter((c) => c.status !== 'matched').length;
           return issues > 0 ? (
