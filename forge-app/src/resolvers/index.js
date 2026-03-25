@@ -1,21 +1,35 @@
 import Resolver from '@forge/resolver';
-import { fetch } from '@forge/api';
-import { storage } from '@forge/api';
+import api from '@forge/api';
+import { kvs as storage } from '@forge/kvs';
 
 const resolver = new Resolver();
 
-// Helper: fetch a file from GitHub via API (supports private repos)
-async function fetchGitHubFile(repo, branch, path, token) {
-  // Use GitHub Contents API — works for both public and private repos
-  const url = `https://api.github.com/repos/${repo}/contents/${path}?ref=${branch}`;
-  const headers = {
-    'Accept': 'application/vnd.github.raw+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+// Helper: get an authenticated GitHub API handle for the current user
+function getGitHubApi() {
+  return api.asUser().withProvider('github', 'github-api');
+}
+
+// Custom error class for 401s — lets getDomain distinguish auth failures
+// from other errors and re-throw outside the try/catch for Forge to intercept.
+class GitHubAuthError extends Error {
+  constructor(path) {
+    super(`GitHub auth expired for ${path}`);
+    this.name = 'GitHubAuthError';
   }
-  const response = await fetch(url, { headers });
+}
+
+// Helper: fetch a file from GitHub via the Forge-authenticated provider
+async function fetchGitHubFile(github, repo, branch, path) {
+  const apiPath = `/repos/${repo}/contents/${path}?ref=${branch}`;
+  const response = await github.fetch(apiPath, {
+    headers: {
+      'Accept': 'application/vnd.github.raw+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (response.status === 401) {
+    throw new GitHubAuthError(path);
+  }
   if (!response.ok) {
     throw new Error(`GitHub fetch failed: ${response.status} for ${path}`);
   }
@@ -99,17 +113,65 @@ function parseLogicalModelYaml(yamlText) {
   return model;
 }
 
-resolver.define('getDomain', async (req) => {
+// Check if the current user has connected their GitHub account
+resolver.define('getAuthStatus', async () => {
   try {
+    const github = getGitHubApi();
+    const hasCredentials = await github.hasCredentials();
+    if (!hasCredentials) {
+      return { authenticated: false };
+    }
+    const account = await github.getAccount();
+    return {
+      authenticated: true,
+      user: account ? { displayName: account.displayName, avatarUrl: account.avatarUrl } : null,
+    };
+  } catch {
+    return { authenticated: false };
+  }
+});
+
+resolver.define('getDomain', async (req) => {
+  // Credential check MUST be outside try/catch — requestCredentials() throws
+  // a platform exception that Forge intercepts to show its OAuth consent UI.
+  // If caught, Forge never sees the throw and can't show the auth prompt.
+  const github = getGitHubApi();
+  if (!(await github.hasCredentials())) {
+    await github.requestCredentials();
+  }
+
+  let result;
+  let needsReauth = false;
+  try {
+    result = await _getDomainInner(github, req);
+  } catch (err) {
+    if (err instanceof GitHubAuthError) {
+      needsReauth = true;
+    } else {
+      return { error: err.message || 'Failed to load domain from GitHub' };
+    }
+  }
+
+  // Token was revoked/expired on GitHub's side — force re-auth.
+  // requestCredentials() MUST be outside try/catch so Forge intercepts
+  // the platform exception and shows the OAuth consent UI.
+  if (needsReauth) {
+    await github.requestCredentials();
+  }
+
+  return result;
+});
+
+async function _getDomainInner(github, req) {
     const payload = req.payload || {};
-    const { repo, branch, domainPath, githubToken } = payload;
+    const { repo, branch, domainPath } = payload;
 
     if (!repo || !domainPath) {
       return { error: `Missing required config: repo=${repo}, domainPath=${domainPath}` };
     }
 
     // 1. Fetch domain JSON
-    const domainText = await fetchGitHubFile(repo, branch || 'main', domainPath, githubToken);
+    const domainText = await fetchGitHubFile(github, repo, branch || 'main', domainPath);
     const domainJson = JSON.parse(domainText);
 
     // 2. Determine base directory for logical-models
@@ -125,7 +187,7 @@ resolver.define('getDomain', async (req) => {
       for (const modelName of modelEntries) {
         try {
           const modelPath = `${baseDir}/logical-models/${modelName}.yml`;
-          const yamlText = await fetchGitHubFile(repo, branch || 'main', modelPath, githubToken);
+          const yamlText = await fetchGitHubFile(github, repo, branch || 'main', modelPath);
           const model = parseLogicalModelYaml(yamlText);
           resolvedModels.push({
             name: model.name || modelName,
@@ -203,20 +265,25 @@ resolver.define('getDomain', async (req) => {
       readOnly: true,
       positionDraggable: false,
     };
-  } catch (err) {
-    return { error: err.message || 'Failed to load domain from GitHub' };
-  }
-});
+}
 
 resolver.define('saveConfig', async ({ payload, context }) => {
   const localId = context.extension?.macro?.id || context.localId || 'default';
-  await storage.set(`config-${localId}`, payload);
+  // Strip githubToken from legacy configs — auth is now handled via OAuth
+  const { githubToken, ...cleanPayload } = payload;
+  await storage.set(`config-${localId}`, cleanPayload);
   return { success: true };
 });
 
 resolver.define('getConfig', async ({ context }) => {
   const localId = context.extension?.macro?.id || context.localId || 'default';
-  return await storage.get(`config-${localId}`);
+  const config = await storage.get(`config-${localId}`);
+  // Strip any legacy githubToken from stored config
+  if (config && config.githubToken) {
+    const { githubToken, ...clean } = config;
+    return clean;
+  }
+  return config;
 });
 
 export const handler = resolver.getDefinitions();
