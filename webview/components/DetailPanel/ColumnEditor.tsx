@@ -118,17 +118,30 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
   }, []);
 
   // Handle toggling a single column's expanded state
-  const handleToggleExpand = useCallback((columnName: string) => {
-    setExpandedColumns((prev) => {
-      const next = new Set(prev);
-      if (next.has(columnName)) {
-        next.delete(columnName);
-      } else {
-        next.add(columnName);
-      }
-      return next;
-    });
-  }, []);
+  const handleToggleExpand = useCallback((columnName: string, opts?: { altKey?: boolean }) => {
+    if (opts?.altKey) {
+      // Alt+Click: expand all if this column was collapsed, collapse all if it was expanded
+      setExpandedColumns((prev) => {
+        if (prev.has(columnName)) {
+          // Column was expanded → collapse all
+          return new Set();
+        } else {
+          // Column was collapsed → expand all
+          return new Set(columns.map((c) => c.name));
+        }
+      });
+    } else {
+      setExpandedColumns((prev) => {
+        const next = new Set(prev);
+        if (next.has(columnName)) {
+          next.delete(columnName);
+        } else {
+          next.add(columnName);
+        }
+        return next;
+      });
+    }
+  }, [columns]);
 
   // Expand all columns
   const handleExpandAll = useCallback(() => {
@@ -282,7 +295,7 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             modelRole={modelRole}
             expanded={expandedColumns.has(col.name)}
-            onToggleExpand={() => handleToggleExpand(col.name)}
+            onToggleExpand={(opts) => handleToggleExpand(col.name, opts)}
             dragHandleProps={isEditable ? getDragHandleProps(idx) : undefined}
             isDragOver={dropIndex === idx && dragIndex !== idx}
             isBeingDragged={dragIndex === idx}
