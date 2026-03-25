@@ -260,7 +260,7 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 
 /* When all items in this model are resolved, give the header a green tint */
 .sync-modal__row--all-resolved {
-  background: rgba(34, 197, 94, 0.07) !important; /* physical stage tint */
+  background: var(--stage-physical-bg) !important;
 }
 
 /* Matched model rows — dimmed */
@@ -278,11 +278,11 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 
 /* Conflict colour tints for column/relationship rows */
 .sync-modal__row--extra {
-  background: rgba(96, 165, 250, 0.04); /* logical stage tint */
+  background: var(--stage-logical-bg);
 }
 
 .sync-modal__row--missing {
-  background: rgba(34, 197, 94, 0.04); /* physical stage tint */
+  background: var(--stage-physical-bg);
 }
 
 .sync-modal__row--mismatch,
@@ -322,7 +322,7 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 
 /* When this side is the selected ground truth */
 .sync-modal__cell--selected {
-  background: rgba(14, 99, 156, 0.08);
+  background: var(--selection-bg);
 }
 
 /* When the other side is selected */
@@ -507,7 +507,7 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 }
 
 .sync-modal__model-status-dot--extra {
-  background: var(--discrepancy-extra, #60a5fa);
+  background: var(--discrepancy-extra, #f59e0b);
 }
 
 .sync-modal__model-status-dot--missing {
@@ -525,7 +525,7 @@ tbody .sync-modal__row--model-header:not(:first-child) {
   flex-shrink: 0;
 }
 
-.sync-modal__col-dot--extra      { background: var(--discrepancy-extra, #60a5fa); }
+.sync-modal__col-dot--extra      { background: var(--discrepancy-extra, #f59e0b); }
 .sync-modal__col-dot--missing    { background: var(--stage-ghost, #9ca3af); }
 .sync-modal__col-dot--type-mismatch       { background: var(--discrepancy-mismatch, #f59e0b); }
 .sync-modal__col-dot--cardinality-mismatch { background: var(--discrepancy-mismatch, #f59e0b); }

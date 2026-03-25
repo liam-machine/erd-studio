@@ -190,7 +190,7 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
 
   if (col.status === 'extra') {
     sourceContent = col.sourceDataType
-      ? <span className="sync-modal__type-badge">{col.sourceDataType}</span>
+      ? <span className="sync-modal__type-pill" style={{ color: STAGE_HEX[sourceStage], borderColor: STAGE_HEX[sourceStage] }}>{col.sourceDataType}</span>
       : <em className="sync-modal__no-type">no type</em>;
     sourceColor = STAGE_HEX[sourceStage];
     targetContent = <span className="sync-modal__missing-dash" style={{ color: STAGE_HEX.ghost }}>— Not present</span>;
