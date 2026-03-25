@@ -9,8 +9,7 @@
  * says "Only in Logical" / "Only in Physical" (or vice versa) so users
  * always know which stage each item belongs to.
  *
- * Sync mode: adds ground truth radio buttons per discrepancy, bulk selection,
- * and a "Generate Sync Plan" footer.
+ * When sync mode is active, this panel hides and SyncMergeModal takes over.
  */
 
 import { useCallback, useMemo } from 'react';
@@ -18,12 +17,7 @@ import { Panel, useReactFlow } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { STAGE_HEX } from '../../lib/stageColors';
-import { SyncRadio, SyncBulkBar, SyncFooter, StalenessWarning } from './SyncControls';
-import {
-  modelKey,
-  columnKey,
-  relationshipKey,
-} from '../../../src/types/syncPlan';
+import { StalenessWarning } from './SyncControls';
 import type { ModelDiscrepancy, RelationshipDiscrepancy } from '../../../src/types/discrepancy';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './DiscrepancyPanel.css';
@@ -62,10 +56,9 @@ interface ModelEntryProps {
   sourceStage: string;
   targetStage: string;
   onNavigate: (modelName: string) => void;
-  syncMode: boolean;
 }
 
-function ModelEntry({ model, sourceStage, targetStage, onNavigate, syncMode }: ModelEntryProps) {
+function ModelEntry({ model, sourceStage, targetStage, onNavigate }: ModelEntryProps) {
   const issues = model.columns.filter((c) => c.status !== 'matched');
   const hasIssues = issues.length > 0 || model.status !== 'matched';
 
@@ -82,9 +75,6 @@ function ModelEntry({ model, sourceStage, targetStage, onNavigate, syncMode }: M
       >
         <span className={`disc-panel__model-status disc-panel__model-status--${model.status}`} />
         <span className="disc-panel__model-name">{model.name}</span>
-        {syncMode && model.status !== 'matched' && (
-          <SyncRadio selectionKey={modelKey(model.name)} />
-        )}
         <span className="disc-panel__model-label">{modelStatusLabel}</span>
       </button>
       {issues.length > 0 && (
@@ -93,9 +83,6 @@ function ModelEntry({ model, sourceStage, targetStage, onNavigate, syncMode }: M
             <div key={col.name} className="disc-panel__column">
               <span className={`disc-panel__col-indicator disc-panel__col-indicator--${col.status}`} />
               <span className="disc-panel__col-name">{col.name}</span>
-              {syncMode && (
-                <SyncRadio selectionKey={columnKey(model.name, col.name)} />
-              )}
               {col.status === 'type-mismatch' ? (
                 <span className="disc-panel__col-detail disc-panel__col-detail--mismatch">
                   <span className="disc-panel__col-stage-type" style={{ color: STAGE_HEX[sourceStage] ?? 'inherit' }}>
@@ -123,10 +110,9 @@ interface RelationshipEntryProps {
   sourceStage: string;
   targetStage: string;
   onNavigate: (modelName: string) => void;
-  syncMode: boolean;
 }
 
-function RelationshipEntry({ rel, sourceStage, targetStage, onNavigate, syncMode }: RelationshipEntryProps) {
+function RelationshipEntry({ rel, sourceStage, targetStage, onNavigate }: RelationshipEntryProps) {
   const statusClass = rel.status === 'cardinality-mismatch' ? 'mismatch' : rel.status;
   const relStatusLabel = statusLabel(rel.status, sourceStage, targetStage);
 
@@ -141,11 +127,6 @@ function RelationshipEntry({ rel, sourceStage, targetStage, onNavigate, syncMode
         <span className="disc-panel__model-name">
           {rel.fromModel}.{rel.fromColumn} &rarr; {rel.toModel}.{rel.toColumn}
         </span>
-        {syncMode && (
-          <SyncRadio
-            selectionKey={relationshipKey(rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn)}
-          />
-        )}
         <span className="disc-panel__model-label">{relStatusLabel}</span>
       </button>
       {rel.status === 'cardinality-mismatch' && rel.sourceCardinality && rel.targetCardinality && (
@@ -201,25 +182,6 @@ export function DiscrepancyPanel() {
 
   const relIssueCount = relsWithIssues.length;
 
-  // Build all selectable keys for sync mode
-  const allSyncKeys = useMemo(() => {
-    const keys: string[] = [];
-    for (const m of modelsWithIssues) {
-      if (m.status !== 'matched') {
-        keys.push(modelKey(m.name));
-      }
-      for (const c of m.columns) {
-        if (c.status !== 'matched') {
-          keys.push(columnKey(m.name, c.name));
-        }
-      }
-    }
-    for (const r of relsWithIssues) {
-      keys.push(relationshipKey(r.fromModel, r.fromColumn, r.toModel, r.toColumn));
-    }
-    return keys;
-  }, [modelsWithIssues, relsWithIssues]);
-
   const handleNavigate = useCallback(
     (modelName: string) => {
       selectNode(modelName);
@@ -244,8 +206,8 @@ export function DiscrepancyPanel() {
     setSyncMode(!syncMode);
   }, [syncMode, setSyncMode]);
 
-  // Guard: render nothing when overlay is inactive (after all hooks)
-  if (!discrepancyVisible || !discrepancyReport || !summary) return null;
+  // Guard: render nothing when overlay is inactive or sync mode active (modal takes over)
+  if (!discrepancyVisible || !discrepancyReport || !summary || syncMode) return null;
 
   const { sourceStage, targetStage } = discrepancyReport;
 
@@ -254,7 +216,7 @@ export function DiscrepancyPanel() {
     + relIssueCount;
 
   return (
-    <Panel position="bottom-right" className={`disc-panel${syncMode ? ' disc-panel--sync-mode' : ''}`}>
+    <Panel position="bottom-right" className="disc-panel">
       <div className="disc-panel__header">
         <span className="disc-panel__title">
           <span className="disc-panel__stage-label" style={{ color: STAGE_HEX[sourceStage] ?? 'inherit' }}>
@@ -272,11 +234,11 @@ export function DiscrepancyPanel() {
         )}
         {totalIssues > 0 && (
           <button
-            className={`disc-panel__sync-toggle${syncMode ? ' disc-panel__sync-toggle--active' : ''}`}
+            className="disc-panel__sync-toggle"
             onClick={handleToggleSyncMode}
-            title={syncMode ? 'Exit sync mode' : 'Enter sync mode to reconcile differences'}
+            title="Enter sync mode to reconcile differences"
           >
-            {syncMode ? '⊘ Sync' : '⊕ Sync'}
+            ⊕ Sync
           </button>
         )}
         <button
@@ -291,11 +253,6 @@ export function DiscrepancyPanel() {
 
       {/* Staleness warning */}
       <StalenessWarning />
-
-      {/* Sync bulk bar */}
-      {syncMode && allSyncKeys.length > 0 && (
-        <SyncBulkBar allKeys={allSyncKeys} />
-      )}
 
       <div className="disc-panel__content">
         {/* Summary counts */}
@@ -348,7 +305,6 @@ export function DiscrepancyPanel() {
                 sourceStage={sourceStage}
                 targetStage={targetStage}
                 onNavigate={handleNavigate}
-                syncMode={syncMode}
               />
             ))}
           </div>
@@ -365,15 +321,11 @@ export function DiscrepancyPanel() {
                 sourceStage={sourceStage}
                 targetStage={targetStage}
                 onNavigate={handleNavigate}
-                syncMode={syncMode}
               />
             ))}
           </div>
         )}
       </div>
-
-      {/* Sync footer */}
-      {syncMode && <SyncFooter totalKeys={allSyncKeys.length} />}
     </Panel>
   );
 }

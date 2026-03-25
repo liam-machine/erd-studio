@@ -501,6 +501,35 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Stub columns toggle
+   --------------------------------------------------------------------------- */
+
+.detail-panel__section--stub {
+  padding: 8px 12px;
+}
+
+.detail-panel__stub-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--editor-fg);
+  user-select: none;
+}
+
+.detail-panel__stub-checkbox {
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.detail-panel__stub-hint {
+  font-size: 10px;
+  opacity: 0.45;
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------------
    Actions Section (Delete Model)
    --------------------------------------------------------------------------- */
 

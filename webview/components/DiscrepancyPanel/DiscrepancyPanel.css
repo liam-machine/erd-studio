@@ -304,14 +304,7 @@
   border-top: 1px solid var(--panel-border);
 }
 
-/* ---------------------------------------------------------------------------
-   Sync mode — expanded panel
-   --------------------------------------------------------------------------- */
-
-.disc-panel--sync-mode {
-  max-width: 440px;
-  max-height: 50vh;
-}
+/* Sync mode is handled by SyncMergeModal — no override needed here */
 
 /* Sync toggle button in header */
 .disc-panel__sync-toggle {

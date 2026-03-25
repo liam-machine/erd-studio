@@ -387,6 +387,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'toggleStubColumns': {
+            const payload = (message as { payload?: { modelName: string; stub: boolean } }).payload;
+            if (payload) {
+              await this.queueEdit(panelKey, () =>
+                this.handleToggleStubColumns(document, webviewPanel.webview, payload));
+            }
+            break;
+          }
           case 'switchStage': {
             const payload = (message as { payload?: { stage: Stage } }).payload;
             if (payload) {
@@ -574,6 +582,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     domain: import('../types/semantic').SemanticDomain,
     manifest: ManifestData,
     viewConfig: import('../types/semantic').ViewConfig,
+    stubColumns?: string[],
   ): DisplayDomain {
     // Build FK column set for isForeignKey computation
     const fkColumnsByModel = new Map<string, Set<string>>();
@@ -640,6 +649,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       layerConfig,
       readOnly: domain.stage === 'physical',
       positionDraggable: true,
+      ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
     };
   }
 
@@ -679,7 +689,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         webview.postMessage({ type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
       } else {
         const domain = this.domainService.getDomainStage(document.uri.fsPath);
-        const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
+        const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
         webview.postMessage({ type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
       }
     } catch (err) {
@@ -2224,6 +2234,46 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Toggle whether a model is in the domain's stubColumns list.
+   * Writes directly to the domain JSON (not a model YAML) and refreshes the webview.
+   */
+  private async handleToggleStubColumns(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; stub: boolean },
+  ): Promise<void> {
+    try {
+      const success = await this.applyDomainEdit(
+        document,
+        (_section, parsed) => {
+          const current = (parsed.stubColumns as string[] | undefined) ?? [];
+          if (payload.stub) {
+            if (!current.includes(payload.modelName)) {
+              parsed.stubColumns = [...current, payload.modelName].sort();
+            }
+          } else {
+            const filtered = current.filter((n) => n !== payload.modelName);
+            if (filtered.length > 0) {
+              parsed.stubColumns = filtered;
+            } else {
+              delete parsed.stubColumns;
+            }
+          }
+        },
+        { webview, stage: 'logical' },
+      );
+
+      if (!success) {
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to update stub columns setting.' } });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Toggle stub columns failed: ${message}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to toggle stub columns: ${message}` } });
+    }
+  }
+
+  /**
    * Handle a toggleDiscrepancy message from the webview.
    * Runs cross-stage comparison and sends the report back.
    */
@@ -2256,7 +2306,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         document, targetStage, manifest,
       );
 
-      const report = compareStages(sourceDomain, targetDomain);
+      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+      const stubColumnModels = new Set(unifiedDomain.stubColumns ?? []);
+      const report = compareStages(sourceDomain, targetDomain, stubColumnModels);
 
       // Cache the report for sync plan generation
       const panelEntry = this.openPanels.get(panelKey);
@@ -2295,7 +2347,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
     }
     const domain = this.domainService.getDomainStage(document.uri.fsPath);
-    return this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
+    return this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
   }
 
   // ---------------------------------------------------------------------------

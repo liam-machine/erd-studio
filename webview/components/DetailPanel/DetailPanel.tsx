@@ -273,6 +273,27 @@ export function DetailPanel() {
         </div>
       )}
 
+      {/* Stub columns toggle — suppresses physical-only column discrepancies */}
+      {!isReadOnly && (() => {
+        const isStub = domain?.stubColumns?.includes(model.name) ?? false;
+        return (
+          <div className="detail-panel__section detail-panel__section--stub">
+            <label className="detail-panel__stub-label" title="When enabled, columns that exist in the physical model but are not defined here are hidden from the sync comparison. Useful for conformed dimensions and reference tables where you only define key columns (PK/NK).">
+              <input
+                type="checkbox"
+                className="detail-panel__stub-checkbox"
+                checked={isStub}
+                onChange={(e) => {
+                  vscode.postMessage({ type: 'toggleStubColumns', payload: { modelName: model.name, stub: e.target.checked } });
+                }}
+              />
+              <span>Stub columns</span>
+              <span className="detail-panel__stub-hint">hide unmatched physical cols</span>
+            </label>
+          </div>
+        );
+      })()}
+
       {/* Grain statement */}
       {!isReadOnly && (
         <div className="detail-panel__section">
