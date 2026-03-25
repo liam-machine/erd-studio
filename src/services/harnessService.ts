@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '7';
+export const HARNESS_VERSION = '8';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -280,12 +280,13 @@ Optional \`rationale\` object — all fields are optional strings. Omit the enti
 
 ## Physical Stage (Read-Only)
 
-The physical stage has **no files on disk**. It is derived at runtime from the dbt manifest (\`target/manifest.json\`):
+The physical stage has **no files on disk**. It is derived at runtime primarily from dbt \`.yml\` schema files, with optional enrichment from \`target/manifest.json\`:
 
-1. **Models**: Logical models that exist in the manifest appear in physical. Columns come from the manifest; PK/FK/NK flags, grain, modelRole, scdType, and additiveType carry forward from logical.
-2. **Relationships**: Derived from **dbt relationship tests** — not copied from logical. Each \`relationships\` test becomes an edge.
-3. **Cardinality**: Derived from **uniqueness tests** — no \`unique\` test = "many" side.
+1. **Models**: Logical models that have a corresponding \`.yml\` schema file appear in physical. Columns come from the \`.yml\` file; \`data_type\` is enriched from the manifest when available. PK/FK/NK flags, grain, modelRole, scdType, and additiveType carry forward from logical.
+2. **Relationships**: Derived from **dbt relationship tests declared in \`.yml\` files** — not copied from logical. Each \`relationships\` test becomes an edge.
+3. **Cardinality**: Derived from **uniqueness tests** in \`.yml\` files (and manifest when available) — no \`unique\` test = "many" side.
 4. **Scoping**: Only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
+5. **Fallback**: If no \`.yml\` files are found, the physical stage falls back to deriving entirely from \`target/manifest.json\`.
 
 ### Cardinality Derivation
 

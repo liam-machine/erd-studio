@@ -1,0 +1,34 @@
+version: 2
+models:
+  - name: fct_order
+    description: Order transaction fact table
+    config:
+      tags:
+        - silver
+    columns:
+      - name: order_id
+        description: Surrogate key for order
+        data_type: INT
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: FK to dim_customer
+        data_type: INT
+        tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: project_id
+        description: FK to dim_project
+        data_type: INT
+        tests:
+          - relationships:
+              to: ref('dim_project')
+              field: project_id
+      - name: order_date
+        description: Date the order was placed
+        data_type: DATE
+      - name: amount
+        description: Order total amount
+        data_type: DECIMAL

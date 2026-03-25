@@ -1,12 +1,12 @@
 /**
  * AddExistingModelDialog styles.
  *
- * Dialog for selecting and adding manifest models to a domain.
+ * Dialog for selecting and adding models to a domain.
  * BEM naming, VS Code theme tokens from webview/styles/theme.css.
  */
 
 .add-existing-model-dialog {
-  width: 500px;
+  width: 520px;
   max-height: calc(100vh - 100px);
   margin-top: 80px;
   background: var(--panel-bg);
@@ -15,7 +15,7 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
-  z-index: 10; /* Above toolbar and other panels */
+  z-index: 10;
 }
 
 /* ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 200px;
 }
 
@@ -115,6 +115,64 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Filter Chips
+   --------------------------------------------------------------------------- */
+
+.add-existing-model-dialog__filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.add-existing-model-dialog__filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease, opacity 0.1s ease;
+  opacity: 0.5;
+}
+
+.add-existing-model-dialog__filter-chip:hover {
+  opacity: 0.8;
+}
+
+.add-existing-model-dialog__filter-chip--active {
+  opacity: 1;
+}
+
+.add-existing-model-dialog__filter-chip--logical.add-existing-model-dialog__filter-chip--active {
+  border-color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+  color: #60a5fa;
+}
+
+.add-existing-model-dialog__filter-chip--yml.add-existing-model-dialog__filter-chip--active {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.add-existing-model-dialog__filter-chip--manifest.add-existing-model-dialog__filter-chip--active {
+  border-color: #9ca3af;
+  background: rgba(156, 163, 175, 0.1);
+  color: #9ca3af;
+}
+
+.add-existing-model-dialog__filter-count {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------------------
    Model List
    --------------------------------------------------------------------------- */
 
@@ -127,7 +185,7 @@
 }
 
 .add-existing-model-dialog__item {
-  padding: 10px 12px;
+  padding: 8px 12px;
   cursor: pointer;
   border-bottom: 1px solid var(--panel-border);
   transition: background 0.1s ease;
@@ -153,7 +211,7 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .add-existing-model-dialog__item-name {
@@ -177,15 +235,31 @@
   color: #60a5fa;
 }
 
-.add-existing-model-dialog__item-source--manifest {
+.add-existing-model-dialog__item-source--yml {
   background: rgba(34, 197, 94, 0.15);
   color: #22c55e;
+}
+
+.add-existing-model-dialog__item-source--manifest {
+  background: rgba(156, 163, 175, 0.15);
+  color: #9ca3af;
 }
 
 .add-existing-model-dialog__item-schema {
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #888);
   font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.add-existing-model-dialog__item-path {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-family: var(--vscode-editor-font-family, monospace);
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
 }
 
 .add-existing-model-dialog__item-meta {

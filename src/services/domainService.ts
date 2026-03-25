@@ -15,10 +15,22 @@ import * as path from 'path';
 import type { DomainSummary, Layer, SemanticDomain, SemanticModel, StageData, UnifiedDomain, ViewConfig } from '../types/semantic';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship } from '../types/display';
-import type { ManifestData, ManifestRelationshipTest } from '../types/manifest';
+import type { ManifestData } from '../types/manifest';
+import type { YmlData } from '../types/ymlData';
 import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
 import type { LogicalModelService } from './logicalModelService';
+
+/**
+ * Minimal relationship test shape accepted by derivePhysicalRelationships().
+ * Both ManifestRelationshipTest and YmlRelationshipTest satisfy this interface.
+ */
+interface RelationshipTest {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+  toColumn: string;
+}
 
 const DEFAULT_SEMANTIC_DIR = 'erd-studio';
 
@@ -146,13 +158,116 @@ export class DomainService {
    *
    * Uses the global viewConfig for positions so layout is consistent across all stages.
    */
+  /**
+   * Build a physical DisplayDomain from yml source files (primary) with
+   * optional manifest enrichment for data_type and schema resolution.
+   *
+   * Falls back to manifest-only derivation when no yml data is available.
+   */
   buildPhysicalDomain(
+    unifiedDomain: UnifiedDomain,
+    ymlData: YmlData,
+    manifest?: ManifestData,
+  ): DisplayDomain {
+    // Fallback: if no yml data, derive entirely from manifest (legacy path)
+    if (ymlData.models.size === 0 && manifest && manifest.models.size > 0) {
+      return this.buildPhysicalDomainFromManifest(unifiedDomain, manifest);
+    }
+
+    const logicalStage = unifiedDomain.logical;
+    const physicalModelNames = new Set<string>();
+
+    // Physical models = logical models that exist in yml source files
+    const models: DisplayModel[] = logicalStage.models
+      .filter(model => ymlData.models.has(model.name))
+      .map(model => {
+        const ymlModel = ymlData.models.get(model.name)!;
+        const manifestModel = manifest?.models.get(model.name);
+        physicalModelNames.add(model.name);
+
+        // Columns come from yml; data_type enriched from manifest when available
+        const columns: DisplayColumn[] = ymlModel.columns.map(col => {
+          // Enrich data_type from manifest if yml has none
+          const manifestCol = manifestModel?.columns.find(mc => mc.name === col.name);
+          const dataType = col.dataType ?? manifestCol?.data_type ?? '';
+
+          return {
+            name: col.name,
+            dataType,
+            description: col.description || manifestCol?.description || '',
+            isPrimaryKey: false,
+            isForeignKey: false,
+            isNaturalKey: false,
+          };
+        });
+
+        // Carry forward PK/FK/NK flags from logical domain columns
+        const logicalColumns = model.columns ?? [];
+        for (const dc of columns) {
+          const logicalCol = logicalColumns.find(c => c.name === dc.name);
+          if (logicalCol) {
+            dc.isPrimaryKey = logicalCol.isPrimaryKey ?? false;
+            dc.isForeignKey = logicalCol.isForeignKey ?? false;
+            dc.isNaturalKey = logicalCol.isNaturalKey ?? false;
+            if (logicalCol.scdType !== undefined) { dc.scdType = logicalCol.scdType; }
+            if (logicalCol.additiveType !== undefined) { dc.additiveType = logicalCol.additiveType; }
+          }
+        }
+
+        return {
+          name: model.name,
+          // Schema only comes from manifest (resolved from dbt_project.yml + macros)
+          schema: manifestModel?.schema ?? '',
+          description: ymlModel.description || manifestModel?.description || model.description || '',
+          columns,
+          rationale: model.rationale,
+          grain: model.grain,
+          modelRole: model.modelRole,
+          existsInManifest: manifestModel !== undefined,
+        };
+      });
+
+    // Derive relationships from yml tests, with uniqueness info from both sources
+    const mergedUniqueColumns = mergeUniqueMaps(
+      ymlData.uniqueColumns,
+      manifest?.uniqueColumns,
+    );
+    const mergedCompositeGroups = mergeCompositeGroups(
+      ymlData.compositeUniqueGroups,
+      manifest?.compositeUniqueGroups,
+    );
+
+    const relationships = derivePhysicalRelationships(
+      ymlData.relationshipTests,
+      physicalModelNames,
+      mergedUniqueColumns,
+      mergedCompositeGroups,
+    );
+
+    return {
+      schemaVersion: unifiedDomain.schemaVersion,
+      domain: unifiedDomain.domain,
+      layer: unifiedDomain.layer,
+      stage: 'physical',
+      description: unifiedDomain.description,
+      modelFolder: unifiedDomain.modelFolder,
+      models,
+      relationships,
+      viewConfig: unifiedDomain.viewConfig,
+      readOnly: true,
+      positionDraggable: true,
+    };
+  }
+
+  /**
+   * Legacy fallback: derive physical domain entirely from manifest.
+   * Used when no yml data is available (e.g. pre-existing projects without .yml files).
+   */
+  private buildPhysicalDomainFromManifest(
     unifiedDomain: UnifiedDomain,
     manifest: ManifestData,
   ): DisplayDomain {
     const logicalStage = unifiedDomain.logical;
-
-    // Physical models = logical models that exist in the manifest
     const physicalModelNames = new Set<string>();
 
     const models: DisplayModel[] = logicalStage.models
@@ -170,7 +285,6 @@ export class DomainService {
           isNaturalKey: false,
         }));
 
-        // Carry forward PK/FK/NK flags from logical domain columns
         const logicalColumns = model.columns ?? [];
         for (const dc of columns) {
           const logicalCol = logicalColumns.find(c => c.name === dc.name);
@@ -195,8 +309,6 @@ export class DomainService {
         };
       });
 
-    // Derive relationships entirely from manifest relationship tests,
-    // scoped to models within this domain's physical model set
     const relationships = derivePhysicalRelationships(
       manifest.relationshipTests,
       physicalModelNames,
@@ -371,8 +483,16 @@ export class DomainService {
  * preventing conformed dimensions from pulling in relationships to models
  * outside the current domain.
  */
+/**
+ * Derive physical relationships from relationship tests (yml or manifest).
+ * Accepts any object with the RelationshipTest shape (structural typing).
+ *
+ * Results are scoped to only models present in the domain's physical model set,
+ * preventing conformed dimensions from pulling in relationships to models
+ * outside the current domain.
+ */
 export function derivePhysicalRelationships(
-  relationshipTests: ManifestRelationshipTest[],
+  relationshipTests: RelationshipTest[],
   physicalModelNames: Set<string>,
   uniqueColumns: Map<string, Set<string>>,
   compositeUniqueGroups: Map<string, string[][]>,
@@ -384,7 +504,7 @@ export function derivePhysicalRelationships(
 
   // Group tests by (fromModel, toModel) pair for composite unique checks
   const pairKey = (from: string, to: string) => `${from}\0${to}`;
-  const testsByPair = new Map<string, ManifestRelationshipTest[]>();
+  const testsByPair = new Map<string, RelationshipTest[]>();
   for (const test of domainTests) {
     const key = pairKey(test.fromModel, test.toModel);
     let group = testsByPair.get(key);
@@ -413,8 +533,8 @@ export function derivePhysicalRelationships(
  * Derive cardinality for a single relationship edge based on uniqueness tests.
  */
 function deriveCardinality(
-  rel: ManifestRelationshipTest,
-  allTestsBetweenPair: ManifestRelationshipTest[],
+  rel: RelationshipTest,
+  allTestsBetweenPair: RelationshipTest[],
   uniqueColumns: Map<string, Set<string>>,
   compositeUniqueGroups: Map<string, string[][]>,
 ): Cardinality {
@@ -437,7 +557,7 @@ function deriveCardinality(
  * Check if a column is effectively unique for cardinality purposes.
  *
  * A column is "unique" if:
- * 1. It has a standalone `unique` test in the manifest, OR
+ * 1. It has a standalone `unique` test, OR
  * 2. It's part of a `unique_combination_of_columns` group where ALL columns
  *    in that group are covered by relationship tests between the same model pair
  *    (meaning the full composite key is present in the relationship edges).
@@ -446,7 +566,7 @@ function isColumnEffectivelyUnique(
   model: string,
   column: string,
   side: 'from' | 'to',
-  allTestsBetweenPair: ManifestRelationshipTest[],
+  allTestsBetweenPair: RelationshipTest[],
   uniqueColumns: Map<string, Set<string>>,
   compositeUniqueGroups: Map<string, string[][]>,
 ): boolean {
@@ -469,4 +589,59 @@ function isColumnEffectivelyUnique(
   }
 
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Merge helpers — combine uniqueness data from yml (primary) and manifest
+// ---------------------------------------------------------------------------
+
+/** Merge two unique-column maps: union of columns per model. */
+function mergeUniqueMaps(
+  primary: Map<string, Set<string>>,
+  secondary?: Map<string, Set<string>>,
+): Map<string, Set<string>> {
+  if (!secondary) { return primary; }
+
+  const merged = new Map<string, Set<string>>();
+  // Copy primary
+  for (const [model, cols] of primary) {
+    merged.set(model, new Set(cols));
+  }
+  // Union secondary
+  for (const [model, cols] of secondary) {
+    const existing = merged.get(model);
+    if (existing) {
+      for (const col of cols) { existing.add(col); }
+    } else {
+      merged.set(model, new Set(cols));
+    }
+  }
+  return merged;
+}
+
+/** Merge two composite-unique-group maps: concatenate groups per model. */
+function mergeCompositeGroups(
+  primary: Map<string, string[][]>,
+  secondary?: Map<string, string[][]>,
+): Map<string, string[][]> {
+  if (!secondary) { return primary; }
+
+  const merged = new Map<string, string[][]>();
+  // Copy primary
+  for (const [model, groups] of primary) {
+    merged.set(model, [...groups]);
+  }
+  // Append secondary (dedupe by content)
+  for (const [model, groups] of secondary) {
+    const existing = merged.get(model) ?? [];
+    for (const group of groups) {
+      const key = group.sort().join('\0');
+      const alreadyExists = existing.some(g => g.sort().join('\0') === key);
+      if (!alreadyExists) {
+        existing.push(group);
+      }
+    }
+    merged.set(model, existing);
+  }
+  return merged;
 }
