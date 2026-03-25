@@ -8,6 +8,10 @@ on:
   pull_request_review_comment:
     types: [created]
 
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     runs-on: ubuntu-latest
@@ -22,52 +26,39 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            Review this pull request by performing three analysis passes, then post exactly ONE review.
+          review_instructions: |
+            ## Project context
 
-            ## Analysis passes
+            This is a VS Code extension (ERD Studio) with dual build targets:
+            - Extension host (Node.js, CJS) in src/
+            - Webview (Browser, React) in webview/
 
-            **Pass 1 — Change Summary**: List files changed in a markdown table with columns: File, Change. Keep change descriptions concise (under 12 words). Group files by layer using row headers like `**Webview**`, `**Extension Host**`, `**Tests**`, `**Docs**`, `**Build/CI**`. Note if the message protocol (src/types/messages.ts) is affected.
+            ## What to check
 
-            **Pass 2 — Bug & Logic Detection**: Check for WorkspaceEdit bypasses, physical stage mutations (must be read-only), inline React Flow type registrations, missing message types in discriminated unions, ELK worker issues, Zustand anti-patterns, null/undefined mishandling, race conditions.
+            **Architecture rules:**
+            - All domain file mutations must go through WorkspaceEdit for undo/redo integration — never write directly via fs (exception: generated output files like .sync-plan.json)
+            - Physical stage is read-only and derived at runtime — reject any code that persists physical data to disk or allows mutation messages in physical stage
+            - Relationships in physical stage come entirely from manifest relationship tests, not from logical stage
+            - Schema changes (fields in src/types/semantic.ts, file layout, naming conventions) must update SCHEMA_CONTENT in src/services/harnessService.ts and bump HARNESS_VERSION
+            - Message protocol changes must update the discriminated unions in src/types/messages.ts for both directions
+            - React Flow custom node/edge types must be defined as module-level constants, not inside component render functions
 
-            **Pass 3 — Security & Quality**: Check for hardcoded secrets, schema changes without HARNESS_VERSION bump, hardcoded CSS colours (should use theme.css vars), BEM violations, renamed dbtSemantic legacy prefixes (must NOT be renamed).
+            **Legacy identifiers — do NOT rename:**
+            Command IDs (dbtSemantic.*), View IDs (dbt-semantic, dbtSemantic.domainTree), custom editor viewType (dbtSemantic.domainEditor), setting keys (dbtSemantic.projectPath, dbtSemantic.semanticDir), colour IDs (dbtSemantic.layer.*), command category ("category": "dbt")
 
-            ## Posting the review
+            **Style:**
+            - All colours must use CSS custom properties from webview/styles/theme.css — no hardcoded hex/rgb values
+            - BEM CSS class naming (block__element--modifier)
+            - Stage colours: logical is blue (#60a5fa), physical is green (#22c55e)
 
-            After analysis, write the review body to /tmp/review.md, then post it with ONE `gh pr review` command. Do NOT run `gh pr review` more than once.
-
-            The review body MUST start with a TLDR section in exactly this format:
-
-            If approving:
-            ```
-            ## TLDR
-            :white_check_mark: **APPROVED** — no bugs, security issues, or architectural violations found.
-            ```
-
-            If requesting changes:
-            ```
-            ## TLDR
-            :x: **CHANGES REQUESTED** — found <N> issue(s) that should be fixed before merging.
-            - <one-line description of each issue>
-            ```
-
-            After the TLDR, include the full three-pass analysis with a table of changes, findings, and any style suggestions.
-
-            To post, write the body to a file first, then use:
-            ```
-            gh pr review <number> --approve --body-file /tmp/review.md
-            ```
-            or:
-            ```
-            gh pr review <number> --request-changes --body-file /tmp/review.md
-            ```
-
-            IMPORTANT: Only call `gh pr review` exactly ONCE. Do not retry or repost.
-
-            When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
-          claude_args: '--max-turns 50 --allowedTools "Bash(gh pr:*)" "Bash(gh api:*)"'
+            **Skip:**
+            - Formatting-only changes in lock files
+            - Changes to test/fixtures/ sample data files
+            - Auto-generated version bump commits
+          max_turns: 15
