@@ -479,9 +479,8 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, stage, layer, layerConfig, columns, grain, dimmed, readOnly, isGhost, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, stage, layer, layerConfig, columns, grain, dimmed, readOnly, isGhost, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
-  const isStub = useEditorStore((s) => s.domain?.stubColumns?.includes(modelName) ?? false);
   const { send } = useMessageBus(() => {});
 
   // Show reorder handles when this node is selected and editable

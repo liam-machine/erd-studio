@@ -17,6 +17,7 @@ import { Panel, useReactFlow } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { STAGE_HEX } from '../../lib/stageColors';
+import { stageName } from '../../lib/stageUtils';
 import { StalenessWarning } from './SyncControls';
 import type { ModelDiscrepancy, RelationshipDiscrepancy } from '../../../src/types/discrepancy';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
@@ -25,11 +26,6 @@ import './DiscrepancyPanel.css';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Human-friendly stage name (capitalised). */
-function stageName(stage: string): string {
-  return stage.charAt(0).toUpperCase() + stage.slice(1);
-}
 
 /**
  * Map a discrepancy status to a user-friendly, stage-anchored label.

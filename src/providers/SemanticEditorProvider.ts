@@ -89,6 +89,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       activeStage: Stage;
       /** Cached discrepancy report from the last comparison (used by sync plan generation). */
       lastDiscrepancyReport?: DiscrepancyReport | null;
+      /** The target stage from the last discrepancy comparison (used to refresh after stub toggle). */
+      lastCompareAgainst?: Stage;
     }
   >();
 
@@ -2223,7 +2225,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       } else {
         // Logical — extract from unified file
         const domain = this.domainService.getDomainStage(document.uri.fsPath);
-        const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
+        const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
         webview.postMessage({ type: 'stageData', payload: displayDomain });
       }
     } catch (err) {
@@ -2265,6 +2267,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       if (!success) {
         webview.postMessage({ type: 'error', payload: { message: 'Failed to update stub columns setting.' } });
+        return;
+      }
+
+      // If a discrepancy comparison was active, re-run it with the updated stubColumns
+      const panelKey = document.uri.toString();
+      const panelEntry = this.openPanels.get(panelKey);
+      if (panelEntry?.lastDiscrepancyReport && panelEntry.lastCompareAgainst) {
+        const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+        const sourceDomain = await this.buildStageDisplayDomain(
+          document, panelEntry.activeStage, manifest,
+        );
+        const targetDomain = await this.buildStageDisplayDomain(
+          document, panelEntry.lastCompareAgainst, manifest,
+        );
+        const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+        const stubColumnModels = new Set(unifiedDomain.stubColumns ?? []);
+        const report = compareStages(sourceDomain, targetDomain, stubColumnModels);
+        panelEntry.lastDiscrepancyReport = report;
+        webview.postMessage({ type: 'discrepancyReport', payload: report });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -2284,6 +2305,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     payload: { enabled: boolean; compareAgainst?: Stage },
   ): Promise<void> {
     if (!payload.enabled || !payload.compareAgainst) {
+      const panelEntry = this.openPanels.get(panelKey);
+      if (panelEntry) {
+        panelEntry.lastDiscrepancyReport = null;
+        panelEntry.lastCompareAgainst = undefined;
+      }
       webview.postMessage({ type: 'discrepancyReport', payload: null });
       return;
     }
@@ -2310,10 +2336,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const stubColumnModels = new Set(unifiedDomain.stubColumns ?? []);
       const report = compareStages(sourceDomain, targetDomain, stubColumnModels);
 
-      // Cache the report for sync plan generation
+      // Cache the report and comparison target for sync plan generation
+      // and to allow re-running after stub column changes.
       const panelEntry = this.openPanels.get(panelKey);
       if (panelEntry) {
         panelEntry.lastDiscrepancyReport = report;
+        panelEntry.lastCompareAgainst = targetStage;
       }
 
       webview.postMessage({ type: 'discrepancyReport', payload: report });

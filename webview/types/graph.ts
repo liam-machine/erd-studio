@@ -68,6 +68,8 @@ export type ModelNodeData = {
   readOnly?: boolean;
   /** True if model doesn't exist in manifest (physical stage ghost node). */
   isGhost?: boolean;
+  /** Whether this model is in stub display mode (PK/NK columns only). */
+  isStub: boolean;
   /** Per-model discrepancy data when a cross-stage comparison report is active. */
   discrepancy?: ModelDiscrepancy;
   /** The stage currently being viewed (set when discrepancy overlay is active). */

@@ -274,21 +274,18 @@ export function DetailPanel() {
       )}
 
       {/* Stub toggle */}
-      {!isReadOnly && (() => {
-        const isStub = domain?.stubColumns?.includes(model.name) ?? false;
-        return (
-          <div className="detail-panel__section detail-panel__section--stub">
-            <label className="detail-panel__stub-label" title="Show only PK/NK columns on the canvas. Extra physical columns are also ignored during sync comparison.">
-              <input
-                type="checkbox"
-                checked={isStub}
-                onChange={(e) => vscode.postMessage({ type: 'toggleStubColumns', payload: { modelName: model.name, stub: e.target.checked } })}
-              />
-              Stub
-            </label>
-          </div>
-        );
-      })()}
+      {!isReadOnly && (
+        <div className="detail-panel__section detail-panel__section--stub">
+          <label className="detail-panel__stub-label" title="Show only PK/NK columns on the canvas. Extra physical columns are also ignored during sync comparison.">
+            <input
+              type="checkbox"
+              checked={domain?.stubColumns?.includes(model.name) ?? false}
+              onChange={(e) => vscode.postMessage({ type: 'toggleStubColumns', payload: { modelName: model.name, stub: e.target.checked } })}
+            />
+            Stub
+          </label>
+        </div>
+      )}
 
       {/* Grain statement */}
       {!isReadOnly && (

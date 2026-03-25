@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { STAGE_HEX } from '../../lib/stageColors';
+import { stageName } from '../../lib/stageUtils';
 import { SyncFooter, StalenessWarning } from '../DiscrepancyPanel/SyncControls';
 import {
   modelKey,
@@ -18,14 +19,6 @@ import {
 import type { ModelDiscrepancy, RelationshipDiscrepancy } from '../../../src/types/discrepancy';
 import type { GroundTruth } from '../../../src/types/syncPlan';
 import './SyncMergeModal.css';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function stageName(stage: string): string {
-  return stage.charAt(0).toUpperCase() + stage.slice(1);
-}
 
 // ---------------------------------------------------------------------------
 // AcceptCell — used only for column and relationship rows
@@ -189,7 +182,6 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
   if (col.status === 'matched') return null;
 
   const key = columnKey(modelName, col.name);
-  const isTypeMismatch = col.status === 'type-mismatch';
 
   let sourceContent: React.ReactNode;
   let targetContent: React.ReactNode;
@@ -197,11 +189,9 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
   let targetColor: string | undefined;
 
   if (col.status === 'extra') {
-    sourceContent = isTypeMismatch
-      ? null
-      : col.sourceDataType
-        ? <span className="sync-modal__type-pill" style={{ color: STAGE_HEX[sourceStage], borderColor: STAGE_HEX[sourceStage] }}>{col.sourceDataType}</span>
-        : <em className="sync-modal__no-type">no type</em>;
+    sourceContent = col.sourceDataType
+      ? <span className="sync-modal__type-badge">{col.sourceDataType}</span>
+      : <em className="sync-modal__no-type">no type</em>;
     sourceColor = STAGE_HEX[sourceStage];
     targetContent = <span className="sync-modal__missing-dash" style={{ color: STAGE_HEX.ghost }}>— Not present</span>;
   } else if (col.status === 'missing') {
