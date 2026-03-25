@@ -32,12 +32,10 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          review_instructions: |
-            ## Project context
-
-            This is a VS Code extension (ERD Studio) with dual build targets:
-            - Extension host (Node.js, CJS) in src/
-            - Webview (Browser, React) in webview/
+          trigger_phrase: "@claude"
+          label_trigger: ""
+          prompt: |
+            Review this PR. Follow the project review guidelines in CLAUDE.md.
 
             ## What to check
 
@@ -61,4 +59,6 @@ jobs:
             - Formatting-only changes in lock files
             - Changes to test/fixtures/ sample data files
             - Auto-generated version bump commits
-          max_turns: 15
+
+            When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
+          claude_args: "--max-turns 15"
