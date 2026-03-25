@@ -61,5 +61,5 @@ jobs:
             - Auto-generated version bump commits
 
             When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
-          claude_args: "--max-turns 25"
+          claude_args: '--max-turns 25 --allowedTools "Bash(gh pr:*)" "Bash(gh api:*)" "Bash(cat:*)" "Bash(head:*)"'
           show_full_output: true
