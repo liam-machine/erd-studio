@@ -5,6 +5,7 @@ models:
     config:
       tags:
         - silver
+        - domain:work-lots
         - domain:showcase
     columns:
       - name: project_id
