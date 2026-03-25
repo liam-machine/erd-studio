@@ -501,6 +501,28 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Stub columns toggle
+   --------------------------------------------------------------------------- */
+
+.detail-panel__stub-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--editor-fg);
+  cursor: pointer;
+  user-select: none;
+}
+
+.detail-panel__stub-label input[type="checkbox"] {
+  accent-color: var(--button-bg);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
    Actions Section (Delete Model)
    --------------------------------------------------------------------------- */
 

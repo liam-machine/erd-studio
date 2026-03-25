@@ -27,10 +27,16 @@ function relationshipKey(r: { fromModel: string; fromColumn: string; toModel: st
 
 /**
  * Compare columns between two matched models.
+ *
+ * @param stubColumns - When true, columns that exist in the target but not the
+ *   source are suppressed. Used for stub/reference models where only a few key
+ *   columns (PK/NK) are defined in logical — the physical model may have many
+ *   more columns that should not surface as discrepancies.
  */
 function compareColumns(
   sourceModel: DisplayModel,
   targetModel: DisplayModel,
+  stubColumns: boolean,
 ): ColumnDiscrepancy[] {
   const targetColumnMap = new Map(targetModel.columns.map((c) => [c.name, c]));
   const visited = new Set<string>();
@@ -54,10 +60,12 @@ function compareColumns(
     }
   }
 
-  // Columns in target but not source
-  for (const col of targetModel.columns) {
-    if (!visited.has(col.name)) {
-      result.push({ name: col.name, status: 'missing', targetDataType: col.dataType });
+  // Columns in target but not source — suppressed for stub models
+  if (!stubColumns) {
+    for (const col of targetModel.columns) {
+      if (!visited.has(col.name)) {
+        result.push({ name: col.name, status: 'missing', targetDataType: col.dataType });
+      }
     }
   }
 
@@ -136,8 +144,14 @@ function compareRelationships(
  *
  * @param source - The domain being viewed (e.g., physical)
  * @param target - The domain being compared against (e.g., logical)
+ * @param stubColumnModels - Model names whose physical-only (missing) column
+ *   discrepancies should be suppressed. See UnifiedDomain.stubColumns.
  */
-export function compare(source: DisplayDomain, target: DisplayDomain): DiscrepancyReport {
+export function compare(
+  source: DisplayDomain,
+  target: DisplayDomain,
+  stubColumnModels: ReadonlySet<string> = new Set(),
+): DiscrepancyReport {
   const targetModelMap = new Map(target.models.map((m) => [m.name, m]));
   const visitedModels = new Set<string>();
   const models: ModelDiscrepancy[] = [];
@@ -163,7 +177,8 @@ export function compare(source: DisplayDomain, target: DisplayDomain): Discrepan
       totalColumns += model.columns.length;
       extraColumns += model.columns.length;
     } else {
-      const columns = compareColumns(model, targetModel);
+      const isStub = stubColumnModels.has(model.name);
+      const columns = compareColumns(model, targetModel, isStub);
       models.push({ name: model.name, status: 'matched', columns });
 
       for (const col of columns) {

@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '7';
+export const HARNESS_VERSION = '9';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -126,8 +126,9 @@ erd-studio/
   "layer": "silver",
   "description": "Customer domain — master data and transaction history",
   "modelFolder": "models/silver",
+  "stubColumns": ["dim_project"],
   "logical": {
-    "models": ["dim_customer", "fct_sale", "dim_product"],
+    "models": ["dim_customer", "fct_sale", "dim_product", "dim_project"],
     "relationships": []
   },
   "viewConfig": {}
@@ -141,6 +142,7 @@ erd-studio/
 | \`layer\` | Yes | Layer name matching parent directory (e.g. \`silver\`, \`gold\`) |
 | \`description\` | No | Human-readable domain description |
 | \`modelFolder\` | No | Filter for "Add Existing Model" dialog (e.g. \`models/silver\`) |
+| \`stubColumns\` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
 | \`logical.models\` | Yes | Array of model name strings (references to \`logical-models/*.yml\`) |
 | \`logical.relationships\` | Yes | Array of relationship objects |
 | \`viewConfig\` | Yes | Root-level view settings. The extension auto-assigns positions for new models |
@@ -477,7 +479,7 @@ function generateGeminiStyleguide(): string {
 
 ### ERD Studio Domain Files (\`erd-studio/**/*.json\`)
 
-1. **Schema version** must be \`4\`
+1. **Schema version** must be \`5\`
 2. **Required sections**: \`logical\` and \`viewConfig\` must both be present at root level
 3. **Model names** must follow naming conventions: \`dim_\`, \`fct_\`, \`ref_\`, or \`brg_\` prefixes
 4. **Relationships**: \`fromModel\` is always the FK side, \`toModel\` is the PK side

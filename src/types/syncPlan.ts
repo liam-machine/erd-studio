@@ -246,7 +246,7 @@ export function deriveRelationshipAction(
     } else {
       return groundTruth === 'physical'
         ? 'remove-relationship-from-logical'
-        : 'add-relationship-to-logical';
+        : 'add-relationship-test-to-physical';
     }
   }
 }

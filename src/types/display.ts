@@ -110,4 +110,9 @@ export interface DisplayDomain {
   readOnly: boolean;
   /** Whether nodes can be dragged to reposition (true for all stages). */
   positionDraggable: boolean;
+  /**
+   * Model names whose physical-only columns are suppressed in discrepancy comparison.
+   * Reflects the domain JSON stubColumns list; included so the UI can show the toggle state.
+   */
+  stubColumns?: string[];
 }

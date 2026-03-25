@@ -362,6 +362,19 @@ export interface UpdateModelRoleMessage {
 }
 
 /**
+ * Toggle whether a model's physical-only columns are suppressed during
+ * discrepancy comparison (stub column mode). Stored in the domain JSON.
+ */
+export interface ToggleStubColumnsMessage {
+  type: 'toggleStubColumns';
+  payload: {
+    modelName: string;
+    /** True = suppress physical-only columns for this model; false = remove from stub list. */
+    stub: boolean;
+  };
+}
+
+/**
  * Request to switch the active stage in the editor.
  * The extension resolves the sibling domain data and sends a stageData response.
  */
@@ -471,6 +484,7 @@ export type WebviewMessage =
   | UpdateModelRationaleMessage
   | UpdateModelGrainMessage
   | UpdateModelRoleMessage
+  | ToggleStubColumnsMessage
   | SwitchStageMessage
   | ToggleDiscrepancyMessage
   | ReorderColumnsMessage

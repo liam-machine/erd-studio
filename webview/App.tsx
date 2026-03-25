@@ -43,6 +43,7 @@ import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
+import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { transformDomain } from './lib/graphTransformer';
 import { stageNodeColor } from './lib/stageColors';
 import type { ModelFlowNode, FkFlowEdge } from './types/graph';
@@ -744,6 +745,9 @@ function EditorCanvas() {
 
       {/* Discrepancy summary panel (bottom-right, avoids legend overlap) */}
       <DiscrepancyPanel />
+
+      {/* Sync merge modal — full-screen takeover when sync mode is active */}
+      <SyncMergeModal />
 
       {/* Legend panel (bottom-left) */}
       <Legend />

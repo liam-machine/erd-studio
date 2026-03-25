@@ -262,6 +262,11 @@ export class DomainService {
         ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig,
     );
 
+    // Parse stubColumns — optional string[] of model names with stub display
+    const stubColumns = Array.isArray(obj.stubColumns)
+      ? (obj.stubColumns as unknown[]).filter((v): v is string => typeof v === 'string')
+      : undefined;
+
     return {
       schemaVersion: obj.schemaVersion as number,
       domain,
@@ -269,6 +274,7 @@ export class DomainService {
       description: typeof obj.description === 'string' ? obj.description : '',
       ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
       logical: this.parseStageData(obj.logical) ?? { ...emptyStage },
+      ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
       viewConfig: globalViewConfig,
     };
   }
