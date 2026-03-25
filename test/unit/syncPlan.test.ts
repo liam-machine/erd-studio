@@ -91,8 +91,8 @@ describe('syncPlan — deriveColumnAction', () => {
   });
 
   describe('sourceStage = physical', () => {
-    it('extra + physical truth = add-column-to-physical', () => {
-      expect(deriveColumnAction('extra', 'physical', 'physical')).toBe('add-column-to-physical');
+    it('extra + physical truth = add-column-to-logical', () => {
+      expect(deriveColumnAction('extra', 'physical', 'physical')).toBe('add-column-to-logical');
     });
 
     it('extra + logical truth = remove-column-from-physical', () => {
@@ -145,9 +145,9 @@ describe('syncPlan — deriveRelationshipAction', () => {
   });
 
   describe('sourceStage = physical', () => {
-    it('extra + physical truth = add-relationship-test-to-physical', () => {
+    it('extra + physical truth = add-relationship-to-logical', () => {
       expect(deriveRelationshipAction('extra', 'physical', 'physical'))
-        .toBe('add-relationship-test-to-physical');
+        .toBe('add-relationship-to-logical');
     });
 
     it('extra + logical truth = remove-relationship-test-from-physical', () => {

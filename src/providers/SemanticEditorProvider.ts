@@ -2475,7 +2475,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         requiresCompile,
       };
 
-      // Write to disk
+      // Write to disk directly (not via WorkspaceEdit) — this is a generated output
+      // file, not a domain mutation, so undo/redo integration is not needed.
       const syncPlanPath = path.join(this.workspaceRoot, semanticDir, '.sync-plan.json');
       const fs = await import('fs');
       const dir = path.dirname(syncPlanPath);
@@ -2529,10 +2530,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       cwd: this.workspaceRoot,
     });
     terminal.show();
-    // Launch the TUI, then send the prompt as user input
+    // Launch the TUI, then send the prompt as user input.
+    // If the prompt is dropped (slow machine), the user can paste it manually.
     terminal.sendText('claude --dangerously-skip-permissions');
-    // Small delay to let the TUI initialize before sending the prompt
-    setTimeout(() => terminal.sendText(prompt), 2000);
+    const CLAUDE_TUI_INIT_DELAY_MS = 2000;
+    setTimeout(() => terminal.sendText(prompt), CLAUDE_TUI_INIT_DELAY_MS);
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {

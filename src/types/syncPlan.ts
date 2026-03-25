@@ -195,10 +195,12 @@ export function deriveColumnAction(
   }
 
   if (status === 'extra') {
+    // extra = exists in source, not in target
     if (logicalIsSource) {
       return groundTruth === 'logical' ? 'add-column-to-physical' : 'remove-column-from-logical';
     } else {
-      return groundTruth === 'physical' ? 'add-column-to-physical' : 'remove-column-from-physical';
+      // source is physical: column exists in physical, not logical
+      return groundTruth === 'physical' ? 'add-column-to-logical' : 'remove-column-from-physical';
     }
   } else {
     // missing
@@ -224,13 +226,15 @@ export function deriveRelationshipAction(
   }
 
   if (status === 'extra') {
+    // extra = exists in source, not in target
     if (logicalIsSource) {
       return groundTruth === 'logical'
         ? 'add-relationship-test-to-physical'
         : 'remove-relationship-from-logical';
     } else {
+      // source is physical: relationship test exists in physical, not logical
       return groundTruth === 'physical'
-        ? 'add-relationship-test-to-physical'
+        ? 'add-relationship-to-logical'
         : 'remove-relationship-test-from-physical';
     }
   } else {
