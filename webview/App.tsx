@@ -185,6 +185,8 @@ function EditorCanvas() {
   const setDiscrepancyReport = useEditorStore((s) => s.setDiscrepancyReport);
   const discrepancyReport = useEditorStore((s) => s.discrepancyReport);
   const discrepancyVisible = useEditorStore((s) => s.discrepancyVisible);
+  const setManifestStale = useEditorStore((s) => s.setManifestStale);
+  const setSyncPlanGenerated = useEditorStore((s) => s.setSyncPlanGenerated);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -231,12 +233,18 @@ function EditorCanvas() {
         case 'discrepancyReport':
           setDiscrepancyReport(msg.payload);
           break;
+        case 'manifestStaleness':
+          setManifestStale(msg.payload.isStale);
+          break;
+        case 'syncPlanGenerated':
+          setSyncPlanGenerated(msg.payload);
+          break;
         case 'error':
           setError(msg.payload.message);
           break;
       }
     },
-    [setDomain, setError, setTemplates, setManifestModels, setExistingModels, setDiscrepancyReport],
+    [setDomain, setError, setTemplates, setManifestModels, setExistingModels, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);

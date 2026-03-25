@@ -15,6 +15,7 @@
 import type { DisplayDomain } from './display';
 import type { DiscrepancyReport } from './discrepancy';
 import type { Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole, Stage } from './semantic';
+import type { GroundTruth } from './syncPlan';
 
 // ---------------------------------------------------------------------------
 // Extension → Webview messages
@@ -68,12 +69,39 @@ export interface DiscrepancyReportMessage {
   payload: DiscrepancyReport | null;
 }
 
+/**
+ * Sent alongside a discrepancy report to indicate whether the manifest is stale.
+ */
+export interface ManifestStalenessMessage {
+  type: 'manifestStaleness';
+  payload: {
+    isStale: boolean;
+    /** Epoch ms of manifest.json mtime, or null if missing. */
+    manifestMtime: number | null;
+    /** Epoch ms of newest source file mtime, or null if no sources found. */
+    newestSourceMtime: number | null;
+  };
+}
+
+/**
+ * Sent after the extension writes a .sync-plan.json file.
+ */
+export interface SyncPlanGeneratedMessage {
+  type: 'syncPlanGenerated';
+  payload: {
+    filePath: string;
+    totalActions: number;
+  };
+}
+
 /** Union of all messages the extension can send to the webview. */
 export type ExtensionMessage =
   | DomainLoadedMessage
   | DomainUpdatedMessage
   | StageDataMessage
   | DiscrepancyReportMessage
+  | ManifestStalenessMessage
+  | SyncPlanGeneratedMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------
@@ -380,6 +408,44 @@ export interface ViewFileMessage {
   type: 'viewFile';
 }
 
+// ---------------------------------------------------------------------------
+// Webview → Extension: Sync reconciliation messages
+// ---------------------------------------------------------------------------
+
+/**
+ * Request the extension to check if the manifest is stale
+ * (source files modified after last compile).
+ */
+export interface CheckManifestStalenessMessage {
+  type: 'checkManifestStaleness';
+}
+
+/**
+ * Request the extension to generate a .sync-plan.json file
+ * from the user's ground truth selections.
+ */
+export interface GenerateSyncPlanMessage {
+  type: 'generateSyncPlan';
+  payload: {
+    /** Map of selection key → ground truth choice. */
+    selections: Record<string, GroundTruth>;
+  };
+}
+
+/**
+ * Request the extension to run `dbt compile` in a VS Code terminal.
+ */
+export interface RunDbtCompileMessage {
+  type: 'runDbtCompile';
+}
+
+/**
+ * Request the extension to launch Claude Code in a terminal to execute the sync plan.
+ */
+export interface LaunchClaudeSyncMessage {
+  type: 'launchClaudeSync';
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -408,7 +474,11 @@ export type WebviewMessage =
   | SwitchStageMessage
   | ToggleDiscrepancyMessage
   | ReorderColumnsMessage
-  | ViewFileMessage;
+  | ViewFileMessage
+  | CheckManifestStalenessMessage
+  | GenerateSyncPlanMessage
+  | RunDbtCompileMessage
+  | LaunchClaudeSyncMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

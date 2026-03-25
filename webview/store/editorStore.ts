@@ -13,6 +13,7 @@ import type { DisplayDomain, ExistingModelPreview, ManifestModelPreview } from '
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { ModelFlowNode, FkFlowEdge, FkEdgeData } from '../types/graph';
 import type { ModelTemplate, Stage } from '../../src/types/semantic';
+import type { GroundTruth } from '../../src/types/syncPlan';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,6 +120,14 @@ export interface EditorState {
   discrepancyCompareStage: Stage | null;
   /** The active discrepancy report from the extension, or null. */
   discrepancyReport: DiscrepancyReport | null;
+  /** Whether the sync resolution UI is active (ground truth radios visible). */
+  syncMode: boolean;
+  /** Per-discrepancy ground truth selections (key → 'logical' | 'physical'). */
+  syncSelections: Record<string, GroundTruth>;
+  /** Whether the manifest is stale (source files newer than manifest). */
+  manifestStale: boolean;
+  /** Info about the last generated sync plan, or null. */
+  syncPlanGenerated: { filePath: string; totalActions: number } | null;
   /** Set of "modelName:columnName" keys for columns involved in selected edges. */
   highlightedColumns: Set<string>;
   /** Set of model IDs with columns expanded. */
@@ -191,6 +200,18 @@ export interface EditorActions {
   setDiscrepancyCompareStage: (stage: Stage | null) => void;
   /** Set the discrepancy report from the extension. */
   setDiscrepancyReport: (report: DiscrepancyReport | null) => void;
+  /** Toggle sync resolution mode (shows ground truth radios in discrepancy panel). */
+  setSyncMode: (active: boolean) => void;
+  /** Set ground truth for a single discrepancy item. */
+  setSyncSelection: (key: string, choice: GroundTruth) => void;
+  /** Set ground truth for multiple items at once (bulk). */
+  setSyncSelectionBulk: (keys: string[], choice: GroundTruth) => void;
+  /** Clear all sync selections. */
+  clearSyncSelections: () => void;
+  /** Set manifest staleness flag. */
+  setManifestStale: (stale: boolean) => void;
+  /** Set sync plan generation result. */
+  setSyncPlanGenerated: (info: { filePath: string; totalActions: number } | null) => void;
   /** Set highlighted columns (for edge click). */
   setHighlightedColumns: (columns: Set<string>) => void;
   /** Expand all listed model IDs (sets allExpanded mode). */
@@ -249,6 +270,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   discrepancyVisible: false,
   discrepancyCompareStage: null,
   discrepancyReport: null,
+  syncMode: false,
+  syncSelections: {},
+  manifestStale: false,
+  syncPlanGenerated: null,
   highlightedColumns: new Set<string>(),
   expandedNodes: new Set<string>(),
   allExpanded: false,
@@ -278,9 +303,12 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     error: null,
     // Clear column selection on domain reload
     selectedColumns: [], lastSelectedColumn: null, editingColumn: null,
-    // Clear discrepancy when switching stages (stage changed)
+    // Clear discrepancy + sync state when switching stages (stage changed)
     ...(state.domain && state.domain.stage !== domain.stage
-      ? { discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null }
+      ? {
+          discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null,
+          syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null,
+        }
       : {}),
   })),
   setError: (error) => set({ error }),
@@ -328,9 +356,25 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
         : {},
     ),
   endDragLine: () => set({ dragLineState: null }),
-  setDiscrepancyVisible: (visible) => set({ discrepancyVisible: visible }),
+  setDiscrepancyVisible: (visible) => set({
+    discrepancyVisible: visible,
+    // Clear sync state when discrepancy overlay is hidden
+    ...(!visible ? { syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null } : {}),
+  }),
   setDiscrepancyCompareStage: (stage) => set({ discrepancyCompareStage: stage }),
   setDiscrepancyReport: (report) => set({ discrepancyReport: report }),
+  setSyncMode: (active) => set({ syncMode: active, syncPlanGenerated: null }),
+  setSyncSelection: (key, choice) =>
+    set((state) => ({ syncSelections: { ...state.syncSelections, [key]: choice } })),
+  setSyncSelectionBulk: (keys, choice) =>
+    set((state) => {
+      const next = { ...state.syncSelections };
+      for (const key of keys) next[key] = choice;
+      return { syncSelections: next };
+    }),
+  clearSyncSelections: () => set({ syncSelections: {}, syncPlanGenerated: null }),
+  setManifestStale: (stale) => set({ manifestStale: stale }),
+  setSyncPlanGenerated: (info) => set({ syncPlanGenerated: info }),
   setHighlightedColumns: (columns) => set({ highlightedColumns: columns }),
   expandAll: (modelIds) => set({ expandedNodes: new Set(modelIds), allExpanded: true }),
   expandNew: (modelIds) =>
