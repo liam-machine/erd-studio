@@ -3,5 +3,6 @@
 
 select
     project_id,
-    project_name
+    project_name,
+    project_code
 from {{ ref('stg_projects') }}

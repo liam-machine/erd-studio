@@ -303,3 +303,233 @@
   opacity: 0.5;
   border-top: 1px solid var(--panel-border);
 }
+
+/* ---------------------------------------------------------------------------
+   Sync mode — expanded panel
+   --------------------------------------------------------------------------- */
+
+.disc-panel--sync-mode {
+  max-width: 440px;
+  max-height: 50vh;
+}
+
+/* Sync toggle button in header */
+.disc-panel__sync-toggle {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.1s ease, background 0.1s ease;
+  white-space: nowrap;
+}
+
+.disc-panel__sync-toggle:hover {
+  opacity: 1;
+  background: var(--selection-bg);
+}
+
+.disc-panel__sync-toggle--active {
+  opacity: 1;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: var(--button-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   Sync radio buttons (Log / Phys pills)
+   --------------------------------------------------------------------------- */
+
+.disc-panel__sync-radio {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.disc-panel__sync-radio-btn {
+  padding: 1px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 9px;
+  font-weight: 500;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: all 0.1s ease;
+  line-height: 1.4;
+}
+
+.disc-panel__sync-radio-btn:hover {
+  opacity: 1;
+  background: var(--selection-bg);
+}
+
+.disc-panel__sync-radio-btn--selected {
+  opacity: 1;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: var(--button-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   Sync bulk bar
+   --------------------------------------------------------------------------- */
+
+.disc-panel__sync-bulk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.disc-panel__sync-bulk-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: all 0.1s ease;
+}
+
+.disc-panel__sync-bulk-btn:hover {
+  opacity: 1;
+  background: var(--selection-bg);
+}
+
+.disc-panel__sync-bulk-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--editor-fg);
+  opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------------------
+   Sync footer (Generate Sync Plan button)
+   --------------------------------------------------------------------------- */
+
+.disc-panel__sync-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--panel-border);
+  flex-direction: column;
+}
+
+.disc-panel__sync-footer--done {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.disc-panel__sync-footer-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--stage-physical);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.disc-panel__sync-footer-check {
+  font-size: 14px;
+}
+
+.disc-panel__sync-execute-btn {
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--stage-physical);
+  color: #000;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.1s ease;
+}
+
+.disc-panel__sync-execute-btn:hover {
+  opacity: 0.85;
+}
+
+.disc-panel__sync-footer-btn {
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.disc-panel__sync-footer-btn:hover:not(:disabled) {
+  background: var(--button-hover-bg, var(--button-bg));
+}
+
+.disc-panel__sync-footer-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.disc-panel__sync-footer-hint {
+  font-size: 10px;
+  color: var(--editor-fg);
+  opacity: 0.4;
+}
+
+/* ---------------------------------------------------------------------------
+   Staleness warning banner
+   --------------------------------------------------------------------------- */
+
+.disc-panel__staleness {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(204, 167, 0, 0.1);
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 11px;
+}
+
+.disc-panel__staleness-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.disc-panel__staleness-text {
+  color: var(--editorWarning-foreground, #cca700);
+  font-weight: 500;
+  flex: 1;
+}
+
+.disc-panel__staleness-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--editorWarning-foreground, #cca700);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editorWarning-foreground, #cca700);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s ease;
+}
+
+.disc-panel__staleness-btn:hover {
+  background: rgba(204, 167, 0, 0.15);
+}

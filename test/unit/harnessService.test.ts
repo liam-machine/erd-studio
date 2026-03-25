@@ -67,6 +67,14 @@ describe('HarnessService', () => {
       }
     });
 
+    it('all formats include sync reconciliation pointer', () => {
+      for (const target of HARNESS_TARGETS) {
+        const content = service.generateContent(target.id);
+        expect(content).toContain('## Sync Reconciliation');
+        expect(content).toContain('.sync-plan.json');
+      }
+    });
+
     it('all formats embed a version marker', () => {
       for (const target of HARNESS_TARGETS) {
         const content = service.generateContent(target.id);
@@ -165,6 +173,31 @@ describe('HarnessService', () => {
 
       expect(result.success).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, '.claude', 'skills', 'erd-studio'))).toBe(true);
+    });
+
+    it('writes companion SYNC.md alongside Claude SKILL.md', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      const syncPath = path.join(tmpDir, '.claude', 'skills', 'erd-studio', 'SYNC.md');
+      expect(fs.existsSync(syncPath)).toBe(true);
+
+      const content = fs.readFileSync(syncPath, 'utf-8');
+      expect(content).toContain('Sync Reconciliation Guide');
+      expect(content).toContain('add-column-to-physical');
+      expect(content).toContain('update-type-in-logical');
+      expect(content).toContain('requiresCompile');
+
+      const version = extractHarnessVersion(content);
+      expect(version).toBe(HARNESS_VERSION);
+    });
+
+    it('does not write SYNC.md for non-Claude targets', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'copilot')!;
+      service.install(tmpDir, target);
+
+      const syncPath = path.join(tmpDir, '.github', 'instructions', 'SYNC.md');
+      expect(fs.existsSync(syncPath)).toBe(false);
     });
   });
 

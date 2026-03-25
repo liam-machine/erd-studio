@@ -25,9 +25,24 @@ import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SchemaTagService } from '../services/schemaTagService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
+import { checkManifestStaleness } from '../services/stalenessService';
 import type { ManifestData } from '../types/manifest';
+import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplayDomain } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignModel, Stage } from '../types/semantic';
+import type { GroundTruth } from '../types/syncPlan';
+import {
+  deriveModelAction,
+  deriveColumnAction,
+  deriveRelationshipAction,
+} from '../types/syncPlan';
+import type {
+  SyncPlan,
+  ModelResolution,
+  ColumnResolution,
+  RelationshipResolution,
+  ModelContext,
+} from '../types/syncPlan';
 import type { NodePosition, Relationship } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
@@ -68,7 +83,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private readonly openPanels = new Map<
     string,
-    { document: vscode.TextDocument; webview: vscode.Webview; activeStage: Stage }
+    {
+      document: vscode.TextDocument;
+      webview: vscode.Webview;
+      activeStage: Stage;
+      /** Cached discrepancy report from the last comparison (used by sync plan generation). */
+      lastDiscrepancyReport?: DiscrepancyReport | null;
+    }
   >();
 
   /**
@@ -195,7 +216,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
           'refreshManifest', 'undo', 'redo', 'updateViewConfig', 'dismissWelcome',
-          'viewFile',
+          'viewFile', 'checkManifestStaleness', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           return;
@@ -378,6 +399,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             if (payload) {
               await this.handleToggleDiscrepancy(panelKey, document, webviewPanel.webview, payload);
             }
+            break;
+          }
+          case 'checkManifestStaleness': {
+            await this.handleCheckManifestStaleness(webviewPanel.webview);
+            break;
+          }
+          case 'generateSyncPlan': {
+            const payload = (message as { payload?: { selections: Record<string, GroundTruth> } }).payload;
+            if (payload) {
+              await this.handleGenerateSyncPlan(panelKey, document, webviewPanel.webview, payload.selections);
+            }
+            break;
+          }
+          case 'runDbtCompile': {
+            await this.handleRunDbtCompile();
+            break;
+          }
+          case 'launchClaudeSync': {
+            await this.handleLaunchClaudeSync();
             break;
           }
           case 'reorderColumns': {
@@ -2217,7 +2257,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
 
       const report = compareStages(sourceDomain, targetDomain);
+
+      // Cache the report for sync plan generation
+      const panelEntry = this.openPanels.get(panelKey);
+      if (panelEntry) {
+        panelEntry.lastDiscrepancyReport = report;
+      }
+
       webview.postMessage({ type: 'discrepancyReport', payload: report });
+
+      // Also check manifest staleness and send alongside
+      try {
+        const staleness = await checkManifestStaleness(this.workspaceRoot);
+        webview.postMessage({ type: 'manifestStaleness', payload: staleness });
+      } catch {
+        // Non-critical — staleness check failure shouldn't break discrepancy
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Discrepancy comparison failed: ${message}`);
@@ -2241,6 +2296,243 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     const domain = this.domainService.getDomainStage(document.uri.fsPath);
     return this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sync reconciliation handlers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Check manifest staleness and send the result to the webview.
+   */
+  private async handleCheckManifestStaleness(webview: vscode.Webview): Promise<void> {
+    try {
+      const staleness = await checkManifestStaleness(this.workspaceRoot);
+      webview.postMessage({ type: 'manifestStaleness', payload: staleness });
+    } catch (err) {
+      console.error('[SemanticEditorProvider] Staleness check failed:', err);
+    }
+  }
+
+  /**
+   * Generate a .sync-plan.json file from user's ground truth selections.
+   */
+  private async handleGenerateSyncPlan(
+    panelKey: string,
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    selections: Record<string, GroundTruth>,
+  ): Promise<void> {
+    try {
+      const panel = this.openPanels.get(panelKey);
+      if (!panel?.lastDiscrepancyReport) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'No discrepancy report available. Run a comparison first.' },
+        });
+        return;
+      }
+
+      const report = panel.lastDiscrepancyReport;
+      const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const semanticDir = vscode.workspace
+        .getConfiguration('dbtSemantic')
+        .get<string>('semanticDir', 'erd-studio');
+
+      // Build resolutions from selections
+      const models: ModelResolution[] = [];
+      const columns: ColumnResolution[] = [];
+      const relationships: RelationshipResolution[] = [];
+      const referencedModels = new Set<string>();
+
+      for (const [key, groundTruth] of Object.entries(selections)) {
+        const parts = key.split(':');
+        const kind = parts[0];
+
+        if (kind === 'model') {
+          const modelName = parts[1];
+          const disc = report.models.find((m) => m.name === modelName);
+          if (!disc || disc.status === 'matched') continue;
+
+          const action = deriveModelAction(disc.status, groundTruth, report.sourceStage);
+          if (!action) continue;
+
+          models.push({
+            modelName,
+            discrepancyStatus: disc.status,
+            groundTruth,
+            action,
+          });
+          referencedModels.add(modelName);
+        } else if (kind === 'col') {
+          const modelName = parts[1];
+          const columnName = parts.slice(2).join(':'); // column name may contain colons
+          const modelDisc = report.models.find((m) => m.name === modelName);
+          const colDisc = modelDisc?.columns.find((c) => c.name === columnName);
+          if (!colDisc || colDisc.status === 'matched') continue;
+
+          const action = deriveColumnAction(colDisc.status, groundTruth, report.sourceStage);
+          if (!action) continue;
+
+          columns.push({
+            modelName,
+            columnName,
+            discrepancyStatus: colDisc.status,
+            groundTruth,
+            action,
+            sourceDataType: colDisc.sourceDataType,
+            targetDataType: colDisc.targetDataType,
+          });
+          referencedModels.add(modelName);
+        } else if (kind === 'rel') {
+          const [, fromModel, fromColumn, toModel, toColumn] = parts;
+          const relDisc = report.relationships.find(
+            (r) =>
+              r.fromModel === fromModel &&
+              r.fromColumn === fromColumn &&
+              r.toModel === toModel &&
+              r.toColumn === toColumn,
+          );
+          if (!relDisc || relDisc.status === 'matched') continue;
+
+          const action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);
+          if (!action) continue;
+
+          relationships.push({
+            fromModel,
+            fromColumn,
+            toModel,
+            toColumn,
+            discrepancyStatus: relDisc.status,
+            groundTruth,
+            action,
+            sourceCardinality: relDisc.sourceCardinality,
+            targetCardinality: relDisc.targetCardinality,
+          });
+          referencedModels.add(fromModel);
+          referencedModels.add(toModel);
+        }
+      }
+
+      const totalActions = models.length + columns.length + relationships.length;
+      if (totalActions === 0) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'No actionable resolutions selected.' },
+        });
+        return;
+      }
+
+      // Build model context with file paths
+      const modelContext: Record<string, ModelContext> = {};
+      for (const modelName of referencedModels) {
+        const manifestModel = manifest.models.get(modelName);
+        let dbtSqlPath: string | null = null;
+        let dbtSchemaPath: string | null = null;
+
+        if (manifestModel?.originalFilePath) {
+          dbtSqlPath = manifestModel.originalFilePath;
+          // Heuristic: schema YAML is next to the SQL file with .yml extension
+          dbtSchemaPath = dbtSqlPath.replace(/\.sql$/, '.yml');
+        }
+
+        modelContext[modelName] = {
+          modelName,
+          logicalModelPath: path.join(semanticDir, 'logical-models', `${modelName}.yml`),
+          dbtSqlPath,
+          dbtSchemaPath,
+        };
+      }
+
+      // Determine if compile is needed (any physical-side action)
+      const physicalActions = [
+        'add-to-physical', 'remove-from-physical',
+        'add-column-to-physical', 'remove-column-from-physical',
+        'update-type-in-physical',
+        'add-relationship-test-to-physical', 'remove-relationship-test-from-physical',
+        'update-cardinality-in-physical',
+      ];
+      const allActions = [
+        ...models.map((m) => m.action),
+        ...columns.map((c) => c.action),
+        ...relationships.map((r) => r.action),
+      ];
+      const requiresCompile = allActions.some((a) => physicalActions.includes(a));
+
+      // Parse domain info from the document
+      const parsed = JSON.parse(document.getText());
+
+      const syncPlan: SyncPlan = {
+        generatedAt: new Date().toISOString(),
+        domain: parsed.domain ?? '',
+        layer: parsed.layer ?? '',
+        sourceStage: report.sourceStage,
+        targetStage: report.targetStage,
+        modelContext,
+        models,
+        columns,
+        relationships,
+        requiresCompile,
+      };
+
+      // Write to disk
+      const syncPlanPath = path.join(this.workspaceRoot, semanticDir, '.sync-plan.json');
+      const fs = await import('fs');
+      const dir = path.dirname(syncPlanPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(syncPlanPath, JSON.stringify(syncPlan, null, 2) + '\n', 'utf-8');
+
+      // Notify the webview
+      webview.postMessage({
+        type: 'syncPlanGenerated',
+        payload: { filePath: syncPlanPath, totalActions },
+      });
+
+      // Open the sync plan in VS Code editor for review
+      const uri = vscode.Uri.file(syncPlanPath);
+      await vscode.window.showTextDocument(uri, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Sync plan generation failed: ${msg}`);
+      webview.postMessage({
+        type: 'error',
+        payload: { message: `Failed to generate sync plan: ${msg}` },
+      });
+    }
+  }
+
+  /**
+   * Run `dbt compile` in a VS Code terminal.
+   * The existing FileWatcherService will detect manifest changes and refresh.
+   */
+  private async handleRunDbtCompile(): Promise<void> {
+    const terminal = vscode.window.createTerminal({ name: 'dbt compile', cwd: this.workspaceRoot });
+    terminal.show();
+    terminal.sendText('dbt compile');
+  }
+
+  /**
+   * Launch Claude Code in a terminal to execute the sync plan.
+   * Uses --dangerously-skip-permissions so file edits proceed without prompts.
+   */
+  private async handleLaunchClaudeSync(): Promise<void> {
+    const semanticDir = vscode.workspace
+      .getConfiguration('dbtSemantic')
+      .get<string>('semanticDir', 'erd-studio');
+    const planPath = `${semanticDir}/.sync-plan.json`;
+    const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.`;
+
+    const terminal = vscode.window.createTerminal({
+      name: 'ERD Studio Sync',
+      cwd: this.workspaceRoot,
+    });
+    terminal.show();
+    // Launch the TUI, then send the prompt as user input
+    terminal.sendText('claude --dangerously-skip-permissions');
+    // Small delay to let the TUI initialize before sending the prompt
+    setTimeout(() => terminal.sendText(prompt), 2000);
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {

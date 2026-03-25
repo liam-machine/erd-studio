@@ -8,17 +8,9 @@
     "models": [
       "dim_project",
       "dim_work_lot",
-      "dim_location",
       "fct_sale"
     ],
     "relationships": [
-      {
-        "fromModel": "fct_sale",
-        "fromColumn": "amount",
-        "toModel": "dim_location",
-        "toColumn": "location_idn",
-        "cardinality": "many-to-one"
-      },
       {
         "fromModel": "dim_work_lot",
         "fromColumn": "work_lot_id",
@@ -38,8 +30,8 @@
   "viewConfig": {
     "positions": {
       "dim_project": {
-        "x": 12,
-        "y": 12
+        "x": -13,
+        "y": 33
       },
       "dim_work_lot": {
         "x": 341,
