@@ -884,73 +884,47 @@ export function activate(context: vscode.ExtensionContext): void {
 
         if (!selected || selected.length === 0) { return; }
 
-        // Check for existing files that would be overwritten
-        const existingTargets = selected.filter(s => s.exists && s.target.id !== 'codex');
-        let overwrite = false;
-        if (existingTargets.length > 0) {
-          const names = existingTargets.map(s => s.target.relativePath).join(', ');
-          const choice = await vscode.window.showWarningMessage(
-            `The following files already exist: ${names}. Overwrite?`,
-            { modal: true },
-            'Overwrite',
-            'Skip Existing',
-          );
-          if (choice === undefined) { return; }
-          overwrite = choice === 'Overwrite';
-        }
-
+        // Always overwrite — harness files are managed by the extension
         const results = selected.map(s =>
-          harnessService.install(workspaceRoot, s.target, overwrite),
+          harnessService.install(workspaceRoot, s.target, true),
         );
 
         const succeeded = results.filter(r => r.success);
-        const failed = results.filter(r => !r.success && r.error !== 'File already exists');
-        const skipped = results.filter(r => !r.success && r.error === 'File already exists');
-
-        const parts: string[] = [];
-        if (succeeded.length > 0) {
-          parts.push(`${succeeded.length} installed`);
-        }
-        if (skipped.length > 0) {
-          parts.push(`${skipped.length} skipped (already exist)`);
-        }
-        if (failed.length > 0) {
-          parts.push(`${failed.length} failed`);
-        }
+        const failed = results.filter(r => !r.success);
 
         if (failed.length > 0) {
           const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
-          void vscode.window.showErrorMessage(`Harness install: ${parts.join(', ')}. Errors: ${errors}`);
+          void vscode.window.showErrorMessage(
+            `Harness install: ${succeeded.length} installed, ${failed.length} failed. Errors: ${errors}`,
+          );
         } else {
-          void vscode.window.showInformationMessage(`AI coding harness: ${parts.join(', ')}.`);
+          void vscode.window.showInformationMessage(
+            `AI coding harness: ${succeeded.length} installed.`,
+          );
         }
       },
     ),
   );
 
-  // Stale harness check — prompt users with outdated AI coding harness files
+  // AI coding harness — auto-update stale files, prompt on fresh install
   {
     const harnessService = new HarnessService();
+    const existing = harnessService.detectExisting(workspaceRoot);
+    const installedCount = [...existing.values()].filter(Boolean).length;
     const staleTargets = harnessService.detectStale(workspaceRoot);
+
     if (staleTargets.length > 0) {
+      // Force-update all stale harness files silently
+      for (const target of staleTargets) {
+        harnessService.install(workspaceRoot, target, true);
+      }
       const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
-      void vscode.window.showWarningMessage(
-        `ERD Studio: AI coding harness outdated for ${names}. Update to v${HARNESS_VERSION}?`,
-        'Update All',
-        'Choose…',
-        'Dismiss',
-      ).then(choice => {
-        if (choice === 'Update All') {
-          for (const target of staleTargets) {
-            harnessService.install(workspaceRoot, target, true);
-          }
-          void vscode.window.showInformationMessage(
-            `Updated ${staleTargets.length} AI coding harness file(s) to v${HARNESS_VERSION}.`,
-          );
-        } else if (choice === 'Choose…') {
-          void vscode.commands.executeCommand('dbtSemantic.installCodingHarness');
-        }
-      });
+      void vscode.window.showInformationMessage(
+        `ERD Studio: Updated ${staleTargets.length} AI coding harness file(s) to v${HARNESS_VERSION} (${names}).`,
+      );
+    } else if (installedCount === 0) {
+      // No harnesses installed — prompt user to choose
+      void vscode.commands.executeCommand('dbtSemantic.installCodingHarness');
     }
   }
 
