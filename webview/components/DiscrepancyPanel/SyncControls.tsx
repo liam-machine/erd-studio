@@ -4,7 +4,7 @@
  * Three sub-components:
  *   SyncRadio    — inline radio pair (Logical | Physical) for a single discrepancy item
  *   SyncBulkBar  — global "All Logical / All Physical" bulk selection bar
- *   SyncFooter   — sticky "Generate Sync Plan" button at the bottom
+ *   SyncFooter   — sticky "Apply Changes" button at the bottom
  */
 
 import React, { useCallback, useMemo } from 'react';
@@ -92,7 +92,7 @@ export const SyncBulkBar: React.FC<SyncBulkBarProps> = ({ allKeys }) => {
 };
 
 // ---------------------------------------------------------------------------
-// SyncFooter — generate sync plan button + status
+// SyncFooter — apply changes button + status
 // ---------------------------------------------------------------------------
 
 interface SyncFooterProps {
@@ -110,6 +110,8 @@ export const SyncFooter: React.FC<SyncFooterProps> = ({ totalKeys }) => {
     [syncSelections],
   );
 
+  const remaining = totalKeys - selectedCount;
+
   const handleGenerate = useCallback(() => {
     if (selectedCount === 0) return;
     vscode.postMessage({ type: 'generateSyncPlan', payload: { selections: syncSelections } });
@@ -125,13 +127,13 @@ export const SyncFooter: React.FC<SyncFooterProps> = ({ totalKeys }) => {
         <div className="disc-panel__sync-footer-status">
           <span className="disc-panel__sync-footer-check">✓</span>
           <span>
-            Sync plan written ({syncPlanGenerated.totalActions} action{syncPlanGenerated.totalActions !== 1 ? 's' : ''})
+            Changes prepared — {syncPlanGenerated.totalActions} action{syncPlanGenerated.totalActions !== 1 ? 's' : ''} ready
           </span>
         </div>
         <button
           className="disc-panel__sync-execute-btn"
           onClick={handleLaunchClaude}
-          title="Launch Claude Code to execute the sync plan"
+          title="Launch Claude Code to execute the changes"
         >
           Execute with Claude
         </button>
@@ -146,11 +148,16 @@ export const SyncFooter: React.FC<SyncFooterProps> = ({ totalKeys }) => {
         disabled={selectedCount === 0}
         onClick={handleGenerate}
       >
-        Generate Sync Plan{selectedCount > 0 ? ` (${selectedCount})` : ''}
+        Apply Changes{selectedCount > 0 ? ` (${selectedCount})` : ''}
       </button>
       {totalKeys > 0 && selectedCount === 0 && (
         <span className="disc-panel__sync-footer-hint">
-          Select ground truth for items above
+          Choose a side for each difference above, then apply
+        </span>
+      )}
+      {selectedCount > 0 && remaining > 0 && (
+        <span className="disc-panel__sync-footer-hint">
+          {remaining} difference{remaining !== 1 ? 's' : ''} still need{remaining === 1 ? 's' : ''} a decision
         </span>
       )}
     </div>

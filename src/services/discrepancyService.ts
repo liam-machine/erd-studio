@@ -26,6 +26,66 @@ function relationshipKey(r: { fromModel: string; fromColumn: string; toModel: st
 }
 
 /**
+ * Alias map: common synonyms → canonical type name.
+ * Applied after lowercasing and whitespace normalisation.
+ */
+const TYPE_ALIASES: Record<string, string> = {
+  // String family
+  varchar:  'string',
+  text:     'string',
+  char:     'string',
+  nvarchar: 'string',
+  nchar:    'string',
+  // Integer family
+  integer:  'int',
+  tinyint:  'int',
+  // Numeric / decimal family
+  numeric:  'decimal',
+  number:   'decimal',
+  // Float family
+  float:    'double',
+  real:     'double',
+  float64:  'double',
+  // Boolean family
+  bool:     'boolean',
+  // Timestamp family
+  timestamp_ntz: 'timestamp',
+  timestamp_ltz: 'timestamp',
+  datetime:      'timestamp',
+  datetime2:     'timestamp',
+};
+
+/**
+ * Normalise a data type string for comparison purposes.
+ *
+ * Steps:
+ * 1. Lowercase
+ * 2. Trim outer whitespace
+ * 3. Normalise whitespace inside parentheses: `decimal(15, 5)` → `decimal(15,5)`
+ * 4. Map common aliases to a canonical name (varchar → string, integer → int, …)
+ *
+ * The original (un-normalised) strings are still stored on the discrepancy
+ * result so the UI shows what the user actually typed / what dbt reports.
+ */
+export function normaliseDataType(raw: string | undefined): string {
+  if (!raw) return '';
+  let t = raw.trim().toLowerCase();
+  // Strip spaces inside parens: `decimal( 15 , 5 )` → `decimal(15,5)`
+  t = t.replace(/\(\s*/g, '(').replace(/\s*\)/g, ')').replace(/\s*,\s*/g, ',');
+  // Extract base name (everything before the first '(')
+  const parenIdx = t.indexOf('(');
+  const baseName = parenIdx >= 0 ? t.slice(0, parenIdx) : t;
+  const suffix = parenIdx >= 0 ? t.slice(parenIdx) : '';
+  const canonical = TYPE_ALIASES[baseName] ?? baseName;
+  return canonical + suffix;
+}
+
+/** Compare two data type strings using normalised forms. */
+function dataTypesMatch(a: string | undefined, b: string | undefined): boolean {
+  return normaliseDataType(a) === normaliseDataType(b);
+}
+
+/**
  * Compare columns between two matched models.
  *
  * @param stubColumns - When true, columns that exist in the target but not the
@@ -48,7 +108,7 @@ function compareColumns(
 
     if (!targetCol) {
       result.push({ name: col.name, status: 'extra', sourceDataType: col.dataType });
-    } else if (col.dataType !== targetCol.dataType) {
+    } else if (!dataTypesMatch(col.dataType, targetCol.dataType)) {
       result.push({
         name: col.name,
         status: 'type-mismatch',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compare } from '../../src/services/discrepancyService';
+import { compare, normaliseDataType } from '../../src/services/discrepancyService';
 import type { DisplayDomain, DisplayModel, DisplayRelationship } from '../../src/types/display';
 
 // ---------------------------------------------------------------------------
@@ -126,21 +126,69 @@ describe('DiscrepancyService.compare', () => {
       expect(report.summary.missingColumns).toBe(1);
     });
 
-    it('reports data type mismatches', () => {
+    it('reports data type mismatches for genuinely different types', () => {
       const source = makeDomain({
-        models: [makeModel('dim_customer', [makeColumn('email_hash', 'VARCHAR')])],
+        models: [makeModel('dim_customer', [makeColumn('email_hash', 'string')])],
       });
       const target = makeDomain({
-        models: [makeModel('dim_customer', [makeColumn('email_hash', 'TEXT')])],
+        models: [makeModel('dim_customer', [makeColumn('email_hash', 'int')])],
       });
 
       const report = compare(source, target);
       const model = report.models.find((m) => m.name === 'dim_customer')!;
       const mismatch = model.columns.find((c) => c.name === 'email_hash');
       expect(mismatch?.status).toBe('type-mismatch');
-      expect(mismatch?.sourceDataType).toBe('VARCHAR');
-      expect(mismatch?.targetDataType).toBe('TEXT');
+      expect(mismatch?.sourceDataType).toBe('string');
+      expect(mismatch?.targetDataType).toBe('int');
       expect(report.summary.dataTypeMismatches).toBe(1);
+    });
+
+    it('treats VARCHAR and TEXT as equivalent to string (no type-mismatch)', () => {
+      const source = makeDomain({
+        models: [makeModel('dim_customer', [
+          makeColumn('a', 'VARCHAR'),
+          makeColumn('b', 'TEXT'),
+          makeColumn('c', 'String'),
+        ])],
+      });
+      const target = makeDomain({
+        models: [makeModel('dim_customer', [
+          makeColumn('a', 'string'),
+          makeColumn('b', 'string'),
+          makeColumn('c', 'string'),
+        ])],
+      });
+
+      const report = compare(source, target);
+      const model = report.models.find((m) => m.name === 'dim_customer')!;
+      expect(model.columns.every((c) => c.status === 'matched')).toBe(true);
+      expect(report.summary.dataTypeMismatches).toBe(0);
+    });
+
+    it('treats integer and INT as equivalent (case-insensitive)', () => {
+      const source = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'INTEGER')])],
+      });
+      const target = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'int')])],
+      });
+
+      const report = compare(source, target);
+      const model = report.models.find((m) => m.name === 'dim_customer')!;
+      expect(model.columns[0].status).toBe('matched');
+    });
+
+    it('normalises decimal spacing: decimal(15, 5) matches decimal(15,5)', () => {
+      const source = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('amount', 'decimal(15, 5)')])],
+      });
+      const target = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('amount', 'decimal(15,5)')])],
+      });
+
+      const report = compare(source, target);
+      const model = report.models.find((m) => m.name === 'dim_customer')!;
+      expect(model.columns[0].status).toBe('matched');
     });
 
     it('populates columns as missing for missing models', () => {
@@ -327,5 +375,70 @@ describe('DiscrepancyService.compare', () => {
       expect(report.summary.totalModels).toBe(0);
       expect(report.summary.totalColumns).toBe(0);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normaliseDataType unit tests
+// ---------------------------------------------------------------------------
+
+describe('normaliseDataType', () => {
+  it('lowercases everything', () => {
+    expect(normaliseDataType('STRING')).toBe('string');
+    expect(normaliseDataType('Int')).toBe('int');
+    expect(normaliseDataType('BIGINT')).toBe('bigint');
+  });
+
+  it('maps common aliases to canonical names', () => {
+    expect(normaliseDataType('varchar')).toBe('string');
+    expect(normaliseDataType('VARCHAR')).toBe('string');
+    expect(normaliseDataType('text')).toBe('string');
+    expect(normaliseDataType('TEXT')).toBe('string');
+    expect(normaliseDataType('nvarchar')).toBe('string');
+    expect(normaliseDataType('char')).toBe('string');
+    expect(normaliseDataType('integer')).toBe('int');
+    expect(normaliseDataType('INTEGER')).toBe('int');
+    expect(normaliseDataType('tinyint')).toBe('int');
+    expect(normaliseDataType('numeric')).toBe('decimal');
+    expect(normaliseDataType('number')).toBe('decimal');
+    expect(normaliseDataType('float')).toBe('double');
+    expect(normaliseDataType('real')).toBe('double');
+    expect(normaliseDataType('float64')).toBe('double');
+    expect(normaliseDataType('bool')).toBe('boolean');
+    expect(normaliseDataType('timestamp_ntz')).toBe('timestamp');
+    expect(normaliseDataType('timestamp_ltz')).toBe('timestamp');
+    expect(normaliseDataType('datetime')).toBe('timestamp');
+    expect(normaliseDataType('datetime2')).toBe('timestamp');
+  });
+
+  it('normalises whitespace inside parentheses', () => {
+    expect(normaliseDataType('decimal(15, 5)')).toBe('decimal(15,5)');
+    expect(normaliseDataType('decimal( 15 , 5 )')).toBe('decimal(15,5)');
+    expect(normaliseDataType('DECIMAL(28, 10)')).toBe('decimal(28,10)');
+  });
+
+  it('applies aliases with precision parameters', () => {
+    expect(normaliseDataType('numeric(18,2)')).toBe('decimal(18,2)');
+    expect(normaliseDataType('NUMBER(10, 0)')).toBe('decimal(10,0)');
+  });
+
+  it('preserves types without aliases', () => {
+    expect(normaliseDataType('bigint')).toBe('bigint');
+    expect(normaliseDataType('date')).toBe('date');
+    expect(normaliseDataType('timestamp')).toBe('timestamp');
+    expect(normaliseDataType('double')).toBe('double');
+    expect(normaliseDataType('boolean')).toBe('boolean');
+    expect(normaliseDataType('smallint')).toBe('smallint');
+  });
+
+  it('handles undefined and empty string', () => {
+    expect(normaliseDataType(undefined)).toBe('');
+    expect(normaliseDataType('')).toBe('');
+    expect(normaliseDataType('  ')).toBe('');
+  });
+
+  it('trims leading/trailing whitespace', () => {
+    expect(normaliseDataType('  string  ')).toBe('string');
+    expect(normaliseDataType(' VARCHAR ')).toBe('string');
   });
 });
