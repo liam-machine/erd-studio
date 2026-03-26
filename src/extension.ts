@@ -229,6 +229,10 @@ export function activate(context: vscode.ExtensionContext): void {
               void vscode.window.showInformationMessage(
                 'dbt manifest updated. Graphs refreshed with latest model data.',
               );
+            } else {
+              void vscode.window.showWarningMessage(
+                'dbt manifest still updating — graph may show stale data. Run dbt compile to refresh.',
+              );
             }
           } catch (err) {
             console.error('[ERD Studio] Manifest retry failed:', err);
@@ -287,6 +291,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   context.subscriptions.push(
+    { dispose() { clearTimeout(manifestRetryTimeout); } },
     treeProvider,
     decorationProvider,
     layerDecorationProvider,
