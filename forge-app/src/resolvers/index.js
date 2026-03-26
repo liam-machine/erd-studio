@@ -30,6 +30,16 @@ async function fetchGitHubFile(github, repo, branch, path) {
   if (response.status === 401) {
     throw new GitHubAuthError(path);
   }
+  if (response.status === 403) {
+    throw new Error(
+      `Access denied (403) for ${path}. Check that the GitHub OAuth scope includes access to this repository.`
+    );
+  }
+  if (response.status === 404) {
+    throw new Error(
+      `File not found (404): ${path}. Check the repository, branch, and file path are correct.`
+    );
+  }
   if (!response.ok) {
     throw new Error(`GitHub fetch failed: ${response.status} for ${path}`);
   }
@@ -157,70 +167,46 @@ resolver.define('getDomain', async (req) => {
   // the platform exception and shows the OAuth consent UI.
   if (needsReauth) {
     await github.requestCredentials();
+    // Retry with fresh credentials — the original attempt returned nothing
+    try {
+      result = await _getDomainInner(github, req);
+    } catch (retryErr) {
+      return { error: retryErr.message || 'Failed to load domain after re-authentication' };
+    }
   }
 
   return result;
 });
 
 async function _getDomainInner(github, req) {
-    const payload = req.payload || {};
-    const { repo, branch, domainPath } = payload;
+  const payload = req.payload || {};
+  const { repo, branch, domainPath } = payload;
 
-    if (!repo || !domainPath) {
-      return { error: `Missing required config: repo=${repo}, domainPath=${domainPath}` };
-    }
+  if (!repo || !domainPath) {
+    return { error: `Missing required config: repo=${repo}, domainPath=${domainPath}` };
+  }
 
-    // 1. Fetch domain JSON
-    const domainText = await fetchGitHubFile(github, repo, branch || 'main', domainPath);
-    const domainJson = JSON.parse(domainText);
+  // 1. Fetch domain JSON
+  const domainText = await fetchGitHubFile(github, repo, branch || 'main', domainPath);
+  const domainJson = JSON.parse(domainText);
 
-    // 2. Determine base directory for logical-models
-    const pathParts = domainPath.split('/');
-    const baseDir = pathParts.slice(0, -2).join('/'); // Remove layer/filename
+  // 2. Determine base directory for logical-models
+  const pathParts = domainPath.split('/');
+  const baseDir = pathParts.slice(0, -2).join('/'); // Remove layer/filename
 
-    // 3. Check if models are string references (v5) or inline objects (v4)
-    const modelEntries = domainJson.logical?.models ?? [];
-    const resolvedModels = [];
+  // 3. Check if models are string references (v5) or inline objects (v4)
+  const modelEntries = domainJson.logical?.models ?? [];
+  const resolvedModels = [];
 
-    if (modelEntries.length > 0 && typeof modelEntries[0] === 'string') {
-      // v5 format: models are string references to YAML files
-      for (const modelName of modelEntries) {
-        try {
-          const modelPath = `${baseDir}/logical-models/${modelName}.yml`;
-          const yamlText = await fetchGitHubFile(github, repo, branch || 'main', modelPath);
-          const model = parseLogicalModelYaml(yamlText);
-          resolvedModels.push({
-            name: model.name || modelName,
-            schema: model.schema || '',
-            description: model.description || '',
-            columns: (model.columns || []).map(col => ({
-              name: col.name,
-              dataType: col.dataType || 'VARCHAR',
-              description: col.description || '',
-              isPrimaryKey: col.isPrimaryKey || false,
-              isForeignKey: col.isForeignKey || false,
-              isNaturalKey: col.isNaturalKey || false,
-              ...(col.scdType != null ? { scdType: col.scdType } : {}),
-              ...(col.additiveType ? { additiveType: col.additiveType } : {}),
-            })),
-            ...(model.rationale ? { rationale: model.rationale } : {}),
-            ...(model.grain ? { grain: model.grain } : {}),
-            ...(model.modelRole ? { modelRole: model.modelRole } : {}),
-          });
-        } catch (err) {
-          resolvedModels.push({
-            name: modelName,
-            schema: '',
-            description: `Could not load ${modelName}.yml`,
-            columns: [],
-          });
-        }
-      }
-    } else {
-      // v4 format: models are inline objects
-      for (const model of modelEntries) {
+  if (modelEntries.length > 0 && typeof modelEntries[0] === 'string') {
+    // v5 format: models are string references to YAML files
+    for (const modelName of modelEntries) {
+      try {
+        const modelPath = `${baseDir}/logical-models/${modelName}.yml`;
+        const yamlText = await fetchGitHubFile(github, repo, branch || 'main', modelPath);
+        const model = parseLogicalModelYaml(yamlText);
         resolvedModels.push({
-          name: model.name,
+          name: model.name || modelName,
           schema: model.schema || '',
           description: model.description || '',
           columns: (model.columns || []).map(col => ({
@@ -237,34 +223,64 @@ async function _getDomainInner(github, req) {
           ...(model.grain ? { grain: model.grain } : {}),
           ...(model.modelRole ? { modelRole: model.modelRole } : {}),
         });
+      } catch (err) {
+        resolvedModels.push({
+          name: modelName,
+          schema: '',
+          description: `Could not load ${modelName}.yml`,
+          columns: [],
+        });
       }
     }
+  } else {
+    // v4 format: models are inline objects
+    for (const model of modelEntries) {
+      resolvedModels.push({
+        name: model.name,
+        schema: model.schema || '',
+        description: model.description || '',
+        columns: (model.columns || []).map(col => ({
+          name: col.name,
+          dataType: col.dataType || 'VARCHAR',
+          description: col.description || '',
+          isPrimaryKey: col.isPrimaryKey || false,
+          isForeignKey: col.isForeignKey || false,
+          isNaturalKey: col.isNaturalKey || false,
+          ...(col.scdType != null ? { scdType: col.scdType } : {}),
+          ...(col.additiveType ? { additiveType: col.additiveType } : {}),
+        })),
+        ...(model.rationale ? { rationale: model.rationale } : {}),
+        ...(model.grain ? { grain: model.grain } : {}),
+        ...(model.modelRole ? { modelRole: model.modelRole } : {}),
+      });
+    }
+  }
 
-    // 4. Build relationships
-    const relationships = (domainJson.logical?.relationships ?? []).map(rel => ({
-      fromModel: rel.fromModel,
-      fromColumn: rel.fromColumn,
-      toModel: rel.toModel,
-      toColumn: rel.toColumn,
-      cardinality: rel.cardinality || 'many-to-one',
-    }));
+  // 4. Build relationships
+  const relationships = (domainJson.logical?.relationships ?? []).map(rel => ({
+    fromModel: rel.fromModel,
+    fromColumn: rel.fromColumn,
+    toModel: rel.toModel,
+    toColumn: rel.toColumn,
+    cardinality: rel.cardinality || 'many-to-one',
+  }));
 
-    // 5. Build layer from path
-    const layer = pathParts[pathParts.length - 2] || 'silver';
+  // 5. Build layer from path
+  const layer = pathParts[pathParts.length - 2] || 'silver';
 
-    // 6. Assemble DisplayDomain
-    return {
-      schemaVersion: domainJson.schemaVersion || 5,
-      domain: domainJson.domain || pathParts[pathParts.length - 1].replace('.json', ''),
-      layer,
-      stage: 'logical',
-      description: domainJson.description || '',
-      models: resolvedModels,
-      relationships,
-      viewConfig: domainJson.viewConfig || {},
-      readOnly: true,
-      positionDraggable: false,
-    };
+  // 6. Assemble DisplayDomain
+  return {
+    schemaVersion: domainJson.schemaVersion || 5,
+    domain: domainJson.domain || pathParts[pathParts.length - 1].replace('.json', ''),
+    layer,
+    stage: 'logical',
+    description: domainJson.description || '',
+    models: resolvedModels,
+    relationships,
+    viewConfig: domainJson.viewConfig || {},
+    readOnly: true,
+    positionDraggable: false,
+  };
 }
 
 resolver.define('saveConfig', async ({ payload, context }) => {

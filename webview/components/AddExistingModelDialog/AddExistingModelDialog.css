@@ -150,21 +150,21 @@
 }
 
 .add-existing-model-dialog__filter-chip--logical.add-existing-model-dialog__filter-chip--active {
-  border-color: #60a5fa;
-  background: rgba(96, 165, 250, 0.1);
-  color: #60a5fa;
+  border-color: var(--stage-logical);
+  background: var(--stage-logical-bg);
+  color: var(--stage-logical);
 }
 
 .add-existing-model-dialog__filter-chip--yml.add-existing-model-dialog__filter-chip--active {
-  border-color: #22c55e;
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
+  border-color: var(--stage-physical);
+  background: var(--stage-physical-bg);
+  color: var(--stage-physical);
 }
 
 .add-existing-model-dialog__filter-chip--manifest.add-existing-model-dialog__filter-chip--active {
-  border-color: #9ca3af;
-  background: rgba(156, 163, 175, 0.1);
-  color: #9ca3af;
+  border-color: var(--stage-ghost);
+  background: var(--stage-ghost-bg);
+  color: var(--stage-ghost);
 }
 
 .add-existing-model-dialog__filter-count {

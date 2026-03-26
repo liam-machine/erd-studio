@@ -44,6 +44,12 @@
   background: rgba(249, 115, 22, 0.15);
 }
 
+/* Suppress colored hover tint when description is expanded — use neutral background */
+.column-row-editor--built.column-row-editor--expanded:hover .column-row-editor__main,
+.column-row-editor--planned.column-row-editor--expanded:hover .column-row-editor__main {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .column-row-editor--approved .column-row-editor__main {
   background: var(--model-approved-bg);
 }
@@ -178,6 +184,58 @@
 
 .column-row-editor__delete:hover {
   background: rgba(239, 68, 68, 0.25);
+}
+
+/* Delete confirmation inline */
+.column-row-editor__delete-confirm {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  animation: delete-confirm-fade-in 0.15s ease;
+}
+
+@keyframes delete-confirm-fade-in {
+  from { opacity: 0; transform: translateX(4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.column-row-editor__delete-confirm-yes {
+  padding: 1px 6px;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 3px;
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--vscode-errorForeground, #f48771);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s ease;
+}
+
+.column-row-editor__delete-confirm-yes:hover {
+  background: rgba(239, 68, 68, 0.3);
+}
+
+.column-row-editor__delete-confirm-no {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 10px;
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.column-row-editor__delete-confirm-no:hover {
+  color: var(--editor-fg);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* ---------------------------------------------------------------------------

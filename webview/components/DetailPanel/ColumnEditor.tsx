@@ -117,19 +117,6 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
     setIsAddingColumn(false);
   }, []);
 
-  // Handle toggling a single column's expanded state
-  const handleToggleExpand = useCallback((columnName: string) => {
-    setExpandedColumns((prev) => {
-      const next = new Set(prev);
-      if (next.has(columnName)) {
-        next.delete(columnName);
-      } else {
-        next.add(columnName);
-      }
-      return next;
-    });
-  }, []);
-
   // Expand all columns
   const handleExpandAll = useCallback(() => {
     setExpandedColumns(new Set(columns.map((c) => c.name)));
@@ -139,6 +126,24 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
   const handleCollapseAll = useCallback(() => {
     setExpandedColumns(new Set());
   }, []);
+
+  // Handle toggling a single column's expanded state
+  const handleToggleExpand = useCallback((columnName: string, opts?: { altKey?: boolean }) => {
+    if (opts?.altKey) {
+      // Alt+Click: expand all if this column was collapsed, collapse all if it was expanded
+      setExpandedColumns((prev) => prev.has(columnName) ? new Set() : new Set(columns.map((c) => c.name)));
+    } else {
+      setExpandedColumns((prev) => {
+        const next = new Set(prev);
+        if (next.has(columnName)) {
+          next.delete(columnName);
+        } else {
+          next.add(columnName);
+        }
+        return next;
+      });
+    }
+  }, [columns]);
 
   // Prune stale selections when columns change (e.g. column deleted externally)
   useEffect(() => {
@@ -282,7 +287,7 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             modelRole={modelRole}
             expanded={expandedColumns.has(col.name)}
-            onToggleExpand={() => handleToggleExpand(col.name)}
+            onToggleExpand={(opts) => handleToggleExpand(col.name, opts)}
             dragHandleProps={isEditable ? getDragHandleProps(idx) : undefined}
             isDragOver={dropIndex === idx && dragIndex !== idx}
             isBeingDragged={dragIndex === idx}

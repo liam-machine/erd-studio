@@ -178,15 +178,14 @@ export class DomainService {
     const physicalModelNames = new Set<string>();
 
     // Physical models = logical models that exist in yml source files
-    const models: DisplayModel[] = logicalStage.models
-      .filter(model => ymlData.models.has(model.name))
-      .map(model => {
-        const ymlModel = ymlData.models.get(model.name)!;
+    const models: DisplayModel[] = logicalStage.models.flatMap(model => {
+        const ymlModel = ymlData.models.get(model.name);
+        if (!ymlModel) { return []; }
         const manifestModel = manifest?.models.get(model.name);
         physicalModelNames.add(model.name);
 
         // Columns come from yml; data_type enriched from manifest when available
-        const columns: DisplayColumn[] = ymlModel.columns.map(col => {
+        const columns: DisplayColumn[] = (ymlModel.columns ?? []).map(col => {
           // Enrich data_type from manifest if yml has none
           const manifestCol = manifestModel?.columns.find(mc => mc.name === col.name);
           const dataType = col.dataType ?? manifestCol?.data_type ?? '';
@@ -214,7 +213,7 @@ export class DomainService {
           }
         }
 
-        return {
+        return [{
           name: model.name,
           // Schema only comes from manifest (resolved from dbt_project.yml + macros)
           schema: manifestModel?.schema ?? '',
@@ -224,7 +223,7 @@ export class DomainService {
           grain: model.grain,
           modelRole: model.modelRole,
           existsInManifest: manifestModel !== undefined,
-        };
+        }];
       });
 
     // Derive relationships from yml tests, with uniqueness info from both sources
@@ -374,6 +373,11 @@ export class DomainService {
         ?? (obj.logical as Record<string, unknown> | undefined)?.viewConfig,
     );
 
+    // Parse stubColumns — optional string[] of model names with stub display
+    const stubColumns = Array.isArray(obj.stubColumns)
+      ? (obj.stubColumns as unknown[]).filter((v): v is string => typeof v === 'string')
+      : undefined;
+
     return {
       schemaVersion: obj.schemaVersion as number,
       domain,
@@ -381,6 +385,7 @@ export class DomainService {
       description: typeof obj.description === 'string' ? obj.description : '',
       ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
       logical: this.parseStageData(obj.logical) ?? { ...emptyStage },
+      ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
       viewConfig: globalViewConfig,
     };
   }
@@ -635,8 +640,8 @@ function mergeCompositeGroups(
   for (const [model, groups] of secondary) {
     const existing = merged.get(model) ?? [];
     for (const group of groups) {
-      const key = group.sort().join('\0');
-      const alreadyExists = existing.some(g => g.sort().join('\0') === key);
+      const key = [...group].sort().join('\0');
+      const alreadyExists = existing.some(g => [...g].sort().join('\0') === key);
       if (!alreadyExists) {
         existing.push(group);
       }

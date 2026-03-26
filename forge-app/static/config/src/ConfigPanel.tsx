@@ -127,6 +127,11 @@ export default function ConfigPanel() {
       setStatus(`Error: ${err.message}`);
     } finally {
       setTesting(false);
+      // Always re-check auth status — covers success, failure, and cancelled OAuth flows
+      try {
+        const auth = await invoke<AuthStatus>('getAuthStatus');
+        setAuthStatus(auth);
+      } catch {}
     }
   };
 

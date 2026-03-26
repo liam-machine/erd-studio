@@ -338,6 +338,18 @@ export interface UpdateModelRationaleMessage {
 }
 
 /**
+ * Request to update the description for a model.
+ * If the description is empty/cleared, the `description` key is removed from the JSON entirely.
+ */
+export interface UpdateModelDescriptionMessage {
+  type: 'updateModelDescription';
+  payload: {
+    modelName: string;
+    description: string;
+  };
+}
+
+/**
  * Request to update the grain statement for a model.
  * If the grain is empty/cleared, the `grain` key is removed from the JSON entirely.
  */
@@ -358,6 +370,19 @@ export interface UpdateModelRoleMessage {
   payload: {
     modelName: string;
     modelRole: ModelRole | null;
+  };
+}
+
+/**
+ * Toggle whether a model's physical-only columns are suppressed during
+ * discrepancy comparison (stub column mode). Stored in the domain JSON.
+ */
+export interface ToggleStubColumnsMessage {
+  type: 'toggleStubColumns';
+  payload: {
+    modelName: string;
+    /** True = suppress physical-only columns for this model; false = remove from stub list. */
+    stub: boolean;
   };
 }
 
@@ -469,8 +494,10 @@ export type WebviewMessage =
   | RedoMessage
   | ToggleColumnKeyMessage
   | UpdateModelRationaleMessage
+  | UpdateModelDescriptionMessage
   | UpdateModelGrainMessage
   | UpdateModelRoleMessage
+  | ToggleStubColumnsMessage
   | SwitchStageMessage
   | ToggleDiscrepancyMessage
   | ReorderColumnsMessage

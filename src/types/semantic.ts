@@ -213,6 +213,13 @@ export interface UnifiedDomain {
   description: string;
   modelFolder?: string;
   logical: StageData;
+  /**
+   * Model names whose physical-only columns are suppressed during discrepancy comparison.
+   * Useful for conformed dimensions and reference tables that are included in a domain
+   * only to anchor relationships — they define a few key columns (PK/NK) but not all
+   * physical columns. Missing-column discrepancies for these models are hidden.
+   */
+  stubColumns?: string[];
   /** Global view configuration shared across all stages. */
   viewConfig: ViewConfig;
 }
@@ -244,6 +251,8 @@ export interface UnifiedDomainV5 {
   description: string;
   modelFolder?: string;
   logical: StageDataV5;
+  /** See UnifiedDomain.stubColumns. */
+  stubColumns?: string[];
   viewConfig: ViewConfig;
 }
 

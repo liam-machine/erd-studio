@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { ModelRationale } from './ModelRationale';
+import { DescriptionEditor } from './DescriptionEditor';
 import { GrainEditor } from './GrainEditor';
 import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
@@ -261,8 +262,12 @@ export function DetailPanel() {
             <span className="detail-panel__value">{model.schema || '—'}</span>
           </div>
         </div>
-        {model.description && (
-          <p className="detail-panel__description">{model.description}</p>
+        {isReadOnly ? (
+          model.description && (
+            <p className="detail-panel__description">{model.description}</p>
+          )
+        ) : (
+          <DescriptionEditor modelName={model.name} description={model.description} />
         )}
       </div>
 
@@ -270,6 +275,20 @@ export function DetailPanel() {
       {!isReadOnly && (
         <div className="detail-panel__section">
           <RoleEditor modelName={model.name} modelRole={model.modelRole} />
+        </div>
+      )}
+
+      {/* Stub toggle */}
+      {!isReadOnly && (
+        <div className="detail-panel__section detail-panel__section--stub">
+          <label className="detail-panel__stub-label" title="Show only PK/NK columns on the canvas. Extra physical columns are also ignored during sync comparison.">
+            <input
+              type="checkbox"
+              checked={domain?.stubColumns?.includes(model.name) ?? false}
+              onChange={(e) => vscode.postMessage({ type: 'toggleStubColumns', payload: { modelName: model.name, stub: e.target.checked } })}
+            />
+            Stub
+          </label>
         </div>
       )}
 

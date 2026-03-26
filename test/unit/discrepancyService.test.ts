@@ -239,6 +239,86 @@ describe('DiscrepancyService.compare', () => {
     });
   });
 
+  describe('stubColumns', () => {
+    it('suppresses missing columns for stub models', () => {
+      // source = physical (id, name), target = logical (id, name, email)
+      // Without stub: email would be 'missing' (in target but not source)
+      // With stub: email should be suppressed
+      const source = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'INT'), makeColumn('name', 'VARCHAR')])],
+      });
+      const target = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'INT'), makeColumn('name', 'VARCHAR'), makeColumn('email', 'VARCHAR')])],
+      });
+
+      const report = compare(source, target, new Set(['dim_customer']));
+      const model = report.models.find((m) => m.name === 'dim_customer')!;
+
+      // email exists in target but not source — normally 'missing', but suppressed for stub
+      expect(model.columns).toHaveLength(2);
+      expect(model.columns.every((c) => c.status === 'matched')).toBe(true);
+      expect(model.columns.find((c) => c.name === 'email')).toBeUndefined();
+    });
+
+    it('still surfaces type mismatches for stub models', () => {
+      const source = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'INT')])],
+      });
+      const target = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'BIGINT')])],
+      });
+
+      const report = compare(source, target, new Set(['dim_customer']));
+      const model = report.models.find((m) => m.name === 'dim_customer')!;
+      const mismatch = model.columns.find((c) => c.name === 'id');
+
+      expect(mismatch?.status).toBe('type-mismatch');
+      expect(mismatch?.sourceDataType).toBe('INT');
+      expect(mismatch?.targetDataType).toBe('BIGINT');
+      expect(report.summary.dataTypeMismatches).toBe(1);
+    });
+
+    it('still surfaces extra columns for stub models', () => {
+      // source has A, B, C; target has A, B → C is 'extra' (in source not target)
+      const source = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'INT'), makeColumn('name', 'VARCHAR'), makeColumn('audit_ts', 'TIMESTAMP')])],
+      });
+      const target = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'INT'), makeColumn('name', 'VARCHAR')])],
+      });
+
+      const report = compare(source, target, new Set(['dim_customer']));
+      const model = report.models.find((m) => m.name === 'dim_customer')!;
+      const extra = model.columns.find((c) => c.name === 'audit_ts');
+
+      expect(extra?.status).toBe('extra');
+      expect(extra?.sourceDataType).toBe('TIMESTAMP');
+      expect(report.summary.extraColumns).toBe(1);
+    });
+
+    it('summary counters exclude suppressed stub columns', () => {
+      // source (physical) has A, B; target (logical) has A, B, C, D
+      // C and D are 'missing' normally but suppressed with stub
+      const source = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'INT'), makeColumn('name', 'VARCHAR')])],
+      });
+      const target = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'INT'), makeColumn('name', 'VARCHAR'), makeColumn('email', 'VARCHAR'), makeColumn('phone', 'VARCHAR')])],
+      });
+
+      const withStub = compare(source, target, new Set(['dim_customer']));
+      const withoutStub = compare(source, target);
+
+      // Without stub: 2 matched + 2 missing = 4 total columns, 2 missing
+      expect(withoutStub.summary.missingColumns).toBe(2);
+      expect(withoutStub.summary.totalColumns).toBe(4);
+
+      // With stub: 2 matched only, missing columns suppressed
+      expect(withStub.summary.missingColumns).toBe(0);
+      expect(withStub.summary.totalColumns).toBe(2);
+    });
+  });
+
   describe('empty domains', () => {
     it('returns empty report when both domains have no models', () => {
       const report = compare(makeDomain(), makeDomain());

@@ -160,9 +160,9 @@ describe('syncPlan — deriveRelationshipAction', () => {
         .toBe('remove-relationship-from-logical');
     });
 
-    it('missing + logical truth = add-relationship-to-logical', () => {
+    it('missing + logical truth = add-relationship-test-to-physical', () => {
       expect(deriveRelationshipAction('missing', 'logical', 'physical'))
-        .toBe('add-relationship-to-logical');
+        .toBe('add-relationship-test-to-physical');
     });
   });
 });
