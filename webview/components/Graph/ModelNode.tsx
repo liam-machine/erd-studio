@@ -96,15 +96,13 @@ interface ColumnRowProps {
   isReorderDragging?: boolean;
   /** Whether the drop indicator should show above this row. */
   isReorderTarget?: boolean;
-  /** Whether the parent node is selected (enables single-click editing). */
-  nodeSelected?: boolean;
   /** The stage being viewed (for stage-labeled type mismatches). */
   discrepancySourceStage?: Stage;
   /** The stage being compared against (for stage-labeled type mismatches). */
   discrepancyTargetStage?: Stage;
 }
 
-function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, nodeSelected, discrepancySourceStage, discrepancyTargetStage }: ColumnRowProps) {
+function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, discrepancySourceStage, discrepancyTargetStage }: ColumnRowProps) {
   const { send } = useMessageBus(() => {});
 
   // Highlight when this column is involved in a selected edge
@@ -400,8 +398,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
         <span
           className={`model-node__col-name${!readOnly ? ' model-node__col-name--editable' : ''}`}
           title={column.name}
-          onClick={nodeSelected && !readOnly ? handleDoubleClickName : undefined}
-          onDoubleClick={!nodeSelected ? handleDoubleClickName : undefined}
+          onDoubleClick={!readOnly ? handleDoubleClickName : undefined}
         >
           {column.name}
         </span>
@@ -448,8 +445,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
         <span
           className={`model-node__col-type${!readOnly ? ' model-node__col-type--editable' : ''}`}
           style={{ color: getDataTypeColor(column.dataType) }}
-          onClick={nodeSelected && !readOnly ? handleDoubleClickType : undefined}
-          onDoubleClick={!nodeSelected ? handleDoubleClickType : undefined}
+          onDoubleClick={!readOnly ? handleDoubleClickType : undefined}
         >
           {column.dataType}
         </span>
@@ -612,7 +608,6 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
             dragHandleProps={showReorderHandles && hiddenCount === 0 ? getDragHandleProps(idx) : undefined}
             isReorderDragging={dragIndex === idx}
             isReorderTarget={dropIndex === idx && dragIndex !== idx}
-            nodeSelected={!!selected}
             discrepancySourceStage={discrepancySourceStage}
             discrepancyTargetStage={discrepancyTargetStage}
           />
