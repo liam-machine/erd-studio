@@ -446,7 +446,7 @@
   border: none;
   border-radius: 4px;
   background: var(--stage-physical);
-  color: #000;
+  color: var(--button-fg, #fff);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -459,15 +459,15 @@
 
 .disc-panel__sync-footer-btn {
   width: 100%;
-  padding: 6px 12px;
+  padding: 8px 16px;
   border: none;
   border-radius: 4px;
   background: var(--button-bg);
   color: var(--button-fg);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .disc-panel__sync-footer-btn:hover:not(:disabled) {
@@ -480,9 +480,10 @@
 }
 
 .disc-panel__sync-footer-hint {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--editor-fg);
-  opacity: 0.4;
+  opacity: 0.5;
+  text-align: center;
 }
 
 /* ---------------------------------------------------------------------------
