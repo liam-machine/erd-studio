@@ -45,7 +45,6 @@ function parseGitHubUrl(url: string) {
 
 function InlineConfig({ onSaved }: { onSaved: () => void }) {
   const [url, setUrl] = useState('');
-  const [token, setToken] = useState('');
   const [height, setHeight] = useState('1200');
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -57,7 +56,9 @@ function InlineConfig({ onSaved }: { onSaved: () => void }) {
     setSaving(true);
     setStatus(null);
     try {
-      const result = await invoke<any>('getDomain', { ...parsed, githubToken: token, height });
+      // getDomain triggers Forge's OAuth consent UI if not authenticated.
+      // After auth, Forge re-invokes the resolver automatically.
+      const result = await invoke<any>('getDomain', { ...parsed, height });
       if (result.error) setStatus(`Error: ${result.error}`);
       else setStatus(`Connected! Found ${result.models?.length ?? 0} models and ${result.relationships?.length ?? 0} relationships.`);
     } catch (err: any) {
@@ -71,7 +72,7 @@ function InlineConfig({ onSaved }: { onSaved: () => void }) {
     if (!parsed) { setStatus('Please paste a valid GitHub URL.'); return; }
     setSaving(true);
     try {
-      await invoke('saveConfig', { ...parsed, githubToken: token, height, githubUrl: url });
+      await invoke('saveConfig', { ...parsed, height, githubUrl: url });
       onSaved();
     } catch (err: any) {
       setStatus(`Save failed: ${err.message}`);
@@ -85,7 +86,8 @@ function InlineConfig({ onSaved }: { onSaved: () => void }) {
     <div style={{ padding: '32px', maxWidth: '560px', margin: '0 auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
       <h2 style={{ margin: '0 0 4px', fontSize: '18px', color: '#172b4d' }}>ERD Studio</h2>
       <p style={{ margin: '0 0 20px', fontSize: '13px', color: '#6b778c' }}>
-        Paste a GitHub link to your domain JSON file to render an interactive ERD diagram.
+        Paste a GitHub link to your domain JSON file. GitHub authentication is handled
+        automatically via OAuth when you test the connection.
       </p>
 
       <label style={labelStyle}>GitHub URL</label>
@@ -108,17 +110,6 @@ function InlineConfig({ onSaved }: { onSaved: () => void }) {
           Could not parse URL. Expected: github.com/owner/repo/blob/branch/path/to/file.json
         </div>
       )}
-
-      <div style={{ marginTop: '16px' }}>
-        <label style={labelStyle}>GitHub Token <span style={{ fontWeight: 400, color: '#97a0af' }}>(required for private repos)</span></label>
-        <input
-          style={inputStyle}
-          type="password"
-          placeholder="ghp_... or github_pat_..."
-          value={token}
-          onChange={(e) => { setToken(e.target.value); setStatus(null); }}
-        />
-      </div>
 
       <div style={{ marginTop: '16px' }}>
         <label style={labelStyle}>Diagram Height</label>
@@ -205,6 +196,8 @@ function ERDViewer() {
       const h = parseInt(config.height, 10);
       if (h && h > 0) setHeightPx(h);
 
+      // getDomain triggers Forge's OAuth consent UI if not authenticated.
+      // After auth, Forge re-invokes the resolver automatically.
       const result = await invoke<any>('getDomain', config);
       if (result.error) {
         setError(result.error);
@@ -241,7 +234,6 @@ function ERDViewer() {
     const h = parseInt(newHeight, 10);
     if (!h || h <= 0) return;
     setHeightPx(h);
-    // Persist to KVS
     try {
       const config = await invoke<any>('getConfig');
       if (config) {
@@ -333,7 +325,8 @@ function ERDViewer() {
             onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
-            defaultViewport={{ x: 50, y: 50, zoom: 1 }}
+            fitView
+            fitViewOptions={{ padding: 0.15, maxZoom: 1.5 }}
             nodesDraggable={false}
             nodesConnectable={false}
             elementsSelectable={true}
