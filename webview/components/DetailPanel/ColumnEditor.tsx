@@ -117,19 +117,21 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
     setIsAddingColumn(false);
   }, []);
 
+  // Expand all columns
+  const handleExpandAll = useCallback(() => {
+    setExpandedColumns(new Set(columns.map((c) => c.name)));
+  }, [columns]);
+
+  // Collapse all columns
+  const handleCollapseAll = useCallback(() => {
+    setExpandedColumns(new Set());
+  }, []);
+
   // Handle toggling a single column's expanded state
   const handleToggleExpand = useCallback((columnName: string, opts?: { altKey?: boolean }) => {
     if (opts?.altKey) {
       // Alt+Click: expand all if this column was collapsed, collapse all if it was expanded
-      setExpandedColumns((prev) => {
-        if (prev.has(columnName)) {
-          // Column was expanded → collapse all
-          return new Set();
-        } else {
-          // Column was collapsed → expand all
-          return new Set(columns.map((c) => c.name));
-        }
-      });
+      setExpandedColumns((prev) => prev.has(columnName) ? new Set() : new Set(columns.map((c) => c.name)));
     } else {
       setExpandedColumns((prev) => {
         const next = new Set(prev);
@@ -142,16 +144,6 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
       });
     }
   }, [columns]);
-
-  // Expand all columns
-  const handleExpandAll = useCallback(() => {
-    setExpandedColumns(new Set(columns.map((c) => c.name)));
-  }, [columns]);
-
-  // Collapse all columns
-  const handleCollapseAll = useCallback(() => {
-    setExpandedColumns(new Set());
-  }, []);
 
   // Prune stale selections when columns change (e.g. column deleted externally)
   useEffect(() => {

@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { ModelRationale } from './ModelRationale';
+import { DescriptionEditor } from './DescriptionEditor';
 import { GrainEditor } from './GrainEditor';
 import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
@@ -261,8 +262,12 @@ export function DetailPanel() {
             <span className="detail-panel__value">{model.schema || '—'}</span>
           </div>
         </div>
-        {model.description && (
-          <p className="detail-panel__description">{model.description}</p>
+        {isReadOnly ? (
+          model.description && (
+            <p className="detail-panel__description">{model.description}</p>
+          )
+        ) : (
+          <DescriptionEditor modelName={model.name} description={model.description} />
         )}
       </div>
 

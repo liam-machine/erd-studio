@@ -373,6 +373,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'updateModelDescription': {
+            const payload = (message as { payload?: { modelName: string; description: string } }).payload;
+            if (payload) {
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateModelDescription(document, webviewPanel.webview, payload, activeStage));
+            }
+            break;
+          }
           case 'updateModelGrain': {
             const payload = (message as { payload?: { modelName: string; grain: string } }).payload;
             if (payload) {
@@ -2103,6 +2111,48 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Update design rationale failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update design rationale: ${message}` } });
+    }
+  }
+
+  private async handleUpdateModelDescription(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelName: string; description: string },
+    stage: 'logical',
+  ): Promise<void> {
+    try {
+      // V5: write to central model file
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (this.isDomainV5(parsed)) {
+        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+          const description = payload.description?.trim() || undefined;
+          if (description) { model.description = description; } else { delete model.description; }
+        });
+        return;
+      }
+
+      // V4: legacy inline path
+      const success = await this.applyDomainEdit(
+        document,
+        (section) => {
+          const models = (section.models ?? []) as Array<Record<string, unknown>>;
+          const model = models.find((m) => m.name === payload.modelName);
+          if (!model) { throw new Error(`Model "${payload.modelName}" not found.`); }
+
+          const description = payload.description?.trim() || undefined;
+          if (description) { model.description = description; } else { delete model.description; }
+        },
+        { webview, stage },
+      );
+
+      if (!success) {
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to update description.' } });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update description failed: ${message}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to update description: ${message}` } });
     }
   }
 

@@ -667,7 +667,7 @@ export function ColumnRowEditor({
               title={mode !== 'readonly' ? 'Click to edit description' : undefined}
             >
               {localColumn.description || (
-                mode !== 'readonly' ? '\u270F Add description...' : 'No description'
+                mode !== 'readonly' ? '✏ Add description...' : 'No description'
               )}
             </div>
           )}
