@@ -199,6 +199,86 @@ describe('HarnessService', () => {
       const syncPath = path.join(tmpDir, '.github', 'instructions', 'SYNC.md');
       expect(fs.existsSync(syncPath)).toBe(false);
     });
+
+    it('adds gitignore entry on first install', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      const gitignorePath = path.join(tmpDir, '.gitignore');
+      expect(fs.existsSync(gitignorePath)).toBe(true);
+
+      const content = fs.readFileSync(gitignorePath, 'utf-8');
+      expect(content).toContain('.claude/skills/erd-studio/');
+      expect(content).toContain('# ERD Studio AI coding harness');
+    });
+
+    it('does not add gitignore entry on overwrite (update)', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'copilot')!;
+      // First install — creates gitignore entry
+      service.install(tmpDir, target);
+
+      const gitignorePath = path.join(tmpDir, '.gitignore');
+      const contentBefore = fs.readFileSync(gitignorePath, 'utf-8');
+
+      // Overwrite (simulates version update where file already existed)
+      service.install(tmpDir, target, true);
+
+      const contentAfter = fs.readFileSync(gitignorePath, 'utf-8');
+      expect(contentAfter).toBe(contentBefore);
+    });
+
+    it('does not duplicate gitignore entries on repeated fresh installs', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'gemini')!;
+      // First install
+      service.install(tmpDir, target);
+
+      // Delete the harness file to simulate fresh install
+      fs.unlinkSync(path.join(tmpDir, target.relativePath));
+
+      // Second fresh install
+      service.install(tmpDir, target);
+
+      const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+      const matches = content.match(/\.gemini\/styleguide\.md/g);
+      expect(matches).toHaveLength(1);
+    });
+
+    it('groups multiple harness entries under one gitignore section', () => {
+      const claude = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      const copilot = HARNESS_TARGETS.find(t => t.id === 'copilot')!;
+      service.install(tmpDir, claude);
+      // Delete copilot file to simulate fresh install
+      service.install(tmpDir, copilot);
+
+      const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+      expect(content).toContain('.claude/skills/erd-studio/');
+      expect(content).toContain('.github/instructions/erd-studio.instructions.md');
+
+      // Should only have one section header
+      const headers = content.match(/# ERD Studio AI coding harness/g);
+      expect(headers).toHaveLength(1);
+    });
+
+    it('does not add gitignore entry for codex (AGENTS.md)', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'codex')!;
+      service.install(tmpDir, target);
+
+      const gitignorePath = path.join(tmpDir, '.gitignore');
+      expect(fs.existsSync(gitignorePath)).toBe(false);
+    });
+
+    it('appends to existing .gitignore without corrupting it', () => {
+      const gitignorePath = path.join(tmpDir, '.gitignore');
+      fs.writeFileSync(gitignorePath, 'node_modules/\n.env\n');
+
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      const content = fs.readFileSync(gitignorePath, 'utf-8');
+      expect(content).toContain('node_modules/');
+      expect(content).toContain('.env');
+      expect(content).toContain('.claude/skills/erd-studio/');
+    });
   });
 
   describe('detectExisting', () => {
