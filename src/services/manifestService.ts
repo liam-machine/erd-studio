@@ -83,8 +83,8 @@ export class ManifestService {
       const fallback = this.lastKnownGood ?? this.emptyManifest();
       if (currentLoadId === this.loadId) {
         this.cache = fallback;
-        this._isStale = true;
       }
+      this._isStale = true; // set unconditionally — any parse failure means stale
       return fallback;
     } finally {
       if (currentLoadId === this.loadId) {
