@@ -33,31 +33,39 @@ import './SyncMergeModal.css';
 // actionToHint — maps action codes to user-friendly tooltip descriptions
 // ---------------------------------------------------------------------------
 
+const ACTION_HINTS: Record<string, string> = {
+  'add-to-logical':                        'Will add this model to your logical design',
+  'remove-from-logical':                   'Will remove this model from your logical design',
+  'add-to-physical':                       'Will add this model to dbt (requires compile)',
+  'remove-from-physical':                  'Will remove this model from dbt',
+  'add-column-to-logical':                 'Will add this column to your logical design',
+  'remove-column-from-logical':            'Will remove this column from your logical design',
+  'add-column-to-physical':                'Will add this column in dbt schema',
+  'remove-column-from-physical':           'Will remove this column from dbt schema',
+  'update-type-in-logical':                'Will update the data type in your logical design',
+  'update-type-in-physical':               'Will update the data type in dbt schema',
+  'add-relationship-to-logical':           'Will add this relationship to your logical design',
+  'remove-relationship-from-logical':      'Will remove this relationship from your logical design',
+  'add-relationship-test-to-physical':     'Will add a dbt relationship test',
+  'remove-relationship-test-from-physical': 'Will remove the dbt relationship test',
+  'update-cardinality-in-logical':         'Will update cardinality in your logical design',
+  'update-cardinality-in-physical':        'Will update cardinality in dbt',
+};
+
 function actionToHint(action: string | null): string {
-  switch (action) {
-    case 'add-to-logical':                       return 'Will add this model to your logical design';
-    case 'remove-from-logical':                  return 'Will remove this model from your logical design';
-    case 'add-to-physical':                      return 'Will add this model to dbt (requires compile)';
-    case 'remove-from-physical':                 return 'Will remove this model from dbt';
-    case 'add-column-to-logical':                return 'Will add this column to your logical design';
-    case 'remove-column-from-logical':           return 'Will remove this column from your logical design';
-    case 'add-column-to-physical':               return 'Will add this column in dbt schema';
-    case 'remove-column-from-physical':          return 'Will remove this column from dbt schema';
-    case 'update-type-in-logical':               return 'Will update the data type in your logical design';
-    case 'update-type-in-physical':              return 'Will update the data type in dbt schema';
-    case 'add-relationship-to-logical':          return 'Will add this relationship to your logical design';
-    case 'remove-relationship-from-logical':     return 'Will remove this relationship from your logical design';
-    case 'add-relationship-test-to-physical':    return 'Will add a dbt relationship test';
-    case 'remove-relationship-test-from-physical': return 'Will remove the dbt relationship test';
-    case 'update-cardinality-in-logical':        return 'Will update cardinality in your logical design';
-    case 'update-cardinality-in-physical':       return 'Will update cardinality in dbt';
-    default:                                     return 'No changes needed';
-  }
+  return (action && ACTION_HINTS[action]) ?? 'No changes needed';
 }
 
 // ---------------------------------------------------------------------------
-// statusBadgeText helpers
+// Status badge text — maps discrepancy statuses to human labels
 // ---------------------------------------------------------------------------
+
+const ITEM_STATUS_TEXT: Record<string, string> = {
+  extra:                  'New',
+  missing:                'Missing',
+  'type-mismatch':        'Type diff',
+  'cardinality-mismatch': 'Cardinality diff',
+};
 
 function modelStatusText(status: string, sourceStage: string, targetStage: string): string {
   if (status === 'extra') return `Only in ${stageName(sourceStage)}`;
@@ -65,18 +73,36 @@ function modelStatusText(status: string, sourceStage: string, targetStage: strin
   return status;
 }
 
-function columnStatusText(status: string): string {
-  if (status === 'extra') return 'New';
-  if (status === 'missing') return 'Missing';
-  if (status === 'type-mismatch') return 'Type diff';
-  return status;
+function itemStatusText(status: string): string {
+  return ITEM_STATUS_TEXT[status] ?? status;
 }
 
-function relStatusText(status: string): string {
-  if (status === 'extra') return 'New';
-  if (status === 'missing') return 'Missing';
-  if (status === 'cardinality-mismatch') return 'Cardinality diff';
-  return status;
+// ---------------------------------------------------------------------------
+// Type narrowing helpers — filter out 'matched' with proper type narrowing
+// ---------------------------------------------------------------------------
+
+type ConflictColumnStatus = 'extra' | 'missing' | 'type-mismatch';
+type ConflictRelStatus = 'extra' | 'missing' | 'cardinality-mismatch';
+
+function isConflictColumnStatus(s: string): s is ConflictColumnStatus {
+  return s === 'extra' || s === 'missing' || s === 'type-mismatch';
+}
+
+function isConflictRelStatus(s: string): s is ConflictRelStatus {
+  return s === 'extra' || s === 'missing' || s === 'cardinality-mismatch';
+}
+
+// ---------------------------------------------------------------------------
+// splitByResolved — partitions an array into unresolved/resolved items
+// ---------------------------------------------------------------------------
+
+function splitByResolved<T>(items: T[], isResolved: (item: T) => boolean): { unresolved: T[]; resolved: T[] } {
+  const unresolved: T[] = [];
+  const resolved: T[] = [];
+  for (const item of items) {
+    (isResolved(item) ? resolved : unresolved).push(item);
+  }
+  return { unresolved, resolved };
 }
 
 // ---------------------------------------------------------------------------
@@ -250,9 +276,10 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
 
   const key = columnKey(modelName, col.name);
 
-  // Compute action hints for tooltips
-  const logicalHint = actionToHint(deriveColumnAction(col.status as 'extra' | 'missing' | 'type-mismatch', 'logical', sourceStage as Stage));
-  const physicalHint = actionToHint(deriveColumnAction(col.status as 'extra' | 'missing' | 'type-mismatch', 'physical', sourceStage as Stage));
+  // Compute action hints for tooltips (status is narrowed by the matched guard above)
+  const colStatus = isConflictColumnStatus(col.status) ? col.status : 'extra';
+  const logicalHint = actionToHint(deriveColumnAction(colStatus, 'logical', sourceStage as Stage));
+  const physicalHint = actionToHint(deriveColumnAction(colStatus, 'physical', sourceStage as Stage));
 
   let sourceContent: React.ReactNode;
   let targetContent: React.ReactNode;
@@ -291,7 +318,7 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
       </AcceptCell>
       <td className="sync-modal__cell sync-modal__cell--item sync-modal__cell--col-item">
         <span className={`sync-modal__status-badge sync-modal__status-badge--sm sync-modal__status-badge--${col.status}`}>
-          {columnStatusText(col.status)}
+          {itemStatusText(col.status)}
         </span>
         <span className="sync-modal__col-name">{col.name}</span>
       </td>
@@ -309,10 +336,10 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
 function RelationshipRow({ rel, sourceStage, targetStage }: { rel: RelationshipDiscrepancy; sourceStage: string; targetStage: string }) {
   const key = relationshipKey(rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn);
 
-  // Compute action hints for tooltips
-  const relStatus = rel.status === 'cardinality-mismatch' ? 'cardinality-mismatch' : rel.status;
-  const logicalHint = actionToHint(deriveRelationshipAction(relStatus as 'extra' | 'missing' | 'cardinality-mismatch', 'logical', sourceStage as Stage));
-  const physicalHint = actionToHint(deriveRelationshipAction(relStatus as 'extra' | 'missing' | 'cardinality-mismatch', 'physical', sourceStage as Stage));
+  // Compute action hints for tooltips (only called for non-matched relationships)
+  const relStatus = isConflictRelStatus(rel.status) ? rel.status : 'extra';
+  const logicalHint = actionToHint(deriveRelationshipAction(relStatus, 'logical', sourceStage as Stage));
+  const physicalHint = actionToHint(deriveRelationshipAction(relStatus, 'physical', sourceStage as Stage));
 
   let sourceContent: React.ReactNode;
   let targetContent: React.ReactNode;
@@ -334,7 +361,7 @@ function RelationshipRow({ rel, sourceStage, targetStage }: { rel: RelationshipD
       <AcceptCell side="logical" selectionKey={key} hint={logicalHint}>{sourceContent}</AcceptCell>
       <td className="sync-modal__cell sync-modal__cell--item">
         <span className={`sync-modal__status-badge sync-modal__status-badge--sm sync-modal__status-badge--${rel.status === 'cardinality-mismatch' ? 'cardinality-mismatch' : rel.status}`}>
-          {relStatusText(rel.status)}
+          {itemStatusText(rel.status)}
         </span>
         <span className="sync-modal__rel-label">
           <span className="sync-modal__rel-model">{rel.fromModel}</span>
@@ -403,7 +430,7 @@ function ModelRowGroup({ model, conflictCols, sourceStage, targetStage, isCollap
     const allColsResolved = columnKeys.every((k) => syncSelections[k]);
     if (!allColsResolved) return;
 
-    // Infer direction from column selections — majority wins
+    // Infer direction from column selections — majority wins, logical on tie
     let logCount = 0;
     let physCount = 0;
     for (const k of columnKeys) {
@@ -534,27 +561,17 @@ export function SyncMergeModal() {
   }, [relsWithIssues, syncSelections]);
 
   // Split models and relationships into unresolved / resolved when hiding
-  const { unresolvedModels, resolvedModels } = useMemo(() => {
-    if (!hideResolved) return { unresolvedModels: models, resolvedModels: [] as ModelDiscrepancy[] };
-    const unresolved: ModelDiscrepancy[] = [];
-    const resolved: ModelDiscrepancy[] = [];
-    for (const m of models) {
-      if (modelResolutionStatus.get(m.name)) resolved.push(m);
-      else unresolved.push(m);
-    }
-    return { unresolvedModels: unresolved, resolvedModels: resolved };
+  const { unresolved: unresolvedModels, resolved: resolvedModels } = useMemo(() => {
+    if (!hideResolved) return { unresolved: models, resolved: [] as ModelDiscrepancy[] };
+    return splitByResolved(models, (m) => !!modelResolutionStatus.get(m.name));
   }, [models, hideResolved, modelResolutionStatus]);
 
-  const { unresolvedRels, resolvedRels } = useMemo(() => {
-    if (!hideResolved) return { unresolvedRels: relsWithIssues, resolvedRels: [] as RelationshipDiscrepancy[] };
-    const unresolved: RelationshipDiscrepancy[] = [];
-    const resolved: RelationshipDiscrepancy[] = [];
-    for (const r of relsWithIssues) {
+  const { unresolved: unresolvedRels, resolved: resolvedRels } = useMemo(() => {
+    if (!hideResolved) return { unresolved: relsWithIssues, resolved: [] as RelationshipDiscrepancy[] };
+    return splitByResolved(relsWithIssues, (r) => {
       const k = relationshipKey(r.fromModel, r.fromColumn, r.toModel, r.toColumn);
-      if (relResolutionStatus.get(k)) resolved.push(r);
-      else unresolved.push(r);
-    }
-    return { unresolvedRels: unresolved, resolvedRels: resolved };
+      return !!relResolutionStatus.get(k);
+    });
   }, [relsWithIssues, hideResolved, relResolutionStatus]);
 
   const totalHiddenCount = resolvedModels.length + resolvedRels.length;

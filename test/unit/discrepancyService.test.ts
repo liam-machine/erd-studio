@@ -409,6 +409,13 @@ describe('normaliseDataType', () => {
     expect(normaliseDataType('timestamp_ltz')).toBe('timestamp');
     expect(normaliseDataType('datetime')).toBe('timestamp');
     expect(normaliseDataType('datetime2')).toBe('timestamp');
+    expect(normaliseDataType('ntext')).toBe('string');
+    expect(normaliseDataType('smallint')).toBe('int');
+    expect(normaliseDataType('int64')).toBe('int');
+    expect(normaliseDataType('bytea')).toBe('binary');
+    expect(normaliseDataType('blob')).toBe('binary');
+    expect(normaliseDataType('varbinary')).toBe('binary');
+    expect(normaliseDataType('jsonb')).toBe('json');
   });
 
   it('normalises whitespace inside parentheses', () => {
@@ -428,7 +435,7 @@ describe('normaliseDataType', () => {
     expect(normaliseDataType('timestamp')).toBe('timestamp');
     expect(normaliseDataType('double')).toBe('double');
     expect(normaliseDataType('boolean')).toBe('boolean');
-    expect(normaliseDataType('smallint')).toBe('smallint');
+    expect(normaliseDataType('smallint')).toBe('int');
   });
 
   it('handles undefined and empty string', () => {

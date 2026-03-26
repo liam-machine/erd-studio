@@ -36,9 +36,14 @@ const TYPE_ALIASES: Record<string, string> = {
   char:     'string',
   nvarchar: 'string',
   nchar:    'string',
+  ntext:    'string',
   // Integer family
   integer:  'int',
   tinyint:  'int',
+  smallint: 'int',
+  int64:    'int',
+  // Big integer family
+  bigint:   'bigint',
   // Numeric / decimal family
   numeric:  'decimal',
   number:   'decimal',
@@ -53,6 +58,12 @@ const TYPE_ALIASES: Record<string, string> = {
   timestamp_ltz: 'timestamp',
   datetime:      'timestamp',
   datetime2:     'timestamp',
+  // Binary family
+  bytea:    'binary',
+  blob:     'binary',
+  varbinary: 'binary',
+  // JSON family
+  jsonb:    'json',
 };
 
 /**
