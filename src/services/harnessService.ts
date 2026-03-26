@@ -49,6 +49,8 @@ export interface HarnessTarget {
   description: string;
   /** Relative path from workspace root where the file will be written. */
   relativePath: string;
+  /** Pattern to add to .gitignore on first install. Omit if the file may contain non-ERD-Studio content. */
+  gitignorePattern?: string;
 }
 
 export interface HarnessInstallResult {
@@ -69,24 +71,28 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
     id: 'claude',
     description: '.claude/skills/erd-studio/SKILL.md',
     relativePath: '.claude/skills/erd-studio/SKILL.md',
+    gitignorePattern: '.claude/skills/erd-studio/',
   },
   {
     label: '$(github) GitHub Copilot',
     id: 'copilot',
     description: '.github/instructions/erd-studio.instructions.md',
     relativePath: '.github/instructions/erd-studio.instructions.md',
+    gitignorePattern: '.github/instructions/erd-studio.instructions.md',
   },
   {
     label: '$(sparkle) Google Gemini',
     id: 'gemini',
     description: '.gemini/styleguide.md',
     relativePath: '.gemini/styleguide.md',
+    gitignorePattern: '.gemini/styleguide.md',
   },
   {
     label: '$(code) OpenAI Codex',
     id: 'codex',
     description: 'codex-erd-studio.md (appended to AGENTS.md)',
     relativePath: 'AGENTS.md',
+    // No gitignorePattern — AGENTS.md may contain non-ERD-Studio content
   },
 ];
 
@@ -582,6 +588,13 @@ export class HarnessService {
         fs.writeFileSync(syncPath, generateSyncGuide(), 'utf-8');
       }
 
+      // Add to .gitignore on first install only — subsequent updates and
+      // version bumps skip this so the user can remove the entry if they
+      // want the harness files tracked in version control.
+      if (!alreadyExisted && target.gitignorePattern) {
+        this.addToGitignore(workspaceRoot, target.gitignorePattern);
+      }
+
       return {
         target,
         success: true,
@@ -597,6 +610,51 @@ export class HarnessService {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  /**
+   * Add a pattern to the workspace .gitignore if not already present.
+   * Only called on first install — subsequent updates skip this so users
+   * who remove the entry don't have it re-added.
+   */
+  private addToGitignore(workspaceRoot: string, pattern: string): void {
+    const gitignorePath = path.join(workspaceRoot, '.gitignore');
+    let content = '';
+    if (fs.existsSync(gitignorePath)) {
+      content = fs.readFileSync(gitignorePath, 'utf-8');
+      // Check if the pattern is already present (exact line match)
+      const lines = content.split('\n').map(l => l.trim());
+      if (lines.includes(pattern)) { return; }
+    }
+
+    const section = '\n# ERD Studio AI coding harness (auto-generated, safe to remove)\n' + pattern + '\n';
+
+    // If there's already an ERD Studio section, append the pattern there
+    const sectionHeader = '# ERD Studio AI coding harness';
+    if (content.includes(sectionHeader)) {
+      // Find the section and append the pattern after the last ERD Studio entry
+      const lines = content.split('\n');
+      let insertIndex = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(sectionHeader)) {
+          // Walk forward past the header and any existing patterns
+          insertIndex = i + 1;
+          while (insertIndex < lines.length && lines[insertIndex].trim() !== '' && !lines[insertIndex].startsWith('#')) {
+            insertIndex++;
+          }
+          break;
+        }
+      }
+      if (insertIndex >= 0) {
+        lines.splice(insertIndex, 0, pattern);
+        fs.writeFileSync(gitignorePath, lines.join('\n'), 'utf-8');
+        return;
+      }
+    }
+
+    // No existing section — append a new one
+    const needsLeadingNewline = content.length > 0 && !content.endsWith('\n');
+    fs.appendFileSync(gitignorePath, (needsLeadingNewline ? '\n' : '') + section, 'utf-8');
   }
 
   /**

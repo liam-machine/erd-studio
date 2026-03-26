@@ -44,6 +44,8 @@ export type ModelNodeData = {
   stage: Stage;
   /** Data warehouse layer. */
   layer: Layer;
+  /** Database schema the model materializes in (shown as badge text). */
+  schema?: string;
   /** Layer configuration for dynamic badge styling (color, abbreviation). */
   layerConfig?: LayerConfig;
   /** Columns to display, enriched with PK/FK flags. */

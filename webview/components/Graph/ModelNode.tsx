@@ -42,6 +42,13 @@ const LAYER_BADGE_FALLBACK: Record<string, string> = {
   gold: 'GLD',
 };
 
+// Abbreviations for common database schema names
+const SCHEMA_BADGE: Record<string, string> = {
+  bronze: 'BRZ',
+  silver: 'SLV',
+  gold: 'GLD',
+};
+
 
 /** Unicode circled numbers for SCD type badges. */
 const SCD_BADGE: Record<number, string> = {
@@ -89,15 +96,13 @@ interface ColumnRowProps {
   isReorderDragging?: boolean;
   /** Whether the drop indicator should show above this row. */
   isReorderTarget?: boolean;
-  /** Whether the parent node is selected (enables single-click editing). */
-  nodeSelected?: boolean;
   /** The stage being viewed (for stage-labeled type mismatches). */
   discrepancySourceStage?: Stage;
   /** The stage being compared against (for stage-labeled type mismatches). */
   discrepancyTargetStage?: Stage;
 }
 
-function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, nodeSelected, discrepancySourceStage, discrepancyTargetStage }: ColumnRowProps) {
+function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, discrepancySourceStage, discrepancyTargetStage }: ColumnRowProps) {
   const { send } = useMessageBus(() => {});
 
   // Highlight when this column is involved in a selected edge
@@ -393,8 +398,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
         <span
           className={`model-node__col-name${!readOnly ? ' model-node__col-name--editable' : ''}`}
           title={column.name}
-          onClick={nodeSelected && !readOnly ? handleDoubleClickName : undefined}
-          onDoubleClick={!nodeSelected ? handleDoubleClickName : undefined}
+          onDoubleClick={!readOnly ? handleDoubleClickName : undefined}
         >
           {column.name}
         </span>
@@ -441,8 +445,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
         <span
           className={`model-node__col-type${!readOnly ? ' model-node__col-type--editable' : ''}`}
           style={{ color: getDataTypeColor(column.dataType) }}
-          onClick={nodeSelected && !readOnly ? handleDoubleClickType : undefined}
-          onDoubleClick={!nodeSelected ? handleDoubleClickType : undefined}
+          onDoubleClick={!readOnly ? handleDoubleClickType : undefined}
         >
           {column.dataType}
         </span>
@@ -479,7 +482,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, stage, layer, layerConfig, columns, grain, dimmed, readOnly, isGhost, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const { send } = useMessageBus(() => {});
 
@@ -579,7 +582,9 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
             color: layerConfig.color,
           } : undefined}
         >
-          {layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
+          {schema
+            ? SCHEMA_BADGE[schema.toLowerCase()] ?? schema.substring(0, 3).toUpperCase()
+            : layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
       </div>
 
@@ -603,7 +608,6 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
             dragHandleProps={showReorderHandles && hiddenCount === 0 ? getDragHandleProps(idx) : undefined}
             isReorderDragging={dragIndex === idx}
             isReorderTarget={dropIndex === idx && dragIndex !== idx}
-            nodeSelected={!!selected}
             discrepancySourceStage={discrepancySourceStage}
             discrepancyTargetStage={discrepancyTargetStage}
           />
