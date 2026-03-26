@@ -63,7 +63,7 @@ export interface ColumnRowEditorProps {
   /** Whether the description area is expanded. */
   expanded?: boolean;
   /** Callback when the expand/collapse chevron is clicked. */
-  onToggleExpand?: () => void;
+  onToggleExpand?: (opts?: { altKey?: boolean }) => void;
   /** Props to spread onto a drag handle element for reordering. */
   dragHandleProps?: React.HTMLAttributes<HTMLSpanElement>;
   /** Whether a dragged row is currently hovering above this row. */
@@ -148,6 +148,10 @@ export function ColumnRowEditor({
     mode === 'new' ? 'name' : null
   );
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Ref for delete confirmation auto-dismiss timer
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Refs for auto-focus
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -190,6 +194,13 @@ export function ColumnRowEditor({
     column.scdType,
     column.additiveType,
   ]);
+
+  // Cleanup delete confirmation timer on unmount
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    };
+  }, []);
 
   // Enter edit mode when store signals via isEditingActive (F2 key)
   useEffect(() => {
@@ -360,13 +371,34 @@ export function ColumnRowEditor({
     [mode, localColumn, existingColumnNames, column.name, onUpdate]
   );
 
-  // Handle delete click
+  // Handle delete click — two-click confirmation
   const handleDeleteClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onDelete?.();
+      if (confirmingDelete) {
+        // Second click confirms deletion
+        if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+        setConfirmingDelete(false);
+        onDelete?.();
+      } else {
+        // First click enters confirmation state
+        setConfirmingDelete(true);
+        // Auto-dismiss after 3 seconds
+        deleteTimerRef.current = setTimeout(() => {
+          setConfirmingDelete(false);
+        }, 3000);
+      }
     },
-    [onDelete]
+    [confirmingDelete, onDelete]
+  );
+
+  const handleCancelDelete = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      setConfirmingDelete(false);
+    },
+    []
   );
 
   // Handle SCD type change — auto-saves immediately
@@ -422,7 +454,7 @@ export function ColumnRowEditor({
   const handleChevronClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onToggleExpand?.();
+      onToggleExpand?.({ altKey: e.altKey });
     },
     [onToggleExpand]
   );
@@ -486,7 +518,7 @@ export function ColumnRowEditor({
           <button
             className="column-row-editor__chevron"
             onClick={handleChevronClick}
-            title={expanded ? 'Collapse description' : 'Expand description'}
+            title={expanded ? 'Collapse description (Alt+Click: all)' : 'Expand description (Alt+Click: all)'}
             aria-label={expanded ? 'Collapse description' : 'Expand description'}
             aria-expanded={expanded}
           >
@@ -570,14 +602,35 @@ export function ColumnRowEditor({
 
         {/* Delete button */}
         {showDelete && mode !== 'readonly' && mode !== 'new' && (
-          <button
-            className="column-row-editor__delete"
-            onClick={handleDeleteClick}
-            title="Delete column"
-            aria-label="Delete column"
-          >
-            ×
-          </button>
+          confirmingDelete ? (
+            <span className="column-row-editor__delete-confirm">
+              <button
+                className="column-row-editor__delete-confirm-yes"
+                onClick={handleDeleteClick}
+                title="Confirm delete"
+                aria-label="Confirm delete column"
+              >
+                Delete?
+              </button>
+              <button
+                className="column-row-editor__delete-confirm-no"
+                onClick={handleCancelDelete}
+                title="Cancel"
+                aria-label="Cancel delete"
+              >
+                ✕
+              </button>
+            </span>
+          ) : (
+            <button
+              className="column-row-editor__delete"
+              onClick={handleDeleteClick}
+              title="Delete column"
+              aria-label="Delete column"
+            >
+              ×
+            </button>
+          )
         )}
       </div>
 
@@ -610,11 +663,11 @@ export function ColumnRowEditor({
           ) : (
             <div
               className={`column-row-editor__description-text ${!hasDescription ? 'column-row-editor__description-text--empty' : ''}`}
-              onDoubleClick={() => handleFieldClick('description')}
-              title={mode !== 'readonly' ? 'Double-click to edit description' : undefined}
+              onClick={() => handleFieldClick('description')}
+              title={mode !== 'readonly' ? 'Click to edit description' : undefined}
             >
               {localColumn.description || (
-                mode !== 'readonly' ? 'Click to add description...' : 'No description'
+                mode !== 'readonly' ? '✏ Add description...' : 'No description'
               )}
             </div>
           )}
