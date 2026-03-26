@@ -42,6 +42,13 @@ const LAYER_BADGE_FALLBACK: Record<string, string> = {
   gold: 'GLD',
 };
 
+// Abbreviations for common database schema names
+const SCHEMA_BADGE: Record<string, string> = {
+  bronze: 'BRZ',
+  silver: 'SLV',
+  gold: 'GLD',
+};
+
 
 /** Unicode circled numbers for SCD type badges. */
 const SCD_BADGE: Record<number, string> = {
@@ -479,7 +486,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, stage, layer, layerConfig, columns, grain, dimmed, readOnly, isGhost, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const { send } = useMessageBus(() => {});
 
@@ -579,7 +586,9 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
             color: layerConfig.color,
           } : undefined}
         >
-          {layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
+          {schema
+            ? SCHEMA_BADGE[schema.toLowerCase()] ?? schema.substring(0, 3).toUpperCase()
+            : layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
       </div>
 

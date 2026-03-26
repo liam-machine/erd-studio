@@ -141,6 +141,7 @@ export function transformDomain(
         stage,
         layer,
         layerConfig,
+        ...(model.schema ? { schema: model.schema } : {}),
         columns,
         isStub: domain.stubColumns?.includes(model.name) ?? false,
         ...(model.rationale && (model.rationale.purpose || model.rationale.design || model.rationale.grainChoice || model.rationale.roleChoice || model.rationale.scdStrategy || model.rationale.measures) ? { hasRationale: true } : {}),
