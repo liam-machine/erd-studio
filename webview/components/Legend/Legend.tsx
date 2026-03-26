@@ -69,7 +69,7 @@ export function Legend() {
               </div>
               <div className="legend__item-text">
                 <span className="legend__item-label">Logical</span>
-                <span className="legend__item-desc">Detailed data model</span>
+                <span className="legend__item-desc">Your data model design</span>
               </div>
             </div>
             <div className="legend__item">
@@ -78,7 +78,7 @@ export function Legend() {
               </div>
               <div className="legend__item-text">
                 <span className="legend__item-label">Physical</span>
-                <span className="legend__item-desc">Built in dbt (read-only)</span>
+                <span className="legend__item-desc">Declared in dbt .yml files (read-only)</span>
               </div>
             </div>
             <div className="legend__item">
@@ -87,7 +87,7 @@ export function Legend() {
               </div>
               <div className="legend__item-text">
                 <span className="legend__item-label">Ghost</span>
-                <span className="legend__item-desc">Not yet built</span>
+                <span className="legend__item-desc">Not in dbt</span>
               </div>
             </div>
           </div>

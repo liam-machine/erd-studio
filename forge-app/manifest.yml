@@ -12,12 +12,51 @@ modules:
   function:
     - key: resolver
       handler: index.handler
+      providers:
+        auth:
+          - github
+providers:
+  auth:
+    - key: github
+      name: GitHub
+      type: oauth2
+      clientId: Ov23ctA25E7CrdmLZXpv
+      scopes:
+        - repo
+      remotes:
+        - github-api
+      bearerMethod:
+        type: authorization-header
+      actions:
+        authorization:
+          remote: github-main
+          path: /login/oauth/authorize
+        exchange:
+          remote: github-main
+          path: /login/oauth/access_token
+          resolvers:
+            accessToken: access_token
+          overrides:
+            headers:
+              Accept: application/json
+        retrieveProfile:
+          remote: github-api
+          path: /user
+          resolvers:
+            id: id
+            displayName: login
+            avatarUrl: avatar_url
 app:
   runtime:
     name: nodejs24.x
     memoryMB: 256
     architecture: arm64
   id: ari:cloud:ecosystem::app/aa70d9de-2e23-4be4-94fa-6a24740dde2d
+remotes:
+  - key: github-main
+    baseUrl: https://github.com
+  - key: github-api
+    baseUrl: https://api.github.com
 resources:
   - key: main-resource
     path: static/frontend/build
@@ -33,5 +72,5 @@ permissions:
   external:
     fetch:
       backend:
-        - raw.githubusercontent.com
-        - api.github.com
+        - 'https://github.com'
+        - 'https://api.github.com'

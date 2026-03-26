@@ -62,8 +62,9 @@ export function WelcomeModal() {
                 <div className="welcome-modal__guide-text">
                   <strong>Logical</strong>
                   <span>
-                    Add columns, data types, keys, and FK relationships — your
-                    detailed blueprint
+                    Design your data models here — add columns, data types,
+                    primary/foreign keys, and relationships. This is your
+                    blueprint for what the data warehouse should look like.
                   </span>
                 </div>
               </div>
@@ -77,8 +78,9 @@ export function WelcomeModal() {
                 <div className="welcome-modal__guide-text">
                   <strong>Physical</strong>
                   <span>
-                    Auto-populated from your dbt manifest — read-only view of
-                    what's actually built
+                    Automatically read from your dbt .yml schema files — see
+                    what's actually defined in your dbt project. Enriched with
+                    data types when a compiled manifest is available.
                   </span>
                 </div>
               </div>
@@ -106,7 +108,7 @@ export function WelcomeModal() {
               <li className="welcome-modal__step">
                 <span className="welcome-modal__step-number">3</span>
                 <span className="welcome-modal__step-text">
-                  Toggle Diff to compare stages and spot discrepancies
+                  Toggle <strong>Diff</strong> to compare your design against what's in dbt and spot differences
                 </span>
               </li>
             </ol>

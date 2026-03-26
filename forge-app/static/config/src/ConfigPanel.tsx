@@ -5,16 +5,19 @@ interface MacroConfig {
   repo: string;
   branch: string;
   domainPath: string;
-  githubToken: string;
   height: string;
   githubUrl: string;
+}
+
+interface AuthStatus {
+  authenticated: boolean;
+  user?: { displayName: string; avatarUrl: string } | null;
 }
 
 const DEFAULT_CONFIG: MacroConfig = {
   repo: '',
   branch: 'main',
   domainPath: '',
-  githubToken: '',
   height: '1200',
   githubUrl: '',
 };
@@ -33,12 +36,10 @@ const HEIGHT_OPTIONS = [
  */
 function parseGitHubUrl(url: string): { repo: string; branch: string; domainPath: string } | null {
   const trimmed = url.trim();
-  // Match: github.com/owner/repo/blob/branch/path...
   const match = trimmed.match(/github\.com\/([^/]+\/[^/]+)\/blob\/([^/]+)\/(.+)/);
   if (match) {
     return { repo: match[1], branch: match[2], domainPath: match[3] };
   }
-  // Match: github.com/owner/repo/tree/branch/path... (directory link)
   const treeMatch = trimmed.match(/github\.com\/([^/]+\/[^/]+)\/tree\/([^/]+)\/(.+)/);
   if (treeMatch) {
     return { repo: treeMatch[1], branch: treeMatch[2], domainPath: treeMatch[3] };
@@ -51,6 +52,23 @@ export default function ConfigPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [parsed, setParsed] = useState<{ repo: string; branch: string; domainPath: string } | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // Check GitHub auth status on mount (display only — no auth trigger)
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const result = await invoke<AuthStatus>('getAuthStatus');
+        setAuthStatus(result);
+      } catch {
+        setAuthStatus({ authenticated: false });
+      } finally {
+        setAuthLoading(false);
+      }
+    }
+    checkAuth();
+  }, []);
 
   // Load existing config
   useEffect(() => {
@@ -58,8 +76,9 @@ export default function ConfigPanel() {
       const context = await view.getContext();
       const macroConfig = (context as any)?.extension?.config;
       if (macroConfig && macroConfig.repo) {
-        setConfig({ ...DEFAULT_CONFIG, ...macroConfig });
-        setParsed({ repo: macroConfig.repo, branch: macroConfig.branch || 'main', domainPath: macroConfig.domainPath });
+        const { githubToken, ...clean } = macroConfig as any;
+        setConfig({ ...DEFAULT_CONFIG, ...clean });
+        setParsed({ repo: clean.repo, branch: clean.branch || 'main', domainPath: clean.domainPath });
         return;
       }
       const saved = await invoke<MacroConfig | null>('getConfig');
@@ -91,6 +110,8 @@ export default function ConfigPanel() {
     setTesting(true);
     setStatus(null);
     try {
+      // getDomain will trigger Forge's OAuth consent UI if not authenticated.
+      // After auth, Forge re-invokes the resolver automatically.
       const result = await invoke<any>('getDomain', config);
       if (result.error) {
         setStatus(`Error: ${result.error}`);
@@ -98,11 +119,19 @@ export default function ConfigPanel() {
         const modelCount = result.models?.length ?? 0;
         const relCount = result.relationships?.length ?? 0;
         setStatus(`Connected! Found ${modelCount} models and ${relCount} relationships.`);
+        // Re-check auth status after successful connection
+        const auth = await invoke<AuthStatus>('getAuthStatus');
+        setAuthStatus(auth);
       }
     } catch (err: any) {
       setStatus(`Error: ${err.message}`);
     } finally {
       setTesting(false);
+      // Always re-check auth status — covers success, failure, and cancelled OAuth flows
+      try {
+        const auth = await invoke<AuthStatus>('getAuthStatus');
+        setAuthStatus(auth);
+      } catch {}
     }
   };
 
@@ -117,14 +146,11 @@ export default function ConfigPanel() {
       setStatus(`Save failed: ${err.message}`);
       return;
     }
-    // Close the config panel — try every method available
     try { await view.submit(config); return; } catch {}
     try { await (view as any).close(); return; } catch {}
-    // Last resort: replace the panel content with a done message
     setStatus('__DONE__');
   };
 
-  // If save completed but panel couldn't close, show a minimal "done" state
   if (status === '__DONE__') {
     return (
       <div style={styles.container}>
@@ -138,13 +164,46 @@ export default function ConfigPanel() {
   }
 
   const isSuccess = status?.startsWith('Connected') || status?.startsWith('Saved');
+  const isAuthenticated = authStatus?.authenticated === true;
 
   return (
     <div style={styles.container}>
       <h3 style={styles.title}>ERD Studio Configuration</h3>
       <p style={styles.subtitle}>
-        Paste a GitHub link to your domain JSON file.
+        Paste a GitHub link to your domain JSON file. GitHub authentication is handled
+        automatically via OAuth when you test the connection.
       </p>
+
+      {/* GitHub Auth Status (display only) */}
+      <div style={{ ...styles.field, borderBottom: '1px solid #dfe1e6', paddingBottom: '12px', marginBottom: '16px' }}>
+        <label style={styles.label}>GitHub Account</label>
+        {authLoading ? (
+          <div style={styles.authBox}>
+            <span style={{ fontSize: '13px', color: '#6b778c' }}>Checking...</span>
+          </div>
+        ) : isAuthenticated ? (
+          <div style={{ ...styles.authBox, backgroundColor: '#e3fcef', borderColor: '#006644' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {authStatus?.user?.avatarUrl && (
+                <img
+                  src={authStatus.user.avatarUrl}
+                  alt=""
+                  style={{ width: '20px', height: '20px', borderRadius: '50%' }}
+                />
+              )}
+              <span style={{ fontSize: '13px', color: '#006644', fontWeight: 600 }}>
+                Connected{authStatus?.user?.displayName ? ` as ${authStatus.user.displayName}` : ''}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div style={styles.authBox}>
+            <span style={{ fontSize: '13px', color: '#6b778c' }}>
+              Not connected — click Test Connection to authenticate via OAuth.
+            </span>
+          </div>
+        )}
+      </div>
 
       <div style={styles.field}>
         <label style={styles.label}>GitHub URL</label>
@@ -168,21 +227,6 @@ export default function ConfigPanel() {
             Could not parse URL. Expected format: github.com/owner/repo/blob/branch/path/to/file.json
           </span>
         )}
-      </div>
-
-      <div style={styles.field}>
-        <label style={styles.label}>GitHub Token (optional)</label>
-        <input
-          style={styles.input}
-          type="password"
-          placeholder="ghp_... or github_pat_..."
-          value={config.githubToken}
-          onChange={(e) => {
-            setConfig((prev) => ({ ...prev, githubToken: e.target.value }));
-            setStatus(null);
-          }}
-        />
-        <span style={styles.hint}>Required for private repos. Needs Contents read permission.</span>
       </div>
 
       <div style={{ ...styles.field, borderTop: '1px solid #dfe1e6', paddingTop: '12px', marginTop: '16px' }}>
@@ -316,5 +360,11 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#ffffff',
     cursor: 'pointer',
     fontWeight: 600,
+  },
+  authBox: {
+    padding: '8px 12px',
+    borderRadius: '3px',
+    border: '1px solid #dfe1e6',
+    backgroundColor: '#f4f5f7',
   },
 };

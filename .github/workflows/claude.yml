@@ -35,12 +35,119 @@ jobs:
           trigger_phrase: "@claude"
           label_trigger: ""
           prompt: |
-            Review this PR. Follow the project review guidelines in CLAUDE.md.
+            You are reviewing PR #${{ github.event.pull_request.number || github.event.issue.number }} on branch "${{ github.head_ref }}".
 
-            ## What to check
+            **CRITICAL: The PR number is ${{ github.event.pull_request.number || github.event.issue.number }}. Use ONLY this number for all gh commands. Do NOT use `gh pr list` to discover PRs.**
+
+            When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch instead of reviewing.
+
+            ## Review process
+
+            Follow these steps precisely:
+
+            ### Step 1 — Gather context
+
+            Run these commands to get the PR metadata and diff:
+            ```
+            gh pr view ${{ github.event.pull_request.number || github.event.issue.number }} --json title,body,headRefName,baseRefName,files,additions,deletions
+            gh pr diff ${{ github.event.pull_request.number || github.event.issue.number }}
+            ```
+
+            Read the root CLAUDE.md file and any CLAUDE.md files in directories containing modified files.
+
+            ### Step 2 — Launch 3 review agents in parallel
+
+            Launch these 3 agents **simultaneously** using the Agent tool. Pass each agent the PR title, description, full diff, and the project rules from CLAUDE.md. Each agent must return a list of issues with confidence scores.
+
+            **Agent 1 — CLAUDE.md compliance (sonnet)**
+            Audit all changes against the project rules in CLAUDE.md. Check architecture rules, legacy identifiers, style rules, and naming conventions. For each violation, quote the exact rule being broken.
+
+            **Agent 2 — Bug scan: diff only (sonnet)**
+            Scan the diff for obvious bugs without reading extra context. Look for: syntax errors, type errors, missing imports, null/undefined handling, logic errors that will definitely produce wrong results, and security vulnerabilities. Only flag issues visible in the diff itself.
+
+            **Agent 3 — Bug scan: with context (sonnet)**
+            Read the full files that were changed and look for bugs in the introduced code. Check for: incorrect logic, race conditions, missing error handling for critical paths, security issues, and integration problems with existing code. Use Read/Grep tools to verify findings against the actual codebase.
+
+            **Each agent must score every finding 0-100:**
+            - **0**: False positive or pre-existing issue
+            - **25**: Might be real but unverified; stylistic nitpick not in CLAUDE.md
+            - **50**: Real issue but low-impact nitpick
+            - **75**: Verified real issue, will be hit in practice, directly impacts functionality or is explicitly in CLAUDE.md
+            - **100**: Confirmed issue with direct evidence
+
+            **Each agent must ONLY report issues with confidence ≥ 80.**
+
+            **CRITICAL: We only want HIGH SIGNAL issues.** Flag issues where:
+            - The code will fail to compile or parse (syntax errors, type errors, missing imports)
+            - The code will definitely produce wrong results regardless of inputs (clear logic errors)
+            - Clear, unambiguous CLAUDE.md violations where you can quote the exact rule being broken
+            - Security vulnerabilities that are exploitable
+
+            **Do NOT flag:**
+            - Pre-existing issues not introduced by this PR
+            - Code style or quality concerns unless explicitly required in CLAUDE.md
+            - Potential issues that depend on specific inputs or state
+            - Subjective suggestions or improvements
+            - Issues a linter would catch
+            - Pedantic nitpicks a senior engineer would not flag
+
+            If not certain an issue is real, do not flag it. False positives erode trust.
+
+            ### Step 3 — Consolidate and post review
+
+            Collect all validated issues from the 3 agents. De-duplicate any overlapping findings. Then post a single review comment on PR #${{ github.event.pull_request.number || github.event.issue.number }} using `gh pr review` with this exact format:
+
+            ---
+
+            If issues were found:
+
+            ```
+            ## TLDR
+
+            **Status: ⚠️ Changes requested** — N issue(s) found across the review.
+
+            ## Issues
+
+            ### 1. <brief title> (confidence: <score>/100)
+
+            **File:** `<file path>`
+            **Rule:** <CLAUDE.md quote or bug explanation>
+
+            <description of the issue and concrete fix suggestion>
+
+            ### 2. ...
+
+            ## Checks passed
+
+            - ✅ <area checked with no issues>
+            - ✅ <area checked with no issues>
+            ```
+
+            If NO issues were found:
+
+            ```
+            ## TLDR
+
+            **Status: ✅ Approved** — no issues found. Checked for bugs, CLAUDE.md compliance, and architecture rules.
+
+            ## Checks passed
+
+            - ✅ Architecture rules (WorkspaceEdit, physical stage, schema versioning)
+            - ✅ Legacy identifiers preserved
+            - ✅ CSS custom properties (no hardcoded colours)
+            - ✅ BEM naming conventions
+            - ✅ No obvious bugs or security issues
+            ```
+
+            ---
+
+            Post using: `gh pr review ${{ github.event.pull_request.number || github.event.issue.number }} --comment --body-file /tmp/review.md`
+            (Write the review body to /tmp/review.md first, then pass it via --body-file to avoid shell escaping issues.)
+
+            ## Project-specific rules (from CLAUDE.md)
 
             **Architecture rules:**
-            - All domain file mutations must go through WorkspaceEdit for undo/redo integration — never write directly via fs (exception: generated output files like .sync-plan.json)
+            - All domain file mutations must go through WorkspaceEdit for undo/redo — never write directly via fs (exception: generated output files like .sync-plan.json)
             - Physical stage is read-only and derived at runtime — reject any code that persists physical data to disk or allows mutation messages in physical stage
             - Relationships in physical stage come entirely from manifest relationship tests, not from logical stage
             - Schema changes (fields in src/types/semantic.ts, file layout, naming conventions) must update SCHEMA_CONTENT in src/services/harnessService.ts and bump HARNESS_VERSION
@@ -59,7 +166,5 @@ jobs:
             - Formatting-only changes in lock files
             - Changes to test/fixtures/ sample data files
             - Auto-generated version bump commits
-
-            When a contributor comments "@claude fix these bugs" or "@claude fix this", apply the fixes directly via a commit to the PR branch.
-          claude_args: '--max-turns 25 --allowedTools "Bash(gh pr:*)" "Bash(gh api:*)" "Bash(cat:*)" "Bash(head:*)"'
+          claude_args: '--max-turns 30 --allowedTools "Bash(gh pr:*)" "Bash(gh api:*)" "Bash(cat:*)" "Bash(head:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Read" "Grep" "Glob" "Agent" "Write"'
           show_full_output: true

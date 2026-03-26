@@ -16,6 +16,7 @@ import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/har
 import { SchemaTagService } from './services/schemaTagService';
 import { LogicalModelService } from './services/logicalModelService';
 import { MigrationService } from './services/migrationService';
+import { YmlParserService } from './services/ymlParserService';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -164,6 +165,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const logicalModelService = new LogicalModelService(workspaceRoot, semanticDir);
   domainService.setLogicalModelService(logicalModelService);
   const manifestService = new ManifestService();
+  const ymlParserService = new YmlParserService();
   const templateService = new TemplateService();
   const schemaTagService = new SchemaTagService(domainService, workspaceRoot, semanticDir);
 
@@ -190,6 +192,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context,
     domainService,
     manifestService,
+    ymlParserService,
     templateService,
     layerService,
     workspaceRoot,
@@ -243,6 +246,14 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  // dbt schema .yml changed → refresh physical stage
+  const dbtYmlChangedSubscription = fileWatcherService.onDbtYmlChanged(
+    async () => {
+      ymlParserService.invalidate();
+      await editorProvider.refreshAllOpenDomains();
+    },
+  );
+
   // dbt_project.yml changed → suggest window reload
   const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
     void vscode.window.showWarningMessage(
@@ -264,6 +275,7 @@ export function activate(context: vscode.ExtensionContext): void {
     semanticChangedSubscription,
     semanticDeletedSubscription,
     logicalModelChangedSubscription,
+    dbtYmlChangedSubscription,
     projectChangedSubscription,
     (() => {
       const treeView = vscode.window.createTreeView('dbtSemantic.domainTree', {
@@ -327,11 +339,15 @@ export function activate(context: vscode.ExtensionContext): void {
         });
         if (description === undefined) { return; }
 
-        // Step 4: Get model folder filter
+        // Step 4: Get model folder filter (try yml source files first, fall back to manifest)
         let modelFolder: string | undefined;
         try {
-          await manifestService.loadManifest(workspaceRoot);
-          const availableFolders = manifestService.getModelFolders();
+          await ymlParserService.loadYmlData(workspaceRoot);
+          let availableFolders = ymlParserService.getModelFolders(workspaceRoot);
+          if (availableFolders.length === 0) {
+            await manifestService.loadManifest(workspaceRoot);
+            availableFolders = manifestService.getModelFolders();
+          }
           if (availableFolders.length > 0) {
             const folderItems: Array<{ label: string; value: string | undefined }> = [
               { label: '$(folder) Any folder (no filter)', value: undefined },
@@ -503,7 +519,9 @@ export function activate(context: vscode.ExtensionContext): void {
         },
         async () => {
           manifestService.invalidate();
+          ymlParserService.invalidate();
           await manifestService.loadManifest(workspaceRoot);
+          await ymlParserService.loadYmlData(workspaceRoot);
           await editorProvider.refreshAllOpenDomains();
           void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest model data.');
         },

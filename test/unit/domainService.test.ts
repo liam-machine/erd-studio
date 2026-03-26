@@ -4,7 +4,16 @@ import { DomainService, derivePhysicalRelationships } from '../../src/services/d
 import type { LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
 import type { ManifestData, ManifestRelationshipTest } from '../../src/types/manifest';
+import type { YmlData } from '../../src/types/ymlData';
 import type { UnifiedDomain, StageData } from '../../src/types/semantic';
+
+/** Empty YmlData — forces buildPhysicalDomain to use the manifest-only fallback. */
+const EMPTY_YML_DATA: YmlData = {
+  models: new Map(),
+  relationshipTests: [],
+  uniqueColumns: new Map(),
+  compositeUniqueGroups: new Map(),
+};
 
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const FIXTURE_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project');
@@ -311,7 +320,7 @@ describe('DomainService', () => {
     }
 
     it('creates a physical DisplayDomain with stage=physical and readOnly=true', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
       expect(result.stage).toBe('physical');
       expect(result.readOnly).toBe(true);
@@ -320,7 +329,7 @@ describe('DomainService', () => {
     });
 
     it('populates found models with manifest columns', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
       const customer = result.models.find(m => m.name === 'dim_customer');
       expect(customer).toBeDefined();
@@ -331,7 +340,7 @@ describe('DomainService', () => {
     });
 
     it('carries forward PK/FK/NK flags from logical domain', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
       const customer = result.models.find(m => m.name === 'dim_customer');
       const pkCol = customer!.columns.find(c => c.name === 'customer_id');
@@ -339,7 +348,7 @@ describe('DomainService', () => {
     });
 
     it('excludes models not found in manifest from physical domain', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
       const orders = result.models.find(m => m.name === 'fct_orders');
       expect(orders).toBeUndefined();
@@ -347,14 +356,14 @@ describe('DomainService', () => {
     });
 
     it('excludes relationships when referenced models not in manifest', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
       // fct_orders is not in manifest, so no relationship tests can match
       expect(result.relationships).toHaveLength(0);
     });
 
     it('derives relationships from manifest relationship tests with cardinality', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifestWithBothModels());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifestWithBothModels());
 
       expect(result.relationships).toHaveLength(1);
       expect(result.relationships[0].fromModel).toBe('fct_orders');
@@ -366,7 +375,7 @@ describe('DomainService', () => {
     });
 
     it('uses global viewConfig positions', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
       expect(result.viewConfig.positions).toEqual({
         dim_customer: { x: 100, y: 200 },
@@ -375,14 +384,14 @@ describe('DomainService', () => {
     });
 
     it('does not include templates or manifestModels', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
       expect(result.templates).toBeUndefined();
       expect(result.manifestModels).toBeUndefined();
     });
 
     it('carries forward grain and modelRole from logical domain', () => {
-      const result = service.buildPhysicalDomain(createUnifiedDomain(), createManifest());
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
       const customer = result.models.find(m => m.name === 'dim_customer');
       expect(customer!.grain).toBe('One row per customer');

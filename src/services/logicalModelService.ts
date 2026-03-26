@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as yaml from 'js-yaml';
 
 import type { ColumnDef, SemanticModel } from '../types/semantic';
+import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
 
 // ---------------------------------------------------------------------------
@@ -205,6 +206,32 @@ export class LogicalModelService {
     const model = this.manifestToSemanticModel(manifestModel);
     this.saveModel(model);
     return model;
+  }
+
+  /**
+   * Create a new logical model file seeded from dbt .yml source data.
+   * Returns true if the model was created, false if the yml model was not found.
+   * If the model file already exists, returns true without overwriting.
+   */
+  createFromYml(name: string, ymlModel: YmlModelInfo): boolean {
+    if (this.modelExists(name)) {
+      return true;
+    }
+
+    const columns: ColumnDef[] = ymlModel.columns.map((col) => ({
+      name: col.name,
+      dataType: col.dataType ?? 'unknown',
+      description: col.description ?? '',
+    }));
+
+    const model: SemanticModel = {
+      name: ymlModel.name,
+      description: ymlModel.description,
+      columns,
+    };
+
+    this.saveModel(model);
+    return true;
   }
 
   // -------------------------------------------------------------------------
