@@ -206,10 +206,13 @@ describe('ManifestService', () => {
   });
 
   describe('error handling', () => {
-    it('rejects when manifest JSON is malformed', async () => {
-      await expect(
-        service.loadManifest(MALFORMED_PROJECT_PATH)
-      ).rejects.toThrow('Failed to parse manifest.json');
+    it('returns empty ManifestData when manifest JSON is malformed (stale-while-revalidate)', async () => {
+      // Malformed manifest should NOT reject — it returns empty/stale data
+      // so the graph stays visible during transient parse failures (e.g. mid-write)
+      const data = await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(data.models.size).toBe(0);
+      expect(data.relationshipTests).toEqual([]);
+      expect(service.isStale).toBe(true);
     });
 
     it('handles models with missing columns field gracefully', async () => {

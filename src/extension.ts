@@ -216,9 +216,23 @@ export function activate(context: vscode.ExtensionContext): void {
     async () => {
       manifestService.invalidate();
       await editorProvider.refreshAllOpenDomains();
-      void vscode.window.showInformationMessage(
-        'dbt manifest updated. Graphs refreshed with latest model data.',
-      );
+
+      if (manifestService.isStale) {
+        // Manifest likely mid-write by dbt — retry once after 2s
+        setTimeout(async () => {
+          manifestService.invalidate();
+          await editorProvider.refreshAllOpenDomains();
+          if (!manifestService.isStale) {
+            void vscode.window.showInformationMessage(
+              'dbt manifest updated. Graphs refreshed with latest model data.',
+            );
+          }
+        }, 2000);
+      } else {
+        void vscode.window.showInformationMessage(
+          'dbt manifest updated. Graphs refreshed with latest model data.',
+        );
+      }
     },
   );
 
