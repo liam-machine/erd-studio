@@ -212,13 +212,37 @@ export function activate(context: vscode.ExtensionContext): void {
   const fileWatcherService = new FileWatcherService(workspaceRoot);
 
   // Manifest changed → refresh open editors
+  let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
   const manifestChangedSubscription = fileWatcherService.onManifestChanged(
     async () => {
       manifestService.invalidate();
       await editorProvider.refreshAllOpenDomains();
-      void vscode.window.showInformationMessage(
-        'dbt manifest updated. Graphs refreshed with latest model data.',
-      );
+
+      if (manifestService.isStale) {
+        // Manifest likely mid-write by dbt — deduplicate and retry once after 2s
+        clearTimeout(manifestRetryTimeout);
+        manifestRetryTimeout = setTimeout(async () => {
+          try {
+            manifestService.invalidate();
+            await editorProvider.refreshAllOpenDomains();
+            if (!manifestService.isStale) {
+              void vscode.window.showInformationMessage(
+                'dbt manifest updated. Graphs refreshed with latest model data.',
+              );
+            } else {
+              void vscode.window.showWarningMessage(
+                'dbt manifest still updating — graph may show stale data. Run dbt compile to refresh.',
+              );
+            }
+          } catch (err) {
+            console.error('[ERD Studio] Manifest retry failed:', err);
+          }
+        }, 2000);
+      } else {
+        void vscode.window.showInformationMessage(
+          'dbt manifest updated. Graphs refreshed with latest model data.',
+        );
+      }
     },
   );
 
@@ -267,6 +291,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   context.subscriptions.push(
+    { dispose() { clearTimeout(manifestRetryTimeout); } },
     treeProvider,
     decorationProvider,
     layerDecorationProvider,
