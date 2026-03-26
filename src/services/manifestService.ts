@@ -30,6 +30,21 @@ export class ManifestService {
   private loadId = 0;
 
   /**
+   * Last successfully parsed manifest data. Survives invalidate() so it can
+   * serve as a fallback when a parse fails (e.g. manifest mid-write by dbt).
+   */
+  private lastKnownGood: ManifestData | null = null;
+
+  /**
+   * True when the most recent loadManifest() returned stale/fallback data
+   * because the parse failed. Callers can check this to schedule a retry.
+   */
+  private _isStale = false;
+  get isStale(): boolean {
+    return this._isStale;
+  }
+
+  /**
    * Stream-parse the manifest and cache model data.
    * Returns cached data on subsequent calls until invalidate() is called.
    *
@@ -53,8 +68,24 @@ export class ManifestService {
       // Only cache if we haven't been invalidated during the parse
       if (currentLoadId === this.loadId) {
         this.cache = result;
+        this.lastKnownGood = result;
+        this._isStale = false;
       }
       return result;
+    } catch (err) {
+      // Parse failed — likely manifest is mid-write by dbt.
+      // Return stale data (or empty) so the graph stays visible.
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[ManifestService] Parse failed (file may be mid-write): ${message}. ` +
+        'Returning last known good data.',
+      );
+      const fallback = this.lastKnownGood ?? this.emptyManifest();
+      if (currentLoadId === this.loadId) {
+        this.cache = fallback;
+        this._isStale = true;
+      }
+      return fallback;
     } finally {
       if (currentLoadId === this.loadId) {
         this.loadPromise = null;
@@ -135,12 +166,7 @@ export class ManifestService {
         `[ManifestService] manifest.json not found at ${manifestPath}. ` +
         'Run "dbt compile" to generate it.'
       );
-      return {
-        models: new Map(),
-        relationshipTests: [],
-        uniqueColumns: new Map(),
-        compositeUniqueGroups: new Map(),
-      };
+      return this.emptyManifest();
     }
 
     const models = new Map<string, ManifestModelInfo>();
@@ -412,6 +438,15 @@ export class ManifestService {
    * Resolve the model name from a test node using attached_node (preferred)
    * or depends_on.nodes (fallback).
    */
+  private emptyManifest(): ManifestData {
+    return {
+      models: new Map(),
+      relationshipTests: [],
+      uniqueColumns: new Map(),
+      compositeUniqueGroups: new Map(),
+    };
+  }
+
   private resolveModelFromTestNode(node: Record<string, unknown>): string | undefined {
     // Prefer attached_node (dbt 1.0+)
     const attachedNode = node.attached_node as string | undefined;
