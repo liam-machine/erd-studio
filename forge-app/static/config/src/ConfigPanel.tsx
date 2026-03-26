@@ -119,6 +119,9 @@ export default function ConfigPanel() {
         const modelCount = result.models?.length ?? 0;
         const relCount = result.relationships?.length ?? 0;
         setStatus(`Connected! Found ${modelCount} models and ${relCount} relationships.`);
+        // Re-check auth status after successful connection
+        const auth = await invoke<AuthStatus>('getAuthStatus');
+        setAuthStatus(auth);
       }
     } catch (err: any) {
       setStatus(`Error: ${err.message}`);

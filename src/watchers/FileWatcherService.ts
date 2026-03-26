@@ -33,6 +33,7 @@ export class FileWatcherService implements vscode.Disposable {
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onLogicalModelChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
+  private readonly _onDbtYmlChanged = new vscode.EventEmitter<void>();
 
   // Public event subscriptions (consumers listen to these)
   readonly onManifestChanged = this._onManifestChanged.event;
@@ -41,12 +42,15 @@ export class FileWatcherService implements vscode.Disposable {
   readonly onProjectConfigChanged = this._onProjectConfigChanged.event;
   /** Fires when a YAML model file in erd-studio/logical-models/ changes. */
   readonly onLogicalModelChanged = this._onLogicalModelChanged.event;
+  /** Fires when any dbt schema .yml/.yaml file under models/ changes. */
+  readonly onDbtYmlChanged = this._onDbtYmlChanged.event;
 
   constructor(private readonly workspaceRoot: string) {
     this.setupManifestWatcher();
     this.setupSemanticWatcher();
     this.setupProjectConfigWatcher();
     this.setupLogicalModelWatcher();
+    this.setupDbtYmlWatcher();
   }
 
   /**
@@ -162,6 +166,32 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
+   * Watch models/**\/*.{yml,yaml} for changes.
+   * Fires when dbt schema files are created, modified, or deleted.
+   * Used to refresh the physical stage which derives from .yml source files.
+   */
+  private setupDbtYmlWatcher(): void {
+    const pattern = new vscode.RelativePattern(
+      this.workspaceRoot,
+      'models/**/*.{yml,yaml}',
+    );
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+    const handleChange = () => {
+      this.debounce('dbt-yml', () => {
+        console.log('[FileWatcherService] dbt schema .yml changed');
+        this.safeFireEvent(() => this._onDbtYmlChanged.fire());
+      });
+    };
+
+    this.subscriptions.push(watcher.onDidChange(handleChange));
+    this.subscriptions.push(watcher.onDidCreate(handleChange));
+    this.subscriptions.push(watcher.onDidDelete(handleChange));
+
+    this.watchers.push(watcher);
+  }
+
+  /**
    * Debounce a callback by key.
    * Multiple calls with the same key within DEBOUNCE_DELAY_MS are collapsed into one.
    */
@@ -224,5 +254,6 @@ export class FileWatcherService implements vscode.Disposable {
     this._onSemanticFileDeleted.dispose();
     this._onProjectConfigChanged.dispose();
     this._onLogicalModelChanged.dispose();
+    this._onDbtYmlChanged.dispose();
   }
 }

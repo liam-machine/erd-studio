@@ -95,6 +95,38 @@
       "depends_on": { "nodes": ["model.my_dbt_project.dim_work_lot"] },
       "config": { "materialized": "table" }
     },
+    "model.my_dbt_project.stg_raw_payments": {
+      "unique_id": "model.my_dbt_project.stg_raw_payments",
+      "name": "stg_raw_payments",
+      "resource_type": "model",
+      "schema": "staging",
+      "description": "Staging model for raw payment data (ephemeral, no .yml)",
+      "original_file_path": "models/staging/stg_raw_payments.sql",
+      "columns": {
+        "payment_id": {
+          "name": "payment_id",
+          "data_type": "INT",
+          "description": "Payment identifier"
+        },
+        "order_id": {
+          "name": "order_id",
+          "data_type": "INT",
+          "description": "FK to orders"
+        },
+        "amount": {
+          "name": "amount",
+          "data_type": "DECIMAL",
+          "description": "Payment amount"
+        },
+        "payment_method": {
+          "name": "payment_method",
+          "data_type": "VARCHAR",
+          "description": "Payment method (credit_card, bank_transfer, etc.)"
+        }
+      },
+      "depends_on": { "nodes": [] },
+      "config": { "materialized": "ephemeral" }
+    },
     "test.my_dbt_project.not_null_dim_work_lot_work_lot_id": {
       "unique_id": "test.my_dbt_project.not_null_dim_work_lot_work_lot_id",
       "name": "not_null_dim_work_lot_work_lot_id",

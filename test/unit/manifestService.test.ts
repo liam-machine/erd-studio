@@ -31,7 +31,7 @@ describe('ManifestService', () => {
       expect(data).toBeDefined();
       expect(data.models).toBeInstanceOf(Map);
       // Should have 3 models (dim_work_lot, dim_project, fct_work_events)
-      expect(data.models.size).toBe(3);
+      expect(data.models.size).toBe(4);
     });
 
     it('extracts only model nodes, skipping tests, seeds, and other node types', async () => {
@@ -150,10 +150,11 @@ describe('ManifestService', () => {
       await service.loadManifest(FIXTURE_PROJECT_PATH);
       const names = service.getModelNames();
 
-      expect(names).toHaveLength(3);
+      expect(names).toHaveLength(4);
       expect(names).toContain('dim_work_lot');
       expect(names).toContain('dim_project');
       expect(names).toContain('fct_work_events');
+      expect(names).toContain('stg_raw_payments');
     });
 
     it('returns empty array when manifest has not been loaded', () => {
@@ -188,7 +189,7 @@ describe('ManifestService', () => {
       // After invalidation, should be a new object (re-parsed)
       expect(data1).not.toBe(data2);
       // But should contain the same data
-      expect(data2.models.size).toBe(3);
+      expect(data2.models.size).toBe(4);
     });
 
     it('clears cached model lookups', async () => {

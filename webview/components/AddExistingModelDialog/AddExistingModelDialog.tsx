@@ -1,12 +1,13 @@
 /**
  * AddExistingModelDialog — dialog for adding existing models to a domain.
  *
- * Displays a searchable list of models from two sources:
- * - Logical: models with YAML definitions in erd-studio/logical-models/
- * - Manifest: compiled dbt models not yet designed in ERD Studio
+ * Displays a searchable, filterable list of models from three sources:
+ * - Library: models with YAML definitions in erd-studio/logical-models/
+ * - dbt: models defined in dbt .yml schema files
+ * - Compiled: models only in compiled manifest (no .yml file)
  *
- * Each model shows a source badge (Logical in blue, Manifest in green).
- * Selecting a model sends the `addExistingModel` message to the extension host.
+ * Each model shows its source badge, file path, and metadata.
+ * Filter chips let the user show/hide each source type.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -16,6 +17,18 @@ import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import type { ExistingModelPreview, ManifestModelPreview } from '../../../src/types/display';
 import './AddExistingModelDialog.css';
+
+// ---------------------------------------------------------------------------
+// Source configuration
+// ---------------------------------------------------------------------------
+
+type SourceKey = 'logical' | 'yml' | 'manifest';
+
+const SOURCE_CONFIG: Record<SourceKey, { label: string; description: string }> = {
+  logical: { label: 'Logical', description: 'ERD Studio model library' },
+  yml: { label: 'Physical', description: 'dbt .yml schema file' },
+  manifest: { label: 'Compiled', description: 'Compiled manifest only' },
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -36,26 +49,51 @@ export function AddExistingModelDialog() {
   // Local state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [activeFilters, setActiveFilters] = useState<Set<SourceKey>>(
+    new Set(['logical', 'yml', 'manifest']),
+  );
 
-  // Filter models by search query (case-insensitive substring match)
-  const filteredModels = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return models;
+  // Compute source counts for filter chips
+  const sourceCounts = useMemo(() => {
+    const counts: Record<SourceKey, number> = { logical: 0, yml: 0, manifest: 0 };
+    for (const m of models) {
+      const source = 'source' in m ? (m.source as SourceKey) : 'manifest';
+      counts[source]++;
     }
-    const query = searchQuery.toLowerCase();
-    return models.filter(
-      (m) =>
-        m.name.toLowerCase().includes(query) ||
-        m.schema.toLowerCase().includes(query) ||
-        m.description.toLowerCase().includes(query),
-    );
-  }, [models, searchQuery]);
+    return counts;
+  }, [models]);
+
+  // Filter models by search query + active source filters
+  const filteredModels = useMemo(() => {
+    let result = models;
+
+    // Source filter
+    result = result.filter((m) => {
+      const source = 'source' in m ? (m.source as SourceKey) : 'manifest';
+      return activeFilters.has(source);
+    });
+
+    // Text search
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(
+        (m) =>
+          m.name.toLowerCase().includes(query) ||
+          m.schema.toLowerCase().includes(query) ||
+          m.description.toLowerCase().includes(query) ||
+          ('sourcePath' in m && (m as ExistingModelPreview).sourcePath.toLowerCase().includes(query)),
+      );
+    }
+
+    return result;
+  }, [models, searchQuery, activeFilters]);
 
   // Handlers
   const handleClose = useCallback(() => {
     setAddExistingModelDialogOpen(false);
     setSearchQuery('');
     setSelectedModel(null);
+    setActiveFilters(new Set(['logical', 'yml', 'manifest']));
   }, [setAddExistingModelDialogOpen]);
 
   const handleSelect = useCallback((modelName: string) => {
@@ -64,32 +102,38 @@ export function AddExistingModelDialog() {
 
   const handleAdd = useCallback(() => {
     if (!selectedModel) return;
-
-    send({
-      type: 'addExistingModel',
-      payload: { modelName: selectedModel },
-    });
-
+    send({ type: 'addExistingModel', payload: { modelName: selectedModel } });
     handleClose();
   }, [selectedModel, send, handleClose]);
 
   const handleDoubleClick = useCallback(
     (modelName: string) => {
-      send({
-        type: 'addExistingModel',
-        payload: { modelName },
-      });
+      send({ type: 'addExistingModel', payload: { modelName } });
       handleClose();
     },
     [send, handleClose],
   );
 
-  // Early return if dialog is closed
+  const toggleFilter = useCallback((source: SourceKey) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(source)) {
+        // Don't allow deselecting all filters
+        if (next.size > 1) {
+          next.delete(source);
+        }
+      } else {
+        next.add(source);
+      }
+      return next;
+    });
+  }, []);
+
   if (!isOpen) {
     return null;
   }
 
-  // Empty state: no models available
+  // Empty state
   if (models.length === 0) {
     return (
       <Panel position="top-center" className="add-existing-model-dialog">
@@ -110,11 +154,11 @@ export function AddExistingModelDialog() {
             <p className="add-existing-model-dialog__empty-hint">
               {modelFolder ? (
                 <>
-                  No models found in <code>{modelFolder}/</code>. Run <code>dbt compile</code> or check your folder filter.
+                  No models found in <code>{modelFolder}/</code>. Add <code>.yml</code> schema files to your dbt project or run <code>dbt compile</code>.
                 </>
               ) : (
                 <>
-                  Create model files in <code>erd-studio/logical-models/</code> or run <code>dbt compile</code> to generate the manifest.
+                  Add <code>.yml</code> schema files to your dbt project, create models in <code>erd-studio/logical-models/</code>, or run <code>dbt compile</code>.
                 </>
               )}
             </p>
@@ -156,23 +200,48 @@ export function AddExistingModelDialog() {
           </span>
         </div>
 
+        {/* Source filter chips */}
+        <div className="add-existing-model-dialog__filters">
+          {(Object.keys(SOURCE_CONFIG) as SourceKey[]).map((source) => {
+            const count = sourceCounts[source];
+            if (count === 0) return null;
+            const isActive = activeFilters.has(source);
+            return (
+              <button
+                key={source}
+                className={`add-existing-model-dialog__filter-chip add-existing-model-dialog__filter-chip--${source}${isActive ? ' add-existing-model-dialog__filter-chip--active' : ''}`}
+                onClick={() => toggleFilter(source)}
+                title={`${isActive ? 'Hide' : 'Show'} ${SOURCE_CONFIG[source].description}`}
+              >
+                {SOURCE_CONFIG[source].label}
+                <span className="add-existing-model-dialog__filter-count">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Model List */}
         <div className="add-existing-model-dialog__list">
           {filteredModels.length === 0 ? (
             <div className="add-existing-model-dialog__no-results">
-              No models match "{searchQuery}"
+              No models match your search or filters
             </div>
           ) : (
-            filteredModels.map((model) => (
-              <ModelItem
-                key={model.name}
-                model={model}
-                source={'source' in model ? model.source : 'manifest'}
-                isSelected={selectedModel === model.name}
-                onSelect={handleSelect}
-                onDoubleClick={handleDoubleClick}
-              />
-            ))
+            filteredModels.map((model) => {
+              const source: SourceKey = 'source' in model ? (model.source as SourceKey) : 'manifest';
+              const sourcePath = 'sourcePath' in model ? (model as ExistingModelPreview).sourcePath : undefined;
+              return (
+                <ModelItem
+                  key={model.name}
+                  model={model}
+                  source={source}
+                  sourcePath={sourcePath}
+                  isSelected={selectedModel === model.name}
+                  onSelect={handleSelect}
+                  onDoubleClick={handleDoubleClick}
+                />
+              );
+            })
           )}
         </div>
       </div>
@@ -203,13 +272,14 @@ export function AddExistingModelDialog() {
 
 interface ModelItemProps {
   model: ManifestModelPreview;
-  source: 'logical' | 'manifest';
+  source: SourceKey;
+  sourcePath?: string;
   isSelected: boolean;
   onSelect: (name: string) => void;
   onDoubleClick: (name: string) => void;
 }
 
-function ModelItem({ model, source, isSelected, onSelect, onDoubleClick }: ModelItemProps) {
+function ModelItem({ model, source, sourcePath, isSelected, onSelect, onDoubleClick }: ModelItemProps) {
   const handleClick = useCallback(() => {
     onSelect(model.name);
   }, [onSelect, model.name]);
@@ -229,10 +299,17 @@ function ModelItem({ model, source, isSelected, onSelect, onDoubleClick }: Model
       <div className="add-existing-model-dialog__item-main">
         <span className="add-existing-model-dialog__item-name">{model.name}</span>
         <span className={`add-existing-model-dialog__item-source add-existing-model-dialog__item-source--${source}`}>
-          {source === 'logical' ? 'Logical' : 'Manifest'}
+          {SOURCE_CONFIG[source].label}
         </span>
-        <span className="add-existing-model-dialog__item-schema">{model.schema}</span>
+        {model.schema && (
+          <span className="add-existing-model-dialog__item-schema">{model.schema}</span>
+        )}
       </div>
+      {sourcePath && (
+        <div className="add-existing-model-dialog__item-path" title={sourcePath}>
+          {sourcePath}
+        </div>
+      )}
       <div className="add-existing-model-dialog__item-meta">
         <span className="add-existing-model-dialog__item-columns">
           {model.columnCount} column{model.columnCount !== 1 ? 's' : ''}

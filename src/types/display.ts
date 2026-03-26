@@ -30,11 +30,14 @@ export interface ManifestModelPreview {
  * Enhanced model preview for the "Add Existing Model" dialog.
  * Extends ManifestModelPreview with source information.
  *
- * - 'logical': model has a YAML definition in erd-studio/logical-models/
- * - 'manifest': model exists in compiled manifest only (no logical model file yet)
+ * - 'logical': model has a YAML definition in erd-studio/logical-models/ (Library)
+ * - 'yml': model defined in a dbt .yml schema file (dbt)
+ * - 'manifest': model exists in compiled manifest only, no .yml file (Compiled)
  */
 export interface ExistingModelPreview extends ManifestModelPreview {
-  source: 'logical' | 'manifest';
+  source: 'logical' | 'yml' | 'manifest';
+  /** Relative file path showing where this model is defined (e.g. "models/silver/dim_customer.yml") */
+  sourcePath: string;
 }
 
 // ---------------------------------------------------------------------------

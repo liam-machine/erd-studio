@@ -19,9 +19,9 @@ import './StageTabs.css';
 // Constants
 // ---------------------------------------------------------------------------
 
-const STAGE_LABELS: { stage: Stage; label: string; shortcut: string }[] = [
-  { stage: 'logical', label: 'Logical', shortcut: 'Alt+1' },
-  { stage: 'physical', label: 'Physical', shortcut: 'Alt+2' },
+const STAGE_LABELS: { stage: Stage; label: string; shortcut: string; tooltip: string }[] = [
+  { stage: 'logical', label: 'Logical', shortcut: 'Alt+1', tooltip: 'Your design blueprint \u2014 the ideal data model' },
+  { stage: 'physical', label: 'Physical', shortcut: 'Alt+2', tooltip: "What's declared in your dbt .yml schema files \u2014 read-only" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ export function StageTabs({ activeStage, readOnly }: StageTabsProps) {
 
   return (
     <div className="stage-tabs" role="tablist" aria-label="Design stage">
-      {STAGE_LABELS.map(({ stage, label, shortcut }) => {
+      {STAGE_LABELS.map(({ stage, label, shortcut, tooltip }) => {
         const isActive = stage === activeStage;
         const showLock = isActive && readOnly;
         return (
@@ -64,7 +64,7 @@ export function StageTabs({ activeStage, readOnly }: StageTabsProps) {
             onClick={() => handleTabClick(stage)}
             role="tab"
             aria-selected={isActive}
-            title={`${label} stage (${shortcut})${showLock ? ' — read-only' : ''}`}
+            title={`${tooltip} (${shortcut})`}
           >
             {showLock && <span className="stage-tabs__lock" aria-hidden="true">🔒</span>}
             {label}

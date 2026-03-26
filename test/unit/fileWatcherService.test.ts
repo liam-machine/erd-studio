@@ -28,8 +28,8 @@ describe('FileWatcherService', () => {
   });
 
   describe('initialization', () => {
-    it('creates four file system watchers', () => {
-      expect(_mockFileWatchers).toHaveLength(4);
+    it('creates five file system watchers', () => {
+      expect(_mockFileWatchers).toHaveLength(5);
     });
   });
 

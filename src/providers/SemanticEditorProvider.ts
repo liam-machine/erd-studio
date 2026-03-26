@@ -21,12 +21,14 @@ import * as vscode from 'vscode';
 import { DomainService } from '../services/domainService';
 import { compare as compareStages } from '../services/discrepancyService';
 import { ManifestService } from '../services/manifestService';
+import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SchemaTagService } from '../services/schemaTagService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
 import { checkManifestStaleness } from '../services/stalenessService';
 import type { ManifestData } from '../types/manifest';
+import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplayDomain } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignModel, Stage } from '../types/semantic';
@@ -105,6 +107,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly domainService: DomainService,
     private readonly manifestService: ManifestService,
+    private readonly ymlParserService: YmlParserService,
     private readonly templateService: TemplateService,
     private readonly layerService: LayerService,
     private readonly workspaceRoot: string,
@@ -114,11 +117,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Build supplementary payload data for webview messages.
-   * Includes templates and list of available models from logical-models/ and manifest.
+   * Includes templates and list of available models from logical-models/, yml, and manifest.
    */
   private buildWebviewPayload(
     domain: { models: Array<{ name: string }> },
     manifest: ManifestData,
+    ymlData: YmlData,
     modelFolder?: string,
   ): {
     templates: ReturnType<TemplateService['loadTemplates']>;
@@ -133,30 +137,46 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const templates = this.templateService.loadTemplates(this.workspaceRoot);
     const existingModelNames = new Set(domain.models.map((m) => m.name));
 
-    // Build existing models list from two sources: logical-models/ and manifest
+    // Build existing models list from three sources: logical-models/, yml, and manifest
     const existingModels: import('../types/display').ExistingModelPreview[] = [];
     const addedNames = new Set<string>();
 
-    // 1. Logical models (already designed in ERD Studio)
+    // 1. Logical models (already designed in ERD Studio's model library)
     const logicalModels = this.logicalModelService.listModels();
     for (const model of logicalModels) {
-      if (existingModelNames.has(model.name)) continue; // already in domain
+      if (existingModelNames.has(model.name)) continue;
+      const absPath = this.logicalModelService.modelPath(model.name);
       existingModels.push({
         name: model.name,
         schema: model.schema ?? '',
         description: model.description ?? '',
         columnCount: (model.columns ?? []).length,
         source: 'logical',
+        sourcePath: path.relative(this.workspaceRoot, absPath),
       });
       addedNames.add(model.name);
     }
 
-    // 2. Manifest models (not yet designed)
+    // 2. dbt .yml source file models (declared in dbt project)
+    for (const [name, ymlModel] of ymlData.models) {
+      if (existingModelNames.has(name) || addedNames.has(name)) continue;
+      const manifestModel = manifest.models.get(name);
+      existingModels.push({
+        name,
+        schema: manifestModel?.schema ?? '',
+        description: ymlModel.description || manifestModel?.description || '',
+        columnCount: ymlModel.columns.length,
+        source: 'yml',
+        sourcePath: path.relative(this.workspaceRoot, ymlModel.filePath),
+      });
+      addedNames.add(name);
+    }
+
+    // 3. Manifest models not in yml or logical (compiled/ephemeral models)
     let filteredManifest = Array.from(manifest.models.values()).filter(
       (m) => !existingModelNames.has(m.name) && !addedNames.has(m.name),
     );
 
-    // Apply folder filter if configured (prefix match)
     if (modelFolder) {
       const folderPrefix = modelFolder.endsWith('/') ? modelFolder : `${modelFolder}/`;
       filteredManifest = filteredManifest.filter(
@@ -171,18 +191,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         description: m.description,
         columnCount: m.columns.length,
         source: 'manifest',
+        sourcePath: 'target/manifest.json',
       });
     }
 
-    // Sort: logical first, then manifest, alphabetical within each group
+    // Sort: logical first, then yml, then manifest; alphabetical within each group
+    const sourceOrder: Record<string, number> = { logical: 0, yml: 1, manifest: 2 };
     existingModels.sort((a, b) => {
-      if (a.source !== b.source) return a.source === 'logical' ? -1 : 1;
+      const orderDiff = (sourceOrder[a.source] ?? 9) - (sourceOrder[b.source] ?? 9);
+      if (orderDiff !== 0) return orderDiff;
       return a.name.localeCompare(b.name);
     });
 
-    // Legacy manifestModels (for backward compat with v4 webview until dialog is updated)
+    // Legacy manifestModels (for backward compat with v4 webview)
     const manifestModels = existingModels
-      .filter((m) => m.source === 'manifest')
+      .filter((m) => m.source === 'manifest' || m.source === 'yml')
       .map(({ name, schema, description, columnCount }) => ({ name, schema, description, columnCount }));
 
     return { templates, manifestModels, existingModels };
@@ -591,6 +614,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private buildDisplayDomain(
     domain: import('../types/semantic').SemanticDomain,
     manifest: ManifestData,
+    ymlData: YmlData,
     viewConfig: import('../types/semantic').ViewConfig,
     stubColumns?: string[],
   ): DisplayDomain {
@@ -638,6 +662,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const { templates, manifestModels, existingModels } = this.buildWebviewPayload(
       { models },
       manifest,
+      ymlData,
       domain.modelFolder,
     );
 
@@ -678,6 +703,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const activeStage = panel?.activeStage ?? 'logical';
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
 
       let unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
@@ -693,13 +719,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       if (activeStage === 'physical') {
-        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
+        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
         webview.postMessage({ type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
       } else {
         const domain = this.domainService.getDomainStage(document.uri.fsPath);
-        const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
+        const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
         webview.postMessage({ type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
       }
     } catch (err) {
@@ -1910,19 +1936,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           return;
         }
 
-        // Ensure the logical model file exists — create from manifest if needed
+        // Ensure the logical model file exists — create from yml or manifest if needed
         if (!this.logicalModelService.modelExists(payload.modelName)) {
-          const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
-          const created = this.logicalModelService.createFromManifest(payload.modelName, manifest);
+          const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+          const ymlModel = ymlData.models.get(payload.modelName);
+          let created = false;
+          if (ymlModel) {
+            // Create from yml source (primary)
+            created = this.logicalModelService.createFromYml(payload.modelName, ymlModel);
+          }
           if (!created) {
-            webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found in manifest or logical-models/. Run 'dbt compile' to refresh.` } });
+            // Fallback: create from manifest
+            const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+            created = this.logicalModelService.createFromManifest(payload.modelName, manifest) !== null;
+          }
+          if (!created) {
+            webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found in .yml files, manifest, or logical-models/.` } });
             return;
           }
         }
 
         // Add name reference + position + auto-relationships to domain
+        // Use yml relationship tests as primary, fall back to manifest
+        const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
         await this.manifestService.loadManifest(this.workspaceRoot);
-        const relationshipTests = this.manifestService.getRelationshipTests();
+        const manifestRelTests = this.manifestService.getRelationshipTests();
+        const relationshipTests = ymlData.relationshipTests.length > 0
+          ? ymlData.relationshipTests
+          : manifestRelTests;
 
         const success = await this.applyDomainEdit(
           document,
@@ -1966,14 +2007,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      // V4: legacy inline path
+      // V4: legacy inline path — try yml first, fall back to manifest
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const ymlModel = ymlData.models.get(payload.modelName);
       const manifestModel = manifest.models.get(payload.modelName);
 
-      if (!manifestModel) {
+      if (!ymlModel && !manifestModel) {
         webview.postMessage({
           type: 'error',
-          payload: { message: `Model "${payload.modelName}" not found in manifest. Run 'dbt compile' to refresh.` },
+          payload: { message: `Model "${payload.modelName}" not found in .yml files or manifest.` },
         });
         return;
       }
@@ -1992,22 +2035,32 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const existingPositions = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
       const newPosition = findOpenPosition(existingPositions);
 
-      const columns = manifestModel.columns.map((col) => ({
-        name: col.name,
-        dataType: col.data_type ?? 'unknown',
-        description: col.description,
-      }));
+      // Build columns from yml (primary) or manifest (fallback)
+      const columns = ymlModel
+        ? ymlModel.columns.map((col) => ({
+            name: col.name,
+            dataType: col.dataType ?? manifestModel?.columns.find((mc) => mc.name === col.name)?.data_type ?? 'unknown',
+            description: col.description || '',
+          }))
+        : manifestModel!.columns.map((col) => ({
+            name: col.name,
+            dataType: col.data_type ?? 'unknown',
+            description: col.description,
+          }));
 
       models.push({
         name: payload.modelName,
-        schema: manifestModel.schema,
-        description: manifestModel.description,
+        schema: manifestModel?.schema ?? '',
+        description: ymlModel?.description || manifestModel?.description || '',
         columns,
       });
 
       const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
       const modelNames = new Set(models.map((m) => m.name as string));
-      const relationshipTests = this.manifestService.getRelationshipTests();
+      // Use yml relationship tests as primary, fall back to manifest
+      const ymlRelTests = ymlData.relationshipTests;
+      const manifestRelTests = this.manifestService.getRelationshipTests();
+      const relationshipTests = ymlRelTests.length > 0 ? ymlRelTests : manifestRelTests;
 
       for (const test of relationshipTests) {
         if (test.fromModel !== payload.modelName && test.toModel !== payload.modelName) continue;
@@ -2261,12 +2314,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       panel.activeStage = targetStage;
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
 
       const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
 
       if (targetStage === 'physical') {
-        // Physical stage is derived from same unified file's logical section + manifest
-        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
+        // Physical stage is derived from yml source files + optional manifest enrichment
+        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) {
           physicalDomain.layerConfig = layerConfig;
@@ -2275,7 +2329,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       } else {
         // Logical — extract from unified file
         const domain = this.domainService.getDomainStage(document.uri.fsPath);
-        const displayDomain = this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
+        const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
         webview.postMessage({ type: 'stageData', payload: displayDomain });
       }
     } catch (err) {
@@ -2325,11 +2379,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const panelEntry = this.openPanels.get(panelKey);
       if (panelEntry?.lastDiscrepancyReport && panelEntry.lastCompareAgainst) {
         const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+        const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
         const sourceDomain = await this.buildStageDisplayDomain(
-          document, panelEntry.activeStage, manifest,
+          document, panelEntry.activeStage, manifest, ymlData,
         );
         const targetDomain = await this.buildStageDisplayDomain(
-          document, panelEntry.lastCompareAgainst, manifest,
+          document, panelEntry.lastCompareAgainst, manifest, ymlData,
         );
         const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
         const stubColumnModels = new Set(unifiedDomain.stubColumns ?? []);
@@ -2369,17 +2424,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!panel) return;
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const sourceStage = panel.activeStage;
       const targetStage = payload.compareAgainst;
 
       // Build source DisplayDomain
       const sourceDomain = await this.buildStageDisplayDomain(
-        document, sourceStage, manifest,
+        document, sourceStage, manifest, ymlData,
       );
 
       // Build target DisplayDomain
       const targetDomain = await this.buildStageDisplayDomain(
-        document, targetStage, manifest,
+        document, targetStage, manifest, ymlData,
       );
 
       const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
@@ -2419,13 +2475,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     stage: Stage,
     manifest: ManifestData,
+    ymlData: YmlData,
   ): Promise<DisplayDomain> {
     const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
     if (stage === 'physical') {
-      return this.domainService.buildPhysicalDomain(unifiedDomain, manifest);
+      return this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest);
     }
     const domain = this.domainService.getDomainStage(document.uri.fsPath);
-    return this.buildDisplayDomain(domain, manifest, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
+    return this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
   }
 
   // ---------------------------------------------------------------------------
@@ -2465,6 +2522,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const report = panel.lastDiscrepancyReport;
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const semanticDir = vscode.workspace
         .getConfiguration('dbtSemantic')
         .get<string>('semanticDir', 'erd-studio');
@@ -2553,16 +2611,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      // Build model context with file paths
+      // Build model context with file paths (prefer yml source, fall back to manifest heuristic)
       const modelContext: Record<string, ModelContext> = {};
       for (const modelName of referencedModels) {
         const manifestModel = manifest.models.get(modelName);
+        const ymlModel = ymlData.models.get(modelName);
         let dbtSqlPath: string | null = null;
         let dbtSchemaPath: string | null = null;
 
-        if (manifestModel?.originalFilePath) {
+        if (ymlModel?.filePath) {
+          // Use the actual yml file path from YmlParserService
+          dbtSchemaPath = path.relative(this.workspaceRoot, ymlModel.filePath);
+          // Heuristic: SQL file is next to the YAML file with .sql extension
+          dbtSqlPath = dbtSchemaPath.replace(/\.ya?ml$/, '.sql');
+        } else if (manifestModel?.originalFilePath) {
           dbtSqlPath = manifestModel.originalFilePath;
-          // Heuristic: schema YAML is next to the SQL file with .yml extension
           dbtSchemaPath = dbtSqlPath.replace(/\.sql$/, '.yml');
         }
 
