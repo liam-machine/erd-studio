@@ -127,6 +127,7 @@ export class ManifestService {
     this.loadId++;
     this.cache = null;
     this.loadPromise = null;
+    this._isStale = false;
   }
 
   /**

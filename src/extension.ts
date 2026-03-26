@@ -212,20 +212,26 @@ export function activate(context: vscode.ExtensionContext): void {
   const fileWatcherService = new FileWatcherService(workspaceRoot);
 
   // Manifest changed → refresh open editors
+  let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
   const manifestChangedSubscription = fileWatcherService.onManifestChanged(
     async () => {
       manifestService.invalidate();
       await editorProvider.refreshAllOpenDomains();
 
       if (manifestService.isStale) {
-        // Manifest likely mid-write by dbt — retry once after 2s
-        setTimeout(async () => {
-          manifestService.invalidate();
-          await editorProvider.refreshAllOpenDomains();
-          if (!manifestService.isStale) {
-            void vscode.window.showInformationMessage(
-              'dbt manifest updated. Graphs refreshed with latest model data.',
-            );
+        // Manifest likely mid-write by dbt — deduplicate and retry once after 2s
+        clearTimeout(manifestRetryTimeout);
+        manifestRetryTimeout = setTimeout(async () => {
+          try {
+            manifestService.invalidate();
+            await editorProvider.refreshAllOpenDomains();
+            if (!manifestService.isStale) {
+              void vscode.window.showInformationMessage(
+                'dbt manifest updated. Graphs refreshed with latest model data.',
+              );
+            }
+          } catch (err) {
+            console.error('[ERD Studio] Manifest retry failed:', err);
           }
         }, 2000);
       } else {
