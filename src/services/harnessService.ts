@@ -592,7 +592,11 @@ export class HarnessService {
       // version bumps skip this so the user can remove the entry if they
       // want the harness files tracked in version control.
       if (!alreadyExisted && target.gitignorePattern) {
-        this.addToGitignore(workspaceRoot, target.gitignorePattern);
+        try {
+          this.addToGitignore(workspaceRoot, target.gitignorePattern);
+        } catch {
+          // Best-effort — don't fail the install if .gitignore is unwritable
+        }
       }
 
       return {
