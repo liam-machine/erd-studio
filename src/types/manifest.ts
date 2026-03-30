@@ -48,6 +48,23 @@ export interface ManifestModelInfo {
   originalFilePath?: string;
 }
 
+/**
+ * Serializable result from the manifest worker thread.
+ * Uses plain objects/arrays instead of Maps/Sets because
+ * structured clone (worker postMessage) cannot transfer them.
+ */
+export interface ManifestWorkerResult {
+  models: Record<string, ManifestModelInfo>;
+  relationshipTests: ManifestRelationshipTest[];
+  uniqueColumns: Record<string, string[]>;
+  compositeUniqueGroups: Record<string, string[][]>;
+}
+
+/** Error result from the manifest worker thread. */
+export interface ManifestWorkerError {
+  error: string;
+}
+
 /** Parsed manifest data cached in memory. */
 export interface ManifestData {
   /** Models indexed by short name (e.g. "dim_work_lot") */

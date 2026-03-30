@@ -58,6 +58,22 @@ const extensionConfig = {
   plugins: [problemMatcherPlugin],
 };
 
+// Manifest worker build — Node.js, CJS, same settings as extension host.
+// Runs JSON.parse in a worker thread for non-blocking manifest parsing.
+const workerConfig = {
+  entryPoints: ['./src/workers/manifestWorker.ts'],
+  bundle: true,
+  outfile: './dist/manifestWorker.js',
+  format: 'cjs',
+  platform: 'node',
+  target: 'node18',
+  sourcemap: !isProduction,
+  minify: isProduction,
+  treeShaking: true,
+  logLevel: 'warning',
+  plugins: [problemMatcherPlugin],
+};
+
 // Webview build — Browser, IIFE, bundle everything including React
 const webviewConfig = {
   entryPoints: ['./webview/index.tsx'],
@@ -87,16 +103,18 @@ async function build() {
   console.log(`Building [${isProduction ? 'production' : 'development'}]...`);
 
   if (isWatch) {
-    const [extCtx, webCtx] = await Promise.all([
+    const [extCtx, webCtx, workerCtx] = await Promise.all([
       esbuild.context(extensionConfig),
       esbuild.context(webviewConfig),
+      esbuild.context(workerConfig),
     ]);
-    await Promise.all([extCtx.watch(), webCtx.watch()]);
+    await Promise.all([extCtx.watch(), webCtx.watch(), workerCtx.watch()]);
     console.log('Watching for changes...');
   } else {
     await Promise.all([
       esbuild.build(extensionConfig),
       esbuild.build(webviewConfig),
+      esbuild.build(workerConfig),
     ]);
     console.log('Build complete.');
   }
