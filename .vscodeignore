@@ -23,6 +23,7 @@ CLAUDE.md
 
 # Other projects accidentally in repo
 data engineer plugin/**
+forge-app/**
 
 # Dev/local files
 .claude/**
