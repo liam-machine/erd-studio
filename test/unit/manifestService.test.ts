@@ -215,6 +215,40 @@ describe('ManifestService', () => {
       expect(service.isStale).toBe(true);
     });
 
+    it('returns lastKnownGood data when re-parse fails after a successful load', async () => {
+      // First load succeeds — populates lastKnownGood
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+
+      // Invalidate so it will re-parse
+      service.invalidate();
+
+      // Re-parse against a malformed manifest — should return stale good data
+      const fallbackData = await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(fallbackData.models.size).toBe(4);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('resets isStale to false after a successful re-parse following a failure', async () => {
+      // Trigger a failure first
+      await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(service.isStale).toBe(true);
+
+      service.invalidate();
+
+      // Successful parse should clear stale flag
+      await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(service.isStale).toBe(false);
+    });
+
+    it('resets isStale to false on invalidate', async () => {
+      await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(service.isStale).toBe(true);
+
+      service.invalidate();
+      expect(service.isStale).toBe(false);
+    });
+
     it('handles models with missing columns field gracefully', async () => {
       const data = await service.loadManifest(SPARSE_PROJECT_PATH);
       const model = data.models.get('no_columns');

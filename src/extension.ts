@@ -213,18 +213,26 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Manifest changed → refresh open editors
   let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
+  let manifestChangeGen = 0;
   const manifestChangedSubscription = fileWatcherService.onManifestChanged(
     async () => {
+      const gen = ++manifestChangeGen;
       manifestService.invalidate();
       await editorProvider.refreshAllOpenDomains();
+
+      // Superseded by a newer file-change event during the await
+      if (gen !== manifestChangeGen) { return; }
 
       if (manifestService.isStale) {
         // Manifest likely mid-write by dbt — deduplicate and retry once after 2s
         clearTimeout(manifestRetryTimeout);
         manifestRetryTimeout = setTimeout(async () => {
+          const retryGen = manifestChangeGen;
           try {
             manifestService.invalidate();
             await editorProvider.refreshAllOpenDomains();
+            // Superseded by a newer event during retry
+            if (retryGen !== manifestChangeGen) { return; }
             if (!manifestService.isStale) {
               void vscode.window.showInformationMessage(
                 'dbt manifest updated. Graphs refreshed with latest model data.',
