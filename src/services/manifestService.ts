@@ -83,8 +83,8 @@ export class ManifestService {
       const fallback = this.lastKnownGood ?? this.emptyManifest();
       if (currentLoadId === this.loadId) {
         this.cache = fallback;
+        this._isStale = true;
       }
-      this._isStale = true; // set unconditionally — any parse failure means stale
       return fallback;
     } finally {
       if (currentLoadId === this.loadId) {
@@ -435,10 +435,6 @@ export class ManifestService {
     groups.push(columns);
   }
 
-  /**
-   * Resolve the model name from a test node using attached_node (preferred)
-   * or depends_on.nodes (fallback).
-   */
   private emptyManifest(): ManifestData {
     return {
       models: new Map(),
@@ -448,6 +444,10 @@ export class ManifestService {
     };
   }
 
+  /**
+   * Resolve the model name from a test node using attached_node (preferred)
+   * or depends_on.nodes (fallback).
+   */
   private resolveModelFromTestNode(node: Record<string, unknown>): string | undefined {
     // Prefer attached_node (dbt 1.0+)
     const attachedNode = node.attached_node as string | undefined;
