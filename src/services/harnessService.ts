@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '9';
+export const HARNESS_VERSION = '11';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -121,6 +121,15 @@ erd-studio/
 
 **Key principle:** Models are defined ONCE in \`logical-models/\` and referenced from multiple domain files. Editing a model from any domain updates the shared definition.
 
+### Model Library (Sidebar)
+
+The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`logical-models/\`. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
+
+- **Referenced models** show how many domains use them (e.g. "2 domains")
+- **Orphaned models** show a warning icon and "(unused)" — these exist as \`.yml\` files but are not in any domain's \`logical.models[]\` array
+
+**Important for AI agents:** Before saying a model "already exists in the ERD", check whether it is referenced by the target domain's \`logical.models[]\` array — not just whether the \`.yml\` file exists. A model file in \`logical-models/\` may be unused (orphaned) or only referenced by other domains.
+
 ## Domain File Structure
 
 **File:** \`erd-studio/{layer}/{domain}.json\`
@@ -160,6 +169,24 @@ erd-studio/
 \`\`\`
 
 > **WARNING — Preserve existing positions:** When adding models to an existing domain file, do NOT clear or overwrite \`viewConfig.positions\`. The extension automatically computes positions for any new models that lack entries. Clearing existing positions will reset the user's carefully arranged layout.
+
+---
+
+## Editing Quick Reference
+
+**CRITICAL — Two files control the diagram.** Column data lives in the YAML; structural data lives in the JSON. You must edit the correct file for each operation.
+
+| User asks to... | Edit this file |
+|-----------------|---------------|
+| Add/remove/rename a column | \`logical-models/{name}.yml\` |
+| Change column type, PK/FK/NK flags, SCD type | \`logical-models/{name}.yml\` |
+| Change grain, modelRole, description, rationale | \`logical-models/{name}.yml\` |
+| Add a model to a domain diagram | Domain \`.json\` → add name to \`logical.models[]\` AND create \`logical-models/{name}.yml\` if it doesn't exist |
+| Remove a model from a domain | Domain \`.json\` → remove name from \`logical.models[]\` AND remove its relationships from \`logical.relationships[]\` |
+| Add/remove/edit a relationship | Domain \`.json\` → \`logical.relationships[]\` |
+| Change layout positions | Domain \`.json\` → \`viewConfig.positions\` |
+
+> **Common mistake:** Editing the \`.yml\` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the \`.yml\` AND adding the name string to the domain \`.json\`. Similarly, relationships are ONLY stored in the domain \`.json\`, never in the \`.yml\`.
 
 ---
 
