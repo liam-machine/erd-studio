@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '9';
+export const HARNESS_VERSION = '10';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -120,6 +120,15 @@ erd-studio/
 \`\`\`
 
 **Key principle:** Models are defined ONCE in \`logical-models/\` and referenced from multiple domain files. Editing a model from any domain updates the shared definition.
+
+### Model Library (Sidebar)
+
+The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`logical-models/\`. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
+
+- **Referenced models** show how many domains use them (e.g. "2 domains")
+- **Orphaned models** show a warning icon and "(unused)" — these exist as \`.yml\` files but are not in any domain's \`logical.models[]\` array
+
+**Important for AI agents:** Before saying a model "already exists in the ERD", check whether it is referenced by the target domain's \`logical.models[]\` array — not just whether the \`.yml\` file exists. A model file in \`logical-models/\` may be unused (orphaned) or only referenced by other domains.
 
 ## Domain File Structure
 

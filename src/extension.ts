@@ -17,6 +17,7 @@ import { SchemaTagService } from './services/schemaTagService';
 import { LogicalModelService } from './services/logicalModelService';
 import { MigrationService } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
+import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -188,6 +189,7 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   }
   const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
+  const modelLibraryProvider = new ModelLibraryTreeProvider(logicalModelService, domainService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
     domainService,
@@ -205,6 +207,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Set context key so view/title menus only show when semantic dir exists
   const fullSemanticDirPath = path.join(workspaceRoot, semanticDir);
   void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
+  void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasLogicalModelsDir', logicalModelService.dirExists());
 
   // -------------------------------------------------------------------------
   // File watchers
@@ -254,14 +257,16 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
-  // Semantic file changed externally → refresh tree view
+  // Semantic file changed externally → refresh tree view + model library
   const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(() => {
     treeProvider.refresh();
+    modelLibraryProvider.refresh();
   });
 
-  // Semantic file deleted → refresh tree and clean up orphaned domain tags
+  // Semantic file deleted → refresh tree + model library and clean up orphaned domain tags
   const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(async () => {
     treeProvider.refresh();
+    modelLibraryProvider.refresh();
     const result = await schemaTagService.reconcileAll();
     if (result.removed > 0) {
       void vscode.window.showInformationMessage(
@@ -270,11 +275,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
 
-  // Logical model file changed → refresh domains referencing that model
+  // Logical model file changed → refresh domains referencing that model + model library
   const logicalModelChangedSubscription = fileWatcherService.onLogicalModelChanged(
     async ({ modelName }) => {
       await editorProvider.refreshDomainsReferencingModel(modelName);
       treeProvider.refresh();
+      modelLibraryProvider.refresh();
+      // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
+      void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasLogicalModelsDir', logicalModelService.dirExists());
     },
   );
 
@@ -321,6 +329,35 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
     vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.window.registerFileDecorationProvider(layerDecorationProvider),
+    modelLibraryProvider,
+    (() => {
+      return vscode.window.createTreeView('dbtSemantic.modelLibrary', {
+        treeDataProvider: modelLibraryProvider,
+        canSelectMany: false,
+      });
+    })(),
+    vscode.commands.registerCommand('dbtSemantic.deleteLogicalModel', async (node: ModelLibraryNode | undefined) => {
+      if (!node || node.type !== 'model') {
+        void vscode.window.showErrorMessage('Delete Model: No model selected. Right-click a model in the Model Library.');
+        return;
+      }
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete model "${node.name}"? This removes the YAML file — domain references are not cleaned up.`,
+        { modal: true },
+        'Delete',
+      );
+      if (confirm === 'Delete') {
+        logicalModelService.deleteModel(node.name);
+        modelLibraryProvider.refresh();
+      }
+    }),
+    vscode.commands.registerCommand('dbtSemantic.revealLogicalModel', (node: ModelLibraryNode | undefined) => {
+      if (!node || node.type !== 'model') {
+        void vscode.window.showErrorMessage('Reveal in Explorer: No model selected. Right-click a model in the Model Library.');
+        return;
+      }
+      void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(node.filePath));
+    }),
     vscode.commands.registerCommand('dbtSemantic.openDomain', async (filePath: string, stage?: Stage) => {
       const fileUri = vscode.Uri.file(filePath);
       await vscode.commands.executeCommand(

@@ -82,6 +82,14 @@ export class TreeItem {
   }
 }
 
+export class MarkdownString {
+  value: string;
+  isTrusted?: boolean;
+  constructor(value = '', supportThemeIcons?: boolean) {
+    this.value = value;
+  }
+}
+
 export class ThemeColor {
   id: string;
   constructor(id: string) {
