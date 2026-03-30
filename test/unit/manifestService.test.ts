@@ -16,6 +16,8 @@ const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const FIXTURE_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project');
 const MALFORMED_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project-malformed');
 const SPARSE_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project-sparse');
+const EMPTY_MANIFEST_PATH = path.resolve(FIXTURES_DIR, 'dbt-project-empty-manifest');
+const ZERO_BYTE_PATH = path.resolve(FIXTURES_DIR, 'dbt-project-zero-byte');
 
 describe('ManifestService', () => {
   let service: ManifestService;
@@ -378,6 +380,83 @@ describe('ManifestService', () => {
 
       expect(data.uniqueColumns.size).toBe(0);
       expect(data.compositeUniqueGroups.size).toBe(0);
+    });
+  });
+
+  describe('blank-screen defense (truncated manifest)', () => {
+    it('returns lastKnownGood when manifest is 0 bytes after having good data', async () => {
+      // First load succeeds — populates lastKnownGood
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+
+      service.invalidate();
+
+      // 0-byte manifest triggers the stat guard → falls back to lastKnownGood
+      const fallback = await service.loadManifest(ZERO_BYTE_PATH);
+      expect(fallback.models.size).toBe(4);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('returns lastKnownGood when re-parse succeeds with 0 models after having good data', async () => {
+      // First load succeeds
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+
+      service.invalidate();
+
+      // Empty-but-valid manifest triggers the semantic regression guard
+      const fallback = await service.loadManifest(EMPTY_MANIFEST_PATH);
+      expect(fallback.models.size).toBe(4);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('does not flag stale when first load returns 0 models (legitimate empty project)', async () => {
+      // No prior data — 0 models is a valid first load (user hasn't added models yet)
+      const data = await service.loadManifest(EMPTY_MANIFEST_PATH);
+      expect(data.models.size).toBe(0);
+      expect(service.isStale).toBe(false);
+    });
+
+    it('returns empty and marks stale when first load is 0 bytes (no lastKnownGood)', async () => {
+      // 0-byte file with no prior data — parse error path, no fallback available
+      const data = await service.loadManifest(ZERO_BYTE_PATH);
+      expect(data.models.size).toBe(0);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('simulates full manifest-change cycle: load → invalidate → truncated file → fallback preserves data', async () => {
+      // This simulates the real-world sequence when dbt compiles:
+      // 1. Extension starts, loads good manifest
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+      expect(goodData.relationshipTests.length).toBe(2);
+      expect(service.isStale).toBe(false);
+
+      // 2. dbt starts writing → file watcher fires → extension calls invalidate()
+      service.invalidate();
+      expect(service.isStale).toBe(false); // reset by invalidate
+
+      // 3. loadManifest is called again but manifest is 0-bytes (truncated by dbt)
+      const afterTruncation = await service.loadManifest(ZERO_BYTE_PATH);
+      // Should get the SAME good data back, not empty
+      expect(afterTruncation.models.size).toBe(4);
+      expect(afterTruncation.relationshipTests.length).toBe(2);
+      expect(service.isStale).toBe(true);
+      // Verify it's the same object reference (lastKnownGood)
+      expect(afterTruncation).toBe(goodData);
+
+      // 4. Repeat with empty-but-valid JSON ({"nodes":{}}) — second failure mode
+      service.invalidate();
+      const afterEmptyJson = await service.loadManifest(EMPTY_MANIFEST_PATH);
+      expect(afterEmptyJson.models.size).toBe(4);
+      expect(afterEmptyJson).toBe(goodData);
+      expect(service.isStale).toBe(true);
+
+      // 5. dbt finishes writing → retry fires → good manifest again
+      service.invalidate();
+      const recovered = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(recovered.models.size).toBe(4);
+      expect(service.isStale).toBe(false);
     });
   });
 });
