@@ -4,7 +4,7 @@
  * Watches:
  * - target/manifest.json (dbt compile output) → triggers manifest cache invalidation
  * - erd-studio/**\/*.json (semantic domain files) → triggers tree and editor refresh
- * - dbt_project.yml (project configuration) → shows reload warning
+ * - dbt_project.yml (project configuration) → reload prompt only when path config changes
  *
  * All change events are debounced by 300ms to prevent rapid-fire triggers
  * during batch operations (e.g., git checkout, dbt compile).
@@ -18,6 +18,8 @@
  *   );
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 const DEBOUNCE_DELAY_MS = 300;
@@ -31,21 +33,26 @@ export class FileWatcherService implements vscode.Disposable {
   private readonly _onManifestChanged = new vscode.EventEmitter<void>();
   private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uri: vscode.Uri }>();
-  private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onLogicalModelChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
   private readonly _onDbtYmlChanged = new vscode.EventEmitter<void>();
+  private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
 
   // Public event subscriptions (consumers listen to these)
   readonly onManifestChanged = this._onManifestChanged.event;
   readonly onSemanticFileChanged = this._onSemanticFileChanged.event;
   readonly onSemanticFileDeleted = this._onSemanticFileDeleted.event;
-  readonly onProjectConfigChanged = this._onProjectConfigChanged.event;
   /** Fires when a YAML model file in erd-studio/logical-models/ changes. */
   readonly onLogicalModelChanged = this._onLogicalModelChanged.event;
   /** Fires when any dbt schema .yml/.yaml file under models/ changes. */
   readonly onDbtYmlChanged = this._onDbtYmlChanged.event;
+  /** Fires when target-path or model-paths change in dbt_project.yml. */
+  readonly onProjectConfigChanged = this._onProjectConfigChanged.event;
+
+  /** Snapshot of path-related keys from dbt_project.yml at startup. */
+  private lastProjectPaths: string;
 
   constructor(private readonly workspaceRoot: string) {
+    this.lastProjectPaths = this.readProjectPaths();
     this.setupManifestWatcher();
     this.setupSemanticWatcher();
     this.setupProjectConfigWatcher();
@@ -114,8 +121,9 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch dbt_project.yml for changes.
-   * Project configuration changes may require a window reload.
+   * Watch dbt_project.yml for changes to path-related keys.
+   * Only fires onProjectConfigChanged when target-path or model-paths actually change,
+   * ignoring irrelevant edits (name, version, vars, etc.).
    */
   private setupProjectConfigWatcher(): void {
     const pattern = new vscode.RelativePattern(
@@ -126,16 +134,51 @@ export class FileWatcherService implements vscode.Disposable {
 
     const handleChange = () => {
       this.debounce('project', () => {
-        console.log('[FileWatcherService] dbt_project.yml changed');
-        this.safeFireEvent(() => this._onProjectConfigChanged.fire());
+        const current = this.readProjectPaths();
+        if (current !== this.lastProjectPaths) {
+          console.log('[FileWatcherService] dbt_project.yml path config changed');
+          this.lastProjectPaths = current;
+          this.safeFireEvent(() => this._onProjectConfigChanged.fire());
+        }
       });
     };
 
-    // Track event subscriptions for disposal
     this.subscriptions.push(watcher.onDidChange(handleChange));
-    // Note: Create/delete not common for dbt_project.yml
-
+    this.subscriptions.push(watcher.onDidCreate(handleChange));
     this.watchers.push(watcher);
+  }
+
+  /**
+   * Read path-related keys (target-path, model-paths) from dbt_project.yml.
+   * Uses simple line matching to avoid a full YAML dependency.
+   * Captures both inline values (`model-paths: ["models"]`) and block-sequence
+   * continuations (`model-paths:\n  - "models"\n  - "other"`).
+   * Returns a stable string for comparison; empty string if file is unreadable.
+   */
+  private readProjectPaths(): string {
+    try {
+      const content = fs.readFileSync(
+        path.join(this.workspaceRoot, 'dbt_project.yml'),
+        'utf-8',
+      );
+      const lines = content.split('\n');
+      const pathLines: string[] = [];
+      let collecting = false;
+      for (const line of lines) {
+        if (/^(target-path|model-paths)\s*:/.test(line)) {
+          pathLines.push(line.trim());
+          collecting = true;
+        } else if (collecting && /^\s+-/.test(line)) {
+          // Block-sequence continuation item (e.g. "  - models")
+          pathLines.push(line.trim());
+        } else if (collecting) {
+          collecting = false;
+        }
+      }
+      return pathLines.sort().join('\n');
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -252,8 +295,8 @@ export class FileWatcherService implements vscode.Disposable {
     this._onManifestChanged.dispose();
     this._onSemanticFileChanged.dispose();
     this._onSemanticFileDeleted.dispose();
-    this._onProjectConfigChanged.dispose();
     this._onLogicalModelChanged.dispose();
     this._onDbtYmlChanged.dispose();
+    this._onProjectConfigChanged.dispose();
   }
 }

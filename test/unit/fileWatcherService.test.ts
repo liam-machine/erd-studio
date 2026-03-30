@@ -8,6 +8,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
+// Mock fs before importing FileWatcherService
+let mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths: ["models"]\n';
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    readFileSync: vi.fn((p: string, _enc?: string) => {
+      if (typeof p === 'string' && p.endsWith('dbt_project.yml')) {
+        return mockDbtProjectContent;
+      }
+      return actual.readFileSync(p as any, _enc as any);
+    }),
+  };
+});
+
 import { FileWatcherService } from '../../src/watchers/FileWatcherService';
 import {
   _clearMockFileWatchers,
@@ -24,6 +39,7 @@ describe('FileWatcherService', () => {
   beforeEach(() => {
     vi.clearAllTimers();
     _clearMockFileWatchers();
+    mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths: ["models"]\n';
     service = new FileWatcherService('/test/workspace');
   });
 
@@ -160,15 +176,99 @@ describe('FileWatcherService', () => {
   });
 
   describe('project config watcher', () => {
-    it('emits onProjectConfigChanged when dbt_project.yml changes', () => {
+    it('emits onProjectConfigChanged when target-path changes', () => {
       const listener = vi.fn();
       service.onProjectConfigChanged(listener);
 
+      // Project config watcher is the third one created (after manifest, semantic)
       const projectWatcher = _mockFileWatchers[2];
+
+      // Change the target-path
+      mockDbtProjectContent = 'name: my_project\ntarget-path: custom_target\nmodel-paths: ["models"]\n';
       projectWatcher._simulateChange(vscode.Uri.file('/test/workspace/dbt_project.yml'));
       vi.advanceTimersByTime(300);
 
       expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits onProjectConfigChanged when model-paths block-sequence items change', () => {
+      // Start with multi-line block-sequence form
+      _clearMockFileWatchers();
+      mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths:\n  - "models"\n  - "other"\n';
+      service = new FileWatcherService('/test/workspace');
+
+      const listener = vi.fn();
+      service.onProjectConfigChanged(listener);
+
+      const projectWatcher = _mockFileWatchers[2];
+
+      // Remove the "other" path entry
+      mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths:\n  - "models"\n';
+      projectWatcher._simulateChange(vscode.Uri.file('/test/workspace/dbt_project.yml'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not emit onProjectConfigChanged when non-path config changes', () => {
+      const listener = vi.fn();
+      service.onProjectConfigChanged(listener);
+
+      const projectWatcher = _mockFileWatchers[2];
+
+      // Change only the project name — paths stay the same
+      mockDbtProjectContent = 'name: renamed_project\ntarget-path: target\nmodel-paths: ["models"]\n';
+      projectWatcher._simulateChange(vscode.Uri.file('/test/workspace/dbt_project.yml'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('does not match indented path keys (e.g. under vars)', () => {
+      const listener = vi.fn();
+      service.onProjectConfigChanged(listener);
+
+      const projectWatcher = _mockFileWatchers[2];
+
+      // Add an indented model-paths under vars — should be ignored
+      mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths: ["models"]\nvars:\n  model-paths: "some_var"\n';
+      projectWatcher._simulateChange(vscode.Uri.file('/test/workspace/dbt_project.yml'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('fires again when path config reverts to original', () => {
+      const listener = vi.fn();
+      service.onProjectConfigChanged(listener);
+
+      const projectWatcher = _mockFileWatchers[2];
+
+      // First change: different target-path
+      mockDbtProjectContent = 'name: my_project\ntarget-path: custom_target\nmodel-paths: ["models"]\n';
+      projectWatcher._simulateChange(vscode.Uri.file('/test/workspace/dbt_project.yml'));
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      // Revert to original
+      mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths: ["models"]\n';
+      projectWatcher._simulateChange(vscode.Uri.file('/test/workspace/dbt_project.yml'));
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not emit for seed-paths or snapshot-paths changes', () => {
+      const listener = vi.fn();
+      service.onProjectConfigChanged(listener);
+
+      const projectWatcher = _mockFileWatchers[2];
+
+      // Add seed-paths and snapshot-paths — should not trigger since extension doesn't use them
+      mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths: ["models"]\nseed-paths: ["seeds"]\nsnapshot-paths: ["snapshots"]\n';
+      projectWatcher._simulateChange(vscode.Uri.file('/test/workspace/dbt_project.yml'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
     });
   });
 

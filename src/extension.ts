@@ -286,10 +286,10 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
-  // dbt_project.yml changed → suggest window reload
+  // dbt_project.yml path config changed → suggest window reload
   const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
     void vscode.window.showWarningMessage(
-      'dbt_project.yml has changed. Some changes require a window reload to take effect.',
+      'dbt_project.yml path configuration changed (target-path / model-paths). A window reload is needed to pick up the new paths.',
       'Reload Window',
     ).then(action => {
       if (action === 'Reload Window') {
