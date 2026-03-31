@@ -1,197 +1,314 @@
-# ERD Studio
+<p align="center">
+  <img src="media/icon.png" width="128" height="128" alt="ERD Studio" />
+</p>
 
-A VS Code extension for visually designing data warehouse models across two stages: logical and physical — with dbt manifest integration.
+<h1 align="center">ERD Studio</h1>
 
-## How It Works
+<p align="center">
+  <strong>Design your data warehouse visually. Let AI build it.</strong>
+</p>
 
-ERD Studio organizes your data warehouse design into two stages, each serving a distinct purpose:
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/v/liamwynne.erd-studio?label=Marketplace&color=0078d4" alt="VS Marketplace Version" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/i/liamwynne.erd-studio?color=0078d4" alt="Installs" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/r/liamwynne.erd-studio?color=0078d4" alt="Rating" /></a>
+  <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE"><img src="https://img.shields.io/github/license/liam-machine/erd-studio?color=0078d4" alt="License" /></a>
+</p>
 
-```
-Logical             Physical
-(model design)  --> (what dbt built)
-```
+<p align="center">
+  ERD Studio turns silver and gold layer modeling from a months-long slog<br>
+  into days of focused design — powered by an AI coding harness<br>
+  built and tested with <a href="https://claude.ai/code">Claude Code</a>.
+</p>
 
-| Stage | Color | Purpose | Editable |
-|-------|-------|---------|----------|
-| **Logical** | Blue | Detailed data model. Full column definitions with data types, PK/FK/NK badges, SCD types, grain, model roles, and rationale. | Yes |
-| **Physical** | Green | What actually exists in dbt. Auto-derived from `manifest.json`, scoped to models in the logical domain. | Positions only |
+<!-- TODO: Replace with actual screenshot/GIF of the extension in action
+<p align="center">
+  <img src="media/demo.gif" width="800" alt="ERD Studio demo — designing a silver layer domain" />
+</p>
+-->
 
-Switch between stages using the toolbar tabs or keyboard shortcuts: `Alt+1` (Logical), `Alt+2` (Physical). Use `Shift+L` to trigger auto-layout.
+---
 
-## Key Features
+## The Problem
 
-- **Domain tagging for scoped dbt runs** -- When you add a model to a domain, its dbt YAML schema is automatically tagged with `domain:{name}`. Run `dbt build --select tag:domain:customer-360` to build just that domain. Tags stay in sync through undo/redo, model removal, and bulk reconciliation.
-- **AI coding harness** -- Install the ERD Studio schema reference so Claude Code, GitHub Copilot, Google Gemini, or OpenAI Codex can read, create, and validate domain files natively. Each harness is formatted for that assistant's config format — one command installs to one or all.
-- **Two-stage design** -- Logical stage for detailed modeling (columns, types, PK/FK/NK, SCD, grain, roles). Physical stage auto-derived from `manifest.json` showing what dbt actually built.
-- **Discrepancy overlay** -- Compare logical vs physical with stage-colored labels. See exactly which columns, models, or relationships differ and which stage they belong to.
-- **Drag-to-relate** -- Long-press a column and drag to another model to create FK relationships with cardinality
-- **Layer organization** -- Medallion layers (bronze, silver, gold, platinum) plus custom layers
-- **Model templates** -- Presets for dimension, fact, bridge, and reference models with pre-configured columns
-- **ELK auto-layout** -- Automatic graph layout with manual repositioning. Positions shared across stages.
-- **Undo/redo** -- All edits go through VS Code's WorkspaceEdit system
-- **dbt manifest integration** -- Physical relationships derived from `relationships` tests; cardinality inferred from `unique` tests
+Data warehouse modeling is slow — not because the SQL is hard, but because the **design process** is scattered across whiteboards, Confluence pages, spreadsheets, and tribal knowledge. By the time you've documented a silver layer domain with 30+ models, weeks have passed and the docs are already stale.
+
+**ERD Studio fixes this in three moves:**
+
+> **1.** Design your data model visually on an interactive canvas inside VS Code
+>
+> **2.** Flip to the Physical stage to see what dbt actually built — spot gaps instantly
+>
+> **3.** Install the AI harness and let Claude Code generate the SQL, YAML, and tests
+
+<br>
+
+<table>
+<tr>
+<td width="50%">
+
+**Without ERD Studio**
+
+- Sketch ERDs on a whiteboard
+- Hand-document in Confluence
+- Write dbt YAML for every model by hand
+- Reverse-engineer relationships from SQL
+- Discover logical/physical drift months later
+- Onboard new engineers with tribal knowledge
+
+</td>
+<td width="50%">
+
+**With ERD Studio + AI**
+
+- Design in VS Code with full column definitions
+- Domain files *are* the docs — always current
+- AI generates schema YAML from your design
+- Drag-to-relate, AI writes the dbt tests
+- Discrepancy overlay shows drift in real time
+- Open the domain — the model is self-documenting
+
+</td>
+</tr>
+</table>
+
+---
+
+## AI-First Design
+
+ERD Studio ships with an **AI coding harness** — a schema reference that teaches your AI assistant the complete domain file format, naming conventions, model roles, and editing rules.
+
+**One command:** <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Install AI Coding Harness`
+
+<table>
+<tr>
+<th>Assistant</th>
+<th>What Gets Installed</th>
+</tr>
+<tr>
+<td><strong>Claude Code</strong></td>
+<td><code>.claude/skills/erd-studio/SKILL.md</code> — full skill with progressive context + sync companion</td>
+</tr>
+<tr>
+<td><strong>GitHub Copilot</strong></td>
+<td><code>.github/instructions/erd-studio.instructions.md</code> — auto-applies to domain files</td>
+</tr>
+<tr>
+<td><strong>Google Gemini</strong></td>
+<td><code>.gemini/styleguide.md</code> — includes validation rules for code review</td>
+</tr>
+<tr>
+<td><strong>OpenAI Codex</strong></td>
+<td><code>AGENTS.md</code> — appended schema reference section</td>
+</tr>
+</table>
+
+<br>
+
+**What your AI can do once the harness is installed:**
+
+- **Create models from scratch** — columns, data types, PK/FK/NK flags, SCD types, grain, rationale
+- **Add models to domains** — correctly updates both domain JSON and model YAML
+- **Generate dbt schema YAML** — writes `relationships` and `unique` tests that map directly to the physical stage
+- **Execute sync reconciliation** — reads discrepancy reports and runs 26 action types to align logical and physical
+- **Validate everything** — schema version, naming conventions (`dim_`, `fct_`, `brg_`, `ref_`), relationship rules
+- **Preserve your layout** — knows not to touch `viewConfig.positions` when updating
+
+> **Built for Claude Code.** The harness was developed and extensively tested with Claude Code. The progressive skill loading and `SYNC.md` companion are purpose-built for Claude's skill system. Other assistants are fully supported — Claude Code is the reference implementation.
+
+---
+
+## Two-Stage Architecture
+
+Every domain has two views of the same data model:
+
+<table>
+<tr>
+<th width="15%">Stage</th>
+<th width="10%">Color</th>
+<th width="55%">What It Shows</th>
+<th width="20%">Editable?</th>
+</tr>
+<tr>
+<td><strong>Logical</strong></td>
+<td>Blue</td>
+<td>Your design intent — full column definitions, data types, PK/FK/NK badges, SCD types, grain, model roles, rationale</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Physical</strong></td>
+<td>Green</td>
+<td>What dbt actually built — auto-derived from <code>manifest.json</code>, relationships from dbt tests, cardinality from uniqueness tests</td>
+<td>Positions only</td>
+</tr>
+</table>
+
+<br>
+
+Switch stages with the toolbar or <kbd>Alt</kbd>+<kbd>1</kbd> / <kbd>Alt</kbd>+<kbd>2</kbd>. Toggle the **discrepancy overlay** to see exactly where your design and warehouse diverge — extra columns, missing models, type mismatches, and cardinality differences are highlighted directly on the graph.
+
+**The physical stage has no files on disk.** It's computed at runtime from `manifest.json`:
+
+- **Models** = logical models that also exist in the manifest
+- **Relationships** = derived from `relationships` / `relationships_where` test nodes (not from logical)
+- **Cardinality** = inferred from `unique` and `unique_combination_of_columns` tests
+
+<!-- TODO: Screenshot showing logical (blue) vs physical (green) stage comparison -->
+
+---
+
+## Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Visual Modeling**
+
+- Interactive ERD canvas with custom model nodes
+- Drag-to-relate — long-press a column, drag to create FK relationships
+- ELK auto-layout with manual repositioning (<kbd>Shift</kbd>+<kbd>L</kbd>)
+- Model templates — dimension, fact, bridge, SCD2, blank
+- Detail panel for columns, grain, rationale, model role
+
+</td>
+<td width="50%" valign="top">
+
+**dbt Integration**
+
+- Stream-parses `manifest.json` (handles 40MB+ files)
+- Domain tagging — auto-tags dbt YAML with `domain:{name}`
+- Run scoped builds: `dbt build --select tag:domain:customer-360`
+- Tag reconciliation to fix drift between domains and YAML
+- Physical relationships derived from dbt test nodes
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Discrepancy Comparison**
+
+- Cross-stage overlay with color-coded labels
+- Status: `matched` `extra` `missing` `type-mismatch` `cardinality-mismatch`
+- Ghost nodes for missing models (translucent)
+- Sync reconciliation via AI (26 action types)
+
+</td>
+<td width="50%" valign="top">
+
+**Organization**
+
+- Medallion layers — bronze, silver, gold, platinum, custom
+- Domain scoping prevents conformed dims from pulling in the full graph
+- Full undo/redo via VS Code `WorkspaceEdit`
+- Central model store — one YAML per model, referenced across domains
+
+</td>
+</tr>
+</table>
+
+---
+
+## Getting Started
+
+**Prerequisites:** VS Code 1.85+ &bull; a dbt project with `dbt_project.yml` &bull; `manifest.json` in `target/`
+
+<table>
+<tr>
+<td width="40" align="center"><strong>1</strong></td>
+<td><strong>Open your dbt project</strong> in VS Code — the extension activates on <code>dbt_project.yml</code></td>
+</tr>
+<tr>
+<td align="center"><strong>2</strong></td>
+<td><strong>Click the ERD Studio icon</strong> in the Activity Bar</td>
+</tr>
+<tr>
+<td align="center"><strong>3</strong></td>
+<td><strong>Initialize the directory</strong> — follow the prompt to create the <code>erd-studio/</code> folder</td>
+</tr>
+<tr>
+<td align="center"><strong>4</strong></td>
+<td><strong>Create a domain</strong> — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; <code>dbt: Create Semantic Domain</code></td>
+</tr>
+<tr>
+<td align="center"><strong>5</strong></td>
+<td><strong>Design</strong> — right-click to add models, define columns in the detail panel, drag to relate</td>
+</tr>
+<tr>
+<td align="center"><strong>6</strong></td>
+<td><strong>Install the AI harness</strong> — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; <code>dbt: Install AI Coding Harness</code></td>
+</tr>
+</table>
+
+---
 
 ## Directory Structure
 
-ERD Studio stores domain files alongside your dbt project:
-
 ```
 erd-studio/
-├── layers.json              ← layer configuration
-├── templates/               ← model templates
+├── layers.json              # layer config
+├── templates/               # custom model templates (optional)
+├── logical-models/          # one YAML per model (central store)
+│   ├── dim_customer.yml
+│   └── fct_orders.yml
 ├── silver/
-│   ├── customer-360.json    ← domain file (logical stage)
+│   ├── customer-360.json    # domain file
 │   └── orders.json
 └── gold/
     └── reporting.json
 ```
 
-Each domain is a single JSON file containing the `logical` section and a `viewConfig` for node positions. The physical stage has no files on disk -- it is derived from `manifest.json` at runtime.
+Domain files are JSON — they reference models and define relationships. Model definitions are YAML — they hold columns, types, and metadata. The AI harness teaches your assistant exactly which file to edit for any task.
 
-## Getting Started
+---
 
-1. **Open your dbt project** in VS Code. The extension activates when it detects `dbt_project.yml`.
-2. **Click the ERD Studio icon** in the Activity Bar (sidebar).
-3. **Set up the directory** -- follow the prompt to initialize the `erd-studio/` folder in your project.
-4. **Create your first domain** -- use the command palette (`Cmd+Shift+P`) and run **dbt: Create Semantic Domain**, then pick a name and layer.
-5. **Add models and columns** -- right-click the canvas to add models, then define columns in the detail panel.
-6. **Switch stages** -- use the toolbar tabs or `Alt+1/2` to move between Logical and Physical views.
+## Physical Cardinality
 
-For the Physical stage to populate, run `dbt compile` or `dbt build` so that `manifest.json` exists in your `target/` directory.
+ERD Studio derives physical relationships from dbt test nodes. Cardinality is inferred from uniqueness tests:
 
-## Physical Stage — How It Works
-
-The physical stage is entirely derived from the dbt manifest at runtime. Nothing is stored on disk for the physical stage.
-
-### Models
-
-Physical models are the intersection of your **logical domain** and the **manifest**: only logical models that also exist in `manifest.json` appear. Columns come from the manifest (data types, descriptions), while PK/FK/NK flags, SCD types, grain, model role, and rationale are carried forward from the logical domain.
-
-### Relationships
-
-Physical relationships are derived from **dbt relationship tests** in the manifest — they are **not** copied from the logical stage. When you define a `relationships` test in your dbt YAML schema, it appears in the manifest as a test node. ERD Studio extracts these and renders them as edges.
-
-This means: if a relationship exists in your logical model but has no `relationships` test in dbt, it will **not** appear in the physical stage. This is intentional — the physical stage reflects what dbt actually validates.
-
-**Supported test types:**
-- `relationships` (dbt built-in)
-- `relationships_where` (dbt_utils) and other custom tests with the same kwargs signature (`column_name`, `field`, `to`)
-
-**Example dbt YAML that produces a physical relationship:**
-
-```yaml
-models:
-  - name: fct_orders
-    columns:
-      - name: customer_id
-        tests:
-          - relationships:
-              to: ref('dim_customer')
-              field: customer_id
-```
-
-### Cardinality
-
-dbt's `relationships` test only validates referential integrity — it doesn't encode cardinality. ERD Studio derives cardinality from **uniqueness tests** in the manifest:
-
-| FK column has `unique` test? | PK column has `unique` test? | Derived Cardinality |
-|------------------------------|------------------------------|---------------------|
+| FK has `unique`? | PK has `unique`? | Cardinality |
+|:---:|:---:|---|
 | No | Yes | `many-to-one` |
 | Yes | Yes | `one-to-one` |
 | Yes | No | `one-to-many` |
 | No | No | `many-to-many` |
 
-**No `unique` test = "many" side.** If you want `many-to-one` to appear on the physical model, add a `unique` test to the PK column on the referenced model:
+No `unique` test = "many" side. Composite keys via `unique_combination_of_columns` are supported.
 
 ```yaml
+# Add a unique test to make this side "one"
 models:
   - name: dim_customer
     columns:
       - name: customer_id
         tests:
-          - unique       # ← Makes this side "one"
+          - unique
           - not_null
 ```
 
-**Composite keys** are also supported via `dbt_utils.unique_combination_of_columns`. If all columns in a composite unique group are covered by relationship tests between the same model pair, that side is treated as "one".
-
-### Domain scoping
-
-Physical relationships are scoped to models within the current domain. If `dim_customer` is a conformed dimension referenced by 50 models across your dbt project, only relationships to other models **in the same domain's logical stage** appear — preventing the graph from pulling in unrelated models.
-
-## AI Coding Harness
-
-ERD Studio can install its domain file schema reference into your repo so AI coding assistants understand the format and can create or validate models for you.
-
-**Command Palette** → `dbt: Install AI Coding Harness`
-
-Or click the robot icon in the ERD Studio sidebar title bar.
-
-| Harness | File Installed | Format |
-|---------|---------------|--------|
-| **Claude Code** | `.claude/skills/erd-studio/SKILL.md` | YAML frontmatter + Markdown skill |
-| **GitHub Copilot** | `.github/instructions/erd-studio.instructions.md` | YAML frontmatter with `applyTo` glob |
-| **Google Gemini** | `.gemini/styleguide.md` | Markdown with code review rules |
-| **OpenAI Codex** | `AGENTS.md` | Appended Markdown section |
-
-Each file contains the ERD Studio JSON schema reference — model structure, column metadata, relationships, naming conventions, and model roles — formatted for that assistant's native config format. Multi-select is supported: install to multiple harnesses in one action.
-
-## Domain Tagging
-
-When you add a model to a domain, ERD Studio automatically tags the model's dbt YAML schema file with a `domain:` prefixed tag. This lets you run dbt for a specific domain using tag selectors.
-
-**Example:** Adding `dim_customer` to the `customer-360` domain produces:
-
-```yaml
-models:
-  - name: dim_customer
-    config:
-      tags:
-        - domain:customer-360
-```
-
-You can then run dbt scoped to that domain:
-
-```bash
-dbt build --select tag:domain:customer-360
-```
-
-Tags are managed automatically:
-- **Added** when a model is added to a domain (via create or add-existing)
-- **Removed** when a model is removed from all domains that share that tag
-- **Undo/redo aware** — tag sync runs after any domain mutation
-- **Bulk reconciliation** — run `dbt: Reconcile All Domain Tags` from the command palette to fix any drift between domain files and YAML tags
-
-Models that belong to multiple domains receive multiple `domain:` tags. Removing a model from one domain only removes that specific tag — tags for other domains are preserved.
-
-## Discrepancy Overlay
-
-The discrepancy overlay lets you compare adjacent stages side by side:
-
-- **Physical vs Logical** -- See which columns or models exist in dbt but are missing from your logical design, and vice versa.
-
-Differences are highlighted directly on the graph: extra columns, missing columns, data type mismatches, and missing models (shown as ghost nodes).
-
-## Requirements
-
-- VS Code 1.85 or later
-- A dbt project with `dbt_project.yml`
-- `dbt compile` or `dbt build` to generate `manifest.json` (required for the Physical stage)
+---
 
 ## Settings
 
 | Setting | Description | Default |
 |---------|-------------|---------|
 | `dbtSemantic.projectPath` | Path to dbt project root | Auto-detected |
-| `dbtSemantic.semanticDir` | Relative path to ERD domain files | `erd-studio` |
+| `dbtSemantic.semanticDir` | Relative path to domain files | `erd-studio` |
+
+---
 
 ## Contributors
 
-| | Name | Contribution |
-|---|------|-------------|
-| <img src="https://github.com/jkweee.png" width="50" height="50" style="border-radius:50%"> | **Jason Kwe** ([@jkweee](https://github.com/jkweee)) | Core concept, UI/UX design |
-| <img src="https://github.com/ginny-jhg.png" width="50" height="50" style="border-radius:50%"> | **Ginny** ([@ginny-jhg](https://github.com/ginny-jhg)) | Auto-layout overhaul, depth partitioning |
+<table>
+<tr>
+<td align="center"><a href="https://github.com/jkweee"><img src="https://github.com/jkweee.png" width="60" height="60" alt="Jason Kwe" /><br><sub><b>Jason Kwe</b></sub></a><br><sub>Core concept, UI/UX</sub></td>
+<td align="center"><a href="https://github.com/ginny-jhg"><img src="https://github.com/ginny-jhg.png" width="60" height="60" alt="Ginny" /><br><sub><b>Ginny</b></sub></a><br><sub>Auto-layout, depth partitioning</sub></td>
+</tr>
+</table>
 
-## License
+---
 
-MIT
+<p align="center">
+  <sub>MIT License &bull; Made for the dbt community</sub>
+</p>
