@@ -269,7 +269,8 @@
     "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vscode-test"
+    "test:integration": "vscode-test",
+    "regen-fixtures": "tsx scripts/regen-fixtures.ts"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

@@ -24,6 +24,15 @@ erd-studio/
 
 **Key principle:** Models are defined ONCE in `logical-models/` and referenced from multiple domain files. Editing a model from any domain updates the shared definition.
 
+### Model Library (Sidebar)
+
+The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `logical-models/`. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
+
+- **Referenced models** show how many domains use them (e.g. "2 domains")
+- **Orphaned models** show a warning icon and "(unused)" — these exist as `.yml` files but are not in any domain's `logical.models[]` array
+
+**Important for AI agents:** Before saying a model "already exists in the ERD", check whether it is referenced by the target domain's `logical.models[]` array — not just whether the `.yml` file exists. A model file in `logical-models/` may be unused (orphaned) or only referenced by other domains.
+
 ## Domain File Structure
 
 **File:** `erd-studio/{layer}/{domain}.json`
@@ -35,8 +44,9 @@ erd-studio/
   "layer": "silver",
   "description": "Customer domain — master data and transaction history",
   "modelFolder": "models/silver",
+  "stubColumns": ["dim_project"],
   "logical": {
-    "models": ["dim_customer", "fct_sale", "dim_product"],
+    "models": ["dim_customer", "fct_sale", "dim_product", "dim_project"],
     "relationships": []
   },
   "viewConfig": {}
@@ -50,6 +60,7 @@ erd-studio/
 | `layer` | Yes | Layer name matching parent directory (e.g. `silver`, `gold`) |
 | `description` | No | Human-readable domain description |
 | `modelFolder` | No | Filter for "Add Existing Model" dialog (e.g. `models/silver`) |
+| `stubColumns` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
 | `logical.models` | Yes | Array of model name strings (references to `logical-models/*.yml`) |
 | `logical.relationships` | Yes | Array of relationship objects |
 | `viewConfig` | Yes | Root-level view settings. The extension auto-assigns positions for new models |
@@ -61,6 +72,24 @@ erd-studio/
 ```
 
 > **WARNING — Preserve existing positions:** When adding models to an existing domain file, do NOT clear or overwrite `viewConfig.positions`. The extension automatically computes positions for any new models that lack entries. Clearing existing positions will reset the user's carefully arranged layout.
+
+---
+
+## Editing Quick Reference
+
+**CRITICAL — Two files control the diagram.** Column data lives in the YAML; structural data lives in the JSON. You must edit the correct file for each operation.
+
+| User asks to... | Edit this file |
+|-----------------|---------------|
+| Add/remove/rename a column | `logical-models/{name}.yml` |
+| Change column type, PK/FK/NK flags, SCD type | `logical-models/{name}.yml` |
+| Change grain, modelRole, description, rationale | `logical-models/{name}.yml` |
+| Add a model to a domain diagram | Domain `.json` → add name to `logical.models[]` AND create `logical-models/{name}.yml` if it doesn't exist |
+| Remove a model from a domain | Domain `.json` → remove name from `logical.models[]` AND remove its relationships from `logical.relationships[]` |
+| Add/remove/edit a relationship | Domain `.json` → `logical.relationships[]` |
+| Change layout positions | Domain `.json` → `viewConfig.positions` |
+
+> **Common mistake:** Editing the `.yml` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the `.yml` AND adding the name string to the domain `.json`. Similarly, relationships are ONLY stored in the domain `.json`, never in the `.yml`.
 
 ---
 
@@ -189,12 +218,13 @@ Optional `rationale` object — all fields are optional strings. Omit the entire
 
 ## Physical Stage (Read-Only)
 
-The physical stage has **no files on disk**. It is derived at runtime from the dbt manifest (`target/manifest.json`):
+The physical stage has **no files on disk**. It is derived at runtime primarily from dbt `.yml` schema files, with optional enrichment from `target/manifest.json`:
 
-1. **Models**: Logical models that exist in the manifest appear in physical. Columns come from the manifest; PK/FK/NK flags, grain, modelRole, scdType, and additiveType carry forward from logical.
-2. **Relationships**: Derived from **dbt relationship tests** — not copied from logical. Each `relationships` test becomes an edge.
-3. **Cardinality**: Derived from **uniqueness tests** — no `unique` test = "many" side.
+1. **Models**: Logical models that have a corresponding `.yml` schema file appear in physical. Columns come from the `.yml` file; `data_type` is enriched from the manifest when available. PK/FK/NK flags, grain, modelRole, scdType, and additiveType carry forward from logical.
+2. **Relationships**: Derived from **dbt relationship tests declared in `.yml` files** — not copied from logical. Each `relationships` test becomes an edge.
+3. **Cardinality**: Derived from **uniqueness tests** in `.yml` files (and manifest when available) — no `unique` test = "many" side.
 4. **Scoping**: Only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
+5. **Fallback**: If no `.yml` files are found, the physical stage falls back to deriving entirely from `target/manifest.json`.
 
 ### Cardinality Derivation
 
@@ -228,4 +258,4 @@ When asked to execute a sync plan, or when `erd-studio/.sync-plan.json` exists:
 2. Read `erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 7 -->
+<!-- erd-studio-harness: 11 -->
