@@ -93,6 +93,26 @@ export function Legend() {
           </div>
         </section>
 
+        {/* Annotations Section */}
+        <section className="legend__section">
+          <h3 className="legend__section-title">Annotations</h3>
+          <div className="legend__items">
+            <div className="legend__item">
+              <div className="legend__annotation-card" />
+              <div className="legend__item-text">
+                <span className="legend__item-label">Build Note</span>
+                <span className="legend__item-desc">Temporary note on canvas</span>
+              </div>
+            </div>
+            <div className="legend__item">
+              <svg className="legend__edge-sample" viewBox="0 0 48 8" aria-hidden="true">
+                <line x1="0" y1="4" x2="48" y2="4" className="legend__edge legend__edge--annotation" />
+              </svg>
+              <span className="legend__item-desc">Note linked to model</span>
+            </div>
+          </div>
+        </section>
+
         {/* Cardinality Section */}
         <section className="legend__section">
           <h3 className="legend__section-title">Cardinality</h3>

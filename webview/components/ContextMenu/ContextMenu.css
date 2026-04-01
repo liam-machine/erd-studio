@@ -375,3 +375,39 @@
   border: 1px solid var(--panel-border);
   color: var(--editor-fg);
 }
+
+/* ---------------------------------------------------------------------------
+   Annotation context menu
+   --------------------------------------------------------------------------- */
+
+.context-menu__color-swatches {
+  display: flex;
+  gap: 4px;
+}
+
+.context-menu__color-swatch {
+  width: 18px;
+  height: 18px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+  padding: 0;
+}
+
+.context-menu__color-swatch:hover {
+  border-color: var(--focus-border);
+  transform: scale(1.15);
+}
+
+.context-menu__link-select {
+  flex: 1;
+  padding: 3px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}

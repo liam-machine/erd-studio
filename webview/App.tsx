@@ -31,6 +31,8 @@ import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
+import { AnnotationNode } from './components/Graph/AnnotationNode';
+import { AnnotationEdge } from './components/Graph/AnnotationEdge';
 import { DragLine } from './components/Graph/DragLine';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { StatusBar } from './components/Toolbar/StatusBar';
@@ -46,7 +48,7 @@ import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { transformDomain } from './lib/graphTransformer';
 import { stageNodeColor } from './lib/stageColors';
-import type { ModelFlowNode, FkFlowEdge } from './types/graph';
+import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from './types/graph';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,10 +59,10 @@ import type { ModelFlowNode, FkFlowEdge } from './types/graph';
 // ---------------------------------------------------------------------------
 
 /** Custom node types for React Flow — must be memoised or stable. */
-const nodeTypes: NodeTypes = { model: ModelNode };
+const nodeTypes: NodeTypes = { model: ModelNode, annotation: AnnotationNode };
 
 /** Custom edge types for React Flow — must be memoised or stable. */
-const edgeTypes: EdgeTypes = { fk: FkEdge };
+const edgeTypes: EdgeTypes = { fk: FkEdge, annotationLink: AnnotationEdge };
 
 function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
@@ -97,8 +99,14 @@ function EditorCanvas() {
   const clearFkDialogEditData = useEditorStore((s) => s.clearFkDialogEditData);
   // Context menu state
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
+  const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  const openAnnotationContextMenu = useEditorStore((s) => s.openAnnotationContextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const contextMenu = useEditorStore((s) => s.contextMenu);
+  const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
+  const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
+  const updateAnnotationLinkDrag = useEditorStore((s) => s.updateAnnotationLinkDrag);
+  const endAnnotationLinkDrag = useEditorStore((s) => s.endAnnotationLinkDrag);
   // Search state (F402)
   const searchQuery = useEditorStore((s) => s.searchQuery);
   const focusSearchInput = useEditorStore((s) => s.focusSearchInput);
@@ -145,7 +153,7 @@ function EditorCanvas() {
   // State persistence (zoom, pan, selection, mode, detail panel, expansion)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
     useStatePersistence();
-  const { setViewport: setReactFlowViewport } = useReactFlow();
+  const { setViewport: setReactFlowViewport, screenToFlowPosition } = useReactFlow();
 
   // Toast notification for invalid selection after restore
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -453,23 +461,27 @@ function EditorCanvas() {
       const connectedNodeIds = new Set<string>();
       if (currentSelectedNode) {
         connectedNodeIds.add(currentSelectedNode);
-        // Find all nodes connected to the selected node via edges
+        // Find all nodes connected to the selected node via edges (FK edges only)
         newEdges.forEach((edge) => {
-          if (edge.data) {
-            if (edge.data.fromModel === currentSelectedNode) {
-              connectedNodeIds.add(edge.data.toModel);
+          if (edge.type === 'fk' && edge.data) {
+            const fkData = edge.data as FkFlowEdge['data'];
+            if (fkData && fkData.fromModel === currentSelectedNode) {
+              connectedNodeIds.add(fkData.toModel);
             }
-            if (edge.data.toModel === currentSelectedNode) {
-              connectedNodeIds.add(edge.data.fromModel);
+            if (fkData && fkData.toModel === currentSelectedNode) {
+              connectedNodeIds.add(fkData.fromModel);
             }
           }
         });
       } else if (selectedEdge) {
         // Edge selection: only the two endpoint models stay bright
         const edge = newEdges.find((e) => e.id === selectedEdge);
-        if (edge?.data) {
-          connectedNodeIds.add(edge.data.fromModel);
-          connectedNodeIds.add(edge.data.toModel);
+        if (edge?.type === 'fk' && edge.data) {
+          const fkData = edge.data as FkFlowEdge['data'];
+          if (fkData) {
+            connectedNodeIds.add(fkData.fromModel);
+            connectedNodeIds.add(fkData.toModel);
+          }
         }
       }
 
@@ -478,7 +490,12 @@ function EditorCanvas() {
       const hasSelection = currentSelectedNode !== null || selectedEdge !== null;
       const query = searchQuery.trim() ? searchQuery.toLowerCase() : '';
       newNodes = newNodes.map((node) => {
-        const searchDimmed = query ? !node.data.modelName.toLowerCase().includes(query) : false;
+        if (node.type === 'annotation') {
+          // Annotations: not search-dimmable, not selection-dimmable
+          return node;
+        }
+        const modelData = node.data as ModelFlowNode['data'];
+        const searchDimmed = query ? !modelData.modelName.toLowerCase().includes(query) : false;
         const selectionDimmed = hasSelection && !connectedNodeIds.has(node.id);
 
         return {
@@ -495,18 +512,23 @@ function EditorCanvas() {
         };
       });
 
-      // Apply selection dimming to edges.
+      // Apply selection dimming to edges (FK edges only).
       // For node selection: an edge is bright only if both endpoints are in the connected set.
       // For edge selection: only the selected edge stays bright.
-      newEdges = newEdges.map((edge) => ({
-        ...edge,
-        data: edge.data ? {
-          ...edge.data,
-          dimmed: hasSelection && (selectedEdge
-            ? edge.id !== selectedEdge
-            : !connectedNodeIds.has(edge.data.fromModel) || !connectedNodeIds.has(edge.data.toModel)),
-        } : edge.data,
-      }));
+      newEdges = newEdges.map((edge) => {
+        if (edge.type !== 'fk' || !edge.data) return edge;
+        const fkData = edge.data as FkFlowEdge['data'];
+        if (!fkData) return edge;
+        return {
+          ...edge,
+          data: {
+            ...fkData,
+            dimmed: hasSelection && (selectedEdge
+              ? edge.id !== selectedEdge
+              : !connectedNodeIds.has(fkData.fromModel) || !connectedNodeIds.has(fkData.toModel)),
+          },
+        };
+      });
 
       // If we have a selected node, preserve the selection in the new nodes
       if (currentSelectedNode) {
@@ -555,9 +577,10 @@ function EditorCanvas() {
     [setViewport],
   );
 
-  // Handle node clicks to open the detail panel.
+  // Handle node clicks to open the detail panel (model nodes only).
   const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: ModelFlowNode) => {
+    (_event: React.MouseEvent, node: ModelFlowNode | AnnotationFlowNode) => {
+      if (node.type === 'annotation') return; // Annotations don't open detail panel
       selectNode(node.id);
       setDetailPanelOpen(true);
       setHighlightedColumns(new Set());
@@ -568,7 +591,8 @@ function EditorCanvas() {
 
   // Handle edge clicks to highlight the FK columns involved and dim unrelated nodes/edges.
   const onEdgeClick = useCallback(
-    (_event: React.MouseEvent, edge: FkFlowEdge) => {
+    (_event: React.MouseEvent, edge: FkFlowEdge | AnnotationFlowEdge) => {
+      if (edge.type !== 'fk') return; // Annotation link edges are not interactive
       if (edge.data) {
         const cols = new Set<string>();
         cols.add(`${edge.data.fromModel}:${edge.data.fromColumn}`);
@@ -640,12 +664,81 @@ function EditorCanvas() {
     };
   }, [openFkDialogWithPrefill, setToastMessage, domain?.readOnly]);
 
+  // Handle annotation drag-to-link: mouse move updates the drag line,
+  // mouse up on a model node completes the link.
+  useEffect(() => {
+    if (!annotationLinkDrag) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      updateAnnotationLinkDrag(e.clientX, e.clientY);
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      // Check if we dropped on a model node
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      const modelNode = target?.closest('.react-flow__node-model');
+      if (modelNode) {
+        const modelId = modelNode.getAttribute('data-id');
+        if (modelId) {
+          vscode.postMessage({
+            type: 'updateAnnotation',
+            payload: { id: annotationLinkDrag.annotationId, linkedModel: modelId },
+          });
+        }
+      }
+      endAnnotationLinkDrag();
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [annotationLinkDrag, updateAnnotationLinkDrag, endAnnotationLinkDrag, vscode]);
+
+  // Handle double-click on blank canvas to create a new annotation
+  const onPaneDoubleClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (domain?.readOnly) return;
+      // Only trigger on actual pane clicks, not double-clicks that bubbled from nodes
+      const target = event.target as HTMLElement;
+      if (!target.classList.contains('react-flow__pane')) return;
+
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const id = crypto.randomUUID();
+      vscode.postMessage({
+        type: 'addAnnotation',
+        payload: { id, text: '', x: Math.round(position.x), y: Math.round(position.y) },
+      });
+      setEditingAnnotationId(id);
+    },
+    [domain?.readOnly, screenToFlowPosition, vscode, setEditingAnnotationId],
+  );
+
+  // Handle right-click on nodes (model or annotation) to show context menu
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: ModelFlowNode | AnnotationFlowNode) => {
+      event.preventDefault();
+      if (node.type === 'annotation') {
+        const annData = (node as AnnotationFlowNode).data;
+        openAnnotationContextMenu(event.clientX, event.clientY, annData.annotationId);
+      } else {
+        const modelData = (node as ModelFlowNode).data;
+        openNodeContextMenu(event.clientX, event.clientY, modelData.modelName);
+      }
+    },
+    [openAnnotationContextMenu, openNodeContextMenu],
+  );
+
   // Handle right-click on edges to show context menu (F401)
   const onEdgeContextMenu = useCallback(
-    (event: React.MouseEvent, edge: FkFlowEdge) => {
+    (event: React.MouseEvent, edge: FkFlowEdge | AnnotationFlowEdge) => {
       event.preventDefault();
-      if (edge.data) {
-        openEdgeContextMenu(event.clientX, event.clientY, edge.data);
+      if (edge.type !== 'fk') return; // Annotation link edges don't have context menu
+      const fkData = edge.data as NonNullable<FkFlowEdge['data']>;
+      if (fkData) {
+        openEdgeContextMenu(event.clientX, event.clientY, fkData);
       }
     },
     [openEdgeContextMenu],
@@ -690,12 +783,15 @@ function EditorCanvas() {
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
         onPaneClick={handlePaneClick}
+        onDoubleClick={onPaneDoubleClick}
+        onNodeContextMenu={onNodeContextMenu}
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
         onEdgeContextMenu={onEdgeContextMenu}
         fitView={!shouldSkipFitView}
         minZoom={0.05}
         selectionMode={SelectionMode.Partial}
+        zoomOnDoubleClick={domain.readOnly}
         nodesDraggable={domain.positionDraggable ?? !domain.readOnly}
         panOnDrag={!shiftHeld}
         selectionOnDrag={shiftHeld && !domain.readOnly}
@@ -709,6 +805,13 @@ function EditorCanvas() {
           pannable
           zoomable
           nodeColor={(node) => {
+            if (node.type === 'annotation') {
+              const colorMap: Record<string, string> = {
+                yellow: '#f59e0b', blue: '#3b82f6', green: '#22c55e',
+                pink: '#ec4899', orange: '#f97316',
+              };
+              return colorMap[(node as AnnotationFlowNode).data.color] ?? '#f59e0b';
+            }
             const d = (node as ModelFlowNode).data;
             return stageNodeColor(d.stage, d.isGhost);
           }}
@@ -723,7 +826,7 @@ function EditorCanvas() {
           nodes={nodes}
           edges={edges}
           allExpanded={allExpanded}
-          onExpandAll={() => expandAll(nodes.map((n) => n.id))}
+          onExpandAll={() => expandAll(nodes.filter((n) => n.type === 'model').map((n) => n.id))}
           onCollapseAll={collapseAll}
         />
         <StatusBar />

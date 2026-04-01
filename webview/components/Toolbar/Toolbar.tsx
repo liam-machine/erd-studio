@@ -28,7 +28,7 @@ import {
   type LayoutDirection,
 } from '../../lib/elkLayout';
 import { StageTabs } from './StageTabs';
-import type { ModelFlowNode, FkFlowEdge } from '../../types/graph';
+import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '../../types/graph';
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './Toolbar.css';
@@ -49,8 +49,8 @@ const LAYER_ABBREV_FALLBACK: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 interface ToolbarProps {
-  nodes: ModelFlowNode[];
-  edges: FkFlowEdge[];
+  nodes: (ModelFlowNode | AnnotationFlowNode)[];
+  edges: (FkFlowEdge | AnnotationFlowEdge)[];
   /** Whether all columns are currently expanded. */
   allExpanded: boolean;
   /** Expand all columns in all nodes. */
@@ -65,7 +65,8 @@ interface ToolbarProps {
 
 export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll }: ToolbarProps) {
   const vscode = useVsCodeApi();
-  const { zoomIn, zoomOut, fitView, getNode } = useReactFlow();
+  const reactFlowInstance = useReactFlow();
+  const { zoomIn, zoomOut, fitView, getNode } = reactFlowInstance;
   const domain = useEditorStore((s) => s.domain);
   const setDomain = useEditorStore((s) => s.setDomain);
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
@@ -114,7 +115,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toLowerCase();
     return nodes
-      .filter((node) => node.data.modelName.toLowerCase().includes(query))
+      .filter((node) => node.type === 'model' && (node.data as ModelFlowNode['data']).modelName.toLowerCase().includes(query))
       .map((node) => node.id);
   }, [searchQuery, nodes]);
 
@@ -276,6 +277,21 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     setNewFkDialogOpen(true);
   }, [setNewFkDialogOpen]);
 
+  const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
+  const handleNewAnnotation = useCallback(() => {
+    setModelDropdownOpen(false);
+    // Place annotation near the center of the viewport
+    const { x, y, zoom } = reactFlowInstance.getViewport();
+    const viewportCenterX = (-x + window.innerWidth / 2) / zoom;
+    const viewportCenterY = (-y + window.innerHeight / 2) / zoom;
+    const id = crypto.randomUUID();
+    vscode.postMessage({
+      type: 'addAnnotation',
+      payload: { id, text: '', x: Math.round(viewportCenterX), y: Math.round(viewportCenterY) },
+    });
+    setEditingAnnotationId(id);
+  }, [vscode, setEditingAnnotationId]);
+
   // --- Auto Layout handlers ------------------------------------------------
 
   const runLayout = useCallback(async () => {
@@ -290,9 +306,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       const effectiveBound = partitionStrategy === 'auto'
         ? detectLayerBound(nodes.length)
         : layerBound;
+      // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
+      const modelNodes = nodes.filter((n): n is import('../../types/graph').ModelFlowNode => n.type === 'model');
+      const fkEdges = edges.filter((e): e is import('../../types/graph').FkFlowEdge => e.type === 'fk');
       const positions = await runElkLayout(
-        nodes,
-        edges,
+        modelNodes,
+        fkEdges,
         {
           ...domain.viewConfig.layoutOptions,
           'elk.direction': layoutDirection,
@@ -511,7 +530,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                 <div className="toolbar__lp-section">
                   <span className="toolbar__lp-label">Grouping</span>
                   {(() => {
-                    const resolved = partitionStrategy === 'auto' ? detectStrategy(nodes, edges) : null;
+                    const modelOnly = nodes.filter((n): n is ModelFlowNode => n.type === 'model');
+                    const fkOnly = edges.filter((e): e is FkFlowEdge => e.type === 'fk');
+                    const resolved = partitionStrategy === 'auto' ? detectStrategy(modelOnly, fkOnly) : null;
                     return (
                       <div className="toolbar__lp-track">
                         {([
@@ -537,7 +558,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                   })()}
                   <span className="toolbar__lp-desc">
                     {partitionStrategy === 'auto' ? (() => {
-                      const r = detectStrategy(nodes, edges);
+                      const r = detectStrategy(nodes.filter((n): n is ModelFlowNode => n.type === 'model'), edges.filter((e): e is FkFlowEdge => e.type === 'fk'));
                       return r === 'role'
                         ? 'Using Model type — your models have roles assigned.'
                         : r === 'depth'
@@ -753,6 +774,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       role="menuitem"
                     >
                       New Relationship
+                    </button>
+                    <div className="toolbar__dropdown-divider" />
+                    <button
+                      className="toolbar__dropdown-item"
+                      onClick={handleNewAnnotation}
+                      role="menuitem"
+                    >
+                      New Note
                     </button>
                   </div>
                 )}

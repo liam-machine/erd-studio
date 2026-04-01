@@ -20,6 +20,8 @@ import type {
 import type {
   ModelFlowNode,
   FkFlowEdge,
+  AnnotationFlowNode,
+  AnnotationFlowEdge,
   ColumnDisplay,
 } from '../types/graph';
 // ---------------------------------------------------------------------------
@@ -27,8 +29,8 @@ import type {
 // ---------------------------------------------------------------------------
 
 export interface TransformResult {
-  nodes: ModelFlowNode[];
-  edges: FkFlowEdge[];
+  nodes: (ModelFlowNode | AnnotationFlowNode)[];
+  edges: (FkFlowEdge | AnnotationFlowEdge)[];
 }
 
 /** Optional parameters for discrepancy overlay rendering. */
@@ -127,7 +129,7 @@ export function transformDomain(
 
   // --- Nodes ---------------------------------------------------------------
 
-  const nodes: ModelFlowNode[] = models.map((model) => {
+  const nodes: (ModelFlowNode | AnnotationFlowNode)[] = models.map((model) => {
     const columns = mapColumns(model);
     const position = positionMap.get(model.name) ?? DEFAULT_POSITION;
     const disc = discrepancyMap.get(model.name);
@@ -205,7 +207,7 @@ export function transformDomain(
   // Only include edges where both endpoints exist in the models/ghost nodes.
   const allNodeNames = new Set(positionMap.keys());
 
-  const edges: FkFlowEdge[] = relationships
+  const edges: (FkFlowEdge | AnnotationFlowEdge)[] = relationships
     .filter((rel) => allNodeNames.has(rel.fromModel) && allNodeNames.has(rel.toModel))
     .map((rel) => {
       const sourcePos = positionMap.get(rel.fromModel)!;
@@ -262,6 +264,46 @@ export function transformDomain(
           },
         });
       }
+    }
+  }
+
+  // --- Annotations ----------------------------------------------------------
+
+  const annotations = domain.viewConfig.annotations ?? [];
+  for (const ann of annotations) {
+    const annNodeId = `annotation-${ann.id}`;
+    nodes.push({
+      id: annNodeId,
+      type: 'annotation' as const,
+      position: { x: ann.x, y: ann.y },
+      data: {
+        annotationId: ann.id,
+        text: ann.text,
+        color: ann.color ?? 'yellow',
+        ...(ann.width != null ? { width: ann.width } : {}),
+        ...(ann.height != null ? { height: ann.height } : {}),
+        ...(ann.linkedModel ? { linkedModel: ann.linkedModel } : {}),
+        ...(readOnly ? { readOnly: true } : {}),
+      },
+    } as AnnotationFlowNode);
+
+    // Dashed edge to linked model (only if model exists in node set)
+    if (ann.linkedModel && positionMap.has(ann.linkedModel)) {
+      const annPos = { x: ann.x, y: ann.y };
+      const modelPos = positionMap.get(ann.linkedModel)!;
+      const { sourceSide, targetSide } = pickHandleSides(annPos, modelPos);
+      edges.push({
+        id: `ann-link-${ann.id}`,
+        type: 'annotationLink' as const,
+        source: annNodeId,
+        target: ann.linkedModel,
+        sourceHandle: `node-${sourceSide}-src`,
+        targetHandle: `node-${targetSide}-tgt`,
+        data: {
+          annotationId: ann.id,
+          targetModel: ann.linkedModel,
+        },
+      } as AnnotationFlowEdge);
     }
   }
 

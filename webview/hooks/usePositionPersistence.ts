@@ -20,7 +20,7 @@ import {
 import { useVsCodeApi } from './useVsCodeApi';
 import { useEditorStore } from '../store/editorStore';
 import type { WebviewMessage } from './useMessageBus';
-import type { ModelFlowNode } from '../types/graph';
+import type { ModelFlowNode, AnnotationFlowNode } from '../types/graph';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -76,23 +76,48 @@ export function usePositionPersistence(): {
       // Flush pending changes to extension host.
       if (pendingChangesRef.current.size > 0 && domainRef.current) {
         const latestDomain = domainRef.current;
-        const changedPositions = Object.fromEntries(pendingChangesRef.current);
 
-        // Send only the delta — extension merges over disk positions to avoid
-        // concurrent tabs clobbering each other's saves.
-        const message: WebviewMessage = {
-          type: 'updatePositions',
-          payload: { positions: changedPositions },
-        };
-        vscode.postMessage(message);
+        // Partition: annotation nodes vs model nodes.
+        const modelPositions: Record<string, { x: number; y: number }> = {};
+        const annotationPositions: Array<{ id: string; x: number; y: number }> = [];
+
+        for (const [nodeId, pos] of pendingChangesRef.current) {
+          if (nodeId.startsWith('annotation-')) {
+            annotationPositions.push({ id: nodeId.slice('annotation-'.length), x: pos.x, y: pos.y });
+          } else {
+            modelPositions[nodeId] = pos;
+          }
+        }
+
+        if (Object.keys(modelPositions).length > 0) {
+          const message: WebviewMessage = {
+            type: 'updatePositions',
+            payload: { positions: modelPositions },
+          };
+          vscode.postMessage(message);
+        }
+
+        for (const ann of annotationPositions) {
+          vscode.postMessage({
+            type: 'updateAnnotationPosition',
+            payload: ann,
+          } as WebviewMessage);
+        }
 
         // Optimistic local update with full merge for correct UI rendering
         const existingPositions = latestDomain.viewConfig.positions ?? {};
+        const updatedAnnotations = annotationPositions.length > 0 && latestDomain.viewConfig.annotations
+          ? latestDomain.viewConfig.annotations.map((ann) => {
+              const moved = annotationPositions.find((a) => a.id === ann.id);
+              return moved ? { ...ann, x: moved.x, y: moved.y } : ann;
+            })
+          : latestDomain.viewConfig.annotations;
         setDomain({
           ...latestDomain,
           viewConfig: {
             ...latestDomain.viewConfig,
-            positions: { ...existingPositions, ...changedPositions },
+            positions: { ...existingPositions, ...modelPositions },
+            ...(updatedAnnotations ? { annotations: updatedAnnotations } : {}),
           },
         });
 
@@ -105,7 +130,7 @@ export function usePositionPersistence(): {
     (changes: NodeChange<Node>[]) => {
       // Apply all changes to nodes (handles selection, position, etc.).
       const updatedNodes = applyNodeChanges(changes, nodesRef.current);
-      setNodes(updatedNodes as ModelFlowNode[]);
+      setNodes(updatedNodes as (ModelFlowNode | AnnotationFlowNode)[]);
 
       // Extract position changes for persistence.
       const dragEndChanges = changes.filter(
@@ -127,10 +152,16 @@ export function usePositionPersistence(): {
       }
 
       const savedPositions = currentDomain.viewConfig.positions ?? {};
+      // Build annotation position lookup for no-op detection
+      const annotationPositions = new Map(
+        (currentDomain.viewConfig.annotations ?? []).map((a) => [`annotation-${a.id}`, { x: a.x, y: a.y }]),
+      );
 
       for (const change of dragEndChanges) {
         const newPos = change.position;
-        const oldPos = savedPositions[change.id];
+        const oldPos = change.id.startsWith('annotation-')
+          ? annotationPositions.get(change.id)
+          : savedPositions[change.id];
 
         // Skip if position unchanged (avoid no-op writes).
         if (
@@ -159,23 +190,49 @@ export function usePositionPersistence(): {
             return;
           }
 
-          const changedPositions = Object.fromEntries(pendingChangesRef.current);
+          // Partition changes: annotation nodes vs model nodes.
+          const modelPositions: Record<string, { x: number; y: number }> = {};
+          const annotationPositions: Array<{ id: string; x: number; y: number }> = [];
 
-          // Send only the delta — extension merges over disk positions to avoid
-          // concurrent tabs clobbering each other's saves.
-          const message: WebviewMessage = {
-            type: 'updatePositions',
-            payload: { positions: changedPositions },
-          };
-          vscode.postMessage(message);
+          for (const [nodeId, pos] of pendingChangesRef.current) {
+            if (nodeId.startsWith('annotation-')) {
+              annotationPositions.push({ id: nodeId.slice('annotation-'.length), x: pos.x, y: pos.y });
+            } else {
+              modelPositions[nodeId] = pos;
+            }
+          }
+
+          // Send model position delta.
+          if (Object.keys(modelPositions).length > 0) {
+            const message: WebviewMessage = {
+              type: 'updatePositions',
+              payload: { positions: modelPositions },
+            };
+            vscode.postMessage(message);
+          }
+
+          // Send annotation position updates.
+          for (const ann of annotationPositions) {
+            vscode.postMessage({
+              type: 'updateAnnotationPosition',
+              payload: ann,
+            } as WebviewMessage);
+          }
 
           // Optimistic local update with full merge for correct UI rendering.
           const existingPositions = latestDomain.viewConfig.positions ?? {};
+          const updatedAnnotations = annotationPositions.length > 0 && latestDomain.viewConfig.annotations
+            ? latestDomain.viewConfig.annotations.map((ann) => {
+                const moved = annotationPositions.find((a) => a.id === ann.id);
+                return moved ? { ...ann, x: moved.x, y: moved.y } : ann;
+              })
+            : latestDomain.viewConfig.annotations;
           setDomain({
             ...latestDomain,
             viewConfig: {
               ...latestDomain.viewConfig,
-              positions: { ...existingPositions, ...changedPositions },
+              positions: { ...existingPositions, ...modelPositions },
+              ...(updatedAnnotations ? { annotations: updatedAnnotations } : {}),
             },
           });
 

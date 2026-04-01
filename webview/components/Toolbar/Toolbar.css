@@ -259,6 +259,12 @@
   border-bottom: 1px solid var(--panel-border);
 }
 
+.toolbar__dropdown-divider {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 0;
+}
+
 /* ---------------------------------------------------------------------------
    Search (F402)
    --------------------------------------------------------------------------- */

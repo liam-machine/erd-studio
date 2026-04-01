@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { FkEdgeData } from '../../types/graph';
-import type { Cardinality } from '../../../src/types/semantic';
+import type { AnnotationColor, Cardinality } from '../../../src/types/semantic';
 import type { FkDialogEditData } from '../../store/editorStore';
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import './ContextMenu.css';
@@ -233,6 +233,132 @@ export function ContextMenu() {
         <div className="context-menu__header">
           <span className="context-menu__title">{modelName}</span>
         </div>
+      </div>
+    );
+  }
+
+  // --- Annotation context menu ---
+  if (contextMenu.type === 'annotation') {
+    const { annotationId } = contextMenu;
+    const displayX = adjustedPosition?.x ?? contextMenu.x;
+    const displayY = adjustedPosition?.y ?? contextMenu.y;
+
+    const colorOptions: { value: AnnotationColor; label: string; swatch: string }[] = [
+      { value: 'yellow', label: 'Yellow', swatch: '#f59e0b' },
+      { value: 'blue', label: 'Blue', swatch: '#3b82f6' },
+      { value: 'green', label: 'Green', swatch: '#22c55e' },
+      { value: 'pink', label: 'Pink', swatch: '#ec4899' },
+      { value: 'orange', label: 'Orange', swatch: '#f97316' },
+    ];
+
+    // Find annotation's linked model from domain viewConfig
+    const annotation = domain?.viewConfig.annotations?.find((a) => a.id === annotationId);
+    const isLinked = !!annotation?.linkedModel;
+
+    const handleDeleteAnnotation = () => {
+      if (!confirmingDelete) {
+        setConfirmingDelete(true);
+      } else {
+        vscode.postMessage({ type: 'removeAnnotation', payload: { id: annotationId } });
+        closeContextMenu();
+      }
+    };
+
+    const handleColorChange = (color: AnnotationColor) => {
+      vscode.postMessage({ type: 'updateAnnotation', payload: { id: annotationId, color } });
+      closeContextMenu();
+    };
+
+    const handleLinkModel = (modelName: string) => {
+      vscode.postMessage({ type: 'updateAnnotation', payload: { id: annotationId, linkedModel: modelName } });
+      closeContextMenu();
+    };
+
+    const handleUnlink = () => {
+      vscode.postMessage({ type: 'updateAnnotation', payload: { id: annotationId, linkedModel: null } });
+      closeContextMenu();
+    };
+
+    return (
+      <div
+        ref={menuRef}
+        className="context-menu"
+        style={{
+          left: displayX,
+          top: displayY,
+          visibility: adjustedPosition ? 'visible' : 'hidden',
+        }}
+        role="menu"
+      >
+        <div className="context-menu__header">
+          <span className="context-menu__title">Note</span>
+          {!isReadOnly && (
+            <div className="context-menu__header-actions">
+              <button
+                className={`context-menu__delete-link${confirmingDelete ? ' context-menu__delete-link--confirming' : ''}`}
+                onClick={handleDeleteAnnotation}
+                role="menuitem"
+              >
+                {confirmingDelete ? 'Confirm?' : 'Remove'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {!isReadOnly && (
+          <div className="context-menu__info">
+            {/* Colour picker */}
+            <div className="context-menu__row">
+              <span className="context-menu__label">Color</span>
+              <div className="context-menu__color-swatches">
+                {colorOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className="context-menu__color-swatch"
+                    style={{ backgroundColor: opt.swatch }}
+                    title={opt.label}
+                    onClick={() => handleColorChange(opt.value)}
+                    aria-label={`Set color to ${opt.label}`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Link to model */}
+            {domain && domain.models.length > 0 && (
+              <div className="context-menu__row">
+                <span className="context-menu__label">Link to</span>
+                <select
+                  className="context-menu__link-select"
+                  value={annotation?.linkedModel ?? ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val) handleLinkModel(val);
+                    else handleUnlink();
+                  }}
+                >
+                  <option value="">None</option>
+                  {domain.models.map((m) => (
+                    <option key={m.name} value={m.name}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Unlink shortcut when linked */}
+            {isLinked && (
+              <div className="context-menu__row">
+                <button
+                  className="context-menu__edit-link"
+                  onClick={handleUnlink}
+                  role="menuitem"
+                >
+                  Unlink from {annotation?.linkedModel}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }

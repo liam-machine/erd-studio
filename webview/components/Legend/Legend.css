@@ -227,6 +227,30 @@
   stroke: var(--stage-physical);
 }
 
+.legend__edge--annotation {
+  stroke: var(--vscode-descriptionForeground, #999);
+  stroke-dasharray: 6 4;
+  stroke-opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------------------
+   Annotation card sample
+   --------------------------------------------------------------------------- */
+
+.legend__annotation-card {
+  width: 36px;
+  height: 24px;
+  border-radius: 3px;
+  border-left: 3px solid #f59e0b;
+  background: #fef3c7;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+body[data-vscode-theme-kind="vscode-dark"] .legend__annotation-card,
+body[data-vscode-theme-kind="vscode-high-contrast"] .legend__annotation-card {
+  background: #422006;
+}
+
 /* ---------------------------------------------------------------------------
    Cardinality display
    --------------------------------------------------------------------------- */
