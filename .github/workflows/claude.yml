@@ -15,10 +15,12 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
+    # Disabled: Anthropic API credit balance is too low. Re-enable by removing the `false &&` below.
     if: |
-      (github.event_name == 'pull_request') ||
+      false &&
+      ((github.event_name == 'pull_request') ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')))
     permissions:
       contents: write
       pull-requests: write
