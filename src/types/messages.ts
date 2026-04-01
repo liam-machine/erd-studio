@@ -14,7 +14,7 @@
 
 import type { DisplayDomain } from './display';
 import type { DiscrepancyReport } from './discrepancy';
-import type { Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole, Stage } from './semantic';
+import type { AnnotationColor, Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole, Stage } from './semantic';
 import type { GroundTruth } from './syncPlan';
 
 // ---------------------------------------------------------------------------
@@ -471,6 +471,63 @@ export interface LaunchClaudeSyncMessage {
   type: 'launchClaudeSync';
 }
 
+// ---------------------------------------------------------------------------
+// Webview → Extension: Annotation messages (build notes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Request to add a new canvas annotation (post-it note).
+ */
+export interface AddAnnotationMessage {
+  type: 'addAnnotation';
+  payload: {
+    id: string;
+    text: string;
+    x: number;
+    y: number;
+    color?: AnnotationColor;
+  };
+}
+
+/**
+ * Request to update an existing annotation's content or style.
+ * Partial patch — only fields being changed need to be present.
+ */
+export interface UpdateAnnotationMessage {
+  type: 'updateAnnotation';
+  payload: {
+    id: string;
+    text?: string;
+    color?: AnnotationColor;
+    linkedModel?: string | null;
+    width?: number;
+    height?: number;
+  };
+}
+
+/**
+ * Request to remove a canvas annotation.
+ */
+export interface RemoveAnnotationMessage {
+  type: 'removeAnnotation';
+  payload: {
+    id: string;
+  };
+}
+
+/**
+ * Request to update an annotation's position (sent on drag end).
+ * Separate from updateAnnotation for high-frequency drag performance.
+ */
+export interface UpdateAnnotationPositionMessage {
+  type: 'updateAnnotationPosition';
+  payload: {
+    id: string;
+    x: number;
+    y: number;
+  };
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
@@ -505,7 +562,11 @@ export type WebviewMessage =
   | CheckManifestStalenessMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage
-  | LaunchClaudeSyncMessage;
+  | LaunchClaudeSyncMessage
+  | AddAnnotationMessage
+  | UpdateAnnotationMessage
+  | RemoveAnnotationMessage
+  | UpdateAnnotationPositionMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

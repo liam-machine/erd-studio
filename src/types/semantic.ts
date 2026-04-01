@@ -159,12 +159,40 @@ export interface NodePosition {
 /** ELK layout options stored as string key-value pairs. */
 export type LayoutOptions = Record<string, string>;
 
+// ---------------------------------------------------------------------------
+// Annotations (build notes)
+// ---------------------------------------------------------------------------
+
+/** Colour options for canvas annotations. */
+export type AnnotationColor = 'yellow' | 'blue' | 'green' | 'pink' | 'orange';
+
+/**
+ * A free-form canvas annotation (post-it note).
+ *
+ * Annotations are temporary build notes — visible on the canvas while
+ * constructing a model, then removed once the work is done. They live
+ * in viewConfig (view-layer data), not in logical (semantic data).
+ */
+export interface Annotation {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  color?: AnnotationColor;
+  width?: number;
+  height?: number;
+  /** Optional link to a model — renders a dashed edge on the canvas. */
+  linkedModel?: string;
+}
+
 /** View configuration for a domain's graph editor. */
 export interface ViewConfig {
   showFkEdges?: boolean;
   layoutOptions?: LayoutOptions;
   /** Persisted node positions keyed by model name. */
   positions?: Record<string, NodePosition>;
+  /** Free-form canvas annotations (build notes). */
+  annotations?: Annotation[];
 }
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
 import type { DisplayDomain, ExistingModelPreview, ManifestModelPreview } from '../../src/types/display';
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
-import type { ModelFlowNode, FkFlowEdge, FkEdgeData } from '../types/graph';
+import type { ModelFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 import type { ModelTemplate, Stage } from '../../src/types/semantic';
 import type { GroundTruth } from '../../src/types/syncPlan';
 
@@ -53,8 +53,16 @@ export interface NodeContextMenu {
   modelName: string;
 }
 
+/** Context menu state for annotation right-click. */
+export interface AnnotationContextMenu {
+  type: 'annotation';
+  x: number;
+  y: number;
+  annotationId: string;
+}
+
 /** Union of context menu states. */
-export type ContextMenuState = EdgeContextMenu | NodeContextMenu | null;
+export type ContextMenuState = EdgeContextMenu | NodeContextMenu | AnnotationContextMenu | null;
 
 export interface EditorState {
   /** Current search query for filtering/highlighting nodes. */
@@ -86,9 +94,11 @@ export interface EditorState {
   /** Error message from the extension host, if any. */
   error: string | null;
   /** React Flow nodes (local state for selection/drag). */
-  nodes: ModelFlowNode[];
+  nodes: (ModelFlowNode | AnnotationFlowNode)[];
   /** React Flow edges. */
-  edges: FkFlowEdge[];
+  edges: (FkFlowEdge | AnnotationFlowEdge)[];
+  /** Annotation currently being edited (auto-focus textarea), or null. */
+  editingAnnotationId: string | null;
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: ModelTemplate[];
   /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
@@ -109,6 +119,14 @@ export interface EditorState {
   dragLineState: {
     sourceModelName: string;
     sourceColumnName: string;
+    sourceX: number;
+    sourceY: number;
+    currentX: number;
+    currentY: number;
+  } | null;
+  /** Active drag line state for linking an annotation to a model via drag. */
+  annotationLinkDrag: {
+    annotationId: string;
     sourceX: number;
     sourceY: number;
     currentX: number;
@@ -165,8 +183,12 @@ export interface EditorActions {
   setAddExistingModelDialogOpen: (open: boolean) => void;
   setDomain: (domain: DisplayDomain) => void;
   setError: (error: string | null) => void;
-  setNodes: (nodes: ModelFlowNode[]) => void;
-  setEdges: (edges: FkFlowEdge[]) => void;
+  setNodes: (nodes: (ModelFlowNode | AnnotationFlowNode)[]) => void;
+  setEdges: (edges: (FkFlowEdge | AnnotationFlowEdge)[]) => void;
+  /** Set the annotation currently being edited (auto-focus). */
+  setEditingAnnotationId: (id: string | null) => void;
+  /** Open context menu for an annotation at the given position. */
+  openAnnotationContextMenu: (x: number, y: number, annotationId: string) => void;
   setTemplates: (templates: ModelTemplate[]) => void;
   setManifestModels: (models: ManifestModelPreview[]) => void;
   setExistingModels: (models: ExistingModelPreview[]) => void;
@@ -194,6 +216,12 @@ export interface EditorActions {
   updateDragLineMouse: (mouseX: number, mouseY: number) => void;
   /** End drag line (on drop or cancel). */
   endDragLine: () => void;
+  /** Start drag line for annotation-to-model linking. */
+  startAnnotationLinkDrag: (annotationId: string, sourceX: number, sourceY: number) => void;
+  /** Update annotation link drag endpoint. */
+  updateAnnotationLinkDrag: (mouseX: number, mouseY: number) => void;
+  /** End annotation link drag. */
+  endAnnotationLinkDrag: () => void;
   /** Toggle the discrepancy overlay visibility. */
   setDiscrepancyVisible: (visible: boolean) => void;
   /** Set the stage being compared against. */
@@ -261,12 +289,14 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   templates: [],
   manifestModels: [],
   existingModels: [],
+  editingAnnotationId: null,
   contextMenu: null,
   _searchFocusFn: null,
   _autoLayoutFn: null,
   legendOpen: false,
   welcomeModalOpen: false,
   dragLineState: null,
+  annotationLinkDrag: null,
   discrepancyVisible: false,
   discrepancyCompareStage: null,
   discrepancyReport: null,
@@ -317,6 +347,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),
   setExistingModels: (models) => set({ existingModels: models }),
+  setEditingAnnotationId: (id) => set({ editingAnnotationId: id }),
+  openAnnotationContextMenu: (x, y, annotationId) => set({ contextMenu: { type: 'annotation', x, y, annotationId } }),
   openEdgeContextMenu: (x, y, data) => set({ contextMenu: { type: 'edge', x, y, data } }),
   openNodeContextMenu: (x, y, modelName) => set({ contextMenu: { type: 'node', x, y, modelName } }),
   closeContextMenu: () => set({ contextMenu: null }),
@@ -356,6 +388,15 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
         : {},
     ),
   endDragLine: () => set({ dragLineState: null }),
+  startAnnotationLinkDrag: (annotationId, sourceX, sourceY) =>
+    set({ annotationLinkDrag: { annotationId, sourceX, sourceY, currentX: sourceX, currentY: sourceY } }),
+  updateAnnotationLinkDrag: (mouseX, mouseY) =>
+    set((state) =>
+      state.annotationLinkDrag
+        ? { annotationLinkDrag: { ...state.annotationLinkDrag, currentX: mouseX, currentY: mouseY } }
+        : {},
+    ),
+  endAnnotationLinkDrag: () => set({ annotationLinkDrag: null }),
   setDiscrepancyVisible: (visible) => set({
     discrepancyVisible: visible,
     // Clear sync state when discrepancy overlay is hidden

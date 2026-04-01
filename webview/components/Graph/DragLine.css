@@ -17,3 +17,11 @@
   fill: none;
   opacity: 0.9;
 }
+
+.drag-line__path--annotation {
+  stroke: var(--vscode-descriptionForeground, #999);
+  stroke-width: 1.5;
+  stroke-dasharray: 6, 4;
+  opacity: 0.7;
+  pointer-events: none;
+}

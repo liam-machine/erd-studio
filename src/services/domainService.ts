@@ -466,6 +466,14 @@ export class DomainService {
       positions: obj.positions && typeof obj.positions === 'object' && !Array.isArray(obj.positions)
         ? (obj.positions as Record<string, { x: number; y: number }>)
         : undefined,
+      annotations: Array.isArray(obj.annotations)
+        ? (obj.annotations as unknown[]).filter(
+            (a): a is import('../types/semantic').Annotation => {
+              const r = a as Record<string, unknown>;
+              return typeof r?.id === 'string' && typeof r?.x === 'number' && typeof r?.y === 'number';
+            },
+          )
+        : undefined,
     };
   }
 }

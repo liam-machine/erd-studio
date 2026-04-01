@@ -242,6 +242,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
           'refreshManifest', 'undo', 'redo', 'updateViewConfig', 'dismissWelcome',
           'viewFile', 'checkManifestStaleness', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
+          'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'updateAnnotationPosition',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           return;
@@ -466,6 +467,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             if (payload) {
               await this.queueEdit(panelKey, () =>
                 this.handleReorderColumns(document, webviewPanel.webview, payload, activeStage));
+            }
+            break;
+          }
+          case 'addAnnotation': {
+            const payload = (message as { payload?: { id: string; text: string; x: number; y: number; color?: string } }).payload;
+            if (payload) {
+              await this.queueEdit(panelKey, () =>
+                this.handleAddAnnotation(document, webviewPanel.webview, payload));
+            }
+            break;
+          }
+          case 'updateAnnotation': {
+            const payload = (message as { payload?: { id: string; text?: string; color?: string; linkedModel?: string | null; width?: number; height?: number } }).payload;
+            if (payload) {
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateAnnotation(document, webviewPanel.webview, payload));
+            }
+            break;
+          }
+          case 'removeAnnotation': {
+            const payload = (message as { payload?: { id: string } }).payload;
+            if (payload) {
+              await this.queueEdit(panelKey, () =>
+                this.handleRemoveAnnotation(document, webviewPanel.webview, payload));
+            }
+            break;
+          }
+          case 'updateAnnotationPosition': {
+            const payload = (message as { payload?: { id: string; x: number; y: number } }).payload;
+            if (payload) {
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateAnnotationPosition(document, payload));
             }
             break;
           }
@@ -1914,6 +1947,179 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Position update failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to save positions: ${message}` } });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Annotation handlers (build notes in viewConfig)
+  // ---------------------------------------------------------------------------
+
+  private async handleAddAnnotation(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { id: string; text: string; x: number; y: number; color?: string },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const vc = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const annotations = (vc.annotations ?? []) as Array<Record<string, unknown>>;
+      if (annotations.some((a) => a.id === payload.id)) return;
+      annotations.push({
+        id: payload.id,
+        text: payload.text,
+        x: Math.round(payload.x),
+        y: Math.round(payload.y),
+        ...(payload.color ? { color: payload.color } : {}),
+      });
+      vc.annotations = annotations;
+      parsed.viewConfig = vc;
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(text.length)), updatedText);
+
+      this.pendingUpdates.set(document.uri.toString(), true);
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdates.delete(document.uri.toString());
+        await this.sendDomainData(document, webview);
+      } else {
+        this.pendingUpdates.delete(document.uri.toString());
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to add annotation.' } });
+      }
+    } catch (err) {
+      this.pendingUpdates.delete(document.uri.toString());
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Add annotation failed: ${msg}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to add annotation: ${msg}` } });
+    }
+  }
+
+  private async handleUpdateAnnotation(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { id: string; text?: string; color?: string; linkedModel?: string | null; width?: number; height?: number },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const vc = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const annotations = (vc.annotations ?? []) as Array<Record<string, unknown>>;
+      const ann = annotations.find((a) => a.id === payload.id);
+      if (!ann) {
+        // Annotation not found — re-sync webview with current disk state
+        await this.sendDomainData(document, webview);
+        return;
+      }
+
+      if (payload.text !== undefined) ann.text = payload.text;
+      if (payload.color !== undefined) ann.color = payload.color;
+      if (payload.width !== undefined) ann.width = payload.width;
+      if (payload.height !== undefined) ann.height = payload.height;
+      if (payload.linkedModel === null) {
+        delete ann.linkedModel;
+      } else if (payload.linkedModel !== undefined) {
+        ann.linkedModel = payload.linkedModel;
+      }
+
+      parsed.viewConfig = vc;
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(text.length)), updatedText);
+
+      this.pendingUpdates.set(document.uri.toString(), true);
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdates.delete(document.uri.toString());
+        await this.sendDomainData(document, webview);
+      } else {
+        this.pendingUpdates.delete(document.uri.toString());
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to update annotation.' } });
+      }
+    } catch (err) {
+      this.pendingUpdates.delete(document.uri.toString());
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update annotation failed: ${msg}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to update annotation: ${msg}` } });
+    }
+  }
+
+  private async handleRemoveAnnotation(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { id: string },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const vc = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const annotations = (vc.annotations ?? []) as Array<Record<string, unknown>>;
+      vc.annotations = annotations.filter((a) => a.id !== payload.id);
+      parsed.viewConfig = vc;
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(text.length)), updatedText);
+
+      this.pendingUpdates.set(document.uri.toString(), true);
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdates.delete(document.uri.toString());
+        await this.sendDomainData(document, webview);
+      } else {
+        this.pendingUpdates.delete(document.uri.toString());
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to remove annotation.' } });
+      }
+    } catch (err) {
+      this.pendingUpdates.delete(document.uri.toString());
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Remove annotation failed: ${msg}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to remove annotation: ${msg}` } });
+    }
+  }
+
+  private async handleUpdateAnnotationPosition(
+    document: vscode.TextDocument,
+    payload: { id: string; x: number; y: number },
+  ): Promise<void> {
+    try {
+      const text = document.getText();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const vc = (parsed.viewConfig ?? {}) as Record<string, unknown>;
+      const annotations = (vc.annotations ?? []) as Array<Record<string, unknown>>;
+      const ann = annotations.find((a) => a.id === payload.id);
+      if (!ann) return;
+
+      ann.x = Math.round(payload.x);
+      ann.y = Math.round(payload.y);
+      parsed.viewConfig = vc;
+
+      const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(text.length)), updatedText);
+
+      this.pendingUpdates.set(document.uri.toString(), true);
+      const success = await vscode.workspace.applyEdit(edit);
+
+      if (success) {
+        await document.save();
+        this.pendingUpdates.delete(document.uri.toString());
+      } else {
+        this.pendingUpdates.delete(document.uri.toString());
+      }
+      // No sendDomainData — same as model positions, the webview already has visual state.
+    } catch (err) {
+      this.pendingUpdates.delete(document.uri.toString());
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Annotation position update failed: ${msg}`);
     }
   }
 

@@ -7,7 +7,7 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { Cardinality, Layer, ModelRole, Stage } from '../../src/types/semantic';
+import type { AnnotationColor, Cardinality, Layer, ModelRole, Stage } from '../../src/types/semantic';
 import type { LayerConfig } from '../../src/types/layer';
 import type { ModelDiscrepancy } from '../../src/types/discrepancy';
 
@@ -110,3 +110,39 @@ export type FkEdgeData = {
 
 /** Typed React Flow edge for a semantic FK relationship. */
 export type FkFlowEdge = Edge<FkEdgeData, 'fk'>;
+
+// ---------------------------------------------------------------------------
+// AnnotationNode (canvas build notes)
+// ---------------------------------------------------------------------------
+
+/** Data payload for an AnnotationNode React Flow node. */
+export type AnnotationNodeData = {
+  annotationId: string;
+  text: string;
+  color: AnnotationColor;
+  width?: number;
+  height?: number;
+  linkedModel?: string;
+  /** Whether this annotation is in a read-only context (physical stage). */
+  readOnly?: boolean;
+  /** Index signature required by React Flow's Node generic. */
+  [key: string]: unknown;
+};
+
+/** Typed React Flow node for a canvas annotation. */
+export type AnnotationFlowNode = Node<AnnotationNodeData, 'annotation'>;
+
+// ---------------------------------------------------------------------------
+// AnnotationEdge (dashed link from annotation to model)
+// ---------------------------------------------------------------------------
+
+/** Data payload for the dashed edge linking an annotation to a model. */
+export type AnnotationEdgeData = {
+  annotationId: string;
+  targetModel: string;
+  /** Index signature required by React Flow's Edge generic. */
+  [key: string]: unknown;
+};
+
+/** Typed React Flow edge for an annotation-to-model link. */
+export type AnnotationFlowEdge = Edge<AnnotationEdgeData, 'annotationLink'>;

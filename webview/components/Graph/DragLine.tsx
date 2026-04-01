@@ -1,9 +1,11 @@
 /**
- * DragLine — visual feedback for column drag-to-connect relationships.
+ * DragLine — visual feedback for drag-to-connect operations.
  *
- * Renders a dashed orange line from the source column to the current cursor
- * position while dragging. Uses design edge styling to indicate this will
- * create a design relationship.
+ * Renders either:
+ * - A dashed orange line for column drag-to-connect (FK relationship creation)
+ * - A dashed grey line for annotation drag-to-link (annotation linking)
+ *
+ * Both use fixed-position SVG overlays that follow the cursor.
  */
 
 import { useEditorStore } from '../../store/editorStore';
@@ -11,10 +13,9 @@ import './DragLine.css';
 
 export function DragLine() {
   const dragLineState = useEditorStore((s) => s.dragLineState);
+  const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
 
-  if (!dragLineState) return null;
-
-  const { sourceX, sourceY, currentX, currentY } = dragLineState;
+  if (!dragLineState && !annotationLinkDrag) return null;
 
   return (
     <svg
@@ -42,14 +43,29 @@ export function DragLine() {
           <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--edge-design)" />
         </marker>
       </defs>
-      <line
-        x1={sourceX}
-        y1={sourceY}
-        x2={currentX}
-        y2={currentY}
-        className="drag-line__path"
-        markerEnd="url(#drag-line-arrow)"
-      />
+
+      {/* FK column drag line */}
+      {dragLineState && (
+        <line
+          x1={dragLineState.sourceX}
+          y1={dragLineState.sourceY}
+          x2={dragLineState.currentX}
+          y2={dragLineState.currentY}
+          className="drag-line__path"
+          markerEnd="url(#drag-line-arrow)"
+        />
+      )}
+
+      {/* Annotation link drag line */}
+      {annotationLinkDrag && (
+        <line
+          x1={annotationLinkDrag.sourceX}
+          y1={annotationLinkDrag.sourceY}
+          x2={annotationLinkDrag.currentX}
+          y2={annotationLinkDrag.currentY}
+          className="drag-line__path drag-line__path--annotation"
+        />
+      )}
     </svg>
   );
 }
