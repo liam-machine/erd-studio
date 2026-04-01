@@ -534,9 +534,9 @@ export function ColumnRowEditor({
             isNaturalKey={column.isNaturalKey ?? false}
             mode={onTogglePK || onToggleFK || onToggleNK ? 'editable' : 'readonly'}
             status={statusClass}
-            onTogglePK={onTogglePK}
-            onToggleFK={onToggleFK}
-            onToggleNK={onToggleNK}
+            onTogglePK={onTogglePK ? () => { skipNextBlurSaveRef.current = true; onTogglePK(); } : undefined}
+            onToggleFK={onToggleFK ? () => { skipNextBlurSaveRef.current = true; onToggleFK(); } : undefined}
+            onToggleNK={onToggleNK ? () => { skipNextBlurSaveRef.current = true; onToggleNK(); } : undefined}
             showMultiplePKWarning={showMultiplePKWarning}
           />
         )}

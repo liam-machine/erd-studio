@@ -1,0 +1,18 @@
+name: dim_customer
+description: Customer dimension with demographics and segmentation
+columns:
+  - name: customer_id
+    dataType: INT
+    description: Surrogate key for customer
+  - name: customer_name
+    dataType: VARCHAR
+    description: Full customer name
+  - name: email
+    dataType: VARCHAR
+    description: Customer email address
+  - name: segment
+    dataType: VARCHAR
+    description: Customer segment (Enterprise, SMB, Consumer)
+  - name: created_at
+    dataType: TIMESTAMP
+    description: Date customer was first created

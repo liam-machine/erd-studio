@@ -1,0 +1,18 @@
+name: fct_work_events
+description: Work events fact table
+columns:
+  - name: event_id
+    dataType: unknown
+    description: Event surrogate key
+    isPrimaryKey: true
+    isForeignKey: true
+    isNaturalKey: true
+  - name: work_lot_id
+    dataType: unknown
+    description: FK to dim_work_lot
+  - name: event_date
+    dataType: unknown
+    description: Date of the event
+  - name: amount
+    dataType: unknown
+    description: Event amount

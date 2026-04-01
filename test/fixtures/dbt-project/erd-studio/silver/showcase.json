@@ -8,7 +8,11 @@
     "models": [
       "dim_project",
       "dim_work_lot",
-      "fct_sale"
+      "fct_sale",
+      "fct_work_events",
+      "dim_customer",
+      "dim_date",
+      "dim_location"
     ],
     "relationships": [
       {
@@ -30,25 +34,62 @@
   "viewConfig": {
     "positions": {
       "dim_project": {
-        "x": -13,
-        "y": 33
+        "x": 778,
+        "y": 12
       },
       "dim_work_lot": {
-        "x": 341,
-        "y": 197
+        "x": 914,
+        "y": 234
       },
       "dim_contractor": {
         "x": 476,
         "y": 296
       },
       "dim_location": {
-        "x": 708,
-        "y": 424
+        "x": 1700,
+        "y": 100
       },
       "fct_sale": {
-        "x": 956,
-        "y": 54
+        "x": 1168,
+        "y": 37
+      },
+      "fct_work_events": {
+        "x": -639,
+        "y": -317
+      },
+      "dim_customer": {
+        "x": 520,
+        "y": 12
+      },
+      "dim_date": {
+        "x": 255,
+        "y": 12
       }
-    }
+    },
+    "annotations": [
+      {
+        "id": "0e2f0b04-d8c2-41f1-b203-42de6e1b9294",
+        "text": "hello\nghvjg\n",
+        "x": 280,
+        "y": -289,
+        "linkedModel": "fct_work_events",
+        "color": "yellow"
+      },
+      {
+        "id": "9997e74a-b3f2-4b41-b657-804c5c0d8227",
+        "text": "lkjkjknnbbbbbbkjb k hilugiu oh iguppjoiuhiioouihuioulughouihluyy;ig;oyiugiuougyogyu9puuhipu9iouuopuoihuhuphihhpu9ujup9yiou9oyy9uyu9iuouiyiou9yuu9uiu99puiuou9uiou9iygu9yu8yuyyuyougiygou9ouiiup",
+        "x": -435,
+        "y": -51,
+        "linkedModel": "fct_work_events",
+        "color": "orange"
+      },
+      {
+        "id": "8bde3dd7-a90f-43c5-8c71-069b7106152d",
+        "text": "",
+        "x": 647,
+        "y": -200,
+        "linkedModel": "fct_work_events"
+      }
+    ]
   }
 }
