@@ -1,0 +1,308 @@
+{
+  "generatedAt": "2026-03-25T11:17:45.145Z",
+  "domain": "scroll-test",
+  "layer": "silver",
+  "sourceStage": "logical",
+  "targetStage": "physical",
+  "modelContext": {
+    "fct_large_table": {
+      "modelName": "fct_large_table",
+      "logicalModelPath": "erd-studio/logical-models/fct_large_table.yml",
+      "dbtSqlPath": null,
+      "dbtSchemaPath": null
+    }
+  },
+  "models": [],
+  "columns": [
+    {
+      "modelName": "fct_large_table",
+      "columnName": "transaction_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "loaded_at",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "TIMESTAMP"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "batch_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "event_timestamp",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "TIMESTAMP"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "source_system",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "campaign_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "sales_rep_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "order_status",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "shipping_method",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "shipping_cost",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(18,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "refund_date",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DATE"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "quantity",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "margin_pct",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(5,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "margin_amount",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(18,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "cost_price",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(18,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "unit_price",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(18,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "net_amount",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(18,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "discount_amount",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(18,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "tax_amount",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(18,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "gross_amount",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DECIMAL(18,2)"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "currency_code",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "payment_method",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "is_refunded",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "BOOLEAN"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "transaction_type",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "postal_code",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "city_name",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "country_code",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "region_code",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "VARCHAR"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "product_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "channel_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "project_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "delivery_date",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "DATE"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "customer_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "warehouse_id",
+      "discrepancyStatus": "extra",
+      "groundTruth": "logical",
+      "action": "add-column-to-physical",
+      "sourceDataType": "INT"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "event_date",
+      "discrepancyStatus": "extra",
+      "groundTruth": "physical",
+      "action": "remove-column-from-logical",
+      "sourceDataType": "DATE"
+    },
+    {
+      "modelName": "fct_large_table",
+      "columnName": "fulfillment_date",
+      "discrepancyStatus": "extra",
+      "groundTruth": "physical",
+      "action": "remove-column-from-logical",
+      "sourceDataType": "DATE"
+    }
+  ],
+  "relationships": [],
+  "requiresCompile": true
+}

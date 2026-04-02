@@ -1,0 +1,16 @@
+name: dim_date
+description: Date dimension with fiscal calendar attributes
+columns:
+  - name: date_key
+    dataType: INT
+    description: Date surrogate key (YYYYMMDD)
+  - name: calendar_date
+    dataType: DATE
+    description: Calendar date
+  - name: fiscal_year
+    dataType: unknown
+    description: Fiscal year
+    isNaturalKey: true
+  - name: fiscal_quarter
+    dataType: unknown
+    description: Fiscal quarter (Q1-Q4)

@@ -65,11 +65,18 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `l
 | `logical.relationships` | Yes | Array of relationship objects |
 | `viewConfig` | Yes | Root-level view settings. The extension auto-assigns positions for new models |
 
-**viewConfig** must be at the root level, not inside `logical`. It stores node positions keyed by model name:
+**viewConfig** must be at the root level, not inside `logical`. It stores node positions keyed by model name, and optional canvas annotations (build notes):
 
 ```json
-"viewConfig": { "positions": { "dim_customer": { "x": 100, "y": 200 } } }
+"viewConfig": {
+  "positions": { "dim_customer": { "x": 100, "y": 200 } },
+  "annotations": [
+    { "id": "uuid", "text": "Build note text", "x": 300, "y": 50, "color": "yellow", "linkedModel": "dim_customer" }
+  ]
+}
 ```
+
+Annotations are temporary build notes — visible on the canvas while constructing models. They are view-layer data, not semantic data. Valid colours: `yellow`, `blue`, `green`, `pink`, `orange`. The `linkedModel` field is optional and draws a dashed edge to the named model.
 
 > **WARNING — Preserve existing positions:** When adding models to an existing domain file, do NOT clear or overwrite `viewConfig.positions`. The extension automatically computes positions for any new models that lack entries. Clearing existing positions will reset the user's carefully arranged layout.
 
@@ -258,4 +265,4 @@ When asked to execute a sync plan, or when `erd-studio/.sync-plan.json` exists:
 2. Read `erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 11 -->
+<!-- erd-studio-harness: 12 -->

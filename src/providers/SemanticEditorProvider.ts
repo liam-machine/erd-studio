@@ -96,13 +96,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   >();
 
-  /**
-   * Track model names per document for diff-based tag sync.
-   * When models are added/removed (including via undo/redo), the diff
-   * triggers tag sync to keep YAML files consistent.
-   */
-  private readonly previousModels = new Map<string, Set<string>>();
-
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly domainService: DomainService,
@@ -523,7 +516,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       messageSubscription.dispose();
       changeSubscription.dispose();
       this.openPanels.delete(panelKey);
-      this.previousModels.delete(document.uri.toString());
     });
   }
 
@@ -741,9 +733,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       let unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
 
-      // Diff-based tag sync: detect model membership changes and sync YAML tags
-      void this.diffAndSyncTags(document, unifiedDomain);
-
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
       const positionsWritten = await this.autoPositionNewModels(document, unifiedDomain);
       if (positionsWritten) {
@@ -822,45 +811,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     this.pendingUpdates.delete(docUri);
     return false;
-  }
-
-  /**
-   * Compare current model list against the previous snapshot and sync domain
-   * tags for any models that were added or removed. Handles undo/redo, external
-   * edits, and direct mutations uniformly.
-   */
-  private diffAndSyncTags(
-    document: vscode.TextDocument,
-    unifiedDomain: { domain: string; logical: { models: Array<{ name: string }> } },
-  ): void {
-    const docKey = document.uri.toString();
-    const domainName = path.basename(document.uri.fsPath, '.json');
-    const currentModels = new Set(unifiedDomain.logical.models.map((m) => m.name));
-    const previousModels = this.previousModels.get(docKey);
-
-    // Always update the snapshot
-    this.previousModels.set(docKey, currentModels);
-
-    // Skip on first load (no previous state to diff against)
-    if (!previousModels) {
-      return;
-    }
-
-    // Models added since last state
-    for (const name of currentModels) {
-      if (!previousModels.has(name)) {
-        void this.schemaTagService.addDomainTag(name, domainName)
-          .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
-      }
-    }
-
-    // Models removed since last state
-    for (const name of previousModels) {
-      if (!currentModels.has(name)) {
-        void this.schemaTagService.removeDomainTag(name, domainName, document.uri.fsPath)
-          .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
-      }
-    }
   }
 
   /**
@@ -1001,7 +951,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           { refreshWebview: true, webview, stage },
         );
 
-        if (!success) {
+        if (success) {
+          const domainName = path.basename(document.uri.fsPath, '.json');
+          void this.schemaTagService.addDomainTag(model.name, domainName)
+            .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
+        } else {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to add model to domain.' } });
         }
         return;
@@ -1058,6 +1012,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         await document.save();
         this.pendingUpdates.delete(document.uri.toString());
         await this.sendDomainData(document, webview);
+        const domainName = path.basename(document.uri.fsPath, '.json');
+        void this.schemaTagService.addDomainTag(model.name, domainName)
+          .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
       } else {
         this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({
@@ -1612,7 +1569,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           { refreshWebview: true, webview, stage },
         );
 
-        if (!success) {
+        if (success) {
+          const domainName = path.basename(document.uri.fsPath, '.json');
+          void this.schemaTagService.removeDomainTag(payload.oldName, domainName, document.uri.fsPath)
+            .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
+          // The dbt YAML file still uses oldName as its filename, so addDomainTag
+          // for trimmedNew will no-op (no matching .yml file). Tag is re-added
+          // if the dbt model is also renamed to match.
+          void this.schemaTagService.addDomainTag(trimmedNew, domainName)
+            .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
+        } else {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to rename model.' } });
         }
         return;
@@ -1657,6 +1623,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         await document.save();
         this.pendingUpdates.delete(document.uri.toString());
         await this.sendDomainData(document, webview);
+        const domainName = path.basename(document.uri.fsPath, '.json');
+        void this.schemaTagService.removeDomainTag(payload.oldName, domainName, document.uri.fsPath)
+          .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
+        // The dbt YAML file still uses oldName as its filename, so addDomainTag
+        // for trimmedNew will no-op (no matching .yml file). Tag is re-added
+        // if the dbt model is also renamed to match.
+        void this.schemaTagService.addDomainTag(trimmedNew, domainName)
+          .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
       } else {
         this.pendingUpdates.delete(document.uri.toString());
         webview.postMessage({ type: 'error', payload: { message: 'Failed to rename model.' } });
@@ -1706,6 +1680,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to remove model.' } });
           return;
         }
+
+        const domainName = path.basename(document.uri.fsPath, '.json');
+        void this.schemaTagService.removeDomainTag(payload.modelName, domainName, document.uri.fsPath)
+          .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
 
         // Ask: remove from domain only, or delete model file entirely?
         if (this.logicalModelService.modelExists(payload.modelName)) {
@@ -1757,6 +1735,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         try {
           await document.save();
           await this.sendDomainData(document, webview);
+          const domainName = path.basename(document.uri.fsPath, '.json');
+          void this.schemaTagService.removeDomainTag(payload.modelName, domainName, document.uri.fsPath)
+            .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
         } finally {
           this.pendingUpdates.delete(document.uri.toString());
         }
@@ -2207,7 +2188,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           { refreshWebview: true, webview, stage },
         );
 
-        if (!success) {
+        if (success) {
+          const domainName = path.basename(document.uri.fsPath, '.json');
+          void this.schemaTagService.addDomainTag(payload.modelName, domainName)
+            .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
+        } else {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to add model to domain.' } });
         }
         return;
@@ -2301,6 +2286,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         try {
           await document.save();
           await this.sendDomainData(document, webview);
+          const domainName = path.basename(document.uri.fsPath, '.json');
+          void this.schemaTagService.addDomainTag(payload.modelName, domainName)
+            .catch(err => console.warn(`[SemanticEditorProvider] Tag sync failed: ${err}`));
         } finally {
           this.pendingUpdates.delete(document.uri.toString());
         }
