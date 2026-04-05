@@ -675,7 +675,7 @@ export class HarnessService {
 
         // Merge hook config into .claude/settings.local.json (local only, never committed)
         try {
-          this.mergeHookConfig(workspaceRoot, hookPath);
+          this.mergeHookConfig(workspaceRoot);
         } catch {
           // Best-effort — don't fail install if settings merge fails
         }
@@ -797,7 +797,7 @@ export class HarnessService {
    * Creates the file if it doesn't exist; adds the hook entry if missing.
    * Uses settings.local.json (not settings.json) so it stays local and never committed.
    */
-  private mergeHookConfig(workspaceRoot: string, hookScriptPath: string): void {
+  private mergeHookConfig(workspaceRoot: string): void {
     const settingsPath = path.join(workspaceRoot, '.claude', 'settings.local.json');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -811,13 +811,13 @@ export class HarnessService {
       }
     }
 
-    const hookCommand = `bash "${hookScriptPath}"`;
+    // Use $CLAUDE_PROJECT_DIR so the path works on any machine / project location
     const hookEntry = {
       matcher: 'Edit|Write',
       hooks: [
         {
           type: 'command',
-          command: hookCommand,
+          command: 'bash "$CLAUDE_PROJECT_DIR/.claude/skills/erd-studio/enforce-skill.sh"',
           timeout: 5,
         },
       ],
