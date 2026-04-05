@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '12';
+export const HARNESS_VERSION = '13';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -504,24 +504,25 @@ ${buildVersionMarker()}
 }
 
 function generateEnforceSkillHook(): string {
-  const lines = [
+  return [
     '#!/usr/bin/env bash',
     '# ERD Studio — PreToolUse hook for Edit and Write tools.',
     '# Blocks the first erd-studio file edit per Claude session to ensure the',
     '# /erd-studio skill is loaded before any changes are made. Subsequent edits',
-    '# in the same session are allowed (flag keyed on parent PID).',
+    '# in the same session are allowed (flag keyed on session ID).',
     '',
     '# Read all stdin (Claude sends hook input JSON via stdin)',
     'input="$(cat)"',
     '',
-    '# Extract file_path using grep (avoids python3 dependency)',
+    '# Extract file_path using grep (avoids python3/jq dependency)',
     'file_path="$(echo "$input" | grep -o \'"file_path" *: *"[^"]*"\' | head -1 | sed \'s/.*: *"//;s/"$//\')"',
     '',
     '# Only act on files inside erd-studio/ directories',
     'case "$file_path" in',
     '  */erd-studio/*)',
-    '    # One-time block per Claude session (PPID = Claude process)',
-    '    flag="/tmp/.erd-studio-skill-${PPID}"',
+    '    # One-time block per Claude session ($CLAUDE_SESSION_ID is set by Claude Code)',
+    '    session_key="${CLAUDE_SESSION_ID:-$$}"',
+    '    flag="/tmp/.erd-studio-skill-${session_key}"',
     '    if [ ! -f "$flag" ]; then',
     '      touch "$flag"',
     '      # Deny with modern hookSpecificOutput format',
@@ -534,9 +535,7 @@ function generateEnforceSkillHook(): string {
     '# Allow — modern format to avoid phantom "hook error" label',
     "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"\"}}'",
     'exit 0',
-    '',
-  ];
-  return lines.join('\n');
+  ].join('\n') + '\n';
 }
 
 function generateSyncGuide(): string {
@@ -806,8 +805,8 @@ export class HarnessService {
       try {
         settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
       } catch {
-        // Malformed JSON — start fresh
-        settings = {};
+        // Malformed JSON — bail out rather than overwriting the user's file
+        return;
       }
     }
 
@@ -827,15 +826,34 @@ export class HarnessService {
     if (!settings.hooks) { settings.hooks = {}; }
     if (!Array.isArray(settings.hooks.PreToolUse)) { settings.hooks.PreToolUse = []; }
 
-    // Check if our hook is already registered (by script name)
+    // Check if our hook is already registered (detect current and legacy script names)
     const preToolUse = settings.hooks.PreToolUse as Array<Record<string, unknown>>;
+    const isErdStudioHook = (h: Record<string, unknown>) =>
+      typeof h.command === 'string' &&
+      (h.command.includes('enforce-skill.sh') || h.command.includes('check-skill.sh'));
+
     const alreadyRegistered = preToolUse.some((entry) => {
       const hooks = entry.hooks as Array<Record<string, unknown>> | undefined;
-      return hooks?.some((h) => typeof h.command === 'string' && h.command.includes('enforce-skill.sh'));
+      return hooks?.some(isErdStudioHook);
     });
-    if (alreadyRegistered) { return; }
 
-    preToolUse.push(hookEntry);
+    if (alreadyRegistered) {
+      // Replace legacy check-skill.sh entry with current enforce-skill.sh
+      const hasLegacy = preToolUse.some((entry) => {
+        const hooks = entry.hooks as Array<Record<string, unknown>> | undefined;
+        return hooks?.some((h) => typeof h.command === 'string' && h.command.includes('check-skill.sh'));
+      });
+      if (!hasLegacy) { return; } // Current version already registered
+
+      // Remove legacy entries
+      settings.hooks.PreToolUse = preToolUse.filter((entry) => {
+        const hooks = entry.hooks as Array<Record<string, unknown>> | undefined;
+        return !hooks?.some((h) => typeof h.command === 'string' && h.command.includes('check-skill.sh'));
+      });
+      (settings.hooks.PreToolUse as Array<Record<string, unknown>>).push(hookEntry);
+    } else {
+      preToolUse.push(hookEntry);
+    }
 
     const dir = path.dirname(settingsPath);
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }

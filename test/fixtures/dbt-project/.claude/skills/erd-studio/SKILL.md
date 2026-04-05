@@ -275,4 +275,4 @@ When asked to execute a sync plan, or when `erd-studio/.sync-plan.json` exists:
 2. Read `erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 12 -->
+<!-- erd-studio-harness: 13 -->

@@ -2,19 +2,20 @@
 # ERD Studio — PreToolUse hook for Edit and Write tools.
 # Blocks the first erd-studio file edit per Claude session to ensure the
 # /erd-studio skill is loaded before any changes are made. Subsequent edits
-# in the same session are allowed (flag keyed on parent PID).
+# in the same session are allowed (flag keyed on session ID).
 
 # Read all stdin (Claude sends hook input JSON via stdin)
 input="$(cat)"
 
-# Extract file_path using grep (avoids python3 dependency)
+# Extract file_path using grep (avoids python3/jq dependency)
 file_path="$(echo "$input" | grep -o '"file_path" *: *"[^"]*"' | head -1 | sed 's/.*: *"//;s/"$//')"
 
 # Only act on files inside erd-studio/ directories
 case "$file_path" in
   */erd-studio/*)
-    # One-time block per Claude session (PPID = Claude process)
-    flag="/tmp/.erd-studio-skill-${PPID}"
+    # One-time block per Claude session ($CLAUDE_SESSION_ID is set by Claude Code)
+    session_key="${CLAUDE_SESSION_ID:-$$}"
+    flag="/tmp/.erd-studio-skill-${session_key}"
     if [ ! -f "$flag" ]; then
       touch "$flag"
       # Deny with modern hookSpecificOutput format

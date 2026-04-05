@@ -192,6 +192,89 @@ describe('HarnessService', () => {
       expect(version).toBe(HARNESS_VERSION);
     });
 
+    it('writes enforce-skill.sh alongside Claude SKILL.md', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      const hookPath = path.join(tmpDir, '.claude', 'skills', 'erd-studio', 'enforce-skill.sh');
+      expect(fs.existsSync(hookPath)).toBe(true);
+
+      const content = fs.readFileSync(hookPath, 'utf-8');
+      expect(content).toContain('#!/usr/bin/env bash');
+      expect(content).toContain('permissionDecision');
+      expect(content).toContain('CLAUDE_SESSION_ID');
+    });
+
+    it('creates settings.local.json with PreToolUse hook on first install', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      expect(settings.hooks?.PreToolUse).toHaveLength(1);
+      expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('enforce-skill.sh');
+      expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('$CLAUDE_PROJECT_DIR');
+    });
+
+    it('does not duplicate hook entry on repeated install', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+      service.install(tmpDir, target, true);
+
+      const settings = JSON.parse(fs.readFileSync(
+        path.join(tmpDir, '.claude', 'settings.local.json'), 'utf-8'));
+      expect(settings.hooks.PreToolUse).toHaveLength(1);
+    });
+
+    it('merges hook into existing settings.local.json without clobbering other keys', () => {
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, JSON.stringify({ permissions: { allow: ['Bash(npm:*)'] } }));
+
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      expect(settings.permissions?.allow).toContain('Bash(npm:*)');
+      expect(settings.hooks?.PreToolUse).toHaveLength(1);
+    });
+
+    it('skips hook merge when settings.local.json has malformed JSON', () => {
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, '{ "permissions": { broken');
+
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      // File should be untouched (malformed JSON preserved, not overwritten)
+      const content = fs.readFileSync(settingsPath, 'utf-8');
+      expect(content).toContain('broken');
+    });
+
+    it('replaces legacy check-skill.sh entry with enforce-skill.sh on upgrade', () => {
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: {
+          PreToolUse: [{
+            matcher: 'Edit|Write',
+            hooks: [{ type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR/.claude/skills/erd-studio/check-skill.sh"' }],
+          }],
+        },
+      }));
+
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      expect(settings.hooks.PreToolUse).toHaveLength(1);
+      expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('enforce-skill.sh');
+      expect(settings.hooks.PreToolUse[0].hooks[0].command).not.toContain('check-skill.sh');
+    });
+
     it('does not write SYNC.md for non-Claude targets', () => {
       const target = HARNESS_TARGETS.find(t => t.id === 'copilot')!;
       service.install(tmpDir, target);
