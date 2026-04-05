@@ -5,7 +5,6 @@
 .annotation-node {
   min-width: 160px;
   min-height: 80px;
-  max-width: 320px;
   padding: 10px 12px;
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
@@ -77,6 +76,16 @@ body[data-vscode-theme-kind="vscode-dark"] .annotation-node--orange,
 body[data-vscode-theme-kind="vscode-high-contrast"] .annotation-node--orange {
   background: #431407;
   color: #fdba74;
+}
+
+/* Selected state — custom outline managed by Zustand, suppress React Flow's default */
+.annotation-node--selected {
+  outline: 2px solid var(--focus-border, #007fd4);
+  outline-offset: 1px;
+}
+
+.react-flow__node-annotation.selected .annotation-node {
+  box-shadow: none;
 }
 
 /* Read-only state */
@@ -188,7 +197,7 @@ body[data-vscode-theme-kind="vscode-dark"] .annotation-node__toolbar-toggle:hove
   position: absolute;
   top: 24px;
   right: 0;
-  min-width: 150px;
+  width: 150px;
   background: var(--panel-bg, #252526);
   border: 1px solid var(--panel-border, #404040);
   border-radius: 6px;
@@ -231,6 +240,7 @@ body[data-vscode-theme-kind="vscode-dark"] .annotation-node__toolbar-toggle:hove
 
 .annotation-node__link-select {
   width: 100%;
+  max-width: 100%;
   padding: 3px 6px;
   border: 1px solid var(--panel-border, #404040);
   border-radius: 4px;
@@ -239,6 +249,8 @@ body[data-vscode-theme-kind="vscode-dark"] .annotation-node__toolbar-toggle:hove
   font-family: inherit;
   font-size: 11px;
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Delete button */
@@ -258,6 +270,36 @@ body[data-vscode-theme-kind="vscode-dark"] .annotation-node__toolbar-toggle:hove
 
 .annotation-node__delete-btn:hover {
   background: rgba(239, 68, 68, 0.15);
+}
+
+/* --- Resize handle (bottom-right corner) --------------------------------- */
+
+.annotation-node__resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 2;
+}
+
+.annotation-node__resize-handle::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  opacity: 0.4;
+}
+
+.annotation-node:hover .annotation-node__resize-handle {
+  opacity: 1;
 }
 
 /* --- Linked model badge -------------------------------------------------- */

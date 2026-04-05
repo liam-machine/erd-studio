@@ -486,6 +486,9 @@ export interface AddAnnotationMessage {
     x: number;
     y: number;
     color?: AnnotationColor;
+    width?: number;
+    height?: number;
+    linkedModel?: string;
   };
 }
 

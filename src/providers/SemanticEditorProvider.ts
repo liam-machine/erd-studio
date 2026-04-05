@@ -1938,7 +1938,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleAddAnnotation(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    payload: { id: string; text: string; x: number; y: number; color?: string },
+    payload: { id: string; text: string; x: number; y: number; color?: string; width?: number; height?: number; linkedModel?: string },
   ): Promise<void> {
     try {
       const text = document.getText();
@@ -1952,6 +1952,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         x: Math.round(payload.x),
         y: Math.round(payload.y),
         ...(payload.color ? { color: payload.color } : {}),
+        ...(payload.width != null ? { width: payload.width } : {}),
+        ...(payload.height != null ? { height: payload.height } : {}),
+        ...(payload.linkedModel ? { linkedModel: payload.linkedModel } : {}),
       });
       vc.annotations = annotations;
       parsed.viewConfig = vc;

@@ -158,6 +158,8 @@ export interface EditorState {
   lastSelectedColumn: string | null;
   /** Column currently in edit mode (name field), or null. */
   editingColumn: string | null;
+  /** Currently selected annotation ID, or null. */
+  selectedAnnotation: string | null;
 }
 
 export interface EditorActions {
@@ -262,6 +264,8 @@ export interface EditorActions {
   clearColumnSelection: () => void;
   /** Set the column currently being edited (F2 / double-click). */
   setEditingColumn: (name: string | null) => void;
+  /** Select an annotation (clears model selection). */
+  selectAnnotation: (annotationId: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,10 +314,11 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   selectedColumns: [],
   lastSelectedColumn: null,
   editingColumn: null,
+  selectedAnnotation: null,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
-  selectNode: (nodeName) => set({ selectedNode: nodeName, selectedColumns: [], lastSelectedColumn: null, editingColumn: null }),
+  selectNode: (nodeName) => set({ selectedNode: nodeName, selectedAnnotation: null, selectedColumns: [], lastSelectedColumn: null, editingColumn: null }),
   setSelectedEdges: (edgeIds) => set({ selectedEdges: edgeIds }),
   setSelectedEdge: (edgeId) => set({ selectedEdge: edgeId }),
   setViewport: (viewport) => set({ viewport }),
@@ -461,4 +466,18 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     }),
   clearColumnSelection: () => set({ selectedColumns: [], lastSelectedColumn: null, editingColumn: null }),
   setEditingColumn: (name) => set({ editingColumn: name }),
+
+  // Annotation selection actions
+  selectAnnotation: (annotationId) => set({
+    selectedAnnotation: annotationId,
+    selectedNode: null,
+    detailPanelOpen: false,
+    pendingDeleteConfirmation: false,
+    selectedEdge: null,
+    selectedEdges: [],
+    highlightedColumns: new Set<string>(),
+    selectedColumns: [],
+    lastSelectedColumn: null,
+    editingColumn: null,
+  }),
 }));

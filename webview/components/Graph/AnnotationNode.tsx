@@ -11,12 +11,13 @@
  * - Handles on all 4 sides for closest-side edge routing
  */
 
-import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { AnnotationFlowNode } from '../../types/graph';
-import type { AnnotationColor } from '../../../src/types/semantic';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
+import { ANNOTATION_COLORS } from '../../lib/annotationColors';
+import type { AnnotationColor } from '../../../src/types/semantic';
 import './AnnotationNode.css';
 
 // ---------------------------------------------------------------------------
@@ -33,14 +34,6 @@ const HANDLE_STYLE: CSSProperties = {
   pointerEvents: 'none',
 };
 
-const COLOR_OPTIONS: { value: AnnotationColor; swatch: string }[] = [
-  { value: 'yellow', swatch: '#f59e0b' },
-  { value: 'blue', swatch: '#3b82f6' },
-  { value: 'green', swatch: '#22c55e' },
-  { value: 'pink', swatch: '#ec4899' },
-  { value: 'orange', swatch: '#f97316' },
-];
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -51,6 +44,8 @@ function AnnotationNodeInner({ data }: NodeProps<AnnotationFlowNode>) {
   const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
   const domain = useEditorStore((s) => s.domain);
   const startAnnotationLinkDrag = useEditorStore((s) => s.startAnnotationLinkDrag);
+  const selectedAnnotation = useEditorStore((s) => s.selectedAnnotation);
+  const isSelected = selectedAnnotation === data.annotationId;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toolbarPanelRef = useRef<HTMLDivElement>(null);
@@ -66,12 +61,19 @@ function AnnotationNodeInner({ data }: NodeProps<AnnotationFlowNode>) {
     }
   }, [data.text, isEditing]);
 
-  // Auto-focus when this annotation enters editing mode
+  // Auto-focus when this annotation enters editing mode.
+  // Use requestAnimationFrame to ensure the textarea is mounted after React commit.
   useEffect(() => {
-    if (isEditing && textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.select();
-    }
+    if (!isEditing) return;
+    const tryFocus = () => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.select();
+      }
+    };
+    // Immediate attempt + deferred attempt for newly created notes
+    tryFocus();
+    requestAnimationFrame(tryFocus);
   }, [isEditing]);
 
   // Close toolbar on click outside (capture phase to beat React Flow's event handling)
@@ -161,16 +163,77 @@ function AnnotationNodeInner({ data }: NodeProps<AnnotationFlowNode>) {
     [data.annotationId, startAnnotationLinkDrag],
   );
 
+  // Resize handle — drag from bottom-right corner
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [resizing, setResizing] = useState<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const [resizeSize, setResizeSize] = useState<{ width: number; height: number } | null>(null);
+
+  const handleResizePointerDown = useCallback(
+    (e: ReactPointerEvent) => {
+      if (data.readOnly) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      setResizing({ startX: e.clientX, startY: e.clientY, startW: rect.width, startH: rect.height });
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [data.readOnly],
+  );
+
+  const handleResizePointerMove = useCallback(
+    (e: ReactPointerEvent) => {
+      if (!resizing) return;
+      const newW = Math.max(120, resizing.startW + (e.clientX - resizing.startX));
+      const newH = Math.max(60, resizing.startH + (e.clientY - resizing.startY));
+      setResizeSize({ width: Math.round(newW), height: Math.round(newH) });
+    },
+    [resizing],
+  );
+
+  const handleResizePointerUp = useCallback(
+    (e: ReactPointerEvent) => {
+      if (!resizing) return;
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      const finalW = Math.max(120, resizing.startW + (e.clientX - resizing.startX));
+      const finalH = Math.max(60, resizing.startH + (e.clientY - resizing.startY));
+      vscode.postMessage({
+        type: 'updateAnnotation',
+        payload: { id: data.annotationId, width: Math.round(finalW), height: Math.round(finalH) },
+      });
+      setResizing(null);
+      setResizeSize(null);
+    },
+    [resizing, data.annotationId, vscode],
+  );
+
+  const handleResizePointerCancel = useCallback(
+    (e: ReactPointerEvent) => {
+      if (!resizing) return;
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      setResizing(null);
+      setResizeSize(null);
+    },
+    [resizing],
+  );
+
   const colorClass = `annotation-node--${data.color}`;
   const style: React.CSSProperties = {};
-  if (data.width) style.width = data.width;
-  if (data.height) style.height = data.height;
+  if (resizeSize) {
+    style.width = resizeSize.width;
+    style.height = resizeSize.height;
+  } else {
+    if (data.width) style.width = data.width;
+    if (data.height) style.height = data.height;
+  }
 
   const modelNames = domain?.models.map((m) => m.name) ?? [];
 
   return (
     <div
-      className={`annotation-node ${colorClass}${data.readOnly ? ' annotation-node--readonly' : ''}`}
+      ref={containerRef}
+      className={`annotation-node ${colorClass}${data.readOnly ? ' annotation-node--readonly' : ''}${isSelected ? ' annotation-node--selected' : ''}`}
       style={style}
       onDoubleClick={handleDoubleClick}
     >
@@ -197,13 +260,13 @@ function AnnotationNodeInner({ data }: NodeProps<AnnotationFlowNode>) {
             <div ref={toolbarPanelRef} className="annotation-node__toolbar-panel nodrag nowheel" onClick={(e) => e.stopPropagation()}>
               {/* Colour swatches */}
               <div className="annotation-node__color-row">
-                {COLOR_OPTIONS.map((opt) => (
+                {ANNOTATION_COLORS.map((opt) => (
                   <button
                     key={opt.value}
                     className={`annotation-node__color-swatch${data.color === opt.value ? ' annotation-node__color-swatch--active' : ''}`}
                     style={{ backgroundColor: opt.swatch }}
                     onClick={() => handleColorChange(opt.value)}
-                    title={opt.value}
+                    title={opt.label}
                   />
                 ))}
               </div>
@@ -255,6 +318,17 @@ function AnnotationNodeInner({ data }: NodeProps<AnnotationFlowNode>) {
         <div className="annotation-node__link-badge" title={`Linked to ${data.linkedModel}`}>
           &#x1F517; {data.linkedModel}
         </div>
+      )}
+
+      {/* Resize handle (bottom-right corner) */}
+      {!data.readOnly && (
+        <div
+          className="annotation-node__resize-handle nodrag"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerUp}
+          onPointerCancel={handleResizePointerCancel}
+        />
       )}
 
       {/* Invisible handles on all 4 sides for closest-side edge routing */}

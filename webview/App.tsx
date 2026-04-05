@@ -49,10 +49,15 @@ import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { transformDomain } from './lib/graphTransformer';
 import { stageNodeColor } from './lib/stageColors';
 import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from './types/graph';
+import type { AnnotationColor } from '../src/types/semantic';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Module-level clipboard for annotation copy/paste (not in Zustand — never drives rendering). */
+type CopiedAnnotation = { text: string; color: AnnotationColor; width?: number; height?: number; linkedModel?: string };
+let _copiedAnnotation: CopiedAnnotation | null = null;
 
 // ---------------------------------------------------------------------------
 // Inner component (must be inside ReactFlowProvider)
@@ -104,6 +109,8 @@ function EditorCanvas() {
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
+  const selectedAnnotation = useEditorStore((s) => s.selectedAnnotation);
+  const selectAnnotation = useEditorStore((s) => s.selectAnnotation);
   const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
   const updateAnnotationLinkDrag = useEditorStore((s) => s.updateAnnotationLinkDrag);
   const endAnnotationLinkDrag = useEditorStore((s) => s.endAnnotationLinkDrag);
@@ -153,7 +160,8 @@ function EditorCanvas() {
   // State persistence (zoom, pan, selection, mode, detail panel, expansion)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
     useStatePersistence();
-  const { setViewport: setReactFlowViewport, screenToFlowPosition } = useReactFlow();
+  const reactFlowInstance = useReactFlow();
+  const { setViewport: setReactFlowViewport, screenToFlowPosition } = reactFlowInstance;
 
   // Toast notification for invalid selection after restore
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -286,6 +294,49 @@ function EditorCanvas() {
         return;
       }
 
+      // Ctrl+C / Cmd+C: Copy selected annotation (skip if context menu is open)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedAnnotation && domain && !contextMenu) {
+        const ann = domain.viewConfig.annotations?.find((a) => a.id === selectedAnnotation);
+        if (ann) {
+          e.preventDefault();
+          _copiedAnnotation = {
+            text: ann.text,
+            color: ann.color ?? 'yellow',
+            ...(ann.width != null ? { width: ann.width } : {}),
+            ...(ann.height != null ? { height: ann.height } : {}),
+            ...(ann.linkedModel ? { linkedModel: ann.linkedModel } : {}),
+          };
+        }
+        return;
+      }
+
+      // Ctrl+V / Cmd+V: Paste copied annotation (skip if context menu is open)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && _copiedAnnotation && domain && !domain.readOnly && !contextMenu) {
+        e.preventDefault();
+        const id = crypto.randomUUID();
+        // Place relative to current viewport center
+        const { x: vx, y: vy, zoom } = reactFlowInstance.getViewport();
+        const container = document.querySelector('.react-flow');
+        const rect = container?.getBoundingClientRect();
+        const centerX = rect ? (rect.width / 2 - vx) / zoom : 200;
+        const centerY = rect ? (rect.height / 2 - vy) / zoom : 200;
+        vscode.postMessage({
+          type: 'addAnnotation',
+          payload: {
+            id,
+            text: _copiedAnnotation.text,
+            x: Math.round(centerX + 30),
+            y: Math.round(centerY + 30),
+            color: _copiedAnnotation.color,
+            ...(_copiedAnnotation.width != null ? { width: _copiedAnnotation.width } : {}),
+            ...(_copiedAnnotation.height != null ? { height: _copiedAnnotation.height } : {}),
+            ...(_copiedAnnotation.linkedModel ? { linkedModel: _copiedAnnotation.linkedModel } : {}),
+          },
+        });
+        setEditingAnnotationId(id);
+        return;
+      }
+
       // F2: Edit selected column (rename)
       if (e.key === 'F2' && selectedColumns.length === 1 && detailPanelOpen && domain && !domain.readOnly) {
         e.preventDefault();
@@ -319,9 +370,10 @@ function EditorCanvas() {
           return;
         }
 
-        // No dialogs open — deselect nodes and edges
-        if (selectedNode || selectedEdges.length > 0 || selectedEdge) {
+        // No dialogs open — deselect nodes, edges, and annotations
+        if (selectedNode || selectedEdges.length > 0 || selectedEdge || selectedAnnotation) {
           selectNode(null);
+          selectAnnotation(null);
           setDetailPanelOpen(false);
           setSelectedEdges([]);
           setSelectedEdge(null);
@@ -351,9 +403,17 @@ function EditorCanvas() {
         return;
       }
 
-      // DELETE KEY: Delete selected design models or edges
+      // DELETE KEY: Delete selected design models, annotations, or edges
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!domain || domain.readOnly) return;
+
+        // Priority 0: Delete selected annotation (no confirmation — undo exists)
+        if (selectedAnnotation) {
+          e.preventDefault();
+          vscode.postMessage({ type: 'removeAnnotation', payload: { id: selectedAnnotation } });
+          selectAnnotation(null);
+          return;
+        }
 
         // Priority 1: Remove selected node (with confirmation)
         if (selectedNode) {
@@ -412,6 +472,7 @@ function EditorCanvas() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     selectedNode,
+    selectedAnnotation,
     selectedEdge,
     selectedEdges,
     domain,
@@ -419,6 +480,7 @@ function EditorCanvas() {
     newModelDialogOpen,
     newFkDialogOpen,
     addExistingModelDialogOpen,
+    contextMenu,
     setDetailPanelOpen,
     setPendingDeleteConfirmation,
     setNewModelDialogOpen,
@@ -427,6 +489,9 @@ function EditorCanvas() {
     clearFkDialogPrefill,
     clearFkDialogEditData,
     selectNode,
+    selectAnnotation,
+    setEditingAnnotationId,
+    reactFlowInstance,
     setSelectedEdge,
     setSelectedEdges,
     setHighlightedColumns,
@@ -577,16 +642,20 @@ function EditorCanvas() {
     [setViewport],
   );
 
-  // Handle node clicks to open the detail panel (model nodes only).
+  // Handle node clicks to open the detail panel (model nodes) or select (annotations).
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: ModelFlowNode | AnnotationFlowNode) => {
-      if (node.type === 'annotation') return; // Annotations don't open detail panel
+      if (node.type === 'annotation') {
+        const annData = (node as AnnotationFlowNode).data;
+        selectAnnotation(annData.annotationId);
+        return;
+      }
       selectNode(node.id);
       setDetailPanelOpen(true);
       setHighlightedColumns(new Set());
       setSelectedEdge(null);
     },
-    [selectNode, setDetailPanelOpen, setHighlightedColumns, setSelectedEdge],
+    [selectNode, selectAnnotation, setDetailPanelOpen, setHighlightedColumns, setSelectedEdge],
   );
 
   // Handle edge clicks to highlight the FK columns involved and dim unrelated nodes/edges.
@@ -611,9 +680,10 @@ function EditorCanvas() {
   const onPaneClick = useCallback(() => {
     setDetailPanelOpen(false);
     selectNode(null);
+    selectAnnotation(null);
     setHighlightedColumns(new Set());
     setSelectedEdge(null);
-  }, [setDetailPanelOpen, selectNode, setHighlightedColumns, setSelectedEdge]);
+  }, [setDetailPanelOpen, selectNode, selectAnnotation, setHighlightedColumns, setSelectedEdge]);
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).
