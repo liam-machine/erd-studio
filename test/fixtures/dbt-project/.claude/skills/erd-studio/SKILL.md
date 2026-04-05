@@ -1,6 +1,16 @@
 ---
 name: erd-studio
-description: Data modeling guide for ERD Studio — covers logical domain JSON format, dbt YAML tests for physical model relationships and cardinality, naming conventions, and design workflow. Use when creating, editing, or validating data models, dbt schema files, or executing a .sync-plan.json reconciliation plan.
+description: >-
+  Schema rules for ERD Studio data model files — the erd-studio/ directory
+  uses a two-file system (YAML model definitions + JSON domain diagrams)
+  with strict format rules you must read before editing. Use this skill
+  whenever the task touches files in erd-studio/ (domain JSON, logical-models
+  YAML, or .sync-plan.json), asks to add/edit/remove models, columns,
+  relationships, or cardinality in a data model or ERD diagram, mentions
+  dim_/fct_/ref_/brg_ prefixed tables in an erd-studio context, or involves
+  writing dbt schema YAML tests to match an ERD physical stage. The skill
+  tells you which of the two files to edit for each operation — without it
+  you will put data in the wrong file.
 ---
 
 # ERD Studio — AI Data Modeling Guide

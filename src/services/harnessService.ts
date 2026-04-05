@@ -484,10 +484,29 @@ models:
 function generateClaudeSkill(): string {
   return `---
 name: erd-studio
-description: Data modeling guide for ERD Studio — covers logical domain JSON format, dbt YAML tests for physical model relationships and cardinality, naming conventions, and design workflow. Use when creating, editing, or validating data models, dbt schema files, or executing a .sync-plan.json reconciliation plan.
+description: >-
+  Schema rules for ERD Studio data model files — the erd-studio/ directory
+  uses a two-file system (YAML model definitions + JSON domain diagrams)
+  with strict format rules you must read before editing. Use this skill
+  whenever the task touches files in erd-studio/ (domain JSON, logical-models
+  YAML, or .sync-plan.json), asks to add/edit/remove models, columns,
+  relationships, or cardinality in a data model or ERD diagram, mentions
+  dim_/fct_/ref_/brg_ prefixed tables in an erd-studio context, or involves
+  writing dbt schema YAML tests to match an ERD physical stage. The skill
+  tells you which of the two files to edit for each operation — without it
+  you will put data in the wrong file.
 ---
 
 ${SCHEMA_CONTENT}
+
+${buildVersionMarker()}
+`;
+}
+
+function generateClaudeMdRule(): string {
+  return `## ERD Studio
+
+Before editing any file inside \`erd-studio/\` — including domain JSON files (\`erd-studio/{layer}/*.json\`), model YAML definitions (\`erd-studio/logical-models/*.yml\`), or sync plans — **always load the \`/erd-studio\` skill first**. The erd-studio directory uses a two-file system (YAML for model definitions, JSON for domain diagrams and relationships) with strict format rules. Editing the wrong file is the most common mistake.
 
 ${buildVersionMarker()}
 `;
@@ -616,10 +635,31 @@ export class HarnessService {
         fs.writeFileSync(filePath, content, 'utf-8');
       }
 
-      // Write companion SYNC.md for Claude harness (progressive context loading)
+      // Write companion files for Claude harness
       if (target.id === 'claude') {
+        // SYNC.md — progressive context loading for sync plan execution
         const syncPath = path.join(dir, 'SYNC.md');
         fs.writeFileSync(syncPath, generateSyncGuide(), 'utf-8');
+
+        // .claude/CLAUDE.md — always-loaded rule that tells Claude to use /erd-studio
+        // skill before editing erd-studio files (skills are opt-in, CLAUDE.md is not)
+        const claudeMdPath = path.join(workspaceRoot, '.claude', 'CLAUDE.md');
+        const ruleContent = generateClaudeMdRule();
+        if (fs.existsSync(claudeMdPath)) {
+          const existing = fs.readFileSync(claudeMdPath, 'utf-8');
+          if (!existing.includes('## ERD Studio')) {
+            fs.appendFileSync(claudeMdPath, '\n' + ruleContent, 'utf-8');
+          } else if (overwrite) {
+            // Replace existing ERD Studio section
+            const updated = existing.replace(
+              /## ERD Studio[\s\S]*?(?=\n## |\n$|$)/,
+              ruleContent.trimEnd(),
+            );
+            fs.writeFileSync(claudeMdPath, updated, 'utf-8');
+          }
+        } else {
+          fs.writeFileSync(claudeMdPath, ruleContent, 'utf-8');
+        }
       }
 
       // Add to .gitignore on first install only — subsequent updates and
