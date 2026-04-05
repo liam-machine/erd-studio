@@ -503,44 +503,6 @@ ${buildVersionMarker()}
 `;
 }
 
-function generateHookScript(): string {
-  // Build the shell script as a plain string to avoid template literal
-  // interpolation of bash variables like $PPID, $flag, $(cat) etc.
-  const lines = [
-    '#!/usr/bin/env bash',
-    '# ERD Studio — PreToolUse hook for Edit and Write tools.',
-    '# Blocks the first erd-studio file edit per Claude session to ensure the',
-    '# /erd-studio skill is loaded before any changes are made. Subsequent edits',
-    '# in the same session are allowed (flag keyed on parent PID).',
-    '',
-    '# Read all stdin (Claude sends hook input JSON via stdin)',
-    'input="$(cat)"',
-    '',
-    '# Extract file_path using grep (avoids python3 dependency)',
-    'file_path="$(echo "$input" | grep -o \'"file_path" *: *"[^"]*"\' | head -1 | sed \'s/.*: *"//;s/"$//\')"',
-    '',
-    '# Only act on files inside erd-studio/ directories',
-    'case "$file_path" in',
-    '  */erd-studio/*)',
-    '    # One-time block per Claude session (PPID = Claude process)',
-    '    flag="/tmp/.erd-studio-skill-${PPID}"',
-    '    if [ ! -f "$flag" ]; then',
-    '      touch "$flag"',
-    '      # Deny with modern hookSpecificOutput format',
-    "      echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"You must load the /erd-studio skill before editing erd-studio files. It contains the two-file editing rules (YAML models vs JSON domains). Run: /erd-studio — then retry.\"}}'",
-    '      exit 0',
-    '    fi',
-    '    ;;',
-    'esac',
-    '',
-    '# Allow — modern format to avoid phantom "hook error" label',
-    "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"\"}}'",
-    'exit 0',
-    '',
-  ];
-  return lines.join('\n');
-}
-
 function generateSyncGuide(): string {
   return `${SYNC_CONTENT}
 
@@ -664,23 +626,10 @@ export class HarnessService {
         fs.writeFileSync(filePath, content, 'utf-8');
       }
 
-      // Write companion files for Claude harness
+      // Write companion SYNC.md for Claude harness (progressive context loading)
       if (target.id === 'claude') {
-        // SYNC.md — progressive context loading for sync plan execution
         const syncPath = path.join(dir, 'SYNC.md');
         fs.writeFileSync(syncPath, generateSyncGuide(), 'utf-8');
-
-        // PreToolUse hook script — blocks first erd-studio edit per session
-        // so Claude loads the /erd-studio skill before making changes
-        const hookPath = path.join(dir, 'check-skill.sh');
-        fs.writeFileSync(hookPath, generateHookScript(), { mode: 0o755 });
-
-        // Merge hook config into .claude/settings.local.json
-        try {
-          this.mergeHookConfig(workspaceRoot, hookPath);
-        } catch {
-          // Best-effort — don't fail install if settings merge fails
-        }
       }
 
       // Add to .gitignore on first install only — subsequent updates and
@@ -794,55 +743,4 @@ export class HarnessService {
     return stale;
   }
 
-  /**
-   * Merge the PreToolUse hook config into .claude/settings.local.json.
-   * Creates the file if it doesn't exist; adds the hook entry if missing.
-   * Uses settings.local.json (not settings.json) since harness files are gitignored.
-   */
-  private mergeHookConfig(workspaceRoot: string, hookScriptPath: string): void {
-    const settingsPath = path.join(workspaceRoot, '.claude', 'settings.local.json');
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let settings: Record<string, any> = {};
-    if (fs.existsSync(settingsPath)) {
-      try {
-        settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-      } catch {
-        // Malformed JSON — start fresh
-        settings = {};
-      }
-    }
-
-    // Build the hook entry
-    const hookCommand = `bash "${hookScriptPath}"`;
-    const hookEntry = {
-      matcher: 'Edit|Write',
-      hooks: [
-        {
-          type: 'command',
-          command: hookCommand,
-          timeout: 5,
-        },
-      ],
-    };
-
-    // Ensure hooks.PreToolUse array exists
-    if (!settings.hooks) { settings.hooks = {}; }
-    if (!Array.isArray(settings.hooks.PreToolUse)) { settings.hooks.PreToolUse = []; }
-
-    // Check if our hook is already registered (by command path)
-    const preToolUse = settings.hooks.PreToolUse as Array<Record<string, unknown>>;
-    const alreadyRegistered = preToolUse.some((entry) => {
-      const hooks = entry.hooks as Array<Record<string, unknown>> | undefined;
-      return hooks?.some((h) => typeof h.command === 'string' && h.command.includes('check-skill.sh'));
-    });
-    if (alreadyRegistered) { return; }
-
-    preToolUse.push(hookEntry);
-
-    // Ensure directory exists and write
-    const dir = path.dirname(settingsPath);
-    if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-  }
 }
