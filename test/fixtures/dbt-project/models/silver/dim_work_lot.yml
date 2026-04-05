@@ -1,7 +1,22 @@
 version: 2
 models:
   - name: dim_work_lot
+    description: Work lot dimension table
     config:
       tags:
-        - domain:work-lots
-        - domain:bill
+        - silver
+        - domain:showcase
+    columns:
+      - name: work_lot_id
+        description: Surrogate key for work lot
+        tests:
+          - relationships:
+              to: ref('fct_sale')
+              field: amount
+      - name: project_id
+        description: FK to dim_project
+      - name: name
+        description: Work lot name
+      - name: status
+        description: Current status
+        data_type: STRING

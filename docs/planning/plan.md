@@ -33,7 +33,7 @@ A VS Code extension that visualises semantic (FK-based) relationships between db
 | Column source for design models | Defined inline in semantic domain JSON (all orange) |
 | PK designation for repo models | `primaryKey` field in semantic JSON (user-defined) |
 | Multi-project support | Single dbt project per workspace |
-| Semantic file location | Inside dbt project: `models/semantic/{layer}/{domain}.json` |
+| Semantic file location | Inside dbt project: `erd-studio/{layer}/{domain}.json` |
 | Sidebar | Tree view listing all domains by layer + graph editor panel |
 | Cross-domain models | Allowed — a model can appear in multiple domains; conflicts flagged for resolution |
 | Schema versioning | Yes — `"schemaVersion": 1` field in domain JSON for future migration |
@@ -60,7 +60,7 @@ A VS Code extension that visualises semantic (FK-based) relationships between db
 
 ```
 /Users/liamwynne/GIT/
-├── dbt-semantic-designer/              ← THIS REPO (VS Code extension)
+├── erd-studio/                         ← THIS REPO (VS Code extension)
 │   ├── plan.md                         # This plan
 │   ├── src/                            # Extension host code
 │   ├── webview/                        # React webview code
@@ -87,7 +87,7 @@ The extension does **not** hardcode paths to the dbt repo. Instead:
 1. User opens `edp-app-dataprocessing/` in VS Code
 2. Extension activates on `workspaceContains:**/dbt_project.yml`
 3. Extension reads `target/manifest.json` from the workspace root
-4. Extension reads/writes `models/semantic/**/*.json` from the workspace root
+4. Extension reads/writes `erd-studio/**/*.json` from the workspace root
 
 ### Development Setup
 
@@ -95,7 +95,7 @@ During development of the extension, use VS Code's Extension Development Host:
 
 ```bash
 # In terminal 1: build extension continuously
-cd /Users/liamwynne/GIT/dbt-semantic-designer
+cd /Users/liamwynne/GIT/LIAM/erd-studio
 npm run watch
 
 # Press F5 in VS Code → opens Extension Development Host
@@ -111,8 +111,8 @@ To bootstrap the dbt repo with the semantic directory structure:
 
 ```bash
 # Create semantic directory in the dbt repo
-mkdir -p /Users/liamwynne/GIT/edp-app-dataprocessing/models/semantic/silver
-mkdir -p /Users/liamwynne/GIT/edp-app-dataprocessing/models/semantic/gold
+mkdir -p /Users/liamwynne/GIT/edp-app-dataprocessing/erd-studio/silver
+mkdir -p /Users/liamwynne/GIT/edp-app-dataprocessing/erd-studio/gold
 
 # Create an initial work-lots domain file manually (or via the extension's Create Domain command)
 ```
@@ -130,7 +130,7 @@ mkdir -p /Users/liamwynne/GIT/edp-app-dataprocessing/models/semantic/gold
 │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
 │  │ TreeView     │  │ Custom       │  │ File Watchers          │  │
 │  │ Provider     │  │ Editor       │  │ - manifest.json        │  │
-│  │ (sidebar)    │  │ Provider     │  │ - models/semantic/**   │  │
+│  │ (sidebar)    │  │ Provider     │  │ - erd-studio/**   │  │
 │  └──────┬───────┘  └──────┬───────┘  └───────────┬────────────┘  │
 │         │                 │                      │               │
 │  ┌──────┴─────────────────┴──────────────────────┴────────────┐  │
@@ -162,7 +162,7 @@ mkdir -p /Users/liamwynne/GIT/edp-app-dataprocessing/models/semantic/gold
 ### Project Structure
 
 ```
-dbt-semantic-designer/
+erd-studio/
 ├── package.json                        # Extension manifest, contribution points
 ├── tsconfig.json                       # Extension host TypeScript config (Node.js)
 ├── tsconfig.webview.json               # Webview TypeScript config (DOM)
@@ -241,7 +241,7 @@ dbt-semantic-designer/
 
 ### Semantic Domain JSON Schema
 
-This is the core data format. Files live at `{dbt_project}/models/semantic/{layer}/{domain}.json`.
+This is the core data format. Files live at `{dbt_project}/erd-studio/{layer}/{domain}.json`.
 
 ```jsonc
 {
@@ -574,7 +574,7 @@ CRUD operations on semantic domain JSON files.
 
 ```typescript
 class DomainService {
-  // List all domains found in models/semantic/
+  // List all domains found in erd-studio/
   async listDomains(): Promise<DomainSummary[]>
 
   // Read a domain file
@@ -639,7 +639,7 @@ class ReconciliationService {
 // Watch manifest.json for changes (dbt compile ran)
 // → Triggers reconciliation, refreshes graph, transitions orange→green
 
-// Watch models/semantic/**/*.json for external changes
+// Watch erd-studio/**/*.json for external changes
 // → Refreshes tree view and any open editors
 
 // Watch dbt_project.yml for project config changes
@@ -698,7 +698,7 @@ An AI skill can read the semantic domain JSON file directly from the filesystem:
 
 ```bash
 # Find all design models across all domains
-find models/semantic -name "*.json" -exec cat {} \; | jq '.models[] | select(.source == "design")'
+find erd-studio -name "*.json" -exec cat {} \; | jq '.models[] | select(.source == "design")'
 ```
 
 ### What AI Needs to Generate
@@ -783,7 +783,7 @@ After AI generates the dbt files:
     "customEditors": [{
       "viewType": "dbtSemantic.domainEditor",
       "displayName": "Semantic Domain Editor",
-      "selector": [{ "filenamePattern": "**/models/semantic/**/*.json" }],
+      "selector": [{ "filenamePattern": "**/erd-studio/**/*.json" }],
       "priority": "option"
     }],
 
@@ -797,7 +797,7 @@ After AI generates the dbt files:
         },
         "dbtSemantic.semanticDir": {
           "type": "string",
-          "default": "models/semantic",
+          "default": "erd-studio",
           "description": "Relative path to semantic domain files within the dbt project"
         },
         "dbtSemantic.autoReconcile": {
@@ -1033,7 +1033,7 @@ When the webview sends a mutation:
 
 ## Semantic Directory Convention
 
-The semantic files live inside the dbt project at `models/semantic/{layer}/{domain}.json`:
+The semantic files live inside the dbt project at `erd-studio/{layer}/{domain}.json`:
 
 ```
 /Users/liamwynne/GIT/edp-app-dataprocessing/
@@ -1059,7 +1059,7 @@ The semantic files live inside the dbt project at `models/semantic/{layer}/{doma
 └── ...
 ```
 
-This convention keeps semantic definitions close to the dbt models they describe, version-controlled alongside the project, and discoverable by the extension via the `models/semantic/` glob pattern.
+This convention keeps semantic definitions close to the dbt models they describe, version-controlled alongside the project, and discoverable by the extension via the `erd-studio/` glob pattern.
 
 ---
 

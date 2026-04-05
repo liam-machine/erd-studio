@@ -3,8 +3,6 @@
  *
  * Shows model name with a layer badge, a list of columns with PK/FK
  * indicators and data types, and a footer with the total column count.
- * Border colour indicates model status: green (built), orange (design),
- * grey (missing).
  *
  * Provides node-level handles (top/right/bottom/left) used by FkEdge for
  * Power BI-style connections that route to whichever side creates the
@@ -16,12 +14,21 @@
  *   3. Release to open the relationship dialog with prefilled data
  */
 
-import { memo, useCallback, useMemo, useEffect, useRef, type CSSProperties } from 'react';
+import { memo, useCallback, useMemo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
+import type { Stage } from '../../../src/types/semantic';
+import type { ColumnDiscrepancy } from '../../../src/types/discrepancy';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
+import { useMessageBus } from '../../hooks/useMessageBus';
+import { useColumnReorder } from '../../hooks/useColumnReorder';
+import { KeyBadge } from '../common/KeyBadge';
+import { DataTypeSelect } from '../common/DataTypeSelect';
+import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
+import { STAGE_HEX } from '../../lib/stageColors';
+import { getDataTypeColor } from '../../lib/dataTypeColors';
 import './ModelNode.css';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +40,28 @@ const LAYER_BADGE_FALLBACK: Record<string, string> = {
   bronze: 'BRZ',
   silver: 'SLV',
   gold: 'GLD',
+};
+
+// Abbreviations for common database schema names
+const SCHEMA_BADGE: Record<string, string> = {
+  bronze: 'BRZ',
+  silver: 'SLV',
+  gold: 'GLD',
+};
+
+
+/** Unicode circled numbers for SCD type badges. */
+const SCD_BADGE: Record<number, string> = {
+  0: '\u24EA', // ⓪
+  1: '\u2460', // ①
+  2: '\u2461', // ②
+};
+
+/** Symbols for additive type badges. */
+const ADDITIVE_BADGE: Record<string, string> = {
+  'additive': '\u03A3',      // Σ
+  'semi-additive': '~',
+  'non-additive': '\u00F7',  // ÷
 };
 
 /**
@@ -55,14 +84,141 @@ const NODE_HANDLE_STYLE: CSSProperties = {
 interface ColumnRowProps {
   column: ColumnDisplay;
   modelName: string;
-  isBuilt: boolean;
+  /** Whether this column is read-only (physical stage). */
+  readOnly?: boolean;
+  /** All column names in the model (for duplicate validation during rename). */
+  existingColumnNames?: string[];
+  /** Column-level discrepancy indicator (from cross-stage comparison). */
+  discrepancy?: ColumnDiscrepancy;
+  /** Props for the drag reorder handle (shown when node is selected). */
+  dragHandleProps?: { onMouseDown: (e: React.MouseEvent) => void };
+  /** Whether this row is being dragged. */
+  isReorderDragging?: boolean;
+  /** Whether the drop indicator should show above this row. */
+  isReorderTarget?: boolean;
+  /** The stage being viewed (for stage-labeled type mismatches). */
+  discrepancySourceStage?: Stage;
+  /** The stage being compared against (for stage-labeled type mismatches). */
+  discrepancyTargetStage?: Stage;
 }
 
-function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
+function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, discrepancySourceStage, discrepancyTargetStage }: ColumnRowProps) {
+  const { send } = useMessageBus(() => {});
+
+  // Highlight when this column is involved in a selected edge
+  const isHighlighted = useEditorStore(
+    (s) => s.highlightedColumns?.has?.(`${modelName}:${column.name}`) ?? false
+  );
+
   // Store actions for drag line visualization
   const startDragLine = useEditorStore((s) => s.startDragLine);
   const updateDragLineMouse = useEditorStore((s) => s.updateDragLineMouse);
   const endDragLine = useEditorStore((s) => s.endDragLine);
+
+  // Stable selector: only re-renders when drag starts/ends, not on every mouse move
+  const dragSourceModel = useEditorStore((s) => s.dragLineState?.sourceModelName ?? null);
+
+  // Track whether cursor is over this column during a cross-model drag
+  const [isDropTarget, setIsDropTarget] = useState(false);
+
+  // Tooltip hover state — delayed show, instant hide
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipEligible = hasTooltipContent(column);
+
+  // --- Inline edit state ---
+  const [editingField, setEditingField] = useState<'name' | 'dataType' | null>(null);
+  const [localValue, setLocalValue] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus input when entering edit mode
+  useEffect(() => {
+    if (editingField && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingField]);
+
+  const startEdit = useCallback((field: 'name' | 'dataType') => {
+    if (readOnly) return;
+    setEditingField(field);
+    setLocalValue(field === 'name' ? column.name : column.dataType);
+    setEditError(null);
+  }, [readOnly, column.name, column.dataType]);
+
+  const cancelEdit = useCallback(() => {
+    setEditingField(null);
+    setLocalValue('');
+    setEditError(null);
+  }, []);
+
+  const commitEdit = useCallback((revertOnError = false) => {
+    if (!editingField) return;
+    const trimmed = localValue.trim();
+    const description = (column as unknown as { description?: string }).description ?? '';
+    const baseColumn = {
+      name: column.name,
+      dataType: column.dataType,
+      description,
+      isPrimaryKey: column.isPrimaryKey,
+      isForeignKey: column.isForeignKey,
+      isNaturalKey: column.isNaturalKey,
+    };
+
+    if (editingField === 'name') {
+      if (!trimmed) { cancelEdit(); return; }
+      if (!/^[a-z0-9_]+$/.test(trimmed)) {
+        if (revertOnError) { cancelEdit(); return; }
+        setEditError('Use lowercase letters, numbers, underscores');
+        return;
+      }
+      if (trimmed !== column.name && existingColumnNames?.includes(trimmed)) {
+        if (revertOnError) { cancelEdit(); return; }
+        setEditError('Column name already exists');
+        return;
+      }
+      if (trimmed === column.name) { cancelEdit(); return; }
+      send({
+        type: 'updateColumn',
+        payload: { modelName, oldColumnName: column.name, column: { ...baseColumn, name: trimmed } },
+      });
+    } else {
+      if (!trimmed) { cancelEdit(); return; }
+      if (trimmed === column.dataType) { cancelEdit(); return; }
+      send({
+        type: 'updateColumn',
+        payload: { modelName, oldColumnName: column.name, column: { ...baseColumn, dataType: trimmed } },
+      });
+    }
+    setEditingField(null);
+    setEditError(null);
+  }, [editingField, localValue, column, modelName, existingColumnNames, send, cancelEdit]);
+
+  const handleEditKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+  }, [commitEdit, cancelEdit]);
+
+  // On blur, commit if valid, otherwise silently revert (no error display)
+  const handleEditBlur = useCallback(() => {
+    commitEdit(true);
+  }, [commitEdit]);
+
+  const handleDoubleClickName = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    startEdit('name');
+  }, [startEdit]);
+
+  const handleDoubleClickType = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    startEdit('dataType');
+  }, [startEdit]);
+
+  // Reset drop target state when drag ends
+  useEffect(() => {
+    if (!dragSourceModel) setIsDropTarget(false);
+  }, [dragSourceModel]);
 
   // Ref to the column element for position calculation
   const elementRef = useRef<HTMLDivElement>(null);
@@ -99,10 +255,8 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
     };
 
     const handleGlobalMouseUp = (e: MouseEvent) => {
-      // Guard against unmounted component
       if (!mountedRef.current) return;
 
-      // Find the element under the cursor
       const targetElement = document.elementFromPoint(e.clientX, e.clientY);
       if (!targetElement) {
         endDrag();
@@ -110,7 +264,6 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
         return;
       }
 
-      // Look for a column row element (has data-column-name attribute)
       const columnRow = targetElement.closest('[data-column-name]') as HTMLElement | null;
       const modelNode = targetElement.closest('[data-model-name]') as HTMLElement | null;
 
@@ -119,7 +272,6 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
         const targetModelName = modelNode.dataset.modelName;
 
         if (targetColumnName && targetModelName && targetModelName !== modelName) {
-          // Valid drop target — dispatch custom event for App to handle
           window.dispatchEvent(
             new CustomEvent('column-relationship-drop', {
               detail: {
@@ -131,7 +283,6 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
             }),
           );
         } else if (targetModelName === modelName) {
-          // Dropped on same model — show toast via event
           window.dispatchEvent(
             new CustomEvent('column-relationship-self-drop'),
           );
@@ -142,7 +293,6 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
       endDragLine();
     };
 
-    // Also handle Escape key to cancel drag
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (!mountedRef.current) return;
@@ -162,42 +312,167 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
     };
   }, [isDragging, endDrag, endDragLine, updateDragLineMouse, modelName, column.name]);
 
-  const statusClass = isBuilt
-    ? 'model-node__column--built'
-    : `model-node__column--${column.status}`;
+  // Drop target: highlight when dragging from a different model and hovering this column
+  const isValidDropTarget = dragSourceModel !== null && dragSourceModel !== modelName;
+
+  // Hide tooltip when drag/press starts or when editing
+  useEffect(() => {
+    if (isPressing || isDragging || editingField) {
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+      setShowTooltip(false);
+    }
+  }, [isPressing, isDragging, editingField]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    };
+  }, []);
+
+  const handleMouseEnter = useCallback(() => {
+    if (isValidDropTarget) setIsDropTarget(true);
+    if (tooltipEligible && !isDragging && !isPressing && !editingField) {
+      tooltipTimerRef.current = setTimeout(() => setShowTooltip(true), 450);
+    }
+  }, [isValidDropTarget, tooltipEligible, isDragging, isPressing, editingField]);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsDropTarget(false);
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    setShowTooltip(false);
+    handlers.onMouseLeave();
+  }, [handlers]);
 
   const pressClass = isPressing ? 'model-node__column--pressing' : '';
   const dragClass = isDragging ? 'model-node__column--dragging' : '';
+  const dropTargetClass = isDropTarget ? 'model-node__column--drop-target' : '';
+  const highlightClass = isHighlighted ? 'model-node__column--relationship-highlight' : '';
+  const reorderDragClass = isReorderDragging ? 'model-node__column--reorder-dragging' : '';
+  const reorderTargetClass = isReorderTarget ? 'model-node__column--reorder-target' : '';
+  const discrepancyClass = discrepancy?.status === 'extra' ? 'model-node__column--disc-extra'
+    : discrepancy?.status === 'type-mismatch' ? 'model-node__column--disc-mismatch'
+    : '';
 
   return (
     <div
       ref={elementRef}
-      className={`model-node__column ${statusClass} ${pressClass} ${dragClass} nodrag`.trim()}
+      className={`model-node__column ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} ${reorderDragClass} ${reorderTargetClass} ${discrepancyClass} nodrag`.trim()}
       data-column-name={column.name}
+      onMouseEnter={handleMouseEnter}
       {...handlers}
+      onMouseLeave={handleMouseLeave}
     >
+      {dragHandleProps && (
+        <span
+          className="model-node__col-reorder-handle nodrag"
+          onMouseDown={(e) => { e.stopPropagation(); dragHandleProps.onMouseDown(e); }}
+          title="Drag to reorder"
+        >
+          ⠿
+        </span>
+      )}
       <span className="model-node__col-indicators">
         {column.isPrimaryKey && (
-          <span
-            className={`model-node__pk${!isBuilt ? ' model-node__pk--planned' : ''}`}
-            title={isBuilt ? 'Primary Key' : 'Primary Key (planned)'}
-          >
-            PK
-          </span>
+          <KeyBadge type="PK" active={true} mode="readonly" />
         )}
         {column.isForeignKey && (
-          <span
-            className={`model-node__fk${!isBuilt ? ' model-node__fk--planned' : ''}`}
-            title={isBuilt ? 'Foreign Key' : 'Foreign Key (planned)'}
-          >
-            FK
-          </span>
+          <KeyBadge type="FK" active={true} mode="readonly" />
+        )}
+        {column.isNaturalKey && (
+          <KeyBadge type="NK" active={true} mode="readonly" />
         )}
       </span>
-      <span className="model-node__col-name" title={column.name}>
-        {column.name}
-      </span>
-      <span className="model-node__col-type">{column.dataType}</span>
+      {editingField === 'name' ? (
+        <input
+          ref={editInputRef}
+          className="model-node__col-edit-input model-node__col-edit-input--name nodrag"
+          value={localValue}
+          onChange={(e) => { setLocalValue(e.target.value); setEditError(null); }}
+          onKeyDown={handleEditKeyDown}
+          onBlur={handleEditBlur}
+          onMouseDown={(e) => e.stopPropagation()}
+          placeholder="column_name"
+        />
+      ) : (
+        <span
+          className={`model-node__col-name${!readOnly ? ' model-node__col-name--editable' : ''}`}
+          title={column.name}
+          onDoubleClick={!readOnly ? handleDoubleClickName : undefined}
+        >
+          {column.name}
+        </span>
+      )}
+      {editingField === 'dataType' ? (
+        <DataTypeSelect
+          value={column.dataType}
+          onChange={(newType) => {
+            if (newType !== column.dataType) {
+              const description = (column as unknown as { description?: string }).description ?? '';
+              send({
+                type: 'updateColumn',
+                payload: {
+                  modelName,
+                  oldColumnName: column.name,
+                  column: {
+                    name: column.name,
+                    dataType: newType,
+                    description,
+                    isPrimaryKey: column.isPrimaryKey,
+                    isForeignKey: column.isForeignKey,
+                    isNaturalKey: column.isNaturalKey,
+                  },
+                },
+              });
+            }
+            setEditingField(null);
+            setEditError(null);
+          }}
+          onBlur={() => { setEditingField(null); setEditError(null); }}
+          className="nodrag"
+          autoOpen={true}
+        />
+      ) : discrepancy?.status === 'type-mismatch' ? (
+        <span className="model-node__col-type model-node__col-type--mismatch" title={`${discrepancySourceStage ?? 'current'}: ${discrepancy.sourceDataType}, ${discrepancyTargetStage ?? 'target'}: ${discrepancy.targetDataType}`}>
+          <span className="model-node__col-type-line" style={{ color: STAGE_HEX[discrepancySourceStage ?? ''] ?? 'inherit' }}>
+            <span className="model-node__col-type-stage">{discrepancySourceStage ?? 'current'}:</span> {discrepancy.sourceDataType}
+          </span>
+          <span className="model-node__col-type-line" style={{ color: STAGE_HEX[discrepancyTargetStage ?? ''] ?? 'inherit' }}>
+            <span className="model-node__col-type-stage">{discrepancyTargetStage ?? 'target'}:</span> {discrepancy.targetDataType}
+          </span>
+        </span>
+      ) : (
+        <span
+          className={`model-node__col-type${!readOnly ? ' model-node__col-type--editable' : ''}`}
+          style={{ color: getDataTypeColor(column.dataType) }}
+          onDoubleClick={!readOnly ? handleDoubleClickType : undefined}
+        >
+          {column.dataType}
+        </span>
+      )}
+      {editError && (
+        <span className="model-node__col-edit-error">{editError}</span>
+      )}
+      {discrepancy?.status === 'extra' && (
+        <span className="model-node__col-disc-badge model-node__col-disc-badge--extra" title={`Only in ${discrepancySourceStage ?? 'this stage'}`}>only here</span>
+      )}
+      {column.scdType != null && SCD_BADGE[column.scdType] && (
+        <span
+          className="model-node__col-badge model-node__col-badge--scd"
+          title={`SCD Type ${column.scdType}`}
+        >
+          {SCD_BADGE[column.scdType]}
+        </span>
+      )}
+      {column.additiveType && ADDITIVE_BADGE[column.additiveType] && (
+        <span
+          className="model-node__col-badge model-node__col-badge--additive"
+          title={column.additiveType}
+        >
+          {ADDITIVE_BADGE[column.additiveType]}
+        </span>
+      )}
+      <ColumnTooltip column={column} anchorRef={elementRef} visible={showTooltip} />
     </div>
   );
 }
@@ -206,23 +481,43 @@ function ColumnRow({ column, modelName, isBuilt }: ColumnRowProps) {
 // ModelNode Component
 // ---------------------------------------------------------------------------
 
-function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
-  const { modelName, status, approved, layer, layerConfig, columns, dimmed, isExpanded = false, onToggleExpansion } = data;
+function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
+  const { modelName, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  const { send } = useMessageBus(() => {});
 
-  // F405: Compute visible columns based on expansion state
-  const { displayColumns, hiddenCount, isCollapsed } = useMemo(() => {
-    const shouldCollapse = columns.length > COLLAPSED_COLUMN_LIMIT && !isExpanded;
+  // Show reorder handles when this node is selected and editable
+  const showReorderHandles = !!selected && !readOnly;
+
+  const handleReorder = useCallback(
+    (orderedNames: string[]) => {
+      send({ type: 'reorderColumns', payload: { modelName, orderedNames } });
+    },
+    [send, modelName],
+  );
+
+  const { dragIndex, dropIndex, getDragHandleProps } = useColumnReorder({
+    columns,
+    onReorder: handleReorder,
+    containerSelector: '.model-node__columns',
+    rowSelector: '.model-node__column',
+  });
+
+  // Compute visible columns — stub models show only PK/NK; others respect expansion state
+  const { displayColumns, hiddenCount } = useMemo(() => {
+    const visibleColumns = isStub
+      ? columns.filter((c) => c.isPrimaryKey || c.isNaturalKey)
+      : columns;
+    const shouldCollapse = visibleColumns.length > COLLAPSED_COLUMN_LIMIT && !isExpanded;
     return {
-      displayColumns: shouldCollapse ? columns.slice(0, COLLAPSED_COLUMN_LIMIT) : columns,
-      hiddenCount: shouldCollapse ? columns.length - COLLAPSED_COLUMN_LIMIT : 0,
-      isCollapsed: shouldCollapse,
+      displayColumns: shouldCollapse ? visibleColumns.slice(0, COLLAPSED_COLUMN_LIMIT) : visibleColumns,
+      hiddenCount: shouldCollapse ? visibleColumns.length - COLLAPSED_COLUMN_LIMIT : 0,
     };
-  }, [columns, isExpanded]);
+  }, [columns, isExpanded, isStub]);
 
   // Handler for expand/collapse button
   const handleToggleClick = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent node selection
+    e.stopPropagation();
     onToggleExpansion?.(modelName);
   };
 
@@ -231,19 +526,37 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
     (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      openNodeContextMenu(e.clientX, e.clientY, modelName, status, approved);
+      openNodeContextMenu(e.clientX, e.clientY, modelName);
     },
-    [openNodeContextMenu, modelName, status, approved],
+    [openNodeContextMenu, modelName],
   );
 
-  // Split columns into built and planned
-  const builtCols = useMemo(() => displayColumns.filter((c) => c.status === 'built'), [displayColumns]);
-  const plannedCols = useMemo(() => displayColumns.filter((c) => c.status !== 'built'), [displayColumns]);
-  const showSeparator = builtCols.length > 0 && plannedCols.length > 0;
+  // All column names for inline rename duplicate validation
+  const columnNames = useMemo(() => columns.map((c) => c.name), [columns]);
+
+  // Build column discrepancy lookup (keyed by column name)
+  const columnDiscrepancyMap = useMemo(() => {
+    if (!discrepancy?.columns?.length) return undefined;
+    const map = new Map<string, ColumnDiscrepancy>();
+    for (const cd of discrepancy.columns) {
+      map.set(cd.name, cd);
+    }
+    return map;
+  }, [discrepancy]);
+
+  // Missing columns (ghost rows) — only shown when expanded
+  const missingColumns = useMemo(() => {
+    if (!isExpanded || !columnDiscrepancyMap) return [];
+    return (discrepancy?.columns ?? []).filter((cd) => cd.status === 'missing');
+  }, [isExpanded, columnDiscrepancyMap, discrepancy]);
+
+  // Determine CSS modifier for stage/ghost
+  const isDiscExtra = discrepancy?.status === 'extra';
+  const stageClass = isGhost ? 'ghost' : stage;
 
   return (
     <div
-      className={`model-node model-node--${status}${dimmed ? ' model-node--dimmed' : ''}`}
+      className={`model-node model-node--${stageClass}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}`}
       data-model-name={modelName}
       onContextMenu={handleContextMenu}
     >
@@ -265,37 +578,38 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
         <span
           className="model-node__badge"
           style={layerConfig?.color ? {
-            backgroundColor: `${layerConfig.color}33`, // 20% opacity
+            backgroundColor: `${layerConfig.color}33`,
             color: layerConfig.color,
           } : undefined}
         >
-          {layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
+          {schema
+            ? SCHEMA_BADGE[schema.toLowerCase()] ?? schema.substring(0, 3).toUpperCase()
+            : layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
       </div>
 
-      {/* Columns — ordered: built first, then planned/missing with separator */}
+      {/* Grain subtitle */}
+      {grain && (
+        <div className="model-node__grain" title={grain}>
+          {grain}
+        </div>
+      )}
+
+      {/* Columns */}
       <div className="model-node__columns">
-        {builtCols.map((col) => (
+        {displayColumns.map((col, idx) => (
           <ColumnRow
             key={col.name}
             column={col}
             modelName={modelName}
-            isBuilt={true}
-          />
-        ))}
-
-        {showSeparator && (
-          <div className="model-node__separator">
-            <span className="model-node__separator-label">planned</span>
-          </div>
-        )}
-
-        {plannedCols.map((col) => (
-          <ColumnRow
-            key={col.name}
-            column={col}
-            modelName={modelName}
-            isBuilt={false}
+            readOnly={readOnly}
+            existingColumnNames={columnNames}
+            discrepancy={columnDiscrepancyMap?.get(col.name)}
+            dragHandleProps={showReorderHandles && hiddenCount === 0 ? getDragHandleProps(idx) : undefined}
+            isReorderDragging={dragIndex === idx}
+            isReorderTarget={dropIndex === idx && dragIndex !== idx}
+            discrepancySourceStage={discrepancySourceStage}
+            discrepancyTargetStage={discrepancyTargetStage}
           />
         ))}
 
@@ -321,14 +635,40 @@ function ModelNodeComponent({ data }: NodeProps<ModelFlowNode>) {
           </button>
         )}
 
-        {columns.length === 0 && (
+        {/* Ghost rows for missing columns (discrepancy overlay) */}
+        {missingColumns.length > 0 && (
+          <>
+            <div className="model-node__separator model-node__separator--disc">
+              <span className="model-node__separator-label model-node__separator-label--missing">only in {discrepancyTargetStage ?? 'comparison'}</span>
+            </div>
+            {missingColumns.map((cd) => (
+              <div key={`ghost-${cd.name}`} className="model-node__column model-node__column--disc-missing nodrag">
+                <span className="model-node__col-name">{cd.name}</span>
+                <span className="model-node__col-type" style={{ color: cd.targetDataType ? getDataTypeColor(cd.targetDataType) : undefined }}>{cd.targetDataType ?? ''}</span>
+                <span className="model-node__col-disc-badge model-node__col-disc-badge--missing">{discrepancyTargetStage ?? 'target'} only</span>
+              </div>
+            ))}
+          </>
+        )}
+
+        {columns.length === 0 && !missingColumns.length && (
           <div className="model-node__empty">No columns</div>
         )}
       </div>
 
       {/* Footer */}
       <div className="model-node__footer">
-        {columns.length} {columns.length === 1 ? 'column' : 'columns'}
+        {isStub
+          ? `${displayColumns.length} key col${displayColumns.length !== 1 ? 's' : ''} of ${columns.length}`
+          : `${columns.length} ${columns.length === 1 ? 'column' : 'columns'}`}
+        {discrepancy && discrepancy.columns.length > 0 && (() => {
+          const issues = discrepancy.columns.filter((c) => c.status !== 'matched').length;
+          return issues > 0 ? (
+            <span className="model-node__footer-disc" title={`${issues} column discrepanc${issues === 1 ? 'y' : 'ies'}`}>
+              {' '}&middot; {issues} diff{issues !== 1 ? 's' : ''}
+            </span>
+          ) : null;
+        })()}
       </div>
     </div>
   );

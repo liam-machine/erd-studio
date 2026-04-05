@@ -1,0 +1,60 @@
+# Keep test fixture harness files in sync with source generators.
+#
+# When harnessService.ts changes on main, regenerates SKILL.md + SYNC.md
+# in the test fixtures and opens a PR if they've drifted.
+
+name: Sync harness fixtures
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/services/harnessService.ts'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Regenerate fixture harness files
+        run: npx tsx scripts/regen-fixtures.ts
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git diff --quiet test/fixtures/dbt-project/.claude/skills/erd-studio/ && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(sed -n 's/.*erd-studio-harness: \([^ ]*\).*/\1/p' test/fixtures/dbt-project/.claude/skills/erd-studio/SKILL.md)
+          BRANCH="auto/sync-harness-fixtures"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add test/fixtures/dbt-project/.claude/skills/erd-studio/
+          git commit -m "chore: sync harness fixture files to v${VERSION}"
+          git push -f origin "$BRANCH"
+
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -z "$EXISTING" ]; then
+            gh pr create \
+              --title "chore: sync harness fixture files to v${VERSION}" \
+              --body "Auto-generated — \`harnessService.ts\` changed on main and fixture harness files were stale. Regenerated via \`scripts/regen-fixtures.ts\`." \
+              --head "$BRANCH" \
+              --base main
+          fi

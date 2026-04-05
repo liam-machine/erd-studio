@@ -46,6 +46,77 @@
   min-width: 0;
 }
 
+.detail-panel__title--editable {
+  cursor: pointer;
+}
+
+.detail-panel__title--editable:hover {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.detail-panel__title-input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  background: var(--input-bg, var(--vscode-input-background, #3c3c3c));
+  border: 1px solid var(--focus-border, var(--vscode-focusBorder, #007fd4));
+  border-radius: 3px;
+  outline: none;
+  font-family: inherit;
+}
+
+.detail-panel__title-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail-panel__title-input--error {
+  border-color: var(--vscode-errorForeground, #f48771);
+}
+
+.detail-panel__title-error {
+  font-size: 10px;
+  color: var(--vscode-errorForeground, #f48771);
+  line-height: 1.2;
+}
+
+.detail-panel__title-edit-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__header:hover .detail-panel__title-edit-btn {
+  opacity: 1;
+}
+
+.detail-panel__title-edit-btn:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
 .detail-panel__close {
   flex-shrink: 0;
   display: flex;
@@ -430,6 +501,28 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Stub columns toggle
+   --------------------------------------------------------------------------- */
+
+.detail-panel__stub-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--editor-fg);
+  cursor: pointer;
+  user-select: none;
+}
+
+.detail-panel__stub-label input[type="checkbox"] {
+  accent-color: var(--button-bg);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
    Actions Section (Delete Model)
    --------------------------------------------------------------------------- */
 
@@ -471,6 +564,19 @@
   border-color: rgba(239, 68, 68, 0.4);
 }
 
+.detail-panel__button--warning {
+  align-self: flex-start;
+  background: rgba(204, 167, 0, 0.1);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  border-color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.detail-panel__button--warning:hover {
+  background: rgba(204, 167, 0, 0.2);
+}
+
 .detail-panel__confirm-label {
   font-size: 11px;
   color: var(--editor-fg);
@@ -498,4 +604,203 @@
 .detail-panel__confirm-actions .detail-panel__button--danger:hover {
   background: rgba(239, 68, 68, 0.2);
   border-color: #ef4444;
+}
+
+/* ---------------------------------------------------------------------------
+   Design Rationale
+   --------------------------------------------------------------------------- */
+
+.detail-panel__rationale-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__rationale-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: inherit;
+}
+
+.detail-panel__rationale-toggle:hover {
+  color: var(--editor-fg);
+}
+
+.detail-panel__rationale-chevron {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.detail-panel__rationale-chevron--open {
+  transform: rotate(90deg);
+}
+
+.detail-panel__rationale-count {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.7;
+}
+
+.detail-panel__rationale-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__rationale-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.detail-panel__rationale-edit-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__rationale-section:hover .detail-panel__rationale-edit-btn {
+  opacity: 1;
+}
+
+.detail-panel__rationale-edit-btn:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.detail-panel__rationale-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-panel__rationale-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8b5cf6;
+}
+
+.detail-panel__rationale-text {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--editor-fg);
+  white-space: pre-wrap;
+}
+
+.detail-panel__rationale-textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 6px;
+  border: 1px solid var(--focus-border, var(--vscode-focusBorder, #007fd4));
+  border-radius: 3px;
+  background: var(--input-bg, var(--vscode-input-background, #3c3c3c));
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.detail-panel__rationale-textarea::placeholder {
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.6;
+}
+
+.detail-panel__rationale-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.detail-panel__rationale-actions .detail-panel__button {
+  flex: 1;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.detail-panel__rationale-add-btn {
+  padding: 6px 12px;
+  border: 1px dashed var(--vscode-descriptionForeground, #888);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+
+.detail-panel__rationale-add-btn:hover {
+  background: rgba(139, 92, 246, 0.08);
+  color: #8b5cf6;
+  border-color: #8b5cf6;
+}
+
+/* ---------------------------------------------------------------------------
+   Role Editor
+   --------------------------------------------------------------------------- */
+
+.detail-panel__role-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-panel__role-select {
+  padding: 4px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.detail-panel__role-select:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* ---------------------------------------------------------------------------
+   Grain Editor
+   --------------------------------------------------------------------------- */
+
+.detail-panel__grain-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__grain-section:hover .detail-panel__rationale-edit-btn {
+  opacity: 1;
 }

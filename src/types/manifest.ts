@@ -48,10 +48,35 @@ export interface ManifestModelInfo {
   originalFilePath?: string;
 }
 
+/**
+ * Serializable result from the manifest worker thread.
+ * Uses plain objects/arrays instead of Maps/Sets because
+ * structured clone (worker postMessage) cannot transfer them.
+ */
+export interface ManifestWorkerResult {
+  models: Record<string, ManifestModelInfo>;
+  relationshipTests: ManifestRelationshipTest[];
+  uniqueColumns: Record<string, string[]>;
+  compositeUniqueGroups: Record<string, string[][]>;
+}
+
+/** Error result from the manifest worker thread. */
+export interface ManifestWorkerError {
+  error: string;
+}
+
 /** Parsed manifest data cached in memory. */
 export interface ManifestData {
   /** Models indexed by short name (e.g. "dim_work_lot") */
   models: Map<string, ManifestModelInfo>;
   /** Relationship tests extracted from manifest test nodes */
   relationshipTests: ManifestRelationshipTest[];
+  /** Columns with a standalone `unique` test, indexed by model name */
+  uniqueColumns: Map<string, Set<string>>;
+  /**
+   * Composite unique groups from `unique_combination_of_columns` tests,
+   * indexed by model name. Each entry is an array of column names that
+   * are unique together.
+   */
+  compositeUniqueGroups: Map<string, string[][]>;
 }

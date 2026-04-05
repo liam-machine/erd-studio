@@ -90,6 +90,73 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Stages List (vertical)
+   --------------------------------------------------------------------------- */
+
+.welcome-modal__stages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.welcome-modal__stage-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Steps (numbered workflow)
+   --------------------------------------------------------------------------- */
+
+.welcome-modal__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.welcome-modal__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.welcome-modal__step-number {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.welcome-modal__step-text {
+  font-size: 12px;
+  color: var(--editor-fg);
+  opacity: 0.85;
+  line-height: 20px;
+}
+
+.welcome-modal__step-text kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--input-bg);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
    Visual Guide Grid
    --------------------------------------------------------------------------- */
 
@@ -141,24 +208,24 @@
   overflow: hidden;
 }
 
-.welcome-modal__model-sample--built {
-  border-color: var(--model-built);
+.welcome-modal__model-sample--logical {
+  border-color: var(--stage-logical);
 }
 
-.welcome-modal__model-sample--design {
-  border-color: var(--model-design);
+.welcome-modal__model-sample--physical {
+  border-color: var(--stage-physical);
 }
 
 .welcome-modal__model-header {
   height: 9px;
 }
 
-.welcome-modal__model-header--built {
-  background: var(--model-built);
+.welcome-modal__model-header--logical {
+  background: var(--stage-logical);
 }
 
-.welcome-modal__model-header--design {
-  background: var(--model-design);
+.welcome-modal__model-header--physical {
+  background: var(--stage-physical);
 }
 
 /* Edge samples */
@@ -171,12 +238,8 @@
   stroke-width: 2;
 }
 
-.welcome-modal__edge--built {
-  stroke: var(--edge-built);
-}
-
-.welcome-modal__edge--design {
-  stroke: var(--edge-design);
+.welcome-modal__edge--logical {
+  stroke: var(--stage-logical);
 }
 
 /* ---------------------------------------------------------------------------
@@ -203,21 +266,21 @@
 .welcome-modal__cardinality-symbol {
   font-weight: 700;
   font-size: 13px;
-  color: var(--edge-built);
+  color: var(--stage-logical);
 }
 
 .welcome-modal__cardinality-line {
   display: inline-block;
   width: 16px;
   height: 2px;
-  background: var(--edge-built);
+  background: var(--stage-logical);
 }
 
 .welcome-modal__cardinality-line--dashed {
   background: linear-gradient(
     to right,
-    var(--edge-built) 0%,
-    var(--edge-built) 60%,
+    var(--stage-logical) 0%,
+    var(--stage-logical) 60%,
     transparent 60%,
     transparent 100%
   );
@@ -227,75 +290,12 @@
 .welcome-modal__cardinality-line--dotted {
   background: linear-gradient(
     to right,
-    var(--edge-built) 0%,
-    var(--edge-built) 30%,
+    var(--stage-logical) 0%,
+    var(--stage-logical) 30%,
     transparent 30%,
     transparent 100%
   );
   background-size: 6px 2px;
-}
-
-/* ---------------------------------------------------------------------------
-   Palette Selector
-   --------------------------------------------------------------------------- */
-
-.welcome-modal__palette-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.welcome-modal__palette-option {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 2px solid var(--panel-border);
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-  text-align: left;
-}
-
-.welcome-modal__palette-option:hover {
-  border-color: var(--focus-border);
-  background: rgba(128, 128, 128, 0.05);
-}
-
-.welcome-modal__palette-option--selected {
-  border-color: var(--focus-border);
-  background: rgba(128, 128, 128, 0.1);
-}
-
-.welcome-modal__palette-preview {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.welcome-modal__palette-swatch {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-}
-
-.welcome-modal__palette-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.welcome-modal__palette-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--editor-fg);
-}
-
-.welcome-modal__palette-desc {
-  font-size: 11px;
-  color: var(--editor-fg);
-  opacity: 0.6;
 }
 
 /* ---------------------------------------------------------------------------

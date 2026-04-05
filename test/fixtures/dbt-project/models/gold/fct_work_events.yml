@@ -1,5 +1,4 @@
 version: 2
-
 models:
   - name: fct_work_events
     description: Work events fact table
@@ -7,6 +6,8 @@ models:
       tags:
         - gold
         - daily
+        - domain:work-lots
+        - domain:showcase
     columns:
       - name: event_id
         description: Event surrogate key

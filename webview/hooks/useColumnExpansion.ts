@@ -1,9 +1,9 @@
 /**
- * useColumnExpansion — manages ephemeral column expansion state for ModelNodes.
+ * useColumnExpansion — manages column expansion state for ModelNodes.
  *
  * Tracks which model nodes have their columns expanded (showing all columns
- * vs collapsed showing first N columns). State is ephemeral — it resets when
- * the domain changes because the hook recreates with a fresh Set.
+ * vs collapsed showing first N columns). State lives in the Zustand store
+ * so it can be persisted across tab switches via useStatePersistence.
  *
  * Smart collapsing: columns only collapse automatically when there are enough
  * nodes (NODE_THRESHOLD) to warrant performance optimization. Below that
@@ -12,7 +12,8 @@
  * @module F405 Performance optimization
  */
 
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
+import { useEditorStore } from '../store/editorStore';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -48,42 +49,20 @@ export interface UseColumnExpansionReturn {
 /**
  * Hook to manage column expansion state.
  *
- * State is local to this hook instance — when the component using this hook
- * unmounts or re-mounts (e.g., on domain change), all expansion state resets.
+ * State is stored in the Zustand editor store and persisted via
+ * useStatePersistence so it survives webview re-creation on tab switches.
  */
 export function useColumnExpansion(): UseColumnExpansionReturn {
-  const [expandedSet, setExpandedSet] = useState<Set<string>>(() => new Set());
-  // Track if user has explicitly set "all expanded" mode
-  const [allExpanded, setAllExpanded] = useState(false);
+  const expandedNodes = useEditorStore((s) => s.expandedNodes);
+  const allExpanded = useEditorStore((s) => s.allExpanded);
+  const toggleExpansion = useEditorStore((s) => s.toggleExpansion);
+  const collapseAll = useEditorStore((s) => s.collapseAll);
+  const expandAll = useEditorStore((s) => s.expandAll);
 
   const isExpanded = useCallback(
-    (modelId: string) => allExpanded || expandedSet.has(modelId),
-    [expandedSet, allExpanded],
+    (modelId: string) => allExpanded || expandedNodes.has(modelId),
+    [expandedNodes, allExpanded],
   );
-
-  const toggleExpansion = useCallback((modelId: string) => {
-    // If in allExpanded mode, switch to individual tracking and collapse this one
-    setAllExpanded(false);
-    setExpandedSet((prev) => {
-      const next = new Set(prev);
-      if (next.has(modelId)) {
-        next.delete(modelId);
-      } else {
-        next.add(modelId);
-      }
-      return next;
-    });
-  }, []);
-
-  const collapseAll = useCallback(() => {
-    setAllExpanded(false);
-    setExpandedSet(new Set());
-  }, []);
-
-  const expandAll = useCallback((modelIds: string[]) => {
-    setAllExpanded(true);
-    setExpandedSet(new Set(modelIds));
-  }, []);
 
   return { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded };
 }

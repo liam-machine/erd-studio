@@ -21,7 +21,8 @@ export type {
   WebviewMessage,
   DomainLoadedMessage,
   DomainUpdatedMessage,
-  ManifestRefreshedMessage,
+  StageDataMessage,
+  DiscrepancyReportMessage,
   ErrorMessage,
   ReadyMessage,
   AddModelMessage,
@@ -36,6 +37,8 @@ export type {
   UpdatePositionsMessage,
   RunAutoLayoutMessage,
   RefreshManifestMessage,
+  SwitchStageMessage,
+  ToggleDiscrepancyMessage,
 } from '../../src/types/messages';
 
 import type { ExtensionMessage, WebviewMessage } from '../../src/types/messages';

@@ -1,10 +1,9 @@
 /**
  * Types for semantic domain JSON files.
  *
- * Domain files live at {dbt_project}/models/semantic/{layer}/{domain}.json
+ * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
  * and describe FK-based relationships between dbt models within a business
- * domain. Models are either sourced from the repo (columns resolved from
- * manifest at runtime) or designed inline (columns defined in the JSON).
+ * domain at a particular design stage (logical or physical).
  */
 
 /**
@@ -13,21 +12,79 @@
  */
 export type Layer = string;
 
+/** The two design stages of a domain. */
+export type Stage = 'logical' | 'physical';
+
 /** The current schema version written by this extension. */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 5;
+
+/** Previous schema version (inline models). */
+export const LEGACY_SCHEMA_VERSION = 4;
 
 // ---------------------------------------------------------------------------
-// Column definitions (used by design models)
+// Column definitions
 // ---------------------------------------------------------------------------
 
-/** Column definition for a design model. */
+/** Column definition for a model. */
 export interface ColumnDef {
   name: string;
   dataType: string;
   description: string;
   isPrimaryKey?: boolean;
-  /** Whether this column has been approved for build. */
-  approved?: boolean;
+  /** Stored FK flag for design-time FK intent (separate from computed FK from relationships). */
+  isForeignKey?: boolean;
+  /** Natural key flag — business identifier like email, SKU, customer_code. */
+  isNaturalKey?: boolean;
+  /**
+   * SCD type for dimension columns: how this attribute handles changes over time.
+   * 0 = Never changes, 1 = Overwrite, 2 = Track history.
+   * Only meaningful on dimension-role models but stored unconditionally.
+   */
+  scdType?: 0 | 1 | 2;
+  /**
+   * Additive type for fact measure columns: how this measure aggregates across dimensions.
+   * Only meaningful on fact-role models but stored unconditionally.
+   */
+  additiveType?: 'additive' | 'semi-additive' | 'non-additive';
+}
+
+// ---------------------------------------------------------------------------
+// Model role
+// ---------------------------------------------------------------------------
+
+/**
+ * Classifies a model's role in the data warehouse architecture.
+ * Maps to entity types from dimensional modelling methodology.
+ */
+export type ModelRole =
+  | 'conformed-dim'        // Shared dimension reused across domains
+  | 'domain-dim'           // New dimension specific to this domain
+  | 'transaction-fact'     // Discrete event fact
+  | 'periodic-snapshot'    // Recurring measurement per period
+  | 'accumulating-snapshot'// Lifecycle with milestones
+  | 'factless-fact'        // M:M bridge table, FKs only
+  | 'reference'            // Low-cardinality lookup
+  | 'gold-fact'            // Pre-joined Gold view
+  | 'gold-dim';            // Flattened Gold dimension view
+
+// ---------------------------------------------------------------------------
+// Design rationale
+// ---------------------------------------------------------------------------
+
+/** Design rationale metadata for a model — explains architectural decisions. */
+export interface Rationale {
+  /** What requirements or purpose this model fulfils. */
+  purpose?: string;
+  /** Why this model was designed the way it was. */
+  design?: string;
+  /** Why this grain was chosen over alternatives. */
+  grainChoice?: string;
+  /** Why this model role / fact type was selected. */
+  roleChoice?: string;
+  /** Overall SCD strategy explanation across dimension attributes. */
+  scdStrategy?: string;
+  /** Why measures are structured this way — additive type choices, component storage. */
+  measures?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,50 +94,36 @@ export interface ColumnDef {
 /**
  * A model entry in a semantic domain.
  *
- * - `source: "repo"` — exists in the dbt project; columns are resolved from
- *   the compiled manifest at runtime. Use `primaryKey` to designate the PK
- *   and `plannedColumns` for columns not yet built.
- * - `source: "design"` — a planned model that doesn't exist yet; columns,
- *   schema, and description are defined inline.
+ * In the stage architecture, models are simple data containers.
+ * The stage is determined by the section (logical) within
+ * the unified domain file, not by a field on the model.
  */
 export interface SemanticModel {
   name: string;
-  source: 'repo' | 'design';
-  /** Schema the model will be materialised in (design models only). */
+  /** Schema the model will be materialised in. */
   schema?: string;
-  /** Model description (design models only — repo models use manifest). */
+  /** Model description. */
   description?: string;
-  /** Inline column definitions (design models only). */
+  /** Column definitions. */
   columns?: ColumnDef[];
-  /**
-   * Primary key column name (repo models only).
-   * For design models, use `isPrimaryKey: true` in the columns array.
-   */
-  primaryKey?: string;
-  /**
-   * Planned columns not yet in manifest (repo models only).
-   * These are displayed as orange rows until they appear in manifest.
-   * Once a planned column exists in manifest, the manifest version is shown
-   * instead (overlay semantics — manifest always wins).
-   */
-  plannedColumns?: ColumnDef[];
-  /**
-   * Whether this model has been approved for build.
-   * Approving a model auto-approves all existing columns.
-   * New columns added after approval start as unapproved.
-   */
-  approved?: boolean;
+  /** Design rationale: what this model does and why it was designed this way. */
+  rationale?: Rationale;
+  /** Grain statement — "One row per ___". The single most critical design decision. */
+  grain?: string;
+  /** Model's role in the data warehouse architecture (e.g. conformed-dim, transaction-fact). */
+  modelRole?: ModelRole;
 }
 
 /**
- * A design model definition used when creating new models via addModel message.
- * All design models have source: 'design' and define columns inline.
+ * A model definition used when creating new models via addModel message.
  */
 export interface DesignModel {
   name: string;
-  schema: string;
+  schema?: string;
   description: string;
   columns: ColumnDef[];
+  /** Model's role in the data warehouse architecture. Auto-suggested from template. */
+  modelRole?: ModelRole;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,8 +137,6 @@ export type Cardinality = 'many-to-one' | 'one-to-one' | 'one-to-many' | 'many-t
  * An FK relationship between two models in a domain.
  *
  * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
- * The optional `source` field marks design-time relationships; repo
- * relationships omit it (or default to repo-like behaviour).
  */
 export interface Relationship {
   fromModel: string;
@@ -103,10 +144,6 @@ export interface Relationship {
   toModel: string;
   toColumn: string;
   cardinality: Cardinality;
-  /** Present and set to `"design"` for relationships created in design mode. */
-  source?: 'design';
-  /** Whether this relationship has been approved for build. */
-  approved?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,12 +159,50 @@ export interface NodePosition {
 /** ELK layout options stored as string key-value pairs. */
 export type LayoutOptions = Record<string, string>;
 
+// ---------------------------------------------------------------------------
+// Annotations (build notes)
+// ---------------------------------------------------------------------------
+
+/** Colour options for canvas annotations. */
+export type AnnotationColor = 'yellow' | 'blue' | 'green' | 'pink' | 'orange';
+
+/**
+ * A free-form canvas annotation (post-it note).
+ *
+ * Annotations are temporary build notes — visible on the canvas while
+ * constructing a model, then removed once the work is done. They live
+ * in viewConfig (view-layer data), not in logical (semantic data).
+ */
+export interface Annotation {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  color?: AnnotationColor;
+  width?: number;
+  height?: number;
+  /** Optional link to a model — renders a dashed edge on the canvas. */
+  linkedModel?: string;
+}
+
 /** View configuration for a domain's graph editor. */
 export interface ViewConfig {
   showFkEdges?: boolean;
   layoutOptions?: LayoutOptions;
   /** Persisted node positions keyed by model name. */
   positions?: Record<string, NodePosition>;
+  /** Free-form canvas annotations (build notes). */
+  annotations?: Annotation[];
+}
+
+// ---------------------------------------------------------------------------
+// Stage data (structure for the logical section)
+// ---------------------------------------------------------------------------
+
+/** The models and relationships for a design stage. */
+export interface StageData {
+  models: SemanticModel[];
+  relationships: Relationship[];
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +214,7 @@ export interface SemanticDomain {
   schemaVersion: number;
   domain: string;
   layer: Layer;
+  stage: Stage;
   description: string;
   /**
    * Optional folder filter for models (e.g., "models/silver").
@@ -149,7 +225,91 @@ export interface SemanticDomain {
   modelFolder?: string;
   models: SemanticModel[];
   relationships: Relationship[];
+}
+
+/**
+ * Unified domain file format (v4).
+ *
+ * A single JSON file at erd-studio/{layer}/{domain}.json containing
+ * logical stage data. Physical stage is derived at runtime from
+ * the logical models projected through the dbt manifest.
+ */
+export interface UnifiedDomain {
+  schemaVersion: number;
+  domain: string;
+  layer: Layer;
+  description: string;
+  modelFolder?: string;
+  logical: StageData;
+  /**
+   * Model names whose physical-only columns are suppressed during discrepancy comparison.
+   * Useful for conformed dimensions and reference tables that are included in a domain
+   * only to anchor relationships — they define a few key columns (PK/NK) but not all
+   * physical columns. Missing-column discrepancies for these models are hidden.
+   */
+  stubColumns?: string[];
+  /** Global view configuration shared across all stages. */
   viewConfig: ViewConfig;
+}
+
+// ---------------------------------------------------------------------------
+// V5 on-disk format (model references instead of inline models)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stage data as stored on disk in v5 domain files.
+ * Models are string references (names) that resolve to logical-models/*.yml files.
+ */
+export interface StageDataV5 {
+  models: string[];
+  relationships: Relationship[];
+}
+
+/**
+ * Unified domain file format (v5).
+ *
+ * Same as v4 but `logical.models` contains model name strings instead of
+ * inline SemanticModel objects. Models are stored centrally in
+ * erd-studio/logical-models/{name}.yml.
+ */
+export interface UnifiedDomainV5 {
+  schemaVersion: number;
+  domain: string;
+  layer: Layer;
+  description: string;
+  modelFolder?: string;
+  logical: StageDataV5;
+  /** See UnifiedDomain.stubColumns. */
+  stubColumns?: string[];
+  viewConfig: ViewConfig;
+}
+
+/**
+ * Raw on-disk domain format — may be v4 (inline models) or v5 (model references).
+ * Used during parsing before version detection.
+ */
+export interface RawDomainFile {
+  schemaVersion: number;
+  domain: string;
+  layer: Layer;
+  description?: string;
+  modelFolder?: string;
+  logical: {
+    models: SemanticModel[] | string[];
+    relationships: Relationship[];
+  };
+  viewConfig?: ViewConfig;
+}
+
+/**
+ * Type guard: returns true if the domain file uses v5 format (model name references).
+ */
+export function isDomainV5(raw: RawDomainFile): boolean {
+  if (raw.schemaVersion >= 5) return true;
+  // Also detect by content: if models array contains strings, it's v5
+  const models = raw.logical?.models ?? [];
+  if (models.length === 0) return true; // empty is ambiguous, treat as v5
+  return typeof models[0] === 'string';
 }
 
 // ---------------------------------------------------------------------------

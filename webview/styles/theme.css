@@ -66,37 +66,51 @@ body {
   --warning-fg: var(--vscode-editorWarning-foreground, #cca700);
 
   /* -----------------------------------------------------------------------
-     Design tokens — model status colours
+     Design tokens — stage colours (fixed, no runtime palette swapping)
      ----------------------------------------------------------------------- */
 
-  /* Built (exists in manifest) — defaults before palette applied */
-  --model-built: #60a5fa;
-  --model-built-bg: rgba(96, 165, 250, 0.08);
-  --model-built-text: #ffffff;
+  /* Logical stage — blue (detailed design) */
+  --stage-logical:       #60a5fa;
+  --stage-logical-bg:    rgba(96, 165, 250, 0.08);
+  --stage-logical-hover: rgba(96, 165, 250, 0.12);
+  --stage-logical-ring:  rgba(96, 165, 250, 0.3);
 
-  /* Approved (approved for build) — defaults before palette applied */
-  --model-approved: #14b8a6;
-  --model-approved-bg: rgba(20, 184, 166, 0.08);
-  --model-approved-text: #ffffff;
+  /* Physical stage — green (built in dbt) */
+  --stage-physical:       #22c55e;
+  --stage-physical-bg:    rgba(34, 197, 94, 0.08);
+  --stage-physical-hover: rgba(34, 197, 94, 0.12);
+  --stage-physical-ring:  rgba(34, 197, 94, 0.3);
+  --stage-physical-border: rgba(34, 197, 94, 0.2);
 
-  /* Design (planned, not yet in manifest) — defaults before palette applied */
-  --model-design: #ea580c;
-  --model-design-bg: rgba(234, 88, 12, 0.08);
-  --model-design-text: #ffffff;
-
-  /* Missing (repo model not found in manifest) — grey */
-  --model-missing: #9ca3af;
-  --model-missing-bg: rgba(156, 163, 175, 0.08);
+  /* Ghost/missing — grey (node not found in manifest or comparison stage) */
+  --stage-ghost:    #9ca3af;
+  --stage-ghost-bg: rgba(156, 163, 175, 0.08);
 
   /* -----------------------------------------------------------------------
-     Design tokens — edge colours
+     Design tokens — discrepancy overlay colours
      ----------------------------------------------------------------------- */
 
-  /* Built FK relationship — defaults before palette applied */
-  --edge-built: #60a5fa;
+  --discrepancy-extra:    #f59e0b;  /* Amber — item exists here, not in target */
+  --discrepancy-mismatch: #ef4444;  /* Red — type/cardinality difference */
 
-  /* Design FK relationship — defaults before palette applied */
-  --edge-design: #ea580c;
+  /* -----------------------------------------------------------------------
+     Backward-compatible aliases for old status variable names.
+     Used by DetailPanel, ContextMenu, ColumnEditor until Batch C/D updates them.
+     TODO: Remove these after Batch C/D migrates those components to stage tokens.
+     ----------------------------------------------------------------------- */
+  --model-built:         var(--stage-physical);
+  --model-built-bg:      var(--stage-physical-bg);
+  --model-built-text:    #ffffff;
+  --model-approved:      #14b8a6;
+  --model-approved-bg:   rgba(20, 184, 166, 0.08);
+  --model-approved-text: #ffffff;
+  --model-design:        var(--stage-logical);
+  --model-design-bg:     var(--stage-logical-bg);
+  --model-design-text:   #ffffff;
+  --model-missing:       var(--stage-ghost);
+  --model-missing-bg:    var(--stage-ghost-bg);
+  --edge-built:          var(--stage-logical);
+  --edge-design:         var(--stage-logical);
 
   /* -----------------------------------------------------------------------
      Design tokens — layer badge colours

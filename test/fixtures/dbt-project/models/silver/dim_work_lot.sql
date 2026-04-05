@@ -5,5 +5,5 @@ select
     work_lot_id,
     project_id,
     name,
-    status
+    cast(status as STRING) as status
 from {{ ref('stg_work_lots') }}

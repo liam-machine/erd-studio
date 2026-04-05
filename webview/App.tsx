@@ -31,6 +31,8 @@ import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
+import { AnnotationNode } from './components/Graph/AnnotationNode';
+import { AnnotationEdge } from './components/Graph/AnnotationEdge';
 import { DragLine } from './components/Graph/DragLine';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { StatusBar } from './components/Toolbar/StatusBar';
@@ -41,51 +43,31 @@ import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddE
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
+import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
+import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { transformDomain } from './lib/graphTransformer';
-import {
-  applyPalette,
-  loadPersistedPalette,
-  getPaletteColors,
-} from './lib/colorPalettes';
-import type { ModelFlowNode, FkFlowEdge } from './types/graph';
+import { stageNodeColor } from './lib/stageColors';
+import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from './types/graph';
+import type { AnnotationColor } from '../src/types/semantic';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Build and show a toast notification for newly built models/relationships.
- */
-function showBuiltNotification(
-  models: string[],
-  relationships: Array<{ fromModel: string; fromColumn: string; toModel: string; toColumn: string }>,
-  setToastMessage: (msg: string) => void,
-): void {
-  const modelCount = models.length;
-  const relCount = relationships.length;
-
-  if (modelCount === 0 && relCount === 0) return;
-
-  const parts: string[] = [];
-  if (modelCount > 0) {
-    parts.push(`Models: ${models.join(', ')}`);
-  }
-  if (relCount > 0) {
-    parts.push(`${relCount} relationship${relCount > 1 ? 's' : ''}`);
-  }
-  setToastMessage(`Built: ${parts.join(' | ')}`);
-}
+/** Module-level clipboard for annotation copy/paste (not in Zustand — never drives rendering). */
+type CopiedAnnotation = { text: string; color: AnnotationColor; width?: number; height?: number; linkedModel?: string };
+let _copiedAnnotation: CopiedAnnotation | null = null;
 
 // ---------------------------------------------------------------------------
 // Inner component (must be inside ReactFlowProvider)
 // ---------------------------------------------------------------------------
 
 /** Custom node types for React Flow — must be memoised or stable. */
-const nodeTypes: NodeTypes = { model: ModelNode };
+const nodeTypes: NodeTypes = { model: ModelNode, annotation: AnnotationNode };
 
 /** Custom edge types for React Flow — must be memoised or stable. */
-const edgeTypes: EdgeTypes = { fk: FkEdge };
+const edgeTypes: EdgeTypes = { fk: FkEdge, annotationLink: AnnotationEdge };
 
 function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
@@ -101,12 +83,16 @@ function EditorCanvas() {
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const setTemplates = useEditorStore((s) => s.setTemplates);
   const setManifestModels = useEditorStore((s) => s.setManifestModels);
+  const setExistingModels = useEditorStore((s) => s.setExistingModels);
   const openFkDialogWithPrefill = useEditorStore((s) => s.openFkDialogWithPrefill);
   const selectedNode = useEditorStore((s) => s.selectedNode);
   const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
   const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
   const selectedEdges = useEditorStore((s) => s.selectedEdges);
   const setSelectedEdges = useEditorStore((s) => s.setSelectedEdges);
+  const setHighlightedColumns = useEditorStore((s) => s.setHighlightedColumns);
+  const selectedEdge = useEditorStore((s) => s.selectedEdge);
+  const setSelectedEdge = useEditorStore((s) => s.setSelectedEdge);
   // Dialog state for Escape key handling
   const newModelDialogOpen = useEditorStore((s) => s.newModelDialogOpen);
   const newFkDialogOpen = useEditorStore((s) => s.newFkDialogOpen);
@@ -118,28 +104,64 @@ function EditorCanvas() {
   const clearFkDialogEditData = useEditorStore((s) => s.clearFkDialogEditData);
   // Context menu state
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
+  const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  const openAnnotationContextMenu = useEditorStore((s) => s.openAnnotationContextMenu);
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const contextMenu = useEditorStore((s) => s.contextMenu);
+  const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
+  const selectedAnnotation = useEditorStore((s) => s.selectedAnnotation);
+  const selectAnnotation = useEditorStore((s) => s.selectAnnotation);
+  const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
+  const updateAnnotationLinkDrag = useEditorStore((s) => s.updateAnnotationLinkDrag);
+  const endAnnotationLinkDrag = useEditorStore((s) => s.endAnnotationLinkDrag);
   // Search state (F402)
   const searchQuery = useEditorStore((s) => s.searchQuery);
   const focusSearchInput = useEditorStore((s) => s.focusSearchInput);
+  const triggerAutoLayout = useEditorStore((s) => s.triggerAutoLayout);
   // Legend state
   const legendOpen = useEditorStore((s) => s.legendOpen);
   const setLegendOpen = useEditorStore((s) => s.setLegendOpen);
-  // Palette state
-  const paletteId = useEditorStore((s) => s.paletteId);
-  const setPaletteId = useEditorStore((s) => s.setPaletteId);
 
+  // Column selection state
+  const selectedColumns = useEditorStore((s) => s.selectedColumns);
+  const clearColumnSelection = useEditorStore((s) => s.clearColumnSelection);
+  const setEditingColumn = useEditorStore((s) => s.setEditingColumn);
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
 
-  // F405: Column expansion state (ephemeral, resets on domain change)
-  const { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded } = useColumnExpansion();
+  // Track Shift key state for pan/selection mode switching.
+  // React Flow's built-in selectionKeyCode uses useKeyPress which may not
+  // receive keyboard events reliably inside VS Code webview iframes.
+  const [shiftHeld, setShiftHeld] = useState(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.key === 'Shift') setShiftHeld(true); };
+    const up = (e: KeyboardEvent) => { if (e.key === 'Shift') setShiftHeld(false); };
+    // Also reset on blur (e.g. user Shift-tabs away from the webview)
+    const blur = () => setShiftHeld(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, []);
 
-  // State persistence (zoom, pan, selection, mode, detail panel)
+  // F405: Column expansion state (persisted in Zustand store via useStatePersistence)
+  const { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded } = useColumnExpansion();
+  // Check synchronously on mount if we have persisted expansion state.
+  // Used to distinguish "first ever load" from "returning after tab switch".
+  const [hadPersistedExpansion] = useState(() => {
+    const s = vscode.getState() as { expandedNodes?: string[] } | null | undefined;
+    return s?.expandedNodes !== undefined;
+  });
+
+  // State persistence (zoom, pan, selection, mode, detail panel, expansion)
   const { shouldSkipFitView, invalidSelectedNode, persistedViewport } =
     useStatePersistence();
-  const { setViewport: setReactFlowViewport } = useReactFlow();
+  const reactFlowInstance = useReactFlow();
+  const { setViewport: setReactFlowViewport, screenToFlowPosition } = reactFlowInstance;
 
   // Toast notification for invalid selection after restore
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -155,53 +177,91 @@ function EditorCanvas() {
   // Memoized callback for toast dismissal (prevents timer re-creation)
   const dismissToast = useCallback(() => setToastMessage(null), []);
 
-  // Initialize colour palette on mount
+  // F405: Auto-expand columns on first-ever domain load.
+  // This effect runs AFTER useStatePersistence's restore effect (React guarantees
+  // effects execute in declaration order within a component). On first-ever load
+  // (no persisted state), expand all if below NODE_THRESHOLD. On restoration
+  // (persisted state exists), skip auto-expand entirely — the persisted state
+  // is the source of truth for which models are expanded.
+  const hasAutoExpandedRef = useRef(false);
   useEffect(() => {
-    const savedPalette = loadPersistedPalette();
-    setPaletteId(savedPalette);
-    applyPalette(savedPalette);
-  }, [setPaletteId]);
+    if (!domain || hasAutoExpandedRef.current) return;
+    hasAutoExpandedRef.current = true;
+
+    // If we have persisted expansion state, trust it — don't auto-expand.
+    // This preserves "Collapse All" intent across tab switches.
+    if (hadPersistedExpansion) return;
+
+    // First ever session: expand all if below node threshold for better UX.
+    if (domain.models.length < NODE_THRESHOLD) {
+      expandAll(domain.models.map((m) => m.name));
+    }
+  }, [domain, hadPersistedExpansion, expandAll]);
+
+  // Discrepancy state
+  const setDiscrepancyReport = useEditorStore((s) => s.setDiscrepancyReport);
+  const discrepancyReport = useEditorStore((s) => s.discrepancyReport);
+  const discrepancyVisible = useEditorStore((s) => s.discrepancyVisible);
+  const setManifestStale = useEditorStore((s) => s.setManifestStale);
+  const setSyncPlanGenerated = useEditorStore((s) => s.setSyncPlanGenerated);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
       switch (msg.type) {
         case 'domainLoaded':
           setDomain(msg.payload);
-          // Extract and store templates from the payload
           if (msg.payload.templates) {
             setTemplates(msg.payload.templates);
           }
-          // Extract and store manifest models for "Add Existing Model" dialog
           if (msg.payload.manifestModels) {
             setManifestModels(msg.payload.manifestModels);
           }
-          // F405: Auto-expand all columns if below node threshold for better UX
-          if (msg.payload.models.length < NODE_THRESHOLD) {
-            expandAll(msg.payload.models.map((m) => m.name));
+          if (msg.payload.existingModels) {
+            setExistingModels(msg.payload.existingModels);
+          }
+          if (!msg.welcomeDismissed) {
+            useEditorStore.getState().setWelcomeModalOpen(true);
           }
           break;
-        case 'manifestRefreshed':
-          // F304: Auto-reconciliation detected design models that are now built
-          setDomain(msg.payload.domain);
-          if (msg.payload.domain.templates) {
-            setTemplates(msg.payload.domain.templates);
+        case 'domainUpdated':
+          setDomain(msg.payload);
+          if (msg.payload.templates) {
+            setTemplates(msg.payload.templates);
           }
-          if (msg.payload.domain.manifestModels) {
-            setManifestModels(msg.payload.domain.manifestModels);
+          if (msg.payload.manifestModels) {
+            setManifestModels(msg.payload.manifestModels);
           }
-          // Show toast notification for newly built models and relationships
-          showBuiltNotification(
-            msg.payload.newlyBuiltModels,
-            msg.payload.newlyBuiltRelationships ?? [],
-            setToastMessage,
-          );
+          if (msg.payload.existingModels) {
+            setExistingModels(msg.payload.existingModels);
+          }
+          break;
+        case 'stageData':
+          setDomain(msg.payload);
+          if (msg.payload.templates) {
+            setTemplates(msg.payload.templates);
+          }
+          if (msg.payload.manifestModels) {
+            setManifestModels(msg.payload.manifestModels);
+          }
+          if (msg.payload.existingModels) {
+            setExistingModels(msg.payload.existingModels);
+          }
+          break;
+        case 'discrepancyReport':
+          setDiscrepancyReport(msg.payload);
+          break;
+        case 'manifestStaleness':
+          setManifestStale(msg.payload.isStale);
+          break;
+        case 'syncPlanGenerated':
+          setSyncPlanGenerated(msg.payload);
           break;
         case 'error':
           setError(msg.payload.message);
           break;
       }
     },
-    [setDomain, setError, setTemplates, setManifestModels, setToastMessage, expandAll],
+    [setDomain, setError, setTemplates, setManifestModels, setExistingModels, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
@@ -234,6 +294,56 @@ function EditorCanvas() {
         return;
       }
 
+      // Ctrl+C / Cmd+C: Copy selected annotation (skip if context menu is open)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedAnnotation && domain && !contextMenu) {
+        const ann = domain.viewConfig.annotations?.find((a) => a.id === selectedAnnotation);
+        if (ann) {
+          e.preventDefault();
+          _copiedAnnotation = {
+            text: ann.text,
+            color: ann.color ?? 'yellow',
+            ...(ann.width != null ? { width: ann.width } : {}),
+            ...(ann.height != null ? { height: ann.height } : {}),
+            ...(ann.linkedModel ? { linkedModel: ann.linkedModel } : {}),
+          };
+        }
+        return;
+      }
+
+      // Ctrl+V / Cmd+V: Paste copied annotation (skip if context menu is open)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && _copiedAnnotation && domain && !domain.readOnly && !contextMenu) {
+        e.preventDefault();
+        const id = crypto.randomUUID();
+        // Place relative to current viewport center
+        const { x: vx, y: vy, zoom } = reactFlowInstance.getViewport();
+        const container = document.querySelector('.react-flow');
+        const rect = container?.getBoundingClientRect();
+        const centerX = rect ? (rect.width / 2 - vx) / zoom : 200;
+        const centerY = rect ? (rect.height / 2 - vy) / zoom : 200;
+        vscode.postMessage({
+          type: 'addAnnotation',
+          payload: {
+            id,
+            text: _copiedAnnotation.text,
+            x: Math.round(centerX + 30),
+            y: Math.round(centerY + 30),
+            color: _copiedAnnotation.color,
+            ...(_copiedAnnotation.width != null ? { width: _copiedAnnotation.width } : {}),
+            ...(_copiedAnnotation.height != null ? { height: _copiedAnnotation.height } : {}),
+            ...(_copiedAnnotation.linkedModel ? { linkedModel: _copiedAnnotation.linkedModel } : {}),
+          },
+        });
+        setEditingAnnotationId(id);
+        return;
+      }
+
+      // F2: Edit selected column (rename)
+      if (e.key === 'F2' && selectedColumns.length === 1 && detailPanelOpen && domain && !domain.readOnly) {
+        e.preventDefault();
+        setEditingColumn(selectedColumns[0]);
+        return;
+      }
+
       // ESCAPE KEY: Close dialogs first, then deselect
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -254,48 +364,88 @@ function EditorCanvas() {
           return;
         }
 
-        // No dialogs open — deselect nodes and edges
-        if (selectedNode || selectedEdges.length > 0) {
+        // Clear column selection first (before deselecting model)
+        if (selectedColumns.length > 0) {
+          clearColumnSelection();
+          return;
+        }
+
+        // No dialogs open — deselect nodes, edges, and annotations
+        if (selectedNode || selectedEdges.length > 0 || selectedEdge || selectedAnnotation) {
           selectNode(null);
+          selectAnnotation(null);
           setDetailPanelOpen(false);
           setSelectedEdges([]);
+          setSelectedEdge(null);
+          setHighlightedColumns(new Set());
         }
         return;
       }
 
-      // DELETE KEY: Delete selected design models or edges
+      // Shift+L: Trigger auto-layout
+      if (e.shiftKey && e.key === 'L') {
+        e.preventDefault();
+        triggerAutoLayout();
+        return;
+      }
+
+      // Alt+1/2: Switch stage tabs
+      if (e.altKey && (e.key === '1' || e.key === '2')) {
+        e.preventDefault();
+        const stageMap: Record<string, import('../src/types/semantic').Stage> = {
+          '1': 'logical',
+          '2': 'physical',
+        };
+        const targetStage = stageMap[e.key];
+        if (targetStage && domain && domain.stage !== targetStage) {
+          vscode.postMessage({ type: 'switchStage', payload: { stage: targetStage } });
+        }
+        return;
+      }
+
+      // DELETE KEY: Delete selected design models, annotations, or edges
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (!domain) return;
+        if (!domain || domain.readOnly) return;
+
+        // Priority 0: Delete selected annotation (no confirmation — undo exists)
+        if (selectedAnnotation) {
+          e.preventDefault();
+          vscode.postMessage({ type: 'removeAnnotation', payload: { id: selectedAnnotation } });
+          selectAnnotation(null);
+          return;
+        }
 
         // Priority 1: Remove selected node (with confirmation)
         if (selectedNode) {
           const model = domain.models.find((m) => m.name === selectedNode);
           if (model) {
-            if (model.status === 'design' || model.status === 'built') {
-              e.preventDefault();
-              // Open detail panel if closed and trigger confirmation mode
-              if (!detailPanelOpen) {
-                setDetailPanelOpen(true);
-              }
-              setPendingDeleteConfirmation(true);
-              return;
-            } else {
-              // Missing model — show toast
-              e.preventDefault();
-              setToastMessage('Cannot remove missing models');
-              return;
+            e.preventDefault();
+            if (!detailPanelOpen) {
+              setDetailPanelOpen(true);
             }
+            setPendingDeleteConfirmation(true);
+            return;
           }
+        }
+
+        // Priority 1.5: Delete selected columns (immediate)
+        if (selectedColumns.length > 0 && detailPanelOpen && selectedNode) {
+          e.preventDefault();
+          for (const colName of selectedColumns) {
+            vscode.postMessage({
+              type: 'removeColumn',
+              payload: { modelName: selectedNode, columnName: colName },
+            });
+          }
+          clearColumnSelection();
+          return;
         }
 
         // Priority 2: Delete selected edges (no confirmation, immediate)
         if (selectedEdges.length > 0) {
           e.preventDefault();
-          let deletedCount = 0;
-          let builtCount = 0;
 
           for (const edgeId of selectedEdges) {
-            // Find the relationship in domain data by edge ID
             const rel = domain.relationships.find((r) => {
               const expectedId = `fk-${r.fromModel}-${r.fromColumn}-${r.toModel}-${r.toColumn}`;
               return expectedId === edgeId;
@@ -303,28 +453,15 @@ function EditorCanvas() {
 
             if (!rel) continue;
 
-            if (rel.status === 'design') {
-              // Delete design relationship immediately
-              vscode.postMessage({
-                type: 'removeRelationship',
-                payload: {
-                  fromModel: rel.fromModel,
-                  fromColumn: rel.fromColumn,
-                  toModel: rel.toModel,
-                  toColumn: rel.toColumn,
-                },
-              });
-              deletedCount++;
-            } else {
-              builtCount++;
-            }
-          }
-
-          // Show toast feedback
-          if (builtCount > 0 && deletedCount === 0) {
-            setToastMessage('Cannot delete built relationships');
-          } else if (builtCount > 0 && deletedCount > 0) {
-            setToastMessage(`Deleted ${deletedCount} design relationship(s). Cannot delete ${builtCount} built relationship(s).`);
+            vscode.postMessage({
+              type: 'removeRelationship',
+              payload: {
+                fromModel: rel.fromModel,
+                fromColumn: rel.fromColumn,
+                toModel: rel.toModel,
+                toColumn: rel.toColumn,
+              },
+            });
           }
           return;
         }
@@ -335,12 +472,15 @@ function EditorCanvas() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     selectedNode,
+    selectedAnnotation,
+    selectedEdge,
     selectedEdges,
     domain,
     detailPanelOpen,
     newModelDialogOpen,
     newFkDialogOpen,
     addExistingModelDialogOpen,
+    contextMenu,
     setDetailPanelOpen,
     setPendingDeleteConfirmation,
     setNewModelDialogOpen,
@@ -349,11 +489,20 @@ function EditorCanvas() {
     clearFkDialogPrefill,
     clearFkDialogEditData,
     selectNode,
+    selectAnnotation,
+    setEditingAnnotationId,
+    reactFlowInstance,
+    setSelectedEdge,
     setSelectedEdges,
+    setHighlightedColumns,
     setToastMessage,
     focusSearchInput,
+    triggerAutoLayout,
     legendOpen,
     setLegendOpen,
+    selectedColumns,
+    clearColumnSelection,
+    setEditingColumn,
     // Note: vscode is omitted as it's a stable ref from useVsCodeApi
   ]);
 
@@ -366,32 +515,53 @@ function EditorCanvas() {
   // Apply search dimming (F402), selection dimming, and column expansion (F405).
   useEffect(() => {
     if (domain) {
-      let { nodes: newNodes, edges: newEdges } = transformDomain(domain);
+      const transformOptions = discrepancyVisible && discrepancyReport
+        ? { discrepancyReport }
+        : undefined;
+      let { nodes: newNodes, edges: newEdges } = transformDomain(domain, transformOptions);
 
       // Compute connected nodes for selection dimming.
-      // When a node is selected, only the selected node and its direct neighbors stay bright.
+      // When a node is selected, the selected node and its direct neighbors stay bright.
+      // When an edge is selected, only the two endpoint nodes stay bright.
       const connectedNodeIds = new Set<string>();
       if (currentSelectedNode) {
         connectedNodeIds.add(currentSelectedNode);
-        // Find all nodes connected to the selected node via edges
+        // Find all nodes connected to the selected node via edges (FK edges only)
         newEdges.forEach((edge) => {
-          if (edge.data) {
-            if (edge.data.fromModel === currentSelectedNode) {
-              connectedNodeIds.add(edge.data.toModel);
+          if (edge.type === 'fk' && edge.data) {
+            const fkData = edge.data as FkFlowEdge['data'];
+            if (fkData && fkData.fromModel === currentSelectedNode) {
+              connectedNodeIds.add(fkData.toModel);
             }
-            if (edge.data.toModel === currentSelectedNode) {
-              connectedNodeIds.add(edge.data.fromModel);
+            if (fkData && fkData.toModel === currentSelectedNode) {
+              connectedNodeIds.add(fkData.fromModel);
             }
           }
         });
+      } else if (selectedEdge) {
+        // Edge selection: only the two endpoint models stay bright
+        const edge = newEdges.find((e) => e.id === selectedEdge);
+        if (edge?.type === 'fk' && edge.data) {
+          const fkData = edge.data as FkFlowEdge['data'];
+          if (fkData) {
+            connectedNodeIds.add(fkData.fromModel);
+            connectedNodeIds.add(fkData.toModel);
+          }
+        }
       }
 
       // F402: Search dimming + selection dimming (additive)
       // F405: Inject column expansion state into node data
+      const hasSelection = currentSelectedNode !== null || selectedEdge !== null;
       const query = searchQuery.trim() ? searchQuery.toLowerCase() : '';
       newNodes = newNodes.map((node) => {
-        const searchDimmed = query ? !node.data.modelName.toLowerCase().includes(query) : false;
-        const selectionDimmed = currentSelectedNode !== null && !connectedNodeIds.has(node.id);
+        if (node.type === 'annotation') {
+          // Annotations: not search-dimmable, not selection-dimmable
+          return node;
+        }
+        const modelData = node.data as ModelFlowNode['data'];
+        const searchDimmed = query ? !modelData.modelName.toLowerCase().includes(query) : false;
+        const selectionDimmed = hasSelection && !connectedNodeIds.has(node.id);
 
         return {
           ...node,
@@ -407,16 +577,23 @@ function EditorCanvas() {
         };
       });
 
-      // Apply selection dimming to edges.
-      // An edge is bright only if both endpoints are in the connected set.
-      newEdges = newEdges.map((edge) => ({
-        ...edge,
-        data: edge.data ? {
-          ...edge.data,
-          dimmed: currentSelectedNode !== null &&
-            (!connectedNodeIds.has(edge.data.fromModel) || !connectedNodeIds.has(edge.data.toModel)),
-        } : edge.data,
-      }));
+      // Apply selection dimming to edges (FK edges only).
+      // For node selection: an edge is bright only if both endpoints are in the connected set.
+      // For edge selection: only the selected edge stays bright.
+      newEdges = newEdges.map((edge) => {
+        if (edge.type !== 'fk' || !edge.data) return edge;
+        const fkData = edge.data as FkFlowEdge['data'];
+        if (!fkData) return edge;
+        return {
+          ...edge,
+          data: {
+            ...fkData,
+            dimmed: hasSelection && (selectedEdge
+              ? edge.id !== selectedEdge
+              : !connectedNodeIds.has(fkData.fromModel) || !connectedNodeIds.has(fkData.toModel)),
+          },
+        };
+      });
 
       // If we have a selected node, preserve the selection in the new nodes
       if (currentSelectedNode) {
@@ -427,18 +604,21 @@ function EditorCanvas() {
       }
 
       // Clear stale edge selections (edges that no longer exist after domain update)
+      const newEdgeIds = new Set(newEdges.map((e) => e.id));
       if (selectedEdges.length > 0) {
-        const newEdgeIds = new Set(newEdges.map((e) => e.id));
         const validEdges = selectedEdges.filter((id) => newEdgeIds.has(id));
         if (validEdges.length !== selectedEdges.length) {
           setSelectedEdges(validEdges);
         }
       }
+      if (selectedEdge && !newEdgeIds.has(selectedEdge)) {
+        setSelectedEdge(null);
+      }
 
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges, setSelectedEdges, selectedEdges, currentSelectedNode, searchQuery, isExpanded, toggleExpansion]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, selectedEdges, currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, discrepancyVisible, discrepancyReport]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -462,20 +642,48 @@ function EditorCanvas() {
     [setViewport],
   );
 
-  // Handle node clicks to open the detail panel.
+  // Handle node clicks to open the detail panel (model nodes) or select (annotations).
   const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: ModelFlowNode) => {
+    (_event: React.MouseEvent, node: ModelFlowNode | AnnotationFlowNode) => {
+      if (node.type === 'annotation') {
+        const annData = (node as AnnotationFlowNode).data;
+        selectAnnotation(annData.annotationId);
+        return;
+      }
       selectNode(node.id);
       setDetailPanelOpen(true);
+      setHighlightedColumns(new Set());
+      setSelectedEdge(null);
     },
-    [selectNode, setDetailPanelOpen],
+    [selectNode, selectAnnotation, setDetailPanelOpen, setHighlightedColumns, setSelectedEdge],
+  );
+
+  // Handle edge clicks to highlight the FK columns involved and dim unrelated nodes/edges.
+  const onEdgeClick = useCallback(
+    (_event: React.MouseEvent, edge: FkFlowEdge | AnnotationFlowEdge) => {
+      if (edge.type !== 'fk') return; // Annotation link edges are not interactive
+      if (edge.data) {
+        const cols = new Set<string>();
+        cols.add(`${edge.data.fromModel}:${edge.data.fromColumn}`);
+        cols.add(`${edge.data.toModel}:${edge.data.toColumn}`);
+        setHighlightedColumns(cols);
+        // Clear node selection and activate edge dimming
+        selectNode(null);
+        setDetailPanelOpen(false);
+        setSelectedEdge(edge.id);
+      }
+    },
+    [setHighlightedColumns, selectNode, setDetailPanelOpen, setSelectedEdge],
   );
 
   // Handle clicks on blank canvas to close the detail panel and clear selection.
   const onPaneClick = useCallback(() => {
     setDetailPanelOpen(false);
     selectNode(null);
-  }, [setDetailPanelOpen, selectNode]);
+    selectAnnotation(null);
+    setHighlightedColumns(new Set());
+    setSelectedEdge(null);
+  }, [setDetailPanelOpen, selectNode, selectAnnotation, setHighlightedColumns, setSelectedEdge]);
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).
@@ -486,6 +694,9 @@ function EditorCanvas() {
       setSelectedEdges(selectedEdgesInFlow.map((e) => e.id));
 
       if (selectedNodes.length !== 1) {
+        // Don't interfere if an edge dimming selection is active (onEdgeClick handles state)
+        if (selectedEdge !== null) return;
+
         // Check if our stored selection still exists in the domain
         // If so, this is likely a domain update, not a user deselection
         if (currentSelectedNode && domain?.models.some((m) => m.name === currentSelectedNode)) {
@@ -496,12 +707,15 @@ function EditorCanvas() {
         selectNode(null);
       }
     },
-    [selectNode, setDetailPanelOpen, setSelectedEdges, currentSelectedNode, domain],
+    [selectNode, setDetailPanelOpen, setSelectedEdges, currentSelectedNode, selectedEdge, domain],
   );
 
   // Handle long-press column drag to create relationships.
   // Listens for custom events dispatched by ColumnRow in ModelNode.
+  // Disabled in read-only mode (physical stage).
   useEffect(() => {
+    if (domain?.readOnly) return;
+
     const handleColumnRelationshipDrop = (e: Event) => {
       const { fromModel, fromColumn, toModel, toColumn } = (e as CustomEvent).detail;
       openFkDialogWithPrefill({ fromModel, fromColumn, toModel, toColumn });
@@ -518,14 +732,83 @@ function EditorCanvas() {
       window.removeEventListener('column-relationship-drop', handleColumnRelationshipDrop);
       window.removeEventListener('column-relationship-self-drop', handleColumnRelationshipSelfDrop);
     };
-  }, [openFkDialogWithPrefill, setToastMessage]);
+  }, [openFkDialogWithPrefill, setToastMessage, domain?.readOnly]);
+
+  // Handle annotation drag-to-link: mouse move updates the drag line,
+  // mouse up on a model node completes the link.
+  useEffect(() => {
+    if (!annotationLinkDrag) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      updateAnnotationLinkDrag(e.clientX, e.clientY);
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      // Check if we dropped on a model node
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      const modelNode = target?.closest('.react-flow__node-model');
+      if (modelNode) {
+        const modelId = modelNode.getAttribute('data-id');
+        if (modelId) {
+          vscode.postMessage({
+            type: 'updateAnnotation',
+            payload: { id: annotationLinkDrag.annotationId, linkedModel: modelId },
+          });
+        }
+      }
+      endAnnotationLinkDrag();
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [annotationLinkDrag, updateAnnotationLinkDrag, endAnnotationLinkDrag, vscode]);
+
+  // Handle double-click on blank canvas to create a new annotation
+  const onPaneDoubleClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (domain?.readOnly) return;
+      // Only trigger on actual pane clicks, not double-clicks that bubbled from nodes
+      const target = event.target as HTMLElement;
+      if (!target.classList.contains('react-flow__pane')) return;
+
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const id = crypto.randomUUID();
+      vscode.postMessage({
+        type: 'addAnnotation',
+        payload: { id, text: '', x: Math.round(position.x), y: Math.round(position.y) },
+      });
+      setEditingAnnotationId(id);
+    },
+    [domain?.readOnly, screenToFlowPosition, vscode, setEditingAnnotationId],
+  );
+
+  // Handle right-click on nodes (model or annotation) to show context menu
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: ModelFlowNode | AnnotationFlowNode) => {
+      event.preventDefault();
+      if (node.type === 'annotation') {
+        const annData = (node as AnnotationFlowNode).data;
+        openAnnotationContextMenu(event.clientX, event.clientY, annData.annotationId);
+      } else {
+        const modelData = (node as ModelFlowNode).data;
+        openNodeContextMenu(event.clientX, event.clientY, modelData.modelName);
+      }
+    },
+    [openAnnotationContextMenu, openNodeContextMenu],
+  );
 
   // Handle right-click on edges to show context menu (F401)
   const onEdgeContextMenu = useCallback(
-    (event: React.MouseEvent, edge: FkFlowEdge) => {
+    (event: React.MouseEvent, edge: FkFlowEdge | AnnotationFlowEdge) => {
       event.preventDefault();
-      if (edge.data) {
-        openEdgeContextMenu(event.clientX, event.clientY, edge.data);
+      if (edge.type !== 'fk') return; // Annotation link edges don't have context menu
+      const fkData = edge.data as NonNullable<FkFlowEdge['data']>;
+      if (fkData) {
+        openEdgeContextMenu(event.clientX, event.clientY, fkData);
       }
     },
     [openEdgeContextMenu],
@@ -568,26 +851,39 @@ function EditorCanvas() {
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
         onPaneClick={handlePaneClick}
+        onDoubleClick={onPaneDoubleClick}
+        onNodeContextMenu={onNodeContextMenu}
         onSelectionChange={onSelectionChange}
         onMoveEnd={onMoveEnd}
         onEdgeContextMenu={onEdgeContextMenu}
         fitView={!shouldSkipFitView}
-        selectionOnDrag
+        minZoom={0.05}
         selectionMode={SelectionMode.Partial}
-        panOnDrag={[1, 2]}
+        zoomOnDoubleClick={domain.readOnly}
+        nodesDraggable={domain.positionDraggable ?? !domain.readOnly}
+        panOnDrag={!shiftHeld}
+        selectionOnDrag={shiftHeld && !domain.readOnly}
+        selectionKeyCode={null}
+        multiSelectionKeyCode="Shift"
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <MiniMap
           position="bottom-right"
+          pannable
+          zoomable
           nodeColor={(node) => {
-            const status = node.data?.status;
-            const colors = getPaletteColors(paletteId);
-            if (status === 'built') return colors.modelBuilt;
-            if (status === 'design') return colors.modelDesign;
-            if (status === 'missing') return colors.modelMissing;
-            return colors.modelMissing;
+            if (node.type === 'annotation') {
+              const colorMap: Record<string, string> = {
+                yellow: '#f59e0b', blue: '#3b82f6', green: '#22c55e',
+                pink: '#ec4899', orange: '#f97316',
+              };
+              return colorMap[(node as AnnotationFlowNode).data.color] ?? '#f59e0b';
+            }
+            const d = (node as ModelFlowNode).data;
+            return stageNodeColor(d.stage, d.isGhost);
           }}
           maskColor="rgba(0, 0, 0, 0.2)"
           style={{
@@ -600,7 +896,7 @@ function EditorCanvas() {
           nodes={nodes}
           edges={edges}
           allExpanded={allExpanded}
-          onExpandAll={() => expandAll(nodes.map((n) => n.id))}
+          onExpandAll={() => expandAll(nodes.filter((n) => n.type === 'model').map((n) => n.id))}
           onCollapseAll={collapseAll}
         />
         <StatusBar />
@@ -619,6 +915,12 @@ function EditorCanvas() {
 
       {/* Edge context menu (F401) */}
       {contextMenu && <ContextMenu />}
+
+      {/* Discrepancy summary panel (bottom-right, avoids legend overlap) */}
+      <DiscrepancyPanel />
+
+      {/* Sync merge modal — full-screen takeover when sync mode is active */}
+      <SyncMergeModal />
 
       {/* Legend panel (bottom-left) */}
       <Legend />

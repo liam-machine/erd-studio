@@ -1,409 +1,433 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import * as path from 'path';
 import * as fs from 'fs';
-import * as yaml from 'js-yaml';
+import * as path from 'path';
+import * as os from 'os';
 import { SchemaTagService } from '../../src/services/schemaTagService';
-import { ManifestService } from '../../src/services/manifestService';
-
-// Mock vscode module
-vi.mock('vscode', () => ({
-  Uri: {
-    file: (fsPath: string) => ({ fsPath, scheme: 'file' }),
-  },
-  Position: class {
-    constructor(public line: number, public character: number) {}
-  },
-  Range: class {
-    constructor(public start: { line: number; character: number }, public end: { line: number; character: number }) {}
-  },
-  WorkspaceEdit: class {
-    private edits: Array<{ type: string; uri: { fsPath: string }; range?: unknown; text?: string }> = [];
-
-    replace(uri: { fsPath: string }, range: unknown, text: string) {
-      this.edits.push({ type: 'replace', uri, range, text });
-    }
-
-    insert(uri: { fsPath: string }, position: unknown, text: string) {
-      this.edits.push({ type: 'insert', uri, text });
-    }
-
-    createFile(uri: { fsPath: string }, options: unknown) {
-      this.edits.push({ type: 'createFile', uri });
-    }
-
-    getEdits() {
-      return this.edits;
-    }
-  },
-  workspace: {
-    textDocuments: [],
-    applyEdit: vi.fn().mockResolvedValue(true),
-  },
-  window: {
-    showErrorMessage: vi.fn(),
-  },
-}));
+import type { DomainService } from '../../src/services/domainService';
 
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const FIXTURE_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project');
-const SCHEMA_TEST_DIR = path.resolve(FIXTURES_DIR, 'dbt-project/models/silver');
+
+/**
+ * Copy a fixture YAML file to a temp directory for mutation tests.
+ * Returns the temp dir path (which acts as workspaceRoot).
+ */
+function setupTempYaml(fixtureRelPath: string): { tmpDir: string; yamlPath: string } {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-tag-'));
+  const srcPath = path.join(FIXTURE_PROJECT_PATH, fixtureRelPath);
+  const destPath = path.join(tmpDir, fixtureRelPath);
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  fs.copyFileSync(srcPath, destPath);
+  return { tmpDir, yamlPath: destPath };
+}
+
+function createMockDomainService(
+  domains: Array<{ domain: string; layer: string; filePath: string; models: string[] }> = [],
+): DomainService {
+  return {
+    listDomains: () =>
+      domains.map((d) => ({ domain: d.domain, layer: d.layer, filePath: d.filePath })),
+    getDomain: (filePath: string) => {
+      const found = domains.find((d) => d.filePath === filePath);
+      if (!found) { throw new Error(`Not found: ${filePath}`); }
+      return {
+        logical: {
+          models: found.models.map((name) => ({ name })),
+          relationships: [],
+        },
+      };
+    },
+  } as unknown as DomainService;
+}
 
 describe('SchemaTagService', () => {
-  let service: SchemaTagService;
-  let manifestService: ManifestService;
-
-  // Track files we create for cleanup
-  const createdFiles: string[] = [];
-
-  beforeEach(async () => {
-    manifestService = new ManifestService();
-    // Pre-load manifest so getModel() works synchronously
-    await manifestService.loadManifest(FIXTURE_PROJECT_PATH);
-    service = new SchemaTagService(manifestService);
-  });
+  let tmpDirs: string[] = [];
 
   afterEach(() => {
-    // Clean up any created test files
-    for (const file of createdFiles) {
-      if (fs.existsSync(file)) {
-        fs.unlinkSync(file);
-      }
+    for (const dir of tmpDirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
-    createdFiles.length = 0;
-    manifestService.invalidate();
-  });
-
-  describe('deriveSchemaPath', () => {
-    it('returns correct path for model in manifest', async () => {
-      // dim_work_lot has originalFilePath: "models/silver/dim_work_lot.sql"
-      // Use addDomainTag and check if it tries to access the right file
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-
-      // Create a minimal schema file to verify path resolution
-      fs.writeFileSync(schemaPath, yaml.dump({ version: 2, models: [{ name: 'dim_work_lot' }] }));
-      createdFiles.push(schemaPath);
-
-      const edit = await service.addDomainTag('dim_work_lot', 'test-domain', FIXTURE_PROJECT_PATH);
-      expect(edit).not.toBeNull();
-    });
-
-    it('returns null for model not in manifest', async () => {
-      const edit = await service.addDomainTag('nonexistent_model', 'test-domain', FIXTURE_PROJECT_PATH);
-      expect(edit).toBeNull();
-    });
+    tmpDirs = [];
+    vi.restoreAllMocks();
   });
 
   describe('addDomainTag', () => {
-    it('creates new schema.yml with tag if file does not exist', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
+    it('adds a domain tag to a model YAML file', async () => {
+      const { tmpDir } = setupTempYaml('models/silver/dim_project.yml');
+      tmpDirs.push(tmpDir);
 
-      // Ensure file doesn't exist
-      if (fs.existsSync(schemaPath)) {
-        fs.unlinkSync(schemaPath);
-      }
-      createdFiles.push(schemaPath);
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        tmpDir,
+        'erd-studio',
+      );
 
-      const edit = await service.addDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
+      await service.addDomainTag('dim_project', 'new-domain');
 
-      expect(edit).not.toBeNull();
-      // The edit should contain a createFile operation
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      expect(edits.some((e: { type: string }) => e.type === 'createFile')).toBe(true);
+      const content = fs.readFileSync(path.join(tmpDir, 'models/silver/dim_project.yml'), 'utf-8');
+      expect(content).toContain('domain:new-domain');
     });
 
-    it('adds tag to existing schema.yml without tags', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            description: 'Work lot dimension table',
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+    it('does not duplicate an existing domain tag', async () => {
+      const { tmpDir } = setupTempYaml('models/silver/dim_project.yml');
+      tmpDirs.push(tmpDir);
 
-      const edit = await service.addDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        tmpDir,
+        'erd-studio',
+      );
 
-      expect(edit).not.toBeNull();
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      const replaceEdit = edits.find((e: { type: string; text?: string }) => e.type === 'replace');
-      expect(replaceEdit).toBeDefined();
+      // dim_project.yml fixture already has domain:work-lots
+      await service.addDomainTag('dim_project', 'work-lots');
 
-      // Parse the new content and verify tag was added
-      const newContent = yaml.load((replaceEdit as { text: string }).text) as Record<string, unknown>;
-      const models = newContent.models as Array<{ config?: { tags?: string[] } }>;
-      expect(models[0].config?.tags).toContain('domain:work-lots');
+      const content = fs.readFileSync(path.join(tmpDir, 'models/silver/dim_project.yml'), 'utf-8');
+      const matches = content.match(/domain:work-lots/g);
+      expect(matches).toHaveLength(1);
     });
 
-    it('adds tag to existing tags array', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['existing-tag', 'another-tag'],
-            },
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+    it('skips silently when no YAML file exists for model', async () => {
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        '/nonexistent',
+        'erd-studio',
+      );
 
-      const edit = await service.addDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
-
-      expect(edit).not.toBeNull();
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      const replaceEdit = edits.find((e: { type: string; text?: string }) => e.type === 'replace');
-
-      const newContent = yaml.load((replaceEdit as { text: string }).text) as Record<string, unknown>;
-      const models = newContent.models as Array<{ config?: { tags?: string[] } }>;
-      expect(models[0].config?.tags).toContain('domain:work-lots');
-      expect(models[0].config?.tags).toContain('existing-tag');
-      expect(models[0].config?.tags).toContain('another-tag');
+      // Should not throw
+      await service.addDomainTag('nonexistent_model', 'some-domain');
     });
 
-    it('returns null if tag already exists (idempotent)', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['domain:work-lots'],
-            },
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+    it('skips silently when YAML file does not exist', async () => {
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        '/nonexistent',
+        'erd-studio',
+      );
 
-      const edit = await service.addDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
-
-      expect(edit).toBeNull();
+      await service.addDomainTag('dim_project', 'some-domain');
     });
 
-    it('supports multiple domain tags', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['domain:sales'],
-            },
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+    it('creates config.tags structure if absent', async () => {
+      // Create a minimal YAML file with no config.tags
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-tag-'));
+      tmpDirs.push(tmpDir);
+      const yamlDir = path.join(tmpDir, 'models', 'silver');
+      fs.mkdirSync(yamlDir, { recursive: true });
+      const yamlPath = path.join(yamlDir, 'dim_bare.yml');
+      fs.writeFileSync(yamlPath, `version: 2\nmodels:\n  - name: dim_bare\n    description: No config\n`, 'utf-8');
 
-      const edit = await service.addDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        tmpDir,
+        'erd-studio',
+      );
 
-      expect(edit).not.toBeNull();
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      const replaceEdit = edits.find((e: { type: string; text?: string }) => e.type === 'replace');
+      await service.addDomainTag('dim_bare', 'test-domain');
 
-      const newContent = yaml.load((replaceEdit as { text: string }).text) as Record<string, unknown>;
-      const models = newContent.models as Array<{ config?: { tags?: string[] } }>;
-      expect(models[0].config?.tags).toContain('domain:work-lots');
-      expect(models[0].config?.tags).toContain('domain:sales');
+      const content = fs.readFileSync(yamlPath, 'utf-8');
+      expect(content).toContain('domain:test-domain');
+      expect(content).toContain('config:');
+      expect(content).toContain('tags:');
+    });
+
+    it('preserves existing comments in YAML', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-tag-'));
+      tmpDirs.push(tmpDir);
+      const yamlDir = path.join(tmpDir, 'models', 'silver');
+      fs.mkdirSync(yamlDir, { recursive: true });
+      const yamlPath = path.join(yamlDir, 'dim_commented.yml');
+      fs.writeFileSync(yamlPath, [
+        'version: 2',
+        '# This is a model with comments',
+        'models:',
+        '  - name: dim_commented',
+        '    description: Has comments # inline comment',
+        '    config:',
+        '      tags:',
+        '        - silver',
+        '',
+      ].join('\n'), 'utf-8');
+
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        tmpDir,
+        'erd-studio',
+      );
+
+      await service.addDomainTag('dim_commented', 'my-domain');
+
+      const content = fs.readFileSync(yamlPath, 'utf-8');
+      expect(content).toContain('# This is a model with comments');
+      expect(content).toContain('# inline comment');
+      expect(content).toContain('domain:my-domain');
+    });
+
+    it('preserves existing non-domain tags', async () => {
+      const { tmpDir } = setupTempYaml('models/silver/dim_project.yml');
+      tmpDirs.push(tmpDir);
+
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        tmpDir,
+        'erd-studio',
+      );
+
+      await service.addDomainTag('dim_project', 'new-domain');
+
+      const content = fs.readFileSync(path.join(tmpDir, 'models/silver/dim_project.yml'), 'utf-8');
+      // Original tags should be preserved
+      expect(content).toContain('silver');
+      expect(content).toContain('domain:work-lots');
+      expect(content).toContain('domain:new-domain');
     });
   });
 
   describe('removeDomainTag', () => {
-    it('removes domain tag from existing tags', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['other-tag', 'domain:work-lots', 'another-tag'],
-            },
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+    it('removes a domain tag from a model YAML file', async () => {
+      const { tmpDir } = setupTempYaml('models/gold/fct_work_events.yml');
+      tmpDirs.push(tmpDir);
 
-      const edit = await service.removeDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
+      const service = new SchemaTagService(
+        createMockDomainService([]),
+        tmpDir,
+        'erd-studio',
+      );
 
-      expect(edit).not.toBeNull();
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      const replaceEdit = edits.find((e: { type: string; text?: string }) => e.type === 'replace');
+      await service.removeDomainTag('fct_work_events', 'work-lots', '/some/domain.json');
 
-      const newContent = yaml.load((replaceEdit as { text: string }).text) as Record<string, unknown>;
-      const models = newContent.models as Array<{ config?: { tags?: string[] } }>;
-      expect(models[0].config?.tags).not.toContain('domain:work-lots');
-      expect(models[0].config?.tags).toContain('other-tag');
-      expect(models[0].config?.tags).toContain('another-tag');
+      const content = fs.readFileSync(path.join(tmpDir, 'models/gold/fct_work_events.yml'), 'utf-8');
+      expect(content).not.toContain('domain:work-lots');
+      // Other tags preserved
+      expect(content).toContain('gold');
+      expect(content).toContain('daily');
     });
 
-    it('removes tags field when last tag is removed', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
+    it('skips removal when model is in another domain with same name', async () => {
+      const { tmpDir } = setupTempYaml('models/gold/fct_work_events.yml');
+      tmpDirs.push(tmpDir);
+
+      const service = new SchemaTagService(
+        createMockDomainService([
           {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['domain:work-lots'],
-            },
+            domain: 'work-lots',
+            layer: 'gold',
+            filePath: '/other/work-lots.json',
+            models: ['fct_work_events'],
           },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+        ]),
+        tmpDir,
+        'erd-studio',
+      );
 
-      const edit = await service.removeDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
+      await service.removeDomainTag('fct_work_events', 'work-lots', '/current/work-lots.json');
 
-      expect(edit).not.toBeNull();
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      const replaceEdit = edits.find((e: { type: string; text?: string }) => e.type === 'replace');
-
-      const newContent = yaml.load((replaceEdit as { text: string }).text) as Record<string, unknown>;
-      const models = newContent.models as Array<{ config?: { tags?: string[] } }>;
-      expect(models[0].config?.tags).toBeUndefined();
+      const content = fs.readFileSync(path.join(tmpDir, 'models/gold/fct_work_events.yml'), 'utf-8');
+      // Tag should NOT be removed because model is still in another domain
+      expect(content).toContain('domain:work-lots');
     });
 
-    it('removes config field when tags was the only field', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['domain:work-lots'],
-            },
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+    it('cleans up empty tags array and config map', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-tag-'));
+      tmpDirs.push(tmpDir);
+      const yamlDir = path.join(tmpDir, 'models', 'silver');
+      fs.mkdirSync(yamlDir, { recursive: true });
+      const yamlPath = path.join(yamlDir, 'dim_single_tag.yml');
+      fs.writeFileSync(yamlPath, [
+        'version: 2',
+        'models:',
+        '  - name: dim_single_tag',
+        '    description: Has only one domain tag',
+        '    config:',
+        '      tags:',
+        '        - domain:my-domain',
+        '',
+      ].join('\n'), 'utf-8');
 
-      const edit = await service.removeDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
+      const service = new SchemaTagService(
+        createMockDomainService([]),
+        tmpDir,
+        'erd-studio',
+      );
 
-      expect(edit).not.toBeNull();
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      const replaceEdit = edits.find((e: { type: string; text?: string }) => e.type === 'replace');
+      await service.removeDomainTag('dim_single_tag', 'my-domain', '/some/domain.json');
 
-      const newContent = yaml.load((replaceEdit as { text: string }).text) as Record<string, unknown>;
-      const models = newContent.models as Array<{ config?: unknown }>;
-      expect(models[0].config).toBeUndefined();
-    });
-
-    it('returns null if tag does not exist (idempotent)', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['other-tag'],
-            },
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
-
-      const edit = await service.removeDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
-
-      expect(edit).toBeNull();
-    });
-
-    it('returns null if schema file does not exist', async () => {
-      const edit = await service.removeDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
-      expect(edit).toBeNull();
-    });
-
-    it('preserves other domain tags when removing one', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['domain:sales', 'domain:work-lots', 'domain:finance'],
-            },
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
-
-      const edit = await service.removeDomainTag('dim_work_lot', 'work-lots', FIXTURE_PROJECT_PATH);
-
-      expect(edit).not.toBeNull();
-      const edits = (edit as unknown as { getEdits(): unknown[] }).getEdits();
-      const replaceEdit = edits.find((e: { type: string; text?: string }) => e.type === 'replace');
-
-      const newContent = yaml.load((replaceEdit as { text: string }).text) as Record<string, unknown>;
-      const models = newContent.models as Array<{ config?: { tags?: string[] } }>;
-      expect(models[0].config?.tags).toContain('domain:sales');
-      expect(models[0].config?.tags).toContain('domain:finance');
-      expect(models[0].config?.tags).not.toContain('domain:work-lots');
+      const content = fs.readFileSync(yamlPath, 'utf-8');
+      expect(content).not.toContain('domain:my-domain');
+      expect(content).not.toContain('config:');
+      expect(content).not.toContain('tags:');
     });
   });
 
-  describe('getDomainTags', () => {
-    it('returns all domain tags for a model', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
+  describe('reconcileAll', () => {
+    it('adds missing domain tags and removes stale ones', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-tag-'));
+      tmpDirs.push(tmpDir);
+
+      // Set up a YAML file with a stale tag and missing expected tag
+      const yamlDir = path.join(tmpDir, 'models', 'silver');
+      fs.mkdirSync(yamlDir, { recursive: true });
+      const yamlPath = path.join(yamlDir, 'dim_test.yml');
+      fs.writeFileSync(yamlPath, [
+        'version: 2',
+        'models:',
+        '  - name: dim_test',
+        '    description: Test model',
+        '    config:',
+        '      tags:',
+        '        - silver',
+        '        - domain:stale-domain',
+        '',
+      ].join('\n'), 'utf-8');
+
+      // Set up domain files in erd-studio
+      const erdDir = path.join(tmpDir, 'erd-studio', 'silver');
+      fs.mkdirSync(erdDir, { recursive: true });
+      const domainFile = path.join(erdDir, 'active-domain.json');
+      fs.writeFileSync(domainFile, JSON.stringify({
+        schemaVersion: 4,
+        domain: 'active-domain',
+        layer: 'silver',
+        description: '',
+        logical: {
+          models: [{ name: 'dim_test', schema: '', description: '', columns: [] }],
+          relationships: [],
+        },
+        viewConfig: {},
+      }), 'utf-8');
+
+      const service = new SchemaTagService(
+        createMockDomainService([
           {
-            name: 'dim_work_lot',
-            config: {
-              tags: ['other-tag', 'domain:work-lots', 'domain:sales', 'staging'],
-            },
+            domain: 'active-domain',
+            layer: 'silver',
+            filePath: domainFile,
+            models: ['dim_test'],
           },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+        ]),
+        tmpDir,
+        'erd-studio',
+      );
 
-      const tags = await service.getDomainTags('dim_work_lot', FIXTURE_PROJECT_PATH);
+      const result = await service.reconcileAll();
 
-      expect(tags).toHaveLength(2);
-      expect(tags).toContain('domain:work-lots');
-      expect(tags).toContain('domain:sales');
-      expect(tags).not.toContain('other-tag');
-      expect(tags).not.toContain('staging');
+      expect(result.added).toBe(1);
+      expect(result.removed).toBe(1);
+      expect(result.errors).toHaveLength(0);
+
+      const content = fs.readFileSync(yamlPath, 'utf-8');
+      expect(content).toContain('domain:active-domain');
+      expect(content).not.toContain('domain:stale-domain');
+      expect(content).toContain('silver'); // non-domain tag preserved
     });
 
-    it('returns empty array if no schema file exists', async () => {
-      const tags = await service.getDomainTags('dim_work_lot', FIXTURE_PROJECT_PATH);
-      expect(tags).toEqual([]);
+    it('returns skipped count for models without YAML files', async () => {
+      const service = new SchemaTagService(
+        createMockDomainService([
+          {
+            domain: 'some-domain',
+            layer: 'silver',
+            filePath: '/fake/domain.json',
+            models: ['missing_model'],
+          },
+        ]),
+        '/nonexistent',
+        'erd-studio',
+      );
+
+      const result = await service.reconcileAll();
+      expect(result.skipped).toBe(1);
+      expect(result.added).toBe(0);
+      expect(result.removed).toBe(0);
     });
 
-    it('returns empty array if model has no tags', async () => {
-      const schemaPath = path.join(FIXTURE_PROJECT_PATH, 'models/silver/dim_work_lot.yml');
-      const initialContent: Record<string, unknown> = {
-        version: 2,
-        models: [
-          {
-            name: 'dim_work_lot',
-            description: 'No tags here',
-          },
-        ],
-      };
-      fs.writeFileSync(schemaPath, yaml.dump(initialContent));
-      createdFiles.push(schemaPath);
+    it('removes stale tags from models no longer in any domain', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-tag-'));
+      tmpDirs.push(tmpDir);
 
-      const tags = await service.getDomainTags('dim_work_lot', FIXTURE_PROJECT_PATH);
-      expect(tags).toEqual([]);
+      const yamlDir = path.join(tmpDir, 'models', 'silver');
+      fs.mkdirSync(yamlDir, { recursive: true });
+      const yamlPath = path.join(yamlDir, 'dim_orphan.yml');
+      fs.writeFileSync(yamlPath, [
+        'version: 2',
+        'models:',
+        '  - name: dim_orphan',
+        '    description: Was in a domain, now removed',
+        '    config:',
+        '      tags:',
+        '        - silver',
+        '        - domain:old-domain',
+        '',
+      ].join('\n'), 'utf-8');
+
+      const service = new SchemaTagService(
+        createMockDomainService([]), // no domains at all
+        tmpDir,
+        'erd-studio',
+      );
+
+      const result = await service.reconcileAll();
+
+      expect(result.removed).toBe(1);
+      const content = fs.readFileSync(yamlPath, 'utf-8');
+      expect(content).not.toContain('domain:old-domain');
+      expect(content).toContain('silver');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('preserves scalar tag value when adding domain tag', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-tag-'));
+      tmpDirs.push(tmpDir);
+      const yamlDir = path.join(tmpDir, 'models', 'silver');
+      fs.mkdirSync(yamlDir, { recursive: true });
+      const yamlPath = path.join(yamlDir, 'dim_scalar.yml');
+      fs.writeFileSync(yamlPath, [
+        'version: 2',
+        'models:',
+        '  - name: dim_scalar',
+        '    description: Has scalar tag',
+        '    config:',
+        '      tags: my-tag',
+        '',
+      ].join('\n'), 'utf-8');
+
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        tmpDir,
+        'erd-studio',
+      );
+
+      await service.addDomainTag('dim_scalar', 'test-domain');
+
+      const content = fs.readFileSync(yamlPath, 'utf-8');
+      expect(content).toContain('my-tag');
+      expect(content).toContain('domain:test-domain');
+    });
+
+    it('resolves .yaml extension when .yml does not exist', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-tag-'));
+      tmpDirs.push(tmpDir);
+      const yamlDir = path.join(tmpDir, 'models', 'silver');
+      fs.mkdirSync(yamlDir, { recursive: true });
+      const yamlPath = path.join(yamlDir, 'dim_yaml_ext.yaml');
+      fs.writeFileSync(yamlPath, [
+        'version: 2',
+        'models:',
+        '  - name: dim_yaml_ext',
+        '    description: Uses .yaml extension',
+        '',
+      ].join('\n'), 'utf-8');
+
+      const service = new SchemaTagService(
+        createMockDomainService(),
+        tmpDir,
+        'erd-studio',
+      );
+
+      await service.addDomainTag('dim_yaml_ext', 'test-domain');
+
+      const content = fs.readFileSync(yamlPath, 'utf-8');
+      expect(content).toContain('domain:test-domain');
     });
   });
 });

@@ -1,0 +1,9 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Monochrome ERD lettermark for VS Code activity bar — uses currentColor -->
+  <!-- E -->
+  <path d="M2,5 L2,19 L7,19 L7,17.5 L3.7,17.5 L3.7,12.8 L6.5,12.8 L6.5,11.3 L3.7,11.3 L3.7,6.5 L7,6.5 L7,5 Z" fill="currentColor"/>
+  <!-- R -->
+  <path d="M8.5,5 L8.5,19 L10.2,19 L10.2,13.2 L11.5,13.2 L14,19 L16,19 L13.3,12.9 C14.5,12.4 15.3,11.2 15.3,9.5 C15.3,7 13.7,5 11.5,5 Z M10.2,6.5 L11.3,6.5 C12.8,6.5 13.6,7.6 13.6,9.5 C13.6,11.3 12.8,12 11.3,12 L10.2,12 Z" fill="currentColor"/>
+  <!-- D -->
+  <path d="M17,5 L17,19 L20,19 C22.2,19 23,16.5 23,12 C23,7.5 22.2,5 20,5 Z M18.7,6.5 L19.8,6.5 C21.2,6.5 21.5,8.5 21.5,12 C21.5,15.5 21.2,17.5 19.8,17.5 L18.7,17.5 Z" fill="currentColor"/>
+</svg>

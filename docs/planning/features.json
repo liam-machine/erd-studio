@@ -1,7 +1,7 @@
 {
   "project": {
-    "name": "dbt Semantic Designer",
-    "description": "A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains, and enables interactive design of new models, columns, and relationships before they are built. Built items appear in green; planned items appear in orange. The dbt repo becomes the single source of truth for both lineage and semantic relationships.",
+    "name": "ERD Studio",
+    "description": "A VS Code extension that visualises semantic (FK-based) relationships between dbt models within curated business domains using a three-stage architecture: Conceptual (violet), Logical (blue), and Physical (green). Engineers design models, columns, and relationships in the Logical stage and compare against the Physical stage to identify discrepancies -- missing columns, extra columns, and type mismatches. The dbt repo becomes the single source of truth for both lineage and semantic relationships.",
     "version": "0.1.0",
     "platform": "web",
     "tech_stack": {
@@ -45,6 +45,13 @@
       "description": "Quality of life improvements, performance optimizations, and edge case handling. Keyboard shortcuts, context menus, search, minimap, export, and error handling.",
       "order": 4,
       "status": "pending"
+    },
+    {
+      "id": "phase-5",
+      "name": "AI-Driven Modelling Metadata",
+      "description": "Enrich the semantic JSON schema with structured modelling metadata that AI populates during design. Grain statements, model roles, SCD strategies, and additive types become first-class fields that the extension renders, validates, and enforces. Expanded AI reasoning fields explain the rationale behind each structural decision, making AI-assisted modelling transparent and auditable.",
+      "order": 5,
+      "status": "pending"
     }
   ],
   "features": [
@@ -62,7 +69,7 @@
         "Open project in VS Code and press F5 — Extension Development Host window launches",
         "Verify package.json contains all contribution points: commands, viewsContainers, views, customEditors, configuration, activationEvents"
       ],
-      "implementation_notes": "esbuild.js handles dual build targets. Extension host targets Node.js, webview targets browser/DOM. Use 'workspaceContains:**/dbt_project.yml' as activation event. Custom editor selector: '**/models/semantic/**/*.json' with priority 'option'.",
+      "implementation_notes": "esbuild.js handles dual build targets. Extension host targets Node.js, webview targets browser/DOM. Use 'workspaceContains:**/dbt_project.yml' as activation event. Custom editor selector: '**/erd-studio/**/*.json' with priority 'option'.",
       "category": "infrastructure",
       "estimated_effort": "medium"
     },
@@ -88,18 +95,18 @@
     {
       "id": "F102",
       "name": "Implement DomainService for reading semantic domain JSON",
-      "description": "Create DomainService (src/services/domainService.ts) with read operations: listDomains() to discover all domain JSON files under models/semantic/, getDomain(layer, domain) to read and parse a specific domain file. Return typed SemanticDomain objects. Define TypeScript types in src/types/semantic.ts covering the full semantic domain JSON schema (schemaVersion, domain, layer, description, models, relationships, viewConfig).",
+      "description": "Create DomainService (src/services/domainService.ts) with read operations: listDomains() to discover all domain JSON files under erd-studio/, getDomain(layer, domain) to read and parse a specific domain file. Return typed SemanticDomain objects. Define TypeScript types in src/types/semantic.ts covering the full semantic domain JSON schema (schemaVersion, domain, layer, description, models, relationships, viewConfig).",
       "phase": "phase-1",
       "status": "completed",
       "skip": false,
       "dependencies": ["F100"],
       "validation_criteria": [
-        "Unit test: listDomains discovers all .json files under models/semantic/ grouped by layer",
+        "Unit test: listDomains discovers all .json files under erd-studio/ grouped by layer",
         "Unit test: getDomain reads and parses a valid domain file into a typed SemanticDomain object",
         "Unit test: getDomain handles missing files with appropriate error",
         "Verify TypeScript types match the semantic domain JSON schema from the plan"
       ],
-      "implementation_notes": "Files live at {dbt_project}/models/semantic/{layer}/{domain}.json. Use VS Code workspace APIs for file access. Types in src/types/semantic.ts should include: SemanticDomain, SemanticModel (with source: 'repo' | 'design'), ColumnDef, Relationship, ViewConfig. Include schemaVersion checking.",
+      "implementation_notes": "Files live at {dbt_project}/erd-studio/{layer}/{domain}.json. Use VS Code workspace APIs for file access. Types in src/types/semantic.ts should include: SemanticDomain, SemanticModel (with source: 'repo' | 'design'), ColumnDef, Relationship, ViewConfig. Include schemaVersion checking.",
       "category": "infrastructure",
       "estimated_effort": "medium"
     },
@@ -124,7 +131,7 @@
     {
       "id": "F104",
       "name": "Create SemanticEditorProvider (custom text editor)",
-      "description": "Implement SemanticEditorProvider (src/providers/SemanticEditorProvider.ts) as a CustomTextEditorProvider that opens semantic JSON files in a React webview instead of the default JSON editor. Register with viewType 'dbtSemantic.domainEditor' and selector '**/models/semantic/**/*.json' with priority 'option'. Handle the extension-webview message protocol: listen for 'ready' message from webview, send 'domainLoaded' with reconciled domain data.",
+      "description": "Implement SemanticEditorProvider (src/providers/SemanticEditorProvider.ts) as a CustomTextEditorProvider that opens semantic JSON files in a React webview instead of the default JSON editor. Register with viewType 'dbtSemantic.domainEditor' and selector '**/erd-studio/**/*.json' with priority 'option'. Handle the extension-webview message protocol: listen for 'ready' message from webview, send 'domainLoaded' with reconciled domain data.",
       "phase": "phase-1",
       "status": "completed",
       "skip": false,
@@ -530,7 +537,7 @@
     {
       "id": "F300",
       "name": "Implement Create Domain command",
-      "description": "Create the 'Create Semantic Domain' command (src/commands/createDomain.ts) that opens a dialog for creating a new domain. Fields: domain name (slug), layer (bronze/silver/gold dropdown), description. Creates the JSON file at models/semantic/{layer}/{domain}.json with the initial schema (schemaVersion: 1, empty models/relationships, default viewConfig). Updates the tree view to show the new domain.",
+      "description": "Create the 'Create Semantic Domain' command (src/commands/createDomain.ts) that opens a dialog for creating a new domain. Fields: domain name (slug), layer (bronze/silver/gold dropdown), description. Creates the JSON file at erd-studio/{layer}/{domain}.json with the initial schema (schemaVersion: 1, empty models/relationships, default viewConfig). Updates the tree view to show the new domain.",
       "phase": "phase-3",
       "status": "completed",
       "skip": false,
@@ -584,7 +591,7 @@
     {
       "id": "F303",
       "name": "Implement file watchers for manifest and semantic files",
-      "description": "Create file watchers (src/watchers/fileWatchers.ts) that monitor: (1) target/manifest.json for changes (dbt compile ran), triggering reconciliation and graph refresh; (2) models/semantic/**/*.json for external changes (AI tools, git operations), triggering tree view and editor refresh; (3) dbt_project.yml for project config changes, triggering project root re-detection.",
+      "description": "Create file watchers (src/watchers/fileWatchers.ts) that monitor: (1) target/manifest.json for changes (dbt compile ran), triggering reconciliation and graph refresh; (2) erd-studio/**/*.json for external changes (AI tools, git operations), triggering tree view and editor refresh; (3) dbt_project.yml for project config changes, triggering project root re-detection.",
       "phase": "phase-3",
       "status": "completed",
       "skip": false,
@@ -781,7 +788,7 @@
     {
       "id": "F407",
       "name": "Implement extension settings UI",
-      "description": "Wire up the extension configuration settings defined in package.json: dbtSemantic.projectPath (path to dbt project root, auto-detected), dbtSemantic.semanticDir (relative path to semantic domain files, default 'models/semantic'), dbtSemantic.autoReconcile (toggle automatic design→built transition, default true). Ensure all services respect these settings and react to changes.",
+      "description": "Wire up the extension configuration settings defined in package.json: dbtSemantic.projectPath (path to dbt project root, auto-detected), dbtSemantic.semanticDir (relative path to semantic domain files, default 'erd-studio'), dbtSemantic.autoReconcile (toggle automatic design→built transition, default true). Ensure all services respect these settings and react to changes.",
       "phase": "phase-4",
       "status": "pending",
       "skip": true,
@@ -799,7 +806,7 @@
     {
       "id": "F408",
       "name": "Implement welcome experience for new projects",
-      "description": "Add a welcome experience for when a dbt project is opened but no semantic directory exists yet. Show a welcome message in the sidebar tree view with a 'Get Started' action that creates the models/semantic/ directory structure (with bronze, silver, gold subdirectories) and guides the user to create their first domain.",
+      "description": "Add a welcome experience for when a dbt project is opened but no semantic directory exists yet. Show a welcome message in the sidebar tree view with a 'Get Started' action that creates the erd-studio/ directory structure (with bronze, silver, gold subdirectories) and guides the user to create their first domain.",
       "phase": "phase-4",
       "status": "completed",
       "skip": false,
@@ -853,19 +860,134 @@
       "implementation_notes": "Extend ManifestService with getRelatedModels(domainModelNames: string[]) that returns model names with manifest relationships to the given models. Use the relationship test data from F409. In AddExistingModelDialog: add a toggle state, filter/sort results based on toggle, style related models with blue background and 'Related to {modelName}' subtitle showing which domain model they connect to. If multiple connections exist, show the first one.",
       "category": "ui",
       "estimated_effort": "medium"
+    },
+    {
+      "id": "F500",
+      "name": "Add grain field to models with node subtitle display",
+      "description": "Add a `grain` string field to SemanticModel for declaring the grain statement ('One row per ___'). This is the single most critical design decision in the modelling workflow. Display the grain as a subtitle on every ModelNode below the model name. Show and edit the grain in the DetailPanel (inline editable text, not a dialog). Add `updateModelGrain` message to the extension-webview protocol. Grain is persisted to the semantic domain JSON as a top-level model property. When grain is empty/missing, the node subtitle area is hidden (no placeholder text on the node itself). The DetailPanel shows an 'Add Grain' button when empty, similar to the AI rationale empty state pattern. AI agents generating models via the SKILL.md schema should always populate grain.",
+      "phase": "phase-5",
+      "status": "completed",
+      "skip": false,
+      "dependencies": [],
+      "validation_criteria": [
+        "Unit test: grain field is preserved through reconciliation (pass-through like ai field)",
+        "Unit test: graphTransformer maps grain to ModelNodeData",
+        "Verify in Extension Development Host: grain statement appears as subtitle below model name on nodes",
+        "Verify in Extension Development Host: grain is editable in the DetailPanel with inline edit (click to edit, Enter to save, Escape to cancel)",
+        "Verify in Extension Development Host: empty grain shows 'Add Grain' button in DetailPanel, no subtitle on node",
+        "Verify grain persists to semantic domain JSON as top-level model property",
+        "Verify in Chrome dev preview: nodes with grain show subtitle, nodes without grain do not"
+      ],
+      "implementation_notes": "Schema: Add `grain?: string` to SemanticModel (src/types/semantic.ts) and ReconciledModel (src/types/reconciled.ts). Pass through in ReconciliationService like the `ai` field. Add `grain?: string` to ModelNodeData (webview/types/graph.ts). In graphTransformer, map `model.grain` to node data. In ModelNode.tsx, render grain as a secondary line below the model name in the header — use smaller font (10px), muted colour (--editor-fg at 60% opacity), truncated with ellipsis if too long. In DetailPanel, add a Grain section between the status/description area and the AI rationale section. Use inline edit pattern: click text to edit, textarea for multi-line, Enter saves, Escape cancels. Message: `updateModelGrain { modelName: string; grain: string }`. Handler in SemanticEditorProvider follows the applyDomainEdit pattern. Empty string removes the grain key from JSON (clean JSON convention).",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F501",
+      "name": "Add model role enum with role-aware badges",
+      "description": "Add a `modelRole` enum field to SemanticModel that classifies each model according to its role in the data warehouse architecture. Roles map directly to the modelling workflow entity classifications: `conformed-dim` (shared dimension reused across domains), `domain-dim` (new dimension specific to this domain), `transaction-fact` (discrete event fact), `periodic-snapshot` (recurring measurement per period), `accumulating-snapshot` (lifecycle with milestones), `factless-fact` (M:M bridge table, FKs only), `reference` (low-cardinality lookup), `gold-fact` (pre-joined Gold view), `gold-dim` (flattened Gold dimension view). Display a role badge on each ModelNode next to the existing layer badge. The role badge uses a short abbreviation (e.g., TXN, DIM, CONF, BRG, PER, ACC, REF, GLD) with role-specific colours. Role is editable in the DetailPanel via a dropdown. When role is not set, no badge is shown (graceful degradation for existing domains). The New Model dialog should auto-suggest a role based on the selected template (Dimension template → domain-dim, Fact template → transaction-fact, Bridge template → factless-fact).",
+      "phase": "phase-5",
+      "status": "completed",
+      "skip": false,
+      "dependencies": ["F500"],
+      "validation_criteria": [
+        "Unit test: modelRole field is preserved through reconciliation",
+        "Unit test: graphTransformer maps modelRole to ModelNodeData",
+        "Unit test: all 9 enum values are valid and handled",
+        "Verify in Extension Development Host: role badge appears on nodes with a role set",
+        "Verify in Extension Development Host: role is editable via dropdown in DetailPanel",
+        "Verify in Extension Development Host: New Model dialog auto-suggests role based on template",
+        "Verify in Extension Development Host: nodes without modelRole show no badge (backward compatible)",
+        "Verify role badge is visually distinct from layer badge and status badge",
+        "Verify role persists to semantic domain JSON"
+      ],
+      "implementation_notes": "Schema: Add `ModelRole` type as string union in src/types/semantic.ts: 'conformed-dim' | 'domain-dim' | 'transaction-fact' | 'periodic-snapshot' | 'accumulating-snapshot' | 'factless-fact' | 'reference' | 'gold-fact' | 'gold-dim'. Add `modelRole?: ModelRole` to SemanticModel and ReconciledModel. Pass through in ReconciliationService. Add `modelRole?: ModelRole` to ModelNodeData. Badge abbreviation map: { 'conformed-dim': 'CONF', 'domain-dim': 'DIM', 'transaction-fact': 'TXN', 'periodic-snapshot': 'PER', 'accumulating-snapshot': 'ACC', 'factless-fact': 'BRG', 'reference': 'REF', 'gold-fact': 'GLD', 'gold-dim': 'GLD' }. Badge colour scheme: dimensions use blue tones (matching built status), facts use warm tones, gold uses gold/amber. In ModelNode header, render badge after the layer badge. In DetailPanel, add a Role dropdown (vscode-dropdown) in the metadata section. Message: `updateModelRole { modelName: string; modelRole: ModelRole | null }`. Template→role mapping in NewModelDialog: dimension→domain-dim, fact→transaction-fact, bridge→factless-fact, scd2→domain-dim, blank→null.",
+      "category": "ui",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "F502",
+      "name": "Add column-level SCD type and additive type with badges",
+      "description": "Add `scdType` (0 | 1 | 2) to ColumnDef for dimension columns, and `additiveType` ('additive' | 'semi-additive' | 'non-additive') to ColumnDef for fact measure columns. These are per-attribute design decisions from the modelling workflow — SCD strategy determines how dimension attributes handle changes over time, and additive type determines how fact measures can be aggregated across dimensions. Display tiny badges in the ModelNode column rows: SCD type shows as a circled number (⓪①②) for dimension columns, additive type shows as a symbol (Σ for additive, ~ for semi-additive, ÷ for non-additive) for fact columns. In the DetailPanel column editor, add dropdowns for these fields — SCD type dropdown appears when the parent model's role is a dimension type, additive type dropdown appears when the parent model's role is a fact type. These fields are optional and only shown when relevant to the model's role.",
+      "phase": "phase-5",
+      "status": "completed",
+      "skip": false,
+      "dependencies": ["F501"],
+      "validation_criteria": [
+        "Unit test: scdType and additiveType fields are preserved through reconciliation for design model columns",
+        "Unit test: scdType and additiveType fields are preserved on plannedColumns for built models",
+        "Verify in Extension Development Host: SCD type badges (⓪①②) appear on dimension model columns",
+        "Verify in Extension Development Host: additive type badges (Σ ~ ÷) appear on fact model columns",
+        "Verify in Extension Development Host: SCD type dropdown appears in column editor for dimension models",
+        "Verify in Extension Development Host: additive type dropdown appears in column editor for fact models",
+        "Verify in Extension Development Host: badges only appear when values are set (no empty badges)",
+        "Verify fields persist to semantic domain JSON on column objects",
+        "Verify in Chrome dev preview: column badges render correctly and don't overflow the column row"
+      ],
+      "implementation_notes": "Schema: Add `scdType?: 0 | 1 | 2` and `additiveType?: 'additive' | 'semi-additive' | 'non-additive'` to ColumnDef (src/types/semantic.ts). These flow through to ReconciledColumn and ColumnDisplay. In ModelNode column rows, render a small badge after the dataType text: SCD uses unicode circled numbers (\\u24EA for 0, \\u2460 for 1, \\u2461 for 2) in a muted style; additive uses symbols. Badge styling: 9px font, same opacity as dataType text, no background (just text). In ColumnEditor (DetailPanel), conditionally show a dropdown based on parent model's modelRole — if role contains 'dim' show SCD type picker, if role contains 'fact' show additive type picker. Messages: extend `updateColumn` payload to include optional scdType and additiveType fields. The column-level fields are independent of AI reasoning — they are structural metadata that any engineer or AI can set. SCD type labels for dropdown: 'Type 0 — Never changes', 'Type 1 — Overwrite', 'Type 2 — Track history'. Additive type labels: 'Additive — Sum across all dims', 'Semi-additive — Not across time', 'Non-additive — Store components'.",
+      "category": "ui",
+      "estimated_effort": "large"
+    },
+    {
+      "id": "F503",
+      "name": "Expand AI reasoning fields for modelling decisions",
+      "description": "Expand the AiRationale interface with additional reasoning fields that explain the structural metadata decisions from F500-F502. New fields: `ai.grain` (why this grain was chosen over alternatives), `ai.classification` (why this model role/fact type was selected), `ai.scd` (overall SCD strategy explanation across all dimension attributes), `ai.measures` (why measures are structured this way — additive type choices, why components stored separately). These are freeform strings where AI explains its design reasoning — the structured fields (grain, modelRole, scdType, additiveType) hold the decisions, while these ai fields hold the justification. Expand the AiRationale component in the DetailPanel to show these fields contextually: `ai.grain` appears in the Grain section, `ai.classification` appears in the Role section, `ai.scd` and `ai.measures` appear in a new 'Design Reasoning' subsection of the AI panel. All fields are editable with the same edit mode pattern as ai.what/ai.why. Empty fields are hidden (not shown as empty placeholders).",
+      "phase": "phase-5",
+      "status": "completed",
+      "skip": false,
+      "dependencies": ["F502"],
+      "validation_criteria": [
+        "Unit test: expanded AiRationale fields are preserved through reconciliation",
+        "Verify in Extension Development Host: ai.grain reasoning appears below the grain statement in DetailPanel",
+        "Verify in Extension Development Host: ai.classification reasoning appears in the Role section",
+        "Verify in Extension Development Host: ai.scd and ai.measures appear in a Design Reasoning subsection",
+        "Verify in Extension Development Host: all expanded fields are editable with the same edit/save/cancel pattern",
+        "Verify in Extension Development Host: empty reasoning fields are hidden (no visual clutter for models without AI reasoning)",
+        "Verify the AI badge on ModelNode accounts for all reasoning fields (badge shows if any ai field has content)",
+        "Verify expanded fields persist to semantic domain JSON under the ai object",
+        "Verify clearing all ai fields removes the ai key entirely from JSON (clean JSON convention)"
+      ],
+      "implementation_notes": "Schema: Expand AiRationale in src/types/semantic.ts with optional fields: `grain?: string`, `classification?: string`, `scd?: string`, `measures?: string`. These flow through unchanged via reconciliation. The existing `hasAiRationale` flag in ModelNodeData should check all 6 fields (what, why, grain, classification, scd, measures). In AiRationale.tsx, restructure the component to show fields contextually: the WHAT/WHY section remains at the top, then GRAIN REASONING below the grain section (only if grain field exists on model), CLASSIFICATION below the role section (only if modelRole exists), and a DESIGN REASONING section for scd/measures. Each field uses the same edit pattern: read mode shows text with pencil button on hover, edit mode shows textarea with save/cancel. The updateModelAi message payload already accepts the full AiRationale object — just extend it with the new fields. In SemanticEditorProvider, the handler already trims and cleans empty fields — extend the clean-up logic to cover all 6 fields. SKILL.md update: instruct AI to populate ai.grain when setting grain, ai.classification when setting modelRole, ai.scd for dimensions, ai.measures for facts.",
+      "category": "ui",
+      "estimated_effort": "medium"
+    },
+    {
+      "id": "F504",
+      "name": "Anti-pattern validation using modelling metadata",
+      "description": "Implement validation rules that use the structured modelling metadata (modelRole, grain, scdType, additiveType) to detect common data modelling anti-patterns from the modelling workflow. Validations run on domain load and after edits, producing warnings (not errors) displayed as a collapsible section in the DetailPanel and as warning badges on affected nodes. Rules: (1) Missing grain — models without a grain statement get a warning. (2) Dimension attributes in facts — columns without isForeignKey on a fact-role model that have STRING/VARCHAR type and no additiveType set, suggesting they may be descriptive attributes that belong in a dimension. (3) Measures in dimensions — columns with additiveType set on a dimension-role model. (4) Pre-computed ratios — columns on fact models with names matching *_pct, *_ratio, *_rate, *_percent suggesting pre-computed ratios that should be stored as numerator/denominator components. (5) Missing SCD strategy — dimension columns without scdType when the model has role set. (6) Conformed dim duplication — a model with role 'domain-dim' whose name matches a known conformed dimension pattern. Warnings are dismissible per-model (stored in viewConfig so they persist but don't block workflow). Each warning links to the relevant section of the modelling workflow documentation.",
+      "phase": "phase-5",
+      "status": "pending",
+      "skip": false,
+      "dependencies": ["F503"],
+      "validation_criteria": [
+        "Unit test: missing grain warning fires for models without grain when modelRole is set",
+        "Unit test: dimension-attribute-in-fact warning fires for STRING columns without FK flag on fact models",
+        "Unit test: measure-in-dimension warning fires for columns with additiveType on dimension models",
+        "Unit test: pre-computed ratio warning fires for columns matching *_pct/*_ratio/*_rate/*_percent patterns on fact models",
+        "Unit test: missing SCD warning fires for dimension columns without scdType when model has role",
+        "Unit test: warnings are not generated for models without modelRole set (graceful degradation)",
+        "Verify in Extension Development Host: warning badge appears on nodes with active warnings",
+        "Verify in Extension Development Host: warnings are shown in a collapsible section in the DetailPanel",
+        "Verify in Extension Development Host: warnings can be dismissed per-model and dismissal persists",
+        "Verify warnings do not block any operations (advisory only, not blocking)"
+      ],
+      "implementation_notes": "Create a new ValidationService (src/services/validationService.ts) that takes a ReconciledDomain and returns warnings per model. Warning interface: `{ modelName: string; rule: string; message: string; severity: 'warning'; column?: string }`. Run validation in ReconciliationService after reconciliation — attach warnings to ReconciledModel as `warnings?: ValidationWarning[]`. The webview renders warnings in DetailPanel as a collapsible 'Modelling Warnings' section with yellow/amber styling (matching the existing discrepancy warning pattern). Node badge: reuse the discrepancy badge pattern but with a different icon/colour for modelling warnings vs structural discrepancies. Dismissals stored in viewConfig.dismissedWarnings as `Record<string, string[]>` (model name → array of dismissed rule IDs). Validation only runs on models that have modelRole set — models without role are unvalidated (supports gradual adoption). Keep rules simple and high-confidence to avoid alert fatigue — it's better to have 5 useful warnings than 20 noisy ones.",
+      "category": "infrastructure",
+      "estimated_effort": "large"
     }
   ],
   "metadata": {
     "generated_from": "plan.md",
     "generated_at": "2026-01-29T00:00:00.000Z",
-    "last_updated": "2026-01-29 - Phase 2 simplified to single-mode approach (no browse/design toggle)",
+    "last_updated": "2026-02-19 - Added Phase 5: AI-Driven Modelling Metadata (F500-F504)",
     "feature_counts": {
-      "total": 36,
+      "total": 49,
       "by_phase": {
         "phase-1": 17,
         "phase-2": 9,
         "phase-3": 8,
-        "phase-4": 10
+        "phase-4": 10,
+        "phase-5": 5
       }
     }
   }

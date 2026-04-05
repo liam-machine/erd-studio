@@ -73,9 +73,11 @@ export function useLongPressDrag(options: UseLongPressDragOptions = {}): UseLong
       // Only respond to primary button (left click)
       if (e.button !== 0) return;
 
-      // Prevent text selection during press
-      e.preventDefault();
-      // Stop propagation to prevent React Flow's node drag from starting
+      // Stop propagation to prevent React Flow's node drag from starting.
+      // Note: we intentionally do NOT call e.preventDefault() here because
+      // that suppresses the browser's native dblclick event generation,
+      // breaking double-click-to-edit on column names and data types.
+      // Text selection is prevented via CSS (user-select: none) on the row.
       e.stopPropagation();
 
       setIsPressing(true);

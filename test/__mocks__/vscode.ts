@@ -6,6 +6,7 @@ export const workspace = {
     get: (key: string, defaultValue?: unknown) => defaultValue,
   }),
   workspaceFolders: [],
+  textDocuments: [] as unknown[],
   createFileSystemWatcher: () => ({
     onDidCreate: () => ({ dispose: () => {} }),
     onDidChange: () => ({ dispose: () => {} }),
@@ -78,6 +79,14 @@ export class TreeItem {
   constructor(label: string, collapsibleState?: TreeItemCollapsibleState) {
     this.label = label;
     this.collapsibleState = collapsibleState;
+  }
+}
+
+export class MarkdownString {
+  value: string;
+  isTrusted?: boolean;
+  constructor(value = '', supportThemeIcons?: boolean) {
+    this.value = value;
   }
 }
 

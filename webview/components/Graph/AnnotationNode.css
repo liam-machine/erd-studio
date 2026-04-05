@@ -1,0 +1,324 @@
+/* ---------------------------------------------------------------------------
+   AnnotationNode — canvas build note (post-it note) styling
+   --------------------------------------------------------------------------- */
+
+.annotation-node {
+  min-width: 160px;
+  min-height: 80px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: grab;
+  border-left: 4px solid transparent;
+  position: relative;
+}
+
+/* --- Colour variants (opaque backgrounds) -------------------------------- */
+
+.annotation-node--yellow {
+  background: #fef3c7;
+  border-left-color: #f59e0b;
+  color: #78350f;
+}
+
+.annotation-node--blue {
+  background: #dbeafe;
+  border-left-color: #3b82f6;
+  color: #1e3a5f;
+}
+
+.annotation-node--green {
+  background: #dcfce7;
+  border-left-color: #22c55e;
+  color: #14532d;
+}
+
+.annotation-node--pink {
+  background: #fce7f3;
+  border-left-color: #ec4899;
+  color: #831843;
+}
+
+.annotation-node--orange {
+  background: #fed7aa;
+  border-left-color: #f97316;
+  color: #7c2d12;
+}
+
+/* Dark themes — opaque dark backgrounds instead of translucent */
+body[data-vscode-theme-kind="vscode-dark"] .annotation-node--yellow,
+body[data-vscode-theme-kind="vscode-high-contrast"] .annotation-node--yellow {
+  background: #422006;
+  color: #fcd34d;
+}
+
+body[data-vscode-theme-kind="vscode-dark"] .annotation-node--blue,
+body[data-vscode-theme-kind="vscode-high-contrast"] .annotation-node--blue {
+  background: #172554;
+  color: #93c5fd;
+}
+
+body[data-vscode-theme-kind="vscode-dark"] .annotation-node--green,
+body[data-vscode-theme-kind="vscode-high-contrast"] .annotation-node--green {
+  background: #052e16;
+  color: #86efac;
+}
+
+body[data-vscode-theme-kind="vscode-dark"] .annotation-node--pink,
+body[data-vscode-theme-kind="vscode-high-contrast"] .annotation-node--pink {
+  background: #500724;
+  color: #f9a8d4;
+}
+
+body[data-vscode-theme-kind="vscode-dark"] .annotation-node--orange,
+body[data-vscode-theme-kind="vscode-high-contrast"] .annotation-node--orange {
+  background: #431407;
+  color: #fdba74;
+}
+
+/* Selected state — custom outline managed by Zustand, suppress React Flow's default */
+.annotation-node--selected {
+  outline: 2px solid var(--focus-border, #007fd4);
+  outline-offset: 1px;
+}
+
+.react-flow__node-annotation.selected .annotation-node {
+  box-shadow: none;
+}
+
+/* Read-only state */
+.annotation-node--readonly {
+  opacity: 0.85;
+  cursor: default;
+}
+
+/* --- Text display -------------------------------------------------------- */
+
+.annotation-node__text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: none;
+}
+
+.annotation-node__placeholder {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+/* Textarea for editing */
+.annotation-node__textarea {
+  width: 100%;
+  min-height: 60px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  padding: 0;
+  margin: 0;
+}
+
+/* --- Inline toolbar (top-right corner) ----------------------------------- */
+
+.annotation-node__toolbar {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Drag-to-link handle (chain icon) */
+.annotation-node__link-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.1s ease;
+  user-select: none;
+}
+
+.annotation-node:hover .annotation-node__link-handle {
+  opacity: 0.5;
+}
+
+.annotation-node__link-handle:hover {
+  opacity: 1 !important;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+body[data-vscode-theme-kind="vscode-dark"] .annotation-node__link-handle:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.annotation-node__toolbar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.1s ease;
+  letter-spacing: 1px;
+}
+
+.annotation-node:hover .annotation-node__toolbar-toggle {
+  opacity: 0.6;
+}
+
+.annotation-node__toolbar-toggle:hover {
+  opacity: 1 !important;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+body[data-vscode-theme-kind="vscode-dark"] .annotation-node__toolbar-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.annotation-node__toolbar-panel {
+  position: absolute;
+  top: 24px;
+  right: 0;
+  width: 150px;
+  background: var(--panel-bg, #252526);
+  border: 1px solid var(--panel-border, #404040);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Colour swatches */
+.annotation-node__color-row {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.annotation-node__color-swatch {
+  width: 18px;
+  height: 18px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+}
+
+.annotation-node__color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.annotation-node__color-swatch--active {
+  border-color: var(--editor-fg, #d4d4d4);
+}
+
+/* Link to model */
+.annotation-node__link-row {
+  padding: 2px 0;
+}
+
+.annotation-node__link-select {
+  width: 100%;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--panel-border, #404040);
+  border-radius: 4px;
+  background: var(--input-bg, #3c3c3c);
+  color: var(--input-fg, #cccccc);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Delete button */
+.annotation-node__delete-btn {
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--error-fg, #f48771);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+}
+
+.annotation-node__delete-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* --- Resize handle (bottom-right corner) --------------------------------- */
+
+.annotation-node__resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 2;
+}
+
+.annotation-node__resize-handle::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  opacity: 0.4;
+}
+
+.annotation-node:hover .annotation-node__resize-handle {
+  opacity: 1;
+}
+
+/* --- Linked model badge -------------------------------------------------- */
+
+.annotation-node__link-badge {
+  margin-top: 6px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  opacity: 0.7;
+  background: rgba(0, 0, 0, 0.08);
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-vscode-theme-kind="vscode-dark"] .annotation-node__link-badge,
+body[data-vscode-theme-kind="vscode-high-contrast"] .annotation-node__link-badge {
+  background: rgba(255, 255, 255, 0.1);
+}

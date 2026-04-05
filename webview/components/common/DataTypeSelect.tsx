@@ -6,7 +6,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
+import { getDataTypeColor } from '../../lib/dataTypeColors';
 import './DataTypeSelect.css';
 
 // ---------------------------------------------------------------------------
@@ -59,20 +61,31 @@ export function DataTypeSelect({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside.
+  // Defer listener registration by a frame so that the mousedown event which
+  // triggered the mount (e.g. double-click) does not immediately close the
+  // dropdown via the click-outside handler.
   useEffect(() => {
+    if (!isOpen) return undefined;
+
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inContainer = containerRef.current?.contains(target);
+      const inDropdown = listRef.current?.contains(target);
+      if (!inContainer && !inDropdown) {
         setIsOpen(false);
         onBlur?.();
       }
     };
 
-    if (isOpen) {
+    const rafId = requestAnimationFrame(() => {
       document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-    return undefined;
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, [isOpen, onBlur]);
 
   // Calculate dropdown position when opening
@@ -153,15 +166,16 @@ export function DataTypeSelect({
         type="button"
         className="data-type-select__trigger"
         onClick={handleToggle}
+        onMouseDown={(e) => e.stopPropagation()}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >
-        <span className="data-type-select__value">{value}</span>
+        <span className="data-type-select__value" style={{ color: getDataTypeColor(value) }}>{value}</span>
         <span className="data-type-select__arrow">▾</span>
       </button>
 
-      {isOpen && (
+      {isOpen && createPortal(
         <ul
           ref={listRef}
           className="data-type-select__dropdown"
@@ -169,6 +183,7 @@ export function DataTypeSelect({
           role="listbox"
           tabIndex={-1}
           onKeyDown={handleKeyDown}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           {DATA_TYPES.map((dt) => (
             <li
@@ -178,12 +193,15 @@ export function DataTypeSelect({
               aria-selected={dt === value}
               data-value={dt}
               tabIndex={0}
+              style={{ color: getDataTypeColor(dt) }}
               onClick={() => handleSelect(dt)}
+              onMouseDown={(e) => e.stopPropagation()}
             >
               {dt}
             </li>
           ))}
-        </ul>
+        </ul>,
+        document.body,
       )}
     </div>
   );

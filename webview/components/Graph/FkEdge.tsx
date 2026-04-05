@@ -4,7 +4,7 @@
  * Renders a smooth-step path with Power BI-style cardinality labels:
  * `*` for "many" and `1` for "one", positioned near each endpoint.
  * Built relationships are blue; design relationships are orange.
- * One-to-one edges use a dashed line style.
+ * All edges use a solid line style.
  *
  * The edge line stops short of the node so the cardinality label sits
  * in the gap between the line end and the node boundary.
@@ -14,7 +14,7 @@
  * least bends.
  */
 
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   getSmoothStepPath,
   EdgeLabelRenderer,
@@ -24,6 +24,8 @@ import {
   type EdgeProps,
 } from '@xyflow/react';
 import type { FkFlowEdge } from '../../types/graph';
+import { useVsCodeApi } from '../../hooks/useVsCodeApi';
+import { swapCardinality } from '../../lib/cardinalityUtils';
 import {
   calculateEdgeOffset,
   parseSideFromHandle,
@@ -108,8 +110,33 @@ function FkEdgeComponent({
     return positions;
   }, [nodeLookup]);
 
+  const vscode = useVsCodeApi();
+  const [hovered, setHovered] = useState(false);
+
+  const handleSwap = useCallback(
+    (e: React.MouseEvent) => {
+      if (!data) return;
+      e.stopPropagation();
+      vscode.postMessage({
+        type: 'updateRelationship',
+        payload: {
+          fromModel: data.fromModel,
+          fromColumn: data.fromColumn,
+          toModel: data.toModel,
+          toColumn: data.toColumn,
+          cardinality: swapCardinality(data.cardinality),
+        },
+      });
+    },
+    [vscode, data],
+  );
+
   if (!data) return null;
-  const { cardinality, status, fromModel, toModel, dimmed } = data;
+  const { cardinality, stage, discrepancyStatus, fromModel, toModel, dimmed, readOnly } = data;
+
+  // For cardinality mismatch edges, pull the mismatch details from the report
+  // The edge data only has status — we need to find the original relationship discrepancy
+  // to get both cardinalities. For now, we show a visual indicator on the edge itself.
 
   // Parse which side each handle is on (top/right/bottom/left)
   const sourceSide = parseSideFromHandle(sourceHandleId);
@@ -166,15 +193,9 @@ function FkEdgeComponent({
     borderRadius: 8,
   });
 
-  const statusClass = `fk-edge--${status}`;
-  // Apply special styling for one-to-one (dashed) and many-to-many (dotted)
-  let cardinalityClass = '';
-  if (cardinality === 'one-to-one') {
-    cardinalityClass = 'fk-edge--one-to-one';
-  } else if (cardinality === 'many-to-many') {
-    cardinalityClass = 'fk-edge--many-to-many';
-  }
-
+  const statusClass = discrepancyStatus
+    ? `fk-edge--discrepancy-${discrepancyStatus}`
+    : `fk-edge--${stage ?? 'logical'}`;
   // Cardinality labels at each end:
   // - many-to-one: * at source, 1 at target
   // - one-to-one: 1 at both ends
@@ -206,17 +227,26 @@ function FkEdgeComponent({
   const srcLabelClass = sourceLabel === '*' ? ' fk-edge__label--many' : '';
   const tgtLabelClass = targetLabel === '*' ? ' fk-edge__label--many' : '';
 
+  // Use discrepancy colour for labels when edge has a discrepancy status
+  const labelColorClass = discrepancyStatus
+    ? `fk-edge__label--discrepancy-${discrepancyStatus}`
+    : `fk-edge__label--${stage ?? 'logical'}`;
+
   // Labels sit close to the node, in the gap before the shortened path.
   // Use adjusted coordinates so labels align with distributed connection points.
   const srcLabel = offsetPoint(adjustedSourceX, adjustedSourceY, sourcePosition, LABEL_OFFSET);
   const tgtLabel = offsetPoint(adjustedTargetX, adjustedTargetY, targetPosition, LABEL_OFFSET);
+
+  // Midpoint for cardinality mismatch badge
+  const midX = (adjustedSourceX + adjustedTargetX) / 2;
+  const midY = (adjustedSourceY + adjustedTargetY) / 2;
 
   return (
     <>
       <path
         id={id}
         d={edgePath}
-        className={`fk-edge ${statusClass} ${cardinalityClass}${dimmed ? ' fk-edge--dimmed' : ''}`}
+        className={`fk-edge ${statusClass}${dimmed ? ' fk-edge--dimmed' : ''}`}
       />
       {/* Invisible wider path for easier hover/click targeting */}
       <path
@@ -228,7 +258,7 @@ function FkEdgeComponent({
       />
       <EdgeLabelRenderer>
         <span
-          className={`fk-edge__label fk-edge__label--${status}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+          className={`fk-edge__label ${labelColorClass}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
           style={{
             transform: `translate(-50%, -50%) translate(${srcLabel.x}px, ${srcLabel.y}px)`,
           }}
@@ -236,13 +266,45 @@ function FkEdgeComponent({
           {sourceLabel}
         </span>
         <span
-          className={`fk-edge__label fk-edge__label--${status}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+          className={`fk-edge__label ${labelColorClass}${tgtLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
           style={{
             transform: `translate(-50%, -50%) translate(${tgtLabel.x}px, ${tgtLabel.y}px)`,
           }}
         >
           {targetLabel}
         </span>
+        {discrepancyStatus === 'cardinality-mismatch' && (
+          <span
+            className="fk-edge__mismatch-badge"
+            style={{
+              transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
+            }}
+            title="Cardinality differs between stages"
+          >
+            !
+          </span>
+        )}
+        {!readOnly && !discrepancyStatus && (
+          <span
+            className={`fk-edge__swap-zone${dimmed ? ' fk-edge__swap-zone--dimmed' : ''}`}
+            style={{
+              transform: `translate(-50%, -50%) translate(${midX}px, ${midY}px)`,
+            }}
+            onMouseEnter={(e) => { e.stopPropagation(); setHovered(true); }}
+            onMouseLeave={(e) => { e.stopPropagation(); setHovered(false); }}
+          >
+            {hovered && (
+              <button
+                className="fk-edge__swap-btn"
+                onClick={handleSwap}
+                title={`Swap cardinality (${cardinality} → ${swapCardinality(cardinality)})`}
+                aria-label="Swap cardinality direction"
+              >
+                &#x21c4;
+              </button>
+            )}
+          </span>
+        )}
       </EdgeLabelRenderer>
     </>
   );

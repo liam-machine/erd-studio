@@ -1,0 +1,89 @@
+/**
+ * KeyBadge styles.
+ *
+ * Status-aware badge styling for PK/FK/NK column indicators.
+ * Uses BEM naming and VS Code theme tokens.
+ */
+
+.key-badge {
+  display: inline-block;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.3px;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+/* ---------------------------------------------------------------------------
+   Clickable state
+   --------------------------------------------------------------------------- */
+
+.key-badge--clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.key-badge--clickable:hover {
+  filter: brightness(1.15);
+}
+
+/* Keyboard focus */
+.key-badge--clickable:focus {
+  outline: 2px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------------------
+   Inactive state (shown in editable mode when key not set)
+   --------------------------------------------------------------------------- */
+
+.key-badge--inactive {
+  opacity: 0.3;
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.key-badge--inactive:hover {
+  opacity: 0.6;
+}
+
+/* ---------------------------------------------------------------------------
+   Active state
+   --------------------------------------------------------------------------- */
+
+.key-badge--active {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Type-specific colors (active state)
+   --------------------------------------------------------------------------- */
+
+/* PK — Yellow/gold */
+.key-badge--pk.key-badge--active {
+  background: rgba(234, 179, 8, 0.2);
+  color: #ca8a04;
+}
+
+/* FK — Blue */
+.key-badge--fk.key-badge--active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+
+/* NK — Purple */
+.key-badge--nk.key-badge--active {
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
+}
+
+/* ---------------------------------------------------------------------------
+   Status-specific dimming for planned/missing columns
+   --------------------------------------------------------------------------- */
+
+.key-badge--planned.key-badge--active,
+.key-badge--missing.key-badge--active {
+  opacity: 0.85;
+}

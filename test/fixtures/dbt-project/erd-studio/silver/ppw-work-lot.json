@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 4,
+  "domain": "ppw-work-lot",
+  "layer": "silver",
+  "description": "PPW PPW WORK LOT data model",
+  "modelFolder": "models/silver",
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}

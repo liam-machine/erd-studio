@@ -9,10 +9,11 @@
 
 import { create } from 'zustand';
 import type { Viewport } from '@xyflow/react';
-import type { ManifestModelPreview, ReconciledDomain } from '../../src/types/reconciled';
-import type { ModelFlowNode, FkFlowEdge, FkEdgeData } from '../types/graph';
-import type { ModelTemplate } from '../../src/types/semantic';
-import type { PaletteId } from '../lib/colorPalettes';
+import type { DisplayDomain, ExistingModelPreview, ManifestModelPreview } from '../../src/types/display';
+import type { DiscrepancyReport } from '../../src/types/discrepancy';
+import type { ModelFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
+import type { ModelTemplate, Stage } from '../../src/types/semantic';
+import type { GroundTruth } from '../../src/types/syncPlan';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,12 +51,18 @@ export interface NodeContextMenu {
   x: number;
   y: number;
   modelName: string;
-  modelStatus: 'built' | 'approved' | 'design' | 'missing';
-  isApproved: boolean;
+}
+
+/** Context menu state for annotation right-click. */
+export interface AnnotationContextMenu {
+  type: 'annotation';
+  x: number;
+  y: number;
+  annotationId: string;
 }
 
 /** Union of context menu states. */
-export type ContextMenuState = EdgeContextMenu | NodeContextMenu | null;
+export type ContextMenuState = EdgeContextMenu | NodeContextMenu | AnnotationContextMenu | null;
 
 export interface EditorState {
   /** Current search query for filtering/highlighting nodes. */
@@ -64,6 +71,8 @@ export interface EditorState {
   selectedNode: string | null;
   /** IDs of currently selected edges. */
   selectedEdges: string[];
+  /** Edge ID selected for dimming (highlights endpoints, dims everything else). */
+  selectedEdge: string | null;
   /** React Flow viewport (pan + zoom). */
   viewport: Viewport;
   /** Whether the detail panel is open. */
@@ -81,23 +90,27 @@ export interface EditorState {
   /** Whether the add existing model dialog is open. */
   addExistingModelDialogOpen: boolean;
   /** The loaded domain data from the extension host (already reconciled with manifest). */
-  domain: ReconciledDomain | null;
+  domain: DisplayDomain | null;
   /** Error message from the extension host, if any. */
   error: string | null;
   /** React Flow nodes (local state for selection/drag). */
-  nodes: ModelFlowNode[];
+  nodes: (ModelFlowNode | AnnotationFlowNode)[];
   /** React Flow edges. */
-  edges: FkFlowEdge[];
+  edges: (FkFlowEdge | AnnotationFlowEdge)[];
+  /** Annotation currently being edited (auto-focus textarea), or null. */
+  editingAnnotationId: string | null;
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: ModelTemplate[];
-  /** Manifest models available to add to this domain (not already in domain). */
+  /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
   manifestModels: ManifestModelPreview[];
+  /** Models available to add from logical-models/ and manifest. */
+  existingModels: ExistingModelPreview[];
   /** Context menu state (position and target), or null if closed. */
   contextMenu: ContextMenuState;
   /** Internal: registered search focus function (not persisted). */
   _searchFocusFn: (() => void) | null;
-  /** Current colour palette ID. */
-  paletteId: PaletteId;
+  /** Internal: registered auto-layout function (not persisted). */
+  _autoLayoutFn: (() => void) | null;
   /** Whether the legend panel is visible. */
   legendOpen: boolean;
   /** Whether the welcome modal is visible. */
@@ -111,12 +124,49 @@ export interface EditorState {
     currentX: number;
     currentY: number;
   } | null;
+  /** Active drag line state for linking an annotation to a model via drag. */
+  annotationLinkDrag: {
+    annotationId: string;
+    sourceX: number;
+    sourceY: number;
+    currentX: number;
+    currentY: number;
+  } | null;
+  /** Whether the cross-stage discrepancy overlay is visible. */
+  discrepancyVisible: boolean;
+  /** The stage being compared against when discrepancy is active. */
+  discrepancyCompareStage: Stage | null;
+  /** The active discrepancy report from the extension, or null. */
+  discrepancyReport: DiscrepancyReport | null;
+  /** Whether the sync resolution UI is active (ground truth radios visible). */
+  syncMode: boolean;
+  /** Per-discrepancy ground truth selections (key → 'logical' | 'physical'). */
+  syncSelections: Record<string, GroundTruth>;
+  /** Whether the manifest is stale (source files newer than manifest). */
+  manifestStale: boolean;
+  /** Info about the last generated sync plan, or null. */
+  syncPlanGenerated: { filePath: string; totalActions: number } | null;
+  /** Set of "modelName:columnName" keys for columns involved in selected edges. */
+  highlightedColumns: Set<string>;
+  /** Set of model IDs with columns expanded. */
+  expandedNodes: Set<string>;
+  /** Whether columns are in global "all expanded" mode. */
+  allExpanded: boolean;
+  /** Selected column names in the DetailPanel (scoped to current model). */
+  selectedColumns: string[];
+  /** Anchor column for Shift+click range selection. */
+  lastSelectedColumn: string | null;
+  /** Column currently in edit mode (name field), or null. */
+  editingColumn: string | null;
+  /** Currently selected annotation ID, or null. */
+  selectedAnnotation: string | null;
 }
 
 export interface EditorActions {
   setSearchQuery: (query: string) => void;
   selectNode: (nodeName: string | null) => void;
   setSelectedEdges: (edgeIds: string[]) => void;
+  setSelectedEdge: (edgeId: string | null) => void;
   setViewport: (viewport: Viewport) => void;
   setDetailPanelOpen: (open: boolean) => void;
   setNewModelDialogOpen: (open: boolean) => void;
@@ -133,24 +183,31 @@ export interface EditorActions {
   setPendingDeleteConfirmation: (pending: boolean) => void;
   /** Open/close the add existing model dialog. */
   setAddExistingModelDialogOpen: (open: boolean) => void;
-  setDomain: (domain: ReconciledDomain) => void;
+  setDomain: (domain: DisplayDomain) => void;
   setError: (error: string | null) => void;
-  setNodes: (nodes: ModelFlowNode[]) => void;
-  setEdges: (edges: FkFlowEdge[]) => void;
+  setNodes: (nodes: (ModelFlowNode | AnnotationFlowNode)[]) => void;
+  setEdges: (edges: (FkFlowEdge | AnnotationFlowEdge)[]) => void;
+  /** Set the annotation currently being edited (auto-focus). */
+  setEditingAnnotationId: (id: string | null) => void;
+  /** Open context menu for an annotation at the given position. */
+  openAnnotationContextMenu: (x: number, y: number, annotationId: string) => void;
   setTemplates: (templates: ModelTemplate[]) => void;
   setManifestModels: (models: ManifestModelPreview[]) => void;
+  setExistingModels: (models: ExistingModelPreview[]) => void;
   /** Open context menu for an edge at the given position. */
   openEdgeContextMenu: (x: number, y: number, data: FkEdgeData) => void;
   /** Open context menu for a node at the given position. */
-  openNodeContextMenu: (x: number, y: number, modelName: string, modelStatus: 'built' | 'approved' | 'design' | 'missing', isApproved: boolean) => void;
+  openNodeContextMenu: (x: number, y: number, modelName: string) => void;
   /** Close the context menu. */
   closeContextMenu: () => void;
   /** Register a function to focus the search input (called by Toolbar on mount). */
   registerSearchFocus: (focusFn: (() => void) | null) => void;
   /** Focus the search input (called by keyboard handler). */
   focusSearchInput: () => void;
-  /** Set the colour palette. */
-  setPaletteId: (paletteId: PaletteId) => void;
+  /** Register a function to trigger auto-layout (called by Toolbar on mount). */
+  registerAutoLayout: (layoutFn: (() => void) | null) => void;
+  /** Trigger auto-layout (called by keyboard handler). */
+  triggerAutoLayout: () => void;
   /** Toggle the legend panel visibility. */
   setLegendOpen: (open: boolean) => void;
   /** Toggle the welcome modal visibility. */
@@ -161,6 +218,54 @@ export interface EditorActions {
   updateDragLineMouse: (mouseX: number, mouseY: number) => void;
   /** End drag line (on drop or cancel). */
   endDragLine: () => void;
+  /** Start drag line for annotation-to-model linking. */
+  startAnnotationLinkDrag: (annotationId: string, sourceX: number, sourceY: number) => void;
+  /** Update annotation link drag endpoint. */
+  updateAnnotationLinkDrag: (mouseX: number, mouseY: number) => void;
+  /** End annotation link drag. */
+  endAnnotationLinkDrag: () => void;
+  /** Toggle the discrepancy overlay visibility. */
+  setDiscrepancyVisible: (visible: boolean) => void;
+  /** Set the stage being compared against. */
+  setDiscrepancyCompareStage: (stage: Stage | null) => void;
+  /** Set the discrepancy report from the extension. */
+  setDiscrepancyReport: (report: DiscrepancyReport | null) => void;
+  /** Toggle sync resolution mode (shows ground truth radios in discrepancy panel). */
+  setSyncMode: (active: boolean) => void;
+  /** Set ground truth for a single discrepancy item. */
+  setSyncSelection: (key: string, choice: GroundTruth) => void;
+  /** Set ground truth for multiple items at once (bulk). */
+  setSyncSelectionBulk: (keys: string[], choice: GroundTruth) => void;
+  /** Clear all sync selections. */
+  clearSyncSelections: () => void;
+  /** Set manifest staleness flag. */
+  setManifestStale: (stale: boolean) => void;
+  /** Set sync plan generation result. */
+  setSyncPlanGenerated: (info: { filePath: string; totalActions: number } | null) => void;
+  /** Set highlighted columns (for edge click). */
+  setHighlightedColumns: (columns: Set<string>) => void;
+  /** Expand all listed model IDs (sets allExpanded mode). */
+  expandAll: (modelIds: string[]) => void;
+  /** Expand only new model IDs without resetting existing state. */
+  expandNew: (modelIds: string[]) => void;
+  /** Collapse all models. */
+  collapseAll: () => void;
+  /** Toggle expand/collapse for a single model. */
+  toggleExpansion: (modelId: string) => void;
+  /** Restore expansion state from persisted data. */
+  setExpandedNodes: (nodes: string[], allExpanded: boolean) => void;
+  /** Select a single column (replaces selection, sets anchor). */
+  selectColumn: (name: string) => void;
+  /** Toggle a column in/out of the selection (Ctrl+click). */
+  toggleColumnSelection: (name: string) => void;
+  /** Select a range of columns from anchor to target (Shift+click). */
+  selectColumnRange: (name: string, allNames: string[]) => void;
+  /** Clear all column selection. */
+  clearColumnSelection: () => void;
+  /** Set the column currently being edited (F2 / double-click). */
+  setEditingColumn: (name: string | null) => void;
+  /** Select an annotation (clears model selection). */
+  selectAnnotation: (annotationId: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +277,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   searchQuery: '',
   selectedNode: null,
   selectedEdges: [],
+  selectedEdge: null,
   viewport: { x: 0, y: 0, zoom: 1 },
   detailPanelOpen: false,
   newModelDialogOpen: false,
@@ -186,17 +292,35 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   edges: [],
   templates: [],
   manifestModels: [],
+  existingModels: [],
+  editingAnnotationId: null,
   contextMenu: null,
   _searchFocusFn: null,
-  paletteId: 'coolWarm',
+  _autoLayoutFn: null,
   legendOpen: false,
   welcomeModalOpen: false,
   dragLineState: null,
+  annotationLinkDrag: null,
+  discrepancyVisible: false,
+  discrepancyCompareStage: null,
+  discrepancyReport: null,
+  syncMode: false,
+  syncSelections: {},
+  manifestStale: false,
+  syncPlanGenerated: null,
+  highlightedColumns: new Set<string>(),
+  expandedNodes: new Set<string>(),
+  allExpanded: false,
+  selectedColumns: [],
+  lastSelectedColumn: null,
+  editingColumn: null,
+  selectedAnnotation: null,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
-  selectNode: (nodeName) => set({ selectedNode: nodeName }),
+  selectNode: (nodeName) => set({ selectedNode: nodeName, selectedAnnotation: null, selectedColumns: [], lastSelectedColumn: null, editingColumn: null }),
   setSelectedEdges: (edgeIds) => set({ selectedEdges: edgeIds }),
+  setSelectedEdge: (edgeId) => set({ selectedEdge: edgeId }),
   setViewport: (viewport) => set({ viewport }),
   setDetailPanelOpen: (open) => set({ detailPanelOpen: open }),
   setNewModelDialogOpen: (open) => set({ newModelDialogOpen: open }),
@@ -209,21 +333,40 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   clearFkDialogEditData: () => set({ fkDialogEditData: null }),
   setPendingDeleteConfirmation: (pending) => set({ pendingDeleteConfirmation: pending }),
   setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
-  setDomain: (domain) => set({ domain, error: null }),
+  setDomain: (domain) => set((state) => ({
+    domain,
+    error: null,
+    // Clear column selection on domain reload
+    selectedColumns: [], lastSelectedColumn: null, editingColumn: null,
+    // Clear discrepancy + sync state when switching stages (stage changed)
+    ...(state.domain && state.domain.stage !== domain.stage
+      ? {
+          discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null,
+          syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null,
+        }
+      : {}),
+  })),
   setError: (error) => set({ error }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),
+  setExistingModels: (models) => set({ existingModels: models }),
+  setEditingAnnotationId: (id) => set({ editingAnnotationId: id }),
+  openAnnotationContextMenu: (x, y, annotationId) => set({ contextMenu: { type: 'annotation', x, y, annotationId } }),
   openEdgeContextMenu: (x, y, data) => set({ contextMenu: { type: 'edge', x, y, data } }),
-  openNodeContextMenu: (x, y, modelName, modelStatus, isApproved) => set({ contextMenu: { type: 'node', x, y, modelName, modelStatus, isApproved } }),
+  openNodeContextMenu: (x, y, modelName) => set({ contextMenu: { type: 'node', x, y, modelName } }),
   closeContextMenu: () => set({ contextMenu: null }),
   registerSearchFocus: (focusFn) => set({ _searchFocusFn: focusFn }),
   focusSearchInput: () => {
     const { _searchFocusFn } = useEditorStore.getState();
     if (_searchFocusFn) _searchFocusFn();
   },
-  setPaletteId: (paletteId) => set({ paletteId }),
+  registerAutoLayout: (layoutFn) => set({ _autoLayoutFn: layoutFn }),
+  triggerAutoLayout: () => {
+    const { _autoLayoutFn } = useEditorStore.getState();
+    if (_autoLayoutFn) _autoLayoutFn();
+  },
   setLegendOpen: (open) => set({ legendOpen: open }),
   setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
   startDragLine: (modelName, columnName, sourceX, sourceY) =>
@@ -250,4 +393,91 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
         : {},
     ),
   endDragLine: () => set({ dragLineState: null }),
+  startAnnotationLinkDrag: (annotationId, sourceX, sourceY) =>
+    set({ annotationLinkDrag: { annotationId, sourceX, sourceY, currentX: sourceX, currentY: sourceY } }),
+  updateAnnotationLinkDrag: (mouseX, mouseY) =>
+    set((state) =>
+      state.annotationLinkDrag
+        ? { annotationLinkDrag: { ...state.annotationLinkDrag, currentX: mouseX, currentY: mouseY } }
+        : {},
+    ),
+  endAnnotationLinkDrag: () => set({ annotationLinkDrag: null }),
+  setDiscrepancyVisible: (visible) => set({
+    discrepancyVisible: visible,
+    // Clear sync state when discrepancy overlay is hidden
+    ...(!visible ? { syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null } : {}),
+  }),
+  setDiscrepancyCompareStage: (stage) => set({ discrepancyCompareStage: stage }),
+  setDiscrepancyReport: (report) => set({ discrepancyReport: report }),
+  setSyncMode: (active) => set({ syncMode: active, syncPlanGenerated: null }),
+  setSyncSelection: (key, choice) =>
+    set((state) => ({ syncSelections: { ...state.syncSelections, [key]: choice } })),
+  setSyncSelectionBulk: (keys, choice) =>
+    set((state) => {
+      const next = { ...state.syncSelections };
+      for (const key of keys) next[key] = choice;
+      return { syncSelections: next };
+    }),
+  clearSyncSelections: () => set({ syncSelections: {}, syncPlanGenerated: null }),
+  setManifestStale: (stale) => set({ manifestStale: stale }),
+  setSyncPlanGenerated: (info) => set({ syncPlanGenerated: info }),
+  setHighlightedColumns: (columns) => set({ highlightedColumns: columns }),
+  expandAll: (modelIds) => set({ expandedNodes: new Set(modelIds), allExpanded: true }),
+  expandNew: (modelIds) =>
+    set((state) => {
+      const next = new Set(state.expandedNodes);
+      modelIds.forEach((id) => next.add(id));
+      return { expandedNodes: next };
+    }),
+  collapseAll: () => set({ expandedNodes: new Set(), allExpanded: false }),
+  toggleExpansion: (modelId) =>
+    set((state) => {
+      const next = new Set(state.expandedNodes);
+      if (next.has(modelId)) {
+        next.delete(modelId);
+      } else {
+        next.add(modelId);
+      }
+      return { expandedNodes: next, allExpanded: false };
+    }),
+  setExpandedNodes: (nodes, allExpanded) =>
+    set({ expandedNodes: new Set(nodes), allExpanded }),
+
+  // Column selection actions
+  selectColumn: (name) => set({ selectedColumns: [name], lastSelectedColumn: name, editingColumn: null }),
+  toggleColumnSelection: (name) =>
+    set((state) => {
+      const idx = state.selectedColumns.indexOf(name);
+      const next = idx >= 0
+        ? state.selectedColumns.filter((n) => n !== name)
+        : [...state.selectedColumns, name];
+      return { selectedColumns: next, lastSelectedColumn: name, editingColumn: null };
+    }),
+  selectColumnRange: (name, allNames) =>
+    set((state) => {
+      const anchor = state.lastSelectedColumn;
+      if (!anchor) return { selectedColumns: [name], lastSelectedColumn: name, editingColumn: null };
+      const anchorIdx = allNames.indexOf(anchor);
+      const targetIdx = allNames.indexOf(name);
+      if (anchorIdx < 0 || targetIdx < 0) return { selectedColumns: [name], lastSelectedColumn: name, editingColumn: null };
+      const start = Math.min(anchorIdx, targetIdx);
+      const end = Math.max(anchorIdx, targetIdx);
+      return { selectedColumns: allNames.slice(start, end + 1), editingColumn: null };
+    }),
+  clearColumnSelection: () => set({ selectedColumns: [], lastSelectedColumn: null, editingColumn: null }),
+  setEditingColumn: (name) => set({ editingColumn: name }),
+
+  // Annotation selection actions
+  selectAnnotation: (annotationId) => set({
+    selectedAnnotation: annotationId,
+    selectedNode: null,
+    detailPanelOpen: false,
+    pendingDeleteConfirmation: false,
+    selectedEdge: null,
+    selectedEdges: [],
+    highlightedColumns: new Set<string>(),
+    selectedColumns: [],
+    lastSelectedColumn: null,
+    editingColumn: null,
+  }),
 }));

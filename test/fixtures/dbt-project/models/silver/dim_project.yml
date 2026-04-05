@@ -6,9 +6,12 @@ models:
       tags:
         - silver
         - domain:work-lots
-        - domain:bill
+        - domain:showcase
     columns:
       - name: project_id
         description: Surrogate key for project
       - name: project_name
         description: Project name
+      - name: project_code
+        description: Project code
+        data_type: VARCHAR

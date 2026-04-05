@@ -1,0 +1,21 @@
+version: 2
+models:
+  - name: dim_date
+    description: Date dimension with fiscal calendar attributes
+    config:
+      tags:
+        - gold
+        - domain:showcase
+    columns:
+      - name: date_key
+        description: Date surrogate key (YYYYMMDD)
+        data_type: INT
+        tests:
+          - unique
+      - name: calendar_date
+        description: Calendar date
+        data_type: DATE
+      - name: fiscal_year
+        description: Fiscal year
+      - name: fiscal_quarter
+        description: Fiscal quarter (Q1-Q4)

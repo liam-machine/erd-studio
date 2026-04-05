@@ -1,14 +1,14 @@
 {
-  "name": "dbt-semantic-designer",
-  "displayName": "dbt Semantic Designer",
-  "description": "Visualise semantic (FK-based) relationships between dbt models within curated business domains, with a design mode for planning new models, columns, and relationships.",
-  "version": "0.1.3",
+  "name": "erd-studio",
+  "displayName": "ERD Studio",
+  "description": "Visual ERD designer for dbt projects. Design your data warehouse across two stages — Logical (columns, types, FK design) and Physical (read-only manifest view) — with cross-stage discrepancy comparison.",
+  "version": "0.6.14",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/liamwynne/dbt-semantic-designer"
+    "url": "https://github.com/liam-machine/erd-studio"
   },
   "keywords": [
     "dbt",
@@ -63,7 +63,7 @@
       },
       {
         "command": "dbtSemantic.addLayer",
-        "title": "Add Layer",
+        "title": "Layer +",
         "category": "dbt"
       },
       {
@@ -80,14 +80,40 @@
         "command": "dbtSemantic.initializeLayerConfig",
         "title": "Initialize Layer Configuration",
         "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.installCodingHarness",
+        "title": "Install AI Coding Harness",
+        "category": "dbt",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "dbtSemantic.syncDomainTags",
+        "title": "Sync Domain Tags to dbt Schema Files",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.migrateToV5",
+        "title": "Migrate Domains to Central Model Store",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.deleteLogicalModel",
+        "title": "Delete Model",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.revealLogicalModel",
+        "title": "Reveal in Explorer",
+        "category": "dbt"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "dbt-semantic",
-          "title": "Semantic Domains",
-          "icon": "media/icon.svg"
+          "title": "ERD Studio",
+          "icon": "media/icon-sidebar.svg"
         }
       ]
     },
@@ -95,7 +121,12 @@
       "dbt-semantic": [
         {
           "id": "dbtSemantic.domainTree",
-          "name": "Domains"
+          "name": "ERD Studio"
+        },
+        {
+          "id": "dbtSemantic.modelLibrary",
+          "name": "Model Library",
+          "when": "dbtSemantic.hasLogicalModelsDir"
         }
       ]
     },
@@ -149,7 +180,11 @@
     "viewsWelcome": [
       {
         "view": "dbtSemantic.domainTree",
-        "contents": "No semantic domains found in this dbt project.\n\nSemantic domains help you visualize and design FK relationships between models, with built models shown in green and planned models in orange.\n\n[Get Started](command:dbtSemantic.setupSemanticDirectory)\n\nThis will create the directory structure and guide you to create your first domain."
+        "contents": "No ERD domains found.\n\nERD Studio lets you design your data warehouse visually across two stages:\n\n**Logical** — columns, data types, FK keys, and design rationale\n**Physical** — read-only view of what's built in dbt\n\n[Set Up ERD Studio](command:dbtSemantic.setupSemanticDirectory)\n\nCreates the erd-studio directory structure and your first domain.\n\n[Install AI Coding Harness](command:dbtSemantic.installCodingHarness)\n\nAdd ERD Studio schema reference to Claude, Copilot, Gemini, or Codex."
+      },
+      {
+        "view": "dbtSemantic.modelLibrary",
+        "contents": "No logical models found.\n\nModels are stored as YAML files in erd-studio/logical-models/.\n\nAdd models to a domain using the ERD editor to create them here."
       }
     ],
     "customEditors": [
@@ -158,7 +193,7 @@
         "displayName": "Semantic Domain Editor",
         "selector": [
           {
-            "filenamePattern": "**/models/semantic/**/*.json"
+            "filenamePattern": "**/erd-studio/*/*.json"
           }
         ],
         "priority": "default"
@@ -185,18 +220,33 @@
           "command": "dbtSemantic.removeLayer",
           "when": "view == dbtSemantic.domainTree && viewItem == layer",
           "group": "7_modification@2"
+        },
+        {
+          "command": "dbtSemantic.revealLogicalModel",
+          "when": "view == dbtSemantic.modelLibrary && viewItem == logicalModel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dbtSemantic.deleteLogicalModel",
+          "when": "view == dbtSemantic.modelLibrary && viewItem == logicalModel",
+          "group": "7_modification@1"
         }
       ],
       "view/title": [
         {
+          "command": "dbtSemantic.installCodingHarness",
+          "when": "view == dbtSemantic.domainTree && dbtSemantic.hasSemanticDir",
+          "group": "navigation@0"
+        },
+        {
           "command": "dbtSemantic.addLayer",
-          "when": "view == dbtSemantic.domainTree",
-          "group": "navigation"
+          "when": "view == dbtSemantic.domainTree && dbtSemantic.hasSemanticDir",
+          "group": "navigation@1"
         }
       ]
     },
     "configuration": {
-      "title": "dbt Semantic Designer",
+      "title": "ERD Studio",
       "properties": {
         "dbtSemantic.projectPath": {
           "type": "string",
@@ -205,13 +255,8 @@
         },
         "dbtSemantic.semanticDir": {
           "type": "string",
-          "default": "models/semantic",
-          "description": "Relative path to semantic domain files within the dbt project"
-        },
-        "dbtSemantic.autoReconcile": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically transition design models to built when detected in manifest"
+          "default": "erd-studio",
+          "description": "Relative path to ERD domain files within the project"
         }
       }
     }
@@ -224,7 +269,8 @@
     "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vscode-test"
+    "test:integration": "vscode-test",
+    "regen-fixtures": "tsx scripts/regen-fixtures.ts"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
@@ -234,7 +280,6 @@
     "@types/node": "^20.17.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "@types/stream-json": "^1.7.8",
     "@types/vscode": "^1.85.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.0",
@@ -251,7 +296,7 @@
     "js-yaml": "^4.1.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "stream-json": "^1.8.0",
+    "yaml": "^2.8.2",
     "zustand": "^5.0.0"
   }
 }

@@ -3,7 +3,6 @@
  *
  * Form fields:
  * - Model name (text input, validated for template prefix)
- * - Schema (text input, pre-filled from domain layer)
  * - Description (textarea)
  * - Template picker (loaded from semantic/templates/*.json files)
  * - Left/Right entity (text inputs, shown only for bridge-type templates)
@@ -12,12 +11,13 @@
  * Placeholder syntax: {name} = model name minus prefix, {left}/{right} = bridge entity names.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
-import type { ColumnDef, DesignModel, ModelTemplate } from '../../../src/types/semantic';
+import { KeyBadgeGroup } from '../common/KeyBadgeGroup';
+import type { ColumnDef, DesignModel, ModelRole, ModelTemplate } from '../../../src/types/semantic';
 import './NewModelDialog.css';
 
 // ---------------------------------------------------------------------------
@@ -62,7 +62,6 @@ function resolvePlaceholders(
  */
 function validateForm(
   modelName: string,
-  schema: string,
   template: ModelTemplate,
   leftEntity: string,
   rightEntity: string,
@@ -83,13 +82,6 @@ function validateForm(
     errors.modelName = `Model "${modelName}" already exists in this domain`;
   }
 
-  // Schema validation
-  if (!schema.trim()) {
-    errors.schema = 'Schema is required';
-  } else if (!/^[a-z0-9_]+$/.test(schema)) {
-    errors.schema = 'Use lowercase letters, numbers, and underscores only';
-  }
-
   // Bridge entity validation (check for requiresLeftEntity/requiresRightEntity flags)
   if (template.requiresLeftEntity || template.requiresRightEntity) {
     if (!leftEntity.trim()) {
@@ -107,6 +99,14 @@ function validateForm(
   return errors;
 }
 
+/** Auto-suggested model role based on template ID. */
+const TEMPLATE_ROLE_MAP: Record<string, ModelRole> = {
+  dimension: 'domain-dim',
+  fact: 'transaction-fact',
+  bridge: 'factless-fact',
+  scd2: 'domain-dim',
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -120,7 +120,6 @@ export function NewModelDialog() {
 
   // Form state
   const [modelName, setModelName] = useState('');
-  const [schema, setSchema] = useState('');
   const [description, setDescription] = useState('');
   const [templateId, setTemplateId] = useState<string>('blank');
   const [leftEntity, setLeftEntity] = useState('');
@@ -128,9 +127,10 @@ export function NewModelDialog() {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [customColumns, setCustomColumns] = useState<ColumnDef[]>([]);
 
-  // Derived state — find the selected template from the store
+  // Derived state — find the selected template from the store.
+  // Fallback to a minimal empty template when no templates are loaded (e.g., physical stage).
   const template = useMemo(
-    () => templates.find((t) => t.id === templateId) ?? templates[0],
+    () => templates.find((t) => t.id === templateId) ?? templates[0] ?? { id: 'blank', label: 'Blank', prefix: '', description: '', columns: [] as import('../../../src/types/semantic').ColumnDef[] },
     [templateId, templates],
   );
 
@@ -142,17 +142,18 @@ export function NewModelDialog() {
     [domain],
   );
 
-  // Validation
+  // Validation (guard: template may be undefined when no templates are loaded)
   const errors = useMemo(
-    () => validateForm(modelName, schema, template, leftEntity, rightEntity, existingModelNames),
-    [modelName, schema, template, leftEntity, rightEntity, existingModelNames],
+    () => template ? validateForm(modelName, template, leftEntity, rightEntity, existingModelNames) : {},
+    [modelName, template, leftEntity, rightEntity, existingModelNames],
   );
 
-  // Validate custom columns (all must have valid names)
+  // Only flag columns that have been touched (non-empty name) but are invalid.
+  // Empty columns are allowed while editing — they are filtered out on submit.
   const hasInvalidColumns = useMemo(
     () =>
       customColumns.some(
-        (col) => !col.name.trim() || !/^[a-z0-9_]+$/.test(col.name)
+        (col) => col.name.trim() !== '' && !/^[a-z0-9_]+$/.test(col.name)
       ),
     [customColumns]
   );
@@ -173,7 +174,6 @@ export function NewModelDialog() {
   // Handlers
   const resetForm = useCallback(() => {
     setModelName('');
-    setSchema('');
     setDescription('');
     // Reset to blank template
     setTemplateId('blank');
@@ -197,13 +197,16 @@ export function NewModelDialog() {
       left: leftEntity,
       right: rightEntity,
     });
-    const finalColumns = [...templateCols, ...customColumns];
+    // Filter out empty custom columns on submit
+    const validCustomColumns = customColumns.filter((col) => col.name.trim() !== '');
+    const finalColumns = [...templateCols, ...validCustomColumns];
 
+    const suggestedRole = TEMPLATE_ROLE_MAP[templateId];
     const newModel: DesignModel = {
       name: modelName.trim(),
-      schema: schema.trim(),
       description: description.trim(),
       columns: finalColumns,
+      ...(suggestedRole ? { modelRole: suggestedRole } : {}),
     };
 
     send({
@@ -212,7 +215,7 @@ export function NewModelDialog() {
     });
 
     handleClose();
-  }, [isValid, modelName, schema, description, template, leftEntity, rightEntity, customColumns, send, handleClose]);
+  }, [isValid, modelName, description, template, leftEntity, rightEntity, customColumns, send, handleClose]);
 
   const handleBlur = useCallback((field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
@@ -251,13 +254,6 @@ export function NewModelDialog() {
     },
     []
   );
-
-  // Set default schema when dialog opens
-  useEffect(() => {
-    if (isOpen && !schema && domain?.layer) {
-      setSchema(domain.layer);
-    }
-  }, [isOpen, schema, domain?.layer]);
 
   if (!isOpen) {
     return null;
@@ -337,25 +333,6 @@ export function NewModelDialog() {
           />
           {touched.modelName && errors.modelName && (
             <span className="new-model-dialog__error">{errors.modelName}</span>
-          )}
-        </div>
-
-        {/* Schema */}
-        <div className="new-model-dialog__field">
-          <label className="new-model-dialog__label" htmlFor="schema">
-            Schema
-          </label>
-          <input
-            id="schema"
-            type="text"
-            className={`new-model-dialog__input ${touched.schema && errors.schema ? 'new-model-dialog__input--error' : ''}`}
-            value={schema}
-            onChange={(e) => setSchema(e.target.value)}
-            onBlur={() => handleBlur('schema')}
-            placeholder="silver"
-          />
-          {touched.schema && errors.schema && (
-            <span className="new-model-dialog__error">{errors.schema}</span>
           )}
         </div>
 
@@ -441,11 +418,13 @@ export function NewModelDialog() {
                   right: rightEntity || '{right}',
                 }).map((col) => (
                   <div key={col.name} className="new-model-dialog__column new-model-dialog__column--template">
-                    <span className="new-model-dialog__col-indicators">
-                      {col.isPrimaryKey && (
-                        <span className="new-model-dialog__pk" title="Primary Key">PK</span>
-                      )}
-                    </span>
+                    <KeyBadgeGroup
+                      isPrimaryKey={col.isPrimaryKey ?? false}
+                      isForeignKey={col.isForeignKey ?? false}
+                      isNaturalKey={col.isNaturalKey ?? false}
+                      mode="readonly"
+                      status="planned"
+                    />
                     <span className="new-model-dialog__col-name">{col.name}</span>
                     <span className="new-model-dialog__col-type">{col.dataType}</span>
                   </div>
@@ -461,12 +440,15 @@ export function NewModelDialog() {
               <div className="new-model-dialog__column-list">
                 {customColumns.map((col, idx) => (
                   <div key={idx} className="new-model-dialog__column-row">
-                    <input
-                      type="checkbox"
-                      className="new-model-dialog__col-pk-checkbox"
-                      checked={col.isPrimaryKey ?? false}
-                      onChange={(e) => handleColumnChange(idx, 'isPrimaryKey', e.target.checked)}
-                      title="Primary Key"
+                    <KeyBadgeGroup
+                      isPrimaryKey={col.isPrimaryKey ?? false}
+                      isForeignKey={col.isForeignKey ?? false}
+                      isNaturalKey={col.isNaturalKey ?? false}
+                      mode="editable"
+                      status="planned"
+                      onTogglePK={() => handleColumnChange(idx, 'isPrimaryKey', !col.isPrimaryKey)}
+                      onToggleFK={() => handleColumnChange(idx, 'isForeignKey', !col.isForeignKey)}
+                      onToggleNK={() => handleColumnChange(idx, 'isNaturalKey', !col.isNaturalKey)}
                     />
                     <input
                       type="text"
@@ -507,6 +489,14 @@ export function NewModelDialog() {
                     </button>
                   </div>
                 ))}
+                {/* Inline add row at the bottom of the list */}
+                <div
+                  className="new-model-dialog__column-row new-model-dialog__column-row--add"
+                  onClick={handleAddColumn}
+                  title="Add another column"
+                >
+                  <span className="new-model-dialog__add-row-text">+ add column</span>
+                </div>
               </div>
             </div>
           )}

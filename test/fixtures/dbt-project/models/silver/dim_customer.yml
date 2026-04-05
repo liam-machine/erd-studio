@@ -1,0 +1,27 @@
+version: 2
+models:
+  - name: dim_customer
+    description: Customer dimension with demographics and segmentation
+    config:
+      tags:
+        - silver
+        - domain:showcase
+    columns:
+      - name: customer_id
+        description: Surrogate key for customer
+        data_type: INT
+        tests:
+          - unique
+          - not_null
+      - name: customer_name
+        description: Full customer name
+        data_type: VARCHAR
+      - name: email
+        description: Customer email address
+        data_type: VARCHAR
+      - name: segment
+        description: Customer segment (Enterprise, SMB, Consumer)
+        data_type: VARCHAR
+      - name: created_at
+        description: Date customer was first created
+        data_type: TIMESTAMP

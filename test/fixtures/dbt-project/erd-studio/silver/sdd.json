@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 4,
+  "domain": "sdd",
+  "layer": "silver",
+  "description": "",
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}

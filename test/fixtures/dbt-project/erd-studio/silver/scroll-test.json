@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 5,
+  "domain": "scroll-test",
+  "layer": "silver",
+  "description": "Test domain — model with many columns for drag-reorder scroll testing",
+  "modelFolder": "models/silver",
+  "logical": {
+    "models": [
+      "fct_large_table"
+    ],
+    "relationships": [],
+    "viewConfig": {}
+  },
+  "viewConfig": {
+    "positions": {
+      "fct_large_table": {
+        "x": 100,
+        "y": 100
+      }
+    }
+  }
+}

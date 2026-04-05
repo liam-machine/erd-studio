@@ -2,11 +2,11 @@
  * DomainTreeProvider — VS Code TreeDataProvider for the sidebar.
  *
  * Displays semantic domains grouped by layer (bronze, silver, gold).
- * Each domain shows a badge with model count and design model count.
- * "New Domain..." items appear inside silver and gold layer folders
- * (bronze is raw/staging and not used for semantic domain design).
+ * Each domain shows a badge with model count (from the logical stage).
+ * "New Domain..." items appear inside creatable layers.
  *
- * Supports drag-and-drop to reorder layers.
+ * Supports drag-and-drop to reorder layers. Stages are handled entirely
+ * by the editor tabs — the tree is stage-agnostic.
  */
 
 import * as vscode from 'vscode';
@@ -49,7 +49,7 @@ export type TreeElement = LayerNode | DomainNode | NewDomainNode;
 // ---------------------------------------------------------------------------
 
 /** Default semantic directory relative to project root. */
-const DEFAULT_SEMANTIC_DIR = 'models/semantic';
+const DEFAULT_SEMANTIC_DIR = 'erd-studio';
 
 export class DomainTreeProvider
   implements vscode.TreeDataProvider<TreeElement>, vscode.TreeDragAndDropController<TreeElement> {
@@ -82,7 +82,6 @@ export class DomainTreeProvider
     dataTransfer: vscode.DataTransfer,
     _token: vscode.CancellationToken,
   ): void | Thenable<void> {
-    // Only allow dragging single layer nodes
     if (source.length !== 1 || source[0].type !== 'layer') {
       return;
     }
@@ -99,31 +98,25 @@ export class DomainTreeProvider
     dataTransfer: vscode.DataTransfer,
     _token: vscode.CancellationToken,
   ): Promise<void> {
-    // Get the dragged layer ID
     const transferItem = dataTransfer.get(LAYER_DRAG_MIME_TYPE);
     if (!transferItem) return;
 
     const draggedLayerId = transferItem.value as string;
 
-    // Target must be a layer node (or undefined for root)
     if (!target || target.type !== 'layer') return;
 
     const targetLayerId = target.layer;
 
-    // Don't do anything if dropping on itself
     if (draggedLayerId === targetLayerId) return;
 
-    // Get current layer order
     const layers = this.layerService.getAllLayers();
     const layerIds = layers.map(l => l.id);
 
-    // Find positions
     const draggedIndex = layerIds.indexOf(draggedLayerId);
     const targetIndex = layerIds.indexOf(targetLayerId);
 
     if (draggedIndex === -1 || targetIndex === -1) return;
 
-    // Remove from old position and insert at new position
     layerIds.splice(draggedIndex, 1);
     layerIds.splice(targetIndex, 0, draggedLayerId);
 
@@ -154,13 +147,10 @@ export class DomainTreeProvider
 
   getChildren(element?: TreeElement): TreeElement[] | undefined {
     if (!element) {
-      // Check if semantic directory exists - if not, return empty array
-      // to trigger VS Code's viewsWelcome content (F408)
       const fullSemanticDir = path.join(this.projectPath, this.semanticDir);
       if (!fs.existsSync(fullSemanticDir)) {
         return [];
       }
-      // Load layers dynamically from LayerService
       const layers = this.layerService.getAllLayers();
       return layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
     }
@@ -182,20 +172,22 @@ export class DomainTreeProvider
 
     const domainNodes: DomainNode[] = layerDomains.map(summary => {
       let modelCount = 0;
-      let designCount = 0;
       try {
         const domain = this.domainService.getDomain(summary.filePath);
-        modelCount = domain.models.length;
-        designCount = domain.models.filter(m => m.source === 'design').length;
+        modelCount = domain.logical.models.length;
       } catch (err) {
         console.warn(`[DomainTreeProvider] Failed to load ${summary.filePath}:`, err);
       }
-      return { type: 'domain' as const, summary, modelCount, designCount };
+      return {
+        type: 'domain' as const,
+        summary,
+        modelCount,
+        designCount: 0,
+      };
     });
 
     const children: TreeElement[] = [...domainNodes];
 
-    // Check if this layer allows creating new domains
     if (this.layerService.isCreatable(layer)) {
       children.push({ type: 'newDomain', layer });
     }

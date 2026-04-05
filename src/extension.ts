@@ -4,17 +4,20 @@ import * as vscode from 'vscode';
 
 import { DomainService } from './services/domainService';
 import { LayerService } from './services/layerService';
-import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type SemanticDomain } from './types/semantic';
+import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
 import { ManifestService } from './services/manifestService';
-import { ReconciliationService } from './services/reconciliationService';
 import { TemplateService } from './services/templateService';
-import { AutoReconciliationService } from './services/autoReconciliationService';
-import { SchemaTagService } from './services/schemaTagService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
+import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/harnessService';
+import { SchemaTagService } from './services/schemaTagService';
+import { LogicalModelService } from './services/logicalModelService';
+import { MigrationService } from './services/migrationService';
+import { YmlParserService } from './services/ymlParserService';
+import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -42,9 +45,6 @@ function findDbtProjectRoot(): string | undefined {
 // Shared helper functions
 // ---------------------------------------------------------------------------
 
-/**
- * Find all open editor tabs for a given file URI.
- */
 function findMatchingTabs(fileUri: vscode.Uri): vscode.Tab[] {
   const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
   return allTabs.filter(tab => {
@@ -54,10 +54,6 @@ function findMatchingTabs(fileUri: vscode.Uri): vscode.Tab[] {
   });
 }
 
-/**
- * Handle unsaved changes in open editors for a domain file.
- * Returns true if the operation should proceed, false if cancelled.
- */
 async function handleUnsavedChanges(
   fileUri: vscode.Uri,
   domainName: string,
@@ -67,7 +63,7 @@ async function handleUnsavedChanges(
   const dirtyTab = matchingTabs.find(tab => tab.isDirty);
 
   if (!dirtyTab) {
-    return true; // No unsaved changes, proceed
+    return true;
   }
 
   const saveChoice = await vscode.window.showWarningMessage(
@@ -98,14 +94,9 @@ async function handleUnsavedChanges(
     }
   }
 
-  // 'Discard' continues without saving
   return true;
 }
 
-/**
- * Validate a domain slug for create or rename operations.
- * Returns an error message if invalid, undefined if valid.
- */
 function validateDomainSlug(
   value: string,
   layer: Layer,
@@ -118,12 +109,10 @@ function validateDomainSlug(
 
   const slug = value.trim();
 
-  // Check if unchanged (only for rename)
   if (currentDomainName && slug === currentDomainName) {
     return 'Domain name unchanged';
   }
 
-  // Validate slug format: lowercase, alphanumeric, hyphens, underscores
   if (!/^[a-z][a-z0-9_-]*$/.test(slug)) {
     return 'Domain name must start with a lowercase letter and contain only lowercase letters, numbers, hyphens, and underscores';
   }
@@ -132,7 +121,6 @@ function validateDomainSlug(
     return 'Domain name must be 64 characters or less';
   }
 
-  // Check for collision in the same layer
   const collision = existingDomains.find(
     d => d.domain === slug && d.layer === layer,
   );
@@ -143,99 +131,173 @@ function validateDomainSlug(
   return undefined;
 }
 
+/** Shared color options for layer creation and editing. */
+const LAYER_COLOR_OPTIONS = [
+  { label: '⚪ Silver', value: '#a0a0a0' },
+  { label: '🟡 Gold', value: '#d4a800' },
+  { label: '🔵 Blue', value: '#3b82f6' },
+  { label: '🟢 Green', value: '#22c55e' },
+  { label: '🟣 Purple', value: '#a855f7' },
+  { label: '🟠 Orange', value: '#f97316' },
+  { label: '🩵 Cyan', value: '#06b6d4' },
+  { label: '🔴 Red', value: '#ef4444' },
+  { label: '$(edit) Custom hex color...', value: 'custom' },
+];
+
 export function activate(context: vscode.ExtensionContext): void {
-  console.log('dbt Semantic Designer is now active');
+  console.log('ERD Studio is now active');
 
   const workspaceRoot = findDbtProjectRoot();
   if (!workspaceRoot) {
     void vscode.window.showWarningMessage(
-      'dbt Semantic Designer: No dbt project found. ' +
+      'ERD Studio: No dbt project found. ' +
         'Open a folder containing dbt_project.yml to activate.',
     );
     return;
   }
 
-  console.log(`dbt Semantic Designer: Found dbt project at ${workspaceRoot}`);
+  console.log(`ERD Studio: Found dbt project at ${workspaceRoot}`);
 
-  // Read configuration for semantic directory path
   const config = vscode.workspace.getConfiguration('dbtSemantic');
-  const semanticDir = config.get<string>('semanticDir', 'models/semantic');
+  const semanticDir = config.get<string>('semanticDir', 'erd-studio');
 
-  // LayerService must be instantiated first as other services depend on it
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
+  const logicalModelService = new LogicalModelService(workspaceRoot, semanticDir);
+  domainService.setLogicalModelService(logicalModelService);
   const manifestService = new ManifestService();
-  const reconciliationService = new ReconciliationService();
+  const ymlParserService = new YmlParserService();
   const templateService = new TemplateService();
-  const autoReconciliationService = new AutoReconciliationService();
-  const schemaTagService = new SchemaTagService(manifestService);
+  const schemaTagService = new SchemaTagService(domainService, workspaceRoot, semanticDir);
+
+  // Check for v4 → v5 migration (non-blocking)
+  const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService);
+  if (migrationService.needsMigration()) {
+    void vscode.window.showInformationMessage(
+      'ERD Studio has a new model storage format that enables cross-domain model sharing. Migrate domain files now?',
+      'Migrate Now',
+      'Later',
+    ).then((choice) => {
+      if (choice === 'Migrate Now') {
+        const result = migrationService.migrate();
+        const details: string[] = [];
+        if (result.domainsConverted > 0) details.push(`${result.domainsConverted} domain(s) converted`);
+        if (result.modelsCreated > 0) details.push(`${result.modelsCreated} model file(s) created in logical-models/`);
+        if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved (richest version kept)`);
+        vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
+      }
+    });
+  }
   const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
+  const modelLibraryProvider = new ModelLibraryTreeProvider(logicalModelService, domainService, workspaceRoot, semanticDir);
   const editorProvider = new SemanticEditorProvider(
     context,
     domainService,
     manifestService,
-    reconciliationService,
+    ymlParserService,
     templateService,
-    autoReconciliationService,
     layerService,
-    schemaTagService,
     workspaceRoot,
+    schemaTagService,
+    logicalModelService,
   );
-  const decorationProvider = new SemanticFileDecorationProvider();
+  const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
 
+  // Set context key so view/title menus only show when semantic dir exists
+  const fullSemanticDirPath = path.join(workspaceRoot, semanticDir);
+  void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
+  void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasLogicalModelsDir', logicalModelService.dirExists());
+
   // -------------------------------------------------------------------------
-  // File watchers for auto-refresh (F303)
+  // File watchers
   // -------------------------------------------------------------------------
   const fileWatcherService = new FileWatcherService(workspaceRoot);
 
-  // Manifest changed (dbt compile ran) → auto-reconcile open domains (F304)
+  // Manifest changed → refresh open editors
+  let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
+  let manifestChangeGen = 0;
   const manifestChangedSubscription = fileWatcherService.onManifestChanged(
     async () => {
-      // Step 1: Invalidate and reload manifest
+      const gen = ++manifestChangeGen;
       manifestService.invalidate();
-      const manifest = await manifestService.loadManifest(workspaceRoot);
+      await editorProvider.refreshAllOpenDomains();
 
-      // Step 2: Check autoReconcile setting
-      const config = vscode.workspace.getConfiguration('dbtSemantic');
-      const autoReconcile = config.get<boolean>('autoReconcile', true);
+      // Superseded by a newer file-change event during the await
+      if (gen !== manifestChangeGen) { return; }
 
-      if (!autoReconcile) {
-        // Auto-reconciliation disabled - just notify
-        void vscode.window.showInformationMessage(
-          'dbt manifest updated. Auto-reconciliation is disabled.',
-        );
-        return;
-      }
-
-      // Step 3: Reconcile all open domain editors
-      const allNewlyBuilt =
-        await editorProvider.reconcileAllOpenDomains(manifest);
-
-      // Step 4: Show notification
-      if (allNewlyBuilt.length > 0) {
-        const modelList = allNewlyBuilt.join(', ');
-        void vscode.window.showInformationMessage(
-          `${allNewlyBuilt.length} design model(s) have been built: ${modelList}`,
-        );
+      if (manifestService.isStale) {
+        // Manifest likely mid-write by dbt — deduplicate and retry once after 2s
+        clearTimeout(manifestRetryTimeout);
+        manifestRetryTimeout = setTimeout(async () => {
+          const retryGen = manifestChangeGen;
+          try {
+            manifestService.invalidate();
+            await editorProvider.refreshAllOpenDomains();
+            // Superseded by a newer event during retry
+            if (retryGen !== manifestChangeGen) { return; }
+            if (!manifestService.isStale) {
+              void vscode.window.showInformationMessage(
+                'dbt manifest updated. Graphs refreshed with latest model data.',
+              );
+            } else {
+              void vscode.window.showWarningMessage(
+                'dbt manifest still updating — graph may show stale data. Run dbt compile to refresh.',
+              );
+            }
+          } catch (err) {
+            console.error('[ERD Studio] Manifest retry failed:', err);
+          }
+        }, 2000);
       } else {
         void vscode.window.showInformationMessage(
-          'dbt manifest updated. Graphs will refresh with latest model data.',
+          'dbt manifest updated. Graphs refreshed with latest model data.',
         );
       }
     },
   );
 
-  // Semantic file changed externally → refresh tree view
-  // (Open editors handle their own refresh via onDidChangeTextDocument)
+  // Semantic file changed externally → refresh tree view + model library
   const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(() => {
     treeProvider.refresh();
+    modelLibraryProvider.refresh();
   });
 
-  // dbt_project.yml changed → suggest window reload
+  // Semantic file deleted → refresh tree + model library and clean up orphaned domain tags
+  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(async () => {
+    treeProvider.refresh();
+    modelLibraryProvider.refresh();
+    const result = await schemaTagService.reconcileAll();
+    if (result.removed > 0) {
+      void vscode.window.showInformationMessage(
+        `Domain file deleted — removed ${result.removed} orphaned tag(s) from YAML files.`,
+      );
+    }
+  });
+
+  // Logical model file changed → refresh domains referencing that model + model library
+  const logicalModelChangedSubscription = fileWatcherService.onLogicalModelChanged(
+    async ({ modelName }) => {
+      await editorProvider.refreshDomainsReferencingModel(modelName);
+      treeProvider.refresh();
+      modelLibraryProvider.refresh();
+      // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
+      void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasLogicalModelsDir', logicalModelService.dirExists());
+    },
+  );
+
+  // dbt schema .yml changed → refresh physical stage
+  const dbtYmlChangedSubscription = fileWatcherService.onDbtYmlChanged(
+    async () => {
+      ymlParserService.invalidate();
+      await editorProvider.refreshAllOpenDomains();
+    },
+  );
+
+  // dbt_project.yml path config changed → suggest window reload
   const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
     void vscode.window.showWarningMessage(
-      'dbt_project.yml has changed. Some changes require a window reload to take effect.',
+      'dbt_project.yml path configuration changed (target-path / model-paths). A window reload is needed to pick up the new paths.',
       'Reload Window',
     ).then(action => {
       if (action === 'Reload Window') {
@@ -245,58 +307,90 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   context.subscriptions.push(
+    { dispose() { clearTimeout(manifestRetryTimeout); } },
     treeProvider,
     decorationProvider,
     layerDecorationProvider,
     fileWatcherService,
     manifestChangedSubscription,
     semanticChangedSubscription,
+    semanticDeletedSubscription,
+    logicalModelChangedSubscription,
+    dbtYmlChangedSubscription,
     projectChangedSubscription,
-    vscode.window.createTreeView('dbtSemantic.domainTree', {
-      treeDataProvider: treeProvider,
-      dragAndDropController: treeProvider,
-      canSelectMany: false,
-    }),
+    (() => {
+      const treeView = vscode.window.createTreeView('dbtSemantic.domainTree', {
+        treeDataProvider: treeProvider,
+        dragAndDropController: treeProvider,
+        canSelectMany: false,
+      });
+      return treeView;
+    })(),
     vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
     vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.window.registerFileDecorationProvider(layerDecorationProvider),
-    vscode.commands.registerCommand('dbtSemantic.openDomain', (filePath: string) => {
-      vscode.commands.executeCommand(
+    modelLibraryProvider,
+    (() => {
+      return vscode.window.createTreeView('dbtSemantic.modelLibrary', {
+        treeDataProvider: modelLibraryProvider,
+        canSelectMany: false,
+      });
+    })(),
+    vscode.commands.registerCommand('dbtSemantic.deleteLogicalModel', async (node: ModelLibraryNode | undefined) => {
+      if (!node || node.type !== 'model') {
+        void vscode.window.showErrorMessage('Delete Model: No model selected. Right-click a model in the Model Library.');
+        return;
+      }
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete model "${node.name}"? This removes the YAML file — domain references are not cleaned up.`,
+        { modal: true },
+        'Delete',
+      );
+      if (confirm === 'Delete') {
+        logicalModelService.deleteModel(node.name);
+        modelLibraryProvider.refresh();
+      }
+    }),
+    vscode.commands.registerCommand('dbtSemantic.revealLogicalModel', (node: ModelLibraryNode | undefined) => {
+      if (!node || node.type !== 'model') {
+        void vscode.window.showErrorMessage('Reveal in Explorer: No model selected. Right-click a model in the Model Library.');
+        return;
+      }
+      void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(node.filePath));
+    }),
+    vscode.commands.registerCommand('dbtSemantic.openDomain', async (filePath: string, stage?: Stage) => {
+      const fileUri = vscode.Uri.file(filePath);
+      await vscode.commands.executeCommand(
         'vscode.openWith',
-        vscode.Uri.file(filePath),
+        fileUri,
         'dbtSemantic.domainEditor',
       );
+      if (stage === 'physical') {
+        editorProvider.switchStageForUri(fileUri, 'physical');
+      }
     }),
     vscode.commands.registerCommand(
       'dbtSemantic.createDomain',
       async (layerArg?: Layer) => {
-        // Step 1: Determine layer (skip QuickPick if passed from tree view)
+        // Step 1: Determine layer
         let layer: Layer | undefined = layerArg;
         if (!layer) {
-          // Get creatable layers from LayerService
           const creatableLayers = layerService.getCreatableLayers();
           if (creatableLayers.length === 0) {
-            void vscode.window.showErrorMessage(
-              'No layers configured for domain creation. Add layers first.',
-            );
+            void vscode.window.showErrorMessage('No layers configured for domain creation. Add layers first.');
             return;
           }
-          const layerItems = creatableLayers.map(l => ({
-            label: l.label,
-            value: l.id,
-          }));
+          const layerItems = creatableLayers.map(l => ({ label: l.label, value: l.id }));
           const layerChoice = await vscode.window.showQuickPick(layerItems, {
             placeHolder: 'Select layer for the new semantic domain',
             ignoreFocusOut: true,
           });
-          if (!layerChoice) {
-            return; // User cancelled
-          }
+          if (!layerChoice) { return; }
           layer = layerChoice.value;
         }
 
-        // Step 2: Get domain name (slug) with validation
-        const existingDomains = domainService.listDomains(workspaceRoot);
+        // Step 2: Get domain name
+        const existingDomains = domainService.listDomains(workspaceRoot, semanticDir);
         const domainSlug = await vscode.window.showInputBox({
           prompt: 'Enter domain name (slug format)',
           placeHolder: 'e.g. customer-360, sales-analytics, work-lots',
@@ -304,107 +398,81 @@ export function activate(context: vscode.ExtensionContext): void {
           validateInput: (value: string) =>
             validateDomainSlug(value, layer, existingDomains),
         });
-        if (!domainSlug) {
-          return; // User cancelled
-        }
+        if (!domainSlug) { return; }
         const slug = domainSlug.trim();
 
-        // Step 3: Get description (optional)
+        // Step 3: Get description
         const description = await vscode.window.showInputBox({
           prompt: 'Enter domain description (optional)',
           placeHolder: 'e.g. Customer 360 view with orders and interactions',
           ignoreFocusOut: true,
         });
-        if (description === undefined) {
-          return; // User cancelled (empty string is valid)
-        }
+        if (description === undefined) { return; }
 
-        // Step 4: Get model folder filter (optional)
-        // Load manifest to detect available folders
+        // Step 4: Get model folder filter (try yml source files first, fall back to manifest)
         let modelFolder: string | undefined;
         try {
-          await manifestService.loadManifest(workspaceRoot);
-          const availableFolders = manifestService.getModelFolders();
-
+          await ymlParserService.loadYmlData(workspaceRoot);
+          let availableFolders = ymlParserService.getModelFolders(workspaceRoot);
+          if (availableFolders.length === 0) {
+            await manifestService.loadManifest(workspaceRoot);
+            availableFolders = manifestService.getModelFolders();
+          }
           if (availableFolders.length > 0) {
             const folderItems: Array<{ label: string; value: string | undefined }> = [
               { label: '$(folder) Any folder (no filter)', value: undefined },
-              ...availableFolders.map((folder) => ({
-                label: `$(folder) ${folder}`,
-                value: folder,
-              })),
+              ...availableFolders.map((folder) => ({ label: `$(folder) ${folder}`, value: folder })),
             ];
-
             const folderChoice = await vscode.window.showQuickPick(folderItems, {
               placeHolder: 'Filter models by folder (optional)',
               ignoreFocusOut: true,
             });
-
-            if (folderChoice === undefined) {
-              return; // User cancelled
-            }
+            if (folderChoice === undefined) { return; }
             modelFolder = folderChoice.value;
           }
         } catch {
-          // If manifest loading fails, skip folder picker (graceful degradation)
           console.warn('[createDomain] Failed to load manifest for folder detection, skipping folder picker');
         }
 
-        // Step 5: Create directory and file (using configured semanticDir)
+        // Step 5: Create unified v3 domain file
         const layerDir = path.join(workspaceRoot, semanticDir, layer);
         const filePath = path.join(layerDir, `${slug}.json`);
 
-        // Create directory if needed
         try {
           if (!fs.existsSync(layerDir)) {
             fs.mkdirSync(layerDir, { recursive: true });
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(
-            `Failed to create directory: ${msg}`,
-          );
+          void vscode.window.showErrorMessage(`Failed to create directory: ${msg}`);
           return;
         }
 
-        // Create domain JSON with initial schema
-        const domainData: Record<string, unknown> = {
+        const emptyStage: StageData = { models: [], relationships: [] };
+        const domainData: UnifiedDomain = {
           schemaVersion: CURRENT_SCHEMA_VERSION,
           domain: slug,
           layer,
           description: description.trim(),
           ...(modelFolder ? { modelFolder } : {}),
-          models: [],
-          relationships: [],
+          logical: { ...emptyStage },
           viewConfig: {},
         };
 
-        // Write file atomically (flag 'wx' fails if file exists, preventing race conditions)
         try {
-          fs.writeFileSync(
-            filePath,
-            JSON.stringify(domainData, null, 2) + '\n',
-            { encoding: 'utf-8', flag: 'wx' },
-          );
+          fs.writeFileSync(filePath, JSON.stringify(domainData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
         } catch (err) {
-          // Handle file-already-exists case (EEXIST error)
           if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
-            void vscode.window.showErrorMessage(
-              `Domain "${slug}" already exists in ${layer} layer`,
-            );
+            void vscode.window.showErrorMessage(`Domain "${slug}" already exists in the ${layer} layer`);
             return;
           }
           const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(
-            `Failed to create domain file: ${msg}`,
-          );
+          void vscode.window.showErrorMessage(`Failed to create domain file: ${msg}`);
           return;
         }
 
-        // Step 6: Refresh tree view
+        // Step 6: Refresh tree and auto-open domain
         treeProvider.refresh();
-
-        // Step 7: Auto-open in custom editor
         await vscode.commands.executeCommand(
           'vscode.openWith',
           vscode.Uri.file(filePath),
@@ -415,11 +483,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'dbtSemantic.deleteDomain',
       async (element?: TreeElement) => {
-        // Validate we have a domain node (from context menu)
         if (!element || element.type !== 'domain') {
-          void vscode.window.showErrorMessage(
-            'Delete Domain: No domain selected. Right-click a domain in the tree view.',
-          );
+          void vscode.window.showErrorMessage('Delete Domain: No domain selected. Right-click a domain in the tree view.');
           return;
         }
 
@@ -427,49 +492,38 @@ export function activate(context: vscode.ExtensionContext): void {
         const filePath = element.summary.filePath;
         const fileUri = vscode.Uri.file(filePath);
 
-        // Step 1: Check for open editors with unsaved changes
         const shouldProceed = await handleUnsavedChanges(fileUri, domainName, 'deleting');
-        if (!shouldProceed) {
-          return;
-        }
+        if (!shouldProceed) { return; }
 
-        // Step 2: Show confirmation dialog
         const confirm = await vscode.window.showWarningMessage(
           `Are you sure you want to delete domain "${domainName}"?`,
           { modal: true },
           'Delete',
         );
-        if (confirm !== 'Delete') {
-          return;
-        }
+        if (confirm !== 'Delete') { return; }
 
-        // Step 3: Close any open editors for this file
+        // Close any open editors
         const matchingTabs = findMatchingTabs(fileUri);
         if (matchingTabs.length > 0) {
-          await vscode.window.tabGroups.close(matchingTabs, /* preserveFocus */ true);
+          await vscode.window.tabGroups.close(matchingTabs, true);
         }
 
-        // Step 4: Delete the file
+        // Delete the unified domain file
         try {
           await vscode.workspace.fs.delete(fileUri);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to delete domain: ${msg}`);
-          return;
         }
 
-        // Step 5: Refresh the tree view
         treeProvider.refresh();
       },
     ),
     vscode.commands.registerCommand(
       'dbtSemantic.renameDomain',
       async (element?: TreeElement) => {
-        // Validate we have a domain node (from context menu)
         if (!element || element.type !== 'domain') {
-          void vscode.window.showErrorMessage(
-            'Rename Domain: No domain selected. Right-click a domain in the tree view.',
-          );
+          void vscode.window.showErrorMessage('Rename Domain: No domain selected. Right-click a domain in the tree view.');
           return;
         }
 
@@ -478,14 +532,10 @@ export function activate(context: vscode.ExtensionContext): void {
         const oldFileUri = vscode.Uri.file(oldFilePath);
         const layer = element.summary.layer;
 
-        // Step 1: Check for open editors with unsaved changes
         const shouldProceed = await handleUnsavedChanges(oldFileUri, oldDomainName, 'renaming');
-        if (!shouldProceed) {
-          return;
-        }
+        if (!shouldProceed) { return; }
 
-        // Step 2: Get new domain name with validation
-        const existingDomains = domainService.listDomains(workspaceRoot);
+        const existingDomains = domainService.listDomains(workspaceRoot, semanticDir);
         const newDomainSlug = await vscode.window.showInputBox({
           prompt: 'Enter new domain name',
           value: oldDomainName,
@@ -493,78 +543,41 @@ export function activate(context: vscode.ExtensionContext): void {
           validateInput: (value: string) =>
             validateDomainSlug(value, layer, existingDomains, oldDomainName),
         });
-
-        if (!newDomainSlug) {
-          return; // User cancelled
-        }
+        if (!newDomainSlug) { return; }
         const newSlug = newDomainSlug.trim();
+        if (newSlug === oldDomainName) { return; }
 
-        // Defensive check for unchanged name
-        if (newSlug === oldDomainName) {
-          return;
-        }
-
-        // Step 3: Read current domain JSON
-        let domainData: SemanticDomain;
+        // Read and update domain name in the unified file
+        let domainData: UnifiedDomain;
         try {
           domainData = domainService.getDomain(oldFilePath);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(
-            `Failed to read domain file: ${msg}`,
-          );
+          void vscode.window.showErrorMessage(`Failed to read domain file: ${msg}`);
           return;
         }
-
-        // Update domain field
         domainData.domain = newSlug;
 
-        // Step 4: Create new file path
-        const layerDir = path.dirname(oldFilePath);
-        const newFilePath = path.join(layerDir, `${newSlug}.json`);
+        // Close old editor tabs before applying the edit (file will be deleted)
+        const oldTabs = findMatchingTabs(oldFileUri);
+        if (oldTabs.length > 0) { await vscode.window.tabGroups.close(oldTabs, true); }
+
+        const newFilePath = path.join(workspaceRoot, semanticDir, layer, `${newSlug}.json`);
         const newFileUri = vscode.Uri.file(newFilePath);
 
-        // Step 5: Perform atomic rename with WorkspaceEdit
         const edit = new vscode.WorkspaceEdit();
+        edit.createFile(newFileUri, { overwrite: false, ignoreIfExists: false });
+        edit.insert(newFileUri, new vscode.Position(0, 0), JSON.stringify(domainData, null, 2) + '\n');
+        edit.deleteFile(oldFileUri, { ignoreIfNotExists: false });
 
-        // Create new file with updated content
-        edit.createFile(newFileUri, {
-          overwrite: false,
-          ignoreIfExists: false,
-        });
-        edit.insert(
-          newFileUri,
-          new vscode.Position(0, 0),
-          JSON.stringify(domainData, null, 2) + '\n',
-        );
-
-        // Delete old file
-        edit.deleteFile(oldFileUri, {
-          ignoreIfNotExists: false,
-        });
-
-        // Apply edit
         const success = await vscode.workspace.applyEdit(edit);
         if (!success) {
-          void vscode.window.showErrorMessage(
-            `Failed to rename domain "${oldDomainName}" to "${newSlug}"`,
-          );
+          void vscode.window.showErrorMessage(`Failed to rename domain "${oldDomainName}" to "${newSlug}"`);
           return;
         }
 
-        // Step 6: Close old editor tabs
-        const matchingTabs = findMatchingTabs(oldFileUri);
-        if (matchingTabs.length > 0) {
-          await vscode.window.tabGroups.close(matchingTabs, /* preserveFocus */ true);
-        }
-
-        // Step 7: Auto-open renamed domain in custom editor
-        // (Tree view refresh handled by file watcher)
-        await vscode.commands.executeCommand(
-          'vscode.openWith',
-          newFileUri,
-          'dbtSemantic.domainEditor',
-        );
+        // Auto-open renamed domain
+        await vscode.commands.executeCommand('vscode.openWith', newFileUri, 'dbtSemantic.domainEditor');
       },
     ),
     vscode.commands.registerCommand('dbtSemantic.refreshManifest', async () => {
@@ -575,51 +588,79 @@ export function activate(context: vscode.ExtensionContext): void {
           cancellable: false,
         },
         async () => {
-          // Step 1: Invalidate and reload manifest
           manifestService.invalidate();
-          const manifest = await manifestService.loadManifest(workspaceRoot);
-
-          // Step 2: Check autoReconcile setting
-          const config = vscode.workspace.getConfiguration('dbtSemantic');
-          const autoReconcile = config.get<boolean>('autoReconcile', true);
-
-          if (!autoReconcile) {
-            // Auto-reconciliation disabled - just refresh editors without transitioning
-            await editorProvider.refreshAllOpenDomains();
-            void vscode.window.showInformationMessage(
-              'Manifest refreshed. Auto-reconciliation is disabled.',
+          ymlParserService.invalidate();
+          await manifestService.loadManifest(workspaceRoot);
+          await ymlParserService.loadYmlData(workspaceRoot);
+          await editorProvider.refreshAllOpenDomains();
+          void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest model data.');
+        },
+      );
+    }),
+    // Sync domain tags to dbt schema YAML files
+    vscode.commands.registerCommand('dbtSemantic.syncDomainTags', async () => {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Syncing domain tags to dbt schema files...',
+          cancellable: false,
+        },
+        async () => {
+          const result = await schemaTagService.reconcileAll();
+          const parts: string[] = [];
+          if (result.added > 0) { parts.push(`${result.added} added`); }
+          if (result.removed > 0) { parts.push(`${result.removed} removed`); }
+          if (result.skipped > 0) { parts.push(`${result.skipped} skipped`); }
+          const summary = parts.length > 0 ? parts.join(', ') : 'all tags up to date';
+          if (result.errors.length > 0) {
+            void vscode.window.showWarningMessage(
+              `Domain tags synced (${summary}). ${result.errors.length} error(s) — see Output for details.`,
             );
-            return;
-          }
-
-          // Step 3: Reconcile all open domain editors
-          const allNewlyBuilt =
-            await editorProvider.reconcileAllOpenDomains(manifest);
-
-          // Step 4: Show notification
-          if (allNewlyBuilt.length > 0) {
-            const modelList = allNewlyBuilt.join(', ');
-            void vscode.window.showInformationMessage(
-              `Manifest refreshed. ${allNewlyBuilt.length} design model(s) have been built: ${modelList}`,
-            );
+            for (const err of result.errors) {
+              console.error(`[SchemaTagService] ${err}`);
+            }
           } else {
-            void vscode.window.showInformationMessage(
-              'Manifest refreshed. Graphs updated with latest model data.',
-            );
+            void vscode.window.showInformationMessage(`Domain tags synced: ${summary}.`);
           }
         },
       );
     }),
-    // F408: Set up semantic directory for new projects (welcome experience)
+    // Migrate v4 domains to v5 central model store
+    vscode.commands.registerCommand('dbtSemantic.migrateToV5', async () => {
+      if (!migrationService.needsMigration()) {
+        void vscode.window.showInformationMessage('All domain files are already using the v5 central model store format.');
+        return;
+      }
+
+      const v4Count = migrationService.findV4Domains().length;
+      const confirm = await vscode.window.showWarningMessage(
+        `Found ${v4Count} domain file(s) using the legacy inline model format. ` +
+        'Migration will extract models to erd-studio/logical-models/ and convert domain files to use name references. ' +
+        'This cannot be undone automatically.',
+        'Migrate Now',
+        'Cancel',
+      );
+
+      if (confirm !== 'Migrate Now') return;
+
+      const result = migrationService.migrate();
+      const details: string[] = [];
+      if (result.domainsConverted > 0) details.push(`${result.domainsConverted} domain(s) converted`);
+      if (result.modelsCreated > 0) details.push(`${result.modelsCreated} model file(s) created in logical-models/`);
+      if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved`);
+      void vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
+
+      treeProvider.refresh();
+      await editorProvider.refreshAllOpenDomains();
+    }),
+    // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(
       'dbtSemantic.setupSemanticDirectory',
       async () => {
-        // Step 1: Create directory structure using default layers from LayerService
         const fullSemanticDir = path.join(workspaceRoot, semanticDir);
         const defaultLayers = layerService.getAllLayers();
 
         try {
-          // Create semantic directory if needed
           if (!fs.existsSync(fullSemanticDir)) {
             fs.mkdirSync(fullSemanticDir, { recursive: true });
           }
@@ -632,96 +673,51 @@ export function activate(context: vscode.ExtensionContext): void {
             }
           }
 
-          // Save default layers.json configuration
+          // Create logical-models directory
+          const logicalModelsDir = path.join(fullSemanticDir, 'logical-models');
+          if (!fs.existsSync(logicalModelsDir)) {
+            fs.mkdirSync(logicalModelsDir, { recursive: true });
+          }
+
           await layerService.saveConfig(defaultLayers);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          void vscode.window.showErrorMessage(
-            `Failed to create semantic directory structure: ${msg}`,
-          );
+          void vscode.window.showErrorMessage(`Failed to create semantic directory structure: ${msg}`);
           return;
         }
 
-        // Step 2: Refresh tree view (welcome disappears, layer folders appear)
+        // Update context key so view/title menus appear
+        void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasSemanticDir', true);
         treeProvider.refresh();
-
-        // Step 3: Give VS Code time to re-render the tree before showing the dialog
         await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Step 4: Show success message
-        void vscode.window.showInformationMessage(
-          'Semantic domains directory created! Now create your first domain.',
-        );
-
-        // Step 5: Trigger the existing createDomain command
-        // (layer picker will appear, user selects silver or gold)
+        void vscode.window.showInformationMessage('ERD Studio directory created! Now create your first domain.');
         await vscode.commands.executeCommand('dbtSemantic.createDomain');
       },
     ),
     // -------------------------------------------------------------------------
-    // Layer Management Commands
+    // Layer Management Commands (unchanged)
     // -------------------------------------------------------------------------
     vscode.commands.registerCommand(
       'dbtSemantic.addLayer',
       async () => {
-        // Step 1: Get layer ID
+        // Step 1: Layer ID
         const id = await vscode.window.showInputBox({
-          prompt: 'Layer ID (lowercase, e.g., platinum)',
+          prompt: 'Layer name (lowercase, e.g., platinum)',
           placeHolder: 'e.g., platinum, staging, raw',
           ignoreFocusOut: true,
           validateInput: (value: string) => {
-            if (!value || !value.trim()) {
-              return 'Layer ID is required';
-            }
-            if (!/^[a-z][a-z0-9_-]*$/.test(value.trim())) {
-              return 'Must start with lowercase letter, contain only lowercase letters, numbers, hyphens, underscores';
-            }
-            if (layerService.hasLayer(value.trim())) {
-              return `Layer "${value.trim()}" already exists`;
-            }
+            if (!value || !value.trim()) { return 'Layer name is required'; }
+            if (!/^[a-z][a-z0-9_-]*$/.test(value.trim())) { return 'Must start with lowercase letter, contain only lowercase letters, numbers, hyphens, underscores'; }
+            if (layerService.hasLayer(value.trim())) { return `Layer "${value.trim()}" already exists`; }
             return undefined;
           },
         });
         if (!id) return;
         const layerId = id.trim();
 
-        // Step 2: Get label
-        const label = await vscode.window.showInputBox({
-          prompt: 'Layer display name',
-          value: layerId.charAt(0).toUpperCase() + layerId.slice(1),
-          ignoreFocusOut: true,
-        });
-        if (label === undefined) return;
-
-        // Step 3: Get abbreviation
-        const abbreviation = await vscode.window.showInputBox({
-          prompt: 'Abbreviation for badges (3 characters)',
-          value: layerId.slice(0, 3).toUpperCase(),
-          ignoreFocusOut: true,
-          validateInput: (value: string) => {
-            if (!value || value.trim().length === 0) {
-              return 'Abbreviation is required';
-            }
-            if (value.trim().length > 4) {
-              return 'Abbreviation should be 3-4 characters';
-            }
-            return undefined;
-          },
-        });
-        if (abbreviation === undefined) return;
-
-        // Step 4: Color picker
-        const colorOptions = [
-          { label: '$(circle-filled) Blue', value: '#3b82f6' },
-          { label: '$(circle-filled) Green', value: '#22c55e' },
-          { label: '$(circle-filled) Purple', value: '#a855f7' },
-          { label: '$(circle-filled) Orange', value: '#f97316' },
-          { label: '$(circle-filled) Cyan', value: '#06b6d4' },
-          { label: '$(circle-filled) Pink', value: '#ec4899' },
-          { label: '$(edit) Custom hex color...', value: 'custom' },
-        ];
-        const colorPick = await vscode.window.showQuickPick(colorOptions, {
-          placeHolder: 'Select layer color',
+        // Step 2: Color
+        const colorPick = await vscode.window.showQuickPick(LAYER_COLOR_OPTIONS, {
+          placeHolder: `Select color for "${layerId}" layer`,
           ignoreFocusOut: true,
         });
         if (!colorPick) return;
@@ -733,9 +729,7 @@ export function activate(context: vscode.ExtensionContext): void {
             placeHolder: '#ff5733',
             ignoreFocusOut: true,
             validateInput: (value: string) => {
-              if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
-                return 'Invalid hex color format (e.g., #ff5733)';
-              }
+              if (!/^#[0-9a-fA-F]{6}$/.test(value)) { return 'Invalid hex color format (e.g., #ff5733)'; }
               return undefined;
             },
           });
@@ -743,40 +737,29 @@ export function activate(context: vscode.ExtensionContext): void {
           color = customColor;
         }
 
-        // Step 5: Creatable checkbox
-        const creatablePick = await vscode.window.showQuickPick([
-          { label: 'Yes - allow creating domains in this layer', value: true },
-          { label: 'No - read-only layer (e.g., raw/staging)', value: false },
-        ], {
-          placeHolder: 'Allow creating domains in this layer?',
-          ignoreFocusOut: true,
-        });
-        if (!creatablePick) return;
-        const creatable = creatablePick.value;
+        // Auto-generate label and abbreviation from ID
+        const label = layerId.charAt(0).toUpperCase() + layerId.slice(1);
+        const abbreviation = layerId.slice(0, 3).toUpperCase();
 
-        // Step 6: Add layer
         try {
           await layerService.addLayer({
             id: layerId,
-            label: label.trim() || layerId.charAt(0).toUpperCase() + layerId.slice(1),
-            abbreviation: abbreviation.trim().toUpperCase(),
+            label,
+            abbreviation,
             color,
-            creatable,
+            creatable: true,
           });
 
-          // Create directory
+          // Create layer directory
           const layerDir = path.join(workspaceRoot, semanticDir, layerId);
           if (!fs.existsSync(layerDir)) {
             fs.mkdirSync(layerDir, { recursive: true });
           }
 
-          // Refresh tree and decorations
           treeProvider.refresh();
           layerDecorationProvider.refresh();
-
-          void vscode.window.showInformationMessage(
-            `Layer "${label.trim() || layerId}" added successfully.`,
-          );
+          decorationProvider.refresh();
+          void vscode.window.showInformationMessage(`Layer "${label}" added. Use Edit Layer to customize display name or abbreviation.`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to add layer: ${msg}`);
@@ -786,12 +769,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'dbtSemantic.editLayer',
       async (element?: TreeElement) => {
-        // Get layer ID from context menu or prompt
         let layerId: string | undefined;
         if (element && element.type === 'layer') {
           layerId = element.layer;
         } else {
-          // Show picker
           const layers = layerService.getAllLayers();
           const layerPick = await vscode.window.showQuickPick(
             layers.map(l => ({ label: l.label, value: l.id })),
@@ -807,12 +788,10 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        // Show edit options
         const editOptions = [
           { label: '$(edit) Rename Layer', value: 'rename' },
           { label: '$(symbol-color) Change Color', value: 'color' },
           { label: '$(tag) Change Abbreviation', value: 'abbreviation' },
-          { label: layer.creatable ? '$(lock) Make Non-Creatable' : '$(unlock) Make Creatable', value: 'creatable' },
         ];
         const editChoice = await vscode.window.showQuickPick(editOptions, {
           placeHolder: `Edit layer: ${layer.label}`,
@@ -822,42 +801,19 @@ export function activate(context: vscode.ExtensionContext): void {
         try {
           switch (editChoice.value) {
             case 'rename': {
-              const newLabel = await vscode.window.showInputBox({
-                prompt: 'New layer display name',
-                value: layer.label,
-                ignoreFocusOut: true,
-              });
+              const newLabel = await vscode.window.showInputBox({ prompt: 'New layer display name', value: layer.label, ignoreFocusOut: true });
               if (newLabel === undefined || newLabel.trim() === layer.label) return;
               await layerService.updateLayer(layerId, { label: newLabel.trim() });
               break;
             }
             case 'color': {
-              const colorOptions = [
-                { label: '$(circle-filled) Blue', value: '#3b82f6' },
-                { label: '$(circle-filled) Green', value: '#22c55e' },
-                { label: '$(circle-filled) Purple', value: '#a855f7' },
-                { label: '$(circle-filled) Orange', value: '#f97316' },
-                { label: '$(circle-filled) Cyan', value: '#06b6d4' },
-                { label: '$(circle-filled) Pink', value: '#ec4899' },
-                { label: '$(edit) Custom hex color...', value: 'custom' },
-              ];
-              const colorPick = await vscode.window.showQuickPick(colorOptions, {
-                placeHolder: 'Select new color',
-              });
+              const colorPick = await vscode.window.showQuickPick(LAYER_COLOR_OPTIONS, { placeHolder: 'Select new color' });
               if (!colorPick) return;
-
               let color = colorPick.value;
               if (color === 'custom') {
                 const customColor = await vscode.window.showInputBox({
-                  prompt: 'Enter hex color (e.g., #ff5733)',
-                  value: layer.color,
-                  ignoreFocusOut: true,
-                  validateInput: (value: string) => {
-                    if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
-                      return 'Invalid hex color format';
-                    }
-                    return undefined;
-                  },
+                  prompt: 'Enter hex color (e.g., #ff5733)', value: layer.color, ignoreFocusOut: true,
+                  validateInput: (value: string) => { if (!/^#[0-9a-fA-F]{6}$/.test(value)) { return 'Invalid hex color format'; } return undefined; },
                 });
                 if (!customColor) return;
                 color = customColor;
@@ -867,16 +823,10 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             case 'abbreviation': {
               const newAbbrev = await vscode.window.showInputBox({
-                prompt: 'New abbreviation (3-4 characters)',
-                value: layer.abbreviation,
-                ignoreFocusOut: true,
+                prompt: 'New abbreviation (3-4 characters)', value: layer.abbreviation, ignoreFocusOut: true,
                 validateInput: (value: string) => {
-                  if (!value || value.trim().length === 0) {
-                    return 'Abbreviation is required';
-                  }
-                  if (value.trim().length > 4) {
-                    return 'Abbreviation should be 3-4 characters';
-                  }
+                  if (!value || value.trim().length === 0) { return 'Abbreviation is required'; }
+                  if (value.trim().length > 4) { return 'Abbreviation should be 3-4 characters'; }
                   return undefined;
                 },
               });
@@ -884,14 +834,11 @@ export function activate(context: vscode.ExtensionContext): void {
               await layerService.updateLayer(layerId, { abbreviation: newAbbrev.trim().toUpperCase() });
               break;
             }
-            case 'creatable': {
-              await layerService.updateLayer(layerId, { creatable: !layer.creatable });
-              break;
-            }
           }
 
           treeProvider.refresh();
           layerDecorationProvider.refresh();
+          decorationProvider.refresh();
           void vscode.window.showInformationMessage(`Layer "${layer.label}" updated.`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -902,7 +849,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'dbtSemantic.removeLayer',
       async (element?: TreeElement) => {
-        // Get layer ID from context menu or prompt
         let layerId: string | undefined;
         if (element && element.type === 'layer') {
           layerId = element.layer;
@@ -922,46 +868,35 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        // Check for existing domains
         const domains = domainService.listDomains(workspaceRoot, semanticDir);
         const layerDomains = domains.filter(d => d.layer === layerId);
-
         if (layerDomains.length > 0) {
           void vscode.window.showErrorMessage(
-            `Cannot remove layer "${layer.label}" — it contains ${layerDomains.length} domain(s). ` +
-            `Delete or move domains first.`,
+            `Cannot remove layer "${layer.label}" — it contains ${layerDomains.length} domain(s). Delete or move domains first.`,
           );
           return;
         }
 
-        // Confirm deletion
         const confirm = await vscode.window.showWarningMessage(
-          `Remove layer "${layer.label}"? This will delete the directory.`,
+          `Remove layer "${layer.label}"? This will delete the directories.`,
           { modal: true },
           'Remove',
         );
         if (confirm !== 'Remove') return;
 
         try {
-          // Update config first (safer ordering - if this fails, nothing is lost)
           await layerService.removeLayer(layerId);
 
-          // Then remove directory (if config update succeeded)
+          // Remove layer directory
           const layerDir = path.join(workspaceRoot, semanticDir, layerId);
           if (fs.existsSync(layerDir)) {
-            await vscode.workspace.fs.delete(
-              vscode.Uri.file(layerDir),
-              { recursive: true },
-            );
+            await vscode.workspace.fs.delete(vscode.Uri.file(layerDir), { recursive: true });
           }
 
-          // Refresh tree and decorations
           treeProvider.refresh();
           layerDecorationProvider.refresh();
-
-          void vscode.window.showInformationMessage(
-            `Layer "${layer.label}" removed.`,
-          );
+          decorationProvider.refresh();
+          void vscode.window.showInformationMessage(`Layer "${layer.label}" removed.`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to remove layer: ${msg}`);
@@ -971,26 +906,18 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'dbtSemantic.initializeLayerConfig',
       async () => {
-        // Auto-detect layers from filesystem
         const detected = layerService.detectLayersFromFilesystem();
-
         if (detected.length === 0) {
-          // No existing layers, just save defaults
           const defaultLayers = layerService.getAllLayers();
           await layerService.saveConfig(defaultLayers);
-          void vscode.window.showInformationMessage(
-            'Layer configuration saved with default layers (Silver, Gold).',
-          );
+          void vscode.window.showInformationMessage('Layer configuration saved with default layers (Silver, Gold).');
           return;
         }
 
-        // Show detected layers and ask to save
         const layerNames = detected.map(l => l.label).join(', ');
         const choice = await vscode.window.showInformationMessage(
           `Detected layers: ${layerNames}. Save this configuration?`,
-          'Save',
-          'Customize',
-          'Cancel',
+          'Save', 'Customize', 'Cancel',
         );
 
         if (choice === 'Save') {
@@ -998,22 +925,98 @@ export function activate(context: vscode.ExtensionContext): void {
           layerService.invalidateCache();
           treeProvider.refresh();
           layerDecorationProvider.refresh();
-          void vscode.window.showInformationMessage(
-            `Layer configuration saved to ${semanticDir}/layers.json`,
-          );
+          decorationProvider.refresh();
+          void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
         } else if (choice === 'Customize') {
-          // Save first, then open for editing
           await layerService.saveConfig(detected);
           const uri = vscode.Uri.file(layerService.getConfigPath());
           await vscode.commands.executeCommand('vscode.open', uri);
         }
       },
     ),
+    // -------------------------------------------------------------------------
+    // AI Coding Harness Installation
+    // -------------------------------------------------------------------------
+    vscode.commands.registerCommand(
+      'dbtSemantic.installCodingHarness',
+      async () => {
+        const harnessService = new HarnessService();
+        const existing = harnessService.detectExisting(workspaceRoot);
+        const staleTargets = harnessService.detectStale(workspaceRoot);
+        const staleIds = new Set(staleTargets.map(t => t.id));
+
+        // Build QuickPick items with existing/outdated status
+        const items = HARNESS_TARGETS.map(target => {
+          const exists = existing.get(target.id);
+          const isStale = staleIds.has(target.id);
+          let description = target.description;
+          if (exists && isStale) {
+            description = '$(warning) outdated — update available';
+          } else if (exists) {
+            description = '$(check) installed (v' + HARNESS_VERSION + ')';
+          }
+          return {
+            label: target.label,
+            description,
+            picked: isStale, // Pre-select outdated targets
+            target,
+            exists,
+          };
+        });
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select AI coding harnesses to install ERD Studio schema into',
+          canPickMany: true,
+          ignoreFocusOut: true,
+        });
+
+        if (!selected || selected.length === 0) { return; }
+
+        // Always overwrite — harness files are managed by the extension
+        const results = selected.map(s =>
+          harnessService.install(workspaceRoot, s.target, true),
+        );
+
+        const succeeded = results.filter(r => r.success);
+        const failed = results.filter(r => !r.success);
+
+        if (failed.length > 0) {
+          const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
+          void vscode.window.showErrorMessage(
+            `Harness install: ${succeeded.length} installed, ${failed.length} failed. Errors: ${errors}`,
+          );
+        } else {
+          void vscode.window.showInformationMessage(
+            `AI coding harness: ${succeeded.length} installed.`,
+          );
+        }
+      },
+    ),
   );
 
-  // -------------------------------------------------------------------------
-  // First-run check: prompt to initialize layers.json for existing projects
-  // -------------------------------------------------------------------------
+  // AI coding harness — auto-update stale files, prompt on fresh install
+  {
+    const harnessService = new HarnessService();
+    const existing = harnessService.detectExisting(workspaceRoot);
+    const installedCount = [...existing.values()].filter(Boolean).length;
+    const staleTargets = harnessService.detectStale(workspaceRoot);
+
+    if (staleTargets.length > 0) {
+      // Force-update all stale harness files silently
+      for (const target of staleTargets) {
+        harnessService.install(workspaceRoot, target, true);
+      }
+      const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
+      void vscode.window.showInformationMessage(
+        `ERD Studio: Updated ${staleTargets.length} AI coding harness file(s) to v${HARNESS_VERSION} (${names}).`,
+      );
+    } else if (installedCount === 0) {
+      // No harnesses installed — prompt user to choose
+      void vscode.commands.executeCommand('dbtSemantic.installCodingHarness');
+    }
+  }
+
+  // First-run check
   const fullSemanticDir = path.join(workspaceRoot, semanticDir);
   if (fs.existsSync(fullSemanticDir) && !layerService.configFileExists()) {
     const detected = layerService.detectLayersFromFilesystem();
@@ -1021,11 +1024,15 @@ export function activate(context: vscode.ExtensionContext): void {
       const layerNames = detected.map(l => l.label).join(', ');
       void vscode.window.showInformationMessage(
         `Detected layers: ${layerNames}. Would you like to save layer configuration for customization?`,
-        'Save Config',
-        'Later',
+        'Save Config', 'Later',
       ).then(async (choice) => {
         if (choice === 'Save Config') {
-          await vscode.commands.executeCommand('dbtSemantic.initializeLayerConfig');
+          await layerService.saveConfig(detected);
+          layerService.invalidateCache();
+          treeProvider.refresh();
+          layerDecorationProvider.refresh();
+          decorationProvider.refresh();
+          void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
         }
       });
     }

@@ -1,3 +1,5 @@
+# Source and build config (not needed at runtime)
+.github/**
 .vscode/**
 .vscode-test/**
 src/**
@@ -12,15 +14,32 @@ tsconfig.json
 tsconfig.webview.json
 esbuild.js
 vitest.config.ts
+
+# Documentation and planning (not needed at runtime)
+docs/**
 plan.md
 features.json
-.claude/**
-**/*.map
-**/*.ts
-!dist/**
-.env
-dev-preview.html
 CLAUDE.md
+
+# Other projects accidentally in repo
+data engineer plugin/**
+forge-app/**
+
+# Dev/local files
+.claude/**
+.env*
+dev-preview.html
+.worktrees/**
+
+# dbt files (for testing only)
 models/**
 target/**
 dbt_project.yml
+
+# Source maps and TypeScript (keep bundle small)
+**/*.map
+**/*.ts
+
+# Re-include dist (but maps already excluded above)
+!dist/*.js
+!dist/*.css

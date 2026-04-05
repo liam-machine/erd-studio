@@ -16,6 +16,8 @@ const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const FIXTURE_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project');
 const MALFORMED_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project-malformed');
 const SPARSE_PROJECT_PATH = path.resolve(FIXTURES_DIR, 'dbt-project-sparse');
+const EMPTY_MANIFEST_PATH = path.resolve(FIXTURES_DIR, 'dbt-project-empty-manifest');
+const ZERO_BYTE_PATH = path.resolve(FIXTURES_DIR, 'dbt-project-zero-byte');
 
 describe('ManifestService', () => {
   let service: ManifestService;
@@ -31,7 +33,7 @@ describe('ManifestService', () => {
       expect(data).toBeDefined();
       expect(data.models).toBeInstanceOf(Map);
       // Should have 3 models (dim_work_lot, dim_project, fct_work_events)
-      expect(data.models.size).toBe(3);
+      expect(data.models.size).toBe(4);
     });
 
     it('extracts only model nodes, skipping tests, seeds, and other node types', async () => {
@@ -150,10 +152,11 @@ describe('ManifestService', () => {
       await service.loadManifest(FIXTURE_PROJECT_PATH);
       const names = service.getModelNames();
 
-      expect(names).toHaveLength(3);
+      expect(names).toHaveLength(4);
       expect(names).toContain('dim_work_lot');
       expect(names).toContain('dim_project');
       expect(names).toContain('fct_work_events');
+      expect(names).toContain('stg_raw_payments');
     });
 
     it('returns empty array when manifest has not been loaded', () => {
@@ -188,7 +191,7 @@ describe('ManifestService', () => {
       // After invalidation, should be a new object (re-parsed)
       expect(data1).not.toBe(data2);
       // But should contain the same data
-      expect(data2.models.size).toBe(3);
+      expect(data2.models.size).toBe(4);
     });
 
     it('clears cached model lookups', async () => {
@@ -205,10 +208,47 @@ describe('ManifestService', () => {
   });
 
   describe('error handling', () => {
-    it('rejects when manifest JSON is malformed', async () => {
-      await expect(
-        service.loadManifest(MALFORMED_PROJECT_PATH)
-      ).rejects.toThrow('Failed to parse manifest.json');
+    it('returns empty ManifestData when manifest JSON is malformed (stale-while-revalidate)', async () => {
+      // Malformed manifest should NOT reject — it returns empty/stale data
+      // so the graph stays visible during transient parse failures (e.g. mid-write)
+      const data = await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(data.models.size).toBe(0);
+      expect(data.relationshipTests).toEqual([]);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('returns lastKnownGood data when re-parse fails after a successful load', async () => {
+      // First load succeeds — populates lastKnownGood
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+
+      // Invalidate so it will re-parse
+      service.invalidate();
+
+      // Re-parse against a malformed manifest — should return stale good data
+      const fallbackData = await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(fallbackData.models.size).toBe(4);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('resets isStale to false after a successful re-parse following a failure', async () => {
+      // Trigger a failure first
+      await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(service.isStale).toBe(true);
+
+      service.invalidate();
+
+      // Successful parse should clear stale flag
+      await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(service.isStale).toBe(false);
+    });
+
+    it('resets isStale to false on invalidate', async () => {
+      await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(service.isStale).toBe(true);
+
+      service.invalidate();
+      expect(service.isStale).toBe(false);
     });
 
     it('handles models with missing columns field gracefully', async () => {
@@ -314,6 +354,109 @@ describe('ManifestService', () => {
       service.invalidate();
 
       expect(service.getRelationshipTests()).toEqual([]);
+    });
+  });
+
+  describe('unique test extraction', () => {
+    it('extracts unique tests from manifest', async () => {
+      const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
+
+      expect(data.uniqueColumns).toBeInstanceOf(Map);
+      // dim_work_lot.work_lot_id, dim_project.project_id, fct_work_events.event_id
+      expect(data.uniqueColumns.get('dim_work_lot')?.has('work_lot_id')).toBe(true);
+      expect(data.uniqueColumns.get('dim_project')?.has('project_id')).toBe(true);
+      expect(data.uniqueColumns.get('fct_work_events')?.has('event_id')).toBe(true);
+    });
+
+    it('does not include non-unique columns', async () => {
+      const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
+
+      // project_id on dim_work_lot has a not_null test but not a unique test
+      expect(data.uniqueColumns.get('dim_work_lot')?.has('project_id')).toBeFalsy();
+    });
+
+    it('returns empty maps when no unique tests exist', async () => {
+      const data = await service.loadManifest(SPARSE_PROJECT_PATH);
+
+      expect(data.uniqueColumns.size).toBe(0);
+      expect(data.compositeUniqueGroups.size).toBe(0);
+    });
+  });
+
+  describe('blank-screen defense (truncated manifest)', () => {
+    it('returns lastKnownGood when manifest is 0 bytes after having good data', async () => {
+      // First load succeeds — populates lastKnownGood
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+
+      service.invalidate();
+
+      // 0-byte manifest triggers the stat guard → falls back to lastKnownGood
+      const fallback = await service.loadManifest(ZERO_BYTE_PATH);
+      expect(fallback.models.size).toBe(4);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('returns lastKnownGood when re-parse succeeds with 0 models after having good data', async () => {
+      // First load succeeds
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+
+      service.invalidate();
+
+      // Empty-but-valid manifest triggers the semantic regression guard
+      const fallback = await service.loadManifest(EMPTY_MANIFEST_PATH);
+      expect(fallback.models.size).toBe(4);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('does not flag stale when first load returns 0 models (legitimate empty project)', async () => {
+      // No prior data — 0 models is a valid first load (user hasn't added models yet)
+      const data = await service.loadManifest(EMPTY_MANIFEST_PATH);
+      expect(data.models.size).toBe(0);
+      expect(service.isStale).toBe(false);
+    });
+
+    it('returns empty and marks stale when first load is 0 bytes (no lastKnownGood)', async () => {
+      // 0-byte file with no prior data — parse error path, no fallback available
+      const data = await service.loadManifest(ZERO_BYTE_PATH);
+      expect(data.models.size).toBe(0);
+      expect(service.isStale).toBe(true);
+    });
+
+    it('simulates full manifest-change cycle: load → invalidate → truncated file → fallback preserves data', async () => {
+      // This simulates the real-world sequence when dbt compiles:
+      // 1. Extension starts, loads good manifest
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+      expect(goodData.relationshipTests.length).toBe(2);
+      expect(service.isStale).toBe(false);
+
+      // 2. dbt starts writing → file watcher fires → extension calls invalidate()
+      service.invalidate();
+      expect(service.isStale).toBe(false); // reset by invalidate
+
+      // 3. loadManifest is called again but manifest is 0-bytes (truncated by dbt)
+      const afterTruncation = await service.loadManifest(ZERO_BYTE_PATH);
+      // Should get the SAME good data back, not empty
+      expect(afterTruncation.models.size).toBe(4);
+      expect(afterTruncation.relationshipTests.length).toBe(2);
+      expect(service.isStale).toBe(true);
+      // Verify it's the same object reference (lastKnownGood)
+      expect(afterTruncation).toBe(goodData);
+
+      // 4. Repeat with empty-but-valid JSON ({"nodes":{}}) — second failure mode
+      service.invalidate();
+      const afterEmptyJson = await service.loadManifest(EMPTY_MANIFEST_PATH);
+      expect(afterEmptyJson.models.size).toBe(4);
+      expect(afterEmptyJson).toBe(goodData);
+      expect(service.isStale).toBe(true);
+
+      // 5. dbt finishes writing → retry fires → good manifest again
+      service.invalidate();
+      const recovered = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(recovered.models.size).toBe(4);
+      expect(service.isStale).toBe(false);
     });
   });
 });

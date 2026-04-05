@@ -1,0 +1,20 @@
+{
+  "name": "automation-action-custom-ui",
+  "version": "2.0.20",
+  "main": "index.js",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "lint": "eslint src/**/*"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "eslint-plugin-react-hooks": "^4.6.0"
+  },
+  "dependencies": {
+    "@forge/api": "^7.1.1",
+    "@forge/kvs": "^1.5.0",
+    "@forge/resolver": "^1.7.1",
+    "tslib": "^2.8.1"
+  }
+}

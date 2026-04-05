@@ -1,4 +1,54 @@
-# dbt Semantic Designer — Project Context
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Naming
+
+The extension display name is **ERD Studio** (package name `erd-studio`).
+
+### Directory Structure
+
+ERD domain files live at `{project_root}/erd-studio/{layer}/{domain}.json`. Each file is a unified domain containing the logical stage data. The custom editor activates for files matching:
+- `**/erd-studio/*/*.json`
+
+The base directory is configurable via the `dbtSemantic.semanticDir` setting (default: `erd-studio`).
+
+```
+erd-studio/
+├── layers.json
+├── templates/
+├── silver/
+│   ├── customer-360.json   ← domain file (logical stage)
+│   └── orders.json
+└── gold/
+    └── reporting.json
+```
+
+### Legacy Internal Identifiers
+
+The following internal identifiers still use the legacy `dbtSemantic` prefix and must **not** be renamed (doing so would break existing user settings, keybindings, and stored state):
+
+- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.installCodingHarness`
+- **View IDs**: `dbt-semantic` (activity bar container), `dbtSemantic.domainTree`
+- **Custom editor viewType**: `dbtSemantic.domainEditor`
+- **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`
+- **Color IDs**: `dbtSemantic.layer.bronze`, `dbtSemantic.layer.silver`, `dbtSemantic.layer.gold`, `dbtSemantic.layer.platinum`, `dbtSemantic.layer.custom`
+- **Command category**: `"category": "dbt"` in package.json command contributions
+
+## Build & Test Commands
+
+```bash
+npm run build          # Build both extension + webview bundles (esbuild)
+npm run watch          # Watch mode — rebuilds on change
+npm run compile        # Type-check only (both tsconfigs, no emit)
+npm run test           # Run unit tests (vitest)
+npm run test:watch     # Run tests in watch mode
+npm run package        # Production build (minified, no sourcemaps)
+```
+
+Single test file: `npx vitest run test/unit/domainService.test.ts`
+
+Tests use vitest with `vscode` module aliased to `test/__mocks__/vscode.ts`. Test fixtures live in `test/fixtures/`.
 
 ## Architecture
 
@@ -6,7 +56,138 @@ VS Code extension with dual build targets:
 - **Extension host** (Node.js, CJS) — `src/` directory
 - **Webview** (Browser, IIFE with React) — `webview/` directory
 
-Built with esbuild. Two TypeScript configs: `tsconfig.json` (Node.js) and `tsconfig.webview.json` (DOM).
+Built with esbuild (`esbuild.js`). Two TypeScript configs: `tsconfig.json` (Node.js) and `tsconfig.webview.json` (DOM). The webview tsconfig includes `src/types/**/*` so types are shared.
+
+### Two-Stage Architecture
+
+The extension uses two design stages, each with a distinct purpose:
+
+| Stage | Color | Purpose | Storage |
+|-------|-------|---------|---------|
+| **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | `logical` section in domain file |
+| **Physical** | Green (`#22c55e`) | What exists in dbt — models from logical filtered by manifest; relationships & cardinality derived entirely from manifest test nodes; fully read-only | Derived at runtime, no file on disk |
+
+The logical stage is the editable stage stored in the domain JSON file. Physical is derived at runtime. Stage colors are defined in `webview/lib/stageColors.ts`.
+
+### Data Flow
+
+```
+{layer}/{domain}.json ─→ getDomain() ─→ UnifiedDomain ─→ .logical → DisplayDomain
+                                                                          │
+manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ DisplayDomain
+                                                                          │
+                                               [message] ─→ graphTransformer ─→ React Flow
+```
+
+1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`). Extracts model nodes, relationship test nodes (`relationships`, `relationships_where`, custom), `unique` tests, and `unique_combination_of_columns` tests.
+2. **DomainService** reads unified domain JSON from `erd-studio/{layer}/*.json` → `UnifiedDomain`, then extracts a stage section via `getDomainStage()` → `DisplayDomain`
+3. For physical stage: `DomainService.buildPhysicalDomain()` derives models from logical filtered by manifest. **Relationships are derived entirely from manifest relationship tests** (not copied from logical). Cardinality is inferred from manifest `unique`/`unique_combination_of_columns` tests (no unique test = "many" side). Relationships are scoped to models within the domain to prevent conformed dimensions from pulling in external edges. See `derivePhysicalRelationships()` in `domainService.ts`.
+4. **DiscrepancyService** compares two `DisplayDomain` objects to produce a `DiscrepancyReport`
+5. Extension sends `domainLoaded` / `stageData` message to webview
+6. **graphTransformer** converts `DisplayDomain` → React Flow nodes + edges (with optional discrepancy overlays)
+7. **elkLayout** runs ELK auto-layout in a Web Worker (injected at build time as `__ELK_WORKER_CODE__`)
+
+### Extension Host (`src/`)
+
+| Directory | Purpose |
+|-----------|---------|
+| `providers/` | `SemanticEditorProvider` (custom editor), `DomainTreeProvider` (sidebar tree) |
+| `services/` | Business logic — manifest parsing, domain I/O, discrepancy comparison, layers, templates |
+| `watchers/` | `FileWatcherService` — debounced watchers for manifest, domains, project config |
+| `types/` | Shared type definitions (imported by both host and webview) |
+
+### Webview (`webview/`)
+
+| Directory | Purpose |
+|-----------|---------|
+| `components/` | React components — `Graph/` (ModelNode, FkEdge), `DetailPanel/`, `DiscrepancyPanel/`, `WelcomeModal/`, `Toolbar/` (StageTabs), dialogs |
+| `store/` | Zustand store (`editorStore.ts`) — UI state, selection, dialogs, active stage, discrepancy |
+| `hooks/` | `useMessageBus` (extension comms), `useVsCodeApi`, position/state persistence |
+| `lib/` | Pure functions — `graphTransformer`, `elkLayout`, `stageColors`, `columnSort` |
+| `styles/` | `theme.css` — CSS custom properties mapping VS Code theme vars |
+
+### Message Protocol (`src/types/messages.ts`)
+
+Extension <-> Webview communication uses discriminated unions on `type` field:
+- **Extension -> Webview**: `domainLoaded`, `domainUpdated`, `stageData`, `discrepancyReport`, `error`
+- **Webview -> Extension**: `ready`, `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `editRelationship`, `updateRelationship`, `renameModel`, `removeModel`, `addExistingModel`, `toggleColumnKey`, `updateModelRationale`, `updateModelGrain`, `updateModelRole`, `updateViewConfig`, `updatePositions`, `runAutoLayout`, `switchStage`, `toggleDiscrepancy`, `refreshManifest`, `undo`, `redo`
+
+All mutations go through `WorkspaceEdit` for undo/redo integration. Physical stage silently rejects all mutation messages.
+
+## Key Conventions
+
+- **Schema changes must update harness content AND bump `HARNESS_VERSION`** — the domain JSON schema (model structure, column fields, relationships, viewConfig, naming conventions) is embedded as a string constant in `src/services/harnessService.ts` (`SCHEMA_CONTENT`). When you change the domain file schema (e.g. add/remove/rename fields in `src/types/semantic.ts`, change file layout, update naming conventions), you **must**: (1) update the `SCHEMA_CONTENT` constant, (2) update the format-specific generators if needed (`generateClaudeSkill`, `generateCopilotInstructions`, `generateGeminiStyleguide`, `generateCodexAgents`), and (3) **bump the `HARNESS_VERSION` constant** in the same file. This version is embedded as `<!-- erd-studio-harness: {version} -->` in generated files. On activation, the extension compares installed files' embedded version against the current `HARNESS_VERSION` and prompts users to update if they differ. See "Harness Versioning" section below for details.
+- Shared types live in `src/types/` and are included in both tsconfigs
+- Webview components use BEM CSS class naming
+- All colours use CSS custom properties from `webview/styles/theme.css`
+- React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
+- Extension host writes use `WorkspaceEdit` for undo/redo integration
+- ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
+- Stage switching sends `switchStage` message; extension extracts the target stage section from the same unified file and responds with `stageData`
+- Physical stage is derived at runtime — no files on disk, positions inherited from logical domain. Models come from logical filtered by manifest; **relationships come from manifest test nodes** (not logical), with cardinality derived from `unique`/`unique_combination_of_columns` tests
+- Mutation handlers target `parsed.logical.models` / `.relationships` within the domain file
+
+## Discrepancy System
+
+Cross-stage comparison is handled by `DiscrepancyService.compare(source, target)`:
+
+| Active Stage | Available Comparisons |
+|-------------|----------------------|
+| Physical | Compare to Logical |
+| Logical | Compare to Physical |
+
+Discrepancy statuses for models/columns/relationships: `matched`, `extra`, `missing`, `type-mismatch` (columns), `cardinality-mismatch` (relationships). Ghost nodes appear for missing models.
+
+## Harness Versioning
+
+AI coding harness files (installed via `dbtSemantic.installCodingHarness`) embed a version marker to track staleness:
+
+```
+<!-- erd-studio-harness: 1 -->
+```
+
+**Key components in `src/services/harnessService.ts`:**
+
+| Export | Purpose |
+|--------|---------|
+| `HARNESS_VERSION` | Current version string — bump when `SCHEMA_CONTENT` or generators change |
+| `extractHarnessVersion(content)` | Parses version from file content, returns `null` if no marker |
+| `detectStale(workspaceRoot)` | Returns installed `HarnessTarget[]` whose embedded version ≠ `HARNESS_VERSION` |
+
+**Activation flow** (`src/extension.ts`): on startup, `detectStale()` runs. If stale targets are found, a warning notification offers "Update All" (overwrites immediately), "Choose…" (opens QuickPick with outdated targets pre-selected), or "Dismiss".
+
+**When to bump `HARNESS_VERSION`:** any change to `SCHEMA_CONTENT`, the generator functions, or naming conventions that would make previously installed harness files incorrect. Do **not** bump for unrelated extension changes — the version is independent of `package.json` version.
+
+## Developer Testing in VS Code
+
+To test the extension in development mode, open the **fixture dbt project** as the workspace.
+
+### From the terminal (preferred)
+
+Build first, then launch the Extension Development Host directly with the fixtures project:
+
+```bash
+npm run build
+code --extensionDevelopmentPath=/Users/liamwynne/GIT/LIAM/erd-studio /Users/liamwynne/GIT/LIAM/erd-studio/test/fixtures/dbt-project
+```
+
+This opens the Extension Development Host with the fixtures project loaded and the extension active — no need to manually open a folder.
+
+### From VS Code (alternative)
+
+1. Open the extension project in VS Code
+2. Press **F5** to launch the Extension Development Host
+3. In the dev host, open `test/fixtures/dbt-project` as the workspace folder
+
+**Note:** F5 runs the `npm: watch` pre-launch task. If it hangs, terminate running tasks first (**Cmd+Shift+P** → "Tasks: Terminate Task"), then retry.
+
+### Using the fixtures
+
+- The sidebar tree shows domains under Silver and Gold layers
+- Open **ppw-work-lot** for the richest sample data (35+ models, 40 relationships)
+- Extension host `console.log` output appears in the **Debug Console** (Cmd+Shift+Y) of the main VS Code window (only when launched via F5)
+
+This fixture project contains `dbt_project.yml`, a `target/manifest.json`, layer config, templates, and several domain files across silver/gold layers.
 
 ## Testing the Webview UI in Chrome
 
@@ -68,9 +249,10 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
                  window.postMessage({
                    type: 'domainLoaded',
                    payload: {
-                     schemaVersion: 1, domain: 'preview', layer: 'silver',
+                     schemaVersion: 4, domain: 'preview', layer: 'silver',
+                     stage: 'logical',
                      description: 'Dev preview', models: [], relationships: [],
-                     viewConfig: {}
+                     viewConfig: {}, readOnly: false
                    }
                  }, '*');
                }, 100);
@@ -92,7 +274,7 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
    ```
    Then navigate to `http://localhost:8765/dev-preview.html`
 
-4. **Add test models/relationships** to the `domainLoaded` payload in `dev-preview.html` to render sample nodes and edges. The graph transformer (F108) converts `SemanticDomain` data into React Flow nodes/edges automatically.
+4. **Add test models/relationships** to the `domainLoaded` payload in `dev-preview.html` to render sample nodes and edges. The graph transformer converts `DisplayDomain` data into React Flow nodes/edges automatically.
 
 5. **Use Chrome browser automation** (claude-in-chrome) to take screenshots and verify visual output.
 
@@ -106,78 +288,31 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
 
 ## Dev Mock Data
 
-`dev-preview.html` contains **mock SemanticDomain data** in its `domainLoaded` payload for visual development. This provides four models and three FK relationships demonstrating:
-- Built many-to-one (blue solid with crow's foot)
-- Design many-to-one (orange solid with crow's foot)
-- Design one-to-one (orange dashed with perpendicular bars)
-
-The graph transformer (`webview/lib/graphTransformer.ts`, F108) converts the SemanticDomain data into React Flow nodes/edges. The colour scheme logic lives in `webview/lib/colorScheme.ts`.
+`dev-preview.html` contains **mock DisplayDomain data** in its `domainLoaded` payload for visual development. The graph transformer (`webview/lib/graphTransformer.ts`) converts the DisplayDomain data into React Flow nodes/edges. The stage colour logic lives in `webview/lib/stageColors.ts`.
 
 To preview in Chrome: create `dev-preview.html` (see instructions above), run `npm run build`, serve with `npx http-server -p 8765 --cors -c-1`, and open `http://localhost:8765/dev-preview.html`.
 
-## Key Conventions
-
-- Shared types live in `src/types/` and are included in both tsconfigs
-- Webview components use BEM CSS class naming
-- All colours use CSS custom properties from `webview/styles/theme.css`
-- React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
-- Extension host writes use `WorkspaceEdit` for undo/redo integration
-
-## Status Lifecycle
-
-Models, columns, and relationships follow a progression from design to built:
-
-### Model Status: `design` → `approved` → `built`
-
-| Status | Description | Color | Source |
-|--------|-------------|-------|--------|
-| `design` | Planned model not yet in dbt | Orange | `source: 'design'` in JSON |
-| `approved` | Ready for build, reviewed | Teal | `source: 'design'` + `approved: true` |
-| `built` | Exists in dbt manifest | Blue | `source: 'repo'` and found in manifest |
-| `missing` | Referenced but not in manifest | Grey | `source: 'repo'` but not in manifest |
-
-### Column Status: `planned` → `approved` → `built`
-
-| Status | Description | Color |
-|--------|-------------|-------|
-| `planned` | Column defined but not in manifest | Orange |
-| `approved` | Column approved for build | Teal |
-| `built` | Column exists in manifest | Blue |
-
-### Relationship Status: `design` → `approved` → `built`
-
-| Status | Description | Color |
-|--------|-------------|-------|
-| `design` | Planned FK relationship | Orange |
-| `approved` | Relationship approved for build | Teal |
-| `built` | Relationship test exists in manifest | Blue |
-
-### Approval Rules
-
-1. **Models**: Can be approved via DetailPanel button or right-click context menu
-2. **Columns**:
-   - On design models: require model approval first
-   - On built models: can be approved independently (for planned columns)
-3. **Relationships**: Can only be approved when **both** connected models are `built` or `approved`
-
-### Cascade Behavior
-
-When **unapproving a model**, the following cascades automatically:
-- All columns in that model become unapproved
-- All relationships connected to that model become unapproved
-
-This maintains the invariant that approved items must have their dependencies also approved.
-
 ## Publishing to VS Code Marketplace
 
-**Marketplace:** https://marketplace.visualstudio.com/items?itemName=liamwynne.dbt-semantic-designer
+**Marketplace:** https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio
+
+The old `liamwynne.dbt-semantic-designer` extension has been unpublished and removed from the marketplace. Only `liamwynne.erd-studio` exists now.
 
 ### Publish a New Version
 
-1. Bump `version` in `package.json`
-2. Run:
-   ```bash
-   source .env && npx @vscode/vsce publish --pat "$AZURE_PAT"
-   ```
+**IMPORTANT: Always bump `version` in `package.json` before publishing.** The marketplace rejects re-publishing an existing version number.
 
-PAT is stored in `.env` as `AZURE_PAT`. Manage at https://dev.azure.com/LiamWynne/_usersSettings/tokens
+1. Bump `version` in `package.json`
+2. Package and publish (two-step is more reliable than single-step):
+   ```bash
+   source .env && npx @vscode/vsce package -o erd-studio.vsix && npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT" && rm erd-studio.vsix
+   ```
+3. Commit the version bump and push.
+
+PAT is stored in `.env` as `AZURE_PAT`. The PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org. Manage at https://dev.azure.com/LiamWynne/_usersSettings/tokens
+
+### Unpublish an Extension
+
+```bash
+source .env && npx @vscode/vsce unpublish <publisher>.<extension-id> --pat "$AZURE_PAT" --force
+```

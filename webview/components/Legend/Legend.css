@@ -175,41 +175,34 @@
   overflow: hidden;
 }
 
-.legend__model-card--built {
-  border-color: var(--model-built);
+.legend__model-card--logical {
+  border-color: var(--stage-logical);
 }
 
-.legend__model-card--approved {
-  border-color: var(--model-approved);
+.legend__model-card--physical {
+  border-color: var(--stage-physical);
 }
 
-.legend__model-card--design {
-  border-color: var(--model-design);
-}
-
-.legend__model-card--missing {
-  border-color: var(--model-missing);
-  opacity: 0.6;
+.legend__model-card--ghost {
+  border-color: var(--stage-ghost);
+  border-style: dashed;
+  opacity: 0.5;
 }
 
 .legend__model-header {
   height: 8px;
 }
 
-.legend__model-header--built {
-  background: var(--model-built);
+.legend__model-header--logical {
+  background: var(--stage-logical);
 }
 
-.legend__model-header--approved {
-  background: var(--model-approved);
+.legend__model-header--physical {
+  background: var(--stage-physical);
 }
 
-.legend__model-header--design {
-  background: var(--model-design);
-}
-
-.legend__model-header--missing {
-  background: var(--model-missing);
+.legend__model-header--ghost {
+  background: var(--stage-ghost);
 }
 
 /* ---------------------------------------------------------------------------
@@ -226,24 +219,36 @@
   stroke-width: 2;
 }
 
-.legend__edge--built {
-  stroke: var(--edge-built);
+.legend__edge--logical {
+  stroke: var(--stage-logical);
 }
 
-.legend__edge--approved {
-  stroke: var(--model-approved);
+.legend__edge--physical {
+  stroke: var(--stage-physical);
 }
 
-.legend__edge--design {
-  stroke: var(--edge-design);
+.legend__edge--annotation {
+  stroke: var(--vscode-descriptionForeground, #999);
+  stroke-dasharray: 6 4;
+  stroke-opacity: 0.5;
 }
 
-.legend__edge--dashed {
-  stroke-dasharray: 6 3;
+/* ---------------------------------------------------------------------------
+   Annotation card sample
+   --------------------------------------------------------------------------- */
+
+.legend__annotation-card {
+  width: 36px;
+  height: 24px;
+  border-radius: 3px;
+  border-left: 3px solid #f59e0b;
+  background: #fef3c7;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
-.legend__edge--dotted {
-  stroke-dasharray: 2 4;
+body[data-vscode-theme-kind="vscode-dark"] .legend__annotation-card,
+body[data-vscode-theme-kind="vscode-high-contrast"] .legend__annotation-card {
+  background: #422006;
 }
 
 /* ---------------------------------------------------------------------------
@@ -265,7 +270,7 @@
 .legend__cardinality-label {
   font-size: 12px;
   font-weight: 700;
-  color: var(--edge-built);
+  color: var(--stage-logical);
   min-width: 10px;
   text-align: center;
 }
@@ -296,5 +301,10 @@
 
 .legend__badge--fk {
   background: rgba(96, 165, 250, 0.2);
-  color: var(--edge-built);
+  color: var(--stage-logical);
+}
+
+.legend__badge--nk {
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
 }

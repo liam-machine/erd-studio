@@ -1,0 +1,22 @@
+version: 2
+models:
+  - name: fct_sale
+    description: Sales transaction fact table
+    config:
+      tags:
+        - silver
+        - domain:showcase
+    columns:
+      - name: sale_id
+        description: Surrogate key
+        data_type: INT
+        tests:
+          - relationships:
+              to: ref('dim_project')
+              field: project_id
+      - name: project_id
+        description: FK to dim_project
+        data_type: INT
+      - name: amount
+        description: Sale amount
+        data_type: DECIMAL
