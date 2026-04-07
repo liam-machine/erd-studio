@@ -202,7 +202,7 @@ describe('HarnessService', () => {
       const content = fs.readFileSync(hookPath, 'utf-8');
       expect(content).toContain('#!/usr/bin/env bash');
       expect(content).toContain('permissionDecision');
-      expect(content).toContain('CLAUDE_SESSION_ID');
+      expect(content).toContain('session_id');
     });
 
     it('creates settings.local.json with PreToolUse hook on first install', () => {
