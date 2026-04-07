@@ -25,6 +25,7 @@ const DOMAIN_TAG_PREFIX = 'domain:';
 const EXCLUDED_DIRS = new Set([
   'node_modules', 'target', '.git', '.venv', 'venv',
   '__pycache__', 'dist', '.tox', '.mypy_cache',
+  'dbt_packages', 'dbt_modules',
 ]);
 
 export class SchemaTagService {

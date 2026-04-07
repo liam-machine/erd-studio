@@ -263,16 +263,22 @@ export function activate(context: vscode.ExtensionContext): void {
     modelLibraryProvider.refresh();
   });
 
-  // Semantic file deleted → refresh tree + model library and clean up orphaned domain tags
-  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(async () => {
+  // Semantic file deleted → refresh tree + model library, prompt for tag cleanup
+  // NOTE: reconcileAll() is NOT called automatically here because git operations
+  // (pull, checkout, merge, rebase) trigger file-delete events on Windows (delete-
+  // then-rename) and macOS (atomic rename via FSEvents), causing mass YAML
+  // modifications. Instead, offer to run the manual sync command.
+  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(() => {
     treeProvider.refresh();
     modelLibraryProvider.refresh();
-    const result = await schemaTagService.reconcileAll();
-    if (result.removed > 0) {
-      void vscode.window.showInformationMessage(
-        `Domain file deleted — removed ${result.removed} orphaned tag(s) from YAML files.`,
-      );
-    }
+    void vscode.window.showInformationMessage(
+      'Domain file deleted. Run "Sync Domain Tags" to clean up orphaned YAML tags.',
+      'Sync Now',
+    ).then(choice => {
+      if (choice === 'Sync Now') {
+        void vscode.commands.executeCommand('dbtSemantic.syncDomainTags');
+      }
+    });
   });
 
   // Logical model file changed → refresh domains referencing that model + model library
