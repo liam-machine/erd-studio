@@ -303,12 +303,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
     try {
       const sp = SPACING_PRESETS[spacingPreset];
-      const effectiveBound = partitionStrategy === 'auto'
-        ? detectLayerBound(nodes.length)
-        : layerBound;
       // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
       const modelNodes = nodes.filter((n): n is import('../../types/graph').ModelFlowNode => n.type === 'model');
       const fkEdges = edges.filter((e): e is import('../../types/graph').FkFlowEdge => e.type === 'fk');
+      const effectiveBound = partitionStrategy === 'auto'
+        ? detectLayerBound(modelNodes.length)
+        : layerBound;
       const positions = await runElkLayout(
         modelNodes,
         fkEdges,
@@ -614,14 +614,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                     <input
                       type="number"
                       className={`toolbar__lp-input${partitionStrategy === 'auto' ? ' toolbar__lp-input--auto' : ''}`}
-                      value={partitionStrategy === 'auto' ? detectLayerBound(nodes.length) : layerBound}
+                      value={partitionStrategy === 'auto' ? detectLayerBound(nodes.filter((n) => n.type === 'model').length) : layerBound}
                       min={1}
                       max={20}
                       disabled={partitionStrategy === 'auto'}
                       onChange={(e) => { setLayerBound(Math.max(1, Math.min(20, Number(e.target.value)))); setLayoutDirty(true); }}
                     />
                     {partitionStrategy === 'auto' ? (
-                      <span className="toolbar__lp-desc">auto — {detectLayerBound(nodes.length)} for {nodes.length} models</span>
+                      <span className="toolbar__lp-desc">auto — {detectLayerBound(nodes.filter((n) => n.type === 'model').length)} for {nodes.filter((n) => n.type === 'model').length} models</span>
                     ) : (
                       <span className="toolbar__lp-desc">lower = wider layout, higher = taller layout</span>
                     )}
