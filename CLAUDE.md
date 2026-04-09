@@ -309,7 +309,7 @@ The old `liamwynne.dbt-semantic-designer` extension has been unpublished and rem
    ```
 3. Commit the version bump and push.
 
-PAT is stored in `.env` as `AZURE_PAT`. The PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org. Manage at https://dev.azure.com/LiamWynne/_usersSettings/tokens
+PAT is stored in `.env` as `AZURE_PAT`. The PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org.
 
 ### Unpublish an Extension
 
