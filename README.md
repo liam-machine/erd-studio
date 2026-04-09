@@ -22,9 +22,11 @@
 </p>
 
 <p align="center">
-  <em>This extension was built almost entirely by Claude Code — from architecture to implementation.<br>
-  The AI harness, reconciliation engine, and webview UI were all developed through<br>
-  human-AI collaboration using Claude as the primary coding partner.</em>
+  <code>Visual ERD canvas</code> &nbsp;&middot;&nbsp;
+  <code>Physical stage from manifest</code> &nbsp;&middot;&nbsp;
+  <code>Real-time drift detection</code> &nbsp;&middot;&nbsp;
+  <code>AI sync reconciliation</code> &nbsp;&middot;&nbsp;
+  <code>40MB+ manifest support</code>
 </p>
 
 <p align="center">
