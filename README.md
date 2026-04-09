@@ -18,14 +18,18 @@
 <p align="center">
   ERD Studio turns silver and gold layer modeling from a months-long slog<br>
   into days of focused design — powered by an AI coding harness<br>
-  built and tested with <a href="https://claude.ai/code">Claude Code</a>.
+  developed with and for <a href="https://claude.ai/code">Claude Code</a>.
 </p>
 
-<!-- TODO: Replace with actual screenshot/GIF of the extension in action
 <p align="center">
-  <img src="media/demo.gif" width="800" alt="ERD Studio demo — designing a silver layer domain" />
+  <em>This extension was built almost entirely by Claude Code — from architecture to implementation.<br>
+  The AI harness, reconciliation engine, and webview UI were all developed through<br>
+  human-AI collaboration using Claude as the primary coding partner.</em>
 </p>
--->
+
+<p align="center">
+  <img src="media/demo.gif" width="800" alt="ERD Studio demo — Logical stage, Physical stage, and Discrepancy overlay" />
+</p>
 
 ---
 
@@ -114,7 +118,7 @@ ERD Studio ships with an **AI coding harness** — a schema reference that teach
 - **Validate everything** — schema version, naming conventions (`dim_`, `fct_`, `brg_`, `ref_`), relationship rules
 - **Preserve your layout** — knows not to touch `viewConfig.positions` when updating
 
-> **Built for Claude Code.** The harness was developed and extensively tested with Claude Code. The progressive skill loading and `SYNC.md` companion are purpose-built for Claude's skill system. Other assistants are fully supported — Claude Code is the reference implementation.
+> **Developed with and for Claude Code.** ERD Studio itself was built using Claude Code as the primary development tool — architecture, implementation, and testing were all driven through human-AI collaboration. The progressive skill loading and `SYNC.md` sync companion are purpose-built for Claude's skill system. Other assistants are fully supported — Claude Code is the reference implementation.
 
 ---
 
@@ -154,6 +158,43 @@ Switch stages with the toolbar or <kbd>Alt</kbd>+<kbd>1</kbd> / <kbd>Alt</kbd>+<
 - **Cardinality** = inferred from `unique` and `unique_combination_of_columns` tests
 
 <!-- TODO: Screenshot showing logical (blue) vs physical (green) stage comparison -->
+
+---
+
+## Reconciliation
+
+The real power of the two-stage architecture is **reconciliation** — comparing your logical design against what dbt actually built, then fixing the drift automatically.
+
+<table>
+<tr>
+<td width="40" align="center"><strong>1</strong></td>
+<td><strong>Compare</strong> — toggle the discrepancy overlay to see where logical and physical diverge. Models, columns, relationships, data types, and cardinality are all checked. Types are normalized (e.g. <code>varchar</code> &rarr; <code>string</code>) to reduce noise.</td>
+</tr>
+<tr>
+<td align="center"><strong>2</strong></td>
+<td><strong>Choose ground truth</strong> — for each discrepancy, decide which side is authoritative. Is the logical design correct and physical needs updating? Or did the dbt model evolve and logical should catch up?</td>
+</tr>
+<tr>
+<td align="center"><strong>3</strong></td>
+<td><strong>Generate sync plan</strong> — the extension writes a <code>.sync-plan.json</code> with the concrete actions needed, including file paths to every affected YAML, SQL, and domain file.</td>
+</tr>
+<tr>
+<td align="center"><strong>4</strong></td>
+<td><strong>AI executes</strong> — Claude reads the plan and runs the actions: adding columns to YAML, writing dbt tests, updating domain JSON, removing stale relationships — whatever it takes to bring both stages into alignment.</td>
+</tr>
+</table>
+
+**Sync action categories:**
+
+| Target | Actions |
+|--------|---------|
+| **Models** | add / remove in either stage |
+| **Columns** | add / remove / update data type in either stage |
+| **Relationships** | add / remove relationship or dbt test / update cardinality in either stage |
+
+The discrepancy overlay uses color-coded labels: `matched` `extra` `missing` `type-mismatch` `cardinality-mismatch`. Missing models appear as translucent "ghost nodes" on the canvas so you can see the full picture even when one side is incomplete.
+
+> **Why this matters:** without reconciliation, logical designs and physical warehouses drift apart silently. ERD Studio makes drift visible and fixable in minutes, not days.
 
 ---
 

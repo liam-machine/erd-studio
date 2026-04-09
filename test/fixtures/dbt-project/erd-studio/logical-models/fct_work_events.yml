@@ -1,18 +1,40 @@
 name: fct_work_events
-description: Work events fact table
+schema: silver
+description: Records every work event across all projects and work lots
+grain: One row per work event
+modelRole: transaction-fact
+rationale:
+  purpose: Central fact table tracking all work activity for reporting and analysis
+  design: Transaction grain with foreign keys to all relevant dimensions
+  measures: duration_hours (additive), amount (additive)
 columns:
   - name: event_id
-    dataType: unknown
-    description: Event surrogate key
+    dataType: INT
+    description: Surrogate key for work event
     isPrimaryKey: true
-    isForeignKey: true
-    isNaturalKey: true
   - name: work_lot_id
-    dataType: unknown
+    dataType: INT
     description: FK to dim_work_lot
+    isForeignKey: true
+  - name: project_id
+    dataType: INT
+    description: FK to dim_project
+    isForeignKey: true
+  - name: customer_id
+    dataType: INT
+    description: FK to dim_customer
+    isForeignKey: true
   - name: event_date
-    dataType: unknown
-    description: Date of the event
+    dataType: DATE
+    description: Date the event occurred
+  - name: event_type
+    dataType: VARCHAR
+    description: Type of work event (inspection, milestone, issue)
   - name: amount
-    dataType: unknown
-    description: Event amount
+    dataType: DECIMAL
+    description: Cost or value of the event
+    additiveType: additive
+  - name: duration_hours
+    dataType: DECIMAL
+    description: Hours spent on this event
+    additiveType: additive

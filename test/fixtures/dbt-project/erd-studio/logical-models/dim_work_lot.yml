@@ -1,6 +1,6 @@
 name: dim_work_lot
 schema: silver
-description: Work lot dimension table
+description: Work lot dimension tracking individual work packages
 grain: One row per work lot
 modelRole: domain-dim
 rationale:
@@ -8,14 +8,13 @@ rationale:
   design: SCD Type 2 on status to track historical state changes
   scdStrategy: Status changes tracked via SCD2; name is Type 1 overwrite
 columns:
-  - name: project_id
-    dataType: INT
-    description: FK to dim_project
-    isForeignKey: true
   - name: work_lot_id
     dataType: INT
     description: Surrogate key for work lot
     isPrimaryKey: true
+  - name: project_id
+    dataType: INT
+    description: FK to dim_project
     isForeignKey: true
   - name: name
     dataType: VARCHAR
@@ -23,5 +22,5 @@ columns:
     scdType: 1
   - name: status
     dataType: STRING
-    description: Current status — type mismatch vs physical (STRING vs VARCHAR)
+    description: Current lifecycle status
     scdType: 2
