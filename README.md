@@ -121,7 +121,7 @@ Once installed, describe what you want in plain English — your AI creates mode
 <table>
 <tr>
 <td align="center"><a href="https://github.com/jkweee"><img src="https://github.com/jkweee.png" width="60" height="60" alt="Jason Kwe" /><br><sub><b>Jason Kwe</b></sub></a><br><sub>Core concept, UI/UX, testing & iteration</sub></td>
-<td align="center"><a href="https://github.com/ginny-jhg"><img src="https://github.com/ginny-jhg.png" width="60" height="60" alt="Ginny" /><br><sub><b>Ginny</b></sub></a><br><sub>Sync reconciliation UI, auto-layout,<br>depth partitioning, testing & iteration</sub></td>
+<td align="center"><a href="https://github.com/ginny-jhg"><img src="https://github.com/ginny-jhg.png" width="60" height="60" alt="Ginny" /><br><sub><b>Ginny</b></sub></a><br><sub>Sync reconciliation, auto-layout,<br>depth partitioning, testing & iteration</sub></td>
 </tr>
 </table>
 
