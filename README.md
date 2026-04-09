@@ -12,7 +12,7 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/v/liamwynne.erd-studio?label=Marketplace&color=0078d4" alt="VS Marketplace Version" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/i/liamwynne.erd-studio?color=0078d4" alt="Installs" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/r/liamwynne.erd-studio?color=0078d4" alt="Rating" /></a>
-  <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-0078d4" alt="License" /></a>
+  <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE"><img src="https://img.shields.io/github/license/liam-machine/erd-studio?color=0078d4" alt="License" /></a>
 </p>
 
 <p align="center">
