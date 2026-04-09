@@ -5,22 +5,28 @@
 <h1 align="center">ERD Studio</h1>
 
 <p align="center">
-  <strong>Design your data warehouse visually. Let AI build it.</strong>
+  <strong>AI-native data warehouse modeling for dbt.</strong>
 </p>
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/v/liamwynne.erd-studio?label=Marketplace&color=0078d4" alt="VS Marketplace Version" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/i/liamwynne.erd-studio?color=0078d4" alt="Installs" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/r/liamwynne.erd-studio?color=0078d4" alt="Rating" /></a>
-  <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE"><img src="https://img.shields.io/github/license/liam-machine/erd-studio?color=0078d4" alt="License" /></a>
+  <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-0078d4" alt="License" /></a>
 </p>
 
 <p align="center">
-  <code>Visual ERD canvas</code> &nbsp;&middot;&nbsp;
+  Design your silver and gold layers on a visual canvas. Tell <a href="https://claude.ai/code">Claude Code</a> what to build.<br>
+  It writes the dbt models, schema YAML, and tests — no need to touch code or the diagram manually.<br>
+  Purpose-built for <strong>Claude Code + dbt</strong>. Other AI assistants supported.
+</p>
+
+<p align="center">
+  <code>AI builds your models</code> &nbsp;&middot;&nbsp;
   <code>Physical stage from manifest</code> &nbsp;&middot;&nbsp;
   <code>Real-time drift detection</code> &nbsp;&middot;&nbsp;
   <code>AI sync reconciliation</code> &nbsp;&middot;&nbsp;
-  <code>40MB+ manifest support</code>
+  <code>40MB+ manifests</code>
 </p>
 
 <p align="center">
@@ -71,9 +77,7 @@ One command installs a schema reference that teaches your AI the domain format, 
 | **Google Gemini** | `.gemini/styleguide.md` |
 | **OpenAI Codex** | `AGENTS.md` section |
 
-Once installed, your AI can create models, generate dbt schema YAML with tests, execute sync plans, and validate naming conventions — all from natural language.
-
-> Developed with and for [Claude Code](https://claude.ai/code). Other assistants are fully supported.
+Once installed, describe what you want in plain English — your AI creates models, generates dbt schema YAML with tests, executes sync plans, and validates naming conventions. No manual editing required.
 
 ---
 
