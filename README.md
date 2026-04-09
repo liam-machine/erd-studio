@@ -37,11 +37,11 @@
 
 ## How It Works
 
-> **1.** Design your data model on an interactive canvas — columns, types, PK/FK/NK, SCD tracking, grain, rationale
+> **1.** Design your data model on the canvas — or tell Claude Code to build it for you in plain English
 >
-> **2.** Switch to the **Physical** stage to see what dbt actually built (derived from `manifest.json`)
+> **2.** AI generates the dbt models, schema YAML, and tests. Run `dbt compile` to see the **Physical** stage
 >
-> **3.** Toggle the **Discrepancy overlay** to spot drift — then let AI fix it
+> **3.** Toggle the **Discrepancy overlay** to spot drift — AI reads the sync plan and fixes it automatically
 
 ---
 
