@@ -3,9 +3,10 @@ import * as vscode from 'vscode';
 import type { LayerService } from '../services/layerService';
 
 /**
- * Provides file decorations (color) for semantic domain JSON files
- * in the Explorer tree view. Uses the layer color from layers.json
- * so each layer's files are visually distinct.
+ * Provides file decorations (tooltips only) for semantic domain JSON files
+ * in the Explorer tree view. Colours are intentionally omitted so the
+ * Explorer keeps its default appearance — layer colours are only applied
+ * inside the ERD Studio sidebar tree via LayerDecorationProvider.
  */
 export class SemanticFileDecorationProvider implements vscode.FileDecorationProvider {
   private static readonly SEMANTIC_PATH_PATTERN = /[/\\]erd-studio[/\\]/;
@@ -27,10 +28,7 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
     if (layerFromFolder) {
       const config = this.layerService.getLayer(layerFromFolder);
       if (config) {
-        return {
-          tooltip: `${config.label} layer`,
-          color: this.hexToThemeColor(config.color),
-        };
+        return { tooltip: `${config.label} layer` };
       }
     }
 
@@ -51,10 +49,7 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
       return undefined;
     }
 
-    return {
-      tooltip: `${layerConfig.label} domain (opens in visual editor)`,
-      color: this.hexToThemeColor(layerConfig.color),
-    };
+    return { tooltip: `${layerConfig.label} domain (opens in visual editor)` };
   }
 
   /**
@@ -95,63 +90,7 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
     return parts[0];
   }
 
-  /**
-   * Map a hex color to the closest VS Code ThemeColor.
-   * VS Code doesn't support arbitrary hex in FileDecoration,
-   * so we map to chart colors by hue.
-   */
-  private hexToThemeColor(hex: string): vscode.ThemeColor {
-    const color = hex.toLowerCase();
-
-    // Grey/silver tones (low saturation) — check first since hue is undefined
-    if (this.isLowSaturation(color)) {
-      return new vscode.ThemeColor('descriptionForeground');
-    }
-
-    const hue = this.getHue(color);
-
-    if (hue >= 0 && hue < 20) return new vscode.ThemeColor('charts.red');
-    if (hue >= 20 && hue < 40) return new vscode.ThemeColor('charts.orange');
-    if (hue >= 40 && hue < 80) return new vscode.ThemeColor('charts.yellow');
-    if (hue >= 80 && hue < 180) return new vscode.ThemeColor('charts.green');
-    if (hue >= 180 && hue < 260) return new vscode.ThemeColor('charts.blue');
-    if (hue >= 260 && hue < 360) return new vscode.ThemeColor('charts.purple');
-
-    return new vscode.ThemeColor('charts.foreground');
-  }
-
-  private isLowSaturation(hex: string): boolean {
-    const rgb = this.hexToRgb(hex);
-    if (!rgb) return false;
-    return Math.max(rgb.r, rgb.g, rgb.b) - Math.min(rgb.r, rgb.g, rgb.b) < 30;
-  }
-
-  private getHue(hex: string): number {
-    const rgb = this.hexToRgb(hex);
-    if (!rgb) return 0;
-
-    const r = rgb.r / 255, g = rgb.g / 255, b = rgb.b / 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
-    if (delta === 0) return 0;
-
-    let hue: number;
-    if (max === r) hue = ((g - b) / delta) % 6;
-    else if (max === g) hue = (b - r) / delta + 2;
-    else hue = (r - g) / delta + 4;
-
-    hue = Math.round(hue * 60);
-    if (hue < 0) hue += 360;
-    return hue;
-  }
-
-  private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result
-      ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) }
-      : null;
-  }
-
-  /** Fire event to refresh decorations (e.g. after layer color changes). */
+  /** Fire event to refresh decorations (e.g. after layer label changes update tooltips). */
   refresh(): void {
     this._onDidChangeFileDecorations.fire(undefined);
   }
