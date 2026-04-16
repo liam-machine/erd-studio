@@ -411,3 +411,15 @@
   font-size: 11px;
   cursor: pointer;
 }
+
+/* Ghost edge hint — shown for relationships from comparison stage */
+.context-menu__ghost-hint {
+  padding: 6px 10px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 10px;
+  font-style: italic;
+  color: var(--editor-fg);
+  opacity: 0.5;
+  border-bottom-left-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
