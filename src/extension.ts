@@ -13,7 +13,8 @@ import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorati
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/harnessService';
-import { SchemaTagService } from './services/schemaTagService';
+import { SelectorsService } from './services/selectorsService';
+import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
 import { MigrationService } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
@@ -168,7 +169,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const manifestService = new ManifestService();
   const ymlParserService = new YmlParserService();
   const templateService = new TemplateService();
-  const schemaTagService = new SchemaTagService(domainService, workspaceRoot, semanticDir);
+  const selectorsService = new SelectorsService(domainService, workspaceRoot, semanticDir);
+  const legacyTagCleanupService = new LegacyTagCleanupService(workspaceRoot);
+
+  // Ensure selectors.yml exists and is up to date at activation time so a
+  // fresh `git clone` with pre-existing domain files gets a valid selector
+  // set before the user makes any edits. Debounced so activation isn't
+  // blocked on disk I/O.
+  selectorsService.scheduleRegenerate();
 
   // Check for v4 → v5 migration (non-blocking)
   const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService);
@@ -185,6 +193,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (result.modelsCreated > 0) details.push(`${result.modelsCreated} model file(s) created in logical-models/`);
         if (result.mergeConflicts.length > 0) details.push(`${result.mergeConflicts.length} merge conflict(s) resolved (richest version kept)`);
         vscode.window.showInformationMessage(`Migration complete: ${details.join(', ')}.`);
+        selectorsService.scheduleRegenerate();
       }
     });
   }
@@ -198,7 +207,7 @@ export function activate(context: vscode.ExtensionContext): void {
     templateService,
     layerService,
     workspaceRoot,
-    schemaTagService,
+    selectorsService,
     logicalModelService,
   );
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
@@ -272,10 +281,10 @@ export function activate(context: vscode.ExtensionContext): void {
     treeProvider.refresh();
     modelLibraryProvider.refresh();
     void vscode.window.showInformationMessage(
-      'Domain file deleted. Run "Sync Domain Tags" to clean up orphaned YAML tags.',
-      'Sync Now',
+      'Domain file deleted. Regenerate dbt selectors.yml to drop the removed domain from the selector set.',
+      'Regenerate Now',
     ).then(choice => {
-      if (choice === 'Sync Now') {
+      if (choice === 'Regenerate Now') {
         void vscode.commands.executeCommand('dbtSemantic.syncDomainTags');
       }
     });
@@ -477,8 +486,9 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        // Step 6: Refresh tree and auto-open domain
+        // Step 6: Refresh tree, regenerate selectors.yml, and auto-open domain
         treeProvider.refresh();
+        selectorsService.scheduleRegenerate();
         await vscode.commands.executeCommand(
           'vscode.openWith',
           vscode.Uri.file(filePath),
@@ -523,6 +533,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
 
         treeProvider.refresh();
+        selectorsService.scheduleRegenerate();
       },
     ),
     vscode.commands.registerCommand(
@@ -583,6 +594,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
 
         // Auto-open renamed domain
+        selectorsService.scheduleRegenerate();
         await vscode.commands.executeCommand('vscode.openWith', newFileUri, 'dbtSemantic.domainEditor');
       },
     ),
@@ -603,30 +615,79 @@ export function activate(context: vscode.ExtensionContext): void {
         },
       );
     }),
-    // Sync domain tags to dbt schema YAML files
+    // Regenerate the root selectors.yml from current domain files.
+    // Run a domain refresh in dbt with: dbt build --selector domain_{layer}_{domain}
     vscode.commands.registerCommand('dbtSemantic.syncDomainTags', async () => {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: 'Syncing domain tags to dbt schema files...',
+          title: 'Regenerating dbt selectors.yml...',
           cancellable: false,
         },
         async () => {
-          const result = await schemaTagService.reconcileAll();
-          const parts: string[] = [];
-          if (result.added > 0) { parts.push(`${result.added} added`); }
-          if (result.removed > 0) { parts.push(`${result.removed} removed`); }
-          if (result.skipped > 0) { parts.push(`${result.skipped} skipped`); }
-          const summary = parts.length > 0 ? parts.join(', ') : 'all tags up to date';
-          if (result.errors.length > 0) {
-            void vscode.window.showWarningMessage(
-              `Domain tags synced (${summary}). ${result.errors.length} error(s) — see Output for details.`,
+          try {
+            const result = selectorsService.regenerate();
+            const relPath = path.relative(workspaceRoot, result.filePath);
+            void vscode.window.showInformationMessage(
+              `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} model reference(s) to ${relPath}.`,
             );
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            void vscode.window.showErrorMessage(`Failed to regenerate selectors.yml: ${msg}`);
+          }
+        },
+      );
+    }),
+    // One-shot cleanup: strip legacy `domain:*` tags from every model YAML
+    // left behind by the old SchemaTagService. Safe to run repeatedly.
+    vscode.commands.registerCommand('dbtSemantic.stripLegacyDomainTags', async () => {
+      const confirm = await vscode.window.showWarningMessage(
+        'This will scan every .yml file in your workspace and remove any `domain:*` tag from `config.tags` or top-level `tags` on each dbt model. ' +
+          'Review and commit the changes as a single PR. Continue?',
+        { modal: true },
+        'Strip Tags',
+      );
+      if (confirm !== 'Strip Tags') { return; }
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Stripping legacy domain tags...',
+          cancellable: false,
+        },
+        async () => {
+          const result = legacyTagCleanupService.stripAll();
+
+          if (result.errors.length > 0) {
             for (const err of result.errors) {
-              console.error(`[SchemaTagService] ${err}`);
+              console.warn(`[LegacyTagCleanup] ${err}`);
             }
-          } else {
-            void vscode.window.showInformationMessage(`Domain tags synced: ${summary}.`);
+          }
+
+          if (result.tagsRemoved === 0) {
+            void vscode.window.showInformationMessage(
+              `No legacy domain tags found. Scanned ${result.filesScanned} YAML file(s).`,
+            );
+            return;
+          }
+
+          const choice = await vscode.window.showInformationMessage(
+            `Removed ${result.tagsRemoved} tag(s) from ${result.filesModified} file(s). Scanned ${result.filesScanned}. Review the diff before committing.` +
+              (result.errors.length > 0 ? ` (${result.errors.length} file(s) skipped — see Output.)` : ''),
+            'Show Modified Files',
+          );
+          if (choice === 'Show Modified Files') {
+            const items = result.modifiedPaths.map((p) => ({
+              label: path.relative(workspaceRoot, p),
+              description: '',
+              fullPath: p,
+            }));
+            const picked = await vscode.window.showQuickPick(items, {
+              placeHolder: 'Open a modified file to review',
+            });
+            if (picked) {
+              await vscode.window.showTextDocument(vscode.Uri.file(picked.fullPath), { preview: true });
+            }
           }
         },
       );
@@ -658,6 +719,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       treeProvider.refresh();
       await editorProvider.refreshAllOpenDomains();
+      selectorsService.scheduleRegenerate();
     }),
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(

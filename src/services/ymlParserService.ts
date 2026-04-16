@@ -6,8 +6,7 @@
  * in the dbt project. Unlike ManifestService (which requires `dbt compile`),
  * this service reads source files directly and is always current.
  *
- * Uses the `yaml` package (comment-preserving parser) following the same
- * navigation pattern as SchemaTagService.
+ * Uses the `yaml` package (comment-preserving parser).
  */
 
 import * as fs from 'fs';
@@ -22,7 +21,7 @@ import type {
   YmlRelationshipTest,
 } from '../types/ymlData';
 
-/** Directories to skip during filesystem walk (matches SchemaTagService). */
+/** Directories to skip during filesystem walk. */
 const EXCLUDED_DIRS = new Set([
   'node_modules', 'target', '.git', '.venv', 'venv',
   '__pycache__', 'dist', '.tox', '.mypy_cache',

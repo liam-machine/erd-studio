@@ -89,7 +89,12 @@
       },
       {
         "command": "dbtSemantic.syncDomainTags",
-        "title": "Sync Domain Tags to dbt Schema Files",
+        "title": "Regenerate dbt selectors.yml",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.stripLegacyDomainTags",
+        "title": "Strip Legacy Domain Tags from Model YAMLs",
         "category": "dbt"
       },
       {
