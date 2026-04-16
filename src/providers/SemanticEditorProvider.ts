@@ -15,6 +15,7 @@
  */
 
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -2875,7 +2876,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleRunDbtCompile(): Promise<void> {
     const terminal = vscode.window.createTerminal({ name: 'dbt compile', cwd: this.workspaceRoot });
     terminal.show();
-    terminal.sendText('dbt compile');
+    const activate = findVenvActivate(this.workspaceRoot);
+    terminal.sendText(activate ? `${activate} && dbt compile` : 'dbt compile');
   }
 
   /**
@@ -2894,9 +2896,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       cwd: this.workspaceRoot,
     });
     terminal.show();
-    // Launch the TUI, then send the prompt as user input.
-    // If the prompt is dropped (slow machine), the user can paste it manually.
-    terminal.sendText('claude --dangerously-skip-permissions');
+    const activate = findVenvActivate(this.workspaceRoot);
+    terminal.sendText(activate ? `${activate} && claude --dangerously-skip-permissions` : 'claude --dangerously-skip-permissions');
     const CLAUDE_TUI_INIT_DELAY_MS = 2000;
     setTimeout(() => terminal.sendText(prompt), CLAUDE_TUI_INIT_DELAY_MS);
   }
@@ -2937,4 +2938,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
 function isTypedMessage(value: unknown): value is { type: string } {
   return typeof value === 'object' && value !== null && 'type' in value && typeof (value as Record<string, unknown>).type === 'string';
+}
+
+const VENV_CANDIDATES = ['.venv', 'venv', 'env'];
+
+function findVenvActivate(workspaceRoot: string): string | null {
+  const isWindows = process.platform === 'win32';
+  for (const dir of VENV_CANDIDATES) {
+    if (isWindows) {
+      const bat = path.join(workspaceRoot, dir, 'Scripts', 'activate.bat');
+      if (fs.existsSync(bat)) return `"${bat.replace(/"/g, '')}"`;
+    } else {
+      const sh = path.join(workspaceRoot, dir, 'bin', 'activate');
+      if (fs.existsSync(sh)) return `source '${sh.replace(/'/g, "'\\''")}'`;
+    }
+  }
+  return null;
 }

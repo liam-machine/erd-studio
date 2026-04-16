@@ -284,7 +284,7 @@ function FkEdgeComponent({
             !
           </span>
         )}
-        {!readOnly && !discrepancyStatus && (
+        {!readOnly && discrepancyStatus !== 'missing' && (
           <span
             className={`fk-edge__swap-zone${dimmed ? ' fk-edge__swap-zone--dimmed' : ''}`}
             style={{

@@ -125,21 +125,23 @@ function AcceptCell({ side, selectionKey, children, valueColor, hint }: AcceptCe
   const isOtherSelected = choice !== null && choice !== side;
 
   const label = isSelected
-    ? `Keeping ${stageName(side)}`
-    : `Keep ${stageName(side)}`;
+    ? `✓ ${stageName(side)}`
+    : stageName(side);
 
   return (
     <td className={`sync-modal__cell sync-modal__cell--stage${isSelected ? ' sync-modal__cell--selected' : ''}${isOtherSelected ? ' sync-modal__cell--rejected' : ''}`}>
-      <span className="sync-modal__cell-value" style={valueColor ? { color: valueColor } : undefined}>
-        {children}
-      </span>
-      <button
-        className={`sync-modal__accept-btn sync-modal__accept-btn--${side}${isSelected ? ' sync-modal__accept-btn--selected' : ''}`}
-        onClick={() => setSyncSelection(selectionKey, side)}
-        title={hint}
-      >
-        {label}
-      </button>
+      <div className="sync-modal__stage-content">
+        <span className="sync-modal__cell-value" style={valueColor ? { color: valueColor } : undefined}>
+          {children}
+        </span>
+        <button
+          className={`sync-modal__accept-btn sync-modal__accept-btn--${side}${isSelected ? ' sync-modal__accept-btn--selected' : ''}`}
+          onClick={() => setSyncSelection(selectionKey, side)}
+          title={hint}
+        >
+          {label}
+        </button>
+      </div>
     </td>
   );
 }
@@ -147,6 +149,12 @@ function AcceptCell({ side, selectionKey, children, valueColor, hint }: AcceptCe
 // ---------------------------------------------------------------------------
 // ModelRow
 // ---------------------------------------------------------------------------
+
+interface SelectionSummary {
+  logical: number;
+  physical: number;
+  total: number;
+}
 
 interface ModelRowProps {
   model: ModelDiscrepancy;
@@ -157,9 +165,10 @@ interface ModelRowProps {
   onToggle: () => void;
   modelSyncKeys: string[];
   allResolved: boolean;
+  selectionSummary: SelectionSummary | null;
 }
 
-function ModelRow({ model, sourceStage, targetStage, isCollapsed, hasFoldableContent, onToggle, modelSyncKeys, allResolved }: ModelRowProps) {
+function ModelRow({ model, sourceStage, targetStage, isCollapsed, hasFoldableContent, onToggle, modelSyncKeys, allResolved, selectionSummary }: ModelRowProps) {
   const setSyncSelectionBulk = useEditorStore((s) => s.setSyncSelectionBulk);
 
   const handleBulk = useCallback(
@@ -208,40 +217,43 @@ function ModelRow({ model, sourceStage, targetStage, isCollapsed, hasFoldableCon
         {allResolved && (
           <span className="sync-modal__resolved-badge">Resolved</span>
         )}
+        {isCollapsed && selectionSummary && (selectionSummary.logical > 0 || selectionSummary.physical > 0) && (
+          <span className="sync-modal__selection-summary">
+            {selectionSummary.logical > 0 && (
+              <span className="sync-modal__selection-chip sync-modal__selection-chip--logical">
+                {selectionSummary.logical} {stageName(sourceStage).toLowerCase()}
+              </span>
+            )}
+            {selectionSummary.physical > 0 && (
+              <span className="sync-modal__selection-chip sync-modal__selection-chip--physical">
+                {selectionSummary.physical} {stageName(targetStage).toLowerCase()}
+              </span>
+            )}
+            {selectionSummary.total - selectionSummary.logical - selectionSummary.physical > 0 && (
+              <span className="sync-modal__selection-chip sync-modal__selection-chip--pending">
+                {selectionSummary.total - selectionSummary.logical - selectionSummary.physical} pending
+              </span>
+            )}
+          </span>
+        )}
       </div>
     </td>
   );
 
-  // Stage cells — contain existence info + bulk accept button
-  const renderStageCell = (side: GroundTruth) => {
-    const isSource = side === 'logical';
-    const stageColor = STAGE_HEX[isSource ? sourceStage : targetStage];
-
-    // Existence indicator for conflicted models only
-    let existenceContent: React.ReactNode = null;
-    if (model.status !== 'matched') {
-      const inSource = model.status === 'extra';
-      const presentOnThisSide = isSource ? inSource : !inSource;
-      existenceContent = presentOnThisSide
-        ? <span className="sync-modal__exists-dot" style={{ color: stageColor }}>● Exists</span>
-        : <span className="sync-modal__missing-dash" style={{ color: STAGE_HEX.ghost }}>— Not present</span>;
-    }
-
-    return (
-      <td className="sync-modal__cell sync-modal__cell--stage sync-modal__cell--model-stage">
-        {existenceContent && <span className="sync-modal__cell-value">{existenceContent}</span>}
-        {modelSyncKeys.length > 0 && (
-          <button
-            className="sync-modal__model-bulk-btn"
-            onClick={handleBulk(side)}
-            title={`Keep all ${stageName(side)} for ${model.name}`}
-          >
-            Keep all
-          </button>
-        )}
-      </td>
-    );
-  };
+  // Stage cells — bulk accept button only (status badge handles existence)
+  const renderStageCell = (side: GroundTruth) => (
+    <td className="sync-modal__cell sync-modal__cell--stage sync-modal__cell--model-stage">
+      {modelSyncKeys.length > 0 && (
+        <button
+          className={`sync-modal__model-bulk-btn sync-modal__model-bulk-btn--${side}`}
+          onClick={handleBulk(side)}
+          title={`Keep all ${stageName(side)} for ${model.name}`}
+        >
+          Keep all
+        </button>
+      )}
+    </td>
+  );
 
   const rowClass = [
     'sync-modal__row',
@@ -291,9 +303,9 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
       ? <span className="sync-modal__type-pill" style={{ color: STAGE_HEX[sourceStage], borderColor: STAGE_HEX[sourceStage] }}>{col.sourceDataType}</span>
       : <em className="sync-modal__no-type">no type</em>;
     sourceColor = STAGE_HEX[sourceStage];
-    targetContent = <span className="sync-modal__missing-dash" style={{ color: STAGE_HEX.ghost }}>— Not present</span>;
+    targetContent = <span className="sync-modal__missing-dash">—</span>;
   } else if (col.status === 'missing') {
-    sourceContent = <span className="sync-modal__missing-dash" style={{ color: STAGE_HEX.ghost }}>— Not present</span>;
+    sourceContent = <span className="sync-modal__missing-dash">—</span>;
     targetContent = col.targetDataType
       ? <span className="sync-modal__type-pill" style={{ color: STAGE_HEX[targetStage], borderColor: STAGE_HEX[targetStage] }}>{col.targetDataType}</span>
       : <em className="sync-modal__no-type">no type</em>;
@@ -345,11 +357,11 @@ function RelationshipRow({ rel, sourceStage, targetStage }: { rel: RelationshipD
   let targetContent: React.ReactNode;
 
   if (rel.status === 'extra') {
-    sourceContent = <span className="sync-modal__exists-dot" style={{ color: STAGE_HEX[sourceStage] }}>● Exists</span>;
-    targetContent = <span className="sync-modal__missing-dash" style={{ color: STAGE_HEX.ghost }}>— Not present</span>;
+    sourceContent = <span className="sync-modal__exists-dot" style={{ color: STAGE_HEX[sourceStage] }}>●</span>;
+    targetContent = <span className="sync-modal__missing-dash">—</span>;
   } else if (rel.status === 'missing') {
-    sourceContent = <span className="sync-modal__missing-dash" style={{ color: STAGE_HEX.ghost }}>— Not present</span>;
-    targetContent = <span className="sync-modal__exists-dot" style={{ color: STAGE_HEX[targetStage] }}>● Exists</span>;
+    sourceContent = <span className="sync-modal__missing-dash">—</span>;
+    targetContent = <span className="sync-modal__exists-dot" style={{ color: STAGE_HEX[targetStage] }}>●</span>;
   } else {
     sourceContent = <span style={{ color: STAGE_HEX[sourceStage] }}>{rel.sourceCardinality ?? '?'}</span>;
     targetContent = <span style={{ color: STAGE_HEX[targetStage] }}>{rel.targetCardinality ?? '?'}</span>;
@@ -415,6 +427,17 @@ function ModelRowGroup({ model, conflictCols, sourceStage, targetStage, isCollap
     [modelSyncKeys, syncSelections],
   );
 
+  const selectionSummary = useMemo<SelectionSummary | null>(() => {
+    if (modelSyncKeys.length === 0) return null;
+    let logical = 0;
+    let physical = 0;
+    for (const k of modelSyncKeys) {
+      if (syncSelections[k] === 'logical') logical++;
+      else if (syncSelections[k] === 'physical') physical++;
+    }
+    return { logical, physical, total: modelSyncKeys.length };
+  }, [modelSyncKeys, syncSelections]);
+
   // Auto-resolve the model key when all column keys are resolved.
   // When a model is extra/missing, it has both a model key and column keys.
   // Users resolve columns individually but never explicitly resolve the model key,
@@ -467,6 +490,7 @@ function ModelRowGroup({ model, conflictCols, sourceStage, targetStage, isCollap
         onToggle={onToggle}
         modelSyncKeys={modelSyncKeys}
         allResolved={allResolved}
+        selectionSummary={selectionSummary}
       />
       {!isCollapsed && conflictCols.map((col) => (
         <ColumnRow
@@ -495,6 +519,10 @@ export function SyncMergeModal() {
   const [collapsedModels, setCollapsedModels] = useState<Set<string>>(new Set());
   const [hideResolved, setHideResolved] = useState(true);
   const [resolvedSectionOpen, setResolvedSectionOpen] = useState(false);
+  const [relsCollapsed, setRelsCollapsed] = useState(false);
+  const [modalSize, setModalSize] = useState<{ width: number; height: number } | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const resizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
 
   const toggleCollapsed = useCallback((modelName: string) => {
     setCollapsedModels((prev) => {
@@ -505,11 +533,16 @@ export function SyncMergeModal() {
     });
   }, []);
 
-  const models = discrepancyReport?.models ?? [];
+  const allModels = discrepancyReport?.models ?? [];
   const relationships = discrepancyReport?.relationships ?? [];
   const sourceStage = discrepancyReport?.sourceStage ?? 'logical';
   const targetStage = discrepancyReport?.targetStage ?? 'physical';
   const domain = discrepancyReport?.domain ?? '';
+
+  const models = useMemo(
+    () => allModels.filter((m) => m.status !== 'matched' || m.columns.some((c) => c.status !== 'matched')),
+    [allModels],
+  );
 
   const relsWithIssues = useMemo(
     () => relationships.filter((r) => r.status !== 'matched'),
@@ -530,10 +563,20 @@ export function SyncMergeModal() {
     return keys;
   }, [models, relsWithIssues]);
 
-  const resolvedCount = useMemo(
-    () => allSyncKeys.filter((k) => syncSelections[k]).length,
-    [allSyncKeys, syncSelections],
-  );
+  const { resolvedCount, logicalResolvedCount, physicalResolvedCount } = useMemo(() => {
+    let total = 0;
+    let log = 0;
+    let phys = 0;
+    for (const k of allSyncKeys) {
+      const sel = syncSelections[k];
+      if (sel) {
+        total++;
+        if (sel === 'logical') log++;
+        else phys++;
+      }
+    }
+    return { resolvedCount: total, logicalResolvedCount: log, physicalResolvedCount: phys };
+  }, [allSyncKeys, syncSelections]);
 
   // Determine which models are fully resolved (all their sync keys have selections)
   const modelResolutionStatus = useMemo(() => {
@@ -576,7 +619,6 @@ export function SyncMergeModal() {
 
   const totalHiddenCount = resolvedModels.length + resolvedRels.length;
 
-  const progressPct = allSyncKeys.length > 0 ? (resolvedCount / allSyncKeys.length) * 100 : 0;
   const allDone = resolvedCount === allSyncKeys.length && allSyncKeys.length > 0;
 
   const handleClose = useCallback(() => setSyncMode(false), [setSyncMode]);
@@ -592,6 +634,31 @@ export function SyncMergeModal() {
     });
   }, []);
 
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const modal = modalRef.current;
+    if (!modal) return;
+    const rect = modal.getBoundingClientRect();
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, startW: rect.width, startH: rect.height };
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const { startX, startY, startW, startH } = resizeRef.current;
+      const newW = Math.max(560, Math.min(window.innerWidth * 0.95, startW + (ev.clientX - startX) * 2));
+      const newH = Math.max(400, Math.min(window.innerHeight * 0.95, startH + (ev.clientY - startY) * 2));
+      setModalSize({ width: newW, height: newH });
+    };
+
+    const handleMouseUp = () => {
+      resizeRef.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, []);
+
   if (!syncMode || !discrepancyReport) return null;
 
   const sourceName = stageName(sourceStage);
@@ -600,73 +667,67 @@ export function SyncMergeModal() {
   return (
     <>
       <div className="sync-modal__backdrop" onClick={handleClose} />
-      <div className="sync-modal" role="dialog" aria-modal="true" aria-label="Resolve differences">
+      <div
+        ref={modalRef}
+        className="sync-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Resolve differences"
+        style={modalSize ? { width: modalSize.width, height: modalSize.height } : undefined}
+      >
 
-        {/* Header — title + explanatory subtitle */}
+        {/* Header */}
         <div className="sync-modal__header">
-          <div className="sync-modal__header-content">
-            <div className="sync-modal__header-title-row">
-              <span className="sync-modal__header-icon">⇄</span>
-              <span className="sync-modal__header-domain">{domain}</span>
-            </div>
-            <p className="sync-modal__header-subtitle">
-              Choose which version to keep for each difference between{' '}
-              <strong style={{ color: STAGE_HEX[sourceStage] }}>{sourceName}</strong>
-              {' '}and{' '}
-              <strong style={{ color: STAGE_HEX[targetStage] }}>{targetName}</strong>.
-            </p>
-          </div>
+          <span className="sync-modal__header-icon">⇄</span>
+          <span className="sync-modal__header-domain">{domain}</span>
+          <span className="sync-modal__header-stage" style={{ color: STAGE_HEX[sourceStage] }}>{sourceName}</span>
+          <span className="sync-modal__header-vs">vs</span>
+          <span className="sync-modal__header-stage" style={{ color: STAGE_HEX[targetStage] }}>{targetName}</span>
           <button className="sync-modal__close" onClick={handleClose} aria-label="Exit sync mode">&times;</button>
         </div>
 
         <StalenessWarning />
 
-        {/* Toolbar — plain-language bulk actions */}
+        {/* Toolbar — bulk actions + integrated progress */}
         <div className="sync-modal__toolbar">
-          <button className="sync-modal__bulk-btn sync-modal__bulk-btn--logical" onClick={handleBulk('logical')}>
-            Keep all {sourceName}
-          </button>
-          <button className="sync-modal__bulk-btn sync-modal__bulk-btn--physical" onClick={handleBulk('physical')}>
-            Keep all {targetName}
-          </button>
-          <span className="sync-modal__toolbar-sep" />
-          <button
-            className={`sync-modal__bulk-btn${hideResolved ? ' sync-modal__bulk-btn--active' : ''}`}
-            onClick={handleToggleHideResolved}
-            title={hideResolved ? 'Show all items including resolved' : 'Move resolved items to the bottom and collapse them'}
-          >
-            {hideResolved ? 'Show all' : 'Hide resolved'}
-          </button>
-          <span className="sync-modal__toolbar-count">
-            {resolvedCount} of {allSyncKeys.length} resolved
-          </span>
-        </div>
-
-        {/* Progress section — labeled bar with status */}
-        <div className="sync-modal__progress-section">
-          <div className="sync-modal__progress-label">
-            <span className="sync-modal__progress-label-text">
-              {resolvedCount} of {allSyncKeys.length} difference{allSyncKeys.length !== 1 ? 's' : ''} resolved
-            </span>
-            {allDone && <span className="sync-modal__progress-done-badge">Ready to apply</span>}
+          <div className="sync-modal__toolbar-grid">
+            <span />
+            <button className="sync-modal__bulk-btn sync-modal__bulk-btn--logical" onClick={handleBulk('logical')}>
+              All {sourceName}
+            </button>
+            <div className="sync-modal__toolbar-center">
+              <button
+                className={`sync-modal__toolbar-toggle${hideResolved ? ' sync-modal__toolbar-toggle--active' : ''}`}
+                onClick={handleToggleHideResolved}
+                title={hideResolved ? 'Show all items including resolved' : 'Move resolved items to the bottom and collapse them'}
+              >
+                {hideResolved ? 'Show all' : 'Hide resolved'}
+              </button>
+              <span className="sync-modal__toolbar-count">
+                {resolvedCount}/{allSyncKeys.length}
+                {resolvedCount > 0 && (
+                  <span className="sync-modal__toolbar-breakdown">
+                    {logicalResolvedCount > 0 && <span className="sync-modal__toolbar-breakdown-dot sync-modal__toolbar-breakdown-dot--logical">{logicalResolvedCount}</span>}
+                    {physicalResolvedCount > 0 && <span className="sync-modal__toolbar-breakdown-dot sync-modal__toolbar-breakdown-dot--physical">{physicalResolvedCount}</span>}
+                  </span>
+                )}
+              </span>
+            </div>
+            <button className="sync-modal__bulk-btn sync-modal__bulk-btn--physical" onClick={handleBulk('physical')}>
+              All {targetName}
+            </button>
           </div>
           <div className="sync-modal__progress">
             <div
-              className={`sync-modal__progress-fill${allDone ? ' sync-modal__progress-fill--done' : ''}`}
-              style={{ width: `${progressPct}%` }}
+              className="sync-modal__progress-fill sync-modal__progress-fill--logical"
+              style={{ width: allSyncKeys.length > 0 ? `${(logicalResolvedCount / allSyncKeys.length) * 100}%` : '0%' }}
+            />
+            <div
+              className="sync-modal__progress-fill sync-modal__progress-fill--physical"
+              style={{ width: allSyncKeys.length > 0 ? `${(physicalResolvedCount / allSyncKeys.length) * 100}%` : '0%' }}
             />
           </div>
         </div>
-
-        {/* Completion banner — appears when all resolved */}
-        {allDone && (
-          <div className="sync-modal__completion-banner">
-            <span className="sync-modal__completion-icon">✓</span>
-            <span className="sync-modal__completion-text">
-              All differences resolved. Click <strong>Apply Changes</strong> below to continue.
-            </span>
-          </div>
-        )}
 
         {/* Table */}
         <div className="sync-modal__table-wrap">
@@ -706,13 +767,22 @@ export function SyncMergeModal() {
                 );
               })}
 
-              {/* Unresolved relationships */}
+              {/* Relationships — collapsible section */}
               {unresolvedRels.length > 0 && (
                 <>
-                  <tr className="sync-modal__section-header-row">
-                    <td colSpan={4} className="sync-modal__section-label">Relationships</td>
+                  <tr
+                    className="sync-modal__section-header-row"
+                    onClick={() => setRelsCollapsed((p) => !p)}
+                  >
+                    <td colSpan={4} className="sync-modal__section-label">
+                      <button className="sync-modal__section-toggle" aria-label={relsCollapsed ? 'Expand relationships' : 'Collapse relationships'}>
+                        {relsCollapsed ? '▶' : '▼'}
+                      </button>
+                      <span>Relationships</span>
+                      <span className="sync-modal__section-count">{unresolvedRels.length}</span>
+                    </td>
                   </tr>
-                  {unresolvedRels.map((r) => (
+                  {!relsCollapsed && unresolvedRels.map((r) => (
                     <RelationshipRow
                       key={`${r.fromModel}.${r.fromColumn}-${r.toModel}.${r.toColumn}`}
                       rel={r}
@@ -754,14 +824,24 @@ export function SyncMergeModal() {
                       />
                     );
                   })}
-                  {resolvedSectionOpen && resolvedRels.length > 0 && resolvedRels.map((r) => (
-                    <RelationshipRow
-                      key={`resolved-${r.fromModel}.${r.fromColumn}-${r.toModel}.${r.toColumn}`}
-                      rel={r}
-                      sourceStage={sourceStage}
-                      targetStage={targetStage}
-                    />
-                  ))}
+                  {resolvedSectionOpen && resolvedRels.length > 0 && (
+                    <>
+                      <tr className="sync-modal__section-header-row sync-modal__section-header-row--static">
+                        <td colSpan={4} className="sync-modal__section-label">
+                          <span>Relationships</span>
+                          <span className="sync-modal__section-count">{resolvedRels.length}</span>
+                        </td>
+                      </tr>
+                      {resolvedRels.map((r) => (
+                        <RelationshipRow
+                          key={`resolved-${r.fromModel}.${r.fromColumn}-${r.toModel}.${r.toColumn}`}
+                          rel={r}
+                          sourceStage={sourceStage}
+                          targetStage={targetStage}
+                        />
+                      ))}
+                    </>
+                  )}
                 </>
               )}
             </tbody>
@@ -772,6 +852,12 @@ export function SyncMergeModal() {
         <div className={`sync-modal__footer${allDone ? ' sync-modal__footer--ready' : ''}`}>
           <SyncFooter totalKeys={allSyncKeys.length} />
         </div>
+
+        <div
+          className="sync-modal__resize-handle"
+          onMouseDown={handleResizeStart}
+          title="Drag to resize"
+        />
       </div>
     </>
   );

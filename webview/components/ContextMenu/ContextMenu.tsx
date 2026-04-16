@@ -355,6 +355,10 @@ export function ContextMenu() {
   // --- Edge context menu ---
   const edge = contextMenu.data as FkEdgeData;
 
+  // Ghost edges exist only in the comparison stage — block mutations
+  const isGhostEdge = edge.discrepancyStatus === 'missing';
+  const isEditable = !isReadOnly && !isGhostEdge;
+
   // Get current cardinality label
   const currentOption = CARDINALITY_OPTIONS.find((opt) => opt.value === edge.cardinality);
   const cardinalityLabel = currentOption?.label ?? edge.cardinality;
@@ -376,7 +380,7 @@ export function ContextMenu() {
       {/* Relationship details header */}
       <div className="context-menu__header">
         <span className="context-menu__title">Relationship</span>
-        {!isReadOnly && (
+        {isEditable && (
           <div className="context-menu__header-actions">
             <button
               className="context-menu__edit-link"
@@ -414,7 +418,7 @@ export function ContextMenu() {
         {/* Cardinality with dropdown (editable) or label (read-only) */}
         <div className="context-menu__row context-menu__row--cardinality">
           <span className="context-menu__label">Cardinality</span>
-          {isReadOnly ? (
+          {!isEditable ? (
             <span className="context-menu__value">{cardinalityLabel}</span>
           ) : (
             <div className="context-menu__cardinality-control">
@@ -463,6 +467,11 @@ export function ContextMenu() {
           )}
         </div>
       </div>
+      {isGhostEdge && (
+        <div className="context-menu__ghost-hint">
+          Only in comparison stage — use Sync to add
+        </div>
+      )}
     </div>
   );
 }
