@@ -780,6 +780,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                       className="toolbar__dropdown-item"
                       onClick={handleNewAnnotation}
                       role="menuitem"
+                      title="Create a note at the viewport centre (or double-click blank canvas)"
                     >
                       New Note
                     </button>

@@ -215,6 +215,11 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
     startEdit('dataType');
   }, [startEdit]);
 
+  const handleDelete = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    send({ type: 'removeColumn', payload: { modelName, columnName: column.name } });
+  }, [send, modelName, column.name]);
+
   // Reset drop target state when drag ends
   useEffect(() => {
     if (!dragSourceModel) setIsDropTarget(false);
@@ -471,6 +476,18 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
         >
           {ADDITIVE_BADGE[column.additiveType]}
         </span>
+      )}
+      {!readOnly && !editingField && (
+        <button
+          type="button"
+          className="model-node__col-delete nodrag"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={handleDelete}
+          title="Delete column"
+          aria-label={`Delete column ${column.name}`}
+        >
+          ×
+        </button>
       )}
       <ColumnTooltip column={column} anchorRef={elementRef} visible={showTooltip} />
     </div>

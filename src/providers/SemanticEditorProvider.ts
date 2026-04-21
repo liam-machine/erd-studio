@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DomainService } from '../services/domainService';
+import { DomainService, relationshipReferencesColumn } from '../services/domainService';
 import { compare as compareStages } from '../services/discrepancyService';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
@@ -1268,35 +1268,46 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
 
-      // V5: write to central model file
+      // V5: write to central model file, cascade orphaned relationships in the domain.
+      // No-op silently if the column or model is already gone (e.g. spam-clicked delete).
       if (this.isDomainV5(parsed)) {
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
-          const columns = model.columns ?? [];
-          const idx = columns.findIndex((c) => c.name === payload.columnName);
-          if (idx === -1) throw new Error(`Column "${payload.columnName}" not found.`);
-          columns.splice(idx, 1);
-        });
+        await this.applyModelEdit(
+          document,
+          webview,
+          payload.modelName,
+          (model) => {
+            const columns = model.columns ?? [];
+            const idx = columns.findIndex((c) => c.name === payload.columnName);
+            if (idx === -1) return;
+            columns.splice(idx, 1);
+          },
+          (sec) => {
+            const rels = (sec.relationships ?? []) as Array<Record<string, unknown>>;
+            sec.relationships = rels.filter(
+              (rel) => !relationshipReferencesColumn(rel, payload.modelName, payload.columnName),
+            );
+          },
+        );
         return;
       }
 
-      // V4: legacy inline path
+      // V4: legacy inline path. Silent no-op if the model or column is already gone.
       const section = this.getStageSection(parsed, stage);
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
       const model = models.find((m) => m.name === payload.modelName);
-      if (!model) {
-        webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found.` } });
-        return;
-      }
+      if (!model) return;
 
       const columns = (model.columns ?? []) as Array<Record<string, unknown>>;
       const columnIndex = columns.findIndex((c) => c.name === payload.columnName);
-      if (columnIndex === -1) {
-        webview.postMessage({ type: 'error', payload: { message: `Column "${payload.columnName}" not found.` } });
-        return;
-      }
+      if (columnIndex === -1) return;
 
       columns.splice(columnIndex, 1);
       model.columns = columns;
+
+      const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
+      section.relationships = relationships.filter(
+        (rel) => !relationshipReferencesColumn(rel, payload.modelName, payload.columnName),
+      );
 
       const updatedText = JSON.stringify(parsed, null, 2) + '\n';
       const edit = new vscode.WorkspaceEdit();

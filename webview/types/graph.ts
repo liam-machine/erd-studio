@@ -104,6 +104,8 @@ export type FkEdgeData = {
   dimmed?: boolean;
   /** Whether the edge is in a read-only context (physical stage). */
   readOnly?: boolean;
+  /** True when source === target — renders a loop arc over the top-right corner. */
+  isSelfLoop?: boolean;
   /** Index signature required by React Flow's Edge generic. */
   [key: string]: unknown;
 };

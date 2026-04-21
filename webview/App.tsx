@@ -767,13 +767,23 @@ function EditorCanvas() {
     };
   }, [annotationLinkDrag, updateAnnotationLinkDrag, endAnnotationLinkDrag, vscode]);
 
-  // Handle double-click on blank canvas to create a new annotation
+  // Handle double-click on blank canvas to create a new annotation.
+  // Robust detection: accept dblclicks anywhere EXCEPT inside a node, edge, or
+  // floating React Flow panel (MiniMap, Controls, Toolbar). This lets dblclicks
+  // on the background dots/grid still create a note, which the stricter
+  // `classList.contains('react-flow__pane')` check would drop.
   const onPaneDoubleClick = useCallback(
     (event: React.MouseEvent) => {
       if (domain?.readOnly) return;
-      // Only trigger on actual pane clicks, not double-clicks that bubbled from nodes
-      const target = event.target as HTMLElement;
-      if (!target.classList.contains('react-flow__pane')) return;
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (
+        target.closest(
+          '.react-flow__node, .react-flow__edge, .react-flow__panel, .react-flow__minimap, .react-flow__controls',
+        )
+      ) {
+        return;
+      }
 
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
       const id = crypto.randomUUID();
