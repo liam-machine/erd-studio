@@ -44,6 +44,13 @@ const PATH_GAP = 20;
 /** How far (px) from the node boundary to place the cardinality label. */
 const LABEL_OFFSET = 8;
 
+/**
+ * Radius (px) of the arc drawn for self-reference edges. The loop exits the
+ * top of the node, arcs outward past the top-right corner, and re-enters the
+ * right side. A larger radius means the loop extends further from the node.
+ */
+const SELF_LOOP_RADIUS = 55;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -132,7 +139,7 @@ function FkEdgeComponent({
   );
 
   if (!data) return null;
-  const { cardinality, stage, discrepancyStatus, fromModel, toModel, dimmed, readOnly } = data;
+  const { cardinality, stage, discrepancyStatus, fromModel, toModel, dimmed, readOnly, isSelfLoop } = data;
 
   // For cardinality mismatch edges, pull the mismatch details from the report
   // The edge data only has status — we need to find the original relationship discrepancy
@@ -183,15 +190,21 @@ function FkEdgeComponent({
   const src = offsetPoint(adjustedSourceX, adjustedSourceY, sourcePosition, PATH_GAP);
   const tgt = offsetPoint(adjustedTargetX, adjustedTargetY, targetPosition, PATH_GAP);
 
-  const [edgePath] = getSmoothStepPath({
-    sourceX: src.x,
-    sourceY: src.y,
-    targetX: tgt.x,
-    targetY: tgt.y,
-    sourcePosition,
-    targetPosition,
-    borderRadius: 8,
-  });
+  // Self-refs use a cubic bezier arcing outward past the top-right corner.
+  // Both control points are pulled diagonally north-east so the curve sweeps
+  // *around* the corner instead of sagging through it — perpendicular-only
+  // control points let the midsection collapse onto the node corner.
+  const edgePath = isSelfLoop
+    ? `M ${src.x},${src.y} C ${src.x + SELF_LOOP_RADIUS},${src.y - SELF_LOOP_RADIUS} ${tgt.x + SELF_LOOP_RADIUS},${tgt.y - SELF_LOOP_RADIUS} ${tgt.x},${tgt.y}`
+    : getSmoothStepPath({
+        sourceX: src.x,
+        sourceY: src.y,
+        targetX: tgt.x,
+        targetY: tgt.y,
+        sourcePosition,
+        targetPosition,
+        borderRadius: 8,
+      })[0];
 
   const statusClass = discrepancyStatus
     ? `fk-edge--discrepancy-${discrepancyStatus}`
@@ -237,9 +250,17 @@ function FkEdgeComponent({
   const srcLabel = offsetPoint(adjustedSourceX, adjustedSourceY, sourcePosition, LABEL_OFFSET);
   const tgtLabel = offsetPoint(adjustedTargetX, adjustedTargetY, targetPosition, LABEL_OFFSET);
 
-  // Midpoint for cardinality mismatch badge
-  const midX = (adjustedSourceX + adjustedTargetX) / 2;
-  const midY = (adjustedSourceY + adjustedTargetY) / 2;
+  // Midpoint for cardinality mismatch badge / swap button.
+  // For self-loops the straight midpoint falls inside the node; instead we
+  // compute the bezier's exact midpoint at t=0.5, which sits northeast of
+  // the top-right corner. (Derived from B(0.5) with diagonal control points:
+  // the R terms aggregate to 0.75·R along each axis.)
+  const midX = isSelfLoop
+    ? (src.x + tgt.x) / 2 + SELF_LOOP_RADIUS * 0.75
+    : (adjustedSourceX + adjustedTargetX) / 2;
+  const midY = isSelfLoop
+    ? (src.y + tgt.y) / 2 - SELF_LOOP_RADIUS * 0.75
+    : (adjustedSourceY + adjustedTargetY) / 2;
 
   return (
     <>

@@ -17,3 +17,7 @@ columns:
   - name: project_code
     dataType: VARCHAR
     description: Business project code
+  - name: parent_project_id
+    dataType: INT
+    description: Parent project for hierarchical rollups (self-reference)
+    isForeignKey: true

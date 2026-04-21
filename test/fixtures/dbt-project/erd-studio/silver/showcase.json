@@ -40,16 +40,38 @@
         "toModel": "dim_customer",
         "toColumn": "customer_id",
         "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_project",
+        "fromColumn": "parent_project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
       }
     ]
   },
   "viewConfig": {
     "positions": {
-      "fct_work_events": { "x": 500, "y": 200 },
-      "dim_project": { "x": 950, "y": -10 },
-      "dim_work_lot": { "x": 950, "y": 250 },
-      "dim_customer": { "x": 50, "y": 0 },
-      "dim_date": { "x": 50, "y": 370 }
+      "fct_work_events": {
+        "x": 500,
+        "y": 200
+      },
+      "dim_project": {
+        "x": 950,
+        "y": -10
+      },
+      "dim_work_lot": {
+        "x": 950,
+        "y": 250
+      },
+      "dim_customer": {
+        "x": 50,
+        "y": 0
+      },
+      "dim_date": {
+        "x": 50,
+        "y": 370
+      }
     },
     "annotations": []
   }

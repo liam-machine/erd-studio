@@ -210,9 +210,14 @@ export function transformDomain(
   const edges: (FkFlowEdge | AnnotationFlowEdge)[] = relationships
     .filter((rel) => allNodeNames.has(rel.fromModel) && allNodeNames.has(rel.toModel))
     .map((rel) => {
+      const isSelfLoop = rel.fromModel === rel.toModel;
       const sourcePos = positionMap.get(rel.fromModel)!;
       const targetPos = positionMap.get(rel.toModel)!;
-      const { sourceSide, targetSide } = pickHandleSides(sourcePos, targetPos);
+      // Self-refs attach to top (source) and right (target) handles so the
+      // FkEdge component can arc the path over the top-right corner.
+      const { sourceSide, targetSide } = isSelfLoop
+        ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
+        : pickHandleSides(sourcePos, targetPos);
 
       const relKey = `${rel.fromModel}|${rel.fromColumn}|${rel.toModel}|${rel.toColumn}`;
       const discStatus = relDiscrepancyMap.get(relKey);
@@ -233,6 +238,7 @@ export function transformDomain(
           stage,
           ...(readOnly ? { readOnly: true } : {}),
           ...(discStatus ? { discrepancyStatus: discStatus } : {}),
+          ...(isSelfLoop ? { isSelfLoop: true } : {}),
         },
       };
     });
@@ -245,7 +251,10 @@ export function transformDomain(
         const targetPos = positionMap.get(rd.toModel);
         if (!sourcePos || !targetPos) continue;
 
-        const { sourceSide, targetSide } = pickHandleSides(sourcePos, targetPos);
+        const isSelfLoop = rd.fromModel === rd.toModel;
+        const { sourceSide, targetSide } = isSelfLoop
+          ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
+          : pickHandleSides(sourcePos, targetPos);
         edges.push({
           id: `ghost-fk-${rd.fromModel}-${rd.fromColumn}-${rd.toModel}-${rd.toColumn}`,
           type: 'fk' as const,
@@ -261,6 +270,7 @@ export function transformDomain(
             cardinality: rd.sourceCardinality ?? rd.targetCardinality ?? 'many-to-one',
             stage,
             discrepancyStatus: 'missing',
+            ...(isSelfLoop ? { isSelfLoop: true } : {}),
           },
         });
       }
