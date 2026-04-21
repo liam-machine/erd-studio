@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/icon.png" width="128" height="128" alt="ERD Studio" />
+  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio-assets/main/icon.png" width="128" height="128" alt="ERD Studio" />
 </p>
 
 <h1 align="center">ERD Studio</h1>
@@ -12,7 +12,7 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/v/liamwynne.erd-studio?label=Marketplace&color=0078d4" alt="VS Marketplace Version" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/i/liamwynne.erd-studio?color=0078d4" alt="Installs" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/r/liamwynne.erd-studio?color=0078d4" alt="Rating" /></a>
-  <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE"><img src="https://img.shields.io/github/license/liam-machine/erd-studio?color=0078d4&_v=2" alt="License" /></a>
+  <img src="https://img.shields.io/badge/license-MIT-0078d4" alt="License: MIT" />
 </p>
 
 <p align="center">
@@ -30,7 +30,7 @@
 </p>
 
 <p align="center">
-  <img src="media/demo.gif" width="800" alt="ERD Studio demo — Logical stage, Physical stage, and Discrepancy overlay" />
+  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio-assets/main/demo.gif" width="800" alt="ERD Studio demo — Logical stage, Physical stage, and Discrepancy overlay" />
 </p>
 
 ---
