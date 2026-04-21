@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as path from 'path';
-import { DomainService, derivePhysicalRelationships } from '../../src/services/domainService';
+import { DomainService, derivePhysicalRelationships, relationshipReferencesColumn } from '../../src/services/domainService';
 import type { LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
 import type { ManifestData, ManifestRelationshipTest } from '../../src/types/manifest';
@@ -519,6 +519,47 @@ describe('DomainService', () => {
     it('returns empty array when no relationship tests exist', () => {
       const result = derivePhysicalRelationships([], models, new Map(), new Map());
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('relationshipReferencesColumn', () => {
+    const rel = {
+      fromModel: 'fct_orders',
+      fromColumn: 'customer_id',
+      toModel: 'dim_customer',
+      toColumn: 'customer_id',
+    };
+
+    it('matches when the column is the from-endpoint', () => {
+      expect(relationshipReferencesColumn(rel, 'fct_orders', 'customer_id')).toBe(true);
+    });
+
+    it('matches when the column is the to-endpoint', () => {
+      expect(relationshipReferencesColumn(rel, 'dim_customer', 'customer_id')).toBe(true);
+    });
+
+    it('does not match when only the model name matches', () => {
+      expect(relationshipReferencesColumn(rel, 'fct_orders', 'order_id')).toBe(false);
+    });
+
+    it('does not match when only the column name matches a different model', () => {
+      expect(relationshipReferencesColumn(rel, 'dim_product', 'customer_id')).toBe(false);
+    });
+
+    it('matches a self-referencing relationship on either endpoint', () => {
+      const selfRef = {
+        fromModel: 'dim_employee',
+        fromColumn: 'employee_id',
+        toModel: 'dim_employee',
+        toColumn: 'manager_id',
+      };
+      expect(relationshipReferencesColumn(selfRef, 'dim_employee', 'employee_id')).toBe(true);
+      expect(relationshipReferencesColumn(selfRef, 'dim_employee', 'manager_id')).toBe(true);
+      expect(relationshipReferencesColumn(selfRef, 'dim_employee', 'other_col')).toBe(false);
+    });
+
+    it('handles relationships with missing endpoint fields without throwing', () => {
+      expect(relationshipReferencesColumn({}, 'fct_orders', 'customer_id')).toBe(false);
     });
   });
 });
