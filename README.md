@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/v/liamwynne.erd-studio?label=Marketplace&color=0078d4" alt="VS Marketplace Version" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/i/liamwynne.erd-studio?color=0078d4" alt="Installs" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/visual-studio-marketplace/r/liamwynne.erd-studio?color=0078d4" alt="Rating" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/version-short/liamwynne.erd-studio.svg" alt="VS Marketplace Version" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/installs-short/liamwynne.erd-studio.svg" alt="Installs" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/rating-short/liamwynne.erd-studio.svg" alt="Rating" /></a>
   <img src="https://img.shields.io/badge/license-MIT-0078d4" alt="License: MIT" />
 </p>
 
@@ -37,11 +37,15 @@
 
 ## How It Works
 
-> **1.** Design your data model on the canvas — or tell Claude Code to build it for you in plain English
+> **1.** Point your AI assistant at the bronze layer. It profiles the source tables against your requirements and drafts a logical **silver** ERD on the canvas
 >
-> **2.** AI generates the dbt models, schema YAML, and tests. Run `dbt compile` to see the **Physical** stage
+> **2.** Prompt the AI to materialise the silver ERD into dbt models, schema YAML, and tests
 >
-> **3.** Toggle the **Discrepancy overlay** to spot drift — AI reads the sync plan and fixes it automatically
+> **3.** Refine your requirements and have the AI compose a logical **gold** ERD — facts, dimensions, and business-aligned grain — on top of the silver foundation
+>
+> **4.** Prompt the AI to generate the gold dbt code, with tests derived directly from the ERD's keys and relationships
+
+ERD Studio ships with a baseline AI harness that teaches your assistant the domain format and sync workflow. Bring your own skills, prompts, and style guides on top so the generated dbt code reflects your team's naming conventions, modelling patterns, and review standards.
 
 ---
 
