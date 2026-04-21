@@ -109,4 +109,4 @@ models:
 - **Cascade deletions**: When removing a model from logical, also remove any relationships referencing it
 - **Column ordering**: When adding columns to logical-models YAML, append to the end of the columns array
 
-<!-- erd-studio-harness: 13 -->
+<!-- erd-studio-harness: 14 -->

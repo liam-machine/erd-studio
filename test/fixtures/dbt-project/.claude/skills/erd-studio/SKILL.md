@@ -181,6 +181,55 @@ Optional `rationale` object — all fields are optional strings. Omit the entire
 
 ---
 
+## Building Models from External Sources
+
+When the user asks you to create a new model — or materially add columns to an existing one — from an external source (planning doc, DDL, staging SQL, CSV, notebook, or another YAML), follow this protocol. It exists to prevent silent column truncation.
+
+**Does NOT apply to:** renaming a column, changing a single flag, or executing an `erd-studio/.sync-plan.json` (see SYNC.md for that workflow).
+
+### Step 1 — Read the source fully, then enumerate
+Before listing anything, confirm you have read the source **in full**. For files longer than 2000 lines, page through with `Read` using `offset`/`limit` until you reach the end of the file. A partial read is a silent-truncation trap before you even start — the columns you never saw cannot appear in your output.
+
+Then list every source column in order, with a total count. Do not summarise or elide:
+
+> Source `models/staging/stg_customer.sql` has **47 columns**:
+> 1. customer_id
+> 2. email
+> …
+
+For wide tables (50+ columns), group the list in numbered chunks of 50 so you and the user can verify nothing was dropped mid-list. Tables over 100 columns are common in EDW staging — the chunking exists for exactly this case.
+
+If you cannot identify a source, stop and ask which source to build from before listing.
+
+### Step 2 — State scope
+State which of those columns you intend to build, in plain English.
+
+> Proposed scope: **all 47 columns**.
+> — or —
+> Proposed scope: **23 of 47 columns** (PK, NKs, and measures; excluding audit columns and deprecated fields).
+
+Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
+
+### Step 3 — Build
+Write the `erd-studio/logical-models/{name}.yml` file.
+
+### Step 4 — Reconcile via set-difference
+Re-read the YAML file you just wrote. Compute the set-difference between source columns and YAML columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
+
+Report in this exact form:
+
+> Reconcile: `dim_customer.yml` has **M** columns; source has **N**.
+>
+> **In source but not in YAML** (K): `created_at` (audit — not modelled), `updated_at` (audit), `_dbt_source_relation` (dbt internal).
+>
+> **In YAML but not in source** (J): `customer_sk` (synthesised surrogate key), `loaded_at` (added for SCD2 tracking).
+
+Every entry in "in source but not in YAML" must have a specific reason. A class-level reason already declared in Step 2 (e.g. "excluding audit columns") is sufficient — you don't need to restate it per column. But an unexplained entry, or a vague reason like "not needed", means **stop and tell the user** that a column may have been dropped unintentionally. Do not claim the task is complete.
+
+**Rule of thumb:** if your reconcile message doesn't name specific columns on both sides, you skipped a step.
+
+---
+
 ## Columns
 
 | Field | Required | Description |
@@ -275,4 +324,4 @@ When asked to execute a sync plan, or when `erd-studio/.sync-plan.json` exists:
 2. Read `erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 13 -->
+<!-- erd-studio-harness: 14 -->
