@@ -160,6 +160,12 @@ export interface EditorState {
   editingColumn: string | null;
   /** Currently selected annotation ID, or null. */
   selectedAnnotation: string | null;
+  /**
+   * Canvas interaction mode.
+   * - 'pan' (default): drag on empty canvas pans the viewport. Shift+drag still rubber-bands.
+   * - 'select': drag on empty canvas draws a rubber-band selection box (no Shift needed) and the cursor is a crosshair.
+   */
+  canvasMode: 'pan' | 'select';
 }
 
 export interface EditorActions {
@@ -266,6 +272,8 @@ export interface EditorActions {
   setEditingColumn: (name: string | null) => void;
   /** Select an annotation (clears model selection). */
   selectAnnotation: (annotationId: string | null) => void;
+  /** Set the canvas interaction mode. */
+  setCanvasMode: (mode: 'pan' | 'select') => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +323,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   lastSelectedColumn: null,
   editingColumn: null,
   selectedAnnotation: null,
+  canvasMode: 'pan',
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -343,6 +352,9 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
       ? {
           discrepancyVisible: false, discrepancyCompareStage: null, discrepancyReport: null,
           syncMode: false, syncSelections: {}, manifestStale: false, syncPlanGenerated: null,
+          // Reset canvas mode to pan on stage switch; select mode is short-lived UI intent
+          // and shouldn't persist across a stage change (physical is read-only).
+          canvasMode: 'pan' as const,
         }
       : {}),
   })),
@@ -480,4 +492,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     lastSelectedColumn: null,
     editingColumn: null,
   }),
+
+  setCanvasMode: (mode) => set({ canvasMode: mode }),
 }));

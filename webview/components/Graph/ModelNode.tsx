@@ -573,7 +573,7 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
 
   return (
     <div
-      className={`model-node model-node--${stageClass}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}`}
+      className={`model-node model-node--${stageClass}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}`}
       data-model-name={modelName}
       onContextMenu={handleContextMenu}
     >

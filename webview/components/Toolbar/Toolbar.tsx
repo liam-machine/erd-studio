@@ -76,6 +76,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const setSearchQuery = useEditorStore((s) => s.setSearchQuery);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
+  const canvasMode = useEditorStore((s) => s.canvasMode);
+  const setCanvasMode = useEditorStore((s) => s.setCanvasMode);
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
   // Get current zoom level from React Flow store
@@ -686,6 +688,21 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             {allExpanded ? '⊟' : '⊞'}
           </button>
         </div>
+
+        {/* Canvas mode — select vs pan */}
+        {!domain?.readOnly && (
+          <div className="toolbar__section">
+            <button
+              className={`toolbar__button toolbar__button--tooltip${canvasMode === 'select' ? ' toolbar__button--active' : ''}`}
+              onClick={() => setCanvasMode(canvasMode === 'select' ? 'pan' : 'select')}
+              data-tooltip={canvasMode === 'select' ? 'Pan Mode' : 'Select Mode'}
+              aria-label="Toggle select mode"
+              aria-pressed={canvasMode === 'select'}
+            >
+              ⬚
+            </button>
+          </div>
+        )}
 
         {/* Discrepancy toggle */}
         {discrepancyOptions.length > 0 && (

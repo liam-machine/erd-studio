@@ -22,6 +22,7 @@ import {
   type OnSelectionChangeFunc,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import './App.css';
 
 import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
@@ -111,6 +112,8 @@ function EditorCanvas() {
   const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
   const selectedAnnotation = useEditorStore((s) => s.selectedAnnotation);
   const selectAnnotation = useEditorStore((s) => s.selectAnnotation);
+  const canvasMode = useEditorStore((s) => s.canvasMode);
+  const setCanvasMode = useEditorStore((s) => s.setCanvasMode);
   const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
   const updateAnnotationLinkDrag = useEditorStore((s) => s.updateAnnotationLinkDrag);
   const endAnnotationLinkDrag = useEditorStore((s) => s.endAnnotationLinkDrag);
@@ -378,6 +381,12 @@ function EditorCanvas() {
           setSelectedEdges([]);
           setSelectedEdge(null);
           setHighlightedColumns(new Set());
+          return;
+        }
+
+        // Nothing selected — if in select mode, return to pan mode
+        if (canvasMode === 'select') {
+          setCanvasMode('pan');
         }
         return;
       }
@@ -387,6 +396,21 @@ function EditorCanvas() {
         e.preventDefault();
         triggerAutoLayout();
         return;
+      }
+
+      // V / S: Canvas mode toggle (Figma-style)
+      // No modifier keys — only fires when no input has focus (guarded above).
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if ((e.key === 'v' || e.key === 'V') && canvasMode !== 'pan') {
+          e.preventDefault();
+          setCanvasMode('pan');
+          return;
+        }
+        if ((e.key === 's' || e.key === 'S') && canvasMode !== 'select' && domain && !domain.readOnly) {
+          e.preventDefault();
+          setCanvasMode('select');
+          return;
+        }
       }
 
       // Alt+1/2: Switch stage tabs
@@ -503,6 +527,8 @@ function EditorCanvas() {
     selectedColumns,
     clearColumnSelection,
     setEditingColumn,
+    canvasMode,
+    setCanvasMode,
     // Note: vscode is omitted as it's a stable ref from useVsCodeApi
   ]);
 
@@ -595,12 +621,18 @@ function EditorCanvas() {
         };
       });
 
-      // If we have a selected node, preserve the selection in the new nodes
-      if (currentSelectedNode) {
-        const selectedIdx = newNodes.findIndex((n) => n.id === currentSelectedNode);
-        if (selectedIdx !== -1) {
-          newNodes[selectedIdx] = { ...newNodes[selectedIdx], selected: true };
-        }
+      // Preserve React Flow's current selection across this rebuild.
+      // Without this, any store change that re-triggers this effect (e.g. setSelectedEdges from
+      // onSelectionChange firing during a rubber-band drag) wipes the multi-selection React Flow
+      // just applied via applyNodeChanges. Read store state directly to avoid adding `nodes` to
+      // the dep array (which would cause an infinite loop since we call setNodes below).
+      const preserveSelected = new Set<string>();
+      if (currentSelectedNode) preserveSelected.add(currentSelectedNode);
+      for (const n of useEditorStore.getState().nodes) {
+        if (n.selected) preserveSelected.add(n.id);
+      }
+      if (preserveSelected.size > 0) {
+        newNodes = newNodes.map((n) => preserveSelected.has(n.id) ? { ...n, selected: true } : n);
       }
 
       // Clear stale edge selections (edges that no longer exist after domain update)
@@ -852,8 +884,12 @@ function EditorCanvas() {
 
   // --- Graph canvas ----------------------------------------------------------
 
+  const selectModeActive = canvasMode === 'select' && !domain.readOnly;
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div
+      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}`}
+      style={{ width: '100%', height: '100%' }}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -873,8 +909,8 @@ function EditorCanvas() {
         selectionMode={SelectionMode.Partial}
         zoomOnDoubleClick={domain.readOnly}
         nodesDraggable={domain.positionDraggable ?? !domain.readOnly}
-        panOnDrag={!shiftHeld}
-        selectionOnDrag={shiftHeld && !domain.readOnly}
+        panOnDrag={!selectModeActive && !shiftHeld}
+        selectionOnDrag={(selectModeActive || shiftHeld) && !domain.readOnly}
         selectionKeyCode={null}
         multiSelectionKeyCode="Shift"
         proOptions={{ hideAttribution: true }}
