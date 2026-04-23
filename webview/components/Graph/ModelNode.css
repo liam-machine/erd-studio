@@ -44,6 +44,20 @@
   box-shadow: 0 0 0 2px var(--discrepancy-extra), 0 0 12px 2px rgba(245, 158, 11, 0.35);
 }
 
+/* Selected — stage-coloured ring + glow. Applies to single and multi-select. */
+.model-node--selected {
+  box-shadow: 0 0 0 2px var(--stage-logical), 0 0 10px 1px rgba(96, 165, 250, 0.4);
+}
+
+.model-node--physical.model-node--selected {
+  box-shadow: 0 0 0 2px var(--stage-physical), 0 0 10px 1px rgba(34, 197, 94, 0.4);
+}
+
+/* Discrepancy-extra takes visual priority over selected so the amber glow wins. */
+.model-node--disc-extra.model-node--selected {
+  box-shadow: 0 0 0 2px var(--discrepancy-extra), 0 0 12px 2px rgba(245, 158, 11, 0.35);
+}
+
 /* Search dimming (F402) — applied when node doesn't match search query */
 .model-node--dimmed {
   opacity: 0.25;
