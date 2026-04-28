@@ -19,7 +19,6 @@ import { LogicalModelService } from './services/logicalModelService';
 import { MigrationService } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
-import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -42,9 +41,6 @@ function findDbtProjectRoot(): string | undefined {
 
   return undefined;
 }
-
-/** globalState key for the last-activated extension version. */
-const LAST_ACTIVATED_VERSION_KEY = 'lastActivatedVersion';
 
 // ---------------------------------------------------------------------------
 // Shared helper functions
@@ -149,26 +145,8 @@ const LAYER_COLOR_OPTIONS = [
   { label: '$(edit) Custom hex color...', value: 'custom' },
 ];
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export function activate(context: vscode.ExtensionContext): void {
   console.log('ERD Studio is now active');
-
-  // Auto-recover open canvases after an extension update.
-  //
-  // VS Code 1.88+ restarts the extension host without a window reload when an
-  // extension version changes. The new host has no message handler bound for
-  // existing custom-editor webviews, so any open domain canvas becomes
-  // orphaned. The only true fix is a window reload — we trigger it ourselves
-  // (after saving all open work) so the user doesn't have to.
-  //
-  // The version write is awaited before the comparison so a crash between
-  // here and the reload can't leave us looping the recovery on next start.
-  const currentVersion = context.extension.packageJSON.version as string;
-  const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
-  await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
-  if (previousVersion && previousVersion !== currentVersion && hasOpenDomainCanvas()) {
-    await saveAllAndReload(`ERD Studio updated to v${currentVersion}`);
-    return;
-  }
 
   const workspaceRoot = findDbtProjectRoot();
   if (!workspaceRoot) {
@@ -414,7 +392,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       return treeView;
     })(),
-    vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, editorProvider),
+    vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
     vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.window.registerFileDecorationProvider(layerDecorationProvider),
     modelLibraryProvider,
@@ -451,7 +429,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await vscode.commands.executeCommand(
         'vscode.openWith',
         fileUri,
-        DOMAIN_EDITOR_VIEW_TYPE,
+        'dbtSemantic.domainEditor',
       );
       if (stage === 'physical') {
         editorProvider.switchStageForUri(fileUri, 'physical');
@@ -565,7 +543,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await vscode.commands.executeCommand(
           'vscode.openWith',
           vscode.Uri.file(filePath),
-          DOMAIN_EDITOR_VIEW_TYPE,
+          'dbtSemantic.domainEditor',
         );
       },
     ),
@@ -668,7 +646,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         // Auto-open renamed domain
         selectorsService.scheduleRegenerate();
-        await vscode.commands.executeCommand('vscode.openWith', newFileUri, DOMAIN_EDITOR_VIEW_TYPE);
+        await vscode.commands.executeCommand('vscode.openWith', newFileUri, 'dbtSemantic.domainEditor');
       },
     ),
     vscode.commands.registerCommand('dbtSemantic.refreshManifest', async () => {
