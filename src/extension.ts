@@ -19,6 +19,7 @@ import { LogicalModelService } from './services/logicalModelService';
 import { MigrationService } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
+import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 
 /**
  * Find the dbt project root by searching workspace folders for dbt_project.yml.
@@ -41,6 +42,9 @@ function findDbtProjectRoot(): string | undefined {
 
   return undefined;
 }
+
+/** globalState key for the last-activated extension version. */
+const LAST_ACTIVATED_VERSION_KEY = 'lastActivatedVersion';
 
 // ---------------------------------------------------------------------------
 // Shared helper functions
@@ -145,8 +149,26 @@ const LAYER_COLOR_OPTIONS = [
   { label: '$(edit) Custom hex color...', value: 'custom' },
 ];
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('ERD Studio is now active');
+
+  // Auto-recover open canvases after an extension update.
+  //
+  // VS Code 1.88+ restarts the extension host without a window reload when an
+  // extension version changes. The new host has no message handler bound for
+  // existing custom-editor webviews, so any open domain canvas becomes
+  // orphaned. The only true fix is a window reload — we trigger it ourselves
+  // (after saving all open work) so the user doesn't have to.
+  //
+  // The version write is awaited before the comparison so a crash between
+  // here and the reload can't leave us looping the recovery on next start.
+  const currentVersion = context.extension.packageJSON.version as string;
+  const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
+  await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
+  if (previousVersion && previousVersion !== currentVersion && hasOpenDomainCanvas()) {
+    await saveAllAndReload(`ERD Studio updated to v${currentVersion}`);
+    return;
+  }
 
   const workspaceRoot = findDbtProjectRoot();
   if (!workspaceRoot) {
@@ -169,7 +191,58 @@ export function activate(context: vscode.ExtensionContext): void {
   const manifestService = new ManifestService();
   const ymlParserService = new YmlParserService();
   const templateService = new TemplateService();
-  const selectorsService = new SelectorsService(domainService, workspaceRoot, semanticDir);
+  // Status bar item shown while selectors.yml is out of sync (skipped writes).
+  // Hidden as soon as a regenerate succeeds.
+  let selectorsOutOfSyncStatus: vscode.StatusBarItem | undefined;
+
+  const selectorsService = new SelectorsService(
+    domainService,
+    workspaceRoot,
+    semanticDir,
+    {
+      isFileDirtyInEditor: (filePath) =>
+        vscode.workspace.textDocuments.some(
+          doc => doc.uri.fsPath === filePath && doc.isDirty,
+        ),
+      onSkipped: (info) => {
+        const message = info.reason === 'unsaved-edits'
+          ? 'selectors.yml has unsaved edits in your editor — ERD Studio won\'t overwrite to avoid losing your work. ' +
+            'Save (or revert) the file, then click "Resync now" to update selectors.yml.'
+          : `selectors.yml has a YAML syntax error and can't be safely regenerated: ${info.detail} ` +
+            'Fix the syntax error in selectors.yml, save the file, then click "Resync now" to update.';
+
+        void vscode.window
+          .showWarningMessage(message, 'Show file', 'Resync now')
+          .then((choice) => {
+            if (choice === 'Show file') {
+              void vscode.window.showTextDocument(vscode.Uri.file(info.filePath));
+            } else if (choice === 'Resync now') {
+              void vscode.commands.executeCommand('dbtSemantic.syncDomainTags');
+            }
+          });
+
+        if (!selectorsOutOfSyncStatus) {
+          selectorsOutOfSyncStatus = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Right,
+            0,
+          );
+          selectorsOutOfSyncStatus.command = 'dbtSemantic.syncDomainTags';
+          selectorsOutOfSyncStatus.backgroundColor = new vscode.ThemeColor(
+            'statusBarItem.warningBackground',
+          );
+          context.subscriptions.push(selectorsOutOfSyncStatus);
+        }
+        selectorsOutOfSyncStatus.text = '$(warning) selectors.yml out of sync';
+        selectorsOutOfSyncStatus.tooltip = info.reason === 'unsaved-edits'
+          ? 'selectors.yml has unsaved edits — save the file, then click to resync.'
+          : `selectors.yml is malformed (${info.detail.split('\n')[0]}) — fix the YAML, then click to resync.`;
+        selectorsOutOfSyncStatus.show();
+      },
+      onWritten: () => {
+        selectorsOutOfSyncStatus?.hide();
+      },
+    },
+  );
   const legacyTagCleanupService = new LegacyTagCleanupService(workspaceRoot);
 
   // Ensure selectors.yml exists and is up to date at activation time so a
@@ -341,7 +414,7 @@ export function activate(context: vscode.ExtensionContext): void {
       });
       return treeView;
     })(),
-    vscode.window.registerCustomEditorProvider('dbtSemantic.domainEditor', editorProvider),
+    vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, editorProvider),
     vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.window.registerFileDecorationProvider(layerDecorationProvider),
     modelLibraryProvider,
@@ -378,7 +451,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand(
         'vscode.openWith',
         fileUri,
-        'dbtSemantic.domainEditor',
+        DOMAIN_EDITOR_VIEW_TYPE,
       );
       if (stage === 'physical') {
         editorProvider.switchStageForUri(fileUri, 'physical');
@@ -492,7 +565,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await vscode.commands.executeCommand(
           'vscode.openWith',
           vscode.Uri.file(filePath),
-          'dbtSemantic.domainEditor',
+          DOMAIN_EDITOR_VIEW_TYPE,
         );
       },
     ),
@@ -595,7 +668,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
         // Auto-open renamed domain
         selectorsService.scheduleRegenerate();
-        await vscode.commands.executeCommand('vscode.openWith', newFileUri, 'dbtSemantic.domainEditor');
+        await vscode.commands.executeCommand('vscode.openWith', newFileUri, DOMAIN_EDITOR_VIEW_TYPE);
       },
     ),
     vscode.commands.registerCommand('dbtSemantic.refreshManifest', async () => {
@@ -627,10 +700,14 @@ export function activate(context: vscode.ExtensionContext): void {
         async () => {
           try {
             const result = selectorsService.regenerate();
-            const relPath = path.relative(workspaceRoot, result.filePath);
-            void vscode.window.showInformationMessage(
-              `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} model reference(s) to ${relPath}.`,
-            );
+            if (result.status === 'written') {
+              const relPath = path.relative(workspaceRoot, result.filePath);
+              void vscode.window.showInformationMessage(
+                `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} model reference(s) to ${relPath}.`,
+              );
+            }
+            // For 'skipped': the onSkipped hook has already shown the
+            // out-of-sync notification + status bar. No success toast.
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             void vscode.window.showErrorMessage(`Failed to regenerate selectors.yml: ${msg}`);
