@@ -169,7 +169,58 @@ export function activate(context: vscode.ExtensionContext): void {
   const manifestService = new ManifestService();
   const ymlParserService = new YmlParserService();
   const templateService = new TemplateService();
-  const selectorsService = new SelectorsService(domainService, workspaceRoot, semanticDir);
+  // Status bar item shown while selectors.yml is out of sync (skipped writes).
+  // Hidden as soon as a regenerate succeeds.
+  let selectorsOutOfSyncStatus: vscode.StatusBarItem | undefined;
+
+  const selectorsService = new SelectorsService(
+    domainService,
+    workspaceRoot,
+    semanticDir,
+    {
+      isFileDirtyInEditor: (filePath) =>
+        vscode.workspace.textDocuments.some(
+          doc => doc.uri.fsPath === filePath && doc.isDirty,
+        ),
+      onSkipped: (info) => {
+        const message = info.reason === 'unsaved-edits'
+          ? 'selectors.yml has unsaved edits in your editor — ERD Studio won\'t overwrite to avoid losing your work. ' +
+            'Save (or revert) the file, then click "Resync now" to update selectors.yml.'
+          : `selectors.yml has a YAML syntax error and can't be safely regenerated: ${info.detail} ` +
+            'Fix the syntax error in selectors.yml, save the file, then click "Resync now" to update.';
+
+        void vscode.window
+          .showWarningMessage(message, 'Show file', 'Resync now')
+          .then((choice) => {
+            if (choice === 'Show file') {
+              void vscode.window.showTextDocument(vscode.Uri.file(info.filePath));
+            } else if (choice === 'Resync now') {
+              void vscode.commands.executeCommand('dbtSemantic.syncDomainTags');
+            }
+          });
+
+        if (!selectorsOutOfSyncStatus) {
+          selectorsOutOfSyncStatus = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Right,
+            0,
+          );
+          selectorsOutOfSyncStatus.command = 'dbtSemantic.syncDomainTags';
+          selectorsOutOfSyncStatus.backgroundColor = new vscode.ThemeColor(
+            'statusBarItem.warningBackground',
+          );
+          context.subscriptions.push(selectorsOutOfSyncStatus);
+        }
+        selectorsOutOfSyncStatus.text = '$(warning) selectors.yml out of sync';
+        selectorsOutOfSyncStatus.tooltip = info.reason === 'unsaved-edits'
+          ? 'selectors.yml has unsaved edits — save the file, then click to resync.'
+          : `selectors.yml is malformed (${info.detail.split('\n')[0]}) — fix the YAML, then click to resync.`;
+        selectorsOutOfSyncStatus.show();
+      },
+      onWritten: () => {
+        selectorsOutOfSyncStatus?.hide();
+      },
+    },
+  );
   const legacyTagCleanupService = new LegacyTagCleanupService(workspaceRoot);
 
   // Ensure selectors.yml exists and is up to date at activation time so a
@@ -627,10 +678,14 @@ export function activate(context: vscode.ExtensionContext): void {
         async () => {
           try {
             const result = selectorsService.regenerate();
-            const relPath = path.relative(workspaceRoot, result.filePath);
-            void vscode.window.showInformationMessage(
-              `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} model reference(s) to ${relPath}.`,
-            );
+            if (result.status === 'written') {
+              const relPath = path.relative(workspaceRoot, result.filePath);
+              void vscode.window.showInformationMessage(
+                `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} model reference(s) to ${relPath}.`,
+              );
+            }
+            // For 'skipped': the onSkipped hook has already shown the
+            // out-of-sync notification + status bar. No success toast.
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             void vscode.window.showErrorMessage(`Failed to regenerate selectors.yml: ${msg}`);
