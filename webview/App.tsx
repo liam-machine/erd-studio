@@ -47,6 +47,7 @@ import { Legend } from './components/Legend/Legend';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
+import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
 import { transformDomain } from './lib/graphTransformer';
 import { stageNodeColor } from './lib/stageColors';
 import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from './types/graph';
@@ -268,6 +269,25 @@ function EditorCanvas() {
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
+
+  // Detect orphaned-canvas state: if `domainLoaded` doesn't arrive within
+  // the boot grace period, the extension host probably can't reach this
+  // panel (typically because it was updated/restarted while the panel was
+  // open). Activation-time auto-recovery in the host should usually fix
+  // this before the overlay ever shows — this is a safety net for edge
+  // cases like extension disable/enable mid-session.
+  const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
+  useEffect(() => {
+    if (domain) return;
+    const overlayTimer = window.setTimeout(() => {
+      setShowReconnectOverlay(true);
+    }, 5000);
+    return () => clearTimeout(overlayTimer);
+  }, [domain]);
+
+  const handleReconnect = useCallback(() => {
+    vscode.postMessage({ type: 'requestReload' });
+  }, [vscode]);
 
   // Unified keyboard shortcut handler (Escape, Delete/Backspace, Ctrl+F)
   useEffect(() => {
@@ -876,9 +896,12 @@ function EditorCanvas() {
 
   if (!domain) {
     return (
-      <div className="editor-message">
-        <p>Loading domain&hellip;</p>
-      </div>
+      <>
+        <div className="editor-message">
+          <p>Loading domain&hellip;</p>
+        </div>
+        {showReconnectOverlay && <ReconnectOverlay onReload={handleReconnect} />}
+      </>
     );
   }
 

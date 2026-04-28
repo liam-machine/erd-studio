@@ -433,6 +433,16 @@ export interface ViewFileMessage {
   type: 'viewFile';
 }
 
+/**
+ * Request the extension to save all dirty editors and reload the window.
+ * Sent by the webview when it detects it has become orphaned (e.g. after an
+ * extension update tore down the previous extension host instance and the new
+ * one has no message handler bound for this panel).
+ */
+export interface RequestReloadMessage {
+  type: 'requestReload';
+}
+
 // ---------------------------------------------------------------------------
 // Webview → Extension: Sync reconciliation messages
 // ---------------------------------------------------------------------------
@@ -562,6 +572,7 @@ export type WebviewMessage =
   | ToggleDiscrepancyMessage
   | ReorderColumnsMessage
   | ViewFileMessage
+  | RequestReloadMessage
   | CheckManifestStalenessMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage

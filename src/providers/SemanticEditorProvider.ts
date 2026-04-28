@@ -28,6 +28,7 @@ import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
 import { checkManifestStaleness } from '../services/stalenessService';
+import { saveAllAndReload } from '../services/recoveryService';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
@@ -237,6 +238,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'refreshManifest', 'undo', 'redo', 'updateViewConfig', 'dismissWelcome',
           'viewFile', 'checkManifestStaleness', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'updateAnnotationPosition',
+          'requestReload',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           return;
@@ -248,6 +250,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         switch (message.type) {
           case 'ready':
             await this.sendDomainData(document, webviewPanel.webview, panelKey);
+            break;
+          case 'requestReload':
+            // Webview detected it was orphaned (e.g. extension update before
+            // activation auto-recovery could fire). Save & reload safely.
+            saveAllAndReload('ERD Studio canvas connection lost').catch(err => {
+              console.error('[ERD Studio] requestReload handling failed:', err);
+            });
             break;
           case 'dismissWelcome':
             await this.context.globalState.update('welcomeDismissed', true);
@@ -2915,9 +2924,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   private getHtmlForWebview(webview: vscode.Webview): string {
     const nonce = crypto.randomBytes(16).toString('base64');
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'),
-    );
+    const scriptOnDisk = vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js');
+
+    // Worst case: an extension update removed the previous version's directory
+    // before this panel was reattached. The cached <script src> would 404 and
+    // leave a blank canvas with no JS to surface the problem. Render a static
+    // fallback that prompts the user to reload.
+    if (!fs.existsSync(scriptOnDisk.fsPath)) {
+      return /* html */ `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ERD Studio</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';">
+</head>
+<body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground);">
+  <h2 style="margin-top: 0;">ERD Studio was updated</h2>
+  <p>This canvas can't render until the window reloads to pick up the new extension files.</p>
+  <p>Run <strong>Developer: Reload Window</strong> from the Command Palette (⌘⇧P / Ctrl+Shift+P).</p>
+</body>
+</html>`;
+    }
+
+    const scriptUri = webview.asWebviewUri(scriptOnDisk);
     const styleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'),
     );

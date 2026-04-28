@@ -30,6 +30,7 @@ export const window = {
   showErrorMessage: async () => undefined,
   showInputBox: async () => undefined,
   showQuickPick: async () => undefined,
+  setStatusBarMessage: (_message: string, _hideAfterTimeout?: number) => ({ dispose: () => {} }),
   createOutputChannel: () => ({
     appendLine: () => {},
     show: () => {},
@@ -38,7 +39,13 @@ export const window = {
   registerTreeDataProvider: () => ({ dispose: () => {} }),
   registerCustomEditorProvider: () => ({ dispose: () => {} }),
   createTreeView: () => ({ dispose: () => {} }),
+  tabGroups: { all: [] as Array<{ tabs: Array<{ input: unknown }> }> },
 };
+
+/** Minimal mock of vscode.TabInputCustom for the recovery service. */
+export class TabInputCustom {
+  constructor(public readonly uri: unknown, public readonly viewType: string) {}
+}
 
 export const commands = {
   registerCommand: () => ({ dispose: () => {} }),
