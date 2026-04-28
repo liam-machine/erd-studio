@@ -1,0 +1,60 @@
+.reconnect-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.reconnect-overlay__panel {
+  max-width: 420px;
+  padding: 20px 24px;
+
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-left: 3px solid var(--warning-fg);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  color: var(--editor-fg);
+  font-size: 13px;
+}
+
+.reconnect-overlay__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.reconnect-overlay__body {
+  margin: 0 0 16px;
+  line-height: 1.5;
+  opacity: 0.9;
+}
+
+.reconnect-overlay__button {
+  padding: 6px 14px;
+
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: none;
+  border-radius: 3px;
+
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+
+  transition: background 0.1s ease;
+}
+
+.reconnect-overlay__button:hover {
+  background: var(--button-hover-bg);
+}
+
+.reconnect-overlay__button:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
