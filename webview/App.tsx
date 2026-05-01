@@ -451,6 +451,64 @@ function EditorCanvas() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!domain || domain.readOnly) return;
 
+        // Priority -1: Multi-select delete (2+ items selected) — immediate, no confirmation.
+        // Read React Flow's selection from the nodes array (source of truth for multi-select).
+        const allSelectedNodes = useEditorStore.getState().nodes.filter((n) => n.selected);
+        const selectedModelNames = allSelectedNodes
+          .filter((n): n is ModelFlowNode => n.type === 'model')
+          .map((n) => n.data.modelName);
+        // graphTransformer namespaces annotation node IDs as `annotation-${id}` —
+        // unwrap to the raw domain ID for the wire protocol.
+        const selectedAnnotationIds = allSelectedNodes
+          .filter((n): n is AnnotationFlowNode => n.type === 'annotation')
+          .map((n) => n.data.annotationId);
+        const totalSelected =
+          selectedModelNames.length + selectedAnnotationIds.length + selectedEdges.length;
+
+        if (totalSelected >= 2) {
+          e.preventDefault();
+
+          if (selectedModelNames.length > 0) {
+            vscode.postMessage({
+              type: 'removeModels',
+              payload: { modelNames: selectedModelNames },
+            });
+          }
+
+          for (const id of selectedAnnotationIds) {
+            vscode.postMessage({ type: 'removeAnnotation', payload: { id } });
+          }
+
+          // Skip edges that the model batch will cascade.
+          for (const edgeId of selectedEdges) {
+            const rel = domain.relationships.find(
+              (r) =>
+                `fk-${r.fromModel}-${r.fromColumn}-${r.toModel}-${r.toColumn}` === edgeId,
+            );
+            if (
+              !rel ||
+              selectedModelNames.includes(rel.fromModel) ||
+              selectedModelNames.includes(rel.toModel)
+            ) {
+              continue;
+            }
+            vscode.postMessage({
+              type: 'removeRelationship',
+              payload: {
+                fromModel: rel.fromModel,
+                fromColumn: rel.fromColumn,
+                toModel: rel.toModel,
+                toColumn: rel.toColumn,
+              },
+            });
+          }
+
+          selectNode(null);
+          selectAnnotation(null);
+          setSelectedEdges([]);
+          return;
+        }
+
         // Priority 0: Delete selected annotation (no confirmation — undo exists)
         if (selectedAnnotation) {
           e.preventDefault();
@@ -936,6 +994,7 @@ function EditorCanvas() {
         selectionOnDrag={(selectModeActive || shiftHeld) && !domain.readOnly}
         selectionKeyCode={null}
         multiSelectionKeyCode="Shift"
+        deleteKeyCode={null}
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />

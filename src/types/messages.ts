@@ -195,6 +195,18 @@ export interface RemoveModelMessage {
 }
 
 /**
+ * Request to remove multiple models from the domain in a single edit.
+ * Cascades all relationships referencing any of the listed models and
+ * cleans up their viewConfig positions. One WorkspaceEdit, one undo step.
+ */
+export interface RemoveModelsMessage {
+  type: 'removeModels';
+  payload: {
+    modelNames: string[];
+  };
+}
+
+/**
  * Request to remove an FK relationship.
  * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
  */
@@ -552,6 +564,7 @@ export type WebviewMessage =
   | AddRelationshipMessage
   | RenameModelMessage
   | RemoveModelMessage
+  | RemoveModelsMessage
   | RemoveRelationshipMessage
   | UpdateRelationshipMessage
   | EditRelationshipMessage
