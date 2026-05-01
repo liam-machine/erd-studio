@@ -340,6 +340,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'removeModels': {
+            const payload = (message as { payload?: { modelNames: string[] } }).payload;
+            if (payload && payload.modelNames.length > 0) {
+              await this.queueEdit(panelKey, () =>
+                this.handleRemoveModels(document, webviewPanel.webview, payload, activeStage));
+            }
+            break;
+          }
           case 'removeRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string } }).payload;
             if (payload) {
@@ -1646,81 +1654,116 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /** Single-model removal — thin wrapper over the batch handler. */
   private async handleRemoveModel(
     document: vscode.TextDocument,
     webview: vscode.Webview,
     payload: { modelName: string },
     stage: 'logical',
   ): Promise<void> {
+    return this.handleRemoveModels(
+      document,
+      webview,
+      { modelNames: [payload.modelName] },
+      stage,
+    );
+  }
+
+  /**
+   * Batch-remove one or more models in a single document edit.
+   * Cascades all relationships referencing any listed model and removes their
+   * viewConfig positions. Produces one WorkspaceEdit (one undo step, one save)
+   * regardless of how many models are deleted.
+   *
+   * In V5, after the domain is updated, prompts the user once to optionally
+   * delete the underlying logical-models/*.yml files for any names that exist
+   * on disk. Singular/plural copy is chosen automatically.
+   */
+  private async handleRemoveModels(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: { modelNames: string[] },
+    stage: 'logical',
+  ): Promise<void> {
+    const namesSet = new Set(payload.modelNames);
+    if (namesSet.size === 0) return;
+    const isSingle = namesSet.size === 1;
+    const errorLabel = isSingle ? 'model' : 'models';
+
     try {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
-      const section = this.getStageSection(parsed, stage);
 
-      // V5: remove reference from domain + ask about deleting model file
       if (this.isDomainV5(parsed)) {
-        // Remove reference, relationships, and position from domain
         const success = await this.applyDomainEdit(
           document,
           (sec, p) => {
-            const names = (sec.models ?? []) as string[];
-            const idx = names.indexOf(payload.modelName);
-            if (idx !== -1) names.splice(idx, 1);
+            const models = (sec.models ?? []) as string[];
+            sec.models = models.filter((name) => !namesSet.has(name));
 
             const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
             sec.relationships = relationships.filter(
-              (rel) => rel.fromModel !== payload.modelName && rel.toModel !== payload.modelName,
+              (rel) =>
+                !namesSet.has(rel.fromModel as string) &&
+                !namesSet.has(rel.toModel as string),
             );
 
             const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
             const positions = (vc.positions ?? {}) as Record<string, unknown>;
-            delete positions[payload.modelName];
+            for (const name of namesSet) delete positions[name];
           },
           { refreshWebview: true, webview, stage },
         );
 
         if (!success) {
-          webview.postMessage({ type: 'error', payload: { message: 'Failed to remove model.' } });
+          webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${errorLabel}.` } });
           return;
         }
 
         this.selectorsService.scheduleRegenerate();
 
-        // Ask: remove from domain only, or delete model file entirely?
-        if (this.logicalModelService.modelExists(payload.modelName)) {
-          void vscode.window.showInformationMessage(
-            `Model "${payload.modelName}" removed from this domain. Delete the model file entirely?`,
-            'Delete Model File',
-            'Keep File',
-          ).then((choice) => {
-            if (choice === 'Delete Model File') {
-              this.logicalModelService.deleteModel(payload.modelName);
-              vscode.window.showInformationMessage(`Deleted logical-models/${payload.modelName}.yml`);
-            }
-          });
+        // Single batched prompt for any underlying .yml files.
+        const filesToOffer = [...namesSet].filter((name) =>
+          this.logicalModelService.modelExists(name),
+        );
+        if (filesToOffer.length > 0) {
+          const fileIsSingle = filesToOffer.length === 1;
+          const prompt = fileIsSingle
+            ? `Model "${filesToOffer[0]}" removed from this domain. Delete the model file entirely?`
+            : `${filesToOffer.length} models removed from this domain. Delete their model files entirely?`;
+          const deleteLabel = fileIsSingle ? 'Delete Model File' : 'Delete Model Files';
+          const keepLabel = fileIsSingle ? 'Keep File' : 'Keep Files';
+          void vscode.window
+            .showInformationMessage(prompt, deleteLabel, keepLabel)
+            .then((choice) => {
+              if (choice !== deleteLabel) return;
+              for (const name of filesToOffer) {
+                this.logicalModelService.deleteModel(name);
+              }
+              const summary = fileIsSingle
+                ? `Deleted logical-models/${filesToOffer[0]}.yml`
+                : `Deleted ${filesToOffer.length} model files`;
+              vscode.window.showInformationMessage(summary);
+            });
         }
         return;
       }
 
       // V4: legacy inline path
+      const section = this.getStageSection(parsed, stage);
       const models = (section.models ?? []) as Array<Record<string, unknown>>;
-      const modelIndex = models.findIndex((m) => m.name === payload.modelName);
-      if (modelIndex === -1) {
-        webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found.` } });
-        return;
-      }
-
-      models.splice(modelIndex, 1);
-      section.models = models;
+      section.models = models.filter((m) => !namesSet.has(m.name as string));
 
       const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
       section.relationships = relationships.filter(
-        (rel) => rel.fromModel !== payload.modelName && rel.toModel !== payload.modelName,
+        (rel) =>
+          !namesSet.has(rel.fromModel as string) &&
+          !namesSet.has(rel.toModel as string),
       );
 
       const viewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
       const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
-      delete positions[payload.modelName];
+      for (const name of namesSet) delete positions[name];
       viewConfig.positions = positions;
       parsed.viewConfig = viewConfig;
 
@@ -1742,13 +1785,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
       } else {
         this.pendingUpdates.delete(document.uri.toString());
-        webview.postMessage({ type: 'error', payload: { message: 'Failed to remove model.' } });
+        webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${errorLabel}.` } });
       }
     } catch (err) {
       this.pendingUpdates.delete(document.uri.toString());
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Remove model failed: ${message}`);
-      webview.postMessage({ type: 'error', payload: { message: `Failed to remove model: ${message}` } });
+      console.error(`[SemanticEditorProvider] Remove ${errorLabel} failed: ${message}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${errorLabel}: ${message}` } });
     }
   }
 
