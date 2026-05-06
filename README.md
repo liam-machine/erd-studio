@@ -23,9 +23,9 @@
 
 ## The problem
 
-When you build a data warehouse with AI, the context lives in three places that don't talk to each other:
+When you build a data warehouse with AI, the context lives in three places:
 
-- **Your modelling tool** (SqlDBM, Lucidchart, dbdiagram, a wiki) holds the relationships, cardinality, grain, SCD strategy, and design rationale.
+- **Your modelling tool** (SqlDBM, Erwin, DbSchema, Lucidchart, dbdiagram, a wiki) holds the relationships, cardinality, grain, SCD strategy, and design rationale.
 - **Your dbt repo** holds the SQL.
 - **Your head** is the only thing that connects them.
 
@@ -36,6 +36,8 @@ You *can* try to bridge it — wire your AI to your modelling tool's API, or pay
 ## The solution
 
 ERD Studio is a **free, AI-native alternative** that puts the semantic model in the **same repo as the SQL**, as a visual canvas both you and the AI can read and write.
+
+Under the hood, your model is plain YAML and JSON — AI reads it natively, git diffs it cleanly, and the canvas is just the human-readable view. No proprietary format, no lock-in.
 
 Other ERD tools draw the boxes and arrows. ERD Studio captures the modelling decisions behind them — grain, SCD types, additivity, model roles, design rationale — as first-class fields the AI can read, not freeform notes locked behind a vendor UI.
 
