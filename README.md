@@ -5,7 +5,7 @@
 <h1 align="center">ERD Studio</h1>
 
 <p align="center">
-  <strong>AI-native data warehouse modeling for dbt.</strong>
+  <strong>Close the context gap between your data model and your AI assistant.</strong>
 </p>
 
 <p align="center">
@@ -16,98 +16,104 @@
 </p>
 
 <p align="center">
-  Design your silver and gold layers on a visual canvas. Tell <a href="https://claude.ai/code">Claude Code</a> what to build.<br>
-  It writes the dbt models, schema YAML, and tests — no need to touch code or the diagram manually.<br>
-  Purpose-built for <strong>Claude Code + dbt</strong>. Other AI assistants supported.
-</p>
-
-<p align="center">
-  <code>AI builds your models</code> &nbsp;&middot;&nbsp;
-  <code>Physical stage from manifest</code> &nbsp;&middot;&nbsp;
-  <code>Real-time drift detection</code> &nbsp;&middot;&nbsp;
-  <code>AI sync reconciliation</code> &nbsp;&middot;&nbsp;
-  <code>40MB+ manifests</code>
-</p>
-
-<p align="center">
   <img src="https://raw.githubusercontent.com/liam-machine/erd-studio-assets/main/demo.gif" width="800" alt="ERD Studio demo — Logical stage, Physical stage, and Discrepancy overlay" />
 </p>
 
 ---
 
-## How It Works
+## The problem
 
-> **1.** Point your AI assistant at the bronze layer. It profiles the source tables against your requirements and drafts a logical **silver** ERD on the canvas
->
-> **2.** Prompt the AI to materialise the silver ERD into dbt models, schema YAML, and tests
->
-> **3.** Refine your requirements and have the AI compose a logical **gold** ERD — facts, dimensions, and business-aligned grain — on top of the silver foundation
->
-> **4.** Prompt the AI to generate the gold dbt code, with tests derived directly from the ERD's keys and relationships
+When you build a data warehouse with AI, the context lives in three places that don't talk to each other:
 
-ERD Studio ships with a baseline AI harness that teaches your assistant the domain format and sync workflow. Bring your own skills, prompts, and style guides on top so the generated dbt code reflects your team's naming conventions, modelling patterns, and review standards.
+- **Your modelling tool** (SqlDBM, Lucidchart, dbdiagram, a wiki) holds the relationships, grain, and design intent.
+- **Your dbt repo** holds the SQL.
+- **Your head** is the only thing that connects them.
+
+So every prompt becomes a re-explanation. You describe the join keys, the cardinality, the SCD strategy — again — and hope the AI doesn't drift. When it generates output, it's a wall of markdown that's hard to scan and easy to mis-review. Errors slip through. Then they slip into the warehouse.
+
+You *can* try to bridge it — wire your AI to your modelling tool's API, or pay for the tier that exposes one. But those integrations are fiddly to build, the licences add up, and your design context still lives behind another login.
+
+## The solution
+
+ERD Studio is a **free, AI-native alternative** that puts the semantic model in the **same repo as the SQL**, as a visual canvas both you and the AI can read and write.
+
+Point the AI at your bronze layer. It profiles the sources, drafts an ERD on the canvas against your requirements and modelling style (Kimball, Inmon, etc.), and you refine it. The AI then writes the dbt models, schema YAML, and tests from the design you signed off on.
+
+<br />
+
+<p align="center">
+  <strong>No more brain-as-middleware.</strong><br />
+  <em>The diagram is the prompt.</em>
+</p>
+
+<br />
+
+> *Today: built for medallion architectures on dbt projects. More frameworks coming.*
+
+Because the canvas lives in your repo, you also get:
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+#### Git version control on your design
+
+Model history and warehouse history commit together and stay in lockstep by default.
+
+</td>
+<td width="50%" valign="top">
+
+#### `selectors.yml` generated for free
+
+Each domain becomes a dbt selector and its models are auto-tagged — one selector refreshes the whole ERD on schedule.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+#### Diff against reality
+
+Compare your design to what dbt actually built (read from `manifest.json`, 40MB+ files supported). Mismatches are colour-coded on the canvas.
+
+</td>
+<td width="50%" valign="top">
+
+#### AI sync plans for drift
+
+When design and warehouse disagree, ERD Studio generates a JSON plan mapping every discrepancy to a concrete fix. Pick the source of truth per item; the AI executes it.
+
+</td>
+</tr>
+</table>
 
 ---
 
-## Two Stages, One Truth
-
-| Stage | Color | What It Shows | Editable? |
-|-------|-------|---------------|-----------|
-| **Logical** | Blue | Your design intent — full column definitions, model roles, relationships | Yes |
-| **Physical** | Green | What dbt built — models, relationships, and cardinality derived from `manifest.json` tests | Read-only |
-
-The physical stage is computed at runtime — no files on disk. Relationships come from dbt `relationships` tests, cardinality from `unique` tests.
-
-Toggle the **Diff** button to compare stages. Discrepancies are color-coded directly on the canvas: `matched` `extra` `missing` `type-mismatch` `cardinality-mismatch`. Missing models appear as translucent ghost nodes.
-
----
-
-## Reconciliation
-
-When design and warehouse drift apart, ERD Studio generates a **sync plan** — a JSON file mapping every discrepancy to a concrete fix. Choose which side is the ground truth per item, then let your AI assistant execute the plan: adding columns to YAML, writing dbt tests, updating domain JSON, or removing stale relationships.
-
----
-
-## AI Coding Harness
-
-One command installs a schema reference that teaches your AI the domain format, naming conventions, and editing rules:
-
-<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Install AI Coding Harness`
-
-| Assistant | What Gets Installed |
-|-----------|---------------------|
-| **Claude Code** | `.claude/skills/erd-studio/SKILL.md` + sync companion |
-| **GitHub Copilot** | `.github/instructions/erd-studio.instructions.md` |
-| **Google Gemini** | `.gemini/styleguide.md` |
-| **OpenAI Codex** | `AGENTS.md` section |
-
-Once installed, describe what you want in plain English — your AI creates models, generates dbt schema YAML with tests, executes sync plans, and validates naming conventions. No manual editing required.
-
----
-
-## Features
-
-- **Drag-to-relate** — long-press a column, drag to create FK relationships
-- **ELK auto-layout** with manual repositioning (<kbd>Shift</kbd>+<kbd>L</kbd>)
-- **Model templates** — dimension, fact, bridge, SCD2, or blank
-- **Domain tagging** — auto-tags dbt YAML with `domain:{name}` for scoped builds
-- **Medallion layers** — bronze, silver, gold, platinum, or custom
-- **Central model store** — one YAML per model, referenced across domains
-- **Full undo/redo** via VS Code `WorkspaceEdit`
-- **Handles 40MB+ manifests** with worker-thread parsing
-
----
-
-## Getting Started
+## Getting started
 
 **Prerequisites:** VS Code 1.85+ &bull; dbt project with `dbt_project.yml` &bull; `manifest.json` in `target/`
 
-1. **Open your dbt project** in VS Code
-2. **Click the ERD Studio icon** in the Activity Bar
-3. **Initialize** — follow the prompt to create the `erd-studio/` folder
-4. **Create a domain** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Create Semantic Domain`
-5. **Design** — add models, define columns, drag to relate
-6. **Install the AI harness** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Install AI Coding Harness`
+> **Quick install:** &nbsp;<kbd>Cmd</kbd>+<kbd>P</kbd> &nbsp;&rarr;&nbsp; <code>ext install liamwynne.erd-studio</code>
+
+1. **Install** ERD Studio from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio).
+2. **Open your dbt project** in VS Code and click the ERD Studio icon in the Activity Bar.
+3. **Initialize** — follow the prompt to create the `erd-studio/` folder.
+4. **Install the AI harness** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Install AI Coding Harness`.
+5. **Create a domain** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Create Semantic Domain`.
+6. **Tell your AI what to build** — describe the scope, point it at bronze, let it draft the ERD. Review on the canvas. Prompt it to generate the dbt code.
+
+The harness installs the right file for your assistant:
+
+| Assistant | Harness file |
+|-----------|--------------|
+| <img src="https://img.shields.io/badge/Claude_Code-D97757?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Code" /> | `.claude/skills/erd-studio/SKILL.md` |
+| <img src="https://img.shields.io/badge/GitHub_Copilot-24292e?style=for-the-badge&logo=githubcopilot&logoColor=white" alt="GitHub Copilot" /> | `.github/instructions/erd-studio.instructions.md` |
+| <img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Google Gemini" /> | `.gemini/styleguide.md` |
+| <img src="https://img.shields.io/badge/OpenAI_Codex-412991?style=for-the-badge&logo=openai&logoColor=white" alt="OpenAI Codex" /> | `AGENTS.md` |
+
+The baseline harness teaches your assistant the domain format and sync workflow — layer your own skills, prompts, and style guides on top so the generated dbt reflects your team's conventions.
+
+<sub><em>Prefer to drive it yourself? Drag a column to another model to create an FK, <kbd>Shift</kbd>+<kbd>L</kbd> for ELK auto-layout, full undo/redo via VS Code.</em></sub>
 
 ---
 
@@ -132,5 +138,14 @@ Once installed, describe what you want in plain English — your AI creates mode
 ---
 
 <p align="center">
-  <sub>MIT License &bull; Made for the dbt community</sub>
+  <a href="https://star-history.com/#liam-machine/erd-studio">
+    <img src="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date" width="600" alt="Star History" />
+  </a>
+</p>
+
+---
+
+<p align="center">
+  <sub>MIT License &bull; Made for the dbt community</sub><br />
+  <sub><a href="https://github.com/liam-machine/erd-studio/issues">Report a bug</a> &bull; <a href="https://github.com/liam-machine/erd-studio/discussions">Start a discussion</a></sub>
 </p>
