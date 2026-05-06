@@ -25,7 +25,7 @@
 
 When you build a data warehouse with AI, the context lives in three places that don't talk to each other:
 
-- **Your modelling tool** (SqlDBM, Lucidchart, dbdiagram, a wiki) holds the relationships, grain, and design intent.
+- **Your modelling tool** (SqlDBM, Lucidchart, dbdiagram, a wiki) holds the relationships, cardinality, grain, SCD strategy, and design rationale.
 - **Your dbt repo** holds the SQL.
 - **Your head** is the only thing that connects them.
 
@@ -37,7 +37,11 @@ You *can* try to bridge it — wire your AI to your modelling tool's API, or pay
 
 ERD Studio is a **free, AI-native alternative** that puts the semantic model in the **same repo as the SQL**, as a visual canvas both you and the AI can read and write.
 
+Other ERD tools draw the boxes and arrows. ERD Studio captures the modelling decisions behind them — grain, SCD types, additivity, model roles, design rationale — as first-class fields the AI can read, not freeform notes locked behind a vendor UI.
+
 Point the AI at your bronze layer. It profiles the sources, drafts an ERD on the canvas against your requirements and modelling style (Kimball, Inmon, etc.), and you refine it. The AI then writes the dbt models, schema YAML, and tests from the design you signed off on.
+
+Already have dbt models? Point ERD Studio at your `manifest.json` — it reads your existing relationship and uniqueness tests to seed an ERD on day one.
 
 <br />
 
@@ -63,9 +67,9 @@ Model history and warehouse history commit together and stay in lockstep by defa
 </td>
 <td width="50%" valign="top">
 
-#### `selectors.yml` generated for free
+#### Schedule a whole ERD as one dbt run
 
-Each domain becomes a dbt selector and its models are auto-tagged — one selector refreshes the whole ERD on schedule.
+ERD Studio writes a `selectors.yml` for you and auto-tags each diagram's models. Refresh every model in an ERD with a single command — no hand-managed tags, no selector config to wire up.
 
 </td>
 </tr>
@@ -111,37 +115,7 @@ The harness installs the right file for your assistant:
 | <img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Google Gemini" /> | `.gemini/styleguide.md` |
 | <img src="https://img.shields.io/badge/OpenAI_Codex-412991?style=for-the-badge&logo=openai&logoColor=white" alt="OpenAI Codex" /> | `AGENTS.md` |
 
-The baseline harness teaches your assistant the domain format and sync workflow — layer your own skills, prompts, and style guides on top so the generated dbt reflects your team's conventions.
-
-<sub><em>Prefer to drive it yourself? Drag a column to another model to create an FK, <kbd>Shift</kbd>+<kbd>L</kbd> for ELK auto-layout, full undo/redo via VS Code.</em></sub>
-
----
-
-## Settings
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `dbtSemantic.projectPath` | Path to dbt project root | Auto-detected |
-| `dbtSemantic.semanticDir` | Relative path to domain files | `erd-studio` |
-
----
-
-## Contributors
-
-<table>
-<tr>
-<td align="center"><a href="https://github.com/jkweee"><img src="https://github.com/jkweee.png" width="60" height="60" alt="Jason Kwe" /><br><sub><b>Jason Kwe</b></sub></a><br><sub>Core concept, UI/UX, testing & iteration</sub></td>
-<td align="center"><a href="https://github.com/ginny-jhg"><img src="https://github.com/ginny-jhg.png" width="60" height="60" alt="Ginny" /><br><sub><b>Ginny</b></sub></a><br><sub>Sync reconciliation, auto-layout,<br>depth partitioning, testing & iteration</sub></td>
-</tr>
-</table>
-
----
-
-<p align="center">
-  <a href="https://star-history.com/#liam-machine/erd-studio">
-    <img src="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date" width="600" alt="Star History" />
-  </a>
-</p>
+The baseline harness teaches your assistant the domain format and sync workflow, with a guard that blocks AI edits to `erd-studio/` until the spec is loaded. Layer your own skills, prompts, and style guides on top so the generated dbt reflects your team's conventions.
 
 ---
 
