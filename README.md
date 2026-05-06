@@ -63,9 +63,9 @@ Model history and warehouse history commit together and stay in lockstep by defa
 </td>
 <td width="50%" valign="top">
 
-#### `selectors.yml` generated for free
+#### Schedule a whole ERD as one dbt run
 
-Each domain becomes a dbt selector and its models are auto-tagged — one selector refreshes the whole ERD on schedule.
+ERD Studio writes a `selectors.yml` for you and auto-tags each diagram's models. Refresh every model in an ERD with a single command — no hand-managed tags, no selector config to wire up.
 
 </td>
 </tr>
@@ -112,36 +112,6 @@ The harness installs the right file for your assistant:
 | <img src="https://img.shields.io/badge/OpenAI_Codex-412991?style=for-the-badge&logo=openai&logoColor=white" alt="OpenAI Codex" /> | `AGENTS.md` |
 
 The baseline harness teaches your assistant the domain format and sync workflow — layer your own skills, prompts, and style guides on top so the generated dbt reflects your team's conventions.
-
-<sub><em>Prefer to drive it yourself? Drag a column to another model to create an FK, <kbd>Shift</kbd>+<kbd>L</kbd> for ELK auto-layout, full undo/redo via VS Code.</em></sub>
-
----
-
-## Settings
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `dbtSemantic.projectPath` | Path to dbt project root | Auto-detected |
-| `dbtSemantic.semanticDir` | Relative path to domain files | `erd-studio` |
-
----
-
-## Contributors
-
-<table>
-<tr>
-<td align="center"><a href="https://github.com/jkweee"><img src="https://github.com/jkweee.png" width="60" height="60" alt="Jason Kwe" /><br><sub><b>Jason Kwe</b></sub></a><br><sub>Core concept, UI/UX, testing & iteration</sub></td>
-<td align="center"><a href="https://github.com/ginny-jhg"><img src="https://github.com/ginny-jhg.png" width="60" height="60" alt="Ginny" /><br><sub><b>Ginny</b></sub></a><br><sub>Sync reconciliation, auto-layout,<br>depth partitioning, testing & iteration</sub></td>
-</tr>
-</table>
-
----
-
-<p align="center">
-  <a href="https://star-history.com/#liam-machine/erd-studio">
-    <img src="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date" width="600" alt="Star History" />
-  </a>
-</p>
 
 ---
 
