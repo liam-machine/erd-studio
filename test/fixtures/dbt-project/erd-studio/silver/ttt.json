@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 4,
+  "domain": "ttt",
+  "layer": "silver",
+  "description": "",
+  "modelFolder": "models/silver",
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}

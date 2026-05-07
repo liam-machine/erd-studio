@@ -1,0 +1,22 @@
+name: dim_location
+schema: silver
+description: Location dimension — exists only in logical (missing from conceptual and physical)
+grain: One row per location
+modelRole: domain-dim
+rationale:
+  purpose: k
+columns:
+  - name: location_idn
+    dataType: INT
+    description: Location surrogate key
+    isPrimaryKey: true
+  - name: site_name
+    dataType: VARCHAR
+    description: Site name
+    isNaturalKey: true
+  - name: latitude
+    dataType: JSON
+    description: GPS latitude
+  - name: longitude
+    dataType: FLOAT
+    description: GPS longitude

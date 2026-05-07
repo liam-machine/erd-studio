@@ -1,0 +1,734 @@
+/**
+ * Toolbar styles.
+ *
+ * Unified toolbar at top-center of the graph editor. Uses VS Code theme
+ * tokens from webview/styles/theme.css for consistent dark/light support.
+ */
+
+/* Outer container: stacks controls above stage tabs with a small gap */
+.toolbar-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Inner controls row */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* When toolbar is attached to stage tabs below, keep a small gap between them */
+.toolbar--attached-bottom {
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* ---------------------------------------------------------------------------
+   Sections
+   --------------------------------------------------------------------------- */
+
+.toolbar__section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--panel-border);
+  margin: 0 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   Domain info
+   --------------------------------------------------------------------------- */
+
+.toolbar__domain {
+  gap: 8px;
+}
+
+.toolbar__domain-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--editor-fg);
+  white-space: nowrap;
+}
+
+.toolbar__layer-badge {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.toolbar__layer-badge--bronze {
+  background: var(--layer-bronze-bg);
+  color: var(--layer-bronze);
+}
+
+.toolbar__layer-badge--silver {
+  background: var(--layer-silver-bg);
+  color: var(--layer-silver);
+}
+
+.toolbar__layer-badge--gold {
+  background: var(--layer-gold-bg);
+  color: var(--layer-gold);
+}
+
+/* ---------------------------------------------------------------------------
+   Zoom controls
+   --------------------------------------------------------------------------- */
+
+.toolbar__zoom {
+  gap: 2px;
+}
+
+.toolbar__zoom-level {
+  min-width: 42px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--editor-fg);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons
+   --------------------------------------------------------------------------- */
+
+.toolbar__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.toolbar__button:hover:not(:disabled) {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.toolbar__button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar__button--text {
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.toolbar__button--confirm {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.toolbar__button--primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Confirmation prompt
+   --------------------------------------------------------------------------- */
+
+.toolbar__confirm-label {
+  font-size: 12px;
+  color: var(--editor-fg);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Spinner
+   --------------------------------------------------------------------------- */
+
+.toolbar__spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: toolbar-spin 0.6s linear infinite;
+}
+
+@keyframes toolbar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Dropdown
+   --------------------------------------------------------------------------- */
+
+.toolbar__dropdown {
+  position: relative;
+}
+
+.toolbar__dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.toolbar__dropdown-trigger:hover {
+  background: var(--button-hover-bg);
+}
+
+.toolbar__dropdown-arrow {
+  font-size: 10px;
+  margin-left: 2px;
+  opacity: 0.8;
+}
+
+.toolbar__dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 160px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.toolbar__dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.toolbar__dropdown-item:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.toolbar__dropdown-item:not(:last-child) {
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.toolbar__dropdown-divider {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Search (F402)
+   --------------------------------------------------------------------------- */
+
+.toolbar__search {
+  gap: 6px;
+}
+
+.toolbar__search-input {
+  width: 110px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.toolbar__search-input:focus {
+  width: 140px;
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.toolbar__search-input::placeholder {
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.7;
+}
+
+.toolbar__search-count {
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Active button state (for legend toggle)
+   --------------------------------------------------------------------------- */
+
+.toolbar__button--active {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Palette dropdown
+   --------------------------------------------------------------------------- */
+
+.toolbar__dropdown-trigger--palette {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  min-width: auto;
+}
+
+.toolbar__dropdown-menu--palette {
+  min-width: 180px;
+}
+
+.toolbar__palette-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.toolbar__palette-preview {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.toolbar__dropdown-item--palette {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar__dropdown-item--selected {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.toolbar__palette-name {
+  flex: 1;
+}
+
+.toolbar__check {
+  color: var(--button-bg);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Quick tooltips (instant on hover)
+   --------------------------------------------------------------------------- */
+
+.toolbar__button--tooltip {
+  position: relative;
+}
+
+.toolbar__button--tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  color: var(--editor-fg);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  z-index: 1000;
+}
+
+.toolbar__button--tooltip:hover::after {
+  opacity: 1;
+  transition-delay: 0.15s; /* Very short delay - appears quickly */
+}
+
+/* ---------------------------------------------------------------------------
+   Active dropdown trigger (e.g., discrepancy toggle when ON)
+   --------------------------------------------------------------------------- */
+
+.toolbar__dropdown-trigger--active {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  color: #000;
+}
+
+.toolbar__dropdown-trigger--active:hover {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  opacity: 0.85;
+}
+
+/* ---------------------------------------------------------------------------
+   Layout panel  (.toolbar__lp)
+   --------------------------------------------------------------------------- */
+
+.toolbar__lp {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  width: 300px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Header ---- */
+.toolbar__lp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.toolbar__lp-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--editor-fg);
+}
+
+.toolbar__lp-kbd {
+  font-size: 10px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-descriptionForeground, #888);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+
+/* ---- Sections ---- */
+.toolbar__lp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.toolbar__lp-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.toolbar__lp-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+/* ---- Body (padded area below header) ---- */
+.toolbar__lp > .toolbar__lp-section,
+.toolbar__lp > .toolbar__lp-columns {
+  padding: 0 14px;
+}
+
+.toolbar__lp > .toolbar__lp-section:first-of-type {
+  padding-top: 12px;
+}
+
+.toolbar__lp > .toolbar__lp-section + .toolbar__lp-section,
+.toolbar__lp > .toolbar__lp-columns + .toolbar__lp-section,
+.toolbar__lp > .toolbar__lp-section + .toolbar__lp-columns {
+  padding-top: 10px;
+}
+
+/* ---- Pill track (segmented control) ---- */
+.toolbar__lp-track {
+  display: flex;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.toolbar__lp-pill {
+  flex: 1;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.toolbar__lp-pill:hover:not(.toolbar__lp-pill--on) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.toolbar__lp-pill--on {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  opacity: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Highlight the resolved strategy pill when Auto is selected */
+.toolbar__lp-pill--auto-resolved:not(.toolbar__lp-pill--on) {
+  opacity: 1;
+  outline: 1.5px dashed var(--button-bg);
+  outline-offset: -1.5px;
+}
+
+/* ---- Columns (Direction + Spacing side-by-side) ---- */
+.toolbar__lp-columns {
+  display: flex;
+  gap: 12px;
+  padding: 0 14px;
+}
+
+.toolbar__lp-columns > .toolbar__lp-section {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Max-per-layer row ---- */
+.toolbar__lp-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar__lp-input {
+  width: 50px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+}
+
+.toolbar__lp-input:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.toolbar__lp-input--auto {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- Apply button ---- */
+.toolbar__lp-apply {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 30px;
+  margin: 12px 14px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 0.1s ease;
+}
+
+.toolbar__lp-apply:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.toolbar__lp-apply--dirty {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  color: #000;
+}
+
+.toolbar__lp-apply:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar__lp-apply-key {
+  font-size: 10px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  opacity: 0.55;
+}
+
+/* Split button group for auto-layout + options caret */
+.toolbar__split-group {
+  display: flex;
+  gap: 0;
+  position: relative;
+  border-radius: 4px;
+  overflow: visible;
+}
+
+/* Main layout button — filled so it stands out from icon-only toolbar buttons */
+.toolbar__split-main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 4px 0 0 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.toolbar__split-main:hover:not(:disabled) {
+  background: var(--button-hover-bg, var(--button-bg));
+  filter: brightness(1.12);
+}
+
+.toolbar__split-main--dirty {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  color: #000;
+}
+
+.toolbar__split-main--dirty:hover:not(:disabled) {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  filter: brightness(1.08);
+}
+
+.toolbar__split-main:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Thin separator between main button and caret */
+.toolbar__split-sep {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.2);
+  align-self: stretch;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.toolbar__split-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 0 4px 4px 0;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 9px;
+  cursor: pointer;
+  transition: filter 0.1s ease;
+  opacity: 0.85;
+}
+
+.toolbar__split-caret:hover {
+  filter: brightness(1.15);
+  opacity: 1;
+}
+
+.toolbar__split-caret--active {
+  filter: brightness(0.88);
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   View File button (top-right corner)
+   --------------------------------------------------------------------------- */
+
+.toolbar__view-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: background 0.1s ease, opacity 0.1s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.toolbar__view-file:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  opacity: 1;
+}

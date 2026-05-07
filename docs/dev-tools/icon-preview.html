@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>dbt Semantic Designer - Icon Options (Simple)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      margin: 0;
+      padding: 40px;
+    }
+    h1 {
+      text-align: center;
+      color: #fff;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      margin-bottom: 40px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .card {
+      background: #252526;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      border: 1px solid #404040;
+    }
+    .card h3 {
+      color: #fff;
+      margin: 0 0 6px 0;
+      font-size: 16px;
+    }
+    .card p {
+      color: #888;
+      font-size: 13px;
+      margin: 0 0 16px 0;
+    }
+    .icon-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 24px;
+    }
+    .icon-size {
+      text-align: center;
+    }
+    .icon-size span {
+      display: block;
+      font-size: 11px;
+      color: #666;
+      margin-top: 4px;
+    }
+    .preview-bg {
+      display: inline-block;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Simple Icon Options</h1>
+  <p class="subtitle">Minimal designs that work at any size</p>
+
+  <div class="grid">
+
+    <!-- Option A: Simple Cube -->
+    <div class="card">
+      <h3>A: Data Cube</h3>
+      <p>Clean isometric cube - dimensional modeling</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <!-- Isometric cube -->
+              <path d="M64 24 L104 46 L104 86 L64 108 L24 86 L24 46 Z" fill="#2D2D2D" stroke="#FF694A" stroke-width="4"/>
+              <path d="M64 24 L64 68 L24 46 Z" fill="#FF694A" opacity="0.3"/>
+              <path d="M64 24 L104 46 L64 68 Z" fill="#FF694A" opacity="0.5"/>
+              <path d="M64 68 L64 108" stroke="#FF694A" stroke-width="3" opacity="0.6"/>
+              <path d="M64 68 L24 46" stroke="#FF694A" stroke-width="3" opacity="0.4"/>
+              <path d="M64 68 L104 46" stroke="#FF694A" stroke-width="3" opacity="0.4"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <path d="M64 24 L104 46 L104 86 L64 108 L24 86 L24 46 Z" fill="#2D2D2D" stroke="#FF694A" stroke-width="6"/>
+              <path d="M64 24 L64 68 L24 46 Z" fill="#FF694A" opacity="0.3"/>
+              <path d="M64 24 L104 46 L64 68 Z" fill="#FF694A" opacity="0.5"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <path d="M64 24 L104 46 L104 86 L64 108 L24 86 L24 46 Z" fill="#FF694A" opacity="0.8"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option B: Two Connected Nodes -->
+    <div class="card">
+      <h3>B: Link</h3>
+      <p>Two entities connected - the essence of relationships</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <!-- Connection line -->
+              <line x1="44" y1="64" x2="84" y2="64" stroke="#FF694A" stroke-width="6" stroke-linecap="round"/>
+              <!-- Left node -->
+              <circle cx="36" cy="64" r="18" fill="#FF694A"/>
+              <!-- Right node -->
+              <circle cx="92" cy="64" r="18" fill="#FF9B4A"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <line x1="44" y1="64" x2="84" y2="64" stroke="#FF694A" stroke-width="8" stroke-linecap="round"/>
+              <circle cx="36" cy="64" r="20" fill="#FF694A"/>
+              <circle cx="92" cy="64" r="20" fill="#FF9B4A"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <line x1="44" y1="64" x2="84" y2="64" stroke="#FF694A" stroke-width="10"/>
+              <circle cx="36" cy="64" r="22" fill="#FF694A"/>
+              <circle cx="92" cy="64" r="22" fill="#FF9B4A"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option C: Schema Brackets -->
+    <div class="card">
+      <h3>C: Schema</h3>
+      <p>Curly braces - defining structure</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <!-- Left brace -->
+              <path d="M44 32 Q32 32, 32 44 L32 56 Q32 64, 24 64 Q32 64, 32 72 L32 84 Q32 96, 44 96"
+                    stroke="#FF694A" stroke-width="6" fill="none" stroke-linecap="round"/>
+              <!-- Right brace -->
+              <path d="M84 32 Q96 32, 96 44 L96 56 Q96 64, 104 64 Q96 64, 96 72 L96 84 Q96 96, 84 96"
+                    stroke="#FF694A" stroke-width="6" fill="none" stroke-linecap="round"/>
+              <!-- Center dot -->
+              <circle cx="64" cy="64" r="8" fill="#FF9B4A"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <path d="M44 32 Q32 32, 32 44 L32 56 Q32 64, 24 64 Q32 64, 32 72 L32 84 Q32 96, 44 96"
+                    stroke="#FF694A" stroke-width="8" fill="none" stroke-linecap="round"/>
+              <path d="M84 32 Q96 32, 96 44 L96 56 Q96 64, 104 64 Q96 64, 96 72 L96 84 Q96 96, 84 96"
+                    stroke="#FF694A" stroke-width="8" fill="none" stroke-linecap="round"/>
+              <circle cx="64" cy="64" r="10" fill="#FF9B4A"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <path d="M44 32 Q28 32, 28 48 L28 56 Q28 64, 20 64 Q28 64, 28 72 L28 80 Q28 96, 44 96"
+                    stroke="#FF694A" stroke-width="10" fill="none" stroke-linecap="round"/>
+              <path d="M84 32 Q100 32, 100 48 L100 56 Q100 64, 108 64 Q100 64, 100 72 L100 80 Q100 96, 84 96"
+                    stroke="#FF694A" stroke-width="10" fill="none" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option D: Stacked Layers -->
+    <div class="card">
+      <h3>D: Layers (Full Color)</h3>
+      <p>Marketplace & Extensions panel view</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <!-- Three bars -->
+              <rect x="28" y="36" width="72" height="14" rx="4" fill="#CD7F32"/>
+              <rect x="28" y="57" width="72" height="14" rx="4" fill="#C0C0C0"/>
+              <rect x="28" y="78" width="72" height="14" rx="4" fill="#FFD700"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="28" y="34" width="72" height="16" rx="4" fill="#CD7F32"/>
+              <rect x="28" y="56" width="72" height="16" rx="4" fill="#C0C0C0"/>
+              <rect x="28" y="78" width="72" height="16" rx="4" fill="#FFD700"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="28" y="32" width="72" height="18" rx="4" fill="#CD7F32"/>
+              <rect x="28" y="55" width="72" height="18" rx="4" fill="#C0C0C0"/>
+              <rect x="28" y="78" width="72" height="18" rx="4" fill="#FFD700"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option D Mono: Activity Bar simulation -->
+    <div class="card" style="border-color: #569CD6;">
+      <h3>D: Layers (Monochrome)</h3>
+      <p>Activity bar simulation (VS Code applies this filter)</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="28" y="36" width="72" height="14" rx="4" fill="#8a8a8a"/>
+              <rect x="28" y="57" width="72" height="14" rx="4" fill="#b0b0b0"/>
+              <rect x="28" y="78" width="72" height="14" rx="4" fill="#d4d4d4"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="28" y="34" width="72" height="16" rx="4" fill="#8a8a8a"/>
+              <rect x="28" y="56" width="72" height="16" rx="4" fill="#b0b0b0"/>
+              <rect x="28" y="78" width="72" height="16" rx="4" fill="#d4d4d4"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="28" y="32" width="72" height="18" rx="4" fill="#8a8a8a"/>
+              <rect x="28" y="55" width="72" height="18" rx="4" fill="#b0b0b0"/>
+              <rect x="28" y="78" width="72" height="18" rx="4" fill="#d4d4d4"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option E: Key Symbol -->
+    <div class="card">
+      <h3>E: Key</h3>
+      <p>Simple key - primary/foreign key relationships</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <!-- Key head (circle) -->
+              <circle cx="44" cy="52" r="20" stroke="#FF694A" stroke-width="6" fill="none"/>
+              <!-- Key shaft -->
+              <line x1="60" y1="64" x2="100" y2="100" stroke="#FF694A" stroke-width="6" stroke-linecap="round"/>
+              <!-- Key teeth -->
+              <line x1="80" y1="84" x2="88" y2="76" stroke="#FF694A" stroke-width="6" stroke-linecap="round"/>
+              <line x1="90" y1="94" x2="98" y2="86" stroke="#FF694A" stroke-width="6" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <circle cx="44" cy="52" r="22" stroke="#FF694A" stroke-width="8" fill="none"/>
+              <line x1="60" y1="64" x2="100" y2="100" stroke="#FF694A" stroke-width="8" stroke-linecap="round"/>
+              <line x1="80" y1="84" x2="90" y2="74" stroke="#FF694A" stroke-width="8" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <circle cx="44" cy="50" r="24" stroke="#FF694A" stroke-width="10" fill="none"/>
+              <line x1="62" y1="66" x2="102" y2="102" stroke="#FF694A" stroke-width="10" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option F: Diamond -->
+    <div class="card">
+      <h3>F: Diamond</h3>
+      <p>ER relationship diamond - clean and iconic</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <!-- Diamond shape -->
+              <path d="M64 24 L100 64 L64 104 L28 64 Z" fill="#FF694A"/>
+              <!-- Inner highlight -->
+              <path d="M64 36 L88 64 L64 92 L40 64 Z" fill="#1A1A1A" opacity="0.3"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <path d="M64 24 L100 64 L64 104 L28 64 Z" fill="#FF694A"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <path d="M64 24 L100 64 L64 104 L28 64 Z" fill="#FF694A"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option G: Table Grid -->
+    <div class="card">
+      <h3>G: Grid</h3>
+      <p>Simple 2x2 grid - tabular data</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <!-- Grid cells -->
+              <rect x="28" y="28" width="32" height="32" rx="4" fill="#FF694A"/>
+              <rect x="68" y="28" width="32" height="32" rx="4" fill="#FF9B4A"/>
+              <rect x="28" y="68" width="32" height="32" rx="4" fill="#FF9B4A"/>
+              <rect x="68" y="68" width="32" height="32" rx="4" fill="#FF694A"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="26" y="26" width="34" height="34" rx="4" fill="#FF694A"/>
+              <rect x="68" y="26" width="34" height="34" rx="4" fill="#FF9B4A"/>
+              <rect x="26" y="68" width="34" height="34" rx="4" fill="#FF9B4A"/>
+              <rect x="68" y="68" width="34" height="34" rx="4" fill="#FF694A"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="24" y="24" width="36" height="36" rx="4" fill="#FF694A"/>
+              <rect x="68" y="24" width="36" height="36" rx="4" fill="#FF9B4A"/>
+              <rect x="24" y="68" width="36" height="36" rx="4" fill="#FF9B4A"/>
+              <rect x="68" y="68" width="36" height="36" rx="4" fill="#FF694A"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Option H: Nested Squares -->
+    <div class="card">
+      <h3>H: Nested</h3>
+      <p>Concentric squares - hierarchy/containment</p>
+      <div class="icon-container">
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <!-- Outer square -->
+              <rect x="24" y="24" width="80" height="80" rx="8" stroke="#FF694A" stroke-width="5" fill="none"/>
+              <!-- Middle square -->
+              <rect x="40" y="40" width="48" height="48" rx="6" stroke="#FF694A" stroke-width="5" fill="none" opacity="0.7"/>
+              <!-- Inner square -->
+              <rect x="54" y="54" width="20" height="20" rx="4" fill="#FF694A"/>
+            </svg>
+          </div>
+          <span>128px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="32" height="32" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="24" y="24" width="80" height="80" rx="8" stroke="#FF694A" stroke-width="6" fill="none"/>
+              <rect x="40" y="40" width="48" height="48" rx="6" stroke="#FF694A" stroke-width="6" fill="none" opacity="0.7"/>
+              <rect x="52" y="52" width="24" height="24" rx="4" fill="#FF694A"/>
+            </svg>
+          </div>
+          <span>32px</span>
+        </div>
+        <div class="icon-size">
+          <div class="preview-bg">
+            <svg width="16" height="16" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="128" height="128" rx="24" fill="#1A1A1A"/>
+              <rect x="24" y="24" width="80" height="80" rx="8" stroke="#FF694A" stroke-width="8" fill="none"/>
+              <rect x="48" y="48" width="32" height="32" rx="4" fill="#FF694A"/>
+            </svg>
+          </div>
+          <span>16px</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

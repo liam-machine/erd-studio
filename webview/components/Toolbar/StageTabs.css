@@ -1,0 +1,53 @@
+/**
+ * StageTabs — stage tab switcher styles.
+ *
+ * Renders three tabs (Conceptual / Logical / Physical) with the active
+ * tab highlighted. Uses the same spacing and sizing conventions as toolbar.
+ */
+
+.stage-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.stage-tabs__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: background 0.1s ease, opacity 0.1s ease;
+}
+
+.stage-tabs__tab:hover:not(.stage-tabs__tab--active) {
+  opacity: 0.85;
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.stage-tabs__tab--active {
+  opacity: 1;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.stage-tabs__lock {
+  font-size: 9px;
+  line-height: 1;
+}

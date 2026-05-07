@@ -1,0 +1,19 @@
+version: 2
+models:
+  - name: fct_task_event
+    description: Task events fact table
+    config:
+      tags:
+        - gold
+        - daily
+        - domain:tasks
+        - domain:showcase
+    columns:
+      - name: event_id
+        description: Event surrogate key
+      - name: task_id
+        description: FK to dim_task
+      - name: event_date
+        description: Date of the event
+      - name: amount
+        description: Event amount

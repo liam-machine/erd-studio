@@ -1,0 +1,410 @@
+/**
+ * NewModelDialog styles.
+ *
+ * Centered dialog for creating new models with built-in templates.
+ * BEM naming, VS Code theme tokens from webview/styles/theme.css.
+ */
+
+.new-model-dialog {
+  width: 480px;
+  max-height: calc(100vh - 100px);
+  margin-top: 80px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  z-index: 10; /* Above toolbar and other panels */
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  flex-shrink: 0;
+}
+
+.new-model-dialog__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--editor-fg);
+}
+
+.new-model-dialog__close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.new-model-dialog__close:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Content
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__content {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   Form Fields
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.new-model-dialog__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--editor-fg);
+}
+
+.new-model-dialog__input,
+.new-model-dialog__select,
+.new-model-dialog__textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.new-model-dialog__input:focus,
+.new-model-dialog__select:focus,
+.new-model-dialog__textarea:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.new-model-dialog__input::placeholder,
+.new-model-dialog__textarea::placeholder {
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.7;
+}
+
+.new-model-dialog__input--error {
+  border-color: var(--error-fg, #f48771);
+}
+
+.new-model-dialog__textarea {
+  min-height: 50px;
+  resize: vertical;
+}
+
+.new-model-dialog__select {
+  cursor: pointer;
+}
+
+.new-model-dialog__error {
+  font-size: 11px;
+  color: var(--error-fg, #f48771);
+}
+
+/* ---------------------------------------------------------------------------
+   Bridge Entity Fields (side-by-side)
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__bridge-fields {
+  display: flex;
+  gap: 12px;
+}
+
+.new-model-dialog__bridge-fields .new-model-dialog__field {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Column Editor
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__column-editor {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.new-model-dialog__column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.new-model-dialog__preview-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.new-model-dialog__add-column-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.new-model-dialog__add-column-btn:hover {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.new-model-dialog__section-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.8;
+}
+
+.new-model-dialog__template-columns,
+.new-model-dialog__custom-columns {
+  margin-bottom: 10px;
+}
+
+.new-model-dialog__columns {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.new-model-dialog__column {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: rgba(249, 115, 22, 0.1); /* Design model orange tint */
+  line-height: 1.4;
+}
+
+.new-model-dialog__column--template {
+  opacity: 0.85;
+}
+
+/* Key badges now handled by KeyBadgeGroup component */
+
+.new-model-dialog__col-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--editor-fg);
+  font-size: 12px;
+}
+
+.new-model-dialog__col-type {
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* Custom column row (editable) */
+.new-model-dialog__column-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.new-model-dialog__column-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(249, 115, 22, 0.08);
+  border: 1px solid rgba(249, 115, 22, 0.2);
+}
+
+/* Old checkbox removed - using KeyBadgeGroup dropdown instead */
+
+.new-model-dialog__col-input {
+  padding: 4px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.new-model-dialog__col-input:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.new-model-dialog__col-input--name {
+  flex: 1;
+  min-width: 100px;
+}
+
+.new-model-dialog__col-input--desc {
+  flex: 1.5;
+  min-width: 120px;
+}
+
+.new-model-dialog__col-input--error {
+  border-color: var(--error-fg, #f48771);
+}
+
+.new-model-dialog__col-select {
+  padding: 4px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  cursor: pointer;
+  min-width: 110px;
+}
+
+.new-model-dialog__col-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--error-fg, #f48771);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.new-model-dialog__col-remove:hover {
+  background: rgba(244, 135, 113, 0.15);
+}
+
+/* Inline "add column" row at the bottom of the list */
+.new-model-dialog__column-row--add {
+  justify-content: center;
+  background: transparent;
+  border: 1px dashed var(--panel-border);
+  cursor: pointer;
+  padding: 5px 8px;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.new-model-dialog__column-row--add:hover {
+  background: rgba(249, 115, 22, 0.06);
+  border-color: rgba(249, 115, 22, 0.4);
+}
+
+.new-model-dialog__add-row-text {
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.new-model-dialog__empty-columns {
+  padding: 16px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 12px;
+  font-style: italic;
+  background: rgba(128, 128, 128, 0.05);
+  border-radius: 4px;
+  border: 1px dashed var(--panel-border);
+}
+
+/* ---------------------------------------------------------------------------
+   Footer
+   --------------------------------------------------------------------------- */
+
+.new-model-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--panel-border);
+  flex-shrink: 0;
+}
+
+.new-model-dialog__button {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s ease, opacity 0.1s ease;
+}
+
+.new-model-dialog__button--primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.new-model-dialog__button--primary:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+}
+
+.new-model-dialog__button--secondary {
+  background: transparent;
+  border-color: var(--panel-border);
+  color: var(--editor-fg);
+}
+
+.new-model-dialog__button--secondary:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.new-model-dialog__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -1,0 +1,905 @@
+/**
+ * SyncMergeModal styles — VS Code-style merge editor overlay.
+ *
+ * Visual hierarchy: Header → Toolbar → Progress → Completion → Table → Footer
+ * Stage colours:  Logical = blue (#60a5fa)  ·  Physical = green (#22c55e)
+ */
+
+/* ---------------------------------------------------------------------------
+   Backdrop
+   --------------------------------------------------------------------------- */
+
+.sync-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+}
+
+/* ---------------------------------------------------------------------------
+   Modal container
+   --------------------------------------------------------------------------- */
+
+.sync-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(960px, 90vw);
+  min-width: 560px;
+  height: min(720px, 82vh);
+  z-index: 201;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+   Header — two-line: title + explanatory subtitle
+   --------------------------------------------------------------------------- */
+
+.sync-modal__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
+}
+
+.sync-modal__header-icon {
+  font-size: 14px;
+  opacity: 0.5;
+}
+
+.sync-modal__header-domain {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--editor-fg);
+  margin-right: 4px;
+}
+
+.sync-modal__header-stage {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sync-modal__header-vs {
+  font-size: 10px;
+  opacity: 0.4;
+  font-weight: 500;
+}
+
+.sync-modal__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 0.15s, background 0.15s;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.sync-modal__close:hover {
+  opacity: 1;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Toolbar — bulk actions with stage-colored accents
+   --------------------------------------------------------------------------- */
+
+.sync-modal__toolbar {
+  padding: 6px 0 0;
+  border-bottom: none;
+  flex-shrink: 0;
+}
+
+.sync-modal__toolbar-grid {
+  display: grid;
+  grid-template-columns: 3.5% 28% 1fr 28%;
+  align-items: center;
+  padding: 0 14px 6px;
+}
+
+.sync-modal__toolbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.sync-modal__toolbar-toggle {
+  padding: 3px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.65;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.sync-modal__toolbar-toggle:hover {
+  opacity: 1;
+  background: var(--selection-bg);
+}
+
+.sync-modal__toolbar-toggle--active {
+  opacity: 1;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border-color: var(--button-bg);
+}
+
+.sync-modal__bulk-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: all 0.15s;
+  white-space: nowrap;
+  border-left: 3px solid transparent;
+}
+
+.sync-modal__bulk-btn--logical {
+  border-left-color: var(--stage-logical, #60a5fa);
+}
+
+.sync-modal__bulk-btn--physical {
+  border-left-color: var(--stage-physical, #22c55e);
+}
+
+.sync-modal__bulk-btn:hover {
+  opacity: 1;
+  background: var(--selection-bg);
+}
+
+.sync-modal__toolbar-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-modal__toolbar-breakdown {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.sync-modal__toolbar-breakdown-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--button-fg, #fff);
+}
+
+.sync-modal__toolbar-breakdown-dot--logical {
+  background: var(--stage-logical, #60a5fa);
+}
+
+.sync-modal__toolbar-breakdown-dot--physical {
+  background: var(--stage-physical, #22c55e);
+}
+
+/* ---------------------------------------------------------------------------
+   Progress bar — inline two-tone bar in toolbar
+   --------------------------------------------------------------------------- */
+
+.sync-modal__progress {
+  display: flex;
+  height: 3px;
+  background: var(--panel-border);
+  overflow: hidden;
+}
+
+.sync-modal__progress-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.sync-modal__progress-fill--logical {
+  background: var(--stage-logical, #60a5fa);
+}
+
+.sync-modal__progress-fill--physical {
+  background: var(--stage-physical, #22c55e);
+}
+
+/* ---------------------------------------------------------------------------
+   Table wrapper (scrollable)
+   --------------------------------------------------------------------------- */
+
+.sync-modal__table-wrap {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+   Table + colgroup
+   --------------------------------------------------------------------------- */
+
+.sync-modal__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.sync-modal__col--chevron { width: 3.5%; }
+.sync-modal__col--stage   { width: 28%; }
+.sync-modal__col--item    { width: 40.5%; }
+
+/* ---------------------------------------------------------------------------
+   Thead — sticky with stage-colored bottom borders
+   --------------------------------------------------------------------------- */
+
+.sync-modal__thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel-bg);
+  box-shadow: 0 1px 0 var(--panel-border);
+}
+
+.sync-modal__th {
+  padding: 7px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  text-align: left;
+  border-bottom: 2px solid var(--panel-border);
+  white-space: nowrap;
+}
+
+.sync-modal__th--chevron {
+  padding: 0;
+  border-bottom: 2px solid var(--panel-border);
+}
+
+.sync-modal__th--item {
+  color: var(--editor-fg);
+  opacity: 0.45;
+}
+
+.sync-modal__th--logical {
+  border-bottom: 2px solid var(--stage-logical, #60a5fa);
+}
+
+.sync-modal__th--physical {
+  border-bottom: 2px solid var(--stage-physical, #22c55e);
+}
+
+/* ---------------------------------------------------------------------------
+   Rows — base
+   --------------------------------------------------------------------------- */
+
+.sync-modal__row {
+  border-bottom: 1px solid rgba(128, 128, 128, 0.12);
+  transition: background 0.15s ease;
+}
+
+.sync-modal__row:last-child {
+  border-bottom: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Model section header rows
+   --------------------------------------------------------------------------- */
+
+.sync-modal__row--model-header {
+  background: var(--stage-ghost-bg, rgba(128, 128, 128, 0.1));
+}
+
+/* Separator above each model header row (except the very first body row) */
+tbody .sync-modal__row--model-header:not(:first-child) {
+  border-top: 1px solid var(--panel-border);
+}
+
+.sync-modal__row--model-header .sync-modal__cell {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* When all items in this model are resolved, give the header a green tint */
+.sync-modal__row--all-resolved {
+  background: var(--stage-physical-bg) !important;
+}
+
+/* Matched model rows — dimmed */
+.sync-modal__row--model-header.sync-modal__row--matched:not(.sync-modal__row--all-resolved) {
+  opacity: 0.55;
+}
+
+.sync-modal__row--model-header.sync-modal__row--matched:not(.sync-modal__row--all-resolved):hover {
+  opacity: 0.75;
+}
+
+/* ---------------------------------------------------------------------------
+   Column sub-rows
+   --------------------------------------------------------------------------- */
+
+/* Conflict colour tints for column/relationship rows */
+.sync-modal__row--extra {
+  background: var(--stage-logical-bg);
+}
+
+.sync-modal__row--missing {
+  background: var(--stage-physical-bg);
+}
+
+.sync-modal__row--mismatch,
+.sync-modal__row--type-mismatch,
+.sync-modal__row--cardinality-mismatch {
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.sync-modal__row--conflict:hover {
+  background: var(--selection-bg);
+}
+
+/* Indent the item cell for column rows */
+.sync-modal__row--column .sync-modal__cell--item {
+  padding-left: 22px;
+}
+
+/* ---------------------------------------------------------------------------
+   Cells
+   --------------------------------------------------------------------------- */
+
+.sync-modal__cell {
+  padding: 6px 12px;
+  vertical-align: middle;
+  font-size: 12px;
+  color: var(--editor-fg);
+}
+
+/* Chevron column cell — narrow, no horizontal padding, holds the toggle */
+.sync-modal__cell--chevron {
+  padding: 0;
+  width: 3.5%;
+  text-align: center;
+  vertical-align: middle;
+  /* border-left applied inline per-row for the accent colour */
+}
+
+/* When this side is the selected ground truth */
+.sync-modal__cell--selected {
+  background: var(--selection-bg);
+}
+
+/* When the other side is selected — dim and strike through */
+.sync-modal__cell--rejected {
+  opacity: 0.35;
+}
+
+.sync-modal__cell--rejected .sync-modal__cell-value {
+  text-decoration: line-through;
+  text-decoration-color: var(--editor-fg);
+  text-decoration-thickness: 1px;
+}
+
+.sync-modal__stage-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sync-modal__cell-value {
+  display: block;
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Model stage cell — stacks existence content above the bulk button */
+.sync-modal__cell--model-stage {
+  vertical-align: middle;
+}
+
+/* ---------------------------------------------------------------------------
+   Accept buttons — "Keep Logical" / "Keep Physical"
+   --------------------------------------------------------------------------- */
+
+.sync-modal__accept-btn {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.sync-modal__accept-btn:hover {
+  opacity: 1;
+}
+
+/* Logical hover preview */
+.sync-modal__accept-btn--logical:hover {
+  background: var(--stage-logical-hover, rgba(96, 165, 250, 0.12));
+  border-color: var(--stage-logical, #60a5fa);
+  color: var(--stage-logical, #60a5fa);
+}
+
+/* Physical hover preview */
+.sync-modal__accept-btn--physical:hover {
+  background: var(--stage-physical-hover, rgba(34, 197, 94, 0.12));
+  border-color: var(--stage-physical, #22c55e);
+  color: var(--stage-physical, #22c55e);
+}
+
+/* Logical accept — blue when selected */
+.sync-modal__accept-btn--logical.sync-modal__accept-btn--selected {
+  opacity: 1;
+  background: var(--stage-logical, #60a5fa);
+  border-color: var(--stage-logical, #60a5fa);
+  color: var(--button-fg, #fff);
+  box-shadow: 0 0 0 1px var(--stage-logical-ring, rgba(96, 165, 250, 0.3));
+}
+
+/* Physical accept — green when selected */
+.sync-modal__accept-btn--physical.sync-modal__accept-btn--selected {
+  opacity: 1;
+  background: var(--stage-physical, #22c55e);
+  border-color: var(--stage-physical, #22c55e);
+  color: var(--button-fg, #fff);
+  box-shadow: 0 0 0 1px var(--stage-physical-ring, rgba(34, 197, 94, 0.3));
+}
+
+/* ---------------------------------------------------------------------------
+   Chevron toggle button (inside chevron cell)
+   Uses ▶/▼ text characters — no CSS rotation needed
+   --------------------------------------------------------------------------- */
+
+.sync-modal__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 30px;
+  border: none;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.15s;
+  padding: 0;
+  line-height: 1;
+}
+
+.sync-modal__chevron:hover {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Model item cell layout
+   --------------------------------------------------------------------------- */
+
+.sync-modal__model-item-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+
+/* Per-model bulk accept buttons — inside stage cells */
+.sync-modal__model-bulk-btn {
+  display: block;
+  padding: 2px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: all 0.15s;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+.sync-modal__model-bulk-btn--logical {
+  border-left: 2px solid var(--stage-logical, #60a5fa);
+}
+
+.sync-modal__model-bulk-btn--physical {
+  border-left: 2px solid var(--stage-physical, #22c55e);
+}
+
+.sync-modal__model-bulk-btn:hover {
+  opacity: 1;
+  background: var(--selection-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   Item cell text elements
+   --------------------------------------------------------------------------- */
+
+.sync-modal__model-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--editor-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-modal__resolved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--stage-physical, #22c55e);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: rgba(34, 197, 94, 0.1);
+  padding: 1px 7px;
+  border-radius: 3px;
+}
+
+/* Selection summary chips — shown when a model row is collapsed */
+.sync-modal__selection-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.sync-modal__selection-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.sync-modal__selection-chip--logical {
+  background: rgba(96, 165, 250, 0.12);
+  color: var(--stage-logical, #60a5fa);
+}
+
+.sync-modal__selection-chip--physical {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--stage-physical, #22c55e);
+}
+
+.sync-modal__selection-chip--pending {
+  background: rgba(128, 128, 128, 0.1);
+  color: var(--editor-fg);
+  opacity: 0.55;
+}
+
+.sync-modal__col-name {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--editor-fg);
+}
+
+/* Relationship labels — structured with hierarchy */
+.sync-modal__rel-label {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--editor-fg);
+}
+
+.sync-modal__rel-model {
+  font-weight: 600;
+  color: var(--editor-fg);
+}
+
+.sync-modal__rel-sep {
+  opacity: 0.35;
+}
+
+.sync-modal__rel-col {
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.sync-modal__rel-arrow {
+  opacity: 0.35;
+  margin: 0 3px;
+}
+
+.sync-modal__exists-dot {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.sync-modal__missing-dash {
+  font-size: 11px;
+  opacity: 0.25;
+}
+
+/* ---------------------------------------------------------------------------
+   Status badges — replace tiny dots with readable pills
+   --------------------------------------------------------------------------- */
+
+.sync-modal__status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
+.sync-modal__status-badge--sm {
+  font-size: 8px;
+  padding: 0 5px;
+  line-height: 1.6;
+}
+
+.sync-modal__status-badge--extra {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--discrepancy-extra, #f59e0b);
+}
+
+.sync-modal__status-badge--missing {
+  background: var(--stage-ghost-bg, rgba(156, 163, 175, 0.08));
+  color: var(--stage-ghost, #9ca3af);
+}
+
+.sync-modal__status-badge--type-mismatch {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--discrepancy-mismatch, #ef4444);
+}
+
+.sync-modal__status-badge--cardinality-mismatch {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--discrepancy-mismatch, #ef4444);
+}
+
+/* ---------------------------------------------------------------------------
+   Type-mismatch pill badges
+   --------------------------------------------------------------------------- */
+
+.sync-modal__type-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.sync-modal__no-type {
+  font-size: 10px;
+  opacity: 0.5;
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------------
+   Relationships section label
+   --------------------------------------------------------------------------- */
+
+.sync-modal__section-header-row {
+  background: rgba(128, 128, 128, 0.07);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.sync-modal__section-header-row:not(.sync-modal__section-header-row--static):hover {
+  background: var(--selection-bg);
+}
+
+.sync-modal__section-header-row--static {
+  cursor: default;
+}
+
+.sync-modal__section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--editor-fg);
+  opacity: 0.6;
+  border-top: 1px solid var(--panel-border);
+}
+
+.sync-modal__section-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 9px;
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 0;
+}
+
+.sync-modal__section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.15);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+   Footer
+   --------------------------------------------------------------------------- */
+
+.sync-modal__footer {
+  border-top: 1px solid var(--panel-border);
+  flex-shrink: 0;
+  transition: background 0.3s ease;
+}
+
+.sync-modal__footer--ready {
+  background: var(--stage-physical-bg);
+}
+
+.sync-modal__footer .disc-panel__sync-footer {
+  padding: 10px 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   Resolved section — collapsed summary at bottom of table
+   --------------------------------------------------------------------------- */
+
+.sync-modal__resolved-section-header {
+  cursor: pointer;
+  border-top: 2px solid var(--panel-border);
+  transition: background 0.15s ease;
+}
+
+.sync-modal__resolved-section-header:hover {
+  background: var(--selection-bg);
+}
+
+.sync-modal__resolved-section-cell {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync-modal__resolved-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.sync-modal__resolved-section-badge {
+  font-size: 13px;
+  color: var(--stage-physical, #22c55e);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.sync-modal__resolved-section-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--editor-fg);
+  opacity: 0.6;
+}
+
+/* ---------------------------------------------------------------------------
+   Resize handle — bottom-right corner drag affordance
+   --------------------------------------------------------------------------- */
+
+.sync-modal__resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 10;
+}
+
+.sync-modal__resize-handle::before {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--editor-fg);
+  border-bottom: 2px solid var(--editor-fg);
+  opacity: 0.25;
+  transition: opacity 0.15s;
+}
+
+.sync-modal__resize-handle:hover::before {
+  opacity: 0.6;
+}
+
+/* ---------------------------------------------------------------------------
+   Animations
+   --------------------------------------------------------------------------- */
+
+@keyframes sync-modal__fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sync-modal__pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.3); }
+  50%      { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.1); }
+}
+
+/* Pulse the CTA button when all resolved and plan not yet generated */
+.sync-modal__footer--ready .disc-panel__sync-footer-btn {
+  animation: sync-modal__pulse 2s ease-in-out infinite;
+}

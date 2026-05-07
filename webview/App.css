@@ -1,0 +1,12 @@
+/**
+ * App-level (editor canvas) styles.
+ *
+ * Behaviour/state rules that depend on application state (canvas mode, etc.).
+ * Theme-token rules live in webview/styles/theme.css.
+ */
+
+/* Select mode — crosshair cursor on the empty canvas. Nodes keep their own
+   grab cursor so hovering a table in select mode still shows a move cursor. */
+.editor-canvas--select-mode .react-flow__pane {
+  cursor: crosshair;
+}

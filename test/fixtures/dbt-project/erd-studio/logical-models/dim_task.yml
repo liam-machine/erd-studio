@@ -1,0 +1,26 @@
+name: dim_task
+schema: silver
+description: Task dimension tracking individual project tasks
+grain: One row per task
+modelRole: domain-dim
+rationale:
+  purpose: Tracks individual tasks and their lifecycle
+  design: SCD Type 2 on status to track historical state changes
+  scdStrategy: Status changes tracked via SCD2; name is Type 1 overwrite
+columns:
+  - name: task_id
+    dataType: INT
+    description: Surrogate key for task
+    isPrimaryKey: true
+  - name: project_id
+    dataType: INT
+    description: FK to dim_project
+    isForeignKey: true
+  - name: name
+    dataType: VARCHAR
+    description: Task name
+    scdType: 1
+  - name: status
+    dataType: STRING
+    description: Current lifecycle status
+    scdType: 2

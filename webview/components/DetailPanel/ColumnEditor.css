@@ -1,0 +1,202 @@
+/**
+ * ColumnEditor styles.
+ *
+ * Editable column list for DetailPanel. BEM naming with VS Code theme tokens.
+ */
+
+/* ---------------------------------------------------------------------------
+   Container
+   --------------------------------------------------------------------------- */
+
+.column-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.column-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.column-editor__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+   Expand/Collapse Controls
+   --------------------------------------------------------------------------- */
+
+.column-editor__expand-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.column-editor__expand-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+
+.column-editor__expand-btn:hover {
+  color: var(--editor-fg);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Fast-appearing custom tooltip */
+.column-editor__expand-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  padding: 3px 6px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--editor-fg);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease, visibility 0.1s ease;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.column-editor__expand-btn:hover::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+.column-editor__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.column-editor__add-btn {
+  padding: 3px 8px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--button-bg);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.column-editor__add-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: var(--button-bg);
+}
+
+.column-editor__add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   Column List
+   --------------------------------------------------------------------------- */
+
+.column-editor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.column-editor__empty {
+  padding: 8px 6px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-style: italic;
+  text-align: center;
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
+   Separator
+   --------------------------------------------------------------------------- */
+
+.column-editor__separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.column-editor__separator::before,
+.column-editor__separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--panel-border);
+}
+
+.column-editor__separator-text {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--model-design);
+  text-transform: uppercase;
+}
+
+/* Status-specific separator colors */
+.column-editor__separator--approved .column-editor__separator-text {
+  color: var(--model-approved);
+}
+
+/* ---------------------------------------------------------------------------
+   Bottom Add Button
+   --------------------------------------------------------------------------- */
+
+.column-editor__add-btn--bottom {
+  width: 100%;
+  margin-top: 6px;
+  justify-content: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Accept All Discrepancies Button
+   --------------------------------------------------------------------------- */
+
+.column-editor__accept-all-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-editorWarning-foreground, #cca700);
+  border-radius: 3px;
+  background: rgba(204, 167, 0, 0.1);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.column-editor__accept-all-btn:hover {
+  background: rgba(204, 167, 0, 0.2);
+}

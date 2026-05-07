@@ -1,0 +1,10 @@
+{
+  "domain": "no-schema-version",
+  "layer": "silver",
+  "description": "Missing schemaVersion field",
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}

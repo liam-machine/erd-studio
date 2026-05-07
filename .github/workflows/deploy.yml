@@ -1,0 +1,83 @@
+name: Deploy to VS Code Marketplace
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run compile
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Check Claude approval
+        id: claude_check
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          CLAUDE_APPROVED=$(gh api "/repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+            --jq '[.[] | select(.user.login == "claude[bot]" and .state == "APPROVED")] | length')
+
+          if [ "$CLAUDE_APPROVED" -gt 0 ]; then
+            echo "Claude approved PR #${PR_NUMBER}"
+            echo "approved=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::PR #${PR_NUMBER} was merged WITHOUT Claude approval. Deploying anyway (soft enforcement)."
+            echo "approved=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump patch version
+        run: |
+          npm version patch --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+          echo "Bumped to v${NEW_VERSION}"
+
+      - name: Production build
+        run: npm run package
+
+      - name: Publish to VS Code Marketplace
+        env:
+          AZURE_PAT: ${{ secrets.AZURE_PAT }}
+        run: |
+          npx @vscode/vsce package -o erd-studio.vsix
+          npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT"
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to v${NEW_VERSION} [deploy]"
+          git push

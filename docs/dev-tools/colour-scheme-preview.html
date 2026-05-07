@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Colour Scheme Preview — dbt Semantic Designer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 32px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #ffffff;
+    }
+
+    .subtitle {
+      color: #888;
+      margin-bottom: 32px;
+      font-size: 14px;
+    }
+
+    .schemes-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-bottom: 48px;
+    }
+
+    .scheme-card {
+      background: #252526;
+      border-radius: 12px;
+      padding: 24px;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .scheme-card:hover {
+      transform: translateY(-2px);
+    }
+
+    .scheme-card.selected {
+      border-color: #007fd4;
+    }
+
+    .scheme-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .scheme-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .scheme-swatches {
+      display: flex;
+      gap: 6px;
+    }
+
+    .scheme-mini-swatch {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .scheme-description {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 20px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .status-swatch {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      border: 2px solid;
+    }
+
+    .status-label {
+      font-size: 13px;
+      flex: 1;
+    }
+
+    .status-hex {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 11px;
+      color: #666;
+    }
+
+    /* Model Node Preview Section */
+    .preview-section {
+      margin-top: 48px;
+    }
+
+    .preview-section h2 {
+      font-size: 18px;
+      margin-bottom: 24px;
+      color: #fff;
+    }
+
+    .nodes-container {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .model-node {
+      width: 240px;
+      background: var(--node-bg);
+      border: 2px solid var(--node-border);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .model-node__header {
+      padding: 12px 14px;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .model-node__icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .model-node__name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .model-node__status-badge {
+      margin-left: auto;
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .model-node__columns {
+      padding: 8px 0;
+    }
+
+    .model-node__column {
+      padding: 6px 14px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #ccc;
+    }
+
+    .model-node__column-badge {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+
+    /* Edge Preview */
+    .edges-container {
+      margin-top: 32px;
+      display: flex;
+      gap: 48px;
+      flex-wrap: wrap;
+    }
+
+    .edge-preview {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .edge-line {
+      width: 80px;
+      height: 3px;
+      border-radius: 2px;
+    }
+
+    .edge-line.dashed {
+      background: repeating-linear-gradient(
+        90deg,
+        var(--edge-color) 0,
+        var(--edge-color) 8px,
+        transparent 8px,
+        transparent 12px
+      );
+    }
+
+    .edge-label {
+      font-size: 12px;
+      color: #888;
+    }
+
+    /* Comparison table */
+    .comparison-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 32px;
+      font-size: 13px;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid #333;
+    }
+
+    .comparison-table th {
+      color: #888;
+      font-weight: 500;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .comparison-table td {
+      color: #ccc;
+    }
+
+    .inline-swatch {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border-radius: 3px;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    /* Accessibility Notes */
+    .a11y-section {
+      margin-top: 48px;
+      padding: 20px;
+      background: #2a2a2a;
+      border-radius: 8px;
+      border-left: 4px solid #007fd4;
+    }
+
+    .a11y-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    .a11y-text {
+      font-size: 12px;
+      color: #aaa;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <h1>Colour Scheme Preview</h1>
+  <p class="subtitle">Click a palette to preview model nodes and relationship edges</p>
+
+  <!-- 3 Palettes -->
+  <div class="schemes-grid">
+    <!-- Cool/Warm (Default) -->
+    <div class="scheme-card selected" data-scheme="coolWarm">
+      <div class="scheme-header">
+        <div class="scheme-title">1. Cool/Warm</div>
+        <div class="scheme-swatches">
+          <div class="scheme-mini-swatch" style="background: #60a5fa;" title="Built"></div>
+          <div class="scheme-mini-swatch" style="background: #14b8a6;" title="Approved"></div>
+          <div class="scheme-mini-swatch" style="background: #ea580c;" title="Design"></div>
+        </div>
+      </div>
+      <div class="scheme-description">Blue for built, teal for approved, orange for design — best accessibility (DEFAULT)</div>
+
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(96, 165, 250, 0.08); border-color: #60a5fa;"></div>
+        <span class="status-label">Built</span>
+        <span class="status-hex">#60a5fa</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(20, 184, 166, 0.08); border-color: #14b8a6;"></div>
+        <span class="status-label">Approved</span>
+        <span class="status-hex">#14b8a6</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(234, 88, 12, 0.08); border-color: #ea580c;"></div>
+        <span class="status-label">Design</span>
+        <span class="status-hex">#ea580c</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(156, 163, 175, 0.08); border-color: #9ca3af;"></div>
+        <span class="status-label">Missing</span>
+        <span class="status-hex">#9ca3af</span>
+      </div>
+    </div>
+
+    <!-- CI/CD Status -->
+    <div class="scheme-card" data-scheme="cicd">
+      <div class="scheme-header">
+        <div class="scheme-title">2. CI/CD Status</div>
+        <div class="scheme-swatches">
+          <div class="scheme-mini-swatch" style="background: #3b82f6;" title="Built"></div>
+          <div class="scheme-mini-swatch" style="background: #10b981;" title="Approved"></div>
+          <div class="scheme-mini-swatch" style="background: #d97706;" title="Design"></div>
+        </div>
+      </div>
+      <div class="scheme-description">Blue for built, green for approved, amber for design — DevOps familiar</div>
+
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(59, 130, 246, 0.08); border-color: #3b82f6;"></div>
+        <span class="status-label">Built</span>
+        <span class="status-hex">#3b82f6</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(16, 185, 129, 0.08); border-color: #10b981;"></div>
+        <span class="status-label">Approved</span>
+        <span class="status-hex">#10b981</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(217, 119, 6, 0.08); border-color: #d97706;"></div>
+        <span class="status-label">Design</span>
+        <span class="status-hex">#d97706</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(107, 114, 128, 0.08); border-color: #6b7280;"></div>
+        <span class="status-label">Missing</span>
+        <span class="status-hex">#6b7280</span>
+      </div>
+    </div>
+
+    <!-- Traffic Light -->
+    <div class="scheme-card" data-scheme="trafficLight">
+      <div class="scheme-header">
+        <div class="scheme-title">3. Traffic Light</div>
+        <div class="scheme-swatches">
+          <div class="scheme-mini-swatch" style="background: #22c55e;" title="Built"></div>
+          <div class="scheme-mini-swatch" style="background: #eab308;" title="Approved"></div>
+          <div class="scheme-mini-swatch" style="background: #ef4444;" title="Design"></div>
+        </div>
+      </div>
+      <div class="scheme-description">Green for built, yellow for approved, red for design — universal recognition</div>
+
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(34, 197, 94, 0.08); border-color: #22c55e;"></div>
+        <span class="status-label">Built</span>
+        <span class="status-hex">#22c55e</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(234, 179, 8, 0.08); border-color: #eab308;"></div>
+        <span class="status-label">Approved</span>
+        <span class="status-hex">#eab308</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(239, 68, 68, 0.08); border-color: #ef4444;"></div>
+        <span class="status-label">Design</span>
+        <span class="status-hex">#ef4444</span>
+      </div>
+      <div class="status-row">
+        <div class="status-swatch" style="background: rgba(115, 115, 115, 0.08); border-color: #737373;"></div>
+        <span class="status-label">Missing</span>
+        <span class="status-hex">#737373</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Model Node Preview -->
+  <div class="preview-section">
+    <h2>Model Node Preview (Cool/Warm)</h2>
+    <div class="nodes-container" id="nodesPreview">
+      <!-- Dynamically filled by JS -->
+    </div>
+
+    <div class="edges-container">
+      <div class="edge-preview">
+        <div class="edge-line" id="edgeBuilt" style="background: #60a5fa;"></div>
+        <span class="edge-label">Built relationship</span>
+      </div>
+      <div class="edge-preview">
+        <div class="edge-line" id="edgeApproved" style="background: #14b8a6;"></div>
+        <span class="edge-label">Approved relationship</span>
+      </div>
+      <div class="edge-preview">
+        <div class="edge-line dashed" id="edgeDesign" style="--edge-color: #ea580c;"></div>
+        <span class="edge-label">Design relationship (dashed)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Comparison Table -->
+  <h2 style="margin-top: 48px; color: #fff; font-size: 18px;">Side-by-Side Comparison</h2>
+  <table class="comparison-table">
+    <thead>
+      <tr>
+        <th>Palette</th>
+        <th>Built</th>
+        <th>Approved</th>
+        <th>Design</th>
+        <th>Missing</th>
+        <th>Best For</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1. Cool/Warm</strong></td>
+        <td><span class="inline-swatch" style="background: #60a5fa;"></span>Blue</td>
+        <td><span class="inline-swatch" style="background: #14b8a6;"></span>Teal</td>
+        <td><span class="inline-swatch" style="background: #ea580c;"></span>Orange</td>
+        <td><span class="inline-swatch" style="background: #9ca3af;"></span>Gray</td>
+        <td>General use, good accessibility</td>
+      </tr>
+      <tr>
+        <td><strong>2. CI/CD Status</strong></td>
+        <td><span class="inline-swatch" style="background: #3b82f6;"></span>Blue</td>
+        <td><span class="inline-swatch" style="background: #10b981;"></span>Green</td>
+        <td><span class="inline-swatch" style="background: #d97706;"></span>Amber</td>
+        <td><span class="inline-swatch" style="background: #6b7280;"></span>Gray</td>
+        <td>DevOps teams, green = approved</td>
+      </tr>
+      <tr>
+        <td><strong>3. Traffic Light</strong></td>
+        <td><span class="inline-swatch" style="background: #22c55e;"></span>Green</td>
+        <td><span class="inline-swatch" style="background: #eab308;"></span>Yellow</td>
+        <td><span class="inline-swatch" style="background: #ef4444;"></span>Red</td>
+        <td><span class="inline-swatch" style="background: #737373;"></span>Gray</td>
+        <td>Universal recognition, no learning</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Accessibility Notes -->
+  <div class="a11y-section">
+    <div class="a11y-title">Accessibility Considerations</div>
+    <div class="a11y-text">
+      <strong>Cool/Warm:</strong> Best overall accessibility with distinct hue separation (blue-teal-orange).<br><br>
+      <strong>CI/CD Status:</strong> Green for approved follows DevOps conventions. Good for teams familiar with pipeline status colours.<br><br>
+      <strong>Traffic Light:</strong> Universal recognition but may be problematic for red-green colour blindness.
+      The app uses text labels alongside colours to maintain accessibility.
+    </div>
+  </div>
+
+  <script>
+    // Palette definitions matching colorPalettes.ts
+    const palettes = {
+      coolWarm: {
+        name: 'Cool/Warm',
+        built: { color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.08)' },
+        approved: { color: '#14b8a6', bg: 'rgba(20, 184, 166, 0.08)' },
+        design: { color: '#ea580c', bg: 'rgba(234, 88, 12, 0.08)' },
+        missing: { color: '#9ca3af', bg: 'rgba(156, 163, 175, 0.08)' }
+      },
+      cicd: {
+        name: 'CI/CD Status',
+        built: { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.08)' },
+        approved: { color: '#10b981', bg: 'rgba(16, 185, 129, 0.08)' },
+        design: { color: '#d97706', bg: 'rgba(217, 119, 6, 0.08)' },
+        missing: { color: '#6b7280', bg: 'rgba(107, 114, 128, 0.08)' }
+      },
+      trafficLight: {
+        name: 'Traffic Light',
+        built: { color: '#22c55e', bg: 'rgba(34, 197, 94, 0.08)' },
+        approved: { color: '#eab308', bg: 'rgba(234, 179, 8, 0.08)' },
+        design: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.08)' },
+        missing: { color: '#737373', bg: 'rgba(115, 115, 115, 0.08)' }
+      }
+    };
+
+    let currentPalette = 'coolWarm';
+
+    function renderNodes(paletteId) {
+      const p = palettes[paletteId];
+      const container = document.getElementById('nodesPreview');
+
+      const statuses = [
+        { key: 'built', label: 'Built', model: 'fct_orders', columns: ['order_id (PK)', 'customer_id (FK)', 'total_amount'] },
+        { key: 'approved', label: 'Approved', model: 'dim_products', columns: ['product_id (PK)', 'name', 'category'] },
+        { key: 'design', label: 'Design', model: 'stg_inventory', columns: ['inventory_id', 'product_id', 'quantity'] },
+        { key: 'missing', label: 'Missing', model: 'ref_categories', columns: ['category_id', 'name'] }
+      ];
+
+      container.innerHTML = statuses.map(s => `
+        <div class="model-node" style="--node-border: ${p[s.key].color}; --node-bg: ${p[s.key].bg};">
+          <div class="model-node__header">
+            <div class="model-node__icon" style="background: ${p[s.key].bg}; color: ${p[s.key].color};">M</div>
+            <span class="model-node__name">${s.model}</span>
+            <span class="model-node__status-badge" style="background: ${p[s.key].bg}; color: ${p[s.key].color};">${s.label}</span>
+          </div>
+          <div class="model-node__columns">
+            ${s.columns.map(col => `
+              <div class="model-node__column">
+                <span>${col.replace(' (PK)', '').replace(' (FK)', '')}</span>
+                ${col.includes('PK') ? '<span class="model-node__column-badge" style="background: rgba(234, 179, 8, 0.2); color: #ca8a04;">PK</span>' : ''}
+                ${col.includes('FK') ? '<span class="model-node__column-badge" style="background: rgba(59, 130, 246, 0.2); color: #3b82f6;">FK</span>' : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('');
+
+      // Update edges
+      document.getElementById('edgeBuilt').style.background = p.built.color;
+      document.getElementById('edgeApproved').style.background = p.approved.color;
+      document.getElementById('edgeDesign').style.setProperty('--edge-color', p.design.color);
+
+      // Update section title
+      document.querySelector('.preview-section h2').textContent = `Model Node Preview (${p.name})`;
+    }
+
+    // Scheme card click handlers
+    document.querySelectorAll('.scheme-card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.scheme-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        currentPalette = card.dataset.scheme;
+        renderNodes(currentPalette);
+      });
+    });
+
+    // Initial render
+    renderNodes(currentPalette);
+  </script>
+</body>
+</html>

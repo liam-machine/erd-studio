@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 5,
+  "domain": "showcase",
+  "layer": "silver",
+  "description": "Project task management — tracks projects, tasks, events, and customers",
+  "modelFolder": "models/silver",
+  "logical": {
+    "models": [
+      "fct_task_event",
+      "dim_project",
+      "dim_task",
+      "fct_order"
+    ],
+    "relationships": [
+      {
+        "fromModel": "fct_task_event",
+        "fromColumn": "task_id",
+        "toModel": "dim_task",
+        "toColumn": "task_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_task",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_task_event",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_project",
+        "fromColumn": "parent_project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_order",
+        "fromColumn": "project_id",
+        "toModel": "dim_project",
+        "toColumn": "project_id",
+        "cardinality": "many-to-one"
+      }
+    ]
+  },
+  "viewConfig": {
+    "positions": {
+      "fct_task_event": {
+        "x": 390,
+        "y": 378
+      },
+      "dim_project": {
+        "x": 976,
+        "y": 72
+      },
+      "dim_task": {
+        "x": 976,
+        "y": 332
+      },
+      "fct_order": {
+        "x": 420,
+        "y": 100
+      }
+    },
+    "annotations": []
+  }
+}

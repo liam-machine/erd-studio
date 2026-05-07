@@ -1,0 +1,110 @@
+/**
+ * DataTypeSelect styles.
+ *
+ * Custom dropdown that opens immediately on click.
+ * BEM naming with VS Code theme tokens.
+ */
+
+.data-type-select {
+  position: relative;
+  display: inline-block;
+}
+
+.data-type-select--disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Trigger Button
+   --------------------------------------------------------------------------- */
+
+.data-type-select__trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 2px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  cursor: pointer;
+  min-width: 70px;
+  text-align: left;
+}
+
+.data-type-select__trigger:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.05));
+}
+
+.data-type-select__trigger:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.data-type-select--open .data-type-select__trigger {
+  border-color: var(--focus-border);
+}
+
+.data-type-select__value {
+  flex: 1;
+}
+
+.data-type-select__arrow {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+/* ---------------------------------------------------------------------------
+   Dropdown Menu
+   --------------------------------------------------------------------------- */
+
+.data-type-select__dropdown {
+  position: fixed;
+  margin: 2px 0 0 0;
+  padding: 2px 0;
+  list-style: none;
+  background: var(--vscode-dropdown-background, var(--panel-bg));
+  border: 1px solid var(--vscode-dropdown-border, var(--panel-border));
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 9999;
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 90px;
+}
+
+.data-type-select__dropdown:focus {
+  outline: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Options
+   --------------------------------------------------------------------------- */
+
+.data-type-select__option {
+  padding: 4px 8px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--vscode-dropdown-foreground, var(--editor-fg));
+  cursor: pointer;
+}
+
+.data-type-select__option:hover,
+.data-type-select__option:focus {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.1));
+  outline: none;
+}
+
+.data-type-select__option--selected {
+  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.3));
+  color: var(--vscode-list-activeSelectionForeground, var(--editor-fg));
+}
+
+.data-type-select__option--selected:hover,
+.data-type-select__option--selected:focus {
+  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.4));
+}

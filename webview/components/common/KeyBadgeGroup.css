@@ -1,0 +1,166 @@
+/**
+ * KeyBadgeGroup styles — compact dropdown for key type selection.
+ */
+
+.key-badge-group {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Trigger Button
+   --------------------------------------------------------------------------- */
+
+.key-badge-group__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 12px;
+  cursor: default;
+  min-width: 24px;
+  min-height: 18px;
+}
+
+.key-badge-group--editable .key-badge-group__trigger {
+  cursor: pointer;
+  border-color: var(--panel-border, #404040);
+}
+
+.key-badge-group--editable .key-badge-group__trigger:hover {
+  background: var(--input-bg, rgba(255, 255, 255, 0.05));
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.key-badge-group--open .key-badge-group__trigger {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: var(--input-bg, rgba(255, 255, 255, 0.05));
+}
+
+.key-badge-group__trigger:disabled {
+  cursor: default;
+  opacity: 1; /* Keep opacity for readonly display */
+}
+
+/* Selected badges container */
+.key-badge-group__selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Empty state placeholder */
+.key-badge-group__empty {
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 10px;
+  padding: 0 2px;
+}
+
+/* Dropdown arrow */
+.key-badge-group__arrow {
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 8px;
+  margin-left: 2px;
+  line-height: 1;
+}
+
+/* Warning icon */
+.key-badge-group__warning {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  margin-left: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 50%;
+  background: rgba(249, 115, 22, 0.2);
+  color: #f97316;
+  cursor: help;
+}
+
+/* ---------------------------------------------------------------------------
+   Dropdown Menu
+   --------------------------------------------------------------------------- */
+
+.key-badge-group__dropdown {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  padding: 4px 0;
+  background: var(--panel-bg, #252526);
+  border: 1px solid var(--panel-border, #404040);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* ---------------------------------------------------------------------------
+   Option Rows
+   --------------------------------------------------------------------------- */
+
+.key-badge-group__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.key-badge-group__option:hover {
+  background: var(--input-bg, rgba(255, 255, 255, 0.05));
+}
+
+.key-badge-group__option:focus {
+  outline: none;
+  background: var(--input-bg, rgba(255, 255, 255, 0.08));
+}
+
+/* Checkbox indicator */
+.key-badge-group__checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--vscode-descriptionForeground, #888);
+  border-radius: 2px;
+  font-size: 10px;
+  color: transparent;
+  flex-shrink: 0;
+}
+
+.key-badge-group__option--active .key-badge-group__checkbox {
+  background: var(--vscode-focusBorder, #007fd4);
+  border-color: var(--vscode-focusBorder, #007fd4);
+  color: #fff;
+}
+
+/* Label text */
+.key-badge-group__label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.key-badge-group__label-text {
+  font-size: 12px;
+  color: var(--editor-fg);
+  font-weight: 500;
+}
+
+.key-badge-group__label-desc {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -1,0 +1,20 @@
+{
+  "id": "scd2",
+  "label": "SCD Type 2",
+  "prefix": "dim_",
+  "description": "Slowly Changing Dimension Type 2 with full history tracking",
+  "columns": [
+    { "name": "{name}_id", "dataType": "INTEGER", "description": "Surrogate key", "isPrimaryKey": true },
+    { "name": "name", "dataType": "VARCHAR", "description": "Display name" },
+    { "name": "description", "dataType": "VARCHAR", "description": "Long description" },
+    { "name": "is_active", "dataType": "BOOLEAN", "description": "Active flag" },
+    { "name": "valid_from", "dataType": "TIMESTAMP_NTZ", "description": "Effective start" },
+    { "name": "valid_to", "dataType": "TIMESTAMP_NTZ", "description": "Effective end" },
+    { "name": "scd_valid_from", "dataType": "TIMESTAMP_NTZ", "description": "SCD effective start" },
+    { "name": "scd_valid_to", "dataType": "TIMESTAMP_NTZ", "description": "SCD effective end" },
+    { "name": "scd_is_current", "dataType": "BOOLEAN", "description": "Current version flag" },
+    { "name": "scd_hash", "dataType": "VARCHAR", "description": "Hash of tracked columns" },
+    { "name": "dwh_inserted_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse insert timestamp" },
+    { "name": "dwh_updated_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse update timestamp" }
+  ]
+}

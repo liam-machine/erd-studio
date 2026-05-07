@@ -1,0 +1,20 @@
+name: dim_customer
+schema: silver
+description: Customer dimension with demographics and segmentation
+grain: One row per customer
+modelRole: conformed-dim
+rationale:
+  purpose: Central customer reference shared across domains
+  design: Conformed dimension for consistent customer attributes
+columns:
+  - name: customer_id
+    dataType: INT
+    description: Surrogate key for customer
+    isPrimaryKey: true
+  - name: customer_name
+    dataType: VARCHAR
+    description: Full customer name
+    isNaturalKey: true
+  - name: email
+    dataType: VARCHAR
+    description: Customer email address

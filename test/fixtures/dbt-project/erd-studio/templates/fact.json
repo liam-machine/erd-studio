@@ -1,0 +1,13 @@
+{
+  "id": "fact",
+  "label": "Fact",
+  "prefix": "fct_",
+  "description": "Transactional fact table with event tracking",
+  "columns": [
+    { "name": "{name}_id", "dataType": "INTEGER", "description": "Surrogate key", "isPrimaryKey": true },
+    { "name": "event_date", "dataType": "DATE", "description": "Business event date" },
+    { "name": "amount", "dataType": "DECIMAL(18,2)", "description": "Monetary amount" },
+    { "name": "dwh_inserted_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse insert timestamp" },
+    { "name": "dwh_updated_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse update timestamp" }
+  ]
+}

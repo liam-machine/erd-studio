@@ -1,0 +1,102 @@
+/**
+ * BulkColumnActions styles.
+ *
+ * Compact inline toolbar for multi-select column operations.
+ * BEM naming with VS Code theme tokens.
+ */
+
+.bulk-column-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-panel-border, #404040);
+  border-radius: 4px;
+  background: var(--vscode-editor-selectionBackground, rgba(4, 57, 94, 0.3));
+  font-size: 11px;
+}
+
+.bulk-column-actions__count {
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 10px;
+  white-space: nowrap;
+  margin-right: 2px;
+}
+
+.bulk-column-actions__divider {
+  width: 1px;
+  height: 16px;
+  background: var(--vscode-panel-border, #404040);
+  flex-shrink: 0;
+}
+
+/* Generic action button */
+.bulk-column-actions__btn {
+  padding: 2px 6px;
+  border: 1px solid var(--vscode-panel-border, #404040);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-editor-foreground, #d4d4d4);
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s ease;
+}
+
+.bulk-column-actions__btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.bulk-column-actions__btn--danger {
+  color: var(--vscode-errorForeground, #f48771);
+  border-color: var(--vscode-errorForeground, #f48771);
+}
+
+.bulk-column-actions__btn--danger:hover {
+  background: rgba(244, 135, 113, 0.12);
+}
+
+.bulk-column-actions__btn--clear {
+  padding: 2px 4px;
+  border: none;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.bulk-column-actions__btn--clear:hover {
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+/* Key type toggle buttons */
+.bulk-column-actions__key-btn {
+  padding: 1px 5px;
+  border: 1px solid var(--vscode-panel-border, #404040);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+
+.bulk-column-actions__key-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+.bulk-column-actions__key-btn--active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: var(--vscode-focusBorder, #007fd4);
+  color: var(--vscode-focusBorder, #007fd4);
+}
+
+.bulk-column-actions__key-btn--active:hover {
+  background: rgba(59, 130, 246, 0.25);
+}
+
+/* DataTypeSelect override for inline rendering */
+.bulk-column-actions__type-select {
+  font-size: 10px;
+}

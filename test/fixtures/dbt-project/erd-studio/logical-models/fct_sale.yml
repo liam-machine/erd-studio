@@ -1,0 +1,17 @@
+name: fct_sale
+schema: silver
+description: Sales transaction fact table
+grain: One row per sale transaction
+modelRole: transaction-fact
+columns:
+  - name: sale_id
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: project_id
+    dataType: INT
+    description: FK to dim_project
+    isForeignKey: true
+  - name: amount
+    dataType: DECIMAL
+    description: Sale amount

@@ -1,0 +1,425 @@
+/**
+ * ContextMenu styles.
+ *
+ * Floating menu positioned at cursor location. Uses VS Code theme
+ * tokens from webview/styles/theme.css for consistent dark/light support.
+ */
+
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  max-width: 280px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  overflow: visible;
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.context-menu__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.context-menu__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-menu__title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--editor-fg);
+  opacity: 0.7;
+}
+
+.context-menu__status {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.context-menu__status--built {
+  background: var(--model-built-bg);
+  color: var(--model-built);
+}
+
+.context-menu__status--approved {
+  background: var(--model-approved-bg);
+  color: var(--model-approved);
+}
+
+.context-menu__status--design {
+  background: var(--model-design-bg);
+  color: var(--model-design);
+}
+
+.context-menu__status--missing {
+  background: var(--model-missing-bg);
+  color: var(--model-missing);
+}
+
+/* ---------------------------------------------------------------------------
+   Info section
+   --------------------------------------------------------------------------- */
+
+.context-menu__info {
+  padding: 8px 12px;
+}
+
+.context-menu__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.context-menu__row:first-child {
+  padding-top: 0;
+}
+
+.context-menu__row:last-child {
+  padding-bottom: 0;
+}
+
+.context-menu__label {
+  flex-shrink: 0;
+  width: 70px;
+  font-size: 11px;
+  color: var(--editor-fg);
+  opacity: 0.6;
+}
+
+.context-menu__value {
+  font-size: 12px;
+  color: var(--editor-fg);
+  word-break: break-word;
+}
+
+.context-menu__value strong {
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   Divider
+   --------------------------------------------------------------------------- */
+
+.context-menu__divider {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Menu items
+   --------------------------------------------------------------------------- */
+
+.context-menu__item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.context-menu__item:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.context-menu__item--danger {
+  color: var(--error-fg);
+}
+
+.context-menu__item--danger:hover {
+  background: var(--error-fg);
+  color: white;
+}
+
+/* ---------------------------------------------------------------------------
+   Cardinality dropdown
+   --------------------------------------------------------------------------- */
+
+.context-menu__row--cardinality {
+  position: relative;
+}
+
+.context-menu__cardinality-wrapper {
+  position: relative;
+  flex: 1;
+}
+
+.context-menu__cardinality-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.context-menu__cardinality-button:hover {
+  border-color: var(--focus-border);
+}
+
+.context-menu__cardinality-arrow {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.context-menu__cardinality-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 4px 0 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+/* Flipped dropdown (opens upward) */
+.context-menu__cardinality-dropdown--flipped {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 4px 0;
+}
+
+.context-menu__cardinality-arrow--flipped {
+  transform: rotate(180deg);
+}
+
+
+.context-menu__cardinality-option {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--editor-fg);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.context-menu__cardinality-option:hover {
+  background: var(--button-bg);
+}
+
+.context-menu__cardinality-option--selected {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 500;
+}
+
+.context-menu__cardinality-option--selected::before {
+  content: '✓ ';
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------------------
+   Cardinality control row (dropdown + swap button)
+   --------------------------------------------------------------------------- */
+
+.context-menu__cardinality-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.context-menu__cardinality-control .context-menu__cardinality-wrapper {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Swap cardinality button (context menu)
+   --------------------------------------------------------------------------- */
+
+.context-menu__swap-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--editor-fg);
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.context-menu__swap-btn:hover {
+  opacity: 1;
+  border-color: var(--focus-border);
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Subtle edit link in header
+   --------------------------------------------------------------------------- */
+
+.context-menu__edit-link {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--button-bg);
+  font-family: inherit;
+  font-size: 10px;
+  opacity: 0.7;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.context-menu__edit-link:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* ---------------------------------------------------------------------------
+   Subtle delete link in header
+   --------------------------------------------------------------------------- */
+
+.context-menu__delete-link {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--error-fg);
+  font-family: inherit;
+  font-size: 10px;
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.context-menu__delete-link:hover {
+  opacity: 1;
+}
+
+/* Confirming state - more prominent to draw attention */
+.context-menu__delete-link--confirming {
+  opacity: 1;
+  color: var(--error-fg);
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* ---------------------------------------------------------------------------
+   Action button (for node context menu)
+   --------------------------------------------------------------------------- */
+
+.context-menu__action-button {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.context-menu__action-button:hover {
+  background: var(--button-hover-bg, var(--button-bg));
+  filter: brightness(1.1);
+}
+
+.context-menu__action-button--approve {
+  background: var(--model-approved);
+  color: var(--model-approved-text);
+}
+
+.context-menu__action-button--unapprove {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--editor-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Annotation context menu
+   --------------------------------------------------------------------------- */
+
+.context-menu__color-swatches {
+  display: flex;
+  gap: 4px;
+}
+
+.context-menu__color-swatch {
+  width: 18px;
+  height: 18px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+  padding: 0;
+}
+
+.context-menu__color-swatch:hover {
+  border-color: var(--focus-border);
+  transform: scale(1.15);
+}
+
+.context-menu__link-select {
+  flex: 1;
+  padding: 3px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* Ghost edge hint — shown for relationships from comparison stage */
+.context-menu__ghost-hint {
+  padding: 6px 10px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 10px;
+  font-style: italic;
+  color: var(--editor-fg);
+  opacity: 0.5;
+  border-bottom-left-radius: 5px;
+  border-bottom-right-radius: 5px;
+}

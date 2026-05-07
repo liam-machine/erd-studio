@@ -1,0 +1,20 @@
+# ERD Studio manages selectors prefixed with `domain_` — regenerated automatically.
+# Other selectors below are user-managed and preserved across regenerates.
+
+selectors:
+  - name: domain_silver_scroll_test
+    description: All models in the scroll-test domain (silver layer). Managed by ERD Studio.
+    definition:
+      union:
+        - method: fqn
+          value: fct_large_table
+  # User-managed: nightly incremental refresh job
+  # Keep in sync with airflow DAG `incrementals_v2`
+  - name: incremental_critical
+    description: Models the nightly incremental job needs to refresh
+    definition:
+      union:
+        - method: fqn
+          value: fct_task_event
+        - method: fqn
+          value: dim_customer

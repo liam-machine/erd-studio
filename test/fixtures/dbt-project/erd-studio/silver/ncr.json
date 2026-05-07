@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 4,
+  "domain": "ncr",
+  "layer": "silver",
+  "description": "ncr",
+  "modelFolder": "models/silver",
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 99,
+  "domain": "future-version",
+  "layer": "silver",
+  "description": "Future schema version",
+  "logical": {
+    "models": [],
+    "relationships": [],
+    "viewConfig": {}
+  }
+}

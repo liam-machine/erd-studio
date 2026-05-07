@@ -1,0 +1,16 @@
+{
+  "metadata": {},
+  "nodes": {
+    "model.proj.good_model": {
+      "unique_id": "model.proj.good_model",
+      "name": "good_model",
+      "resource_type": "model",
+      "schema": "silver",
+      "description": "A valid model",
+      "columns": {
+        "id": { "name": "id", "data_type": "INT", "description": "PK" }
+      }
+    }
+  }
+  INVALID JSON HERE
+}

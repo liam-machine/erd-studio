@@ -1,0 +1,18 @@
+.DS_Store
+node_modules/
+dist/
+out/
+out-webview/
+*.vsix
+.vscode-test/
+dev-preview.html
+
+# Local dbt project files for development testing
+/dbt_project.yml
+/target/
+/models/
+/selectors.yml
+.env
+
+# Git worktrees (per-branch checkouts, not for tracking)
+.worktrees/

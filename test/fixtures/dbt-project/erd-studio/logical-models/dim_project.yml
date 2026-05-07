@@ -1,0 +1,23 @@
+name: dim_project
+schema: silver
+description: Project dimension table
+grain: One row per project
+modelRole: conformed-dim
+rationale:
+  purpose: Central project reference shared across domains
+  design: Conformed dimension for consistent project attributes
+columns:
+  - name: project_id
+    dataType: INT
+    description: Surrogate key for project
+    isPrimaryKey: true
+  - name: project_name
+    dataType: VARCHAR
+    description: Project name
+  - name: project_code
+    dataType: VARCHAR
+    description: Business project code
+  - name: parent_project_id
+    dataType: INT
+    description: Parent project for hierarchical rollups (self-reference)
+    isForeignKey: true

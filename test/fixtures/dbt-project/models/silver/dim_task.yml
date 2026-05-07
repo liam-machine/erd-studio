@@ -1,0 +1,22 @@
+version: 2
+models:
+  - name: dim_task
+    description: Task dimension table
+    config:
+      tags:
+        - silver
+        - domain:showcase
+    columns:
+      - name: task_id
+        description: Surrogate key for task
+        tests:
+          - relationships:
+              to: ref('fct_sale')
+              field: amount
+      - name: project_id
+        description: FK to dim_project
+      - name: name
+        description: Task name
+      - name: status
+        description: Current status
+        data_type: STRING

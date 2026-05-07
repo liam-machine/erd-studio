@@ -1,0 +1,27 @@
+/**
+ * DragLine styles.
+ *
+ * Visual feedback for column drag-to-connect. Uses design edge color
+ * and dashed pattern to indicate this will create a design relationship.
+ */
+
+.drag-line {
+  pointer-events: none;
+  overflow: visible;
+}
+
+.drag-line__path {
+  stroke: var(--edge-design);
+  stroke-width: 2;
+  stroke-dasharray: 8, 4;
+  fill: none;
+  opacity: 0.9;
+}
+
+.drag-line__path--annotation {
+  stroke: var(--vscode-descriptionForeground, #999);
+  stroke-width: 1.5;
+  stroke-dasharray: 6, 4;
+  opacity: 0.7;
+  pointer-events: none;
+}

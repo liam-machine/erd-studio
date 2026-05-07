@@ -1,0 +1,18 @@
+name: fct_order
+description: Order transaction fact table
+columns:
+  - name: order_id
+    dataType: INT
+    description: Surrogate key for order
+  - name: customer_id
+    dataType: INT
+    description: FK to dim_customer
+  - name: project_id
+    dataType: INT
+    description: FK to dim_project
+  - name: order_date
+    dataType: DATE
+    description: Date the order was placed
+  - name: amount
+    dataType: DECIMAL
+    description: Order total amount

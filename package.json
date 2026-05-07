@@ -1,0 +1,307 @@
+{
+  "name": "erd-studio",
+  "displayName": "ERD Studio",
+  "description": "Visual ERD designer for dbt projects. Design your data warehouse across two stages — Logical (columns, types, FK design) and Physical (read-only manifest view) — with cross-stage discrepancy comparison.",
+  "version": "0.6.39",
+  "publisher": "liamwynne",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liam-machine/erd-studio"
+  },
+  "keywords": [
+    "dbt",
+    "semantic",
+    "data modeling",
+    "visualization",
+    "ERD",
+    "relationships"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/dbt_project.yml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dbtSemantic.createDomain",
+        "title": "Create Semantic Domain",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.setupSemanticDirectory",
+        "title": "Set Up Semantic Domains Directory",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.openDomain",
+        "title": "Open Semantic Domain",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.deleteDomain",
+        "title": "Delete Semantic Domain",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.refreshManifest",
+        "title": "Refresh Manifest",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.renameDomain",
+        "title": "Rename Semantic Domain",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.addLayer",
+        "title": "Layer +",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.editLayer",
+        "title": "Edit Layer",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.removeLayer",
+        "title": "Remove Layer",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.initializeLayerConfig",
+        "title": "Initialize Layer Configuration",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.installCodingHarness",
+        "title": "Install AI Coding Harness",
+        "category": "dbt",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "dbtSemantic.syncDomainTags",
+        "title": "Regenerate dbt selectors.yml",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.stripLegacyDomainTags",
+        "title": "Strip Legacy Domain Tags from Model YAMLs",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.migrateToV5",
+        "title": "Migrate Domains to Central Model Store",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.deleteLogicalModel",
+        "title": "Delete Model",
+        "category": "dbt"
+      },
+      {
+        "command": "dbtSemantic.revealLogicalModel",
+        "title": "Reveal in Explorer",
+        "category": "dbt"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dbt-semantic",
+          "title": "ERD Studio",
+          "icon": "media/icon-sidebar.svg"
+        }
+      ]
+    },
+    "views": {
+      "dbt-semantic": [
+        {
+          "id": "dbtSemantic.domainTree",
+          "name": "ERD Studio"
+        },
+        {
+          "id": "dbtSemantic.modelLibrary",
+          "name": "Model Library",
+          "when": "dbtSemantic.hasLogicalModelsDir"
+        }
+      ]
+    },
+    "colors": [
+      {
+        "id": "dbtSemantic.layer.bronze",
+        "description": "Color for bronze layer folders",
+        "defaults": {
+          "dark": "#cd7f32",
+          "light": "#cd7f32",
+          "highContrast": "#cd7f32"
+        }
+      },
+      {
+        "id": "dbtSemantic.layer.silver",
+        "description": "Color for silver layer folders",
+        "defaults": {
+          "dark": "#a0a0a0",
+          "light": "#808080",
+          "highContrast": "#a0a0a0"
+        }
+      },
+      {
+        "id": "dbtSemantic.layer.gold",
+        "description": "Color for gold layer folders",
+        "defaults": {
+          "dark": "#d4a800",
+          "light": "#b8960a",
+          "highContrast": "#d4a800"
+        }
+      },
+      {
+        "id": "dbtSemantic.layer.platinum",
+        "description": "Color for platinum layer folders",
+        "defaults": {
+          "dark": "#e5e4e2",
+          "light": "#c0c0c0",
+          "highContrast": "#e5e4e2"
+        }
+      },
+      {
+        "id": "dbtSemantic.layer.custom",
+        "description": "Color for custom layer folders",
+        "defaults": {
+          "dark": "#6a9fb5",
+          "light": "#4a7f95",
+          "highContrast": "#6a9fb5"
+        }
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "dbtSemantic.domainTree",
+        "contents": "No ERD domains found.\n\nERD Studio lets you design your data warehouse visually across two stages:\n\n**Logical** — columns, data types, FK keys, and design rationale\n**Physical** — read-only view of what's built in dbt\n\n[Set Up ERD Studio](command:dbtSemantic.setupSemanticDirectory)\n\nCreates the erd-studio directory structure and your first domain.\n\n[Install AI Coding Harness](command:dbtSemantic.installCodingHarness)\n\nAdd ERD Studio schema reference to Claude, Copilot, Gemini, or Codex."
+      },
+      {
+        "view": "dbtSemantic.modelLibrary",
+        "contents": "No logical models found.\n\nModels are stored as YAML files in erd-studio/logical-models/.\n\nAdd models to a domain using the ERD editor to create them here."
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "dbtSemantic.domainEditor",
+        "displayName": "Semantic Domain Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/erd-studio/*/*.json"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "dbtSemantic.renameDomain",
+          "when": "view == dbtSemantic.domainTree && viewItem == domain",
+          "group": "7_modification@1"
+        },
+        {
+          "command": "dbtSemantic.deleteDomain",
+          "when": "view == dbtSemantic.domainTree && viewItem == domain",
+          "group": "7_modification@2"
+        },
+        {
+          "command": "dbtSemantic.editLayer",
+          "when": "view == dbtSemantic.domainTree && viewItem == layer",
+          "group": "7_modification@1"
+        },
+        {
+          "command": "dbtSemantic.removeLayer",
+          "when": "view == dbtSemantic.domainTree && viewItem == layer",
+          "group": "7_modification@2"
+        },
+        {
+          "command": "dbtSemantic.revealLogicalModel",
+          "when": "view == dbtSemantic.modelLibrary && viewItem == logicalModel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dbtSemantic.deleteLogicalModel",
+          "when": "view == dbtSemantic.modelLibrary && viewItem == logicalModel",
+          "group": "7_modification@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "dbtSemantic.installCodingHarness",
+          "when": "view == dbtSemantic.domainTree && dbtSemantic.hasSemanticDir",
+          "group": "navigation@0"
+        },
+        {
+          "command": "dbtSemantic.addLayer",
+          "when": "view == dbtSemantic.domainTree && dbtSemantic.hasSemanticDir",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ERD Studio",
+      "properties": {
+        "dbtSemantic.projectPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to dbt project root (auto-detected from workspace)"
+        },
+        "dbtSemantic.semanticDir": {
+          "type": "string",
+          "default": "erd-studio",
+          "description": "Relative path to ERD domain files within the project"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
+    "vscode:prepublish": "npm run package",
+    "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vscode-test",
+    "regen-fixtures": "tsx scripts/regen-fixtures.ts"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@testing-library/react": "^16.1.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.17.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.0",
+    "esbuild": "^0.24.0",
+    "jsdom": "^25.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "@vscode-elements/elements": "^1.6.0",
+    "@vscode-elements/react-elements": "^0.5.0",
+    "@xyflow/react": "^12.4.0",
+    "elkjs": "^0.9.3",
+    "js-yaml": "^4.1.1",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "yaml": "^2.8.2",
+    "zustand": "^5.0.0"
+  }
+}

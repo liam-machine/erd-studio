@@ -1,0 +1,58 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- L1: 3D shadow + metallic gradient + strong diagonal shine -->
+  <defs>
+    <linearGradient id="bronzeL" x1="0" y1="36" x2="0" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f0b860"/>
+      <stop offset="35%" stop-color="#CD7F32"/>
+      <stop offset="100%" stop-color="#7a4f1a"/>
+    </linearGradient>
+    <linearGradient id="silverL" x1="0" y1="36" x2="0" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f0f0f0"/>
+      <stop offset="35%" stop-color="#C0C0C0"/>
+      <stop offset="100%" stop-color="#707070"/>
+    </linearGradient>
+    <linearGradient id="goldL" x1="0" y1="36" x2="0" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fff080"/>
+      <stop offset="35%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#a07800"/>
+    </linearGradient>
+    <!-- Diagonal shine -->
+    <linearGradient id="shineL" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="white" stop-opacity="0"/>
+      <stop offset="35%" stop-color="white" stop-opacity="0"/>
+      <stop offset="45%" stop-color="white" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="white" stop-opacity="0.4"/>
+      <stop offset="55%" stop-color="white" stop-opacity="0.35"/>
+      <stop offset="65%" stop-color="white" stop-opacity="0"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="allL">
+      <path d="M14,36 L14,92 L40,92 L40,84 L23,84 L23,68 L37,68 L37,60 L23,60 L23,44 L40,44 L40,36 Z"/>
+      <path d="M46,36 L46,92 L55,92 L55,69 L61,69 L72,92 L82,92 L70,68 C75,66 79,60 79,53 C79,43 72,36 62,36 Z M55,44 L61,44 C67,44 70,47 70,53 C70,58 67,61 61,61 L55,61 Z"/>
+      <path d="M88,36 L88,92 L103,92 C114,92 120,81 120,64 C120,47 114,36 103,36 Z M97,44 L102,44 C109,44 112,52 112,64 C112,76 109,84 102,84 L97,84 Z"/>
+    </clipPath>
+  </defs>
+
+  <rect width="128" height="128" rx="22" fill="#1c1c1c"/>
+
+  <!-- Drop shadow (2px offset) -->
+  <g opacity="0.5">
+    <path d="M16,38 L16,94 L42,94 L42,86 L25,86 L25,70 L39,70 L39,62 L25,62 L25,46 L42,46 L42,38 Z" fill="#000"/>
+    <path d="M48,38 L48,94 L57,94 L57,71 L63,71 L74,94 L84,94 L72,70 C77,68 81,62 81,55 C81,45 74,38 64,38 Z" fill="#000"/>
+    <path d="M90,38 L90,94 L105,94 C116,94 122,83 122,66 C122,49 116,38 105,38 Z" fill="#000"/>
+  </g>
+
+  <!-- E — Bronze gradient -->
+  <path d="M14,36 L14,92 L40,92 L40,84 L23,84 L23,68 L37,68 L37,60 L23,60 L23,44 L40,44 L40,36 Z" fill="url(#bronzeL)"/>
+
+  <!-- R — Silver gradient -->
+  <path d="M46,36 L46,92 L55,92 L55,69 L61,69 L72,92 L82,92 L70,68 C75,66 79,60 79,53 C79,43 72,36 62,36 Z M55,44 L61,44 C67,44 70,47 70,53 C70,58 67,61 61,61 L55,61 Z" fill="url(#silverL)"/>
+
+  <!-- D — Gold gradient -->
+  <path d="M88,36 L88,92 L103,92 C114,92 120,81 120,64 C120,47 114,36 103,36 Z M97,44 L102,44 C109,44 112,52 112,64 C112,76 109,84 102,84 L97,84 Z" fill="url(#goldL)"/>
+
+  <!-- Diagonal shine streak across all letters -->
+  <g clip-path="url(#allL)">
+    <rect x="0" y="0" width="128" height="128" fill="url(#shineL)"/>
+  </g>
+</svg>

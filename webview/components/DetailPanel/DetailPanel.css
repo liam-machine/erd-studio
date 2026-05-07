@@ -1,0 +1,806 @@
+/**
+ * DetailPanel styles.
+ *
+ * Floating detail view at top-right. Uses VS Code theme tokens from
+ * webview/styles/theme.css for consistent light/dark theme support.
+ * Follows BEM naming and matches Toolbar/ModelNode patterns.
+ */
+
+.detail-panel {
+  width: 340px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.detail-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.detail-panel__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-panel__title--editable {
+  cursor: pointer;
+}
+
+.detail-panel__title--editable:hover {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.detail-panel__title-input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  background: var(--input-bg, var(--vscode-input-background, #3c3c3c));
+  border: 1px solid var(--focus-border, var(--vscode-focusBorder, #007fd4));
+  border-radius: 3px;
+  outline: none;
+  font-family: inherit;
+}
+
+.detail-panel__title-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail-panel__title-input--error {
+  border-color: var(--vscode-errorForeground, #f48771);
+}
+
+.detail-panel__title-error {
+  font-size: 10px;
+  color: var(--vscode-errorForeground, #f48771);
+  line-height: 1.2;
+}
+
+.detail-panel__title-edit-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__header:hover .detail-panel__title-edit-btn {
+  opacity: 1;
+}
+
+.detail-panel__title-edit-btn:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.detail-panel__close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__close:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Sections
+   --------------------------------------------------------------------------- */
+
+.detail-panel__section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.detail-panel__section:last-child {
+  border-bottom: none;
+}
+
+.detail-panel__section-title {
+  margin: 0 0 8px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+/* ---------------------------------------------------------------------------
+   Metadata
+   --------------------------------------------------------------------------- */
+
+.detail-panel__metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-panel__metadata-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-panel__label {
+  font-weight: 500;
+  color: var(--vscode-descriptionForeground, #888);
+  min-width: 50px;
+}
+
+.detail-panel__value {
+  color: var(--editor-fg);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.detail-panel__status-badge {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-panel__status-badge--built {
+  background: var(--model-built-bg);
+  color: var(--model-built);
+}
+
+.detail-panel__status-badge--design {
+  background: var(--model-design-bg);
+  color: var(--model-design);
+}
+
+.detail-panel__status-badge--missing {
+  background: var(--model-missing-bg);
+  color: var(--model-missing);
+}
+
+.detail-panel__status-badge--approved {
+  background: var(--model-approved-bg);
+  color: var(--model-approved);
+}
+
+/* Approve/Unapprove button in metadata row */
+.detail-panel__approve-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--model-approved);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--model-approved);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.detail-panel__approve-btn:hover {
+  background: var(--model-approved);
+  color: var(--model-approved-text, #fff);
+}
+
+.detail-panel__approve-btn--unapprove {
+  border-color: var(--model-design);
+  color: var(--model-design);
+}
+
+.detail-panel__approve-btn--unapprove:hover {
+  background: var(--model-design);
+  color: var(--model-design-text, #fff);
+}
+
+.detail-panel__description {
+  margin: 8px 0 0 0;
+  color: var(--editor-fg);
+  line-height: 1.5;
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
+   Columns
+   --------------------------------------------------------------------------- */
+
+.detail-panel__columns {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.detail-panel__column {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+
+.detail-panel__column--built {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.detail-panel__column--built:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.detail-panel__column--planned,
+.detail-panel__column--missing {
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.detail-panel__column--planned:hover,
+.detail-panel__column--missing:hover {
+  background: rgba(249, 115, 22, 0.18);
+}
+
+.detail-panel__col-indicators {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 36px;
+}
+
+.detail-panel__pk,
+.detail-panel__fk {
+  display: inline-block;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.3px;
+}
+
+.detail-panel__pk {
+  background: rgba(234, 179, 8, 0.2);
+  color: #ca8a04;
+}
+
+.detail-panel__fk {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+
+.detail-panel__col-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--editor-fg);
+}
+
+.detail-panel__col-type {
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.detail-panel__empty {
+  padding: 8px 6px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-style: italic;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Relationships
+   --------------------------------------------------------------------------- */
+
+.detail-panel__relationships {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-panel__relationship {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 3px;
+  line-height: 1.4;
+  font-size: 11px;
+}
+
+.detail-panel__relationship--built {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.detail-panel__relationship--approved {
+  background: rgba(20, 184, 166, 0.1);
+}
+
+.detail-panel__relationship--design {
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.detail-panel__relationship--clickable {
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.detail-panel__relationship--clickable:hover {
+  background: rgba(128, 128, 128, 0.2);
+}
+
+.detail-panel__relationship--clickable:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+.detail-panel__rel-direction {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 12px;
+  width: 16px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.detail-panel__rel-columns {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.detail-panel__rel-local {
+  font-weight: 600;
+  color: var(--editor-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-panel__rel-arrow {
+  color: var(--vscode-descriptionForeground, #888);
+  flex-shrink: 0;
+}
+
+.detail-panel__rel-target {
+  color: var(--editor-fg);
+  font-family: var(--vscode-editor-font-family, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-panel__rel-cardinality {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 500;
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--vscode-descriptionForeground, #888);
+  white-space: nowrap;
+}
+
+.detail-panel__rel-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__rel-delete:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* Relationship approval toggle */
+.detail-panel__rel-approve {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--model-approved, #14b8a6);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--model-approved, #14b8a6);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.1s ease, background 0.1s ease;
+}
+
+.detail-panel__relationship:hover .detail-panel__rel-approve {
+  opacity: 1;
+}
+
+.detail-panel__rel-approve:hover {
+  background: var(--model-approved-bg, rgba(20, 184, 166, 0.15));
+}
+
+.detail-panel__rel-approve--approved {
+  background: var(--model-approved, #14b8a6);
+  color: var(--model-approved-text, #fff);
+  opacity: 1;
+}
+
+.detail-panel__rel-approve--approved:hover {
+  background: var(--model-design, #f97316);
+  border-color: var(--model-design, #f97316);
+  color: var(--model-design-text, #fff);
+}
+
+/* ---------------------------------------------------------------------------
+   Stub columns toggle
+   --------------------------------------------------------------------------- */
+
+.detail-panel__stub-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--editor-fg);
+  cursor: pointer;
+  user-select: none;
+}
+
+.detail-panel__stub-label input[type="checkbox"] {
+  accent-color: var(--button-bg);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Actions Section (Delete Model)
+   --------------------------------------------------------------------------- */
+
+.detail-panel__section--actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__button {
+  padding: 6px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.detail-panel__button:hover {
+  background: var(--button-hover-bg);
+  border-color: var(--focus-border);
+}
+
+.detail-panel__button--danger {
+  align-self: flex-start;
+  background: transparent;
+  color: #dc6b6b;
+  border-color: rgba(220, 107, 107, 0.25);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.detail-panel__button--danger:hover {
+  background: rgba(220, 107, 107, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.detail-panel__button--warning {
+  align-self: flex-start;
+  background: rgba(204, 167, 0, 0.1);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  border-color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.detail-panel__button--warning:hover {
+  background: rgba(204, 167, 0, 0.2);
+}
+
+.detail-panel__confirm-label {
+  font-size: 11px;
+  color: var(--editor-fg);
+  line-height: 1.4;
+}
+
+.detail-panel__confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.detail-panel__confirm-actions .detail-panel__button {
+  flex: 1;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.detail-panel__confirm-actions .detail-panel__button--danger {
+  align-self: auto;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.detail-panel__confirm-actions .detail-panel__button--danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+}
+
+/* ---------------------------------------------------------------------------
+   Design Rationale
+   --------------------------------------------------------------------------- */
+
+.detail-panel__rationale-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__rationale-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: inherit;
+}
+
+.detail-panel__rationale-toggle:hover {
+  color: var(--editor-fg);
+}
+
+.detail-panel__rationale-chevron {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.detail-panel__rationale-chevron--open {
+  transform: rotate(90deg);
+}
+
+.detail-panel__rationale-count {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.7;
+}
+
+.detail-panel__rationale-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__rationale-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.detail-panel__rationale-edit-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.detail-panel__rationale-section:hover .detail-panel__rationale-edit-btn {
+  opacity: 1;
+}
+
+.detail-panel__rationale-edit-btn:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.detail-panel__rationale-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-panel__rationale-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8b5cf6;
+}
+
+.detail-panel__rationale-text {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--editor-fg);
+  white-space: pre-wrap;
+}
+
+.detail-panel__rationale-textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 6px;
+  border: 1px solid var(--focus-border, var(--vscode-focusBorder, #007fd4));
+  border-radius: 3px;
+  background: var(--input-bg, var(--vscode-input-background, #3c3c3c));
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.detail-panel__rationale-textarea::placeholder {
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.6;
+}
+
+.detail-panel__rationale-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.detail-panel__rationale-actions .detail-panel__button {
+  flex: 1;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.detail-panel__rationale-add-btn {
+  padding: 6px 12px;
+  border: 1px dashed var(--vscode-descriptionForeground, #888);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+
+.detail-panel__rationale-add-btn:hover {
+  background: rgba(139, 92, 246, 0.08);
+  color: #8b5cf6;
+  border-color: #8b5cf6;
+}
+
+/* ---------------------------------------------------------------------------
+   Role Editor
+   --------------------------------------------------------------------------- */
+
+.detail-panel__role-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-panel__role-select {
+  padding: 4px 6px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.detail-panel__role-select:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+}
+
+/* ---------------------------------------------------------------------------
+   Grain Editor
+   --------------------------------------------------------------------------- */
+
+.detail-panel__grain-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-panel__grain-section:hover .detail-panel__rationale-edit-btn {
+  opacity: 1;
+}

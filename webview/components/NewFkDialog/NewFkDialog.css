@@ -1,0 +1,240 @@
+/**
+ * NewFkDialog styles.
+ *
+ * Centered dialog for creating FK relationships between models.
+ * BEM naming, VS Code theme tokens from webview/styles/theme.css.
+ */
+
+.new-fk-dialog {
+  width: 420px;
+  max-height: calc(100vh - 100px);
+  margin-top: 80px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  z-index: 10; /* Above toolbar and other panels */
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  flex-shrink: 0;
+}
+
+.new-fk-dialog__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--editor-fg);
+}
+
+.new-fk-dialog__close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.new-fk-dialog__close:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Content
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__content {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   Form Fields
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.new-fk-dialog__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--editor-fg);
+}
+
+.new-fk-dialog__input,
+.new-fk-dialog__select {
+  padding: 6px 8px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.new-fk-dialog__input:focus,
+.new-fk-dialog__select:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.new-fk-dialog__input::placeholder {
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.7;
+}
+
+.new-fk-dialog__input--error,
+.new-fk-dialog__select--error {
+  border-color: var(--error-fg, #f48771);
+}
+
+.new-fk-dialog__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.new-fk-dialog__select {
+  cursor: pointer;
+}
+
+.new-fk-dialog__error {
+  font-size: 11px;
+  color: var(--error-fg, #f48771);
+}
+
+.new-fk-dialog__error--global {
+  padding: 8px;
+  border-radius: 3px;
+  background: rgba(244, 135, 113, 0.1);
+}
+
+.new-fk-dialog__warning {
+  font-size: 11px;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.new-fk-dialog__warning--global {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 3px;
+  background: rgba(204, 167, 0, 0.1);
+}
+
+.new-fk-dialog__warning-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Preview
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: rgba(249, 115, 22, 0.1); /* Design orange tint */
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.new-fk-dialog__preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.new-fk-dialog__preview-text {
+  font-size: 12px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--editor-fg);
+}
+
+.new-fk-dialog__preview-cardinality {
+  margin-left: 6px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+/* ---------------------------------------------------------------------------
+   Footer
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--panel-border);
+  flex-shrink: 0;
+}
+
+.new-fk-dialog__button {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s ease, opacity 0.1s ease;
+}
+
+.new-fk-dialog__button--primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.new-fk-dialog__button--primary:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+}
+
+.new-fk-dialog__button--secondary {
+  background: transparent;
+  border-color: var(--panel-border);
+  color: var(--editor-fg);
+}
+
+.new-fk-dialog__button--secondary:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.new-fk-dialog__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

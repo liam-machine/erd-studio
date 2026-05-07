@@ -1,0 +1,122 @@
+/**
+ * ColumnTooltip styles.
+ *
+ * Rendered via React Portal into document.body, so positioned with
+ * position: fixed relative to the viewport. pointer-events: none
+ * ensures it never blocks long-press drag or drop-target detection.
+ */
+
+/* -----------------------------------------------------------------------
+   Container — positioned by JS, fades in when .column-tooltip--visible
+   ----------------------------------------------------------------------- */
+
+.column-tooltip {
+  position: fixed;
+  z-index: 10000;
+  min-width: 260px;
+  max-width: 420px;
+  padding: 10px 14px;
+  background: var(--vscode-editorHoverWidget-background, var(--panel-bg, #252526));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vscode-editorHoverWidget-foreground, var(--editor-fg, #d4d4d4));
+  pointer-events: none;
+  opacity: 0;
+  white-space: normal;
+  word-wrap: break-word;
+  transition: opacity 0.12s ease;
+}
+
+.column-tooltip--visible {
+  opacity: 1;
+}
+
+/* Arrow — points down (tooltip above anchor) */
+.column-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+}
+
+/* Flipped arrow — points up (tooltip below anchor) */
+.column-tooltip--flipped::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+}
+
+/* -----------------------------------------------------------------------
+   Header — column name + data type
+   ----------------------------------------------------------------------- */
+
+.column-tooltip__header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.column-tooltip__name {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.column-tooltip__type {
+  flex-shrink: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+/* -----------------------------------------------------------------------
+   Description
+   ----------------------------------------------------------------------- */
+
+.column-tooltip__description {
+  padding: 6px 0;
+  border-top: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+  color: var(--vscode-editorHoverWidget-foreground, var(--editor-fg, #d4d4d4));
+  font-size: 13px;
+}
+
+/* -----------------------------------------------------------------------
+   Details rows (keys, SCD, additive)
+   ----------------------------------------------------------------------- */
+
+.column-tooltip__details {
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.column-tooltip__row {
+  display: flex;
+  gap: 10px;
+}
+
+.column-tooltip__label {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--vscode-descriptionForeground, #888);
+  min-width: 52px;
+}
+
+.column-tooltip__value {
+  font-size: 13px;
+}

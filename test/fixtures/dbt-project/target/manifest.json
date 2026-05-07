@@ -1,0 +1,272 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12/manifest.json",
+    "dbt_version": "1.8.0",
+    "generated_at": "2025-01-15T10:30:00.000000Z",
+    "invocation_id": "test-invocation-id",
+    "project_name": "my_dbt_project",
+    "project_id": "test-project-id",
+    "env": {}
+  },
+  "nodes": {
+    "model.my_dbt_project.dim_task": {
+      "unique_id": "model.my_dbt_project.dim_task",
+      "name": "dim_task",
+      "resource_type": "model",
+      "schema": "silver",
+      "description": "Task dimension table",
+      "original_file_path": "models/silver/dim_task.sql",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "data_type": "INT",
+          "description": "Surrogate key for task"
+        },
+        "project_id": {
+          "name": "project_id",
+          "data_type": "INT",
+          "description": "FK to dim_project"
+        },
+        "name": {
+          "name": "name",
+          "data_type": "VARCHAR",
+          "description": "Task name"
+        },
+        "status": {
+          "name": "status",
+          "data_type": "VARCHAR",
+          "description": "Current status"
+        }
+      },
+      "depends_on": { "nodes": [] },
+      "config": { "materialized": "table" }
+    },
+    "model.my_dbt_project.dim_project": {
+      "unique_id": "model.my_dbt_project.dim_project",
+      "name": "dim_project",
+      "resource_type": "model",
+      "schema": "silver",
+      "description": "Project dimension table",
+      "original_file_path": "models/silver/dim_project.sql",
+      "columns": {
+        "project_id": {
+          "name": "project_id",
+          "data_type": "INT",
+          "description": "Surrogate key for project"
+        },
+        "project_name": {
+          "name": "project_name",
+          "data_type": "VARCHAR",
+          "description": "Project name"
+        }
+      },
+      "depends_on": { "nodes": [] },
+      "config": { "materialized": "table" }
+    },
+    "model.my_dbt_project.fct_task_event": {
+      "unique_id": "model.my_dbt_project.fct_task_event",
+      "name": "fct_task_event",
+      "resource_type": "model",
+      "schema": "gold",
+      "description": "Task events fact table",
+      "original_file_path": "models/gold/fct_task_event.sql",
+      "columns": {
+        "event_id": {
+          "name": "event_id",
+          "data_type": "INT",
+          "description": "Event surrogate key"
+        },
+        "task_id": {
+          "name": "task_id",
+          "data_type": "INT",
+          "description": "FK to dim_task"
+        },
+        "event_date": {
+          "name": "event_date",
+          "data_type": "DATE",
+          "description": "Date of the event"
+        },
+        "amount": {
+          "name": "amount",
+          "data_type": "NUMERIC",
+          "description": "Event amount"
+        }
+      },
+      "depends_on": { "nodes": ["model.my_dbt_project.dim_task"] },
+      "config": { "materialized": "table" }
+    },
+    "model.my_dbt_project.stg_raw_payments": {
+      "unique_id": "model.my_dbt_project.stg_raw_payments",
+      "name": "stg_raw_payments",
+      "resource_type": "model",
+      "schema": "staging",
+      "description": "Staging model for raw payment data (ephemeral, no .yml)",
+      "original_file_path": "models/staging/stg_raw_payments.sql",
+      "columns": {
+        "payment_id": {
+          "name": "payment_id",
+          "data_type": "INT",
+          "description": "Payment identifier"
+        },
+        "order_id": {
+          "name": "order_id",
+          "data_type": "INT",
+          "description": "FK to orders"
+        },
+        "amount": {
+          "name": "amount",
+          "data_type": "DECIMAL",
+          "description": "Payment amount"
+        },
+        "payment_method": {
+          "name": "payment_method",
+          "data_type": "VARCHAR",
+          "description": "Payment method (credit_card, bank_transfer, etc.)"
+        }
+      },
+      "depends_on": { "nodes": [] },
+      "config": { "materialized": "ephemeral" }
+    },
+    "test.my_dbt_project.not_null_dim_task_task_id": {
+      "unique_id": "test.my_dbt_project.not_null_dim_task_task_id",
+      "name": "not_null_dim_task_task_id",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "columns": {},
+      "depends_on": { "nodes": ["model.my_dbt_project.dim_task"] },
+      "config": {}
+    },
+    "test.my_dbt_project.unique_dim_task_task_id": {
+      "unique_id": "test.my_dbt_project.unique_dim_task_task_id",
+      "name": "unique_dim_task_task_id",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "task_id",
+          "model": "ref('dim_task')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.dim_task",
+      "depends_on": { "nodes": ["model.my_dbt_project.dim_task"] },
+      "columns": {},
+      "config": {}
+    },
+    "test.my_dbt_project.unique_dim_project_project_id": {
+      "unique_id": "test.my_dbt_project.unique_dim_project_project_id",
+      "name": "unique_dim_project_project_id",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "project_id",
+          "model": "ref('dim_project')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.dim_project",
+      "depends_on": { "nodes": ["model.my_dbt_project.dim_project"] },
+      "columns": {},
+      "config": {}
+    },
+    "test.my_dbt_project.unique_fct_task_event_event_id": {
+      "unique_id": "test.my_dbt_project.unique_fct_task_event_event_id",
+      "name": "unique_fct_task_event_event_id",
+      "resource_type": "test",
+      "schema": "gold",
+      "description": "",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "event_id",
+          "model": "ref('fct_task_event')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.fct_task_event",
+      "depends_on": { "nodes": ["model.my_dbt_project.fct_task_event"] },
+      "columns": {},
+      "config": {}
+    },
+    "test.my_dbt_project.relationships_dim_task_project_id__project_id__ref_dim_project_": {
+      "unique_id": "test.my_dbt_project.relationships_dim_task_project_id__project_id__ref_dim_project_",
+      "name": "relationships_dim_task_project_id__project_id__ref_dim_project_",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "column_name": "project_id",
+          "field": "project_id",
+          "to": "ref('dim_project')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.dim_task",
+      "depends_on": {
+        "nodes": [
+          "model.my_dbt_project.dim_task",
+          "model.my_dbt_project.dim_project"
+        ]
+      },
+      "columns": {},
+      "config": {}
+    },
+    "test.my_dbt_project.relationships_fct_task_event_task_id__task_id__ref_dim_task_": {
+      "unique_id": "test.my_dbt_project.relationships_fct_task_event_task_id__task_id__ref_dim_task_",
+      "name": "relationships_fct_task_event_task_id__task_id__ref_dim_task_",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "column_name": "task_id",
+          "field": "task_id",
+          "to": "ref('dim_task')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.fct_task_event",
+      "depends_on": {
+        "nodes": [
+          "model.my_dbt_project.fct_task_event",
+          "model.my_dbt_project.dim_task"
+        ]
+      },
+      "columns": {},
+      "config": {}
+    },
+    "seed.my_dbt_project.seed_status_codes": {
+      "unique_id": "seed.my_dbt_project.seed_status_codes",
+      "name": "seed_status_codes",
+      "resource_type": "seed",
+      "schema": "silver",
+      "description": "Seed for status codes",
+      "columns": {},
+      "depends_on": { "nodes": [] },
+      "config": {}
+    }
+  },
+  "sources": {
+    "source.my_dbt_project.raw.tasks": {
+      "unique_id": "source.my_dbt_project.raw.tasks",
+      "name": "tasks",
+      "resource_type": "source",
+      "schema": "raw"
+    }
+  },
+  "macros": {
+    "macro.my_dbt_project.my_macro": {
+      "unique_id": "macro.my_dbt_project.my_macro",
+      "name": "my_macro",
+      "resource_type": "macro"
+    }
+  },
+  "exposures": {},
+  "metrics": {},
+  "selectors": {},
+  "docs": {}
+}

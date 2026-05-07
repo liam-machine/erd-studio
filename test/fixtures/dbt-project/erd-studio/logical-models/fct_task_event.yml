@@ -1,0 +1,40 @@
+name: fct_task_event
+schema: silver
+description: Records every task event across all projects and tasks
+grain: One row per task event
+modelRole: transaction-fact
+rationale:
+  purpose: Central fact table tracking all task activity for reporting and analysis
+  design: Transaction grain with foreign keys to all relevant dimensions
+  measures: duration_hours (additive), amount (additive)
+columns:
+  - name: event_id
+    dataType: INT
+    description: Surrogate key for task event
+    isPrimaryKey: true
+  - name: task_id
+    dataType: INT
+    description: FK to dim_task
+    isForeignKey: true
+  - name: project_id
+    dataType: INT
+    description: FK to dim_project
+    isForeignKey: true
+  - name: customer_id
+    dataType: INT
+    description: FK to dim_customer
+    isForeignKey: true
+  - name: event_date
+    dataType: DATE
+    description: Date the event occurred
+  - name: event_type
+    dataType: VARCHAR
+    description: Type of task event (started, completed, blocked)
+  - name: amount
+    dataType: DECIMAL
+    description: Cost or value of the event
+    additiveType: additive
+  - name: duration_hours
+    dataType: DECIMAL
+    description: Hours spent on this event
+    additiveType: additive

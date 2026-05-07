@@ -1,0 +1,360 @@
+/**
+ * AddExistingModelDialog styles.
+ *
+ * Dialog for selecting and adding models to a domain.
+ * BEM naming, VS Code theme tokens from webview/styles/theme.css.
+ */
+
+.add-existing-model-dialog {
+  width: 520px;
+  max-height: calc(100vh - 100px);
+  margin-top: 80px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.add-existing-model-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  flex-shrink: 0;
+}
+
+.add-existing-model-dialog__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--editor-fg);
+}
+
+.add-existing-model-dialog__close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.add-existing-model-dialog__close:hover {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Content
+   --------------------------------------------------------------------------- */
+
+.add-existing-model-dialog__content {
+  flex: 1;
+  padding: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 200px;
+}
+
+/* ---------------------------------------------------------------------------
+   Search
+   --------------------------------------------------------------------------- */
+
+.add-existing-model-dialog__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.add-existing-model-dialog__search-input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--input-border, var(--panel-border));
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--input-fg, var(--editor-fg));
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.add-existing-model-dialog__search-input:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: -1px;
+  border-color: var(--focus-border);
+}
+
+.add-existing-model-dialog__search-input::placeholder {
+  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.7;
+}
+
+.add-existing-model-dialog__search-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+/* ---------------------------------------------------------------------------
+   Filter Chips
+   --------------------------------------------------------------------------- */
+
+.add-existing-model-dialog__filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.add-existing-model-dialog__filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease, opacity 0.1s ease;
+  opacity: 0.5;
+}
+
+.add-existing-model-dialog__filter-chip:hover {
+  opacity: 0.8;
+}
+
+.add-existing-model-dialog__filter-chip--active {
+  opacity: 1;
+}
+
+.add-existing-model-dialog__filter-chip--logical.add-existing-model-dialog__filter-chip--active {
+  border-color: var(--stage-logical);
+  background: var(--stage-logical-bg);
+  color: var(--stage-logical);
+}
+
+.add-existing-model-dialog__filter-chip--yml.add-existing-model-dialog__filter-chip--active {
+  border-color: var(--stage-physical);
+  background: var(--stage-physical-bg);
+  color: var(--stage-physical);
+}
+
+.add-existing-model-dialog__filter-chip--manifest.add-existing-model-dialog__filter-chip--active {
+  border-color: var(--stage-ghost);
+  background: var(--stage-ghost-bg);
+  color: var(--stage-ghost);
+}
+
+.add-existing-model-dialog__filter-count {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------------------
+   Model List
+   --------------------------------------------------------------------------- */
+
+.add-existing-model-dialog__list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+}
+
+.add-existing-model-dialog__item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--panel-border);
+  transition: background 0.1s ease;
+}
+
+.add-existing-model-dialog__item:last-child {
+  border-bottom: none;
+}
+
+.add-existing-model-dialog__item:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.add-existing-model-dialog__item--selected {
+  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.2));
+}
+
+.add-existing-model-dialog__item--selected:hover {
+  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.25));
+}
+
+.add-existing-model-dialog__item-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.add-existing-model-dialog__item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--editor-fg);
+}
+
+.add-existing-model-dialog__item-source {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.add-existing-model-dialog__item-source--logical {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+}
+
+.add-existing-model-dialog__item-source--yml {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.add-existing-model-dialog__item-source--manifest {
+  background: rgba(156, 163, 175, 0.15);
+  color: #9ca3af;
+}
+
+.add-existing-model-dialog__item-schema {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.add-existing-model-dialog__item-path {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-family: var(--vscode-editor-font-family, monospace);
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.add-existing-model-dialog__item-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.add-existing-model-dialog__item-columns {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.add-existing-model-dialog__item-desc {
+  flex: 1;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Empty & No Results States
+   --------------------------------------------------------------------------- */
+
+.add-existing-model-dialog__empty,
+.add-existing-model-dialog__no-results {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 13px;
+}
+
+.add-existing-model-dialog__empty p {
+  margin: 0 0 8px 0;
+}
+
+.add-existing-model-dialog__empty-hint {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.add-existing-model-dialog__empty-hint code {
+  background: rgba(128, 128, 128, 0.15);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
+   Footer
+   --------------------------------------------------------------------------- */
+
+.add-existing-model-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--panel-border);
+  flex-shrink: 0;
+}
+
+.add-existing-model-dialog__button {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s ease, opacity 0.1s ease;
+}
+
+.add-existing-model-dialog__button--primary {
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.add-existing-model-dialog__button--primary:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+}
+
+.add-existing-model-dialog__button--secondary {
+  background: transparent;
+  border-color: var(--panel-border);
+  color: var(--editor-fg);
+}
+
+.add-existing-model-dialog__button--secondary:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.add-existing-model-dialog__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -1,0 +1,135 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12/manifest.json",
+    "dbt_version": "1.8.0",
+    "generated_at": "2025-01-15T10:30:00.000000Z",
+    "invocation_id": "test-invocation-id",
+    "project_name": "my_dbt_project",
+    "project_id": "test-project-id",
+    "env": {}
+  },
+  "nodes": {
+    "model.my_dbt_project.dim_task": {
+      "unique_id": "model.my_dbt_project.dim_task",
+      "name": "dim_task",
+      "resource_type": "model",
+      "schema": "silver",
+      "description": "Task dimension table",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "data_type": "INT",
+          "description": "Surrogate key for task"
+        },
+        "project_id": {
+          "name": "project_id",
+          "data_type": "INT",
+          "description": "FK to dim_project"
+        },
+        "name": {
+          "name": "name",
+          "data_type": "VARCHAR",
+          "description": "Task name"
+        },
+        "status": {
+          "name": "status",
+          "data_type": "VARCHAR",
+          "description": "Current status"
+        }
+      },
+      "depends_on": { "nodes": [] },
+      "config": { "materialized": "table" }
+    },
+    "model.my_dbt_project.dim_project": {
+      "unique_id": "model.my_dbt_project.dim_project",
+      "name": "dim_project",
+      "resource_type": "model",
+      "schema": "silver",
+      "description": "Project dimension table",
+      "columns": {
+        "project_id": {
+          "name": "project_id",
+          "data_type": "INT",
+          "description": "Surrogate key for project"
+        },
+        "project_name": {
+          "name": "project_name",
+          "data_type": "VARCHAR",
+          "description": "Project name"
+        }
+      },
+      "depends_on": { "nodes": [] },
+      "config": { "materialized": "table" }
+    },
+    "model.my_dbt_project.fct_task_event": {
+      "unique_id": "model.my_dbt_project.fct_task_event",
+      "name": "fct_task_event",
+      "resource_type": "model",
+      "schema": "silver",
+      "description": "Task events fact table",
+      "columns": {
+        "event_id": {
+          "name": "event_id",
+          "data_type": "INT",
+          "description": "Event surrogate key"
+        },
+        "task_id": {
+          "name": "task_id",
+          "data_type": "INT",
+          "description": "FK to dim_task"
+        },
+        "event_date": {
+          "name": "event_date",
+          "data_type": "DATE",
+          "description": "Date of the event"
+        },
+        "amount": {
+          "name": "amount",
+          "data_type": "NUMERIC",
+          "description": "Event amount"
+        }
+      },
+      "depends_on": { "nodes": ["model.my_dbt_project.dim_task"] },
+      "config": { "materialized": "table" }
+    },
+    "test.my_dbt_project.not_null_dim_task_task_id": {
+      "unique_id": "test.my_dbt_project.not_null_dim_task_task_id",
+      "name": "not_null_dim_task_task_id",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "columns": {},
+      "depends_on": { "nodes": ["model.my_dbt_project.dim_task"] },
+      "config": {}
+    },
+    "seed.my_dbt_project.seed_status_codes": {
+      "unique_id": "seed.my_dbt_project.seed_status_codes",
+      "name": "seed_status_codes",
+      "resource_type": "seed",
+      "schema": "silver",
+      "description": "Seed for status codes",
+      "columns": {},
+      "depends_on": { "nodes": [] },
+      "config": {}
+    }
+  },
+  "sources": {
+    "source.my_dbt_project.raw.tasks": {
+      "unique_id": "source.my_dbt_project.raw.tasks",
+      "name": "tasks",
+      "resource_type": "source",
+      "schema": "raw"
+    }
+  },
+  "macros": {
+    "macro.my_dbt_project.my_macro": {
+      "unique_id": "macro.my_dbt_project.my_macro",
+      "name": "my_macro",
+      "resource_type": "macro"
+    }
+  },
+  "exposures": {},
+  "metrics": {},
+  "selectors": {},
+  "docs": {}
+}
