@@ -23,15 +23,13 @@
 
 ## The problem
 
-When you build a data warehouse with AI, the context lives in three places:
+If you build data pipelines with **dbt**, your design lives in one tool (SqlDBM, Erwin, dbdiagram) and the actual code lives in another. That split creates three problems:
 
-- **Your modelling tool** (SqlDBM, Erwin, DbSchema, Lucidchart, dbdiagram, a wiki) holds the relationships, cardinality, grain, SCD strategy, and design rationale.
-- **Your dbt repo** holds the SQL.
-- **Your head** is the only thing that connects them.
+- **The diagram drifts from the code.** Change a column in dbt and the ERD doesn't notice. Change the ERD and the code doesn't notice. You're the only thing holding them together — and you forget.
+- **You can't refresh one part of the warehouse on its own schedule.** Other ERD tools don't tag your dbt models by domain, so "rebuild just the customer area every hour" isn't a button — you have to wire it up by hand.
+- **Your AI can't read your model.** Tools like SqlDBM keep the design behind a UI. Every prompt re-explains the same join keys, grain, and cardinality — and the AI still drifts.
 
-So every prompt becomes a re-explanation. You describe the join keys, the cardinality, the SCD strategy — again — and hope the AI doesn't drift. When it generates output, it's a wall of markdown that's hard to scan and easy to mis-review. Errors slip through. Then they slip into the warehouse.
-
-You *can* try to bridge it — wire your AI to your modelling tool's API, or pay for the tier that exposes one. But those integrations are fiddly to build, the licences add up, and your design context still lives behind another login.
+That's why ERD Studio exists.
 
 ## The solution
 
