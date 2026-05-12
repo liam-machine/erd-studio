@@ -1,0 +1,54 @@
+{
+  "name": "erd-studio-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for ERD Studio — read your dbt project's semantic ERD model from Claude, Cursor, Continue, or any MCP client.",
+  "type": "module",
+  "bin": {
+    "erd-studio-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node esbuild.js",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "dbt",
+    "erd",
+    "data-modeling",
+    "analytics-engineering",
+    "claude",
+    "ai-tools",
+    "semantic-layer"
+  ],
+  "author": "Liam Wynne",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liam-machine/erd-studio",
+    "directory": "mcp-server"
+  },
+  "homepage": "https://github.com/liam-machine/erd-studio#readme",
+  "bugs": {
+    "url": "https://github.com/liam-machine/erd-studio/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -33,7 +33,7 @@ That's why ERD Studio exists.
 
 ## The solution
 
-ERD Studio is a **free, AI-native alternative** that puts the semantic model in the **same repo as the SQL**, as a visual canvas both you and the AI can read and write.
+ERD Studio is a **free and open source, AI-native alternative** that puts the semantic model in the **same repo as the SQL**, as a visual canvas both you and the AI can read and write.
 
 Under the hood, your model is plain YAML and JSON — AI reads it natively, git diffs it cleanly, and the canvas is just the human-readable view. No proprietary format, no lock-in.
 
@@ -335,6 +335,6 @@ That's the whole system. Three folders, two file types, one diagram per JSON, on
 ---
 
 <p align="center">
-  <sub>MIT License &bull; Made for the dbt community</sub><br />
-  <sub><a href="https://github.com/liam-machine/erd-studio/issues">Report a bug</a> &bull; <a href="https://github.com/liam-machine/erd-studio/discussions">Start a discussion</a></sub>
+  <sub>Open source (MIT) &bull; Made for the dbt community</sub><br />
+  <sub><a href="https://github.com/liam-machine/erd-studio">View source</a> &bull; <a href="https://github.com/liam-machine/erd-studio/issues">Report a bug</a> &bull; <a href="https://github.com/liam-machine/erd-studio/discussions">Start a discussion</a></sub>
 </p>
