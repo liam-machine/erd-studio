@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { z } from 'zod';
 import { buildServices } from '../services.js';
+import { isInitialized, NOT_INITIALIZED_TIP } from '../lib/setup.js';
 
 export const read_domain = {
   name: 'read_domain',
@@ -38,10 +39,15 @@ export const read_domain = {
     domain: string;
   }) {
     const { domainService, projectPath, semanticDir } = buildServices(project_path);
+
+    if (!isInitialized(projectPath, semanticDir)) {
+      throw new Error(NOT_INITIALIZED_TIP);
+    }
+
     const filePath = path.join(projectPath, semanticDir, layer, `${domain}.json`);
     if (!fs.existsSync(filePath)) {
       throw new Error(
-        `Domain not found: ${layer}/${domain}.json. Use list_domains to see what's available.`,
+        `Domain not found: ${layer}/${domain}.json. Use list_domains to see what's available, or call get_editor_setup if you haven't created any ERDs yet.`,
       );
     }
 

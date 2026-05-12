@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildServices } from '../services.js';
+import { isInitialized, NOT_INITIALIZED_TIP } from '../lib/setup.js';
 
 export const read_model = {
   name: 'read_model',
@@ -29,11 +30,16 @@ export const read_model = {
     project_path: string;
     model_name: string;
   }) {
-    const { logicalModelService } = buildServices(project_path);
+    const { logicalModelService, projectPath, semanticDir } = buildServices(project_path);
+
+    if (!isInitialized(projectPath, semanticDir)) {
+      throw new Error(NOT_INITIALIZED_TIP);
+    }
+
     const model = logicalModelService.getModel(model_name);
     if (!model) {
       throw new Error(
-        `Model not found: ${model_name}. Use list_models to see what's available.`,
+        `Model not found: ${model_name}. Use list_models to see what's available, or call get_editor_setup if you haven't created any models yet.`,
       );
     }
     return {

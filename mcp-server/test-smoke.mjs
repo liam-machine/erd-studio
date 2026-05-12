@@ -2,12 +2,18 @@
 // Quick smoke test — spawn the server, run a few JSON-RPC calls, print results.
 
 import { spawn } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_PATH = path.resolve(__dirname, '../test/fixtures/dbt-project');
 const SERVER = path.resolve(__dirname, 'dist/index.js');
+
+// Build a temporary "uninitialized" project — has dbt_project.yml but no erd-studio/
+const UNINIT_PATH = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-mcp-uninit-'));
+fs.writeFileSync(path.join(UNINIT_PATH, 'dbt_project.yml'), "name: 'test_uninit'\nversion: '1.0.0'\n");
 
 const child = spawn('node', [SERVER], {
   stdio: ['pipe', 'pipe', 'inherit'],
@@ -122,6 +128,35 @@ async function main() {
   });
   summarize('list_manifest_models', lmm);
 
+  // 8. Call get_editor_setup
+  console.log('\n--- get_editor_setup ---');
+  const ges = await rpc('tools/call', {
+    name: 'get_editor_setup',
+    arguments: {},
+  });
+  if (ges.result?.content?.[0]?.text?.includes('marketplace.visualstudio.com')) {
+    console.log('✅ get_editor_setup returns marketplace link');
+  } else {
+    console.log('❌ get_editor_setup missing marketplace link');
+    console.log(ges);
+  }
+
+  // 9. Verify graceful "not initialized" tip on uninitialized project
+  console.log('\n--- list_domains on UNINITIALIZED project ---');
+  const uninit = await rpc('tools/call', {
+    name: 'list_domains',
+    arguments: { project_path: UNINIT_PATH },
+  });
+  const uninitText = uninit.result?.content?.[0]?.text || '';
+  if (uninitText.includes('tip') && uninitText.includes('marketplace.visualstudio.com')) {
+    console.log('✅ uninitialized project returns tip pointing to extension');
+  } else {
+    console.log('❌ uninitialized fallback missing tip');
+    console.log(uninitText.slice(0, 300));
+  }
+
+  // Cleanup
+  fs.rmSync(UNINIT_PATH, { recursive: true, force: true });
   child.kill();
   process.exit(0);
 }

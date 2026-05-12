@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildServices } from '../services.js';
+import { isInitialized, NOT_INITIALIZED_TIP } from '../lib/setup.js';
 
 export const list_models = {
   name: 'list_models',
@@ -20,7 +21,23 @@ export const list_models = {
     },
   },
   async handler({ project_path }: { project_path: string }) {
-    const { logicalModelService } = buildServices(project_path);
+    const { logicalModelService, projectPath, semanticDir } = buildServices(project_path);
+
+    if (!isInitialized(projectPath, semanticDir)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(
+              { count: 0, models: [], tip: NOT_INITIALIZED_TIP },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }
+
     const models = logicalModelService.listModels();
     return {
       content: [
