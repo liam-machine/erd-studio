@@ -130,7 +130,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }>;
     existingModels: import('../types/display').ExistingModelPreview[];
   } {
-    const templates = this.templateService.loadTemplates(this.workspaceRoot);
+    const templates = this.templateService.loadTemplates(this.workspaceRoot, this.semanticDir);
     const existingModelNames = new Set(domain.models.map((m) => m.name));
 
     // Build existing models list from three sources: logical-models/, yml, and manifest
