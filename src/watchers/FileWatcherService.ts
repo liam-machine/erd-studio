@@ -51,7 +51,10 @@ export class FileWatcherService implements vscode.Disposable {
   /** Snapshot of path-related keys from dbt_project.yml at startup. */
   private lastProjectPaths: string;
 
-  constructor(private readonly workspaceRoot: string) {
+  constructor(
+    private readonly workspaceRoot: string,
+    private readonly semanticDir: string = 'erd-studio',
+  ) {
     this.lastProjectPaths = this.readProjectPaths();
     this.setupManifestWatcher();
     this.setupSemanticWatcher();
@@ -93,7 +96,7 @@ export class FileWatcherService implements vscode.Disposable {
   private setupSemanticWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'erd-studio/**/*.json',
+      `${this.semanticDir}/**/*.json`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
@@ -189,7 +192,7 @@ export class FileWatcherService implements vscode.Disposable {
   private setupLogicalModelWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'erd-studio/logical-models/*.yml',
+      `${this.semanticDir}/logical-models/*.yml`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
