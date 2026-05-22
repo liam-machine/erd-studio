@@ -4,6 +4,7 @@
 export const workspace = {
   getConfiguration: () => ({
     get: (key: string, defaultValue?: unknown) => defaultValue,
+    inspect: (key: string) => ({ key }),
   }),
   workspaceFolders: [],
   textDocuments: [] as unknown[],

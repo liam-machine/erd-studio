@@ -17,6 +17,7 @@ import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
 import { MigrationService } from './services/migrationService';
+import { resolveSemanticDir } from './services/semanticDirResolver';
 import { YmlParserService } from './services/ymlParserService';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
@@ -184,7 +185,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   console.log(`ERD Studio: Found dbt project at ${workspaceRoot}`);
 
   const config = vscode.workspace.getConfiguration('dbtSemantic');
-  const semanticDir = config.get<string>('semanticDir', 'erd-studio');
+  const semanticDir = resolveSemanticDir(workspaceRoot, config);
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
@@ -254,7 +255,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   selectorsService.scheduleRegenerate();
 
   // Check for v4 → v5 migration (non-blocking)
-  const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService);
+  const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService, semanticDir);
   if (migrationService.needsMigration()) {
     void vscode.window.showInformationMessage(
       'ERD Studio has a new model storage format that enables cross-domain model sharing. Migrate domain files now?',
@@ -284,6 +285,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     selectorsService,
     logicalModelService,
+    semanticDir,
   );
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
@@ -296,7 +298,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // -------------------------------------------------------------------------
   // File watchers
   // -------------------------------------------------------------------------
-  const fileWatcherService = new FileWatcherService(workspaceRoot);
+  const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir);
 
   // Manifest changed → refresh open editors
   let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -781,7 +783,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const v4Count = migrationService.findV4Domains().length;
       const confirm = await vscode.window.showWarningMessage(
         `Found ${v4Count} domain file(s) using the legacy inline model format. ` +
-        'Migration will extract models to erd-studio/logical-models/ and convert domain files to use name references. ' +
+        `Migration will extract models to ${semanticDir}/logical-models/ and convert domain files to use name references. ` +
         'This cannot be undone automatically.',
         'Migrate Now',
         'Cancel',
@@ -1121,7 +1123,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         // Always overwrite — harness files are managed by the extension
         const results = selected.map(s =>
-          harnessService.install(workspaceRoot, s.target, true),
+          harnessService.install(workspaceRoot, s.target, true, semanticDir),
         );
 
         const succeeded = results.filter(r => r.success);
@@ -1151,7 +1153,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (staleTargets.length > 0) {
       // Force-update all stale harness files silently
       for (const target of staleTargets) {
-        harnessService.install(workspaceRoot, target, true);
+        harnessService.install(workspaceRoot, target, true, semanticDir);
       }
       const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
       void vscode.window.showInformationMessage(
