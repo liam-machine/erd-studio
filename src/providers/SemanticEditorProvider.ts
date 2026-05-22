@@ -108,6 +108,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly workspaceRoot: string,
     private readonly selectorsService: SelectorsService,
     readonly logicalModelService: import('../services/logicalModelService').LogicalModelService,
+    private readonly semanticDir: string = 'erd-studio',
   ) {}
 
   /**
@@ -2758,9 +2759,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const report = panel.lastDiscrepancyReport;
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
-      const semanticDir = vscode.workspace
-        .getConfiguration('dbtSemantic')
-        .get<string>('semanticDir', 'erd-studio');
+      const semanticDir = this.semanticDir;
 
       // Build resolutions from selections
       const models: ModelResolution[] = [];
@@ -2948,10 +2947,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Uses --dangerously-skip-permissions so file edits proceed without prompts.
    */
   private async handleLaunchClaudeSync(): Promise<void> {
-    const semanticDir = vscode.workspace
-      .getConfiguration('dbtSemantic')
-      .get<string>('semanticDir', 'erd-studio');
-    const planPath = `${semanticDir}/.sync-plan.json`;
+    const planPath = `${this.semanticDir}/.sync-plan.json`;
     const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.`;
 
     const terminal = vscode.window.createTerminal({
