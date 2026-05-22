@@ -9,15 +9,19 @@ import type { LayerService } from '../services/layerService';
  * inside the ERD Studio sidebar tree via LayerDecorationProvider.
  */
 export class SemanticFileDecorationProvider implements vscode.FileDecorationProvider {
-  private static readonly SEMANTIC_PATH_PATTERN = /[/\\]erd-studio[/\\]/;
-
   private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<vscode.Uri | vscode.Uri[] | undefined>();
   readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
+
+  /** Matches paths containing the semantic directory as a path segment. */
+  private readonly semanticPathPattern: RegExp;
 
   constructor(
     private readonly layerService: LayerService,
     private readonly semanticDir: string = 'erd-studio',
-  ) {}
+  ) {
+    const escaped = this.semanticDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    this.semanticPathPattern = new RegExp(`[/\\\\]${escaped}[/\\\\]`);
+  }
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
     const fsPath = uri.fsPath;
@@ -38,7 +42,7 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
       return undefined;
     }
 
-    if (!SemanticFileDecorationProvider.SEMANTIC_PATH_PATTERN.test(fsPath)) {
+    if (!this.semanticPathPattern.test(fsPath)) {
       return undefined;
     }
 
