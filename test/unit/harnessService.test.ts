@@ -393,6 +393,56 @@ describe('HarnessService', () => {
     });
   });
 
+  describe('directory templating', () => {
+    it('renders the Claude skill against a custom data directory', () => {
+      const content = service.generateContent('claude', '.erd-studio');
+      expect(content).toContain('\n.erd-studio/\n');               // architecture tree root
+      expect(content).toContain('.erd-studio/logical-models/');
+      expect(content).toContain('.erd-studio/{layer}/{domain}.json');
+    });
+
+    it('keeps the skill name identifier untemplated', () => {
+      const content = service.generateContent('claude', '.erd-studio');
+      expect(content).toContain('name: erd-studio\n');
+    });
+
+    it('templates the Copilot applyTo glob', () => {
+      const content = service.generateContent('copilot', '.erd-studio');
+      expect(content).toContain("applyTo: '**/.erd-studio/**/*.json'");
+    });
+
+    it('defaults to erd-studio when no directory is given', () => {
+      expect(service.generateContent('copilot')).toContain("applyTo: '**/erd-studio/**/*.json'");
+    });
+
+    it('leaves no unresolved __DATA_DIR__ tokens in any format', () => {
+      for (const target of HARNESS_TARGETS) {
+        expect(service.generateContent(target.id, '.erd-studio')).not.toContain('__DATA_DIR__');
+      }
+    });
+
+    it('templates the enforce-skill hook case pattern', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target, false, '.erd-studio');
+      const hook = fs.readFileSync(
+        path.join(tmpDir, '.claude', 'skills', 'erd-studio', 'enforce-skill.sh'), 'utf-8');
+      expect(hook).toContain('*/.erd-studio/*)');
+    });
+
+    it('templates the SYNC.md companion against a custom data directory', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target, false, '.erd-studio');
+      const sync = fs.readFileSync(
+        path.join(tmpDir, '.claude', 'skills', 'erd-studio', 'SYNC.md'), 'utf-8');
+      expect(sync).toContain('.erd-studio/.sync-plan.json');
+      expect(sync).not.toContain('__DATA_DIR__');
+    });
+
+    it('exposes HARNESS_VERSION 15', () => {
+      expect(HARNESS_VERSION).toBe('15');
+    });
+  });
+
   describe('detectStale', () => {
     it('returns empty array when no harnesses installed', () => {
       expect(service.detectStale(tmpDir)).toEqual([]);

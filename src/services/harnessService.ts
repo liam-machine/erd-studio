@@ -19,13 +19,18 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '14';
+export const HARNESS_VERSION = '15';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
 
 function buildVersionMarker(): string {
   return `${VERSION_MARKER_PREFIX} ${HARNESS_VERSION}${VERSION_MARKER_SUFFIX}`;
+}
+
+/** Substitute the __DATA_DIR__ placeholder with the project's data directory. */
+function renderDataDir(content: string, semanticDir: string): string {
+  return content.split('__DATA_DIR__').join(semanticDir);
 }
 
 /**
@@ -100,14 +105,17 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
 // Core schema content (shared across all harnesses)
 // ---------------------------------------------------------------------------
 
+// Data-directory paths in this template use the __DATA_DIR__ placeholder, which
+// renderDataDir() substitutes per-project. Never write a literal data-dir path
+// (e.g. `erd-studio/...`) here — it would not be templated.
 const SCHEMA_CONTENT = `# ERD Studio — AI Data Modeling Guide
 
-ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`erd-studio/logical-models/\`. Domain JSON files reference models by name and define relationships and layout.
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`__DATA_DIR__/logical-models/\`. Domain JSON files reference models by name and define relationships and layout.
 
 ## Architecture Overview
 
 \`\`\`
-erd-studio/
+__DATA_DIR__/
 ├── logical-models/           ← Central model definitions (YAML, one per model)
 │   ├── dim_customer.yml
 │   ├── dim_project.yml
@@ -123,7 +131,7 @@ erd-studio/
 
 ### Model Library (Sidebar)
 
-The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`logical-models/\`. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
+The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`__DATA_DIR__/logical-models/\`. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
 
 - **Referenced models** show how many domains use them (e.g. "2 domains")
 - **Orphaned models** show a warning icon and "(unused)" — these exist as \`.yml\` files but are not in any domain's \`logical.models[]\` array
@@ -132,7 +140,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`
 
 ## Domain File Structure
 
-**File:** \`erd-studio/{layer}/{domain}.json\`
+**File:** \`__DATA_DIR__/{layer}/{domain}.json\`
 
 \`\`\`json
 {
@@ -199,9 +207,9 @@ Annotations are temporary build notes — visible on the canvas while constructi
 
 ## Models
 
-Model definitions live in \`erd-studio/logical-models/{model_name}.yml\`. Create/edit these YAML files to define models. Then reference them by name in domain files.
+Model definitions live in \`__DATA_DIR__/logical-models/{model_name}.yml\`. Create/edit these YAML files to define models. Then reference them by name in domain files.
 
-**File:** \`erd-studio/logical-models/dim_customer.yml\`
+**File:** \`__DATA_DIR__/logical-models/dim_customer.yml\`
 
 \`\`\`yaml
 name: dim_customer
@@ -272,7 +280,7 @@ Optional \`rationale\` object — all fields are optional strings. Omit the enti
 
 When the user asks you to create a new model — or materially add columns to an existing one — from an external source (planning doc, DDL, staging SQL, CSV, notebook, or another YAML), follow this protocol. It exists to prevent silent column truncation.
 
-**Does NOT apply to:** renaming a column, changing a single flag, or executing an \`erd-studio/.sync-plan.json\` (see SYNC.md for that workflow).
+**Does NOT apply to:** renaming a column, changing a single flag, or executing an \`__DATA_DIR__/.sync-plan.json\` (see SYNC.md for that workflow).
 
 ### Step 1 — Read the source fully, then enumerate
 Before listing anything, confirm you have read the source **in full**. For files longer than 2000 lines, page through with \`Read\` using \`offset\`/\`limit\` until you reach the end of the file. A partial read is a silent-truncation trap before you even start — the columns you never saw cannot appear in your output.
@@ -298,7 +306,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the \`erd-studio/logical-models/{name}.yml\` file.
+Write the \`__DATA_DIR__/logical-models/{name}.yml\` file.
 
 ### Step 4 — Reconcile via set-difference
 Re-read the YAML file you just wrote. Compute the set-difference between source columns and YAML columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -405,16 +413,19 @@ Recognized test types: \`relationships\`, \`relationships_where\`, and any test 
 
 ## Sync Reconciliation
 
-When asked to execute a sync plan, or when \`erd-studio/.sync-plan.json\` exists:
+When asked to execute a sync plan, or when \`__DATA_DIR__/.sync-plan.json\` exists:
 
 1. Read \`SYNC.md\` in the same directory as this skill file for the full action reference and execution guide
-2. Read \`erd-studio/.sync-plan.json\` for the specific actions to execute
+2. Read \`__DATA_DIR__/.sync-plan.json\` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models`;
 
 // ---------------------------------------------------------------------------
 // Sync guide content (companion file — loaded on demand)
 // ---------------------------------------------------------------------------
 
+// Data-directory paths in this template use the __DATA_DIR__ placeholder, which
+// renderDataDir() substitutes per-project. Never write a literal data-dir path
+// (e.g. `erd-studio/...`) here — it would not be templated.
 const SYNC_CONTENT = `# ERD Studio — Sync Reconciliation Guide
 
 This guide is loaded when you need to execute a sync plan generated by ERD Studio.
@@ -423,7 +434,7 @@ The sync plan reconciles differences between the **logical** (user-defined) and
 
 ## When to Use
 
-When \`erd-studio/.sync-plan.json\` exists in the project, the user has reviewed
+When \`__DATA_DIR__/.sync-plan.json\` exists in the project, the user has reviewed
 logical-vs-physical discrepancies in ERD Studio and chosen which side is "ground truth"
 for each difference. Your job is to execute those choices.
 
@@ -439,7 +450,7 @@ for each difference. Your job is to execute those choices.
   "modelContext": {
     "dim_customer": {
       "modelName": "dim_customer",
-      "logicalModelPath": "erd-studio/logical-models/dim_customer.yml",
+      "logicalModelPath": "__DATA_DIR__/logical-models/dim_customer.yml",
       "dbtSqlPath": "models/silver/dim_customer.sql",
       "dbtSchemaPath": "models/silver/dim_customer.yml"
     }
@@ -510,14 +521,14 @@ models:
 
 ## Execution Steps
 
-1. **Read** \`erd-studio/.sync-plan.json\`
+1. **Read** \`__DATA_DIR__/.sync-plan.json\`
 2. **Execute each action** in order:
    - For logical-side actions: edit files at \`modelContext[modelName].logicalModelPath\` and/or the domain JSON
    - For physical-side actions: edit files at \`modelContext[modelName].dbtSqlPath\` and \`dbtSchemaPath\`
    - For destructive actions (\`remove-*\`): confirm with the user before proceeding
 3. **Compile** if \`requiresCompile\` is \`true\`: run \`dbt compile\` to regenerate the manifest
 4. **Verify**: Re-open the domain in ERD Studio and run the diff comparison to confirm discrepancies are resolved
-5. **Clean up**: Delete \`erd-studio/.sync-plan.json\` on success
+5. **Clean up**: Delete \`__DATA_DIR__/.sync-plan.json\` on success
 
 ## Important Notes
 
@@ -530,17 +541,17 @@ models:
 // Format-specific generators
 // ---------------------------------------------------------------------------
 
-function generateClaudeSkill(): string {
-  return `---
+function generateClaudeSkill(semanticDir: string): string {
+  return renderDataDir(`---
 name: erd-studio
 description: >-
-  Schema rules for ERD Studio data model files — the erd-studio/ directory
+  Schema rules for ERD Studio data model files — the __DATA_DIR__/ directory
   uses a two-file system (YAML model definitions + JSON domain diagrams)
   with strict format rules you must read before editing. Use this skill
-  whenever the task touches files in erd-studio/ (domain JSON, logical-models
+  whenever the task touches files in __DATA_DIR__/ (domain JSON, logical-models
   YAML, or .sync-plan.json), asks to add/edit/remove models, columns,
   relationships, or cardinality in a data model or ERD diagram, mentions
-  dim_/fct_/ref_/brg_ prefixed tables in an erd-studio context, or involves
+  dim_/fct_/ref_/brg_ prefixed tables in an __DATA_DIR__ context, or involves
   writing dbt schema YAML tests to match an ERD physical stage. The skill
   tells you which of the two files to edit for each operation — without it
   you will put data in the wrong file.
@@ -549,11 +560,11 @@ description: >-
 ${SCHEMA_CONTENT}
 
 ${buildVersionMarker()}
-`;
+`, semanticDir);
 }
 
-function generateEnforceSkillHook(): string {
-  return [
+function generateEnforceSkillHook(semanticDir: string): string {
+  return renderDataDir([
     '#!/usr/bin/env bash',
     '# ERD Studio — PreToolUse hook for Edit and Write tools.',
     '# Blocks the first erd-studio file edit per Claude Code session to ensure the',
@@ -570,9 +581,9 @@ function generateEnforceSkillHook(): string {
     'file_path="$(echo "$input" | grep -o \'"file_path" *: *"[^"]*"\' | head -1 | sed \'s/.*: *"//;s/"$//\')"',
     'session_id="$(echo "$input" | grep -o \'"session_id" *: *"[^"]*"\' | head -1 | sed \'s/.*: *"//;s/"$//\')"',
     '',
-    '# Only act on files inside erd-studio/ directories',
+    '# Only act on files inside the ERD Studio data directory',
     'case "$file_path" in',
-    '  */erd-studio/*)',
+    '  */__DATA_DIR__/*)',
     '    flag="/tmp/.erd-studio-skill-${session_id}"',
     '    if [ ! -f "$flag" ]; then',
     '      touch "$flag"',
@@ -583,35 +594,35 @@ function generateEnforceSkillHook(): string {
     '',
     'echo "$allow"',
     'exit 0',
-  ].join('\n') + '\n';
+  ].join('\n') + '\n', semanticDir);
 }
 
-function generateSyncGuide(): string {
-  return `${SYNC_CONTENT}
+function generateSyncGuide(semanticDir: string): string {
+  return renderDataDir(`${SYNC_CONTENT}
 
 ${buildVersionMarker()}
-`;
+`, semanticDir);
 }
 
-function generateCopilotInstructions(): string {
-  return `---
+function generateCopilotInstructions(semanticDir: string): string {
+  return renderDataDir(`---
 name: 'ERD Studio'
 description: 'Data modeling guide for ERD Studio — domain JSON format, dbt YAML tests for physical model, naming conventions'
-applyTo: '**/erd-studio/**/*.json'
+applyTo: '**/__DATA_DIR__/**/*.json'
 ---
 
 ${SCHEMA_CONTENT}
 
 ${buildVersionMarker()}
-`;
+`, semanticDir);
 }
 
-function generateGeminiStyleguide(): string {
-  return `${SCHEMA_CONTENT}
+function generateGeminiStyleguide(semanticDir: string): string {
+  return renderDataDir(`${SCHEMA_CONTENT}
 
 ## Code Review Rules
 
-### ERD Studio Domain Files (\`erd-studio/**/*.json\`)
+### ERD Studio Domain Files (\`__DATA_DIR__/**/*.json\`)
 
 1. **Schema version** must be \`5\`
 2. **Required sections**: \`logical\` and \`viewConfig\` must both be present at root level
@@ -628,17 +639,17 @@ function generateGeminiStyleguide(): string {
 10. **Composite keys** should use \`dbt_utils.unique_combination_of_columns\` model-level test
 
 ${buildVersionMarker()}
-`;
+`, semanticDir);
 }
 
-function generateCodexAgents(): string {
-  return `
+function generateCodexAgents(semanticDir: string): string {
+  return renderDataDir(`
 ## ERD Studio Domain Files
 
 ${SCHEMA_CONTENT}
 
 ${buildVersionMarker()}
-`;
+`, semanticDir);
 }
 
 // ---------------------------------------------------------------------------
@@ -649,16 +660,16 @@ export class HarnessService {
   /**
    * Generate the config file content for a given harness target.
    */
-  generateContent(targetId: HarnessTarget['id']): string {
+  generateContent(targetId: HarnessTarget['id'], semanticDir: string = 'erd-studio'): string {
     switch (targetId) {
       case 'claude':
-        return generateClaudeSkill();
+        return generateClaudeSkill(semanticDir);
       case 'copilot':
-        return generateCopilotInstructions();
+        return generateCopilotInstructions(semanticDir);
       case 'gemini':
-        return generateGeminiStyleguide();
+        return generateGeminiStyleguide(semanticDir);
       case 'codex':
-        return generateCodexAgents();
+        return generateCodexAgents(semanticDir);
     }
   }
 
@@ -672,6 +683,7 @@ export class HarnessService {
     workspaceRoot: string,
     target: HarnessTarget,
     overwrite: boolean = false,
+    semanticDir: string = 'erd-studio',
   ): HarnessInstallResult {
     const filePath = path.join(workspaceRoot, target.relativePath);
     const dir = path.dirname(filePath);
@@ -683,7 +695,7 @@ export class HarnessService {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      const content = this.generateContent(target.id);
+      const content = this.generateContent(target.id, semanticDir);
 
       if (target.id === 'codex' && alreadyExisted && !overwrite) {
         // Append to existing AGENTS.md
@@ -713,12 +725,12 @@ export class HarnessService {
       if (target.id === 'claude') {
         // SYNC.md — progressive context loading for sync plan execution
         const syncPath = path.join(dir, 'SYNC.md');
-        fs.writeFileSync(syncPath, generateSyncGuide(), 'utf-8');
+        fs.writeFileSync(syncPath, generateSyncGuide(semanticDir), 'utf-8');
 
         // enforce-skill.sh — PreToolUse hook that blocks first erd-studio edit
         // per session so Claude loads the /erd-studio skill before making changes
         const hookPath = path.join(dir, 'enforce-skill.sh');
-        fs.writeFileSync(hookPath, generateEnforceSkillHook(), { mode: 0o755 });
+        fs.writeFileSync(hookPath, generateEnforceSkillHook(semanticDir), { mode: 0o755 });
 
         // Merge hook config into .claude/settings.local.json (local only, never committed)
         try {
