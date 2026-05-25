@@ -12,7 +12,12 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/version-short/liamwynne.erd-studio.svg" alt="VS Marketplace Version" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/installs-short/liamwynne.erd-studio.svg" alt="Installs" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/rating-short/liamwynne.erd-studio.svg" alt="Rating" /></a>
-  <img src="https://img.shields.io/badge/license-MIT-0078d4" alt="License: MIT" />
+  <a href="https://github.com/liam-machine/erd-studio"><img src="https://img.shields.io/github/stars/liam-machine/erd-studio?style=flat&logo=github&label=Star&color=0078d4" alt="GitHub stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0078d4" alt="License: MIT" /></a>
+</p>
+
+<p align="center">
+  <sub><em>Free and open source — built in the open on <a href="https://github.com/liam-machine/erd-studio">GitHub</a>. Issues, PRs, and stars welcome.</em></sub>
 </p>
 
 <p align="center">
