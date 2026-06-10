@@ -16,7 +16,7 @@ import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/har
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
-import { MigrationService } from './services/migrationService';
+import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
@@ -185,6 +185,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const config = vscode.workspace.getConfiguration('dbtSemantic');
   const semanticDir = config.get<string>('semanticDir', '.erd-studio');
+
+  // v0.6.44 moved the default data directory from erd-studio/ to .erd-studio/.
+  // Rename legacy folders in place before any service reads from disk so
+  // existing projects keep working without intervention.
+  if (migrateLegacySemanticDir(workspaceRoot, semanticDir)) {
+    void vscode.window.showInformationMessage(
+      'ERD Studio: your erd-studio/ folder was renamed to .erd-studio/ (the new default location). ' +
+        'Commit the rename so collaborators stay in sync.',
+    );
+  }
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
