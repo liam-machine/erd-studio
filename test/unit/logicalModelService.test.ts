@@ -1,5 +1,5 @@
 /**
- * Tests for LogicalModelService — YAML model file I/O for erd-studio/logical-models/.
+ * Tests for LogicalModelService — YAML model file I/O for .erd-studio/logical-models/.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';

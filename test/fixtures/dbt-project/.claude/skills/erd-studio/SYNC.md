@@ -6,7 +6,7 @@ The sync plan reconciles differences between the **logical** (user-defined) and
 
 ## When to Use
 
-When `erd-studio/.sync-plan.json` exists in the project, the user has reviewed
+When `.erd-studio/.sync-plan.json` exists in the project, the user has reviewed
 logical-vs-physical discrepancies in ERD Studio and chosen which side is "ground truth"
 for each difference. Your job is to execute those choices.
 
@@ -22,7 +22,7 @@ for each difference. Your job is to execute those choices.
   "modelContext": {
     "dim_customer": {
       "modelName": "dim_customer",
-      "logicalModelPath": "erd-studio/logical-models/dim_customer.yml",
+      "logicalModelPath": ".erd-studio/logical-models/dim_customer.yml",
       "dbtSqlPath": "models/silver/dim_customer.sql",
       "dbtSchemaPath": "models/silver/dim_customer.yml"
     }
@@ -93,14 +93,14 @@ models:
 
 ## Execution Steps
 
-1. **Read** `erd-studio/.sync-plan.json`
+1. **Read** `.erd-studio/.sync-plan.json`
 2. **Execute each action** in order:
    - For logical-side actions: edit files at `modelContext[modelName].logicalModelPath` and/or the domain JSON
    - For physical-side actions: edit files at `modelContext[modelName].dbtSqlPath` and `dbtSchemaPath`
    - For destructive actions (`remove-*`): confirm with the user before proceeding
 3. **Compile** if `requiresCompile` is `true`: run `dbt compile` to regenerate the manifest
 4. **Verify**: Re-open the domain in ERD Studio and run the diff comparison to confirm discrepancies are resolved
-5. **Clean up**: Delete `erd-studio/.sync-plan.json` on success
+5. **Clean up**: Delete `.erd-studio/.sync-plan.json` on success
 
 ## Important Notes
 
@@ -109,4 +109,4 @@ models:
 - **Cascade deletions**: When removing a model from logical, also remove any relationships referencing it
 - **Column ordering**: When adding columns to logical-models YAML, append to the end of the columns array
 
-<!-- erd-studio-harness: 14 -->
+<!-- erd-studio-harness: 15 -->

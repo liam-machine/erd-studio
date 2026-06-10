@@ -2760,7 +2760,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const semanticDir = vscode.workspace
         .getConfiguration('dbtSemantic')
-        .get<string>('semanticDir', 'erd-studio');
+        .get<string>('semanticDir', '.erd-studio');
 
       // Build resolutions from selections
       const models: ModelResolution[] = [];
@@ -2950,7 +2950,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleLaunchClaudeSync(): Promise<void> {
     const semanticDir = vscode.workspace
       .getConfiguration('dbtSemantic')
-      .get<string>('semanticDir', 'erd-studio');
+      .get<string>('semanticDir', '.erd-studio');
     const planPath = `${semanticDir}/.sync-plan.json`;
     const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.`;
 

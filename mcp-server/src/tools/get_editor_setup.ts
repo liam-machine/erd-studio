@@ -42,7 +42,7 @@ export const get_editor_setup = {
       'dbt: Set Up Semantic Domains Directory',
       '```',
       '',
-      'This creates `erd-studio/` with `layers.json`, `logical-models/`, and `templates/`.',
+      'This creates `.erd-studio/` with `layers.json`, `logical-models/`, and `templates/`.',
       '',
       '## 3. Install the AI coding harness (writes the skill file)',
       '',

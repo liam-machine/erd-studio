@@ -11,7 +11,7 @@ export const EXTENSION_REPO_URL = 'https://github.com/liam-machine/erd-studio';
  * surfaces the install path to the user.
  */
 export const NOT_INITIALIZED_TIP =
-  "This project doesn't have an erd-studio/ directory yet. To start designing ERDs, " +
+  "This project doesn't have a .erd-studio/ directory yet. To start designing ERDs, " +
   `install the ERD Studio VS Code extension: ${EXTENSION_MARKETPLACE_URL} ` +
   "Then run Command Palette → 'dbt: Set Up Semantic Domains Directory'. " +
   "The extension also installs an AI coding skill (.claude/skills/erd-studio/SKILL.md) " +
@@ -19,7 +19,7 @@ export const NOT_INITIALIZED_TIP =
   "by design and complements the skill for AI clients other than Claude Code.";
 
 /**
- * Returns true if the project has an erd-studio/ directory.
+ * Returns true if the project has a .erd-studio/ directory.
  */
 export function isInitialized(projectPath: string, semanticDir: string): boolean {
   return fs.existsSync(path.join(projectPath, semanticDir));

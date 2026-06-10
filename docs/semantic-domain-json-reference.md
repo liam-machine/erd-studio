@@ -4,10 +4,10 @@
 
 ## File Layout
 
-Domain files are organized by stage and layer under the `erd-studio/` directory:
+Domain files are organized by stage and layer under the `.erd-studio/` directory:
 
 ```
-erd-studio/
+.erd-studio/
   conceptual/
     {layer}/
       {domain}.json
@@ -22,7 +22,7 @@ erd-studio/
 
 There are three stages: **conceptual**, **logical**, and **physical**. Conceptual and logical have persisted JSON files. Physical has no files -- it is derived at runtime by merging the logical domain with the dbt manifest.
 
-## Domain File (`erd-studio/{stage}/{layer}/{domain}.json`)
+## Domain File (`.erd-studio/{stage}/{layer}/{domain}.json`)
 
 ### Top-Level Schema
 
@@ -187,7 +187,7 @@ When generating new domains, omit `positions` -- the extension auto-layouts on f
 
 ### Conceptual Stage
 
-Conceptual domains capture high-level entity design. Files live at `erd-studio/conceptual/{layer}/{domain}.json`.
+Conceptual domains capture high-level entity design. Files live at `.erd-studio/conceptual/{layer}/{domain}.json`.
 
 - Models can omit `columns` entirely (entity-level modelling only).
 - When columns are present, `dataType` can be `""` if the type is not yet decided.
@@ -196,7 +196,7 @@ Conceptual domains capture high-level entity design. Files live at `erd-studio/c
 
 ### Logical Stage
 
-Logical domains capture detailed column-level design. Files live at `erd-studio/logical/{layer}/{domain}.json`.
+Logical domains capture detailed column-level design. Files live at `.erd-studio/logical/{layer}/{domain}.json`.
 
 - Models should have full `columns` arrays with `dataType` and `description` populated.
 - FK relationships should specify concrete column references.
@@ -207,7 +207,7 @@ Logical domains capture detailed column-level design. Files live at `erd-studio/
 
 Physical has no files. It is derived at runtime by merging the logical domain with the dbt manifest. Do not create files for the physical stage.
 
-## Layers File (`erd-studio/layers.json`)
+## Layers File (`.erd-studio/layers.json`)
 
 Defines the medallion architecture layers available in the project.
 
@@ -248,7 +248,7 @@ Defines the medallion architecture layers available in the project.
 
 **Known layer defaults:** `bronze` (`#cd7f32`, creatable: false), `silver` (`#a0a0a0`, creatable: true), `gold` (`#d4a800`, creatable: true).
 
-## Model Templates (`erd-studio/templates/{id}.json`)
+## Model Templates (`.erd-studio/templates/{id}.json`)
 
 Templates provide preset columns when creating new models.
 
@@ -303,7 +303,7 @@ Templates provide preset columns when creating new models.
 
 A conceptual domain focuses on entities, relationships, and design intent. Columns are optional or minimal.
 
-File path: `erd-studio/conceptual/silver/sales.json`
+File path: `.erd-studio/conceptual/silver/sales.json`
 
 ```json
 {
@@ -403,7 +403,7 @@ File path: `erd-studio/conceptual/silver/sales.json`
 
 The same sales domain at the logical stage with full column definitions, data types, and metadata flags.
 
-File path: `erd-studio/logical/silver/sales.json`
+File path: `.erd-studio/logical/silver/sales.json`
 
 ```json
 {

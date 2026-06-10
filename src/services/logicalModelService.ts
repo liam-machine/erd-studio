@@ -1,6 +1,6 @@
 /**
  * LogicalModelService — reads and writes canonical model definitions
- * stored as YAML files in erd-studio/logical-models/.
+ * stored as YAML files in .erd-studio/logical-models/.
  *
  * Each model is a single YAML file: logical-models/{model_name}.yml.
  * Domain JSON files reference models by name (string[]) instead of
@@ -52,7 +52,7 @@ interface YamlColumn {
 export class LogicalModelService {
   private readonly modelsDir: string;
 
-  constructor(workspaceRoot: string, semanticDir = 'erd-studio') {
+  constructor(workspaceRoot: string, semanticDir = '.erd-studio') {
     this.modelsDir = path.join(workspaceRoot, semanticDir, 'logical-models');
   }
 

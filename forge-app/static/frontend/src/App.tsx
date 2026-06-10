@@ -94,7 +94,7 @@ function InlineConfig({ onSaved }: { onSaved: () => void }) {
       <input
         style={inputStyle}
         type="text"
-        placeholder="https://github.com/owner/repo/blob/main/erd-studio/silver/domain.json"
+        placeholder="https://github.com/owner/repo/blob/main/.erd-studio/silver/domain.json"
         value={url}
         onChange={(e) => { setUrl(e.target.value); setStatus(null); }}
       />

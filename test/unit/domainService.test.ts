@@ -51,7 +51,7 @@ describe('DomainService', () => {
   });
 
   describe('listDomains', () => {
-    it('discovers all .json files under erd-studio/{layer}/', () => {
+    it('discovers all .json files under .erd-studio/{layer}/', () => {
       const domains = service.listDomains(FIXTURE_PROJECT_PATH);
 
       const silverDomains = domains.filter((d) => d.layer === 'silver');
@@ -76,11 +76,11 @@ describe('DomainService', () => {
 
       expect(finance).toBeDefined();
       expect(finance!.filePath).toBe(
-        path.join(FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json')
+        path.join(FIXTURE_PROJECT_PATH, '.erd-studio', 'gold', 'finance.json')
       );
     });
 
-    it('returns empty array when erd-studio directory does not exist', () => {
+    it('returns empty array when .erd-studio directory does not exist', () => {
       const domains = service.listDomains('/nonexistent/path');
       expect(domains).toEqual([]);
     });
@@ -92,7 +92,7 @@ describe('DomainService', () => {
     });
 
     it('supports custom semantic directory', () => {
-      const domains = service.listDomains(FIXTURE_PROJECT_PATH, 'erd-studio');
+      const domains = service.listDomains(FIXTURE_PROJECT_PATH, '.erd-studio');
       expect(domains.length).toBeGreaterThan(0);
     });
 
@@ -110,7 +110,7 @@ describe('DomainService', () => {
   describe('getDomain', () => {
     it('reads and parses a valid domain file into a UnifiedDomain', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
+        FIXTURE_PROJECT_PATH, '.erd-studio', 'gold', 'finance.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -122,7 +122,7 @@ describe('DomainService', () => {
 
     it('returns logical stage section', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
+        FIXTURE_PROJECT_PATH, '.erd-studio', 'gold', 'finance.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -132,7 +132,7 @@ describe('DomainService', () => {
 
     it('parses viewConfig correctly from top-level', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
+        FIXTURE_PROJECT_PATH, '.erd-studio', 'gold', 'finance.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -149,28 +149,28 @@ describe('DomainService', () => {
 
     it('handles invalid JSON with descriptive error', () => {
       const filePath = path.join(
-        MALFORMED_PROJECT_PATH, 'erd-studio', 'silver', 'broken.json'
+        MALFORMED_PROJECT_PATH, '.erd-studio', 'silver', 'broken.json'
       );
       expect(() => service.getDomain(filePath)).toThrow('Invalid JSON');
     });
 
     it('throws when schemaVersion is missing', () => {
       const filePath = path.join(
-        SPARSE_PROJECT_PATH, 'erd-studio', 'silver', 'no-schema-version.json'
+        SPARSE_PROJECT_PATH, '.erd-studio', 'silver', 'no-schema-version.json'
       );
       expect(() => service.getDomain(filePath)).toThrow('schemaVersion');
     });
 
     it('throws when schemaVersion is from the future', () => {
       const filePath = path.join(
-        SPARSE_PROJECT_PATH, 'erd-studio', 'silver', 'future-version.json'
+        SPARSE_PROJECT_PATH, '.erd-studio', 'silver', 'future-version.json'
       );
       expect(() => service.getDomain(filePath)).toThrow('update the extension');
     });
 
     it('applies defaults for missing optional fields', () => {
       const filePath = path.join(
-        SPARSE_PROJECT_PATH, 'erd-studio', 'silver', 'minimal.json'
+        SPARSE_PROJECT_PATH, '.erd-studio', 'silver', 'minimal.json'
       );
       const domain = service.getDomain(filePath);
 
@@ -186,7 +186,7 @@ describe('DomainService', () => {
   describe('getDomainStage', () => {
     it('extracts logical stage from unified domain', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'erd-studio', 'gold', 'finance.json'
+        FIXTURE_PROJECT_PATH, '.erd-studio', 'gold', 'finance.json'
       );
       const stage = service.getDomainStage(filePath);
 
@@ -197,7 +197,7 @@ describe('DomainService', () => {
 
     it('includes shared metadata in extracted stage', () => {
       const filePath = path.join(
-        FIXTURE_PROJECT_PATH, 'erd-studio', 'silver', 'ncr.json'
+        FIXTURE_PROJECT_PATH, '.erd-studio', 'silver', 'ncr.json'
       );
       const stage = service.getDomainStage(filePath);
 

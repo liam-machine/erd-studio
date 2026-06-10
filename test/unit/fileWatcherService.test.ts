@@ -105,7 +105,7 @@ describe('FileWatcherService', () => {
       service.onSemanticFileChanged(listener);
 
       const semanticWatcher = _mockFileWatchers[1];
-      const uri = vscode.Uri.file('/test/workspace/erd-studio/silver/orders.json');
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/silver/orders.json');
       semanticWatcher._simulateChange(uri);
       vi.advanceTimersByTime(300);
 
@@ -117,7 +117,7 @@ describe('FileWatcherService', () => {
       service.onSemanticFileChanged(listener);
 
       const semanticWatcher = _mockFileWatchers[1];
-      const uri = vscode.Uri.file('/test/workspace/erd-studio/gold/new-domain.json');
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/gold/new-domain.json');
       semanticWatcher._simulateCreate(uri);
       vi.advanceTimersByTime(300);
 
@@ -129,7 +129,7 @@ describe('FileWatcherService', () => {
       service.onSemanticFileDeleted(listener);
 
       const semanticWatcher = _mockFileWatchers[1];
-      const uri = vscode.Uri.file('/test/workspace/erd-studio/silver/deleted.json');
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/silver/deleted.json');
       semanticWatcher._simulateDelete(uri);
       vi.advanceTimersByTime(300);
 
@@ -141,7 +141,7 @@ describe('FileWatcherService', () => {
       service.onSemanticFileChanged(listener);
 
       const semanticWatcher = _mockFileWatchers[1];
-      const uri = vscode.Uri.file('/test/workspace/erd-studio/silver/deleted.json');
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/silver/deleted.json');
       semanticWatcher._simulateDelete(uri);
       vi.advanceTimersByTime(300);
 
@@ -153,8 +153,8 @@ describe('FileWatcherService', () => {
       service.onSemanticFileChanged(listener);
 
       const semanticWatcher = _mockFileWatchers[1];
-      const uri1 = vscode.Uri.file('/test/workspace/erd-studio/silver/file1.json');
-      const uri2 = vscode.Uri.file('/test/workspace/erd-studio/silver/file2.json');
+      const uri1 = vscode.Uri.file('/test/workspace/.erd-studio/silver/file1.json');
+      const uri2 = vscode.Uri.file('/test/workspace/.erd-studio/silver/file2.json');
 
       // Change file1 multiple times
       semanticWatcher._simulateChange(uri1);

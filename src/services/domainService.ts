@@ -1,7 +1,7 @@
 /**
  * DomainService — reads semantic domain JSON files from disk.
  *
- * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
+ * Domain files live at {dbt_project}/.erd-studio/{layer}/{domain}.json
  * Each file is a UnifiedDomain containing logical stage data.
  *
  * Physical domains are not stored on disk — they are derived at runtime
@@ -32,7 +32,7 @@ interface RelationshipTest {
   toColumn: string;
 }
 
-const DEFAULT_SEMANTIC_DIR = 'erd-studio';
+const DEFAULT_SEMANTIC_DIR = '.erd-studio';
 
 export class DomainService {
   private logicalModelService: LogicalModelService | null = null;
@@ -49,11 +49,11 @@ export class DomainService {
   }
 
   /**
-   * Discover all semantic domain JSON files under erd-studio/,
+   * Discover all semantic domain JSON files under .erd-studio/,
    * grouped by layer. Returns lightweight summaries (no full parse).
    *
    * Directory structure:
-   *   erd-studio/{layer}/*.json
+   *   .erd-studio/{layer}/*.json
    */
   listDomains(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): DomainSummary[] {
     const basePath = path.join(projectPath, semanticDir);

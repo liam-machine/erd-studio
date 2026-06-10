@@ -1,7 +1,7 @@
 /**
  * TemplateService — reads model template JSON files from disk.
  *
- * Templates live at {dbt_project}/erd-studio/templates/*.json
+ * Templates live at {dbt_project}/.erd-studio/templates/*.json
  * and define preset columns and metadata for common model patterns.
  *
  * Falls back to built-in templates if no template files are found.
@@ -12,7 +12,7 @@ import * as path from 'path';
 
 import type { ColumnDef, ModelTemplate } from '../types/semantic';
 
-const DEFAULT_SEMANTIC_DIR = 'erd-studio';
+const DEFAULT_SEMANTIC_DIR = '.erd-studio';
 const TEMPLATES_DIR = 'templates';
 
 /**
@@ -96,7 +96,7 @@ export class TemplateService {
   /**
    * Load all model templates from the templates directory.
    *
-   * Returns templates from {projectPath}/erd-studio/templates/*.json
+   * Returns templates from {projectPath}/.erd-studio/templates/*.json
    * if any exist, otherwise returns built-in fallback templates.
    *
    * Templates are sorted by: dimension, fact, bridge, scd2, blank, then

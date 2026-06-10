@@ -2,7 +2,7 @@
  * AddExistingModelDialog — dialog for adding existing models to a domain.
  *
  * Displays a searchable, filterable list of models from three sources:
- * - Library: models with YAML definitions in erd-studio/logical-models/
+ * - Library: models with YAML definitions in .erd-studio/logical-models/
  * - dbt: models defined in dbt .yml schema files
  * - Compiled: models only in compiled manifest (no .yml file)
  *
@@ -158,7 +158,7 @@ export function AddExistingModelDialog() {
                 </>
               ) : (
                 <>
-                  Add <code>.yml</code> schema files to your dbt project, create models in <code>erd-studio/logical-models/</code>, or run <code>dbt compile</code>.
+                  Add <code>.yml</code> schema files to your dbt project, create models in <code>.erd-studio/logical-models/</code>, or run <code>dbt compile</code>.
                 </>
               )}
             </p>

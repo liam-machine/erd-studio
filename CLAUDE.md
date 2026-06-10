@@ -8,13 +8,13 @@ The extension display name is **ERD Studio** (package name `erd-studio`).
 
 ### Directory Structure
 
-ERD domain files live at `{project_root}/erd-studio/{layer}/{domain}.json`. Each file is a unified domain containing the logical stage data. The custom editor activates for files matching:
-- `**/erd-studio/*/*.json`
+ERD domain files live at `{project_root}/.erd-studio/{layer}/{domain}.json`. Each file is a unified domain containing the logical stage data. The custom editor activates for files matching:
+- `**/.erd-studio/*/*.json`
 
-The base directory is configurable via the `dbtSemantic.semanticDir` setting (default: `erd-studio`).
+The base directory is configurable via the `dbtSemantic.semanticDir` setting (default: `.erd-studio`).
 
 ```
-erd-studio/
+.erd-studio/
 ├── layers.json
 ├── templates/
 ├── silver/
@@ -80,7 +80,7 @@ manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ Display
 ```
 
 1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`). Extracts model nodes, relationship test nodes (`relationships`, `relationships_where`, custom), `unique` tests, and `unique_combination_of_columns` tests.
-2. **DomainService** reads unified domain JSON from `erd-studio/{layer}/*.json` → `UnifiedDomain`, then extracts a stage section via `getDomainStage()` → `DisplayDomain`
+2. **DomainService** reads unified domain JSON from `.erd-studio/{layer}/*.json` → `UnifiedDomain`, then extracts a stage section via `getDomainStage()` → `DisplayDomain`
 3. For physical stage: `DomainService.buildPhysicalDomain()` derives models from logical filtered by manifest. **Relationships are derived entirely from manifest relationship tests** (not copied from logical). Cardinality is inferred from manifest `unique`/`unique_combination_of_columns` tests (no unique test = "many" side). Relationships are scoped to models within the domain to prevent conformed dimensions from pulling in external edges. See `derivePhysicalRelationships()` in `domainService.ts`.
 4. **DiscrepancyService** compares two `DisplayDomain` objects to produce a `DiscrepancyReport`
 5. Extension sends `domainLoaded` / `stageData` message to webview

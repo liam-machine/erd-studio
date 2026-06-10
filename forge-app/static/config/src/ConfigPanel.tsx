@@ -210,7 +210,7 @@ export default function ConfigPanel() {
         <input
           style={styles.input}
           type="text"
-          placeholder="https://github.com/owner/repo/blob/main/erd-studio/silver/domain.json"
+          placeholder="https://github.com/owner/repo/blob/main/.erd-studio/silver/domain.json"
           value={config.githubUrl}
           onChange={(e) => onUrlChange(e.target.value)}
         />

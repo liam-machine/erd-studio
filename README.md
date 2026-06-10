@@ -106,7 +106,7 @@ When design and warehouse disagree, ERD Studio generates a JSON plan mapping eve
 
 1. **Install** ERD Studio from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio).
 2. **Open your dbt project** in VS Code and click the ERD Studio icon in the Activity Bar.
-3. **Initialize** — follow the prompt to create the `erd-studio/` folder.
+3. **Initialize** — follow the prompt to create the `.erd-studio/` folder.
 4. **Install the AI harness** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Install AI Coding Harness`.
 5. **Create a domain** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Create Semantic Domain`.
 6. **Tell your AI what to build** — describe the scope, point it at bronze, let it draft the ERD. Review on the canvas. Prompt it to generate the dbt code.
@@ -120,7 +120,7 @@ The harness installs the right file for your assistant:
 | <img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Google Gemini" /> | `.gemini/styleguide.md` |
 | <img src="https://img.shields.io/badge/OpenAI_Codex-412991?style=for-the-badge&logo=openai&logoColor=white" alt="OpenAI Codex" /> | `AGENTS.md` |
 
-The baseline harness teaches your assistant the domain format and sync workflow, with a guard that blocks AI edits to `erd-studio/` until the spec is loaded. Layer your own skills, prompts, and style guides on top so the generated dbt reflects your team's conventions.
+The baseline harness teaches your assistant the domain format and sync workflow, with a guard that blocks AI edits to `.erd-studio/` until the spec is loaded. Layer your own skills, prompts, and style guides on top so the generated dbt reflects your team's conventions.
 
 <br />
 
@@ -148,7 +148,7 @@ After setup, your dbt project gets:
 
 ```
 your-dbt-project/
-├── erd-studio/
+├── .erd-studio/
 │   ├── layers.json              # Layer definitions (silver, gold, etc.)
 │   ├── logical-models/          # Model definitions — one YAML per table
 │   │   ├── dim_customer.yml
@@ -172,7 +172,7 @@ Layer folders match what's in `layers.json`. You're not stuck with `silver`/`gol
 
 ### Anatomy of a model file
 
-`erd-studio/logical-models/dim_customer.yml`:
+`.erd-studio/logical-models/dim_customer.yml`:
 
 ```yaml
 name: dim_customer
@@ -208,7 +208,7 @@ columns:
 
 ### Anatomy of a domain file
 
-`erd-studio/silver/orders.json`:
+`.erd-studio/silver/orders.json`:
 
 ```json
 {
@@ -282,7 +282,7 @@ The spec teaches the AI:
 - The naming conventions (`dim_`, `fct_`, `ref_`, `brg_` prefixes for dimensions, facts, references, bridges)
 - The full field reference (every key documented above)
 
-For Claude Code, the install also adds a **PreToolUse hook** at `.claude/settings.local.json` that blocks the first edit to any `erd-studio/` file in a session until the assistant has loaded the skill. No half-read spec, no drift.
+For Claude Code, the install also adds a **PreToolUse hook** at `.claude/settings.local.json` that blocks the first edit to any `.erd-studio/` file in a session until the assistant has loaded the skill. No half-read spec, no drift.
 
 The harness embeds a version marker. When you upgrade ERD Studio, the extension detects out-of-date harness files and prompts to update.
 
@@ -317,7 +317,7 @@ So `dbt run --selector domain_silver_orders` refreshes every model in your "orde
 
 Type comparison normalises common aliases (`varchar`/`string`, `int`/`integer`, `timestamp_ntz`/`timestamp`, etc.) so equivalent types don't show as mismatches.
 
-For unrecoverable drift, the AI can generate a **sync plan** at `erd-studio/.sync-plan.json` — every discrepancy mapped to a concrete action (`add-to-logical`, `update-type-in-physical`, etc.). You pick the source of truth per item; the AI executes it.
+For unrecoverable drift, the AI can generate a **sync plan** at `.erd-studio/.sync-plan.json` — every discrepancy mapped to a concrete action (`add-to-logical`, `update-type-in-physical`, etc.). You pick the source of truth per item; the AI executes it.
 
 ### Editing by hand vs by AI vs on the canvas
 
