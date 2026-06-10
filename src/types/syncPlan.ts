@@ -103,7 +103,7 @@ export interface RelationshipResolution {
 
 export interface ModelContext {
   modelName: string;
-  /** Relative path to the logical model YAML (e.g. erd-studio/logical-models/dim_customer.yml). */
+  /** Relative path to the logical model YAML (e.g. .erd-studio/logical-models/dim_customer.yml). */
   logicalModelPath: string;
   /** Relative path to the dbt SQL file (from manifest originalFilePath). Null if not in manifest. */
   dbtSqlPath: string | null;
@@ -112,7 +112,7 @@ export interface ModelContext {
 }
 
 // ---------------------------------------------------------------------------
-// The sync plan  (written to erd-studio/.sync-plan.json)
+// The sync plan  (written to .erd-studio/.sync-plan.json)
 // ---------------------------------------------------------------------------
 
 export interface SyncPlan {

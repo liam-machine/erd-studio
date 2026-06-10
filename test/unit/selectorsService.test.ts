@@ -82,7 +82,7 @@ describe('SelectorsService', () => {
         },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
 
     const result = svc.regenerate();
@@ -119,7 +119,7 @@ describe('SelectorsService', () => {
         },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
 
     svc.regenerate();
@@ -138,7 +138,7 @@ describe('SelectorsService', () => {
         { domain: 'real', layer: 'silver', filePath: '/dummy/silver/real.json', models: ['dim_real'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
 
     const result = svc.regenerate();
@@ -155,7 +155,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['m1'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
     const raw = fs.readFileSync(path.join(tmpDir, 'selectors.yml'), 'utf-8');
@@ -174,7 +174,7 @@ describe('SelectorsService', () => {
         },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -193,7 +193,7 @@ describe('SelectorsService', () => {
         { domain: 'new', layer: 'silver', filePath: '/x/silver/new.json', models: ['dim_new'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -225,7 +225,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -257,7 +257,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -286,7 +286,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -314,7 +314,7 @@ describe('SelectorsService', () => {
         { domain: 'new', layer: 'silver', filePath: '/x/silver/new.json', models: ['dim_new'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -345,7 +345,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
     const first = fs.readFileSync(path.join(tmpDir, 'selectors.yml'), 'utf-8');
@@ -372,7 +372,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -401,7 +401,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -431,7 +431,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     expect(() => svc.regenerate()).not.toThrow();
 
@@ -452,7 +452,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['m1'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     const result = svc.regenerate();
     expect(result.status).toBe('written');
@@ -466,7 +466,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['m1'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     const result = svc.regenerate();
     expect(result.status).toBe('written');
@@ -491,7 +491,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -516,7 +516,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
     );
     svc.regenerate();
 
@@ -543,7 +543,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
       { onSkipped, onWritten },
     );
     const result = svc.regenerate();
@@ -575,7 +575,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
       { onSkipped },
     );
     const result = svc.regenerate();
@@ -598,7 +598,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
       { onSkipped },
     );
     const result = svc.regenerate();
@@ -628,7 +628,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
       { isFileDirtyInEditor, onSkipped, onWritten },
     );
     const before = fs.readFileSync(path.join(tmpDir, 'selectors.yml'), 'utf-8');
@@ -660,7 +660,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
       { isFileDirtyInEditor, onSkipped, onWritten },
     );
     const result = svc.regenerate();
@@ -678,7 +678,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
       { onSkipped, onWritten },
     );
     svc.regenerate();
@@ -700,7 +700,7 @@ describe('SelectorsService', () => {
         { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
       ]),
       tmpDir,
-      'erd-studio',
+      '.erd-studio',
       { onSkipped, onWritten },
     );
 

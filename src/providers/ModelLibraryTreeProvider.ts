@@ -1,7 +1,7 @@
 /**
  * ModelLibraryTreeProvider — VS Code TreeDataProvider for the Model Library sidebar.
  *
- * Shows all model YAML files in erd-studio/logical-models/ as a flat
+ * Shows all model YAML files in .erd-studio/logical-models/ as a flat
  * alphabetical list. Orphaned models (not referenced by any domain) are
  * flagged with a warning icon and "(unused)" description. Referenced models
  * show their domain count and list domain names in the tooltip.

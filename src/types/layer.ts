@@ -2,7 +2,7 @@
  * Layer configuration types for dynamic layer management.
  *
  * Layers define the medallion architecture levels for semantic domains.
- * Configuration is stored in erd-studio/layers.json and controls:
+ * Configuration is stored in .erd-studio/layers.json and controls:
  *   - Layer metadata (label, abbreviation, description)
  *   - UI appearance (color)
  *   - Behavior flags (creatable, order)
@@ -45,7 +45,7 @@ export interface LayerConfig {
 
 /**
  * Full layer configuration file schema.
- * Stored at erd-studio/layers.json.
+ * Stored at .erd-studio/layers.json.
  */
 export interface LayersConfigFile {
   /** Schema version for future compatibility. */

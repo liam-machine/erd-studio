@@ -3,7 +3,7 @@
  *
  * Watches:
  * - target/manifest.json (dbt compile output) → triggers manifest cache invalidation
- * - erd-studio/**\/*.json (semantic domain files) → triggers tree and editor refresh
+ * - {semanticDir}/**\/*.json (semantic domain files, default .erd-studio) → triggers tree and editor refresh
  * - dbt_project.yml (project configuration) → reload prompt only when path config changes
  *
  * All change events are debounced by 300ms to prevent rapid-fire triggers
@@ -41,7 +41,7 @@ export class FileWatcherService implements vscode.Disposable {
   readonly onManifestChanged = this._onManifestChanged.event;
   readonly onSemanticFileChanged = this._onSemanticFileChanged.event;
   readonly onSemanticFileDeleted = this._onSemanticFileDeleted.event;
-  /** Fires when a YAML model file in erd-studio/logical-models/ changes. */
+  /** Fires when a YAML model file in {semanticDir}/logical-models/ changes. */
   readonly onLogicalModelChanged = this._onLogicalModelChanged.event;
   /** Fires when any dbt schema .yml/.yaml file under models/ changes. */
   readonly onDbtYmlChanged = this._onDbtYmlChanged.event;
@@ -51,7 +51,10 @@ export class FileWatcherService implements vscode.Disposable {
   /** Snapshot of path-related keys from dbt_project.yml at startup. */
   private lastProjectPaths: string;
 
-  constructor(private readonly workspaceRoot: string) {
+  constructor(
+    private readonly workspaceRoot: string,
+    private readonly semanticDir: string = '.erd-studio',
+  ) {
     this.lastProjectPaths = this.readProjectPaths();
     this.setupManifestWatcher();
     this.setupSemanticWatcher();
@@ -87,13 +90,13 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch erd-studio/**\/*.json for changes.
+   * Watch {semanticDir}/**\/*.json for changes.
    * Fires when domain files are created, modified, or deleted externally.
    */
   private setupSemanticWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'erd-studio/**/*.json',
+      `${this.semanticDir}/**/*.json`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
@@ -182,14 +185,14 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch erd-studio/logical-models/*.yml for changes.
+   * Watch {semanticDir}/logical-models/*.yml for changes.
    * Fires when model definition files are created, modified, or deleted.
    * Used to refresh open domain editors that reference the changed model.
    */
   private setupLogicalModelWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'erd-studio/logical-models/*.yml',
+      `${this.semanticDir}/logical-models/*.yml`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 

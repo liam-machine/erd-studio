@@ -3,7 +3,7 @@
  *
  * v4 → v5 migration:
  *   - Extracts inline model objects from domain files
- *   - Creates YAML model files in erd-studio/logical-models/
+ *   - Creates YAML model files in .erd-studio/logical-models/
  *   - Converts domain logical.models from SemanticModel[] to string[]
  *   - Bumps schemaVersion to 5
  *
@@ -65,7 +65,7 @@ export class MigrationService {
    * Scan all domain files and return paths of those with schemaVersion < 5.
    */
   findV4Domains(): string[] {
-    const semanticDir = path.join(this.workspaceRoot, 'erd-studio');
+    const semanticDir = path.join(this.workspaceRoot, '.erd-studio');
     if (!fs.existsSync(semanticDir)) {
       return [];
     }

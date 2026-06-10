@@ -39,7 +39,7 @@ describe('HarnessService', () => {
 
     it('generates Copilot instructions with applyTo glob', () => {
       const content = service.generateContent('copilot');
-      expect(content).toContain("applyTo: '**/erd-studio/**/*.json'");
+      expect(content).toContain("applyTo: '**/.erd-studio/**/*.json'");
       expect(content).toContain("name: 'ERD Studio'");
       expect(content).toContain('# ERD Studio');
     });
@@ -63,7 +63,7 @@ describe('HarnessService', () => {
         expect(content).toContain('schemaVersion');
         expect(content).toContain('viewConfig');
         expect(content).toContain('logical');
-        expect(content).toContain('erd-studio/{layer}/{domain}.json');
+        expect(content).toContain('.erd-studio/{layer}/{domain}.json');
       }
     });
 

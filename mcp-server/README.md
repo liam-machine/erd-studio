@@ -58,18 +58,18 @@ These editors support MCP via their respective config files. Use the same `comma
 
 ## Tools
 
-All tools take a `project_path` argument: the **absolute path** to the dbt project root (the directory containing `dbt_project.yml`). The project should also contain an `erd-studio/` directory created by the [ERD Studio VS Code extension](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio).
+All tools take a `project_path` argument: the **absolute path** to the dbt project root (the directory containing `dbt_project.yml`). The project should also contain a `.erd-studio/` directory created by the [ERD Studio VS Code extension](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio).
 
 | Tool | Returns |
 |---|---|
 | `list_domains` | All ERDs grouped by layer. Filter optional by `layer`. |
 | `read_domain` | Full domain: models + columns + relationships + cardinality + rationale. |
-| `list_models` | All logical model definitions from `erd-studio/logical-models/*.yml`. |
+| `list_models` | All logical model definitions from `.erd-studio/logical-models/*.yml`. |
 | `read_model` | Single logical model with column-level metadata, grain, SCD types, rationale. |
 | `list_manifest_models` | Models from `target/manifest.json` (what dbt actually built), with unique/relationship test coverage. Filter optional by `name_contains`. |
 | `get_editor_setup` | Returns install instructions for the ERD Studio VS Code extension. Use this when the user wants to edit, design, or build (this MCP server is read-only). |
 
-All tools are read-only. If the project hasn't been initialized with an `erd-studio/` directory yet, list-tools return empty results with a `tip` field pointing to the install path; read-tools throw a friendly error doing the same. Either way the AI naturally surfaces the extension install path to the user.
+All tools are read-only. If the project hasn't been initialized with a `.erd-studio/` directory yet, list-tools return empty results with a `tip` field pointing to the install path; read-tools throw a friendly error doing the same. Either way the AI naturally surfaces the extension install path to the user.
 
 ## What the AI gets
 
@@ -91,7 +91,7 @@ So when you ask the AI *"propose a column to add to `dim_customer`"*, it sees no
 
 ## Without ERD Studio yet
 
-If your dbt project doesn't have an `erd-studio/` directory yet:
+If your dbt project doesn't have a `.erd-studio/` directory yet:
 
 1. Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio)
 2. In VS Code: Command Palette → `dbt: Set Up Semantic Domains Directory`

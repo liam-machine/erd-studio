@@ -2,7 +2,7 @@
  * LayerService — manages layer configuration for the semantic domain system.
  *
  * Responsibilities:
- *   1. Load layer config from erd-studio/layers.json
+ *   1. Load layer config from .erd-studio/layers.json
  *   2. Auto-detect existing layer directories on first run
  *   3. Validate layer configuration structure
  *   4. Provide layer lookup and metadata access
@@ -32,7 +32,7 @@ export class LayerService {
   private readonly configPath: string;
   private readonly semanticPath: string;
 
-  constructor(projectPath: string, semanticDir: string = 'erd-studio') {
+  constructor(projectPath: string, semanticDir: string = '.erd-studio') {
     this.semanticPath = path.join(projectPath, semanticDir);
     this.configPath = path.join(this.semanticPath, LAYERS_CONFIG_FILE);
   }

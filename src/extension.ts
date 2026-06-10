@@ -184,7 +184,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   console.log(`ERD Studio: Found dbt project at ${workspaceRoot}`);
 
   const config = vscode.workspace.getConfiguration('dbtSemantic');
-  const semanticDir = config.get<string>('semanticDir', 'erd-studio');
+  const semanticDir = config.get<string>('semanticDir', '.erd-studio');
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
@@ -296,7 +296,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // -------------------------------------------------------------------------
   // File watchers
   // -------------------------------------------------------------------------
-  const fileWatcherService = new FileWatcherService(workspaceRoot);
+  const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir);
 
   // Manifest changed → refresh open editors
   let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -781,7 +781,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const v4Count = migrationService.findV4Domains().length;
       const confirm = await vscode.window.showWarningMessage(
         `Found ${v4Count} domain file(s) using the legacy inline model format. ` +
-        'Migration will extract models to erd-studio/logical-models/ and convert domain files to use name references. ' +
+        'Migration will extract models to .erd-studio/logical-models/ and convert domain files to use name references. ' +
         'This cannot be undone automatically.',
         'Migrate Now',
         'Cancel',

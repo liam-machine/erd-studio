@@ -21,7 +21,7 @@ vi.mock('fs', async () => {
 
 function createMockLogicalModelService(
   modelNames: string[] = [],
-  modelsDir = '/project/erd-studio/logical-models',
+  modelsDir = '/project/.erd-studio/logical-models',
 ): LogicalModelService {
   return {
     dirExists: vi.fn(() => modelNames.length > 0),
@@ -67,8 +67,8 @@ function v4DomainJson(modelNames: string[]): string {
 // ---------------------------------------------------------------------------
 
 const SUMMARIES: DomainSummary[] = [
-  { domain: 'customer-360', layer: 'silver', filePath: '/project/erd-studio/silver/customer-360.json' },
-  { domain: 'reporting', layer: 'gold', filePath: '/project/erd-studio/gold/reporting.json' },
+  { domain: 'customer-360', layer: 'silver', filePath: '/project/.erd-studio/silver/customer-360.json' },
+  { domain: 'reporting', layer: 'gold', filePath: '/project/.erd-studio/gold/reporting.json' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ describe('ModelLibraryTreeProvider', () => {
       mockLogicalModelService,
       mockDomainService,
       '/project',
-      'erd-studio',
+      '.erd-studio',
     );
   });
 
@@ -129,7 +129,7 @@ describe('ModelLibraryTreeProvider', () => {
         mockLogicalModelService,
         mockDomainService,
         '/project',
-        'erd-studio',
+        '.erd-studio',
       );
       expect(provider.getChildren()).toEqual([]);
     });
@@ -174,8 +174,8 @@ describe('ModelLibraryTreeProvider', () => {
 
     it('sets correct filePath on each node', () => {
       const children = provider.getChildren()!;
-      expect(children[0].filePath).toBe('/project/erd-studio/logical-models/dim_customer.yml');
-      expect(children[1].filePath).toBe('/project/erd-studio/logical-models/dim_date.yml');
+      expect(children[0].filePath).toBe('/project/.erd-studio/logical-models/dim_customer.yml');
+      expect(children[1].filePath).toBe('/project/.erd-studio/logical-models/dim_date.yml');
     });
   });
 
@@ -188,7 +188,7 @@ describe('ModelLibraryTreeProvider', () => {
       const node: ModelLibraryNode = {
         type: 'model',
         name: 'dim_date',
-        filePath: '/project/erd-studio/logical-models/dim_date.yml',
+        filePath: '/project/.erd-studio/logical-models/dim_date.yml',
         referencingDomains: [],
       };
 
@@ -205,7 +205,7 @@ describe('ModelLibraryTreeProvider', () => {
       const node: ModelLibraryNode = {
         type: 'model',
         name: 'dim_customer',
-        filePath: '/project/erd-studio/logical-models/dim_customer.yml',
+        filePath: '/project/.erd-studio/logical-models/dim_customer.yml',
         referencingDomains: ['customer-360', 'reporting'],
       };
 
@@ -222,7 +222,7 @@ describe('ModelLibraryTreeProvider', () => {
       const node: ModelLibraryNode = {
         type: 'model',
         name: 'fct_orders',
-        filePath: '/project/erd-studio/logical-models/fct_orders.yml',
+        filePath: '/project/.erd-studio/logical-models/fct_orders.yml',
         referencingDomains: ['customer-360'],
       };
 
@@ -234,7 +234,7 @@ describe('ModelLibraryTreeProvider', () => {
       const node: ModelLibraryNode = {
         type: 'model',
         name: 'dim_customer',
-        filePath: '/project/erd-studio/logical-models/dim_customer.yml',
+        filePath: '/project/.erd-studio/logical-models/dim_customer.yml',
         referencingDomains: [],
       };
 

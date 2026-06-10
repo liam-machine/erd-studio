@@ -12,7 +12,7 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn((p: string) => {
-      if (typeof p === 'string' && p.includes('test-project') && p.includes('erd-studio')) return true;
+      if (typeof p === 'string' && p.includes('test-project') && p.includes('.erd-studio')) return true;
       return actual.existsSync(p as any);
     }),
   };
@@ -74,19 +74,19 @@ function createMockDomainService(
 // ---------------------------------------------------------------------------
 
 const SILVER_DOMAINS: DomainSummary[] = [
-  { domain: 'customer-360', layer: 'silver', filePath: '/project/erd-studio/silver/customer-360.json' },
-  { domain: 'orders', layer: 'silver', filePath: '/project/erd-studio/silver/orders.json' },
+  { domain: 'customer-360', layer: 'silver', filePath: '/project/.erd-studio/silver/customer-360.json' },
+  { domain: 'orders', layer: 'silver', filePath: '/project/.erd-studio/silver/orders.json' },
 ];
 
 const GOLD_DOMAINS: DomainSummary[] = [
-  { domain: 'reporting', layer: 'gold', filePath: '/project/erd-studio/gold/reporting.json' },
+  { domain: 'reporting', layer: 'gold', filePath: '/project/.erd-studio/gold/reporting.json' },
 ];
 
 const ALL_SUMMARIES = [...SILVER_DOMAINS, ...GOLD_DOMAINS];
 
 function buildDomainMap(): Map<string, UnifiedDomain> {
   const map = new Map<string, UnifiedDomain>();
-  map.set('/project/erd-studio/silver/customer-360.json', makeUnifiedDomain({
+  map.set('/project/.erd-studio/silver/customer-360.json', makeUnifiedDomain({
     domain: 'customer-360',
     layer: 'silver',
     logical: {
@@ -94,7 +94,7 @@ function buildDomainMap(): Map<string, UnifiedDomain> {
       relationships: [],
     },
   }));
-  map.set('/project/erd-studio/silver/orders.json', makeUnifiedDomain({
+  map.set('/project/.erd-studio/silver/orders.json', makeUnifiedDomain({
     domain: 'orders',
     layer: 'silver',
     logical: {
@@ -102,7 +102,7 @@ function buildDomainMap(): Map<string, UnifiedDomain> {
       relationships: [],
     },
   }));
-  map.set('/project/erd-studio/gold/reporting.json', makeUnifiedDomain({
+  map.set('/project/.erd-studio/gold/reporting.json', makeUnifiedDomain({
     domain: 'reporting',
     layer: 'gold',
     logical: {

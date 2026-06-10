@@ -15,7 +15,7 @@ export interface Services {
   manifestService: ManifestService;
 }
 
-const SEMANTIC_DIR = 'erd-studio';
+const SEMANTIC_DIR = '.erd-studio';
 
 export function resolveProjectPath(input: string): string {
   const resolved = path.resolve(input);

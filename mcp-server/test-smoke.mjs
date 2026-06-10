@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_PATH = path.resolve(__dirname, '../test/fixtures/dbt-project');
 const SERVER = path.resolve(__dirname, 'dist/index.js');
 
-// Build a temporary "uninitialized" project — has dbt_project.yml but no erd-studio/
+// Build a temporary "uninitialized" project — has dbt_project.yml but no .erd-studio/
 const UNINIT_PATH = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-mcp-uninit-'));
 fs.writeFileSync(path.join(UNINIT_PATH, 'dbt_project.yml'), "name: 'test_uninit'\nversion: '1.0.0'\n");
 

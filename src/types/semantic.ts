@@ -1,7 +1,7 @@
 /**
  * Types for semantic domain JSON files.
  *
- * Domain files live at {dbt_project}/erd-studio/{layer}/{domain}.json
+ * Domain files live at {dbt_project}/.erd-studio/{layer}/{domain}.json
  * and describe FK-based relationships between dbt models within a business
  * domain at a particular design stage (logical or physical).
  */
@@ -230,7 +230,7 @@ export interface SemanticDomain {
 /**
  * Unified domain file format (v4).
  *
- * A single JSON file at erd-studio/{layer}/{domain}.json containing
+ * A single JSON file at .erd-studio/{layer}/{domain}.json containing
  * logical stage data. Physical stage is derived at runtime from
  * the logical models projected through the dbt manifest.
  */
@@ -270,7 +270,7 @@ export interface StageDataV5 {
  *
  * Same as v4 but `logical.models` contains model name strings instead of
  * inline SemanticModel objects. Models are stored centrally in
- * erd-studio/logical-models/{name}.yml.
+ * .erd-studio/logical-models/{name}.yml.
  */
 export interface UnifiedDomainV5 {
   schemaVersion: number;

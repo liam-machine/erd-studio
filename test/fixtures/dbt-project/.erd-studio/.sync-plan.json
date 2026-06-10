@@ -7,7 +7,7 @@
   "modelContext": {
     "fct_large_table": {
       "modelName": "fct_large_table",
-      "logicalModelPath": "erd-studio/logical-models/fct_large_table.yml",
+      "logicalModelPath": ".erd-studio/logical-models/fct_large_table.yml",
       "dbtSqlPath": null,
       "dbtSchemaPath": null
     }

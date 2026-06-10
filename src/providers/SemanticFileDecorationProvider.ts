@@ -9,14 +9,15 @@ import type { LayerService } from '../services/layerService';
  * inside the ERD Studio sidebar tree via LayerDecorationProvider.
  */
 export class SemanticFileDecorationProvider implements vscode.FileDecorationProvider {
-  private static readonly SEMANTIC_PATH_PATTERN = /[/\\]erd-studio[/\\]/;
+  // Matches the .erd-studio data directory (and the legacy non-dotted erd-studio name)
+  private static readonly SEMANTIC_PATH_PATTERN = /[/\\]\.?erd-studio[/\\]/;
 
   private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<vscode.Uri | vscode.Uri[] | undefined>();
   readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
 
   constructor(
     private readonly layerService: LayerService,
-    private readonly semanticDir: string = 'erd-studio',
+    private readonly semanticDir: string = '.erd-studio',
   ) {}
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {

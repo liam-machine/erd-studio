@@ -1,10 +1,10 @@
 ---
 name: erd-studio
 description: >-
-  Schema rules for ERD Studio data model files — the erd-studio/ directory
+  Schema rules for ERD Studio data model files — the .erd-studio/ directory
   uses a two-file system (YAML model definitions + JSON domain diagrams)
   with strict format rules you must read before editing. Use this skill
-  whenever the task touches files in erd-studio/ (domain JSON, logical-models
+  whenever the task touches files in .erd-studio/ (domain JSON, logical-models
   YAML, or .sync-plan.json), asks to add/edit/remove models, columns,
   relationships, or cardinality in a data model or ERD diagram, mentions
   dim_/fct_/ref_/brg_ prefixed tables in an erd-studio context, or involves
@@ -15,12 +15,12 @@ description: >-
 
 # ERD Studio — AI Data Modeling Guide
 
-ERD Studio uses a **central model store** architecture. Model definitions are YAML files in `erd-studio/logical-models/`. Domain JSON files reference models by name and define relationships and layout.
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in `.erd-studio/logical-models/`. Domain JSON files reference models by name and define relationships and layout.
 
 ## Architecture Overview
 
 ```
-erd-studio/
+.erd-studio/
 ├── logical-models/           ← Central model definitions (YAML, one per model)
 │   ├── dim_customer.yml
 │   ├── dim_project.yml
@@ -45,7 +45,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `l
 
 ## Domain File Structure
 
-**File:** `erd-studio/{layer}/{domain}.json`
+**File:** `.erd-studio/{layer}/{domain}.json`
 
 ```json
 {
@@ -112,9 +112,9 @@ Annotations are temporary build notes — visible on the canvas while constructi
 
 ## Models
 
-Model definitions live in `erd-studio/logical-models/{model_name}.yml`. Create/edit these YAML files to define models. Then reference them by name in domain files.
+Model definitions live in `.erd-studio/logical-models/{model_name}.yml`. Create/edit these YAML files to define models. Then reference them by name in domain files.
 
-**File:** `erd-studio/logical-models/dim_customer.yml`
+**File:** `.erd-studio/logical-models/dim_customer.yml`
 
 ```yaml
 name: dim_customer
@@ -185,7 +185,7 @@ Optional `rationale` object — all fields are optional strings. Omit the entire
 
 When the user asks you to create a new model — or materially add columns to an existing one — from an external source (planning doc, DDL, staging SQL, CSV, notebook, or another YAML), follow this protocol. It exists to prevent silent column truncation.
 
-**Does NOT apply to:** renaming a column, changing a single flag, or executing an `erd-studio/.sync-plan.json` (see SYNC.md for that workflow).
+**Does NOT apply to:** renaming a column, changing a single flag, or executing an `.erd-studio/.sync-plan.json` (see SYNC.md for that workflow).
 
 ### Step 1 — Read the source fully, then enumerate
 Before listing anything, confirm you have read the source **in full**. For files longer than 2000 lines, page through with `Read` using `offset`/`limit` until you reach the end of the file. A partial read is a silent-truncation trap before you even start — the columns you never saw cannot appear in your output.
@@ -211,7 +211,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the `erd-studio/logical-models/{name}.yml` file.
+Write the `.erd-studio/logical-models/{name}.yml` file.
 
 ### Step 4 — Reconcile via set-difference
 Re-read the YAML file you just wrote. Compute the set-difference between source columns and YAML columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -318,10 +318,10 @@ Recognized test types: `relationships`, `relationships_where`, and any test whos
 
 ## Sync Reconciliation
 
-When asked to execute a sync plan, or when `erd-studio/.sync-plan.json` exists:
+When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 
 1. Read `SYNC.md` in the same directory as this skill file for the full action reference and execution guide
-2. Read `erd-studio/.sync-plan.json` for the specific actions to execute
+2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 14 -->
+<!-- erd-studio-harness: 15 -->
