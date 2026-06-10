@@ -11,7 +11,7 @@ The extension display name is **ERD Studio** (package name `erd-studio`).
 ERD domain files live at `{project_root}/.erd-studio/{layer}/{domain}.json`. Each file is a unified domain containing the logical stage data. The custom editor activates for files matching:
 - `**/.erd-studio/*/*.json`
 
-The base directory is configurable via the `dbtSemantic.semanticDir` setting (default: `.erd-studio`).
+The base directory is configurable via the `erdStudio.semanticDir` setting (default: `.erd-studio`).
 
 ```
 .erd-studio/
@@ -24,16 +24,12 @@ The base directory is configurable via the `dbtSemantic.semanticDir` setting (de
     └── reporting.json
 ```
 
-### Legacy Internal Identifiers
+### Internal Identifiers
 
-The following internal identifiers still use the legacy `dbtSemantic` prefix and must **not** be renamed (doing so would break existing user settings, keybindings, and stored state):
+All internal identifiers use the `erdStudio` prefix (`erd-studio` for the activity bar container id), with the command palette category `"ERD Studio"`. The extension was originally published with a `dbtSemantic` prefix; two compatibility shims keep pre-rename users working and must **not** be removed:
 
-- **Command IDs**: `dbtSemantic.createDomain`, `dbtSemantic.openDomain`, `dbtSemantic.deleteDomain`, `dbtSemantic.refreshManifest`, `dbtSemantic.renameDomain`, `dbtSemantic.addLayer`, `dbtSemantic.editLayer`, `dbtSemantic.removeLayer`, `dbtSemantic.initializeLayerConfig`, `dbtSemantic.setupSemanticDirectory`, `dbtSemantic.installCodingHarness`
-- **View IDs**: `dbt-semantic` (activity bar container), `dbtSemantic.domainTree`
-- **Custom editor viewType**: `dbtSemantic.domainEditor`
-- **Setting keys**: `dbtSemantic.projectPath`, `dbtSemantic.semanticDir`
-- **Color IDs**: `dbtSemantic.layer.bronze`, `dbtSemantic.layer.silver`, `dbtSemantic.layer.gold`, `dbtSemantic.layer.platinum`, `dbtSemantic.layer.custom`
-- **Command category**: `"category": "dbt"` in package.json command contributions
+- **Legacy command aliases**: every `erdStudio.*` command is also registered in code as `dbtSemantic.*` (see `LEGACY_ALIASED_COMMANDS` at the end of `activate()` in `src/extension.ts`) so old keybindings keep working. These are code-only registrations — never contribute them in package.json.
+- **Legacy setting fallback**: settings are read via `getErdStudioSetting()` (`src/services/configService.ts`), which prefers explicit `erdStudio.*` values and falls back to explicit `dbtSemantic.*` values. The deprecated `dbtSemantic.projectPath` / `dbtSemantic.semanticDir` entries in package.json carry `markdownDeprecationMessage` and must stay contributed. Never read settings with `getConfiguration('erdStudio').get(...)` directly — always use the helper.
 
 ## Build & Test Commands
 
@@ -140,7 +136,7 @@ Discrepancy statuses for models/columns/relationships: `matched`, `extra`, `miss
 
 ## Harness Versioning
 
-AI coding harness files (installed via `dbtSemantic.installCodingHarness`) embed a version marker to track staleness:
+AI coding harness files (installed via `erdStudio.installCodingHarness`) embed a version marker to track staleness:
 
 ```
 <!-- erd-studio-harness: 1 -->

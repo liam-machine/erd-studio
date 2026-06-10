@@ -205,7 +205,7 @@ export class DomainTreeProvider
     item.iconPath = new vscode.ThemeIcon('folder');
 
     // Assign a resource URI so FileDecorationProvider can apply colors
-    item.resourceUri = vscode.Uri.parse(`dbt-semantic-layer:/${element.layer}`);
+    item.resourceUri = vscode.Uri.parse(`erd-studio-layer:/${element.layer}`);
 
     return item;
   }
@@ -226,7 +226,7 @@ export class DomainTreeProvider
     item.iconPath = new vscode.ThemeIcon('json');
     item.tooltip = `${this.layerService.getLabel(element.summary.layer)} / ${element.summary.domain}`;
     item.command = {
-      command: 'dbtSemantic.openDomain',
+      command: 'erdStudio.openDomain',
       title: 'Open Domain',
       arguments: [element.summary.filePath],
     };
@@ -242,7 +242,7 @@ export class DomainTreeProvider
     item.contextValue = 'newDomain';
     item.iconPath = new vscode.ThemeIcon('add');
     item.command = {
-      command: 'dbtSemantic.createDomain',
+      command: 'erdStudio.createDomain',
       title: 'Create Domain',
       arguments: [element.layer],
     };

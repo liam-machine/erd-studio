@@ -15,7 +15,7 @@ import * as vscode from 'vscode';
  * in sync with the `customEditors` contribution in package.json. Per CLAUDE.md
  * this identifier is part of the legacy public API and must not be renamed.
  */
-export const DOMAIN_EDITOR_VIEW_TYPE = 'dbtSemantic.domainEditor';
+export const DOMAIN_EDITOR_VIEW_TYPE = 'erdStudio.domainEditor';
 
 /**
  * True when at least one editor tab is showing a domain canvas. Used to
