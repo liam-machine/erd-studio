@@ -6,7 +6,7 @@ import type { LayerService } from '../services/layerService';
  * URI scheme for layer tree items.
  * Used to identify layer nodes in the FileDecorationProvider.
  */
-export const LAYER_URI_SCHEME = 'dbt-semantic-layer';
+export const LAYER_URI_SCHEME = 'erd-studio-layer';
 
 /**
  * Provides file decorations (color) for layer folders in the sidebar tree.

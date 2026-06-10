@@ -296,7 +296,7 @@ describe('DomainTreeProvider', () => {
       const item = provider.getTreeItem(element);
 
       expect(item.command).toEqual({
-        command: 'dbtSemantic.openDomain',
+        command: 'erdStudio.openDomain',
         title: 'Open Domain',
         arguments: ['/path/to/test.json'],
       });
@@ -309,7 +309,7 @@ describe('DomainTreeProvider', () => {
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
       expect(item.contextValue).toBe('newDomain');
       expect(item.command).toEqual({
-        command: 'dbtSemantic.createDomain',
+        command: 'erdStudio.createDomain',
         title: 'Create Domain',
         arguments: ['gold'],
       });

@@ -18,6 +18,7 @@ import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
+import { getErdStudioSetting } from './services/configService';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 
@@ -183,8 +184,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   console.log(`ERD Studio: Found dbt project at ${workspaceRoot}`);
 
-  const config = vscode.workspace.getConfiguration('dbtSemantic');
-  const semanticDir = config.get<string>('semanticDir', '.erd-studio');
+  const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
 
   // v0.6.44 moved the default data directory from erd-studio/ to .erd-studio/.
   // Rename legacy folders in place before any service reads from disk so
@@ -229,7 +229,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (choice === 'Show file') {
               void vscode.window.showTextDocument(vscode.Uri.file(info.filePath));
             } else if (choice === 'Resync now') {
-              void vscode.commands.executeCommand('dbtSemantic.syncDomainTags');
+              void vscode.commands.executeCommand('erdStudio.syncDomainTags');
             }
           });
 
@@ -238,7 +238,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             vscode.StatusBarAlignment.Right,
             0,
           );
-          selectorsOutOfSyncStatus.command = 'dbtSemantic.syncDomainTags';
+          selectorsOutOfSyncStatus.command = 'erdStudio.syncDomainTags';
           selectorsOutOfSyncStatus.backgroundColor = new vscode.ThemeColor(
             'statusBarItem.warningBackground',
           );
@@ -300,8 +300,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Set context key so view/title menus only show when semantic dir exists
   const fullSemanticDirPath = path.join(workspaceRoot, semanticDir);
-  void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
-  void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasLogicalModelsDir', logicalModelService.dirExists());
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
 
   // -------------------------------------------------------------------------
   // File watchers
@@ -370,7 +370,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'Regenerate Now',
     ).then(choice => {
       if (choice === 'Regenerate Now') {
-        void vscode.commands.executeCommand('dbtSemantic.syncDomainTags');
+        void vscode.commands.executeCommand('erdStudio.syncDomainTags');
       }
     });
   });
@@ -382,7 +382,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       treeProvider.refresh();
       modelLibraryProvider.refresh();
       // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
-      void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasLogicalModelsDir', logicalModelService.dirExists());
+      void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
     },
   );
 
@@ -419,7 +419,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     dbtYmlChangedSubscription,
     projectChangedSubscription,
     (() => {
-      const treeView = vscode.window.createTreeView('dbtSemantic.domainTree', {
+      const treeView = vscode.window.createTreeView('erdStudio.domainTree', {
         treeDataProvider: treeProvider,
         dragAndDropController: treeProvider,
         canSelectMany: false,
@@ -431,12 +431,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.registerFileDecorationProvider(layerDecorationProvider),
     modelLibraryProvider,
     (() => {
-      return vscode.window.createTreeView('dbtSemantic.modelLibrary', {
+      return vscode.window.createTreeView('erdStudio.modelLibrary', {
         treeDataProvider: modelLibraryProvider,
         canSelectMany: false,
       });
     })(),
-    vscode.commands.registerCommand('dbtSemantic.deleteLogicalModel', async (node: ModelLibraryNode | undefined) => {
+    vscode.commands.registerCommand('erdStudio.deleteLogicalModel', async (node: ModelLibraryNode | undefined) => {
       if (!node || node.type !== 'model') {
         void vscode.window.showErrorMessage('Delete Model: No model selected. Right-click a model in the Model Library.');
         return;
@@ -451,14 +451,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         modelLibraryProvider.refresh();
       }
     }),
-    vscode.commands.registerCommand('dbtSemantic.revealLogicalModel', (node: ModelLibraryNode | undefined) => {
+    vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: ModelLibraryNode | undefined) => {
       if (!node || node.type !== 'model') {
         void vscode.window.showErrorMessage('Reveal in Explorer: No model selected. Right-click a model in the Model Library.');
         return;
       }
       void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(node.filePath));
     }),
-    vscode.commands.registerCommand('dbtSemantic.openDomain', async (filePath: string, stage?: Stage) => {
+    vscode.commands.registerCommand('erdStudio.openDomain', async (filePath: string, stage?: Stage) => {
       const fileUri = vscode.Uri.file(filePath);
       await vscode.commands.executeCommand(
         'vscode.openWith',
@@ -470,7 +470,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
     vscode.commands.registerCommand(
-      'dbtSemantic.createDomain',
+      'erdStudio.createDomain',
       async (layerArg?: Layer) => {
         // Step 1: Determine layer
         let layer: Layer | undefined = layerArg;
@@ -582,7 +582,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ),
     vscode.commands.registerCommand(
-      'dbtSemantic.deleteDomain',
+      'erdStudio.deleteDomain',
       async (element?: TreeElement) => {
         if (!element || element.type !== 'domain') {
           void vscode.window.showErrorMessage('Delete Domain: No domain selected. Right-click a domain in the tree view.');
@@ -622,7 +622,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ),
     vscode.commands.registerCommand(
-      'dbtSemantic.renameDomain',
+      'erdStudio.renameDomain',
       async (element?: TreeElement) => {
         if (!element || element.type !== 'domain') {
           void vscode.window.showErrorMessage('Rename Domain: No domain selected. Right-click a domain in the tree view.');
@@ -683,7 +683,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await vscode.commands.executeCommand('vscode.openWith', newFileUri, DOMAIN_EDITOR_VIEW_TYPE);
       },
     ),
-    vscode.commands.registerCommand('dbtSemantic.refreshManifest', async () => {
+    vscode.commands.registerCommand('erdStudio.refreshManifest', async () => {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -702,7 +702,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     // Regenerate the root selectors.yml from current domain files.
     // Run a domain refresh in dbt with: dbt build --selector domain_{layer}_{domain}
-    vscode.commands.registerCommand('dbtSemantic.syncDomainTags', async () => {
+    vscode.commands.registerCommand('erdStudio.syncDomainTags', async () => {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -729,7 +729,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     // One-shot cleanup: strip legacy `domain:*` tags from every model YAML
     // left behind by the old SchemaTagService. Safe to run repeatedly.
-    vscode.commands.registerCommand('dbtSemantic.stripLegacyDomainTags', async () => {
+    vscode.commands.registerCommand('erdStudio.stripLegacyDomainTags', async () => {
       const confirm = await vscode.window.showWarningMessage(
         'This will scan every .yml file in your workspace and remove any `domain:*` tag from `config.tags` or top-level `tags` on each dbt model. ' +
           'Review and commit the changes as a single PR. Continue?',
@@ -782,7 +782,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
     }),
     // Migrate v4 domains to v5 central model store
-    vscode.commands.registerCommand('dbtSemantic.migrateToV5', async () => {
+    vscode.commands.registerCommand('erdStudio.migrateToV5', async () => {
       if (!migrationService.needsMigration()) {
         void vscode.window.showInformationMessage('All domain files are already using the v5 central model store format.');
         return;
@@ -812,7 +812,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(
-      'dbtSemantic.setupSemanticDirectory',
+      'erdStudio.setupSemanticDirectory',
       async () => {
         const fullSemanticDir = path.join(workspaceRoot, semanticDir);
         const defaultLayers = layerService.getAllLayers();
@@ -844,18 +844,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
 
         // Update context key so view/title menus appear
-        void vscode.commands.executeCommand('setContext', 'dbtSemantic.hasSemanticDir', true);
+        void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', true);
         treeProvider.refresh();
         await new Promise(resolve => setTimeout(resolve, 100));
         void vscode.window.showInformationMessage('ERD Studio directory created! Now create your first domain.');
-        await vscode.commands.executeCommand('dbtSemantic.createDomain');
+        await vscode.commands.executeCommand('erdStudio.createDomain');
       },
     ),
     // -------------------------------------------------------------------------
     // Layer Management Commands (unchanged)
     // -------------------------------------------------------------------------
     vscode.commands.registerCommand(
-      'dbtSemantic.addLayer',
+      'erdStudio.addLayer',
       async () => {
         // Step 1: Layer ID
         const id = await vscode.window.showInputBox({
@@ -924,7 +924,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ),
     vscode.commands.registerCommand(
-      'dbtSemantic.editLayer',
+      'erdStudio.editLayer',
       async (element?: TreeElement) => {
         let layerId: string | undefined;
         if (element && element.type === 'layer') {
@@ -1004,7 +1004,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ),
     vscode.commands.registerCommand(
-      'dbtSemantic.removeLayer',
+      'erdStudio.removeLayer',
       async (element?: TreeElement) => {
         let layerId: string | undefined;
         if (element && element.type === 'layer') {
@@ -1061,7 +1061,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ),
     vscode.commands.registerCommand(
-      'dbtSemantic.initializeLayerConfig',
+      'erdStudio.initializeLayerConfig',
       async () => {
         const detected = layerService.detectLayersFromFilesystem();
         if (detected.length === 0) {
@@ -1095,7 +1095,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // AI Coding Harness Installation
     // -------------------------------------------------------------------------
     vscode.commands.registerCommand(
-      'dbtSemantic.installCodingHarness',
+      'erdStudio.installCodingHarness',
       async () => {
         const harnessService = new HarnessService();
         const existing = harnessService.detectExisting(workspaceRoot);
@@ -1169,7 +1169,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
     } else if (installedCount === 0) {
       // No harnesses installed — prompt user to choose
-      void vscode.commands.executeCommand('dbtSemantic.installCodingHarness');
+      void vscode.commands.executeCommand('erdStudio.installCodingHarness');
     }
   }
 
@@ -1193,6 +1193,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       });
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Legacy command aliases
+  // ---------------------------------------------------------------------------
+  // The extension was originally published with dbtSemantic.* command IDs.
+  // Keep them callable (registered in code only, so they stay out of the
+  // command palette) so existing user keybindings keep working after the
+  // erdStudio.* rename.
+  const LEGACY_ALIASED_COMMANDS = [
+    'createDomain',
+    'setupSemanticDirectory',
+    'openDomain',
+    'deleteDomain',
+    'refreshManifest',
+    'renameDomain',
+    'addLayer',
+    'editLayer',
+    'removeLayer',
+    'initializeLayerConfig',
+    'installCodingHarness',
+    'syncDomainTags',
+    'stripLegacyDomainTags',
+    'migrateToV5',
+    'deleteLogicalModel',
+    'revealLogicalModel',
+  ];
+  for (const name of LEGACY_ALIASED_COMMANDS) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`dbtSemantic.${name}`, (...args: unknown[]) =>
+        vscode.commands.executeCommand(`erdStudio.${name}`, ...args),
+      ),
+    );
   }
 }
 
