@@ -47,6 +47,64 @@ export interface MigrationResult {
 }
 
 // ---------------------------------------------------------------------------
+// Legacy directory migration (erd-studio/ → .erd-studio/)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SEMANTIC_DIR = '.erd-studio';
+const LEGACY_SEMANTIC_DIR = 'erd-studio';
+
+/** Files/dirs whose presence identifies a folder as an ERD Studio data dir. */
+const ERD_DIR_MARKERS = ['layers.json', 'logical-models', 'templates'];
+
+/**
+ * Returns the absolute path of a legacy erd-studio/ data directory that
+ * should be renamed to .erd-studio/, or null when no migration applies.
+ *
+ * Migration applies only when ALL of:
+ *   - the effective semanticDir is the default '.erd-studio' (a custom
+ *     setting means the user manages the location themselves)
+ *   - '.erd-studio' does not already exist
+ *   - 'erd-studio' exists, is a directory, and looks like an ERD data dir
+ *     (has a known marker, or a layer subdirectory containing .json files)
+ */
+export function findLegacySemanticDir(
+  workspaceRoot: string,
+  semanticDir: string,
+): string | null {
+  if (semanticDir !== DEFAULT_SEMANTIC_DIR) return null;
+  if (fs.existsSync(path.join(workspaceRoot, semanticDir))) return null;
+
+  const legacy = path.join(workspaceRoot, LEGACY_SEMANTIC_DIR);
+  if (!fs.existsSync(legacy) || !fs.statSync(legacy).isDirectory()) return null;
+
+  const hasMarker = ERD_DIR_MARKERS.some((m) => fs.existsSync(path.join(legacy, m)));
+  if (hasMarker) return legacy;
+
+  const hasLayerWithDomains = fs.readdirSync(legacy).some((entry) => {
+    const sub = path.join(legacy, entry);
+    return (
+      fs.statSync(sub).isDirectory() &&
+      fs.readdirSync(sub).some((f) => f.endsWith('.json'))
+    );
+  });
+  return hasLayerWithDomains ? legacy : null;
+}
+
+/**
+ * Rename a legacy erd-studio/ directory to .erd-studio/ in place.
+ * Returns true when a rename happened.
+ */
+export function migrateLegacySemanticDir(
+  workspaceRoot: string,
+  semanticDir: string,
+): boolean {
+  const legacy = findLegacySemanticDir(workspaceRoot, semanticDir);
+  if (!legacy) return false;
+  fs.renameSync(legacy, path.join(workspaceRoot, semanticDir));
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
