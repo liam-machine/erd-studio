@@ -1,6 +1,6 @@
 /**
  * LegacyTagCleanupService — one-shot walker that strips `domain:*` tags from
- * every dbt model YAML in the workspace.
+ * every dbt model YAML under the project's `model-paths`.
  *
  * Background: ERD Studio previously wrote `tags: [domain:foo]` into each
  * member model's schema.yml. That mechanism has been replaced by a single
@@ -13,9 +13,19 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Document, parseDocument, isSeq, isMap, YAMLMap, YAMLSeq } from 'yaml';
+import { Document, parseDocument, isSeq, isMap, isScalar, YAMLMap, YAMLSeq } from 'yaml';
 
 const DOMAIN_TAG_PREFIX = 'domain:';
+
+/** dbt's default when `model-paths` is not set in dbt_project.yml. */
+const DEFAULT_MODEL_PATHS = ['models'];
+
+/**
+ * Stringify options for rewritten files. `lineWidth: 0` disables folding so
+ * long descriptions are not re-wrapped at 80 columns — the diff should show
+ * only the tags that were removed (matches SelectorsService).
+ */
+const STRINGIFY_OPTIONS = { lineWidth: 0 } as const;
 
 const EXCLUDED_DIRS = new Set([
   'node_modules', 'target', '.git',
@@ -45,7 +55,9 @@ export class LegacyTagCleanupService {
     };
 
     const yamlFiles: string[] = [];
-    this.walk(this.workspaceRoot, yamlFiles);
+    for (const modelPath of this.resolveModelPaths()) {
+      this.walk(modelPath, yamlFiles);
+    }
 
     for (const filePath of yamlFiles) {
       result.filesScanned++;
@@ -66,6 +78,12 @@ export class LegacyTagCleanupService {
         result.errors.push(`Parse failed: ${filePath}: ${this.msg(err)}`);
         continue;
       }
+      // parseDocument reports syntax errors on the document rather than
+      // throwing; never re-serialise a partial AST over a malformed file.
+      if (doc.errors.length > 0) {
+        result.errors.push(`Parse failed: ${filePath}: ${doc.errors[0].message}`);
+        continue;
+      }
 
       const modelsNode = doc.get('models');
       if (!isSeq(modelsNode)) { continue; }
@@ -79,7 +97,7 @@ export class LegacyTagCleanupService {
 
       if (fileTagsRemoved > 0) {
         try {
-          fs.writeFileSync(filePath, doc.toString(), 'utf-8');
+          fs.writeFileSync(filePath, doc.toString(STRINGIFY_OPTIONS), 'utf-8');
           result.filesModified++;
           result.tagsRemoved += fileTagsRemoved;
           result.modifiedPaths.push(filePath);
@@ -140,6 +158,51 @@ export class LegacyTagCleanupService {
       }
     }
     return removed;
+  }
+
+  /**
+   * Resolve the absolute directories to scan from `model-paths` in
+   * dbt_project.yml (falling back to the pre-1.0 `source-paths` key, then
+   * dbt's default `models/`). Only the model tree is touched so YAML
+   * elsewhere in the workspace (seeds, CI configs, packages) is never rewritten.
+   */
+  private resolveModelPaths(): string[] {
+    let configured: string[] | null = null;
+    try {
+      const raw = fs.readFileSync(path.join(this.workspaceRoot, 'dbt_project.yml'), 'utf-8');
+      const doc = parseDocument(raw);
+      if (doc.errors.length === 0) {
+        configured = this.readPathList(doc.get('model-paths', true))
+          ?? this.readPathList(doc.get('source-paths', true));
+      }
+    } catch {
+      // Missing or unreadable dbt_project.yml — use dbt's default.
+    }
+    const relPaths = configured && configured.length > 0 ? configured : DEFAULT_MODEL_PATHS;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const rel of relPaths) {
+      const abs = path.resolve(this.workspaceRoot, rel);
+      if (seen.has(abs)) { continue; }
+      seen.add(abs);
+      out.push(abs);
+    }
+    return out;
+  }
+
+  /** Read a YAML sequence of strings (or a single string) into a string array. */
+  private readPathList(node: unknown): string[] | null {
+    if (isScalar(node)) {
+      return typeof node.value === 'string' && node.value.trim() !== '' ? [node.value] : null;
+    }
+    if (!isSeq(node)) { return null; }
+    const paths: string[] = [];
+    for (const item of node.items) {
+      if (isScalar(item) && typeof item.value === 'string' && item.value.trim() !== '') {
+        paths.push(item.value);
+      }
+    }
+    return paths.length > 0 ? paths : null;
   }
 
   private walk(dir: string, out: string[]): void {

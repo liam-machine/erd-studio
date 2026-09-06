@@ -731,7 +731,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // left behind by the old SchemaTagService. Safe to run repeatedly.
     vscode.commands.registerCommand('erdStudio.stripLegacyDomainTags', async () => {
       const confirm = await vscode.window.showWarningMessage(
-        'This will scan every .yml file in your workspace and remove any `domain:*` tag from `config.tags` or top-level `tags` on each dbt model. ' +
+        'This will scan every .yml file under your dbt model-paths (default `models/`) and remove any `domain:*` tag from `config.tags` or top-level `tags` on each dbt model. ' +
           'Review and commit the changes as a single PR. Continue?',
         { modal: true },
         'Strip Tags',
