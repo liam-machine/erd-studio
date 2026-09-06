@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { TreeItemCollapsibleState } from 'vscode';
 import { DomainTreeProvider, type TreeElement } from '../../src/providers/DomainTreeProvider';
 import type { DomainService } from '../../src/services/domainService';
@@ -337,6 +340,89 @@ describe('DomainTreeProvider', () => {
 
       provider.refresh();
       expect(fired).toBe(true);
+    });
+  });
+
+  describe('domain summary cache (H11)', () => {
+    let tempDir: string;
+    let domainPath: string;
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-tree-'));
+      fs.mkdirSync(path.join(tempDir, '.erd-studio', 'silver'), { recursive: true });
+      domainPath = path.join(tempDir, '.erd-studio', 'silver', 'orders.json');
+      fs.writeFileSync(domainPath, '{}');
+    });
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    function realFileProvider(models: unknown[]): { provider: DomainTreeProvider; getDomain: ReturnType<typeof vi.fn> } {
+      const summaries: DomainSummary[] = [{ domain: 'orders', layer: 'silver', filePath: domainPath }];
+      const domains = new Map<string, UnifiedDomain>();
+      domains.set(domainPath, makeUnifiedDomain({
+        domain: 'orders',
+        logical: { models: models as any, relationships: [] },
+      }));
+      const svc = createMockDomainService(summaries, domains);
+      return {
+        provider: new DomainTreeProvider(svc, layerService, tempDir),
+        getDomain: svc.getDomain as unknown as ReturnType<typeof vi.fn>,
+      };
+    }
+
+    it('parses each domain file once while it is unchanged on disk', () => {
+      const { provider: p, getDomain } = realFileProvider([{ name: 'a' }, { name: 'b' }]);
+
+      const first = p.getChildren({ type: 'layer', layer: 'silver' })!;
+      p.refresh();
+      const second = p.getChildren({ type: 'layer', layer: 'silver' })!;
+      p.getChildren({ type: 'layer', layer: 'silver' });
+
+      expect(getDomain).toHaveBeenCalledTimes(1);
+      expect((first[0] as any).modelCount).toBe(2);
+      expect((second[0] as any).modelCount).toBe(2);
+    });
+
+    it('re-parses when the file changes on disk (mtime/size)', () => {
+      const { provider: p, getDomain } = realFileProvider([{ name: 'a' }]);
+      p.getChildren({ type: 'layer', layer: 'silver' });
+      expect(getDomain).toHaveBeenCalledTimes(1);
+
+      fs.writeFileSync(domainPath, '{"changed": true}');
+      const t = new Date(Date.now() + 5000);
+      fs.utimesSync(domainPath, t, t);
+
+      p.getChildren({ type: 'layer', layer: 'silver' });
+      expect(getDomain).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-parses after invalidateDomain(filePath)', () => {
+      const { provider: p, getDomain } = realFileProvider([{ name: 'a' }]);
+      p.getChildren({ type: 'layer', layer: 'silver' });
+      p.invalidateDomain(domainPath);
+      p.getChildren({ type: 'layer', layer: 'silver' });
+      expect(getDomain).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-parses everything after invalidateDomain() with no argument', () => {
+      const { provider: p, getDomain } = realFileProvider([{ name: 'a' }]);
+      p.getChildren({ type: 'layer', layer: 'silver' });
+      p.invalidateDomain();
+      p.getChildren({ type: 'layer', layer: 'silver' });
+      expect(getDomain).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not cache a failed parse', () => {
+      const summaries: DomainSummary[] = [{ domain: 'orders', layer: 'silver', filePath: domainPath }];
+      const svc = createMockDomainService(summaries, new Map()); // getDomain throws
+      const p = new DomainTreeProvider(svc, layerService, tempDir);
+
+      p.getChildren({ type: 'layer', layer: 'silver' });
+      p.getChildren({ type: 'layer', layer: 'silver' });
+
+      expect(svc.getDomain).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -15,6 +15,16 @@ import * as yaml from 'js-yaml';
 import type { ColumnDef, SemanticModel } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
+import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
+
+/** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
+export const LOGICAL_MODELS_DIR = 'logical-models';
+
+/** Parsed model cached against the file's mtime + size. */
+interface CachedModel {
+  readonly signature: string;
+  readonly model: SemanticModel;
+}
 
 // ---------------------------------------------------------------------------
 // YAML schema for model files
@@ -52,8 +62,61 @@ interface YamlColumn {
 export class LogicalModelService {
   private readonly modelsDir: string;
 
-  constructor(workspaceRoot: string, semanticDir = '.erd-studio') {
-    this.modelsDir = path.join(workspaceRoot, semanticDir, 'logical-models');
+  /**
+   * In-memory parse cache keyed by file path. Each entry is validated against
+   * the file's current mtime + size on read, so an external edit (or a change
+   * missed by the watcher) is never served stale; invalidateCache() drops
+   * entries eagerly when the logical-model watcher fires.
+   */
+  private readonly cache = new Map<string, CachedModel>();
+
+  constructor(
+    workspaceRoot: string,
+    semanticDir = '.erd-studio',
+    private readonly ownWriteTracker: OwnWriteTracker = ownWrites,
+  ) {
+    this.modelsDir = path.join(workspaceRoot, semanticDir, LOGICAL_MODELS_DIR);
+  }
+
+  /**
+   * Drop cached parses. Pass a model name to drop a single entry, or nothing
+   * to clear everything (e.g. after a bulk change on disk).
+   */
+  invalidateCache(name?: string): void {
+    if (name === undefined) {
+      this.cache.clear();
+    } else {
+      this.cache.delete(this.modelPath(name));
+    }
+  }
+
+  /**
+   * Read + parse a YAML model file, serving from the cache when the file on
+   * disk is unchanged. Returns a fresh deep copy so callers may mutate freely.
+   * Returns null when the file is missing; throws on read/parse failure.
+   */
+  private readModelFile(filePath: string): SemanticModel | null {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      this.cache.delete(filePath);
+      return null;
+    }
+    const signature = `${stat.mtimeMs}:${stat.size}`;
+    const cached = this.cache.get(filePath);
+    if (cached && cached.signature === signature) {
+      return structuredClone(cached.model);
+    }
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const raw = yaml.load(content) as YamlModel;
+    if (!raw || !raw.name) {
+      this.cache.delete(filePath);
+      return null;
+    }
+    const model = this.yamlToModel(raw);
+    this.cache.set(filePath, { signature, model: structuredClone(model) });
+    return model;
   }
 
   // -------------------------------------------------------------------------
@@ -96,13 +159,8 @@ export class LogicalModelService {
    */
   getModel(name: string): SemanticModel | null {
     const filePath = this.modelPath(name);
-    if (!fs.existsSync(filePath)) {
-      return null;
-    }
     try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const raw = yaml.load(content) as YamlModel;
-      return this.yamlToModel(raw);
+      return this.readModelFile(filePath);
     } catch (err) {
       console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
       return null;
@@ -121,10 +179,9 @@ export class LogicalModelService {
     const models: SemanticModel[] = [];
     for (const file of files) {
       try {
-        const content = fs.readFileSync(path.join(this.modelsDir, file), 'utf-8');
-        const raw = yaml.load(content) as YamlModel;
-        if (raw && raw.name) {
-          models.push(this.yamlToModel(raw));
+        const model = this.readModelFile(path.join(this.modelsDir, file));
+        if (model) {
+          models.push(model);
         }
       } catch {
         // Skip invalid files
@@ -159,6 +216,10 @@ export class LogicalModelService {
     const filePath = this.modelPath(model.name);
     const yamlContent = this.modelToYaml(model);
     fs.writeFileSync(filePath, yamlContent, 'utf-8');
+    // Record so the logical-model watcher does not bounce this save back as
+    // an external change (which would trigger a second identical domainLoaded).
+    this.ownWriteTracker.recordWrite(filePath);
+    this.cache.delete(filePath);
   }
 
   /**
@@ -168,7 +229,9 @@ export class LogicalModelService {
     const filePath = this.modelPath(name);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
+      this.ownWriteTracker.recordDelete(filePath);
     }
+    this.cache.delete(filePath);
   }
 
   /**
