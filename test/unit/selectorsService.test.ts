@@ -446,6 +446,54 @@ describe('SelectorsService', () => {
 
   // Edge cases ----------------------------------------------------------------
 
+  it('does NOT create selectors.yml in a project with no domains (noop)', () => {
+    const svc = new SelectorsService(fakeDomainService([]), tmpDir, '.erd-studio');
+    const onWritten = vi.fn();
+    const onSkipped = vi.fn();
+    const svcWithHooks = new SelectorsService(fakeDomainService([]), tmpDir, '.erd-studio', { onWritten, onSkipped });
+
+    expect(svc.regenerate().status).toBe('noop');
+    expect(svcWithHooks.regenerate().status).toBe('noop');
+    expect(fs.existsSync(path.join(tmpDir, 'selectors.yml'))).toBe(false);
+    expect(onWritten).not.toHaveBeenCalled();
+    expect(onSkipped).not.toHaveBeenCalled();
+  });
+
+  it('does NOT create selectors.yml when every domain is empty', () => {
+    const svc = new SelectorsService(
+      fakeDomainService([{ domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: [] }]),
+      tmpDir,
+      '.erd-studio',
+    );
+    expect(svc.regenerate().status).toBe('noop');
+    expect(fs.existsSync(path.join(tmpDir, 'selectors.yml'))).toBe(false);
+  });
+
+  it('still rewrites an existing selectors.yml when no domains remain (drops stale domain_* entries)', () => {
+    writeSelectors(
+      tmpDir,
+      [
+        'selectors:',
+        '  - name: domain_silver_old',
+        '    definition:',
+        '      union:',
+        '        - method: fqn',
+        '          value: gone',
+        '  - name: nightly',
+        '    definition:',
+        '      union:',
+        '        - method: tag',
+        '          value: nightly',
+        '',
+      ].join('\n'),
+    );
+    const svc = new SelectorsService(fakeDomainService([]), tmpDir, '.erd-studio');
+    const result = svc.regenerate();
+    expect(result.status).toBe('written');
+    const parsed = readSelectors(tmpDir);
+    expect(parsed.selectors.map((s) => s.name)).toEqual(['nightly']);
+  });
+
   it('writes a fresh file when no selectors.yml exists yet', () => {
     const svc = new SelectorsService(
       fakeDomainService([

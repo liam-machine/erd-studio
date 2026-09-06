@@ -48,6 +48,11 @@ describe('recoveryService', () => {
   });
 
   describe('saveAllAndReload', () => {
+    it('returns true when the reload was requested', async () => {
+      vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+      await expect(saveAllAndReload('test reason')).resolves.toBe(true);
+    });
+
     it('runs saveAll then reloadWindow when nothing is dirty after save', async () => {
       const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
 
@@ -95,8 +100,9 @@ describe('recoveryService', () => {
       const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
       vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Cancel' as never);
 
-      await saveAllAndReload('test reason');
+      const reloaded = await saveAllAndReload('test reason');
 
+      expect(reloaded).toBe(false);
       expect(exec).toHaveBeenCalledWith('workbench.action.files.saveAll');
       expect(exec).not.toHaveBeenCalledWith('workbench.action.reloadWindow');
     });

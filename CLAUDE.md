@@ -148,9 +148,11 @@ AI coding harness files (installed via `erdStudio.installCodingHarness`) embed a
 |--------|---------|
 | `HARNESS_VERSION` | Current version string — bump when `SCHEMA_CONTENT` or generators change |
 | `extractHarnessVersion(content)` | Parses version from file content, returns `null` if no marker |
-| `detectStale(workspaceRoot)` | Returns installed `HarnessTarget[]` whose embedded version ≠ `HARNESS_VERSION` |
+| `detectStale(workspaceRoot)` | Returns installed `HarnessTarget[]` whose embedded version ≠ `HARNESS_VERSION`. Files with **no** marker are unmanaged (hand-written) and are never reported |
+| `CODEX_REGION_BEGIN` / `CODEX_REGION_END` | `<!-- BEGIN/END erd-studio-harness -->` markers wrapping the ERD section in `AGENTS.md`; updates replace only this region |
+| `findCodexRegion(content)` / `mergeCodexContent(existing, generated)` | Locate / splice the managed `AGENTS.md` region (falls back to heading…version-marker for pre-v16 installs, appends when absent) |
 
-**Activation flow** (`src/extension.ts`): on startup, `detectStale()` runs. If stale targets are found, a warning notification offers "Update All" (overwrites immediately), "Choose…" (opens QuickPick with outdated targets pre-selected), or "Dismiss".
+**Activation flow** (`src/extension.ts`): on startup, `detectStale()` runs. If stale targets are found, a warning notification offers "Update All" (updates immediately), "Choose…" (opens QuickPick with outdated targets pre-selected), or "Dismiss". Nothing is ever overwritten silently, and `AGENTS.md` content outside the BEGIN/END region is always preserved. When no harness files exist at all, the install QuickPick is offered once per workspace (tracked in `workspaceState`).
 
 **When to bump `HARNESS_VERSION`:** any change to `SCHEMA_CONTENT`, the generator functions, or naming conventions that would make previously installed harness files incorrect. Do **not** bump for unrelated extension changes — the version is independent of `package.json` version.
 
