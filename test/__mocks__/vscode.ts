@@ -14,6 +14,8 @@ export const workspace = {
     dispose: () => {},
   }),
   onDidChangeTextDocument: () => ({ dispose: () => {} }),
+  /** Accepts any WorkspaceEdit; tests can spy on this to capture the edit. */
+  applyEdit: async (_edit: unknown) => true,
   fs: {
     readFile: async () => Buffer.from('{}'),
     writeFile: async () => {},
@@ -249,6 +251,23 @@ export function createMockTextDocument(fsPath: string, text = '{}') {
     getText: () => text,
     lineCount: text.split('\n').length,
   };
+}
+
+/** Minimal text-edit primitives so mutation handlers can build a WorkspaceEdit. */
+export class Position {
+  constructor(public readonly line: number, public readonly character: number) {}
+}
+
+export class Range {
+  constructor(public readonly start: Position, public readonly end: Position) {}
+}
+
+/** Records replace() calls so tests can inspect the text a handler intends to write. */
+export class WorkspaceEdit {
+  readonly _replacements: Array<{ uri: unknown; range: Range; newText: string }> = [];
+  replace(uri: unknown, range: Range, newText: string): void {
+    this._replacements.push({ uri, range, newText });
+  }
 }
 
 export class CancellationTokenSource {

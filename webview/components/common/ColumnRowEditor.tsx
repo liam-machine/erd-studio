@@ -14,6 +14,7 @@ import { DataTypeSelect } from './DataTypeSelect';
 import { KeyBadgeGroup } from './KeyBadgeGroup';
 import { useFocusWithinRow } from '../../hooks/useFocusWithinRow';
 import type { ColumnDef, ModelRole } from '../../../src/types/semantic';
+import type { UpdateColumnPayloadColumn } from '../../../src/types/messages';
 import './ColumnRowEditor.css';
 
 // ---------------------------------------------------------------------------
@@ -40,8 +41,12 @@ export interface ColumnRowEditorProps {
   mode: 'readonly' | 'editable' | 'new';
   /** Existing column names for duplicate validation. */
   existingColumnNames?: string[];
-  /** Callback when column is updated (saved). */
-  onUpdate?: (updated: ColumnDef) => void;
+  /**
+   * Callback when column is updated (saved).
+   * `scdType` / `additiveType` are `null` when explicitly cleared and omitted
+   * when unchanged (the host keeps the existing value for omitted fields).
+   */
+  onUpdate?: (updated: UpdateColumnPayloadColumn) => void;
   /** Callback when delete button is clicked. */
   onDelete?: () => void;
   /** Callback when new row is cancelled (Escape key). */
@@ -418,7 +423,8 @@ export function ColumnRowEditor({
           isPrimaryKey: localColumn.isPrimaryKey,
           isForeignKey: localColumn.isForeignKey,
           isNaturalKey: localColumn.isNaturalKey,
-          ...(value != null ? { scdType: value } : {}),
+          // Explicit null clears; the host would otherwise keep the existing value.
+          scdType: value ?? null,
           ...(localColumn.additiveType ? { additiveType: localColumn.additiveType } : {}),
         });
       }
@@ -443,7 +449,8 @@ export function ColumnRowEditor({
           isForeignKey: localColumn.isForeignKey,
           isNaturalKey: localColumn.isNaturalKey,
           ...(localColumn.scdType != null ? { scdType: localColumn.scdType } : {}),
-          ...(value ? { additiveType: value } : {}),
+          // Explicit null clears; the host would otherwise keep the existing value.
+          additiveType: value ?? null,
         });
       }
     },
