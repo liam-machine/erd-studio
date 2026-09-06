@@ -18,7 +18,7 @@ import * as path from 'path';
 import { LogicalModelService } from './logicalModelService';
 import { LayerService } from './layerService';
 import type { SemanticModel, Relationship, ViewConfig } from '../types/semantic';
-import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
+import { CURRENT_SCHEMA_VERSION, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +35,26 @@ interface V4DomainFile {
     relationships: Relationship[];
   };
   viewConfig?: ViewConfig;
+}
+
+/**
+ * Inline SemanticModel objects from a raw domain document, whether they live
+ * under `logical.models` (v4 / hybrid) or a legacy top-level `models` array.
+ * String entries (v5 name references) are ignored.
+ */
+function inlineModelsOf(raw: unknown): SemanticModel[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const obj = raw as Record<string, unknown>;
+  const logicalModels = (obj.logical as Record<string, unknown> | undefined)?.models;
+  const source: unknown[] = Array.isArray(logicalModels)
+    ? logicalModels
+    : Array.isArray(obj.models)
+      ? obj.models
+      : [];
+  return source.filter(
+    (m): m is SemanticModel =>
+      !!m && typeof m === 'object' && !Array.isArray(m) && typeof (m as SemanticModel).name === 'string',
+  );
 }
 
 export interface MigrationResult {
@@ -120,7 +140,12 @@ export class MigrationService {
   // -------------------------------------------------------------------------
 
   /**
-   * Scan all domain files and return paths of those with schemaVersion < 5.
+   * Scan all domain files and return paths of those that need migrating to v5:
+   * - `v4` files with inline model objects
+   * - `hybrid` files (schemaVersion 5 with inline objects, or mixed entries)
+   * - `legacy` pre-v4 files (schemaVersion < 4 or top-level `models`)
+   *
+   * Uses the shared {@link detectDomainFormat} so this agrees with DomainService.
    */
   findV4Domains(): string[] {
     const semanticDir = path.join(this.workspaceRoot, '.erd-studio');
@@ -140,11 +165,14 @@ export class MigrationService {
         const filePath = path.join(layerDir, file);
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
-          const parsed = JSON.parse(content);
-          if (parsed.schemaVersion && parsed.schemaVersion < CURRENT_SCHEMA_VERSION) {
-            // Verify it has inline models (array of objects, not strings)
-            const models = parsed.logical?.models ?? [];
-            if (models.length > 0 && typeof models[0] === 'object') {
+          const parsed = JSON.parse(content) as unknown;
+          const format = detectDomainFormat(parsed);
+          if (format === 'hybrid' || format === 'legacy') {
+            v4Paths.push(filePath);
+          } else if (format === 'v4') {
+            // Only v4 files that actually carry inline models need converting
+            const models = (parsed as V4DomainFile).logical?.models ?? [];
+            if (models.length > 0) {
               v4Paths.push(filePath);
             }
           }
@@ -201,10 +229,11 @@ export class MigrationService {
     for (const filePath of v4Paths) {
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
-        const parsed = JSON.parse(content) as V4DomainFile;
-        const models = parsed.logical?.models ?? [];
+        const parsed = JSON.parse(content) as unknown;
 
-        for (const model of models) {
+        // Inline objects only — string entries (hybrid files) already live in
+        // logical-models/ and must not be overwritten with a placeholder.
+        for (const model of inlineModelsOf(parsed)) {
           if (!model.name) continue;
 
           const existing = allModels.get(model.name);
@@ -239,16 +268,32 @@ export class MigrationService {
     for (const filePath of v4Paths) {
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
-        const parsed = JSON.parse(content);
+        const parsed = JSON.parse(content) as Record<string, unknown>;
 
-        // Convert models from objects to name strings
-        const models = parsed.logical?.models ?? [];
-        const modelNames = models
-          .filter((m: SemanticModel) => m.name)
-          .map((m: SemanticModel) => m.name);
+        // Convert models (inline objects and/or existing name strings) to a
+        // de-duplicated list of name references. Handles legacy top-level
+        // `models` as well as `logical.models`.
+        const modelNames = Array.from(new Set(getRawDomainModelNames(parsed)));
+
+        // Legacy (pre-v4) layout: lift top-level models/relationships into
+        // a `logical` section and drop the obsolete `stage` field.
+        const logical: Record<string, unknown> =
+          parsed.logical && typeof parsed.logical === 'object' && !Array.isArray(parsed.logical)
+            ? (parsed.logical as Record<string, unknown>)
+            : {};
+        if (!Array.isArray(logical.relationships)) {
+          logical.relationships = Array.isArray(parsed.relationships) ? parsed.relationships : [];
+        }
+        delete parsed.models;
+        delete parsed.relationships;
+        delete parsed.stage;
 
         parsed.schemaVersion = CURRENT_SCHEMA_VERSION;
-        parsed.logical.models = modelNames;
+        logical.models = modelNames;
+        parsed.logical = logical;
+        if (!parsed.viewConfig || typeof parsed.viewConfig !== 'object') {
+          parsed.viewConfig = {};
+        }
 
         const updatedContent = JSON.stringify(parsed, null, 2) + '\n';
         fs.writeFileSync(filePath, updatedContent, 'utf-8');

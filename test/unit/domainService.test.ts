@@ -1,6 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { DomainService, derivePhysicalRelationships, relationshipReferencesColumn } from '../../src/services/domainService';
+import { DomainService, derivePhysicalRelationships, relationshipReferencesColumn, renameDomainInRaw } from '../../src/services/domainService';
+import { LogicalModelService } from '../../src/services/logicalModelService';
 import type { LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
 import type { ManifestData, ManifestRelationshipTest } from '../../src/types/manifest';
@@ -560,6 +563,228 @@ describe('DomainService', () => {
 
     it('handles relationships with missing endpoint fields without throwing', () => {
       expect(relationshipReferencesColumn({}, 'fct_orders', 'customer_id')).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Domain format handling (H01 / H26 / H40)
+// ---------------------------------------------------------------------------
+
+describe('DomainService format handling', () => {
+  let tmpRoot: string;
+  let service: DomainService;
+
+  /** Write a domain JSON into a temp .erd-studio/silver/ dir and return its path. */
+  function writeDomain(name: string, body: unknown): string {
+    const dir = path.join(tmpRoot, '.erd-studio', 'silver');
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${name}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(body, null, 2));
+    return filePath;
+  }
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-domain-format-'));
+    service = new DomainService(createMockLayerService());
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  describe('legacy (pre-v4) documents', () => {
+    it('throws a clear error naming the migration command instead of loading an empty domain', () => {
+      const filePath = writeDomain('legacy', {
+        schemaVersion: 2,
+        domain: 'legacy',
+        layer: 'silver',
+        stage: 'logical',
+        models: [{ name: 'dim_x', columns: [] }],
+        relationships: [],
+        viewConfig: {},
+      });
+      expect(() => service.getDomain(filePath)).toThrow(/no longer supported/);
+      expect(() => service.getDomain(filePath)).toThrow(/Migrate to v5/);
+    });
+
+    it('rejects a top-level models array even at schemaVersion 5', () => {
+      const filePath = writeDomain('toplevel', {
+        schemaVersion: 5,
+        domain: 'toplevel',
+        layer: 'silver',
+        models: [{ name: 'dim_x' }],
+        relationships: [],
+        viewConfig: {},
+      });
+      expect(() => service.getDomain(filePath)).toThrow(/no longer supported/);
+    });
+  });
+
+  describe('hybrid documents', () => {
+    it('rejects schemaVersion 5 with inline model objects', () => {
+      const filePath = writeDomain('inline5', {
+        schemaVersion: 5,
+        domain: 'inline5',
+        layer: 'silver',
+        logical: { models: [{ name: 'dim_x', columns: [] }], relationships: [] },
+        viewConfig: {},
+      });
+      expect(() => service.getDomain(filePath)).toThrow(/Migrate to v5/);
+    });
+
+    it('rejects mixed string/object model arrays instead of creating placeholder nodes', () => {
+      const filePath = writeDomain('mixed', {
+        schemaVersion: 5,
+        domain: 'mixed',
+        layer: 'silver',
+        logical: { models: ['dim_project', { name: 'inline_obj', columns: [] }], relationships: [] },
+        viewConfig: {},
+      });
+      expect(() => service.getDomain(filePath)).toThrow(/mixes inline model objects/);
+    });
+  });
+
+  describe('per-entry validation', () => {
+    it('skips inline v4 models that lack a string name', () => {
+      const filePath = writeDomain('v4bad', {
+        schemaVersion: 4,
+        domain: 'v4bad',
+        layer: 'silver',
+        logical: {
+          models: [{ name: 'dim_ok', columns: [] }, { columns: [] }, { name: 42 }],
+          relationships: [],
+        },
+        viewConfig: {},
+      });
+      const domain = service.getDomain(filePath);
+      expect(domain.logical.models.map((m) => m.name)).toEqual(['dim_ok']);
+    });
+
+    it('drops malformed relationship entries and defaults invalid cardinality', () => {
+      const filePath = writeDomain('rels', {
+        schemaVersion: 5,
+        domain: 'rels',
+        layer: 'silver',
+        logical: {
+          models: ['dim_a', 'fct_b'],
+          relationships: [
+            { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
+            { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'lots-to-few' },
+            { fromModel: 'dim_a' },
+            'garbage',
+            null,
+            42,
+          ],
+        },
+        viewConfig: {},
+      });
+      const domain = service.getDomain(filePath);
+      expect(domain.logical.relationships).toEqual([
+        { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
+        { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
+      ]);
+    });
+
+    it('keeps only viewConfig.positions entries with finite numeric x/y', () => {
+      const filePath = writeDomain('positions', {
+        schemaVersion: 5,
+        domain: 'positions',
+        layer: 'silver',
+        logical: { models: ['dim_a', 'dim_b', 'dim_c', 'dim_d'], relationships: [] },
+        viewConfig: {
+          positions: {
+            dim_a: { x: 100, y: 200 },
+            dim_b: { x: '100', y: null },
+            dim_c: 'str',
+            dim_d: { x: 1e400, y: 0 },
+            dim_e: null,
+          },
+        },
+      });
+      const domain = service.getDomain(filePath);
+      expect(domain.viewConfig.positions).toEqual({ dim_a: { x: 100, y: 200 } });
+    });
+  });
+
+  describe('renameDomainInRaw (H01)', () => {
+    it('rewrites only the domain slug, preserving v5 name references and unknown keys', () => {
+      const original = {
+        schemaVersion: 5,
+        domain: 'showcase',
+        layer: 'silver',
+        description: 'desc',
+        modelFolder: 'models/silver',
+        stubColumns: ['dim_project'],
+        someFutureKey: { nested: true },
+        logical: {
+          models: ['fct_task_event', 'dim_project'],
+          relationships: [
+            { fromModel: 'fct_task_event', fromColumn: 'project_id', toModel: 'dim_project', toColumn: 'project_id', cardinality: 'many-to-one' },
+          ],
+        },
+        viewConfig: { positions: { dim_project: { x: 1, y: 2 } }, unknownViewKey: 'kept' },
+      };
+
+      const renamed = JSON.parse(renameDomainInRaw(JSON.stringify(original), 'renamed'));
+      expect(renamed).toEqual({ ...original, domain: 'renamed' });
+      expect(renamed.logical.models.every((m: unknown) => typeof m === 'string')).toBe(true);
+    });
+
+    it('ends with a trailing newline and 2-space indentation', () => {
+      const out = renameDomainInRaw('{"schemaVersion":5,"domain":"a","layer":"silver","logical":{"models":[],"relationships":[]},"viewConfig":{}}', 'b');
+      expect(out.endsWith('}\n')).toBe(true);
+      expect(out).toContain('\n  "domain": "b"');
+    });
+
+    it('throws for non-object JSON', () => {
+      expect(() => renameDomainInRaw('[]', 'x')).toThrow('JSON object');
+      expect(() => renameDomainInRaw('null', 'x')).toThrow('JSON object');
+    });
+
+    it('end-to-end: a renamed v5 fixture still resolves models live from logical-models/', () => {
+      // Copy the fixture project so we can rename and mutate yml safely
+      fs.cpSync(path.join(FIXTURE_PROJECT_PATH, '.erd-studio'), path.join(tmpRoot, '.erd-studio'), { recursive: true });
+      const lms = new LogicalModelService(tmpRoot);
+      service.setLogicalModelService(lms);
+
+      const oldPath = path.join(tmpRoot, '.erd-studio', 'silver', 'showcase.json');
+      const newPath = path.join(tmpRoot, '.erd-studio', 'silver', 'renamed.json');
+      fs.writeFileSync(newPath, renameDomainInRaw(fs.readFileSync(oldPath, 'utf-8'), 'renamed'));
+
+      // The renamed file is still a clean v5 document
+      const rawRenamed = JSON.parse(fs.readFileSync(newPath, 'utf-8'));
+      expect(rawRenamed.domain).toBe('renamed');
+      expect(rawRenamed.schemaVersion).toBe(5);
+      expect(typeof rawRenamed.logical.models[0]).toBe('string');
+
+      // A yml edit made after the rename is visible through the renamed domain
+      const before = service.getDomain(newPath);
+      const target = before.logical.models.find((m) => m.name === 'fct_task_event')!;
+      expect(target.columns!.some((c) => c.name === 'zzz_new_col')).toBe(false);
+
+      const model = lms.getModel('fct_task_event')!;
+      model.columns = [...(model.columns ?? []), { name: 'zzz_new_col', dataType: 'INT', description: '' }];
+      lms.saveModel(model);
+
+      const after = service.getDomain(newPath);
+      const updated = after.logical.models.find((m) => m.name === 'fct_task_event')!;
+      expect(updated.columns!.some((c) => c.name === 'zzz_new_col')).toBe(true);
+    });
+
+    it('regression: re-serialising the resolved UnifiedDomain produces a hybrid file that is now rejected', () => {
+      fs.cpSync(path.join(FIXTURE_PROJECT_PATH, '.erd-studio'), path.join(tmpRoot, '.erd-studio'), { recursive: true });
+      service.setLogicalModelService(new LogicalModelService(tmpRoot));
+
+      const oldPath = path.join(tmpRoot, '.erd-studio', 'silver', 'showcase.json');
+      const resolved = service.getDomain(oldPath);
+      resolved.domain = 'broken';
+      const brokenPath = path.join(tmpRoot, '.erd-studio', 'silver', 'broken.json');
+      fs.writeFileSync(brokenPath, JSON.stringify(resolved, null, 2));
+
+      expect(() => service.getDomain(brokenPath)).toThrow(/Migrate to v5/);
     });
   });
 });
