@@ -15,14 +15,20 @@ import type {
   ColumnDiscrepancy,
   RelationshipDiscrepancy,
 } from '../types/discrepancy';
+import { normaliseName } from './nameUtils';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Composite key for matching relationships across stages. */
+/**
+ * Composite key for matching relationships across stages.
+ * Model and column names are matched case-insensitively (dbt identifiers are
+ * case-insensitive on most warehouses); raw names are preserved on the
+ * resulting discrepancy entries for display.
+ */
 function relationshipKey(r: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }): string {
-  return `${r.fromModel}|${r.fromColumn}|${r.toModel}|${r.toColumn}`;
+  return [r.fromModel, r.fromColumn, r.toModel, r.toColumn].map(normaliseName).join('|');
 }
 
 /**
@@ -109,13 +115,15 @@ function compareColumns(
   targetModel: DisplayModel,
   stubColumns: boolean,
 ): ColumnDiscrepancy[] {
-  const targetColumnMap = new Map(targetModel.columns.map((c) => [c.name, c]));
+  // Keyed by normalised name so `CUSTOMER_ID` (yml) matches `customer_id` (logical).
+  const targetColumnMap = new Map(targetModel.columns.map((c) => [normaliseName(c.name), c]));
   const visited = new Set<string>();
   const result: ColumnDiscrepancy[] = [];
 
   for (const col of sourceModel.columns) {
-    const targetCol = targetColumnMap.get(col.name);
-    visited.add(col.name);
+    const key = normaliseName(col.name);
+    const targetCol = targetColumnMap.get(key);
+    visited.add(key);
 
     if (!targetCol) {
       result.push({ name: col.name, status: 'extra', sourceDataType: col.dataType });
@@ -134,7 +142,7 @@ function compareColumns(
   // Columns in target but not source — suppressed for stub models
   if (!stubColumns) {
     for (const col of targetModel.columns) {
-      if (!visited.has(col.name)) {
+      if (!visited.has(normaliseName(col.name))) {
         result.push({ name: col.name, status: 'missing', targetDataType: col.dataType });
       }
     }
@@ -223,7 +231,9 @@ export function compare(
   target: DisplayDomain,
   stubColumnModels: ReadonlySet<string> = new Set(),
 ): DiscrepancyReport {
-  const targetModelMap = new Map(target.models.map((m) => [m.name, m]));
+  // Model matching is case-insensitive; report entries keep the raw names.
+  const targetModelMap = new Map(target.models.map((m) => [normaliseName(m.name), m]));
+  const stubModelKeys = new Set(Array.from(stubColumnModels, normaliseName));
   const visitedModels = new Set<string>();
   const models: ModelDiscrepancy[] = [];
 
@@ -235,8 +245,9 @@ export function compare(
 
   // Compare source models against target
   for (const model of source.models) {
-    const targetModel = targetModelMap.get(model.name);
-    visitedModels.add(model.name);
+    const modelKey = normaliseName(model.name);
+    const targetModel = targetModelMap.get(modelKey);
+    visitedModels.add(modelKey);
 
     if (!targetModel) {
       const extraCols: ColumnDiscrepancy[] = model.columns.map((c) => ({
@@ -248,7 +259,7 @@ export function compare(
       totalColumns += model.columns.length;
       extraColumns += model.columns.length;
     } else {
-      const isStub = stubColumnModels.has(model.name);
+      const isStub = stubModelKeys.has(modelKey);
       const columns = compareColumns(model, targetModel, isStub);
       models.push({ name: model.name, status: 'matched', columns });
 
@@ -266,7 +277,7 @@ export function compare(
 
   // Models in target but not source
   for (const model of target.models) {
-    if (!visitedModels.has(model.name)) {
+    if (!visitedModels.has(normaliseName(model.name))) {
       const missingCols: ColumnDiscrepancy[] = model.columns.map((c) => ({
         name: c.name,
         status: 'missing' as const,
@@ -288,7 +299,7 @@ export function compare(
     models,
     relationships,
     summary: {
-      totalModels: source.models.length + target.models.filter((m) => !visitedModels.has(m.name)).length,
+      totalModels: source.models.length + target.models.filter((m) => !visitedModels.has(normaliseName(m.name))).length,
       matchedModels: models.filter((m) => m.status === 'matched').length,
       extraModels: models.filter((m) => m.status === 'extra').length,
       missingModels: models.filter((m) => m.status === 'missing').length,

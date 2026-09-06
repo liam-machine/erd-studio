@@ -20,6 +20,7 @@ import type {
   YmlModelInfo,
   YmlRelationshipTest,
 } from '../types/ymlData';
+import { parseRefModelName } from './nameUtils';
 
 /** Directories to skip during filesystem walk. */
 const EXCLUDED_DIRS = new Set([
@@ -28,11 +29,17 @@ const EXCLUDED_DIRS = new Set([
 ]);
 
 /**
- * Regex to extract a model name from a dbt ref() call.
- * Handles both single-arg `ref('model')` and two-arg `ref('project', 'model')`.
+ * Keys under which dbt accepts test declarations.
+ * `tests:` is the classic key; `data_tests:` is recommended since dbt 1.8.
  */
-const REF_SINGLE = /ref\(['"](\w+)['"]\s*\)/;
-const REF_TWO_ARG = /ref\(['"][^'"]+['"],\s*['"](\w+)['"]\s*\)/;
+const TEST_LIST_KEYS = ['tests', 'data_tests'] as const;
+
+/** Test names that declare a foreign-key style relationship. */
+const RELATIONSHIP_TEST_KEYS = [
+  'relationships',
+  'relationships_where',
+  'dbt_utils.relationships_where',
+] as const;
 
 export class YmlParserService {
   private cache: YmlData | null = null;
@@ -266,8 +273,13 @@ export class YmlParserService {
   }
 
   /**
-   * Extract tests from a column's `tests:` sequence.
-   * Handles both scalar tests (`- unique`) and object tests (`- relationships: {...}`).
+   * Extract tests from a column's `tests:` / `data_tests:` sequence.
+   *
+   * Handles:
+   * - scalar tests: `- unique`
+   * - map-form tests with config: `- unique: { config: { severity: warn } }`
+   * - object tests: `- relationships: { to: ..., field: ... }`
+   * - dbt 1.10 `arguments:` nesting: `- relationships: { arguments: { to, field } }`
    */
   private extractColumnTests(
     modelName: string,
@@ -276,55 +288,74 @@ export class YmlParserService {
     relationshipTests: YmlRelationshipTest[],
     uniqueColumns: Map<string, Set<string>>,
   ): void {
-    const testsNode = colNode.get('tests');
-    if (!isSeq(testsNode)) {
-      return;
-    }
+    for (const listKey of TEST_LIST_KEYS) {
+      const testsNode = colNode.get(listKey);
+      if (!isSeq(testsNode)) {
+        continue;
+      }
 
-    for (const testItem of (testsNode as YAMLSeq).items) {
-      // Scalar test: `- unique` or `- not_null`
-      const scalarValue = this.resolveScalar(testItem);
-      if (scalarValue === 'unique') {
-        let cols = uniqueColumns.get(modelName);
-        if (!cols) {
-          cols = new Set<string>();
-          uniqueColumns.set(modelName, cols);
+      for (const testItem of (testsNode as YAMLSeq).items) {
+        // Scalar test: `- unique` or `- not_null`
+        const scalarValue = this.resolveScalar(testItem);
+        if (scalarValue === 'unique') {
+          this.addUniqueColumn(modelName, columnName, uniqueColumns);
+          continue;
         }
-        cols.add(columnName);
-        continue;
-      }
 
-      // Object test: `- relationships: { to: ..., field: ... }`
-      if (!isMap(testItem)) {
-        continue;
-      }
-      const testMap = testItem as YAMLMap;
+        if (!isMap(testItem)) {
+          continue;
+        }
+        const testMap = testItem as YAMLMap;
 
-      // Check for relationship tests (relationships, relationships_where)
-      for (const key of ['relationships', 'relationships_where']) {
-        const relNode = testMap.get(key);
-        if (isMap(relNode)) {
-          const relTest = this.extractRelationshipTest(
-            modelName,
-            columnName,
-            relNode as YAMLMap,
-          );
-          if (relTest) {
-            relationshipTests.push(relTest);
+        // Map-form unique test carrying config: `- unique:` / `- unique: { config: ... }`
+        if (testMap.has('unique')) {
+          this.addUniqueColumn(modelName, columnName, uniqueColumns);
+        }
+
+        // Relationship tests (relationships, relationships_where, …)
+        for (const key of RELATIONSHIP_TEST_KEYS) {
+          const relNode = testMap.get(key);
+          if (isMap(relNode)) {
+            const relTest = this.extractRelationshipTest(
+              modelName,
+              columnName,
+              relNode as YAMLMap,
+            );
+            if (relTest) {
+              relationshipTests.push(relTest);
+            }
           }
         }
       }
     }
   }
 
+  private addUniqueColumn(
+    modelName: string,
+    columnName: string,
+    uniqueColumns: Map<string, Set<string>>,
+  ): void {
+    let cols = uniqueColumns.get(modelName);
+    if (!cols) {
+      cols = new Set<string>();
+      uniqueColumns.set(modelName, cols);
+    }
+    cols.add(columnName);
+  }
+
   /**
    * Extract a relationship test from its kwargs map.
    *
-   * Expected YAML structure:
+   * Expected YAML structure (kwargs at the top level, or nested under
+   * `arguments:` as dbt 1.10 recommends):
    * ```yaml
    * - relationships:
    *     to: ref('dim_project')
    *     field: project_id
+   * - relationships:
+   *     arguments:
+   *       to: ref('dim_project')
+   *       field: project_id
    * ```
    */
   private extractRelationshipTest(
@@ -332,17 +363,18 @@ export class YmlParserService {
     fromColumn: string,
     relNode: YAMLMap,
   ): YmlRelationshipTest | null {
-    const toRef = this.getString(relNode, 'to');
-    const toColumn = this.getString(relNode, 'field');
+    const argsNode = relNode.get('arguments');
+    const kwargs = isMap(argsNode) ? (argsNode as YAMLMap) : relNode;
+
+    const toRef = this.getString(kwargs, 'to') || this.getString(relNode, 'to');
+    const toColumn = this.getString(kwargs, 'field') || this.getString(relNode, 'field');
 
     if (!toRef || !toColumn) {
       return null;
     }
 
-    // Extract model name from ref('model') or ref('project', 'model')
-    const twoArgMatch = toRef.match(REF_TWO_ARG);
-    const singleMatch = toRef.match(REF_SINGLE);
-    const toModel = twoArgMatch?.[1] ?? singleMatch?.[1];
+    // Extract model name from ref('model'), ref('project', 'model') or ref('model', v=2)
+    const toModel = parseRefModelName(toRef);
 
     if (!toModel) {
       return null;
@@ -373,7 +405,7 @@ export class YmlParserService {
     compositeUniqueGroups: Map<string, string[][]>,
   ): void {
     // dbt supports both `tests:` and `data_tests:` at model level
-    for (const key of ['tests', 'data_tests']) {
+    for (const key of TEST_LIST_KEYS) {
       const testsNode = modelNode.get(key);
       if (!isSeq(testsNode)) {
         continue;
@@ -394,7 +426,11 @@ export class YmlParserService {
           if (!isMap(ucoNode)) {
             continue;
           }
-          const combo = (ucoNode as YAMLMap).get('combination_of_columns');
+          // dbt 1.10 nests test kwargs under `arguments:`
+          const ucoArgs = (ucoNode as YAMLMap).get('arguments');
+          const ucoKwargs = isMap(ucoArgs) ? (ucoArgs as YAMLMap) : (ucoNode as YAMLMap);
+          const combo = ucoKwargs.get('combination_of_columns')
+            ?? (ucoNode as YAMLMap).get('combination_of_columns');
           if (!isSeq(combo)) {
             continue;
           }
