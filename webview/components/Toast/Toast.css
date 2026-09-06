@@ -47,6 +47,14 @@
   border-left: 3px solid var(--focus-border);
 }
 
+.toast--error {
+  border-left: 3px solid var(--error-fg);
+}
+
+.toast--error .toast__message {
+  color: var(--error-fg);
+}
+
 .toast__message {
   flex: 1;
   line-height: 1.4;

@@ -5,6 +5,41 @@
  * Theme-token rules live in webview/styles/theme.css.
  */
 
+/* Full-screen error page — only shown when the initial domain load failed
+   (error with no domain to fall back on). Later host errors render as a toast
+   over the live canvas instead. */
+.editor-message--error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.editor-message__retry {
+  padding: 6px 14px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: none;
+  border-radius: 3px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.editor-message__retry:hover {
+  background: var(--button-hover-bg);
+}
+
+.editor-message__retry:focus {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
 /* Select mode — crosshair cursor on the empty canvas. Nodes keep their own
    grab cursor so hovering a table in select mode still shows a move cursor. */
 .editor-canvas--select-mode .react-flow__pane {
