@@ -4,6 +4,14 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+    # Docs-only / fixture-only / planning-only PRs do not produce a release.
+    # Every marketplace release triggers a save-all + window reload for users
+    # with a canvas open, so avoid publishing when nothing shipped changes.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'test/fixtures/**'
+      - '.planning/**'
 
 concurrency:
   group: deploy-main
@@ -21,6 +29,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -57,27 +66,51 @@ jobs:
             echo "approved=no" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Bump patch version
+      # The next version is max(package.json, latest marketplace version) + patch,
+      # so a desynced repo (lost bump commit, rewritten history) can never fail
+      # with "version already exists".
+      - name: Determine next version
         run: |
-          npm version patch --no-git-tag-version
-          NEW_VERSION=$(node -p "require('./package.json').version")
+          if ! npx @vscode/vsce show liamwynne.erd-studio --json > marketplace.json 2> vsce-show.err; then
+            echo "::warning::vsce show failed; falling back to package.json version"
+            cat vsce-show.err
+            echo '{}' > marketplace.json
+          fi
+          NEW_VERSION=$(node scripts/release.mjs next-version --marketplace-json marketplace.json)
+          npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
           echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
-          echo "Bumped to v${NEW_VERSION}"
+          echo "Releasing v${NEW_VERSION}"
 
-      - name: Production build
-        run: npm run package
-
-      - name: Publish to VS Code Marketplace
+      - name: Update CHANGELOG
         env:
-          AZURE_PAT: ${{ secrets.AZURE_PAT }}
-        run: |
-          npx @vscode/vsce package -o erd-studio.vsix
-          npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT"
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/release.mjs changelog --version "$NEW_VERSION"
 
+      # Commit and push the bump BEFORE publishing so a failed publish never
+      # leaves main behind the marketplace.
       - name: Commit version bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
+          git add package.json package-lock.json CHANGELOG.md
           git commit -m "chore: bump version to v${NEW_VERSION} [deploy]"
-          git push
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}); rebasing onto origin/main and retrying"
+            git pull --rebase origin main
+          done
+          echo "::error::Could not push version bump after 3 attempts"
+          exit 1
+
+      # `vsce package` runs the vscode:prepublish hook (npm run package), so no
+      # separate production build step is needed. esbuild bundles every runtime
+      # dependency into dist/, so vsce's npm dependency walk is skipped.
+      - name: Publish to VS Code Marketplace
+        env:
+          AZURE_PAT: ${{ secrets.AZURE_PAT }}
+        run: |
+          npx @vscode/vsce package --no-dependencies -o erd-studio.vsix
+          npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT"

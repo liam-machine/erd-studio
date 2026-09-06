@@ -14,27 +14,41 @@ tsconfig.json
 tsconfig.webview.json
 esbuild.js
 vitest.config.ts
+scripts/**
 
-# Documentation and planning (not needed at runtime)
+# Documentation and planning (not needed at runtime).
+# Root-level markdown is excluded wholesale; only the marketplace-facing
+# README / CHANGELOG (and LICENSE) are re-included below.
 docs/**
-plan.md
+.planning/**
+*.md
+!README.md
+!CHANGELOG.md
 features.json
-CLAUDE.md
 
-# Other projects accidentally in repo
-data engineer plugin/**
+# Sibling projects that live in this repo but are not part of the extension
 forge-app/**
+mcp-server/**
+data engineer plugin/**
+
+# Media only referenced from the external assets repo (README uses the
+# raw.githubusercontent.com copy of demo.gif)
+media/demo.gif
 
 # Dev/local files
 .claude/**
 .env*
 dev-preview.html
 .worktrees/**
+*.vsix
+.DS_Store
+**/.DS_Store
 
 # dbt files (for testing only)
 models/**
 target/**
 dbt_project.yml
+selectors.yml
 
 # Source maps and TypeScript (keep bundle small)
 **/*.map

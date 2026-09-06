@@ -18,7 +18,7 @@ After Batch C:
 - Store has `discrepancyReport` and `discrepancyVisible` state
 - `graphTransformer` accepts optional `DiscrepancyReport` parameter
 
-Read `plan.md` in the project root for full architectural context.
+Read `docs/archive/plan.md` for full architectural context.
 
 ---
 

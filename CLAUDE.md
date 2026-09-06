@@ -296,14 +296,20 @@ The old `liamwynne.dbt-semantic-designer` extension has been unpublished and rem
 
 ### Publish a New Version
 
-**IMPORTANT: Always bump `version` in `package.json` before publishing.** The marketplace rejects re-publishing an existing version number.
+Releases normally happen automatically: `.github/workflows/deploy.yml` runs when a PR is merged to `main` (docs-only, `test/fixtures/**` and `.planning/**` PRs are skipped via `paths-ignore`). It computes the next version as max(`package.json`, latest marketplace version) + patch via `scripts/release.mjs next-version`, stamps the `## Unreleased` section of `CHANGELOG.md` with that version, **commits and pushes the bump before publishing**, then runs `vsce package --no-dependencies` + `vsce publish`. Put user-facing release notes under `## Unreleased` in `CHANGELOG.md` as part of your PR.
 
-1. Bump `version` in `package.json`
-2. Package and publish (two-step is more reliable than single-step):
+Manual publishing (rare) must follow the same order so `main` never falls behind the marketplace:
+
+**IMPORTANT: Always bump `version` in `package.json` before publishing.** The marketplace rejects re-publishing an existing version number — check the latest published version first with `npx @vscode/vsce show liamwynne.erd-studio --json | jq -r '.versions[0].version'`.
+
+1. Bump `version` in `package.json` (`node scripts/release.mjs next-version --marketplace-json <(npx @vscode/vsce show liamwynne.erd-studio --json)` prints the right one) and update `CHANGELOG.md`
+2. Commit the version bump and push
+3. Package and publish (two-step is more reliable than single-step; `--no-dependencies` because esbuild bundles every runtime dependency into `dist/`):
    ```bash
-   source .env && npx @vscode/vsce package -o erd-studio.vsix && npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT" && rm erd-studio.vsix
+   source .env && npx @vscode/vsce package --no-dependencies -o erd-studio.vsix && npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT" && rm erd-studio.vsix
    ```
-3. Commit the version bump and push.
+
+`npx @vscode/vsce ls --no-dependencies` shows exactly what will ship; CI fails if it lists more than 60 files. `.vscodeignore` excludes everything except `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, `media/` icons and `dist/`.
 
 PAT is stored in `.env` as `AZURE_PAT`. The PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org.
 

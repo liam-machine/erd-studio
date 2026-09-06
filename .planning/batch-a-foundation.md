@@ -16,7 +16,7 @@ The extension currently uses a single directory `erd-studio/{layer}/{domain}.jso
 - No more `source` field, no `approved` field, no `plannedColumns`, no `designedColumns`
 - No more `ReconciliationService`, `AutoReconciliationService`, or `SchemaTagService`
 
-Read `plan.md` in the project root for full architectural context.
+Read `docs/archive/plan.md` for full architectural context.
 
 ---
 
