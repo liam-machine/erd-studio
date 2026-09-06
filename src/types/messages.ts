@@ -94,8 +94,22 @@ export interface SyncPlanGeneratedMessage {
   };
 }
 
+/**
+ * Ask the webview to open the "Report a Bug" dialog (triggered from the
+ * command palette / sidebar while a canvas is active). Optional prefill lets
+ * error notifications seed the description.
+ */
+export interface OpenBugReportMessage {
+  type: 'openBugReport';
+  payload?: {
+    title?: string;
+    description?: string;
+  };
+}
+
 /** Union of all messages the extension can send to the webview. */
 export type ExtensionMessage =
+  | OpenBugReportMessage
   | DomainLoadedMessage
   | DomainUpdatedMessage
   | StageDataMessage
@@ -446,6 +460,35 @@ export interface ViewFileMessage {
 }
 
 /**
+ * Submit a bug report. The extension opens a prefilled GitHub issue form in
+ * the browser; nothing is sent from the extension itself. The optional
+ * screenshot is a PNG data URL captured from the canvas by the webview.
+ */
+export interface ReportBugMessage {
+  type: 'reportBug';
+  payload: {
+    title: string;
+    description: string;
+    steps?: string;
+    includeDiagnostics: boolean;
+    screenshotDataUrl?: string;
+    /** True when the webview successfully wrote the PNG to the clipboard. */
+    screenshotOnClipboard?: boolean;
+    /** Recent errors the webview observed (oldest → newest). */
+    webviewErrors?: string[];
+    /** Summary of the domain shown on the canvas, for diagnostics. */
+    domain?: {
+      name: string;
+      layer: string;
+      stage: string;
+      modelCount: number;
+      relationshipCount: number;
+      schemaVersion?: number;
+    };
+  };
+}
+
+/**
  * Request the extension to save all dirty editors and reload the window.
  * Sent by the webview when it detects it has become orphaned (e.g. after an
  * extension update tore down the previous extension host instance and the new
@@ -585,6 +628,7 @@ export type WebviewMessage =
   | ToggleDiscrepancyMessage
   | ReorderColumnsMessage
   | ViewFileMessage
+  | ReportBugMessage
   | RequestReloadMessage
   | CheckManifestStalenessMessage
   | GenerateSyncPlanMessage

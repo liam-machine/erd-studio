@@ -111,6 +111,12 @@
         "command": "erdStudio.revealLogicalModel",
         "title": "Reveal in Explorer",
         "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.reportBug",
+        "title": "Report a Bug",
+        "category": "ERD Studio",
+        "icon": "$(bug)"
       }
     ],
     "viewsContainers": {
@@ -250,6 +256,11 @@
           "command": "erdStudio.addLayer",
           "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
           "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.reportBug",
+          "when": "view == erdStudio.domainTree",
+          "group": "navigation@9"
         }
       ]
     },
@@ -315,6 +326,10 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "yaml": "^2.8.2",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.0",
+    "html-to-image": "^1.11.13"
+  },
+  "bugs": {
+    "url": "https://github.com/liam-machine/erd-studio/issues"
   }
 }

@@ -10,3 +10,31 @@
 .editor-canvas--select-mode .react-flow__pane {
   cursor: crosshair;
 }
+
+/* Full-canvas status/error screen ("Loading…", "Error: …") */
+.editor-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100vh;
+  padding: 24px;
+  text-align: center;
+  color: var(--editor-fg);
+}
+
+.editor-message__button {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.editor-message__button:hover {
+  background: var(--button-hover-bg);
+}

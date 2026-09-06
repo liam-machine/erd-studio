@@ -46,6 +46,7 @@ import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
+import { BugReportDialog } from './components/BugReportDialog/BugReportDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
 import { transformDomain } from './lib/graphTransformer';
@@ -83,6 +84,7 @@ function EditorCanvas() {
   const setEdges = useEditorStore((s) => s.setEdges);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
+  const setBugReportDialogOpen = useEditorStore((s) => s.setBugReportDialogOpen);
   const setTemplates = useEditorStore((s) => s.setTemplates);
   const setManifestModels = useEditorStore((s) => s.setManifestModels);
   const setExistingModels = useEditorStore((s) => s.setExistingModels);
@@ -261,7 +263,11 @@ function EditorCanvas() {
           setSyncPlanGenerated(msg.payload);
           break;
         case 'error':
+          useEditorStore.getState().recordError('extension', msg.payload.message);
           setError(msg.payload.message);
+          break;
+        case 'openBugReport':
+          useEditorStore.getState().setBugReportDialogOpen(true, msg.payload ?? null);
           break;
       }
     },
@@ -372,6 +378,10 @@ function EditorCanvas() {
         e.preventDefault();
 
         // Close any open dialog (priority order)
+        if (useEditorStore.getState().bugReportDialogOpen) {
+          setBugReportDialogOpen(false);
+          return;
+        }
         if (newModelDialogOpen) {
           setNewModelDialogOpen(false);
           return;
@@ -946,6 +956,14 @@ function EditorCanvas() {
     return (
       <div className="editor-message">
         <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+        <button
+          type="button"
+          className="editor-message__button"
+          onClick={() => setBugReportDialogOpen(true, { description: `Error shown on canvas: ${error}` })}
+        >
+          Report a Bug
+        </button>
+        <BugReportDialog />
       </div>
     );
   }
@@ -1055,6 +1073,9 @@ function EditorCanvas() {
 
       {/* Welcome modal (first-time users) */}
       <WelcomeModal />
+
+      {/* Report a Bug dialog */}
+      <BugReportDialog />
     </div>
   );
 }
@@ -1064,6 +1085,20 @@ function EditorCanvas() {
 // ---------------------------------------------------------------------------
 
 export function App() {
+  // Capture uncaught webview errors so bug reports can include them.
+  useEffect(() => {
+    const record = useEditorStore.getState().recordError;
+    const onError = (e: ErrorEvent) => record('window', e.message);
+    const onRejection = (e: PromiseRejectionEvent) =>
+      record('promise', e.reason instanceof Error ? e.reason.message : String(e.reason));
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, []);
+
   return (
     <ReactFlowProvider>
       <EditorCanvas />

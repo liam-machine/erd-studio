@@ -30,6 +30,8 @@ import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
+import { hostErrorLog, submitBugReport } from '../services/feedbackService';
+import type { ReportBugMessage, OpenBugReportMessage } from '../types/messages';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
@@ -207,6 +209,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return { templates, manifestModels, existingModels };
   }
 
+  /**
+   * If the active editor tab is one of our canvases, ask its webview to open
+   * the "Report a Bug" dialog (so the report can include a screenshot and
+   * canvas context). Returns false when no canvas is active so the caller
+   * can fall back to a canvas-less flow.
+   */
+  requestBugReportDialog(prefill?: OpenBugReportMessage['payload']): boolean {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    if (!(input instanceof vscode.TabInputCustom)) return false;
+    const panel = this.openPanels.get(input.uri.toString());
+    if (!panel) return false;
+    const msg: OpenBugReportMessage = { type: 'openBugReport', payload: prefill };
+    void panel.webview.postMessage(msg);
+    return true;
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     webviewPanel: vscode.WebviewPanel,
@@ -239,7 +257,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'refreshManifest', 'undo', 'redo', 'updateViewConfig', 'dismissWelcome',
           'viewFile', 'checkManifestStaleness', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'updateAnnotationPosition',
-          'requestReload',
+          'requestReload', 'reportBug',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           return;
@@ -387,6 +405,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'viewFile': {
             await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+            break;
+          }
+          case 'reportBug': {
+            const payload = (message as ReportBugMessage).payload;
+            if (payload && typeof payload.title === 'string' && typeof payload.description === 'string') {
+              try {
+                await submitBugReport(this.context, payload, payload.domain);
+              } catch (err) {
+                hostErrorLog.record('reportBug', err);
+                void vscode.window.showErrorMessage(
+                  `ERD Studio: could not open the bug report (${err instanceof Error ? err.message : String(err)}).`,
+                );
+              }
+            }
             break;
           }
           case 'undo': {
@@ -770,6 +802,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         webview.postMessage({ type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
       }
     } catch (err) {
+      hostErrorLog.record('sendDomainData', err);
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
       webview.postMessage({ type: 'error', payload: { message } });
@@ -3000,6 +3033,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     content="default-src 'none';
       script-src ${webview.cspSource} 'nonce-${nonce}';
       style-src ${webview.cspSource} 'unsafe-inline';
+      img-src ${webview.cspSource} data: blob:;
+      font-src ${webview.cspSource};
+      connect-src ${webview.cspSource};
       worker-src blob:;">
   <title>Semantic Domain Editor</title>
   <link rel="stylesheet" href="${styleUri}">

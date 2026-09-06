@@ -732,3 +732,9 @@
   color: var(--button-fg);
   opacity: 1;
 }
+
+/* Top-right corner actions (Report Bug + View File) */
+.toolbar__corner {
+  display: flex;
+  gap: 6px;
+}

@@ -21,6 +21,7 @@ import { YmlParserService } from './services/ymlParserService';
 import { getErdStudioSetting } from './services/configService';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
+import { submitBugReport } from './services/feedbackService';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -155,6 +156,32 @@ const LAYER_COLOR_OPTIONS = [
   { label: '$(edit) Custom hex color...', value: 'custom' },
 ];
 
+/**
+ * "Report a Bug" without an active canvas: gather a title and a one-line
+ * description via input boxes, then open the prefilled GitHub issue form.
+ */
+async function reportBugWithoutCanvas(
+  context: vscode.ExtensionContext,
+  prefill?: { title?: string; description?: string },
+): Promise<void> {
+  const title = await vscode.window.showInputBox({
+    title: 'ERD Studio — Report a Bug (1/2)',
+    prompt: 'One-line summary of the problem',
+    value: prefill?.title ?? '',
+    ignoreFocusOut: true,
+    validateInput: (v) => (v.trim() ? undefined : 'Please enter a short title'),
+  });
+  if (title === undefined) return;
+  const description = await vscode.window.showInputBox({
+    title: 'ERD Studio — Report a Bug (2/2)',
+    prompt: 'What happened? You can add more detail on GitHub before submitting.',
+    value: prefill?.description ?? '',
+    ignoreFocusOut: true,
+  });
+  if (description === undefined) return;
+  await submitBugReport(context, { title, description, includeDiagnostics: true });
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('ERD Studio is now active');
 
@@ -172,6 +199,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await saveAllAndReload(`ERD Studio updated to v${currentVersion}`);
     return;
   }
+
+  // "Report a Bug" is registered before any early return so it is always
+  // reachable from the command palette, even when no dbt project is open.
+  // When a canvas is active the report is routed through its webview so it
+  // can include a screenshot and domain context.
+  let editorProviderForFeedback: SemanticEditorProvider | undefined;
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'erdStudio.reportBug',
+      async (prefill?: { title?: string; description?: string }) => {
+        if (editorProviderForFeedback?.requestBugReportDialog(prefill)) return;
+        await reportBugWithoutCanvas(context, prefill);
+      },
+    ),
+  );
 
   const workspaceRoot = findDbtProjectRoot();
   if (!workspaceRoot) {
@@ -295,6 +337,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     selectorsService,
     logicalModelService,
   );
+  editorProviderForFeedback = editorProvider;
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
 

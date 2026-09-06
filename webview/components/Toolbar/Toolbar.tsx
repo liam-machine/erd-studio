@@ -398,6 +398,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     vscode.postMessage(message);
   }, [vscode]);
 
+  const setBugReportDialogOpen = useEditorStore((s) => s.setBugReportDialogOpen);
+  const handleReportBug = useCallback(() => setBugReportDialogOpen(true), [setBugReportDialogOpen]);
+
   // --- Early return if no domain -------------------------------------------
 
   if (!domain) {
@@ -813,12 +816,20 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
       </Panel>
 
-      {/* View File button — top-right corner */}
-      <Panel position="top-right">
+      {/* Corner actions — top-right */}
+      <Panel position="top-right" className="toolbar__corner">
+        <button
+          className="toolbar__view-file"
+          onClick={handleReportBug}
+          title="Report a bug on GitHub (prefilled with diagnostics)"
+          aria-label="Report a bug"
+        >
+          🐞 Report Bug
+        </button>
         <button
           className="toolbar__view-file"
           onClick={handleViewFile}
-          title="Open as JaSON file"
+          title="Open as JSON file"
           aria-label="Open underlying JSON file in text editor"
         >
           {'{ }'} View File

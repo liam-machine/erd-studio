@@ -1,0 +1,42 @@
+name: Bug report
+description: Something in ERD Studio isn't working as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. If you opened this page from the
+        extension (**ERD Studio: Report a Bug**), most fields are already filled in —
+        just check them, paste your screenshot if you took one, and press **Submit**.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect to happen, and what happened instead?
+      placeholder: When I renamed a column on the canvas, the relationship arrow disappeared…
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the silver/orders domain
+        2. Click the "+ Add" button
+        3. …
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Optional. Click into this box and paste (Ctrl+V / ⌘V), or drag an image file here.
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Collected automatically by the extension (versions, OS, domain summary, recent errors). Remove anything you would rather not share.
+      render: shell
