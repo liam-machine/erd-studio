@@ -11,6 +11,7 @@
 import { useCallback } from 'react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
+import { nextStageRequestId } from '../../lib/stageRequest';
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './StageTabs.css';
@@ -45,7 +46,7 @@ export function StageTabs({ activeStage, readOnly }: StageTabsProps) {
       if (stage === activeStage) return;
       const message: WebviewMessage = {
         type: 'switchStage',
-        payload: { stage },
+        payload: { stage, requestId: nextStageRequestId() },
       };
       vscode.postMessage(message);
     },

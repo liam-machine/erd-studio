@@ -49,10 +49,24 @@ import type {
   ModelContext,
 } from '../types/syncPlan';
 import type { NodePosition, Relationship } from '../types/semantic';
+import {
+  isValidCardinality,
+  isValidKeyType,
+  isValidModelRole,
+  isValidStage,
+  validateColumnDef as validateColumnDefPayload,
+  validateColumnDefs,
+  validateModelName,
+  validatePoint,
+  validatePositions,
+} from './payloadValidation';
 
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
+
+/** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
+export const PHYSICAL_READ_ONLY_MESSAGE = 'Physical stage is read-only. Switch to the Logical stage to make changes.';
 
 export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
@@ -98,6 +112,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       lastCompareAgainst?: Stage;
     }
   >();
+
+  /**
+   * Webviews whose panel has been disposed. Refresh paths iterate a snapshot
+   * of openPanels and may race with disposal, and mutation handlers may finish
+   * after the user closes the tab — `post()` drops messages to these instead
+   * of calling into a dead webview.
+   */
+  private readonly disposedWebviews = new WeakSet<vscode.Webview>();
+
+  /**
+   * Post a message to a webview, skipping disposed panels and observing the
+   * returned promise so a rejection can never surface as an unhandled
+   * rejection from a fire-and-forget call site.
+   */
+  private post(webview: vscode.Webview, message: unknown): void {
+    if (this.disposedWebviews.has(webview)) {
+      return;
+    }
+    try {
+      void Promise.resolve(webview.postMessage(message)).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[SemanticEditorProvider] postMessage failed: ${msg}`);
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[SemanticEditorProvider] postMessage threw: ${msg}`);
+    }
+  }
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -232,16 +274,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
 
         // Guard: reject mutation messages when viewing physical (read-only) stage.
-        // Non-mutation messages (ready, switching, viewing, navigation) are allowed through.
+        // Allowed through in physical: non-mutations (ready, switching, viewing,
+        // navigation) plus writes that only touch shared canvas metadata —
+        // positions and annotations live in the global viewConfig (physical
+        // inherits logical positions), stubColumns is a comparison setting,
+        // and generateSyncPlan is the physical-stage "Compare to Logical" flow.
+        // undo/redo are NOT allowed: they would rewind the logical document
+        // while the user is looking at a derived, read-only view.
         const panel = this.openPanels.get(panelKey);
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
-          'refreshManifest', 'undo', 'redo', 'updateViewConfig', 'dismissWelcome',
+          'refreshManifest', 'updateViewConfig', 'dismissWelcome',
           'viewFile', 'checkManifestStaleness', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'updateAnnotationPosition',
-          'requestReload',
+          'toggleStubColumns', 'requestReload',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
+          console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
+          this.post(webviewPanel.webview, { type: 'error', payload: { message: PHYSICAL_READ_ONLY_MESSAGE } });
           return;
         }
 
@@ -250,7 +300,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         switch (message.type) {
           case 'ready':
-            await this.sendDomainData(document, webviewPanel.webview, panelKey);
+            // The initial load is the one refresh path allowed to persist
+            // auto-computed positions for models that lack them.
+            await this.sendDomainData(document, webviewPanel.webview, panelKey, { persistPositions: true });
             break;
           case 'requestReload':
             // Webview detected it was orphaned (e.g. extension update before
@@ -267,6 +319,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               | { positions: Record<string, { x: number; y: number }> }
               | undefined;
             if (payload?.positions) {
+              const positionsError = validatePositions(payload.positions);
+              if (positionsError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to save positions: ${positionsError}` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleUpdatePositions(
                   document,
@@ -312,6 +369,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'toggleColumnKey': {
             const payload = (message as { payload?: { modelName: string; columnName: string; keyType: 'PK' | 'FK' | 'NK'; value: boolean } }).payload;
             if (payload) {
+              if (!isValidKeyType(payload.keyType)) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Unknown key type "${String(payload.keyType)}".` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleToggleColumnKey(document, webviewPanel.webview, payload, activeStage));
             }
@@ -320,6 +381,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'addRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
+              if (!isValidCardinality(payload.cardinality)) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: unknown cardinality "${String(payload.cardinality)}".` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleAddRelationship(document, webviewPanel.webview, payload, activeStage));
             }
@@ -343,7 +408,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'removeModels': {
             const payload = (message as { payload?: { modelNames: string[] } }).payload;
-            if (payload && payload.modelNames.length > 0) {
+            if (payload && Array.isArray(payload.modelNames) && payload.modelNames.length > 0) {
               await this.queueEdit(panelKey, () =>
                 this.handleRemoveModels(document, webviewPanel.webview, payload, activeStage));
             }
@@ -360,6 +425,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'updateRelationship': {
             const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
+              if (!isValidCardinality(payload.cardinality)) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update relationship: unknown cardinality "${String(payload.cardinality)}".` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleUpdateRelationship(document, webviewPanel.webview, payload, activeStage));
             }
@@ -368,6 +437,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'editRelationship': {
             const payload = (message as { payload?: { originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string; fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
             if (payload) {
+              if (!isValidCardinality(payload.cardinality)) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: unknown cardinality "${String(payload.cardinality)}".` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleEditRelationship(document, webviewPanel.webview, payload, activeStage));
             }
@@ -428,6 +501,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'updateModelRole': {
             const payload = (message as { payload?: { modelName: string; modelRole: string | null } }).payload;
             if (payload) {
+              if (payload.modelRole != null && !isValidModelRole(payload.modelRole)) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update model role: unknown role "${String(payload.modelRole)}".` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleUpdateModelRole(document, webviewPanel.webview, payload, activeStage));
             }
@@ -442,9 +519,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'switchStage': {
-            const payload = (message as { payload?: { stage: Stage } }).payload;
+            const payload = (message as { payload?: { stage: Stage; requestId?: number } }).payload;
             if (payload) {
-              await this.handleSwitchStage(panelKey, document, webviewPanel.webview, payload.stage);
+              if (!isValidStage(payload.stage)) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to switch stage: unknown stage "${String(payload.stage)}".` } });
+                break;
+              }
+              const requestId = typeof payload.requestId === 'number' && Number.isFinite(payload.requestId)
+                ? payload.requestId
+                : undefined;
+              await this.handleSwitchStage(panelKey, document, webviewPanel.webview, payload.stage, requestId);
             }
             break;
           }
@@ -485,6 +569,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'addAnnotation': {
             const payload = (message as { payload?: { id: string; text: string; x: number; y: number; color?: string } }).payload;
             if (payload) {
+              const pointError = validatePoint(payload);
+              if (pointError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add annotation: ${pointError}` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleAddAnnotation(document, webviewPanel.webview, payload));
             }
@@ -509,6 +598,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'updateAnnotationPosition': {
             const payload = (message as { payload?: { id: string; x: number; y: number } }).payload;
             if (payload) {
+              const pointError = validatePoint(payload);
+              if (pointError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to move annotation: ${pointError}` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleUpdateAnnotationPosition(document, payload));
             }
@@ -534,6 +628,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
       changeSubscription.dispose();
+      this.disposedWebviews.add(webviewPanel.webview);
       this.openPanels.delete(panelKey);
     });
   }
@@ -735,11 +830,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Parse the document, build display domain for the active stage, and send to webview.
    * On parse failure, sends an error message instead.
+   *
+   * Models that lack a viewConfig position get one computed. By default the
+   * computed positions are merged into the payload in memory only, so
+   * watcher-driven refreshes (manifest / yml changes, external edits) never
+   * write to the domain file. Pass `persistPositions: true` (the `ready` path)
+   * to also write them back via WorkspaceEdit so they survive reloads.
    */
   private async sendDomainData(
     document: vscode.TextDocument,
     webview: vscode.Webview,
     panelKey?: string,
+    options: { persistPositions?: boolean } = {},
   ): Promise<void> {
     try {
       const key = panelKey ?? document.uri.toString();
@@ -753,43 +855,50 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       let unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
-      const positionsWritten = await this.autoPositionNewModels(document, unifiedDomain);
-      if (positionsWritten) {
-        // Re-read since we wrote new positions to the file
-        unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+      const computed = this.computeMissingPositions(unifiedDomain);
+      if (computed) {
+        if (options.persistPositions) {
+          const positionsWritten = await this.autoPositionNewModels(document, computed);
+          if (positionsWritten) {
+            // Re-read since we wrote new positions to the file
+            unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+          }
+        }
+        // Whether or not they were persisted, the payload carries the positions
+        // so the canvas never renders a model at (0,0).
+        unifiedDomain.viewConfig.positions = { ...(unifiedDomain.viewConfig.positions ?? {}), ...computed };
       }
 
       if (activeStage === 'physical') {
         const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
-        webview.postMessage({ type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
+        this.post(webview, { type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
       } else {
         const domain = this.domainService.getDomainStage(document.uri.fsPath);
         const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
-        webview.postMessage({ type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
+        this.post(webview, { type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
-      webview.postMessage({ type: 'error', payload: { message } });
+      this.post(webview, { type: 'error', payload: { message } });
     }
   }
 
   /**
    * Detect models in logical.models that lack entries in viewConfig.positions
-   * and compute positions for them. Writes positions back to the document via
-   * WorkspaceEdit so they persist. Returns true if positions were written.
+   * and compute positions for them. Pure — returns the computed positions (or
+   * null when every model already has one) without touching the document.
    */
-  private async autoPositionNewModels(
-    document: vscode.TextDocument,
+  private computeMissingPositions(
     unifiedDomain: { logical: { models: Array<{ name: string }>; relationships: Relationship[] }; viewConfig: { positions?: Record<string, NodePosition> } },
-  ): Promise<boolean> {
+  ): Record<string, NodePosition> | null {
     const positions = unifiedDomain.viewConfig.positions ?? {};
     const modelNames = unifiedDomain.logical.models.map((m) => m.name);
     const newModels = modelNames.filter((name) => !positions[name]);
 
-    if (newModels.length === 0) return false;
+    if (newModels.length === 0) return null;
 
     const computed = computeNewModelPositions({
       newModels,
@@ -797,8 +906,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       existingPositions: positions,
     });
 
-    if (Object.keys(computed).length === 0) return false;
+    return Object.keys(computed).length === 0 ? null : computed;
+  }
 
+  /**
+   * Persist auto-computed positions to the document via WorkspaceEdit so they
+   * survive reloads. Only called from the `ready` path — see sendDomainData.
+   * Returns true if positions were written.
+   */
+  private async autoPositionNewModels(
+    document: vscode.TextDocument,
+    computed: Record<string, NodePosition>,
+  ): Promise<boolean> {
     // Merge computed positions into document
     const text = document.getText();
     const parsed = JSON.parse(text) as Record<string, unknown>;
@@ -839,6 +958,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   async refreshAllOpenDomains(): Promise<void> {
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
+      // The snapshot may include a panel that was disposed while an earlier
+      // iteration awaited — skip it rather than refreshing a dead webview.
+      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
+        continue;
+      }
       try {
         if (activeStage === 'physical') {
           await this.handleSwitchStage(panelKey, document, webview, 'physical');
@@ -850,7 +974,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         console.error(
           `[SemanticEditorProvider] Refresh failed for ${document.uri.fsPath}: ${message}`,
         );
-        webview.postMessage({
+        this.post(webview, {
           type: 'error',
           payload: { message: `Refresh failed: ${message}` },
         });
@@ -865,6 +989,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   async refreshDomainsReferencingModel(modelName: string): Promise<void> {
     for (const [panelKey, { document, webview }] of Array.from(this.openPanels.entries())) {
+      if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
+        continue;
+      }
       try {
         const text = document.getText();
         const parsed = JSON.parse(text) as Record<string, unknown>;
@@ -924,6 +1051,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      // Validate the payload before anything touches disk: the model name
+      // becomes a file name under logical-models/, and column names are used
+      // as keys by every later edit/remove path.
+      const nameError = validateModelName(model.name);
+      if (nameError) {
+        webview.postMessage({ type: 'error', payload: { message: `Failed to add model: ${nameError}` } });
+        return;
+      }
+      const columnsError = validateColumnDefs(model.columns ?? []);
+      if (columnsError) {
+        webview.postMessage({ type: 'error', payload: { message: `Failed to add model: ${columnsError}` } });
+        return;
+      }
+      if (model.modelRole != null && !isValidModelRole(model.modelRole)) {
+        webview.postMessage({ type: 'error', payload: { message: `Failed to add model: unknown role "${String(model.modelRole)}".` } });
+        return;
+      }
+      model = { ...model, name: model.name.trim() };
+
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const section = this.getStageSection(parsed, stage);
@@ -1049,17 +1195,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   private validateColumnDef(column: ColumnDef): string | null {
-    const trimmedName = column.name?.trim();
-    if (!trimmedName) {
-      return 'Column name is required';
-    }
-    if (!/^[a-z0-9_]+$/.test(trimmedName)) {
-      return 'Column name must use lowercase letters, numbers, and underscores';
-    }
-    if (!column.dataType?.trim()) {
-      return 'Data type is required';
-    }
-    return null;
+    return validateColumnDefPayload(column);
   }
 
   private async handleAddColumn(
@@ -1365,6 +1501,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.isDomainV5(parsed)) {
         const fieldMap: Record<string, keyof ColumnDef> = { PK: 'isPrimaryKey', FK: 'isForeignKey', NK: 'isNaturalKey' };
         const fieldName = fieldMap[payload.keyType];
+        if (!fieldName) throw new Error(`Unknown key type "${String(payload.keyType)}".`);
         await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
           const column = columns.find((c) => c.name === payload.columnName);
@@ -1389,6 +1526,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const fieldMap: Record<string, string> = { PK: 'isPrimaryKey', FK: 'isForeignKey', NK: 'isNaturalKey' };
       const fieldName = fieldMap[payload.keyType];
+      if (!fieldName) {
+        webview.postMessage({ type: 'error', payload: { message: `Unknown key type "${String(payload.keyType)}".` } });
+        return;
+      }
       const columns = (model.columns ?? []) as Array<Record<string, unknown>>;
       const column = columns.find((c) => c.name === payload.columnName);
 
@@ -1549,15 +1690,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      const nameError = validateModelName(payload.newName);
+      if (nameError) {
+        webview.postMessage({ type: 'error', payload: { message: nameError } });
+        return;
+      }
       const trimmedNew = payload.newName.trim();
-      if (!trimmedNew) {
-        webview.postMessage({ type: 'error', payload: { message: 'Model name cannot be empty.' } });
-        return;
-      }
-      if (!/^[a-z][a-z0-9_]*$/.test(trimmedNew)) {
-        webview.postMessage({ type: 'error', payload: { message: 'Model name must start with a letter and use lowercase letters, numbers, and underscores.' } });
-        return;
-      }
       if (trimmedNew === payload.oldName) {
         return;
       }
@@ -2157,6 +2295,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      // The name may be used to create a logical-models/*.yml file below.
+      const nameError = validateModelName(payload.modelName);
+      if (nameError) {
+        webview.postMessage({ type: 'error', payload: { message: `Failed to add model: ${nameError}` } });
+        return;
+      }
+
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       const section = this.getStageSection(parsed, stage);
@@ -2535,12 +2680,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Handle a switchStage message from the webview.
    * Loads data for the requested stage and sends it back.
+   *
+   * `requestId` is the webview's sequence token for this switch; it is echoed
+   * on the `stageData` reply so the webview can discard a reply for a stage it
+   * no longer wants (e.g. Alt+1 pressed while a slow physical load is in flight).
+   * Host-initiated switches (tree view, watcher refresh) carry no token.
    */
   private async handleSwitchStage(
     panelKey: string,
     document: vscode.TextDocument,
     webview: vscode.Webview,
     targetStage: Stage,
+    requestId?: number,
   ): Promise<void> {
     try {
       const panel = this.openPanels.get(panelKey);
@@ -2554,6 +2705,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
 
+      // Same in-memory auto-positioning as sendDomainData — never a write here.
+      const computed = this.computeMissingPositions(unifiedDomain);
+      if (computed) {
+        unifiedDomain.viewConfig.positions = { ...(unifiedDomain.viewConfig.positions ?? {}), ...computed };
+      }
+
+      const reply = requestId !== undefined ? { requestId } : {};
       if (targetStage === 'physical') {
         // Physical stage is derived from yml source files + optional manifest enrichment
         const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest);
@@ -2561,17 +2719,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (layerConfig) {
           physicalDomain.layerConfig = layerConfig;
         }
-        webview.postMessage({ type: 'stageData', payload: physicalDomain });
+        this.post(webview, { type: 'stageData', payload: physicalDomain, ...reply });
       } else {
         // Logical — extract from unified file
         const domain = this.domainService.getDomainStage(document.uri.fsPath);
         const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
-        webview.postMessage({ type: 'stageData', payload: displayDomain });
+        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Stage switch failed: ${message}`);
-      webview.postMessage({ type: 'error', payload: { message: `Failed to switch stage: ${message}` } });
+      this.post(webview, { type: 'error', payload: { message: `Failed to switch stage: ${message}` } });
     }
   }
 
@@ -2944,22 +3102,62 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Launch Claude Code in a terminal to execute the sync plan.
-   * Uses --dangerously-skip-permissions so file edits proceed without prompts.
+   *
+   * The user is shown a modal that names the exact command before anything
+   * runs. `--dangerously-skip-permissions` is only added when the
+   * `erdStudio.claudeSync.skipPermissions` setting is enabled (default off),
+   * because it lets Claude edit files in the workspace without asking.
+   *
+   * The prompt is typed into the Claude TUI after a short delay; if the user
+   * closes the terminal in the meantime the send is skipped rather than
+   * throwing "Terminal has already been disposed" inside the timer.
    */
   private async handleLaunchClaudeSync(): Promise<void> {
     const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
+    const skipPermissions = getErdStudioSetting<boolean>('claudeSync.skipPermissions', false) === true;
     const planPath = `${semanticDir}/.sync-plan.json`;
     const prompt = `Execute the erd-studio sync plan at ${planPath} using the erd-studio skill. Read .claude/skills/erd-studio/SYNC.md for the action reference and follow the execution steps.`;
+
+    const claudeCommand = skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude';
+    const activate = findVenvActivate(this.workspaceRoot);
+    const launchCommand = activate ? `${activate} && ${claudeCommand}` : claudeCommand;
+
+    const detail = skipPermissions
+      ? `Command: ${claudeCommand}\n\n` +
+        'The --dangerously-skip-permissions flag lets Claude Code edit files in this workspace ' +
+        'without asking for confirmation. Set "erdStudio.claudeSync.skipPermissions" to false to keep the permission prompts.'
+      : `Command: ${claudeCommand}\n\n` +
+        'Claude Code will ask before editing files. Enable "erdStudio.claudeSync.skipPermissions" ' +
+        'to run unattended with --dangerously-skip-permissions.';
+    const LAUNCH = 'Launch';
+    const choice = await vscode.window.showWarningMessage(
+      `Launch Claude Code in a terminal to execute the sync plan at ${planPath}?`,
+      { modal: true, detail },
+      LAUNCH,
+    );
+    if (choice !== LAUNCH) {
+      return;
+    }
 
     const terminal = vscode.window.createTerminal({
       name: 'ERD Studio Sync',
       cwd: this.workspaceRoot,
     });
     terminal.show();
-    const activate = findVenvActivate(this.workspaceRoot);
-    terminal.sendText(activate ? `${activate} && claude --dangerously-skip-permissions` : 'claude --dangerously-skip-permissions');
+    terminal.sendText(launchCommand);
     const CLAUDE_TUI_INIT_DELAY_MS = 2000;
-    setTimeout(() => terminal.sendText(prompt), CLAUDE_TUI_INIT_DELAY_MS);
+    setTimeout(() => {
+      try {
+        if (!isTerminalAlive(terminal)) {
+          console.warn('[SemanticEditorProvider] Claude sync terminal closed before the prompt could be sent.');
+          return;
+        }
+        terminal.sendText(prompt);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[SemanticEditorProvider] Failed to send sync prompt to terminal: ${message}`);
+      }
+    }, CLAUDE_TUI_INIT_DELAY_MS);
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {
@@ -3018,6 +3216,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
 function isTypedMessage(value: unknown): value is { type: string } {
   return typeof value === 'object' && value !== null && 'type' in value && typeof (value as Record<string, unknown>).type === 'string';
+}
+
+/**
+ * True while a terminal is still open and its process has not exited.
+ * `exitStatus` is set when the shell exits; a closed terminal also drops out of
+ * `window.terminals`. Either signal means `sendText` would throw.
+ */
+function isTerminalAlive(terminal: vscode.Terminal): boolean {
+  if (terminal.exitStatus !== undefined) return false;
+  const open = vscode.window.terminals;
+  return Array.isArray(open) ? open.includes(terminal) : true;
 }
 
 const VENV_CANDIDATES = ['.venv', 'venv', 'env'];

@@ -260,9 +260,21 @@ export class LogicalModelService {
 
   /**
    * Get the file path for a model.
+   *
+   * The name is used verbatim as a file name, so anything that would resolve
+   * outside `logical-models/` (path separators, `..`, absolute paths) is
+   * rejected rather than silently written elsewhere in the workspace.
    */
   modelPath(name: string): string {
-    return path.join(this.modelsDir, `${name}.yml`);
+    if (typeof name !== 'string' || !name.trim() || name.includes('/') || name.includes('\\') || name.includes('..')) {
+      throw new Error(`Invalid model name "${String(name)}": must not contain path separators.`);
+    }
+    const modelsDir = path.resolve(this.modelsDir);
+    const resolved = path.resolve(modelsDir, `${name}.yml`);
+    if (path.dirname(resolved) !== modelsDir) {
+      throw new Error(`Invalid model name "${name}": resolves outside the logical-models directory.`);
+    }
+    return resolved;
   }
 
   // -------------------------------------------------------------------------

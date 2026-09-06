@@ -29,6 +29,7 @@ import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
 import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
+import { isStaleStageReply, nextStageRequestId } from './lib/stageRequest';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
@@ -240,6 +241,9 @@ function EditorCanvas() {
           }
           break;
         case 'stageData':
+          // A reply for a stage the user has since switched away from — drop it
+          // so the canvas never flips back to the wrong stage.
+          if (isStaleStageReply(msg.requestId)) break;
           setDomain(msg.payload);
           if (msg.payload.templates) {
             setTemplates(msg.payload.templates);
@@ -442,7 +446,7 @@ function EditorCanvas() {
         };
         const targetStage = stageMap[e.key];
         if (targetStage && domain && domain.stage !== targetStage) {
-          vscode.postMessage({ type: 'switchStage', payload: { stage: targetStage } });
+          vscode.postMessage({ type: 'switchStage', payload: { stage: targetStage, requestId: nextStageRequestId() } });
         }
         return;
       }

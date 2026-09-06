@@ -266,6 +266,11 @@
           "default": ".erd-studio",
           "description": "Relative path to ERD domain files within the project"
         },
+        "erdStudio.claudeSync.skipPermissions": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first."
+        },
         "dbtSemantic.projectPath": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.projectPath#` instead. Legacy values are still honoured.",

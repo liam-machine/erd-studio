@@ -108,7 +108,7 @@ Extension <-> Webview communication uses discriminated unions on `type` field:
 - **Extension -> Webview**: `domainLoaded`, `domainUpdated`, `stageData`, `discrepancyReport`, `error`
 - **Webview -> Extension**: `ready`, `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `editRelationship`, `updateRelationship`, `renameModel`, `removeModel`, `addExistingModel`, `toggleColumnKey`, `updateModelRationale`, `updateModelGrain`, `updateModelRole`, `updateViewConfig`, `updatePositions`, `runAutoLayout`, `switchStage`, `toggleDiscrepancy`, `refreshManifest`, `undo`, `redo`
 
-All mutations go through `WorkspaceEdit` for undo/redo integration. Physical stage silently rejects all mutation messages.
+All mutations go through `WorkspaceEdit` for undo/redo integration. While a panel is viewing the physical stage the host rejects schema mutations (and `undo`/`redo`) with a `"Physical stage is read-only"` `error` message; only shared canvas metadata writes (`updatePositions`, annotations, `toggleStubColumns`, `generateSyncPlan`) are allowed through. Payloads are validated at the message boundary by `src/providers/payloadValidation.ts` (model names via the shared `MODEL_NAME_PATTERN` in `src/types/naming.ts`, column lists incl. duplicates, `keyType`, `cardinality`, `modelRole`, finite positions). `switchStage` carries a `requestId` that the host echoes on `stageData` so the webview can drop stale replies (`webview/lib/stageRequest.ts`).
 
 ## Key Conventions
 

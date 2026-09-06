@@ -18,6 +18,7 @@ import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus } from '../../hooks/useMessageBus';
 import { KeyBadgeGroup } from '../common/KeyBadgeGroup';
 import type { ColumnDef, DesignModel, ModelRole, ModelTemplate } from '../../../src/types/semantic';
+import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, findDuplicateNames } from '../../../src/types/naming';
 import './NewModelDialog.css';
 
 // ---------------------------------------------------------------------------
@@ -69,11 +70,12 @@ function validateForm(
 ): Record<string, string> {
   const errors: Record<string, string> = {};
 
-  // Model name validation
+  // Model name validation — same rule as the host's validateModelName / rename,
+  // so a name accepted here can always be renamed later.
   if (!modelName.trim()) {
     errors.modelName = 'Model name is required';
-  } else if (!/^[a-z0-9_]+$/.test(modelName)) {
-    errors.modelName = 'Use lowercase letters, numbers, and underscores only';
+  } else if (!MODEL_NAME_PATTERN.test(modelName)) {
+    errors.modelName = 'Start with a letter; use lowercase letters, numbers, and underscores only';
   } else if (template.prefix && !modelName.startsWith(template.prefix)) {
     errors.modelName = `Must start with "${template.prefix}" for ${template.label} template`;
   } else if (template.prefix && modelName.length <= template.prefix.length) {
@@ -148,18 +150,6 @@ export function NewModelDialog() {
     [modelName, template, leftEntity, rightEntity, existingModelNames],
   );
 
-  // Only flag columns that have been touched (non-empty name) but are invalid.
-  // Empty columns are allowed while editing — they are filtered out on submit.
-  const hasInvalidColumns = useMemo(
-    () =>
-      customColumns.some(
-        (col) => col.name.trim() !== '' && !/^[a-z0-9_]+$/.test(col.name)
-      ),
-    [customColumns]
-  );
-
-  const isValid = Object.keys(errors).length === 0 && modelName.trim() !== '' && !hasInvalidColumns;
-
   // Resolved columns with placeholders replaced, plus custom columns
   const resolvedColumns = useMemo(() => {
     const baseName = extractBaseName(modelName || '{name}', template.prefix);
@@ -170,6 +160,28 @@ export function NewModelDialog() {
     });
     return [...templateCols, ...customColumns];
   }, [modelName, template, leftEntity, rightEntity, customColumns]);
+
+  // Column names that appear more than once across template + custom columns.
+  // Duplicates break every name-keyed path (React keys, edit/remove by name),
+  // so the host rejects them — flag them here before submit.
+  const duplicateColumnNames = useMemo(
+    () => new Set(findDuplicateNames(resolvedColumns.map((col) => col.name))),
+    [resolvedColumns],
+  );
+
+  // Only flag columns that have been touched (non-empty name) but are invalid.
+  // Empty columns are allowed while editing — they are filtered out on submit.
+  const hasInvalidColumns = useMemo(
+    () =>
+      customColumns.some(
+        (col) =>
+          col.name.trim() !== '' &&
+          (!COLUMN_NAME_PATTERN.test(col.name) || duplicateColumnNames.has(col.name.trim())),
+      ),
+    [customColumns, duplicateColumnNames]
+  );
+
+  const isValid = Object.keys(errors).length === 0 && modelName.trim() !== '' && !hasInvalidColumns;
 
   // Handlers
   const resetForm = useCallback(() => {
@@ -453,8 +465,15 @@ export function NewModelDialog() {
                     <input
                       type="text"
                       className={`new-model-dialog__col-input new-model-dialog__col-input--name ${
-                        col.name && !/^[a-z0-9_]+$/.test(col.name) ? 'new-model-dialog__col-input--error' : ''
+                        col.name && (!COLUMN_NAME_PATTERN.test(col.name) || duplicateColumnNames.has(col.name.trim()))
+                          ? 'new-model-dialog__col-input--error'
+                          : ''
                       }`}
+                      title={
+                        col.name && duplicateColumnNames.has(col.name.trim())
+                          ? `Duplicate column name "${col.name.trim()}"`
+                          : undefined
+                      }
                       value={col.name}
                       onChange={(e) => handleColumnChange(idx, 'name', e.target.value)}
                       placeholder="column_name"
