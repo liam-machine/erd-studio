@@ -525,3 +525,57 @@ describe('launchClaudeSync (H36)', () => {
     expect(terminal._sentText).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// H21 — message boundary: unknown types are logged, handler failures reported
+// ---------------------------------------------------------------------------
+
+describe('message boundary (H21)', () => {
+  it('logs an unknown message type instead of dropping it silently', async () => {
+    const { panel } = await openShowcase(root);
+    const warn = vi.mocked(console.warn);
+    warn.mockClear();
+
+    panel._simulateMessage({ type: 'renameColumnGroup', payload: {} });
+    await vi.waitFor(() =>
+      expect(warn.mock.calls.some((c) => String(c[0]).includes('unknown webview message type "renameColumnGroup"'))).toBe(true),
+    );
+    expect(types(panel)).not.toContain('error');
+    expect(applyEditSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs a message without a string type', async () => {
+    const { panel } = await openShowcase(root);
+    const warn = vi.mocked(console.warn);
+    warn.mockClear();
+
+    panel._simulateMessage({ payload: { modelName: 'dim_task' } });
+    await vi.waitFor(() =>
+      expect(warn.mock.calls.some((c) => String(c[0]).includes('without a string "type"'))).toBe(true),
+    );
+    expect(types(panel)).not.toContain('error');
+  });
+
+  it('reports a handler that throws as an error message rather than an unhandled rejection', async () => {
+    const { panel, provider } = await openShowcase(root);
+    (provider as unknown as { handleUpdateModelGrain: unknown }).handleUpdateModelGrain = vi
+      .fn()
+      .mockRejectedValue(new Error('boom'));
+
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', onRejection);
+    try {
+      panel._simulateMessage({ type: 'updateModelGrain', payload: { modelName: 'dim_task', grain: 'x' } });
+      await waitForError(panel, /Failed to handle "updateModelGrain": boom/);
+      await new Promise((r) => setTimeout(r, 30));
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+    expect(rejections).toEqual([]);
+
+    // The boundary must not poison the edit queue: a later mutation still runs.
+    panel._simulateMessage({ type: 'updateModelRationale', payload: { modelName: 'dim_task', rationale: 'after' } });
+    await waitForType(panel, 'domainLoaded', 2);
+  });
+});

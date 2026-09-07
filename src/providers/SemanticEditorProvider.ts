@@ -141,6 +141,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /**
+   * Wrap a webview message listener so a handler that throws (or rejects)
+   * is logged and reported to the webview as an `error` message instead of
+   * becoming an unhandled rejection that silently drops the message.
+   */
+  private withMessageErrorBoundary(
+    webview: vscode.Webview,
+    listener: (message: unknown) => Promise<void>,
+  ): (message: unknown) => Promise<void> {
+    return async (message: unknown) => {
+      try {
+        await listener(message);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const type = isTypedMessage(message) ? message.type : 'unknown';
+        console.error(`[SemanticEditorProvider] Message "${type}" failed: ${detail}`);
+        this.post(webview, { type: 'error', payload: { message: `Failed to handle "${type}": ${detail}` } });
+      }
+    };
+  }
+
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly domainService: DomainService,
@@ -268,8 +289,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // --- Subscriptions (disposed when the panel closes) ---------------------
 
     const messageSubscription = webviewPanel.webview.onDidReceiveMessage(
-      async (message: unknown) => {
+      this.withMessageErrorBoundary(webviewPanel.webview, async (message: unknown) => {
         if (!isTypedMessage(message)) {
+          console.warn('[SemanticEditorProvider] Ignoring webview message without a string "type"');
           return;
         }
 
@@ -608,8 +630,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          default:
+            // A message type this host does not know — most likely webview /
+            // host version skew after an update. Log rather than drop silently.
+            console.warn(`[SemanticEditorProvider] Ignoring unknown webview message type "${message.type}"`);
+            break;
         }
-      },
+      }),
     );
 
     const changeSubscription = vscode.workspace.onDidChangeTextDocument(async (e) => {
