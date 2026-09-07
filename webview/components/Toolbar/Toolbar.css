@@ -709,7 +709,27 @@
    View File button (top-right corner)
    --------------------------------------------------------------------------- */
 
-.toolbar__view-file {
+/* ---------------------------------------------------------------------------
+   Top-right corner actions
+
+   Labelled buttons while they fit, and one overflow glyph once they would run
+   into the top-centre toolbar — which grows with the domain name, the search
+   box and the discrepancy controls, so the switch is decided by measurement in
+   `Toolbar.tsx` rather than by a breakpoint here.
+   --------------------------------------------------------------------------- */
+
+.toolbar__corner {
+  display: flex;
+  gap: 6px;
+}
+
+.toolbar__corner-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* The labelled form. */
+.toolbar__corner-button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -727,14 +747,49 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.toolbar__view-file:hover {
+.toolbar__corner-button:hover {
   background: var(--button-bg);
   color: var(--button-fg);
   opacity: 1;
 }
 
-/* Top-right corner actions (Report Bug + View File) */
-.toolbar__corner {
-  display: flex;
-  gap: 6px;
+/* The collapsed form. */
+.toolbar__corner-menu {
+  position: relative;
+}
+
+.toolbar__corner-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--editor-fg);
+  font-family: inherit;
+  /* The glyph is a horizontal ellipsis; it needs the size to read as a
+     control rather than as three stray dots. */
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: background 0.1s ease, opacity 0.1s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.toolbar__corner-trigger:hover,
+.toolbar__corner-trigger--active {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  opacity: 1;
+}
+
+/* Right-aligned: the menu is wider than its trigger and the trigger sits at
+   the very edge of the canvas, so it has to open inwards. */
+.toolbar__corner-list {
+  left: auto;
+  right: 0;
 }
