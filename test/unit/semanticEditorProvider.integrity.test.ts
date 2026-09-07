@@ -120,6 +120,7 @@ async function createHarness(): Promise<Harness> {
   const context = {
     extensionUri: vscode.Uri.file(root),
     globalState: { get: () => undefined, update: async () => undefined },
+    secrets: vscode.createMockSecretStorage(),
   } as unknown as vscode.ExtensionContext;
 
   const ownWrites = new OwnWriteTracker();

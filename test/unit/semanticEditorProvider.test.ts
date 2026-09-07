@@ -82,6 +82,7 @@ function buildProvider(root: string) {
     globalStorageUri: vscode.Uri.file(path.join(root, '.global-storage')),
     extension: { packageJSON: { version: '0.0.0-test' } },
     globalState: { get: () => true, update: async () => {} },
+    secrets: vscode.createMockSecretStorage(),
     subscriptions: [],
   } as unknown as import('vscode').ExtensionContext;
 
@@ -616,14 +617,15 @@ describe('message boundary (H21)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Bug reports — `reportBug` message and requestBugReportDialog()
+// Feedback — `submitFeedback` message and requestFeedbackDialog()
 // ---------------------------------------------------------------------------
 
 /** 1×1 transparent PNG. */
 const TINY_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
-const bugPayload = (overrides: Record<string, unknown> = {}) => ({
+const feedbackPayload = (overrides: Record<string, unknown> = {}) => ({
+  kind: 'bug' as const,
   title: 'Edge vanished after rename',
   description: 'Renamed dim_task and the FK edge disappeared.',
   includeDiagnostics: true,
@@ -631,12 +633,28 @@ const bugPayload = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-describe('bug reports (reportBug message)', () => {
+/** One attachment carrying the tiny PNG, as the dialog would send it. */
+const pngAttachment = (overrides: Record<string, unknown> = {}) => ({
+  id: '1-canvas-png',
+  name: 'canvas.png',
+  mime: 'image/png' as const,
+  bytes: 70,
+  dataUrl: TINY_PNG,
+  source: 'canvas' as const,
+  ...overrides,
+});
+
+const lastSubmitted = (panel: MockPanel) =>
+  posted(panel).filter((m) => m.type === 'feedbackSubmitted').at(-1)?.payload as
+    | { ok: boolean; commentedOn?: number; error?: string }
+    | undefined;
+
+describe('feedback (submitFeedback message)', () => {
   it('opens the prefilled GitHub issue for a valid payload', async () => {
     const { panel } = await openShowcase(root);
     const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
 
-    panel._simulateMessage({ type: 'reportBug', payload: bugPayload() });
+    panel._simulateMessage({ type: 'submitFeedback', payload: feedbackPayload() });
 
     await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
     const url = String(open.mock.calls[0][0]);
@@ -647,6 +665,7 @@ describe('bug reports (reportBug message)', () => {
     expect(decoded).toContain('description=Renamed dim_task and the FK edge disappeared.');
     expect(decoded).toContain('silver/showcase (stage=logical, schemaVersion=5)');
     expect(decoded).toContain('ERD Studio: 0.0.0-test');
+    await vi.waitFor(() => expect(lastSubmitted(panel)).toEqual({ ok: true }));
     expect(lastError(panel)).toBeUndefined();
   });
 
@@ -656,23 +675,26 @@ describe('bug reports (reportBug message)', () => {
     await waitForType(panel, 'stageData');
     const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
 
-    panel._simulateMessage({ type: 'reportBug', payload: bugPayload() });
+    panel._simulateMessage({ type: 'submitFeedback', payload: feedbackPayload() });
 
     await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
     expect(lastError(panel)).not.toBe(PHYSICAL_READ_ONLY_MESSAGE);
   });
 
-  it('ignores a malformed payload without opening anything or raising an error', async () => {
+  it('answers a malformed payload with feedbackSubmitted { ok: false }, never a bare error', async () => {
     const { panel } = await openShowcase(root);
     const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
 
-    await panel._simulateMessage({ type: 'reportBug', payload: { title: 'no description' } });
-    await panel._simulateMessage({ type: 'reportBug', payload: null });
-    await panel._simulateMessage({ type: 'reportBug' });
+    await panel._simulateMessage({ type: 'submitFeedback', payload: { title: 'no kind' } });
+    await panel._simulateMessage({ type: 'submitFeedback', payload: null });
+    await panel._simulateMessage({ type: 'submitFeedback' });
     await new Promise((r) => setTimeout(r, 20));
 
     expect(open).not.toHaveBeenCalled();
     expect(lastError(panel)).toBeUndefined();
+    expect(posted(panel).filter((m) => m.type === 'feedbackSubmitted')).toHaveLength(3);
+    expect(lastSubmitted(panel)?.ok).toBe(false);
+    expect(typeof lastSubmitted(panel)?.error).toBe('string');
   });
 
   it('tells the user when the browser could not be opened, including the link', async () => {
@@ -680,48 +702,48 @@ describe('bug reports (reportBug message)', () => {
     vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(false);
     const showError = vi.spyOn(vscode.window, 'showErrorMessage');
 
-    panel._simulateMessage({ type: 'reportBug', payload: bugPayload() });
+    panel._simulateMessage({ type: 'submitFeedback', payload: feedbackPayload() });
 
     await vi.waitFor(() =>
       expect(showError).toHaveBeenCalledWith(expect.stringMatching(/could not open the browser.*github\.com\/liam-machine\/erd-studio/)),
     );
+    await vi.waitFor(() => expect(lastSubmitted(panel)?.ok).toBe(false));
     expect(lastError(panel)).toBeUndefined();
   });
 
-  it('turns a thrown error into a notification and records it for later diagnostics', async () => {
+  it('turns a thrown error into a failed reply and records it for later diagnostics', async () => {
     const { panel } = await openShowcase(root);
     vi.spyOn(vscode.env, 'openExternal').mockRejectedValue(new Error('EPERM'));
-    const showError = vi.spyOn(vscode.window, 'showErrorMessage');
 
-    panel._simulateMessage({ type: 'reportBug', payload: bugPayload() });
+    panel._simulateMessage({ type: 'submitFeedback', payload: feedbackPayload() });
 
-    await vi.waitFor(() =>
-      expect(showError).toHaveBeenCalledWith(expect.stringContaining('could not open the bug report (EPERM)')),
-    );
-    expect(hostErrorLog.recent().at(-1)).toMatch(/\[reportBug\] EPERM$/);
+    await vi.waitFor(() => expect(lastSubmitted(panel)).toEqual({ ok: false, error: 'EPERM' }));
+    expect(hostErrorLog.recent().at(-1)).toMatch(/\[submitFeedback\] EPERM$/);
     expect(types(panel)).not.toContain('error');
   });
 
-  it('saves the screenshot under global storage and points the user at the clipboard', async () => {
+  it('saves the images under a per-report global-storage folder and offers to reveal it', async () => {
     const { panel } = await openShowcase(root);
     vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
 
     panel._simulateMessage({
-      type: 'reportBug',
-      payload: bugPayload({ screenshotDataUrl: TINY_PNG, screenshotOnClipboard: true }),
+      type: 'submitFeedback',
+      payload: feedbackPayload({ attachments: [pngAttachment({ onClipboard: true })] }),
     });
 
     await vi.waitFor(() =>
-      expect(info).toHaveBeenCalledWith(expect.stringContaining('on the clipboard'), 'Reveal Screenshot'),
+      expect(info).toHaveBeenCalledWith(expect.stringContaining('on your clipboard'), 'Reveal Folder'),
     );
-    const saved = fs.readdirSync(path.join(root, '.global-storage', 'bug-reports'));
-    expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatch(/^erd-studio-.*\.png$/);
+    const feedbackDir = path.join(root, '.global-storage', 'feedback');
+    const stamps = fs.readdirSync(feedbackDir);
+    expect(stamps).toHaveLength(1);
+    const saved = fs.readdirSync(path.join(feedbackDir, stamps[0]));
+    expect(saved).toEqual([`erd-studio-${stamps[0]}-01.png`]);
   });
 });
 
-describe('requestBugReportDialog', () => {
+describe('requestFeedbackDialog', () => {
   afterEach(() => {
     vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
   });
@@ -732,23 +754,26 @@ describe('requestBugReportDialog', () => {
       input: new vscode.TabInputCustom(doc.uri, DOMAIN_EDITOR_VIEW_TYPE),
     };
 
-    expect(provider.requestBugReportDialog({ title: 'From palette' })).toBe(true);
+    expect(provider.requestFeedbackDialog({ kind: 'bug', title: 'From palette' })).toBe(true);
 
     await vi.waitFor(() =>
-      expect(posted(panel).at(-1)).toEqual({ type: 'openBugReport', payload: { title: 'From palette' } }),
+      expect(posted(panel).at(-1)).toEqual({
+        type: 'openFeedback',
+        payload: { kind: 'bug', title: 'From palette' },
+      }),
     );
   });
 
-  it('returns false (so the caller falls back to input boxes) when no canvas of ours is focused', async () => {
+  it('returns false (so the caller falls back to the QuickPick flow) when no canvas of ours is focused', async () => {
     const { provider, panel } = await openShowcase(root);
     const before = posted(panel).length;
 
     vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
-    expect(provider.requestBugReportDialog()).toBe(false);
+    expect(provider.requestFeedbackDialog()).toBe(false);
 
     // A text editor tab (not a custom editor input)
     vscode.window.tabGroups.activeTabGroup.activeTab = { input: { uri: vscode.Uri.file('/elsewhere.json') } };
-    expect(provider.requestBugReportDialog()).toBe(false);
+    expect(provider.requestFeedbackDialog()).toBe(false);
 
     // One of our canvases, but for a document this provider has not opened
     vscode.window.tabGroups.activeTabGroup.activeTab = {
@@ -757,7 +782,7 @@ describe('requestBugReportDialog', () => {
         DOMAIN_EDITOR_VIEW_TYPE,
       ),
     };
-    expect(provider.requestBugReportDialog()).toBe(false);
+    expect(provider.requestFeedbackDialog()).toBe(false);
 
     expect(posted(panel).length).toBe(before);
   });

@@ -114,9 +114,25 @@
       },
       {
         "command": "erdStudio.reportBug",
-        "title": "Report a Bug",
+        "title": "Send Feedback",
         "category": "ERD Studio",
-        "icon": "$(bug)"
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "erdStudio.setFeedbackApiKey",
+        "title": "Set Feedback API Key",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.clearFeedbackApiKey",
+        "title": "Clear Feedback API Key",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.refreshMyReports",
+        "title": "Refresh My Reports",
+        "category": "ERD Studio",
+        "icon": "$(refresh)"
       }
     ],
     "viewsContainers": {
@@ -138,6 +154,11 @@
           "id": "erdStudio.modelLibrary",
           "name": "Model Library",
           "when": "erdStudio.hasLogicalModelsDir"
+        },
+        {
+          "id": "erdStudio.myReports",
+          "name": "My Reports",
+          "when": "erdStudio.hasTrackedReports"
         }
       ]
     },
@@ -261,6 +282,11 @@
           "command": "erdStudio.reportBug",
           "when": "view == erdStudio.domainTree",
           "group": "navigation@9"
+        },
+        {
+          "command": "erdStudio.refreshMyReports",
+          "when": "view == erdStudio.myReports",
+          "group": "navigation@0"
         }
       ]
     },
@@ -281,6 +307,29 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first."
+        },
+        "erdStudio.feedback.aiAssist": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Let the Feedback dialog make **one** request to a language model to draft a title, pick bug vs feature, and check for duplicate issues. Only what you typed is sent — diagnostics, file paths and model names never are. Off by default; you are asked to confirm the destination the first time."
+        },
+        "erdStudio.feedback.endpoint": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Base URL of an OpenAI-compatible chat-completions API for feedback analysis (e.g. `https://api.openai.com/v1`). Leave empty to use VS Code's built-in language model when one is available. The API key is stored in secret storage via **ERD Studio: Set Feedback API Key**, never in settings."
+        },
+        "erdStudio.feedback.model": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Model id sent to `#erdStudio.feedback.endpoint#`, e.g. `gpt-4o-mini`."
+        },
+        "erdStudio.feedback.trackReports": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show a **My Reports** view listing issues you filed from ERD Studio, refreshed from GitHub every few hours. Requires you to be signed in to GitHub in VS Code; the view is hidden otherwise and you are never prompted to sign in."
         },
         "dbtSemantic.projectPath": {
           "type": "string",

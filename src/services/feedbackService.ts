@@ -1,25 +1,39 @@
 /**
- * FeedbackService — "Report a Bug" support.
+ * FeedbackService — bug reports and feature requests.
  *
- * Builds a prefilled GitHub *issue form* URL (`.github/ISSUE_TEMPLATE/bug_report.yml`)
- * from the user's description plus automatically collected diagnostics, and
- * opens it in the browser. The user reviews everything on GitHub before
- * anything is submitted — nothing is sent from the extension itself, so no
- * GitHub token or scope is needed.
+ * Builds a prefilled GitHub *issue form* URL (`.github/ISSUE_TEMPLATE/bug_report.yml`
+ * or `feature_request.yml`, chosen by {@link FeedbackKind}) from the user's
+ * description plus automatically collected diagnostics, and opens it in the
+ * browser. The user reviews everything on GitHub before anything is submitted —
+ * nothing is sent from the extension itself, so no GitHub token or scope is
+ * needed. There is deliberately no "file it from here" path.
  *
- * Screenshots: GitHub has no API for attaching images to issues, so the
- * webview copies the captured canvas PNG to the clipboard (and we save a copy
- * under globalStorage as a fallback). The user pastes it into the issue with
- * one keystroke.
+ * Images: GitHub has no API for attaching images to issues, so the webview
+ * copies the first image to the clipboard and the host saves every image under
+ * `<globalStorage>/feedback/<stamp>/` so the rest can be dragged in. The
+ * notifications branch on `attachments[0].onClipboard` — the browser clipboard
+ * refuses anything but PNG, so "saved" and "on the clipboard" are not the same
+ * question.
  *
- * The pure helpers (`formatDiagnostics`, `buildIssueUrl`, `ErrorLog`) have no
- * VS Code dependency so they are unit-testable; the VS Code-facing functions
- * live at the bottom of the file.
+ * The pure helpers (`formatDiagnostics`, `buildIssueUrl`, `composeFeedbackFields`,
+ * `composeMarkdownReport`, `ErrorLog`) have no VS Code dependency so they are
+ * unit-testable; the VS Code-facing functions live at the bottom of the file.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+
+import {
+  applyRegressionPrefix,
+  FEEDBACK_MIME_EXTENSIONS,
+  type FeedbackAttachment,
+  type FeedbackDiagnosticsChip,
+  type FeedbackDiagnosticsView,
+  type FeedbackDraft,
+  type FeedbackImageMime,
+  type FeedbackKind,
+} from '../types/feedback';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -238,6 +252,186 @@ export function decodePngDataUrl(dataUrl: string): Buffer | null {
   }
 }
 
+/** Issue form template file name for feature requests. */
+export const FEATURE_REQUEST_TEMPLATE = 'feature_request.yml';
+
+/** Issue-form template file for a kind. */
+export function templateForKind(kind: FeedbackKind): string {
+  return kind === 'feature' ? FEATURE_REQUEST_TEMPLATE : BUG_REPORT_TEMPLATE;
+}
+
+/** Default issue title when the user left it blank. */
+export function defaultTitleForKind(kind: FeedbackKind): string {
+  return kind === 'feature' ? 'Feature request' : 'Bug report';
+}
+
+/** Issue-form field id the context field maps to. */
+export function contextFieldForKind(kind: FeedbackKind): 'steps' | 'rationale' {
+  return kind === 'feature' ? 'rationale' : 'steps';
+}
+
+/** Truncation order for buildIssueUrl, most expendable first. */
+export function truncationOrderForKind(kind: FeedbackKind): string[] {
+  return ['diagnostics', contextFieldForKind(kind), 'description'];
+}
+
+/** Heading the description sits under, matching the issue form's label. */
+const DESCRIPTION_HEADING: Readonly<Record<FeedbackKind, string>> = {
+  bug: 'What happened?',
+  feature: 'What would you like to be able to do?',
+};
+
+/** Heading the context field sits under, matching the issue form's label. */
+const CONTEXT_HEADING: Readonly<Record<FeedbackKind, string>> = {
+  bug: 'Steps to reproduce',
+  feature: 'Why do you want it?',
+};
+
+/** The title as it will be filed: trimmed, defaulted, and regression-prefixed. */
+function resolveFeedbackTitle(draft: FeedbackDraft): string {
+  const title = draft.title.trim() || defaultTitleForKind(draft.kind);
+  return draft.regressionOf != null ? applyRegressionPrefix(title) : title;
+}
+
+/**
+ * The `screenshot` field body for N attachments. Branches on whether the FIRST
+ * image actually made it onto the clipboard (the browser clipboard refuses
+ * anything but PNG), never on whether images were saved.
+ */
+function screenshotFieldText(attachments: readonly FeedbackAttachment[]): string {
+  const onClipboard = attachments[0]?.onClipboard === true;
+  if (attachments.length === 1) {
+    return onClipboard
+      ? 'A screenshot is on your clipboard — click here and press Ctrl+V / ⌘V to attach it.'
+      : 'Drag the saved screenshot file here to attach it.';
+  }
+  return onClipboard
+    ? `The first of ${attachments.length} images is on your clipboard — paste it here. The rest are saved to a folder you can reveal from the notification.`
+    : `All ${attachments.length} images are saved to a folder you can reveal from the notification — drag them here.`;
+}
+
+/**
+ * Compose the issue-form fields for a feedback draft. Delegates the shared part
+ * to {@link composeIssueFields} (a `FeedbackDraft` is a structural superset of a
+ * `BugReportDraft`), then applies what is kind-specific: the default title, the
+ * regression prefix, `steps` → `rationale` for a feature request, and the
+ * `screenshot` body for N attachments.
+ */
+export function composeFeedbackFields(
+  draft: FeedbackDraft,
+  diagnostics: Diagnostics | null,
+): Record<string, string> {
+  const base = composeIssueFields(draft, diagnostics);
+  const attachments = draft.attachments ?? [];
+
+  const fields: Record<string, string> = {
+    title: resolveFeedbackTitle(draft),
+    description: base.description,
+  };
+  if (base.steps) fields[contextFieldForKind(draft.kind)] = base.steps;
+
+  const screenshot = attachments.length > 0 ? screenshotFieldText(attachments) : base.screenshot;
+  if (screenshot) fields.screenshot = screenshot;
+
+  if (base.diagnostics) fields.diagnostics = base.diagnostics;
+  return fields;
+}
+
+/**
+ * The whole report as Markdown, for the "Copy report" button and for the
+ * comment posted on an existing thread. Sections with no content are omitted.
+ */
+export function composeMarkdownReport(
+  draft: FeedbackDraft,
+  diagnostics: Diagnostics | null,
+  options: { attachmentNames?: string[] } = {},
+): string {
+  const sections: string[] = [`# ${resolveFeedbackTitle(draft)}`];
+
+  if (diagnostics) {
+    sections.push(
+      `_${defaultTitleForKind(draft.kind)} · ERD Studio ${diagnostics.extensionVersion}_`,
+    );
+  }
+
+  const description = draft.description.trim();
+  if (description) {
+    sections.push(`## ${DESCRIPTION_HEADING[draft.kind]}`, description);
+  }
+
+  const context = draft.steps?.trim();
+  if (context) {
+    sections.push(`## ${CONTEXT_HEADING[draft.kind]}`, context);
+  }
+
+  const names = options.attachmentNames ?? (draft.attachments ?? []).map((a) => a.name);
+  if (names.length > 0) {
+    sections.push('## Attachments', names.map((name) => `- ${name}`).join('\n'));
+  }
+
+  if (diagnostics && draft.includeDiagnostics) {
+    sections.push('## Diagnostics', ['```', formatDiagnostics(diagnostics), '```'].join('\n'));
+  }
+
+  return sections.join('\n\n');
+}
+
+/**
+ * Diagnostics chips for the dialog. Deliberately coarser than
+ * {@link formatDiagnostics}: no file paths, and nothing about the project
+ * beyond the domain summary the user can already see on the canvas.
+ */
+export function buildDiagnosticsChips(d: Diagnostics): FeedbackDiagnosticsChip[] {
+  const chips: FeedbackDiagnosticsChip[] = [
+    { label: `ERD Studio ${d.extensionVersion}`, tone: 'normal' },
+    { label: `VS Code ${d.vscodeVersion}`, tone: 'normal' },
+    { label: `${d.platform} ${d.arch}`, tone: 'normal' },
+  ];
+  if (d.domain) {
+    chips.push({
+      label: `${d.domain.layer}/${d.domain.name} · ${d.domain.modelCount} models`,
+      tone: 'normal',
+    });
+  }
+  const errors = d.hostErrors.length + d.webviewErrors.length;
+  if (errors > 0) {
+    chips.push({ label: `${errors} recent error${errors === 1 ? '' : 's'}`, tone: 'error' });
+  }
+  return chips;
+}
+
+/** The dialog-facing view of diagnostics: chips plus the verbatim text. */
+export function buildDiagnosticsView(d: Diagnostics): FeedbackDiagnosticsView {
+  return { chips: buildDiagnosticsChips(d), text: formatDiagnostics(d) };
+}
+
+/**
+ * Decode any accepted image data URL. Unlike {@link decodePngDataUrl} (PNG-only,
+ * kept for the single-screenshot path) this accepts png/jpeg/gif/webp and
+ * returns the mime alongside the bytes. Null on a malformed or unaccepted URL.
+ */
+export function decodeImageDataUrl(
+  dataUrl: string,
+): { mime: FeedbackImageMime; bytes: Buffer } | null {
+  const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) return null;
+  try {
+    return { mime: match[1] as FeedbackImageMime, bytes: Buffer.from(match[2], 'base64') };
+  } catch {
+    return null;
+  }
+}
+
+/** File name for a saved attachment: `erd-studio-<stamp>-<index><ext>`. */
+export function attachmentFileName(
+  attachment: FeedbackAttachment,
+  index: number,
+  stamp: string,
+): string {
+  const extension = FEEDBACK_MIME_EXTENSIONS[attachment.mime] ?? '.png';
+  return `erd-studio-${stamp}-${String(index).padStart(2, '0')}${extension}`;
+}
+
 // ---------------------------------------------------------------------------
 // VS Code-facing helpers
 // ---------------------------------------------------------------------------
@@ -283,52 +477,164 @@ export async function saveScreenshot(
   }
 }
 
+/** Notification action that opens the saved-images folder in the OS file manager. */
+const REVEAL_FOLDER_ACTION = 'Reveal Folder';
+
 /**
- * Open the prefilled GitHub issue in the browser and tell the user what to do
- * about the screenshot (if any).
+ * Show a notification that optionally offers to reveal the saved-images folder.
+ *
+ * Callers must NOT await this. A notification carrying an action button is
+ * sticky, so the promise only settles when the user clicks or dismisses it —
+ * and the dialog stays disabled (Cancel, Escape and the backdrop included)
+ * until `submitFeedback` returns. It therefore swallows its own failures
+ * rather than becoming an unhandled rejection on the floor.
  */
-export async function submitBugReport(
+async function notifyWithReveal(message: string, folder: vscode.Uri | null): Promise<void> {
+  try {
+    const actions = folder ? [REVEAL_FOLDER_ACTION] : [];
+    const choice = await vscode.window.showInformationMessage(message, ...actions);
+    if (choice === REVEAL_FOLDER_ACTION && folder) {
+      await vscode.commands.executeCommand('revealFileInOS', folder);
+    }
+  } catch (err) {
+    hostErrorLog.record('notifyWithReveal', err);
+  }
+}
+
+/**
+ * Persist every attachment under `<globalStorage>/feedback/<stamp>/` — a folder
+ * per report, so two reports can never interleave their images. Returns the
+ * folder and the files written, or null when nothing decoded.
+ */
+export async function saveAttachments(
   context: vscode.ExtensionContext,
-  draft: BugReportDraft,
+  attachments: readonly FeedbackAttachment[],
+): Promise<{ folder: vscode.Uri; files: vscode.Uri[] } | null> {
+  if (attachments.length === 0) return null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const dir = path.join(context.globalStorageUri.fsPath, 'feedback', stamp);
+    const files: vscode.Uri[] = [];
+    attachments.forEach((attachment, index) => {
+      const decoded = decodeImageDataUrl(attachment.dataUrl);
+      if (!decoded) return;
+      if (files.length === 0) fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, attachmentFileName(attachment, index + 1, stamp));
+      fs.writeFileSync(file, decoded.bytes);
+      files.push(vscode.Uri.file(file));
+    });
+    if (files.length === 0) return null;
+    return { folder: vscode.Uri.file(dir), files };
+  } catch (err) {
+    hostErrorLog.record('saveAttachments', err);
+    return null;
+  }
+}
+
+/**
+ * The whole submit path: open the prefilled GitHub issue form (or, when
+ * `draft.commentOnIssue` is set, put the Markdown report on the clipboard and
+ * open that thread's comment box), save the images, and say what to do with
+ * them. Nothing is filed from here — the user presses Submit on GitHub.
+ *
+ * Never throws: failures are recorded on `hostErrorLog` and returned so the
+ * dialog can un-stick its primary button.
+ */
+export async function submitFeedback(
+  context: vscode.ExtensionContext,
+  draft: FeedbackDraft,
   domain?: Diagnostics['domain'],
+): Promise<{ ok: boolean; commentedOn?: number; error?: string }> {
+  try {
+    const diagnostics = draft.includeDiagnostics
+      ? collectDiagnostics(context, domain, draft.webviewErrors ?? [])
+      : null;
+    const attachments = draft.attachments ?? [];
+    const saved = await saveAttachments(context, attachments);
+    const folder = saved?.folder ?? null;
+    const commentOn = draft.commentOnIssue;
+
+    if (commentOn != null) {
+      await vscode.env.clipboard.writeText(composeMarkdownReport(draft, diagnostics));
+      const url = `https://github.com/${GITHUB_REPO}/issues/${commentOn}#issuecomment-new`;
+      const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
+      if (!opened) {
+        void vscode.window.showErrorMessage(
+          'ERD Studio: could not open the browser. Copy this link to file the issue: ' + url,
+        );
+        return { ok: false, error: 'Could not open the browser.' };
+      }
+      // Deliberately not awaited: a sticky notification would otherwise hold
+      // the dialog's busy state open until the user dismisses it.
+      void notifyWithReveal(
+        `ERD Studio: your report is on the clipboard — paste it as a comment on #${commentOn}.`,
+        folder,
+      );
+      return { ok: true, commentedOn: commentOn };
+    }
+
+    const url = buildIssueUrl(composeFeedbackFields(draft, diagnostics), {
+      template: templateForKind(draft.kind),
+      truncationOrder: truncationOrderForKind(draft.kind),
+    });
+    const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
+    if (!opened) {
+      void vscode.window.showErrorMessage(
+        'ERD Studio: could not open the browser. Copy this link to file the issue: ' + url,
+      );
+      return { ok: false, error: 'Could not open the browser.' };
+    }
+
+    if (attachments.length === 0) {
+      // The user asked for a screenshot but capture failed — say so rather than
+      // filing the report with a silently missing image.
+      if (draft.screenshotError) {
+        void vscode.window.showWarningMessage(
+          `ERD Studio: the screenshot could not be captured. ${draft.screenshotError}`,
+        );
+      }
+      return { ok: true };
+    }
+
+    const count = attachments.length;
+    const message = attachments[0].onClipboard
+      ? 'ERD Studio: the first image is on your clipboard — paste it into the "Screenshot" box on GitHub.'
+      : folder
+        ? `ERD Studio: ${count} image${count === 1 ? '' : 's'} saved to a folder — drag ${count === 1 ? 'it' : 'them'} into the issue.`
+        : 'ERD Studio: the images could not be copied to the clipboard. Drag them from the saved folder into the GitHub issue.';
+    void notifyWithReveal(message, folder);
+    return { ok: true };
+  } catch (err) {
+    hostErrorLog.record('submitFeedback', err);
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Write the whole report to the clipboard as Markdown. The escape hatch for
+ * anyone who would rather paste it into an email, a chat or their own tracker —
+ * it needs no network, no GitHub account and no model.
+ */
+export async function copyFeedbackReport(
+  context: vscode.ExtensionContext,
+  draft: FeedbackDraft,
+  domain?: Diagnostics['domain'],
+  attachmentNames?: string[],
 ): Promise<void> {
   const diagnostics = draft.includeDiagnostics
     ? collectDiagnostics(context, domain, draft.webviewErrors ?? [])
     : null;
+  await vscode.env.clipboard.writeText(
+    composeMarkdownReport(draft, diagnostics, { attachmentNames }),
+  );
+  void vscode.window.showInformationMessage('ERD Studio: the report is on your clipboard.');
+}
 
-  let screenshotUri: vscode.Uri | null = null;
-  if (draft.screenshotDataUrl) {
-    screenshotUri = await saveScreenshot(context, draft.screenshotDataUrl);
-  }
-
-  const url = buildIssueUrl(composeIssueFields(draft, diagnostics));
-  const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
-  if (!opened) {
-    void vscode.window.showErrorMessage(
-      'ERD Studio: could not open the browser. Copy this link to file the issue: ' + url,
-    );
-    return;
-  }
-
-  // The user asked for a screenshot but capture failed — say so rather than
-  // filing the report with a silently missing image.
-  if (!draft.screenshotDataUrl) {
-    if (draft.screenshotError) {
-      void vscode.window.showWarningMessage(
-        `ERD Studio: the screenshot could not be captured. ${draft.screenshotError}`,
-      );
-    }
-    return;
-  }
-
-  const actions = screenshotUri ? ['Reveal Screenshot'] : [];
-  const message = draft.screenshotOnClipboard
-    ? 'ERD Studio: your screenshot is on the clipboard — paste it into the "Screenshot" box on GitHub.'
-    : screenshotUri
-      ? 'ERD Studio: the screenshot could not be copied to the clipboard. Drag the saved file into the GitHub issue.'
-      : 'ERD Studio: the screenshot could not be captured. Take one with your OS screenshot tool and paste it into the issue.';
-  const choice = await vscode.window.showInformationMessage(message, ...actions);
-  if (choice === 'Reveal Screenshot' && screenshotUri) {
-    await vscode.commands.executeCommand('revealFileInOS', screenshotUri);
-  }
+/** Collect diagnostics and package them for the dialog (chips + exact text). */
+export function buildFeedbackContext(
+  context: vscode.ExtensionContext,
+  domain?: Diagnostics['domain'],
+  webviewErrors?: string[],
+): FeedbackDiagnosticsView {
+  return buildDiagnosticsView(collectDiagnostics(context, domain, webviewErrors ?? []));
 }

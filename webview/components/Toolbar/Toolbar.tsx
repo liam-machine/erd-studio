@@ -401,8 +401,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     vscode.postMessage(message);
   }, [vscode]);
 
-  const setBugReportDialogOpen = useEditorStore((s) => s.setBugReportDialogOpen);
-  const handleReportBug = useCallback(() => setBugReportDialogOpen(true), [setBugReportDialogOpen]);
+  const setFeedbackDialogOpen = useEditorStore((s) => s.setFeedbackDialogOpen);
+  const handleSendFeedback = useCallback(() => setFeedbackDialogOpen(true), [setFeedbackDialogOpen]);
 
   // --- Early return if no domain -------------------------------------------
 
@@ -823,11 +823,11 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       <Panel position="top-right" className="toolbar__corner">
         <button
           className="toolbar__view-file"
-          onClick={handleReportBug}
-          title="Report a bug on GitHub (prefilled with diagnostics)"
-          aria-label="Report a bug"
+          onClick={handleSendFeedback}
+          title="Send feedback"
+          aria-label="Send feedback"
         >
-          🐞 Report Bug
+          💬 Feedback
         </button>
         <button
           className="toolbar__view-file"

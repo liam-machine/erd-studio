@@ -87,6 +87,7 @@ function buildProvider(root: string) {
   const context = {
     extensionUri: vscode.Uri.file(REPO_ROOT),
     globalState: { get: () => true, update: async () => {} },
+    secrets: vscode.createMockSecretStorage(),
     subscriptions: [],
   } as unknown as import('vscode').ExtensionContext;
 

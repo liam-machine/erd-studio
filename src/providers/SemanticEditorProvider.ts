@@ -14,10 +14,14 @@
  *                         canvas metadata (updatePositions, *Annotation*),
  *                         sync flow (toggleDiscrepancy, generateSyncPlan,
  *                         runDbtCompile, launchClaudeSync),
- *                         viewFile, requestReload, dismissWelcome, reportBug
+ *                         feedback (requestFeedbackContext, analyzeFeedback,
+ *                         submitFeedback, copyFeedbackReport,
+ *                         openFeedbackLink),
+ *                         viewFile, requestReload, dismissWelcome
  *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
  *                         requestId), discrepancyReport, manifestStaleness,
- *                         syncPlanGenerated, openBugReport, error
+ *                         syncPlanGenerated, openFeedback, feedbackContext,
+ *                         feedbackAnalysis, feedbackSubmitted, error
  *
  * Writes and save semantics:
  *   Every domain-file write goes through `applyDomainEdit` — the ONLY place a
@@ -33,9 +37,11 @@
  *   - Payloads are validated at the boundary (providers/payloadValidation.ts)
  *     before anything reaches disk.
  *   - While a panel shows the physical stage only NON_MUTATION_TYPES (see
- *     resolveCustomTextEditor) are accepted — positions, annotations and the
- *     sync-plan flow write to the shared viewConfig and are allowed; schema
- *     mutations and undo/redo are answered with PHYSICAL_READ_ONLY_MESSAGE.
+ *     resolveCustomTextEditor) are accepted — positions, annotations, the
+ *     sync-plan flow and every feedback message are allowed (the first two
+ *     write only to the shared viewConfig, feedback writes nothing at all);
+ *     schema mutations and undo/redo are answered with
+ *     PHYSICAL_READ_ONLY_MESSAGE.
  *   - `withMessageErrorBoundary` turns a throwing/rejecting handler into an
  *     `error` message instead of an unhandled rejection.
  *   - Refresh paths (watchers, external edits, stage switches) never write;
@@ -63,9 +69,29 @@ import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
-import { hostErrorLog, submitBugReport } from '../services/feedbackService';
+import {
+  GITHUB_REPO,
+  buildFeedbackContext,
+  copyFeedbackReport,
+  hostErrorLog,
+  submitFeedback,
+} from '../services/feedbackService';
+import {
+  analysisProviderLabel,
+  analyzeFeedback,
+  resolveAnalysisTier,
+} from '../services/feedbackAnalysisService';
+import type { ReportTrackingService } from '../services/reportTrackingService';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
-import type { ReportBugMessage, OpenBugReportMessage, RelationshipKey } from '../types/messages';
+import type {
+  AnalyzeFeedbackMessage,
+  CopyFeedbackReportMessage,
+  OpenFeedbackLinkMessage,
+  OpenFeedbackMessage,
+  RelationshipKey,
+  RequestFeedbackContextMessage,
+  SubmitFeedbackMessage,
+} from '../types/messages';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
@@ -171,6 +197,11 @@ import {
   validateModelNameSafety,
   validatePoint,
   validatePositions,
+  validateAnalyzeFeedbackPayload,
+  validateCopyFeedbackReportPayload,
+  validateOpenFeedbackLinkPayload,
+  validateRequestFeedbackContextPayload,
+  validateSubmitFeedbackPayload,
   type AnnotationPositionPayload,
 } from './payloadValidation';
 
@@ -211,6 +242,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** @see _onDidWriteDomain */
   readonly onDidWriteDomain = this._onDidWriteDomain.event;
+
+  /**
+   * Report tracking, injected after construction so the five existing
+   * constructor call sites stay untouched. Undefined until `activate()` has
+   * built the service (and always undefined with no dbt project), so every use
+   * must null-check.
+   */
+  private reportTracking: ReportTrackingService | undefined;
+
+  /** @see reportTracking */
+  setReportTracking(tracking: ReportTrackingService | undefined): void {
+    this.reportTracking = tracking;
+  }
 
   /**
    * Serialization queue for document mutations. Ensures concurrent messages
@@ -417,18 +461,67 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * If the active editor tab is one of our canvases, ask its webview to open
-   * the "Report a Bug" dialog (so the report can include a screenshot and
-   * canvas context). Returns false when no canvas is active so the caller
-   * can fall back to a canvas-less flow.
+   * Build and post the Feedback dialog's `feedbackContext` reply: the
+   * diagnostics view (chips plus the verbatim `formatDiagnostics()` text) and a
+   * capability snapshot.
+   *
+   * The GitHub session is read **silently** — the handle is only ever used to
+   * label the auth pill and to track filed issues, and nobody is nagged to sign
+   * in. `resolveAnalysisTier` / `analysisProviderLabel` decide whether the AI
+   * panel renders at all; both answer "none" unless `feedback.aiAssist` is on.
    */
-  requestBugReportDialog(prefill?: OpenBugReportMessage['payload']): boolean {
+  private async sendFeedbackContext(
+    webview: vscode.Webview,
+    payload: RequestFeedbackContextMessage['payload'],
+  ): Promise<void> {
+    const diagnostics = buildFeedbackContext(
+      this.context,
+      payload.domain,
+      payload.webviewErrors ?? [],
+    );
+    const tier = await resolveAnalysisTier(this.context);
+    // The handle is decoration: it labels the auth pill and helps the tracker
+    // reconcile. A host with no GitHub authentication provider registered
+    // rejects here, and losing the diagnostics disclosure and the screenshot
+    // checkbox over that would be absurd — so this one call is guarded and the
+    // rest of the payload is posted regardless.
+    let githubHandle: string | null = null;
+    try {
+      const session = await vscode.authentication.getSession('github', ['read:user'], {
+        silent: true,
+      });
+      githubHandle = session?.account?.label ?? null;
+    } catch (err) {
+      hostErrorLog.record('sendFeedbackContext.getSession', err);
+    }
+    this.post(webview, {
+      type: 'feedbackContext',
+      payload: {
+        diagnostics,
+        capabilities: {
+          extensionVersion: String(this.context.extension.packageJSON.version ?? 'unknown'),
+          aiAvailable: tier !== 'none',
+          aiProviderLabel: tier === 'none' ? null : await analysisProviderLabel(this.context),
+          githubHandle,
+          canCaptureCanvas: true,
+        },
+      },
+    });
+  }
+
+  /**
+   * If the active editor tab is one of our canvases, ask its webview to open
+   * the Feedback dialog (so the report can include screenshots, diagnostics
+   * chips and the optional analysis). Returns false when no canvas is active
+   * so the caller can fall back to the canvas-less QuickPick flow.
+   */
+  requestFeedbackDialog(prefill?: OpenFeedbackMessage['payload']): boolean {
     const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
     if (!(input instanceof vscode.TabInputCustom)) return false;
     const panel = this.openPanels.get(input.uri.toString());
     if (!panel) return false;
-    const msg: OpenBugReportMessage = { type: 'openBugReport', payload: prefill };
-    void panel.webview.postMessage(msg);
+    const msg: OpenFeedbackMessage = { type: 'openFeedback', payload: prefill };
+    this.post(panel.webview, msg);
     return true;
   }
 
@@ -471,7 +564,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'refreshManifest', 'dismissWelcome',
           'viewFile', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'removeAnnotations',
-          'requestReload', 'reportBug',
+          'requestReload',
+          'requestFeedbackContext', 'analyzeFeedback', 'submitFeedback',
+          'copyFeedbackReport', 'openFeedbackLink',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -660,17 +755,164 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
             break;
           }
-          case 'reportBug': {
-            const payload = (message as ReportBugMessage).payload;
-            if (payload && typeof payload.title === 'string' && typeof payload.description === 'string') {
-              try {
-                await submitBugReport(this.context, payload, payload.domain);
-              } catch (err) {
-                hostErrorLog.record('reportBug', err);
-                void vscode.window.showErrorMessage(
-                  `ERD Studio: could not open the bug report (${err instanceof Error ? err.message : String(err)}).`,
-                );
+          // --- Feedback dialog -------------------------------------------
+          // None of these writes a domain file, so all six are allowlisted in
+          // NON_MUTATION_TYPES above. `submitFeedback` reports a rejected
+          // payload as `feedbackSubmitted { ok: false }` rather than a bare
+          // `error`, because the dialog sits over the toast and only clears its
+          // busy flag on that reply; the rest take the generic error path.
+          case 'requestFeedbackContext': {
+            const payload = (message as RequestFeedbackContextMessage).payload;
+            const validationError = validateRequestFeedbackContextPayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: `Failed to load feedback context: ${validationError}` },
+              });
+              break;
+            }
+            try {
+              await this.sendFeedbackContext(webviewPanel.webview, payload);
+            } catch (err) {
+              hostErrorLog.record('requestFeedbackContext', err);
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: {
+                  message: `Failed to load feedback context: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              });
+            }
+            break;
+          }
+          case 'analyzeFeedback': {
+            const payload = (message as AnalyzeFeedbackMessage).payload;
+            const validationError = validateAnalyzeFeedbackPayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: `Failed to analyse feedback: ${validationError}` },
+              });
+              break;
+            }
+            try {
+              const result = await analyzeFeedback(this.context, {
+                kind: payload.kind,
+                description: payload.description,
+                context: payload.context,
+              });
+              this.post(webviewPanel.webview, {
+                type: 'feedbackAnalysis',
+                payload: { requestId: payload.requestId, ...result },
+              });
+            } catch (err) {
+              // analyzeFeedback is documented not to throw; if it ever does,
+              // the dialog still needs a reply or its panel spins forever.
+              hostErrorLog.record('analyzeFeedback', err);
+              this.post(webviewPanel.webview, {
+                type: 'feedbackAnalysis',
+                payload: {
+                  requestId: payload.requestId,
+                  analysis: null,
+                  error: 'The analysis could not be completed.',
+                },
+              });
+            }
+            break;
+          }
+          case 'submitFeedback': {
+            const payload = (message as SubmitFeedbackMessage).payload;
+            const validationError = validateSubmitFeedbackPayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'feedbackSubmitted',
+                payload: { ok: false, error: validationError },
+              });
+              break;
+            }
+            try {
+              const result = await submitFeedback(this.context, payload, payload.domain);
+              // The issue is filed in the user's own browser, so all we can
+              // record is that a form was opened; the tracker reconciles it
+              // against GitHub later. A comment on an existing thread files
+              // nothing new and is deliberately not tracked.
+              if (result.ok && result.commentedOn === undefined) {
+                // Tracking is a convenience on top of a submission that has
+                // already happened — a failed globalState write must never be
+                // reported back as a failed report.
+                try {
+                  await this.reportTracking?.recordPending(payload.title, payload.kind);
+                } catch (err) {
+                  hostErrorLog.record('submitFeedback.recordPending', err);
+                }
               }
+              this.post(webviewPanel.webview, { type: 'feedbackSubmitted', payload: result });
+            } catch (err) {
+              hostErrorLog.record('submitFeedback', err);
+              this.post(webviewPanel.webview, {
+                type: 'feedbackSubmitted',
+                payload: { ok: false, error: err instanceof Error ? err.message : String(err) },
+              });
+            }
+            break;
+          }
+          case 'copyFeedbackReport': {
+            const payload = (message as CopyFeedbackReportMessage).payload;
+            const validationError = validateCopyFeedbackReportPayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: `Failed to copy the report: ${validationError}` },
+              });
+              break;
+            }
+            try {
+              await copyFeedbackReport(
+                this.context,
+                payload,
+                payload.domain,
+                payload.attachmentNames,
+              );
+            } catch (err) {
+              hostErrorLog.record('copyFeedbackReport', err);
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: {
+                  message: `Failed to copy the report: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              });
+            }
+            break;
+          }
+          case 'openFeedbackLink': {
+            const payload = (message as OpenFeedbackLinkMessage).payload;
+            const validationError = validateOpenFeedbackLinkPayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: `Failed to open the link: ${validationError}` },
+              });
+              break;
+            }
+            try {
+              if (payload.target === 'extension') {
+                await vscode.commands.executeCommand(
+                  'workbench.extensions.search',
+                  '@id:liamwynne.erd-studio',
+                );
+                break;
+              }
+              const anchor = payload.comment ? '#issuecomment-new' : '';
+              await vscode.env.openExternal(
+                vscode.Uri.parse(`https://github.com/${GITHUB_REPO}/issues/${payload.issue}${anchor}`),
+              );
+            } catch (err) {
+              hostErrorLog.record('openFeedbackLink', err);
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: {
+                  message: `Failed to open the link: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              });
             }
             break;
           }

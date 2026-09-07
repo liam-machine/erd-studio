@@ -1,0 +1,39 @@
+name: Feature request
+description: Something you'd like ERD Studio to be able to do
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. If you opened this page from the extension
+        (**ERD Studio: Send Feedback**), most fields are already filled in —
+        just check them, paste your screenshot if you took one, and press **Submit**.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What would you like to be able to do?
+      description: Describe the thing you want, not the implementation.
+      placeholder: I'd like to export the canvas as an SVG so I can drop it into a design doc…
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why do you want it?
+      placeholder: Today I work around this by…
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Optional. Click into this box and paste (Ctrl+V / ⌘V), or drag an image file here.
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Collected automatically by the extension (versions, OS, domain summary, recent errors). Remove anything you would rather not share.
+      render: shell

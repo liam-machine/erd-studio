@@ -1,5 +1,5 @@
 /**
- * Canvas screenshot capture for bug reports.
+ * Canvas screenshot capture for feedback reports.
  *
  * Uses `html-to-image` to rasterise the webview DOM (React Flow canvas,
  * toolbar, panels) into a PNG, then tries to put it on the system clipboard
@@ -20,8 +20,11 @@
 
 import { toBlob } from 'html-to-image';
 
-/** Refuse to ship absurdly large PNGs through postMessage. */
-const MAX_PNG_BYTES = 12 * 1024 * 1024;
+/**
+ * Refuse to ship absurdly large PNGs through postMessage. Exported so the
+ * attachment helpers can apply the same ceiling to a captured canvas.
+ */
+export const MAX_PNG_BYTES = 12 * 1024 * 1024;
 
 /** How long to wait for the rasteriser before giving up on the screenshot. */
 export const CAPTURE_TIMEOUT_MS = 15_000;
@@ -60,15 +63,29 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-/** Attempt to copy a PNG blob to the clipboard. Never throws. */
-export async function copyPngToClipboard(blob: Blob): Promise<boolean> {
+/**
+ * Attempt to copy an image blob to the clipboard under `mime`. Never throws.
+ *
+ * Browsers only guarantee `image/png` on the async clipboard — a JPEG, GIF or
+ * WebP write is refused with a `NotAllowedError`. That is a normal outcome
+ * here, not a failure: the caller falls back to telling the user to drag the
+ * saved file into the issue, so every refusal comes back as `false`.
+ */
+export async function copyImageToClipboard(blob: Blob, mime: string): Promise<boolean> {
   try {
     if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) return false;
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    const supports = (ClipboardItem as unknown as { supports?: (type: string) => boolean }).supports;
+    if (typeof supports === 'function' && !supports(mime)) return false;
+    await navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]);
     return true;
   } catch {
     return false;
   }
+}
+
+/** Attempt to copy a PNG blob to the clipboard. Never throws. */
+export async function copyPngToClipboard(blob: Blob): Promise<boolean> {
+  return copyImageToClipboard(blob, 'image/png');
 }
 
 /**

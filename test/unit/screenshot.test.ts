@@ -4,13 +4,13 @@
  * The rasteriser (`html-to-image`) resolves inside a `requestAnimationFrame`
  * callback, which the browser stops firing while the document is hidden — so a
  * capture started just before the user switches VS Code tabs never settles.
- * `withTimeout` is what stops the Report a Bug dialog hanging on "Preparing…"
- * forever in that case.
+ * `withTimeout` is what stops the Feedback dialog hanging on "Capturing the
+ * canvas…" forever in that case.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 
-import { withTimeout, CAPTURE_TIMEOUT_MS } from '../../webview/lib/screenshot';
+import { withTimeout, CAPTURE_TIMEOUT_MS, MAX_PNG_BYTES } from '../../webview/lib/screenshot';
 
 describe('screenshot capture guards', () => {
   describe('withTimeout', () => {
@@ -53,5 +53,11 @@ describe('screenshot capture guards', () => {
       expect(CAPTURE_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
       expect(CAPTURE_TIMEOUT_MS).toBeLessThanOrEqual(60_000);
     });
+  });
+
+  // The attachment helpers apply the same ceiling to a captured canvas, so the
+  // constant has to be exported rather than module-private.
+  it('exports the PNG ceiling the attachment helpers reuse', () => {
+    expect(MAX_PNG_BYTES).toBe(12 * 1024 * 1024);
   });
 });

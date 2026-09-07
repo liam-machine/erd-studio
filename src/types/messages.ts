@@ -2,11 +2,15 @@
  * Message protocol types for extension ↔ webview communication.
  *
  * Messages are categorised by direction:
- *   Extension → Webview:  domainLoaded, stageData, discrepancyReport, error
+ *   Extension → Webview:  domainLoaded, stageData, discrepancyReport, error,
+ *                         openFeedback, feedbackContext, feedbackAnalysis,
+ *                         feedbackSubmitted
  *   Webview → Extension:  ready, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel, updatePositions, switchStage,
- *                         toggleDiscrepancy
+ *                         toggleDiscrepancy, requestFeedbackContext,
+ *                         analyzeFeedback, submitFeedback, copyFeedbackReport,
+ *                         openFeedbackLink
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -14,12 +18,24 @@
  * Every message type in the `WebviewMessage` union has a `case` in
  * `SemanticEditorProvider`, and every `ExtensionMessage` type is posted by the
  * host — do not add a type without wiring both ends.
+ *
+ * The physical stage is read-only: every webview → extension type that does not
+ * write a domain file is listed in `NON_MUTATION_TYPES` in
+ * `SemanticEditorProvider`. The six feedback types above all belong there —
+ * filing feedback is never a domain mutation.
  */
 
 import type { DisplayDomain } from './display';
 import type { DiscrepancyReport } from './discrepancy';
 import type { AnnotationColor, Rationale, Cardinality, ColumnDef, DesignModel, ModelRole, Stage } from './semantic';
 import type { GroundTruth } from './syncPlan';
+import type {
+  FeedbackAnalysis,
+  FeedbackAttachment,
+  FeedbackCapabilities,
+  FeedbackDiagnosticsView,
+  FeedbackKind,
+} from './feedback';
 
 // ---------------------------------------------------------------------------
 // Extension → Webview messages
@@ -95,21 +111,66 @@ export interface SyncPlanGeneratedMessage {
 }
 
 /**
- * Ask the webview to open the "Report a Bug" dialog (triggered from the
- * command palette / sidebar while a canvas is active). Optional prefill lets
- * error notifications seed the description.
+ * Ask the webview to open the Feedback dialog (command palette / sidebar /
+ * error notification while a canvas is active). Optional prefill seeds the
+ * kind and the two text fields.
  */
-export interface OpenBugReportMessage {
-  type: 'openBugReport';
+export interface OpenFeedbackMessage {
+  type: 'openFeedback';
   payload?: {
+    kind?: FeedbackKind;
     title?: string;
     description?: string;
   };
 }
 
+/**
+ * Push the diagnostics view and capability snapshot into the open dialog.
+ * Sent in reply to `requestFeedbackContext`, and again after a sign-in.
+ */
+export interface FeedbackContextMessage {
+  type: 'feedbackContext';
+  payload: {
+    diagnostics: FeedbackDiagnosticsView;
+    capabilities: FeedbackCapabilities;
+  };
+}
+
+/**
+ * Result of one AI analysis. `requestId` echoes `analyzeFeedback` so the
+ * dialog can drop stale replies. `analysis` is null when the call failed or
+ * no tier is configured; `error` is a short human sentence when it failed.
+ */
+export interface FeedbackAnalysisMessage {
+  type: 'feedbackAnalysis';
+  payload: {
+    requestId: number;
+    analysis: FeedbackAnalysis | null;
+    error?: string;
+  };
+}
+
+/**
+ * Outcome of `submitFeedback`. The dialog stays open and re-enables its
+ * primary button when `ok` is false — including when the host rejected the
+ * payload, which is reported here rather than as a bare `error` message.
+ */
+export interface FeedbackSubmittedMessage {
+  type: 'feedbackSubmitted';
+  payload: {
+    ok: boolean;
+    /** Issue number when the flow commented on an existing thread. */
+    commentedOn?: number;
+    error?: string;
+  };
+}
+
 /** Union of all messages the extension can send to the webview. */
 export type ExtensionMessage =
-  | OpenBugReportMessage
+  | OpenFeedbackMessage
+  | FeedbackContextMessage
+  | FeedbackAnalysisMessage
+  | FeedbackSubmittedMessage
   | DomainLoadedMessage
   | StageDataMessage
   | DiscrepancyReportMessage
@@ -466,34 +527,105 @@ export interface ViewFileMessage {
 }
 
 /**
- * Submit a bug report. The extension opens a prefilled GitHub issue form in
- * the browser; nothing is sent from the extension itself. The optional
- * screenshot is a PNG data URL captured from the canvas by the webview.
+ * Summary of the domain shown on the canvas, carried on the feedback messages
+ * so the host can build diagnostics without re-reading the document.
  */
-export interface ReportBugMessage {
-  type: 'reportBug';
+export interface FeedbackDomainSummary {
+  name: string;
+  layer: string;
+  stage: string;
+  modelCount: number;
+  relationshipCount: number;
+  schemaVersion?: number;
+}
+
+/**
+ * Ask the host for the diagnostics view and capability snapshot. Sent by the
+ * dialog on open; the host replies with `feedbackContext`.
+ */
+export interface RequestFeedbackContextMessage {
+  type: 'requestFeedbackContext';
   payload: {
+    /** Recent errors the webview observed (oldest → newest). */
+    webviewErrors?: string[];
+    /** Summary of the domain shown on the canvas, for the diagnostics chips. */
+    domain?: FeedbackDomainSummary;
+  };
+}
+
+/**
+ * Run one AI analysis. Only the description and the context field are sent —
+ * diagnostics never reach the model.
+ */
+export interface AnalyzeFeedbackMessage {
+  type: 'analyzeFeedback';
+  payload: {
+    /** Monotonic per-panel id; echoed on `feedbackAnalysis`. */
+    requestId: number;
+    kind: FeedbackKind;
+    description: string;
+    context?: string;
+  };
+}
+
+/**
+ * Submit the report. The host opens the prefilled GitHub issue form (or the
+ * existing thread, when `commentOnIssue` is set), handles the images, and
+ * replies with `feedbackSubmitted`.
+ */
+export interface SubmitFeedbackMessage {
+  type: 'submitFeedback';
+  payload: {
+    kind: FeedbackKind;
+    title: string;
+    description: string;
+    /** Steps to reproduce (bug) or rationale (feature). */
+    steps?: string;
+    includeDiagnostics: boolean;
+    attachments?: FeedbackAttachment[];
+    /** Why the canvas capture failed, when the user asked for one. */
+    screenshotError?: string;
+    /** Recent errors the webview observed (oldest → newest). */
+    webviewErrors?: string[];
+    regressionOf?: number;
+    commentOnIssue?: number;
+    /** Summary of the domain shown on the canvas, for diagnostics. */
+    domain?: FeedbackDomainSummary;
+  };
+}
+
+/**
+ * Copy the whole report to the clipboard as Markdown. Written by the host with
+ * `vscode.env.clipboard.writeText` so it works without a secure-context
+ * clipboard permission in the webview.
+ */
+export interface CopyFeedbackReportMessage {
+  type: 'copyFeedbackReport';
+  payload: {
+    kind: FeedbackKind;
     title: string;
     description: string;
     steps?: string;
     includeDiagnostics: boolean;
-    screenshotDataUrl?: string;
-    /** True when the webview successfully wrote the PNG to the clipboard. */
-    screenshotOnClipboard?: boolean;
-    /** Why the screenshot could not be captured, when the user asked for one. */
-    screenshotError?: string;
-    /** Recent errors the webview observed (oldest → newest). */
+    attachmentNames?: string[];
     webviewErrors?: string[];
-    /** Summary of the domain shown on the canvas, for diagnostics. */
-    domain?: {
-      name: string;
-      layer: string;
-      stage: string;
-      modelCount: number;
-      relationshipCount: number;
-      schemaVersion?: number;
-    };
+    domain?: FeedbackDomainSummary;
   };
+}
+
+/**
+ * Open something outside the canvas on the user's behalf: a GitHub issue, or the
+ * Extensions view so they can update. Never files anything.
+ *
+ * With `comment: true` the host puts the description on the clipboard first and
+ * opens the issue's new-comment anchor, so the user pastes into an existing
+ * thread instead of filing a second one.
+ */
+export interface OpenFeedbackLinkMessage {
+  type: 'openFeedbackLink';
+  payload:
+    | { target: 'issue'; issue: number; comment?: boolean }
+    | { target: 'extension' };
 }
 
 /**
@@ -624,7 +756,11 @@ export type WebviewMessage =
   | ToggleDiscrepancyMessage
   | ReorderColumnsMessage
   | ViewFileMessage
-  | ReportBugMessage
+  | RequestFeedbackContextMessage
+  | AnalyzeFeedbackMessage
+  | SubmitFeedbackMessage
+  | CopyFeedbackReportMessage
+  | OpenFeedbackLinkMessage
   | RequestReloadMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage

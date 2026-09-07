@@ -5,6 +5,32 @@ All notable changes to the ERD Studio extension.
 The `Unreleased` heading below is renamed to the released version by the deploy workflow
 (`scripts/release.mjs changelog`). Add user-facing notes under it as part of each PR.
 
+## Unreleased
+
+### Added
+
+- **Send Feedback replaces Report a Bug.** One dialog now files both bugs and feature requests: pick which on the way in (or flip it later), and the labels, placeholders and GitHub issue template follow. `ERD Studio: Send Feedback` is on the command palette, the sidebar title bar, the canvas toolbar and the canvas error screen; without a canvas open it asks which kind you are filing before the title and description.
+- **Several screenshots per report.** Attach up to four images (PNG, JPEG, GIF or WebP, 10 MB each) by choosing files, dragging them onto the dialog, or pasting from the clipboard — plus the one-click canvas capture, which is still there for bugs. The first image goes on your clipboard to paste into the issue; the rest are written to a folder the notification can reveal.
+- **Diagnostics you can see before you send them.** Versions, OS, the domain summary and the recent-error count are shown as chips with the exact text one click away, and a **remove** toggle if you would rather not share them. They are attached by default and are never sent anywhere until you press Submit on GitHub.
+- **Copy report.** Copies the whole report — title, kind, description, steps or rationale, attachment names and diagnostics — as Markdown, so it can go into an email, a chat or your own tracker instead. Works with no network, no GitHub account and no model.
+- **Optional AI assist, off by default.** With `erdStudio.feedback.aiAssist` on, the dialog makes a single request that drafts a title, picks bug vs feature, pulls the steps out of your description and checks whether the issue has already been reported. Only what you typed is sent — diagnostics, file paths and model names never are — and you confirm the destination the first time. A strong match takes the dialog over and offers to add your details to the existing thread (or, when it was already fixed in a newer version, tells you to update instead of filing). Every suggestion lands in an editable field; nothing is decided for you, and a model outage never blocks a report.
+- **AI assist settings and commands** — `erdStudio.feedback.aiAssist`, `erdStudio.feedback.endpoint` and `erdStudio.feedback.model`, with **ERD Studio: Set Feedback API Key** / **Clear Feedback API Key** storing the key in VS Code's secret storage, never in `settings.json`. With no endpoint configured the dialog uses VS Code's built-in language model where one is available, and simply hides the panel where one is not.
+- **My Reports.** When you are signed in to GitHub in VS Code, a sidebar view lists the issues you filed from ERD Studio and their state — open with the comment count, implemented (with the version it shipped in, when that is known), or closed as not planned — refreshed every few hours, and one notification when something you reported ships. It is hidden entirely when you are not signed in; you are never prompted to sign in, and you can turn the whole thing off with `erdStudio.feedback.trackReports`.
+
+### Security
+
+- **The feedback endpoint can only be set in your own settings.** `erdStudio.feedback.aiAssist`, `.endpoint` and `.model` are now machine-scoped and read only from your user settings, so a repository you open cannot redirect the analysis request — and the API key stored in VS Code's secret storage that goes with it — to a server of its author's choosing. The endpoint must be `https`, or `http` on localhost for a local model server. Consent is now remembered per destination, so changing the endpoint asks again rather than inheriting an answer given about a different host.
+
+### Fixed
+
+- **A feature request can be filed with the AI assist off.** The "Not right? Make it a feature/bug" switch now sits in the dialog header, so it is there in the default configuration where the analysis panel — which used to hold the only copy of it — never renders. Flipping to a feature request also drops the canvas screenshot, whose checkbox is bug-only.
+- **"It still happens on my version" is no longer filed as a regression.** Clicking it from the *this is already fixed, you're on an older version* panel filed the report titled "Regression: …", against a fix the user had never received.
+- **A closed issue with no recorded fix version no longer claims you already have the fix.** GitHub only tells us which release carried a fix when the issue has a milestone or a `shipped-in:` label. Without one the dialog now says so and offers **File it anyway**, instead of asserting a regression it cannot verify.
+- **A regression claim can no longer attach itself to the wrong issue.** Choosing "report it as a regression" and then rewriting the description left `regressionOf` — and the "Regression: " title prefix — pointing at a duplicate that was no longer on screen.
+- **A slow analysis reply can no longer take over a form you have cleared.** Deleting your description below the minimum length, or closing and reopening the dialog, now discards the reply that was still in flight.
+- **The dialog no longer freezes behind a notification.** Submitting waited for the "images saved — reveal folder" notification to be dismissed before re-enabling anything, so Cancel, Escape, the backdrop and the close button were all dead until you noticed the toast.
+- **The Feedback dialog still works where GitHub sign-in is unavailable.** A host with no GitHub authentication provider made the whole context request fail, taking the diagnostics disclosure and the canvas-screenshot checkbox with it; only the (decorative) handle is lost now.
+
 ## 0.6.48 — 2026-09-07
 
 ### Fixed
