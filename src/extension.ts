@@ -1129,32 +1129,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       'erdStudio.initializeLayerConfig',
       async () => {
-        const detected = layerService.detectLayersFromFilesystem();
-        if (detected.length === 0) {
-          const defaultLayers = layerService.getAllLayers();
-          await layerService.saveConfig(defaultLayers);
-          void vscode.window.showInformationMessage('Layer configuration saved with default layers (Silver, Gold).');
-          return;
-        }
+        // saveConfig refuses to overwrite an unreadable layers.json (H18) —
+        // surface that as a message rather than an unhandled command failure.
+        try {
+          const detected = layerService.detectLayersFromFilesystem();
+          if (detected.length === 0) {
+            const defaultLayers = layerService.getAllLayers();
+            await layerService.saveConfig(defaultLayers);
+            refreshContextKeys();
+            void vscode.window.showInformationMessage('Layer configuration saved with default layers (Silver, Gold).');
+            return;
+          }
 
-        const layerNames = detected.map(l => l.label).join(', ');
-        const choice = await vscode.window.showInformationMessage(
-          `Detected layers: ${layerNames}. Save this configuration?`,
-          'Save', 'Customize', 'Cancel',
-        );
+          const layerNames = detected.map(l => l.label).join(', ');
+          const choice = await vscode.window.showInformationMessage(
+            `Detected layers: ${layerNames}. Save this configuration?`,
+            'Save', 'Customize', 'Cancel',
+          );
 
-        if (choice === 'Save') {
-          await layerService.saveConfig(detected);
-          layerService.invalidateCache();
-          refreshContextKeys();
-          treeProvider.refresh();
-          layerDecorationProvider.refresh();
-          decorationProvider.refresh();
-          void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
-        } else if (choice === 'Customize') {
-          await layerService.saveConfig(detected);
-          const uri = vscode.Uri.file(layerService.getConfigPath());
-          await vscode.commands.executeCommand('vscode.open', uri);
+          if (choice === 'Save') {
+            await layerService.saveConfig(detected);
+            layerService.invalidateCache();
+            refreshContextKeys();
+            treeProvider.refresh();
+            layerDecorationProvider.refresh();
+            decorationProvider.refresh();
+            void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
+          } else if (choice === 'Customize') {
+            await layerService.saveConfig(detected);
+            refreshContextKeys();
+            const uri = vscode.Uri.file(layerService.getConfigPath());
+            await vscode.commands.executeCommand('vscode.open', uri);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to save layer configuration: ${msg}`);
         }
       },
     ),

@@ -343,6 +343,26 @@ describe('DomainTreeProvider', () => {
     });
   });
 
+  describe('handleDrop', () => {
+    it('surfaces a refused reorder (unreadable layers.json, H18) to the user', async () => {
+      const vscode = await import('vscode');
+      const errorSpy = vi.spyOn(vscode.window, 'showErrorMessage');
+      (layerService as { reorderLayers: (ids: string[]) => Promise<void> }).reorderLayers =
+        vi.fn(async () => { throw new Error('layers.json could not be loaded (Invalid JSON)'); });
+
+      const transfer = new vscode.DataTransfer();
+      transfer.set('application/vnd.code.tree.dbtsemantic.layer', new vscode.DataTransferItem('gold'));
+      const target: TreeElement = { type: 'layer', layer: 'bronze' };
+
+      await provider.handleDrop(target, transfer as never, {} as never);
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(String(errorSpy.mock.calls[0][0])).toContain('Failed to reorder layers');
+      expect(String(errorSpy.mock.calls[0][0])).toContain('layers.json could not be loaded');
+      errorSpy.mockRestore();
+    });
+  });
+
   describe('domain summary cache (H11)', () => {
     let tempDir: string;
     let domainPath: string;

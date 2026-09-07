@@ -141,6 +141,8 @@ export class DomainTreeProvider
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
+      // Reorder is refused when layers.json is unreadable (H18) — tell the user
+      void vscode.window.showErrorMessage(`Failed to reorder layers: ${message}`);
     }
   }
 
