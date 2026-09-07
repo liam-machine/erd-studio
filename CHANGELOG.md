@@ -7,6 +7,10 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 
 ## Unreleased
 
+### Added
+
+- **Report a Bug** — `ERD Studio: Report a Bug` (command palette, sidebar, canvas toolbar and error screens) opens a prefilled GitHub issue with diagnostics (versions, OS, domain summary, recent errors) and, from a canvas, copies a screenshot to the clipboard for pasting. Nothing is sent until you submit on GitHub.
+
 ### Fixed
 
 - **Multi-select delete and drag are one undo step** — deleting a rubber-band selection that includes notes and standalone relationships now removes them in a single edit (one Cmd+Z restores everything, matching models), and dragging several notes together is persisted as one edit instead of one per note.

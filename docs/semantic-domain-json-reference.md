@@ -20,7 +20,7 @@ ERD Studio uses a **central model store**. Model definitions are YAML files in `
     reporting.json
 ```
 
-There are two stages. **Logical** is the editable stage stored in the domain file. **Physical** has no files — it is derived at runtime from the logical model list, the dbt YAML, and `target/manifest.json`. Do not create files for the physical stage.
+There are two stages. **Logical** is the editable stage stored in the domain file and model YAMLs. **Physical** has no files — it is derived at runtime by resolving each model in `logical.models` against the dbt schema YAMLs under `model-paths` (preferred) or `{target-path}/manifest.json` (fallback), with relationships and cardinality taken from the union of the `relationships` / `unique` / `unique_combination_of_columns` tests declared in either source. Model and column names match case-insensitively. Do not create files for the physical stage; the only writes allowed while a canvas shows it are to the shared `viewConfig` (positions, annotations).
 
 The base directory name (`.erd-studio`) is configurable via the `erdStudio.semanticDir` setting.
 

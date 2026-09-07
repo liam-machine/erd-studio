@@ -1,17 +1,50 @@
 /**
  * SemanticEditorProvider — CustomTextEditorProvider for semantic domain JSON files.
  *
- * Opens semantic JSON files in a React webview instead of the default JSON editor.
- * VS Code manages save/dirty state for the underlying text document.
+ * Opens domain files (`{semanticDir}/{layer}/{domain}.json`, v5 central model
+ * store) in a React webview instead of the default JSON editor. Model bodies
+ * live in `{semanticDir}/logical-models/{name}.yml` and are resolved through
+ * LogicalModelService; the domain file holds model names, relationships and
+ * the shared viewConfig (positions, annotations).
  *
- * Message protocol:
- *   Webview → Extension:  { type: "ready" }
- *   Extension → Webview:  { type: "domainLoaded", payload: DisplayDomain }
- *   Extension → Webview:  { type: "error", payload: { message: string } }
+ * Message protocol (src/types/messages.ts — every type there has a live
+ * sender and a `case` below; unknown types are logged, never dropped):
+ *   Webview → Extension:  ready, switchStage, refreshManifest, undo/redo,
+ *                         schema mutations (addModel … removeRelationships),
+ *                         canvas metadata (updatePositions, *Annotation*),
+ *                         sync flow (toggleDiscrepancy, checkManifestStaleness,
+ *                         generateSyncPlan, runDbtCompile, launchClaudeSync),
+ *                         viewFile, requestReload, dismissWelcome, reportBug
+ *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
+ *                         requestId), discrepancyReport, manifestStaleness,
+ *                         syncPlanGenerated, openBugReport, error
+ *
+ * Writes and save semantics:
+ *   Every domain-file write goes through `applyDomainEdit` — the ONLY place a
+ *   domain WorkspaceEdit is built (parse → mutate → replace → applyEdit →
+ *   document.save() → refresh). logical-models/*.yml changes ride in the same
+ *   WorkspaceEdit (`applyModelEdit` / `addModelFileEdits`) so a model edit and
+ *   its domain change are atomic and one undo step. Edits are saved
+ *   immediately after applying — the custom editor never sits dirty. Multi-
+ *   select messages (removeModels, removeRelationships, removeAnnotations,
+ *   updatePositions with annotations) are one edit, one save, one domainLoaded.
+ *
+ * Guards:
+ *   - Payloads are validated at the boundary (providers/payloadValidation.ts)
+ *     before anything reaches disk.
+ *   - While a panel shows the physical stage only NON_MUTATION_TYPES (see
+ *     resolveCustomTextEditor) are accepted — positions, annotations and the
+ *     sync-plan flow write to the shared viewConfig and are allowed; schema
+ *     mutations and undo/redo are answered with PHYSICAL_READ_ONLY_MESSAGE.
+ *   - `withMessageErrorBoundary` turns a throwing/rejecting handler into an
+ *     `error` message instead of an unhandled rejection.
+ *   - Refresh paths (watchers, external edits, stage switches) never write;
+ *     only the initial `ready` load persists auto-computed positions.
  *
  * Update loop prevention:
- *   When writing via WorkspaceEdit, a pendingUpdate flag is set to avoid
- *   re-sending the update triggered by onDidChangeTextDocument.
+ *   `pendingUpdates` is held for the whole applyDomainEdit / undo / redo so the
+ *   onDidChangeTextDocument listener does not save and re-send on its own.
+ *   External edits (guard not held) are saved if dirty and re-sent.
  */
 
 import * as crypto from 'crypto';
