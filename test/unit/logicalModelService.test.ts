@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { LogicalModelService } from '../../src/services/logicalModelService';
+import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import type { ManifestData, ManifestModelInfo } from '../../src/types/manifest';
 
 // ---------------------------------------------------------------------------
@@ -106,6 +107,101 @@ describe('LogicalModelService', () => {
       const models = service.listModels();
       expect(models).toHaveLength(2);
       expect(models.find(m => m.name === 'dim_x')?.description).toBe('X');
+    });
+  });
+
+  describe('own-write tracking and parse cache (H11)', () => {
+    it('records saves and deletes with the own-write tracker', () => {
+      const tracker = new OwnWriteTracker();
+      const tracked = new LogicalModelService(tempDir, '.erd-studio', tracker);
+
+      tracked.saveModel({ name: 'dim_a', columns: [] });
+      const filePath = tracked.modelPath('dim_a');
+      expect(tracker.has(filePath)).toBe(true);
+      expect(tracker.consume(filePath)).toBe(true);
+
+      tracked.deleteModel('dim_a');
+      expect(tracker.consume(filePath)).toBe(true);
+    });
+
+    /**
+     * Rewrite a model file with same-length content and the original mtime so
+     * the stat signature is unchanged. Only a cache hit can then explain a
+     * read that still returns the old content.
+     */
+    const PINNED_MTIME = new Date('2024-01-01T00:00:00Z');
+
+    /** Pin mtime to a whole second so utimes round-trips exactly. */
+    function pinMtime(filePath: string): void {
+      fs.utimesSync(filePath, PINNED_MTIME, PINNED_MTIME);
+    }
+
+    function rewriteKeepingSignature(filePath: string, content: string): void {
+      const before = fs.statSync(filePath);
+      fs.writeFileSync(filePath, content, 'utf-8');
+      pinMtime(filePath);
+      const after = fs.statSync(filePath);
+      expect(after.size).toBe(before.size);
+      expect(after.mtimeMs).toBe(before.mtimeMs);
+    }
+
+    it('serves repeated reads from the cache while the stat signature is unchanged', () => {
+      service.saveModel({ name: 'dim_cached', description: 'v1', columns: [] });
+      pinMtime(service.modelPath('dim_cached'));
+      expect(service.getModel('dim_cached')!.description).toBe('v1');
+
+      const filePath = service.modelPath('dim_cached');
+      rewriteKeepingSignature(filePath, fs.readFileSync(filePath, 'utf-8').replace('v1', 'v2'));
+
+      expect(service.getModel('dim_cached')!.description).toBe('v1');
+      expect(service.listModels().find(m => m.name === 'dim_cached')!.description).toBe('v1');
+    });
+
+    it('returns independent copies so callers cannot corrupt the cache', () => {
+      service.saveModel({ name: 'dim_copy', description: 'orig', columns: [{ name: 'id', dataType: 'INT', description: '' }] });
+      const a = service.getModel('dim_copy')!;
+      a.description = 'mutated';
+      a.columns!.push({ name: 'x', dataType: 'INT', description: '' });
+
+      const b = service.getModel('dim_copy')!;
+      expect(b.description).toBe('orig');
+      expect(b.columns).toHaveLength(1);
+    });
+
+    it('re-reads when the file changes on disk', () => {
+      service.saveModel({ name: 'dim_ext', description: 'v1', columns: [] });
+      expect(service.getModel('dim_ext')!.description).toBe('v1');
+
+      const filePath = service.modelPath('dim_ext');
+      fs.writeFileSync(filePath, 'name: dim_ext\ndescription: edited externally by an agent\n');
+      const t = new Date(Date.now() + 5000);
+      fs.utimesSync(filePath, t, t);
+
+      expect(service.getModel('dim_ext')!.description).toBe('edited externally by an agent');
+    });
+
+    it('re-reads after invalidateCache(name) and invalidateCache()', () => {
+      service.saveModel({ name: 'dim_inv', description: 'v1', columns: [] });
+      const filePath = service.modelPath('dim_inv');
+      pinMtime(filePath);
+      expect(service.getModel('dim_inv')!.description).toBe('v1');
+
+      rewriteKeepingSignature(filePath, fs.readFileSync(filePath, 'utf-8').replace('v1', 'v2'));
+      expect(service.getModel('dim_inv')!.description).toBe('v1'); // cached
+      service.invalidateCache('dim_inv');
+      expect(service.getModel('dim_inv')!.description).toBe('v2');
+
+      rewriteKeepingSignature(filePath, fs.readFileSync(filePath, 'utf-8').replace('v2', 'v3'));
+      expect(service.getModel('dim_inv')!.description).toBe('v2'); // cached
+      service.invalidateCache();
+      expect(service.getModel('dim_inv')!.description).toBe('v3');
+    });
+
+    it('reflects a save immediately in the next read', () => {
+      service.saveModel({ name: 'dim_save', description: 'v1', columns: [] });
+      service.getModel('dim_save');
+      service.saveModel({ name: 'dim_save', description: 'v2', columns: [] });
+      expect(service.getModel('dim_save')!.description).toBe('v2');
     });
   });
 

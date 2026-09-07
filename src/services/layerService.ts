@@ -21,20 +21,65 @@ import {
   KNOWN_LAYER_DEFAULTS,
   LAYERS_SCHEMA_VERSION,
 } from '../types/layer';
+import { LOGICAL_MODELS_DIR } from './logicalModelService';
+import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
 
-const LAYERS_CONFIG_FILE = 'layers.json';
+export const LAYERS_CONFIG_FILE = 'layers.json';
 
 /** Reserved stage names that must never be detected as user-defined layers. */
 const STAGE_DIR_NAMES = new Set(['logical', 'physical']);
+
+/**
+ * Directories under the semantic dir that are never layers:
+ * templates/ (domain templates) and logical-models/ (v5 YAML model files).
+ */
+const RESERVED_DIR_NAMES = new Set(['templates', LOGICAL_MODELS_DIR]);
+
+/** Sentinel signature used when layers.json is absent. */
+const NO_FILE_SIGNATURE = 'missing';
 
 export class LayerService {
   private config: LayersConfigFile | null = null;
   private readonly configPath: string;
   private readonly semanticPath: string;
 
-  constructor(projectPath: string, semanticDir: string = '.erd-studio') {
+  /** mtime + size of layers.json when `config` was loaded (or NO_FILE_SIGNATURE). */
+  private loadedSignature: string | null = null;
+
+  /**
+   * Human-readable reason the last load of layers.json fell back to defaults
+   * (unreadable, invalid JSON, unsupported schemaVersion, no valid layers).
+   * Null when the file loaded cleanly or does not exist.
+   */
+  private loadError: string | null = null;
+
+  constructor(
+    projectPath: string,
+    semanticDir: string = '.erd-studio',
+    private readonly ownWriteTracker: OwnWriteTracker = ownWrites,
+  ) {
     this.semanticPath = path.join(projectPath, semanticDir);
     this.configPath = path.join(this.semanticPath, LAYERS_CONFIG_FILE);
+  }
+
+  /**
+   * Why the last load of layers.json fell back to default layers, or null
+   * when the file loaded cleanly (or does not exist). Forces a load so the
+   * answer reflects the file currently on disk.
+   */
+  getLoadError(): string | null {
+    this.loadConfig();
+    return this.loadError;
+  }
+
+  /** Cheap fingerprint of layers.json on disk, used to detect external edits. */
+  private fileSignature(): string {
+    try {
+      const stat = fs.statSync(this.configPath);
+      return `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      return NO_FILE_SIGNATURE;
+    }
   }
 
   /**
@@ -57,14 +102,18 @@ export class LayerService {
    * Returns layers from layers.json if it exists, otherwise returns
    * default layers (silver, gold).
    *
-   * Results are cached in memory for performance.
+   * Results are cached in memory for performance. The cache is validated
+   * against the file's mtime + size on every call, so an external edit
+   * (git pull, manual edit, deletion) is picked up without a window reload.
    */
   loadConfig(): LayerConfig[] {
-    if (this.config) {
+    const signature = this.fileSignature();
+    if (this.config && signature === this.loadedSignature) {
       return this.config.layers;
     }
 
-    if (fs.existsSync(this.configPath)) {
+    this.loadError = null;
+    if (signature !== NO_FILE_SIGNATURE) {
       this.config = this.loadFromFile();
     } else {
       // Use defaults
@@ -73,8 +122,20 @@ export class LayerService {
         layers: [...DEFAULT_LAYERS],
       };
     }
+    this.loadedSignature = signature;
 
     return this.config.layers;
+  }
+
+  /**
+   * Record why layers.json could not be used and return the default layers.
+   * The error is retained (see getLoadError) so callers can warn the user and
+   * saveConfig can refuse to overwrite the broken file with these defaults.
+   */
+  private fallbackToDefaults(reason: string): LayersConfigFile {
+    console.error(`[LayerService] ${reason}`);
+    this.loadError = reason;
+    return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
   }
 
   /**
@@ -86,8 +147,7 @@ export class LayerService {
       raw = fs.readFileSync(this.configPath, 'utf-8');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[LayerService] Failed to read layers config: ${message}`);
-      return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
+      return this.fallbackToDefaults(`Failed to read layers config: ${message}`);
     }
 
     let parsed: unknown;
@@ -95,8 +155,7 @@ export class LayerService {
       parsed = JSON.parse(raw);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[LayerService] Invalid JSON in layers config: ${message}`);
-      return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
+      return this.fallbackToDefaults(`Invalid JSON in layers config: ${message}`);
     }
 
     return this.validateConfig(parsed);
@@ -108,30 +167,26 @@ export class LayerService {
    */
   private validateConfig(data: unknown): LayersConfigFile {
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      console.error('[LayerService] Layers config must be a JSON object');
-      return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
+      return this.fallbackToDefaults('Layers config must be a JSON object');
     }
 
     const obj = data as Record<string, unknown>;
 
     // Schema version check
     if (typeof obj.schemaVersion !== 'number') {
-      console.error('[LayerService] Layers config missing schemaVersion field');
-      return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
+      return this.fallbackToDefaults('Layers config missing schemaVersion field');
     }
 
     if (obj.schemaVersion > LAYERS_SCHEMA_VERSION) {
-      console.error(
-        `[LayerService] Layers config has schemaVersion ${obj.schemaVersion} ` +
+      return this.fallbackToDefaults(
+        `Layers config has schemaVersion ${obj.schemaVersion} ` +
         `but this extension only supports up to version ${LAYERS_SCHEMA_VERSION}`,
       );
-      return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
     }
 
     // Validate layers array
     if (!Array.isArray(obj.layers)) {
-      console.error('[LayerService] Layers config must have a "layers" array');
-      return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
+      return this.fallbackToDefaults('Layers config must have a "layers" array');
     }
 
     const layers: LayerConfig[] = [];
@@ -192,8 +247,7 @@ export class LayerService {
 
     // Ensure at least one layer exists
     if (layers.length === 0) {
-      console.error('[LayerService] No valid layers found, using defaults');
-      return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
+      return this.fallbackToDefaults('No valid layers found, using defaults');
     }
 
     // Sort by order
@@ -227,11 +281,12 @@ export class LayerService {
       .filter(entry =>
         entry.isDirectory() &&
         !entry.name.startsWith('.') &&
-        entry.name !== 'templates' &&
+        !RESERVED_DIR_NAMES.has(entry.name) &&
         !STAGE_DIR_NAMES.has(entry.name),
       )
       .map(entry => entry.name)
-      .filter(name => /^[a-z][a-z0-9_-]*$/.test(name)); // Valid layer ID format
+      .filter(name => /^[a-z][a-z0-9_-]*$/.test(name)) // Valid layer ID format
+      .filter(name => !this.isYamlOnlyDir(path.join(this.semanticPath, name)));
 
     if (layerDirs.length === 0) {
       return [];
@@ -268,6 +323,22 @@ export class LayerService {
     }
 
     return layers;
+  }
+
+  /**
+   * A directory holding YAML files and no JSON files is a model store
+   * (e.g. a renamed logical-models/), not a layer of domain JSON files.
+   */
+  private isYamlOnlyDir(dirPath: string): boolean {
+    let files: string[];
+    try {
+      files = fs.readdirSync(dirPath);
+    } catch {
+      return false;
+    }
+    const hasYaml = files.some(f => /\.ya?ml$/i.test(f));
+    const hasJson = files.some(f => /\.json$/i.test(f));
+    return hasYaml && !hasJson;
   }
 
   /**
@@ -349,6 +420,16 @@ export class LayerService {
    * Save layer configurations to layers.json.
    */
   async saveConfig(layers: LayerConfig[]): Promise<void> {
+    // Never overwrite a layers.json we could not read: the in-memory layers
+    // are defaults, and writing them would silently destroy the user's file.
+    this.loadConfig();
+    if (this.loadError && this.fileSignature() !== NO_FILE_SIGNATURE) {
+      throw new Error(
+        `${LAYERS_CONFIG_FILE} could not be loaded (${this.loadError}). ` +
+        'Fix or remove the file before changing layers.',
+      );
+    }
+
     // Ensure semantic directory exists
     if (!fs.existsSync(this.semanticPath)) {
       fs.mkdirSync(this.semanticPath, { recursive: true });
@@ -371,9 +452,12 @@ export class LayerService {
       JSON.stringify(config, null, 2) + '\n',
       'utf-8',
     );
+    this.ownWriteTracker.recordWrite(this.configPath);
 
     // Update cache
     this.config = config;
+    this.loadError = null;
+    this.loadedSignature = this.fileSignature();
   }
 
   /**
@@ -546,5 +630,7 @@ export class LayerService {
    */
   invalidateCache(): void {
     this.config = null;
+    this.loadedSignature = null;
+    this.loadError = null;
   }
 }

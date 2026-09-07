@@ -16,6 +16,7 @@ import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
+import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
 import { getErdStudioSetting } from './services/configService';
@@ -475,10 +476,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
 
-  // Set context key so view/title menus only show when semantic dir exists
+  // Set context keys so view/title menus only show when semantic dir exists.
+  // Re-evaluated whenever the semantic dir changes on disk (watcher events) or
+  // the extension itself creates it (createDomain, addLayer, setup), so the
+  // "+ Add Layer" / "Install Harness" buttons appear without a window reload.
   const fullSemanticDirPath = path.join(workspaceRoot, semanticDir);
-  void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
-  void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
+  const refreshContextKeys = (): void => {
+    void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
+    void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
+  };
+  refreshContextKeys();
+
+  // Surface a broken layers.json once per distinct error. LayerService falls
+  // back to default layers in memory but refuses to overwrite the file, so the
+  // user must know why their custom layers vanished.
+  let lastLayerLoadErrorShown: string | null = null;
+  const warnIfLayerConfigBroken = (): void => {
+    const loadError = layerService.getLoadError();
+    if (!loadError || loadError === lastLayerLoadErrorShown) {
+      if (!loadError) { lastLayerLoadErrorShown = null; }
+      return;
+    }
+    lastLayerLoadErrorShown = loadError;
+    void vscode.window.showWarningMessage(
+      `ERD Studio: ${semanticDir}/layers.json could not be loaded (${loadError}). ` +
+      'Default layers are shown until the file is fixed; layer changes are disabled to avoid overwriting it.',
+      'Open layers.json',
+    ).then(choice => {
+      if (choice === 'Open layers.json') {
+        void vscode.window.showTextDocument(vscode.Uri.file(layerService.getConfigPath()));
+      }
+    });
+  };
+  warnIfLayerConfigBroken();
 
   // -------------------------------------------------------------------------
   // File watchers
@@ -529,21 +559,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // Semantic file changed externally → refresh tree view + model library
-  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(() => {
+  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri }) => {
+    treeProvider.invalidateDomain(uri.fsPath);
     treeProvider.refresh();
     modelLibraryProvider.refresh();
+    // A pulled/created .erd-studio/ must reveal the view/title buttons without a reload
+    refreshContextKeys();
   });
 
-  // Semantic file deleted → refresh tree + model library, prompt for tag cleanup
+  // Domain file(s) deleted → refresh tree + model library, prompt for tag cleanup.
+  // The watcher coalesces a delete storm (branch switch) into one event and
+  // filters out layers.json / templates / logical-models / .sync-plan.json, so
+  // one toast covers the whole burst and only real domain files trigger it.
   // NOTE: reconcileAll() is NOT called automatically here because git operations
   // (pull, checkout, merge, rebase) trigger file-delete events on Windows (delete-
   // then-rename) and macOS (atomic rename via FSEvents), causing mass YAML
   // modifications. Instead, offer to run the manual sync command.
-  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(() => {
+  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(({ uris }) => {
+    for (const uri of uris) {
+      treeProvider.invalidateDomain(uri.fsPath);
+    }
     treeProvider.refresh();
     modelLibraryProvider.refresh();
+    refreshContextKeys();
+    const subject = uris.length === 1
+      ? 'Domain file deleted.'
+      : `${uris.length} domain files deleted.`;
     void vscode.window.showInformationMessage(
-      'Domain file deleted. Regenerate dbt selectors.yml to drop the removed domain from the selector set.',
+      `${subject} Regenerate dbt selectors.yml to drop the removed domain${uris.length === 1 ? '' : 's'} from the selector set.`,
       'Regenerate Now',
     ).then(choice => {
       if (choice === 'Regenerate Now') {
@@ -552,14 +595,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   });
 
+  // layers.json changed externally (git pull, manual edit, delete) → drop the
+  // cached layer list so the tree, decorations and domain listing pick up the
+  // new layers; warn if the file is now unreadable.
+  const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(() => {
+    layerService.invalidateCache();
+    treeProvider.invalidateDomain();
+    treeProvider.refresh();
+    modelLibraryProvider.refresh();
+    layerDecorationProvider.refresh();
+    decorationProvider.refresh();
+    refreshContextKeys();
+    warnIfLayerConfigBroken();
+  });
+
   // Logical model file changed → refresh domains referencing that model + model library
   const logicalModelChangedSubscription = fileWatcherService.onLogicalModelChanged(
     async ({ modelName }) => {
+      logicalModelService.invalidateCache(modelName);
       await editorProvider.refreshDomainsReferencingModel(modelName);
       treeProvider.refresh();
       modelLibraryProvider.refresh();
       // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
-      void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
+      refreshContextKeys();
     },
   );
 
@@ -592,6 +650,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     manifestChangedSubscription,
     semanticChangedSubscription,
     semanticDeletedSubscription,
+    layerConfigChangedSubscription,
     logicalModelChangedSubscription,
     dbtYmlChangedSubscription,
     projectChangedSubscription,
@@ -748,7 +807,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return;
         }
 
-        // Step 6: Refresh tree, regenerate selectors.yml, and auto-open domain
+        // Step 6: Refresh tree, regenerate selectors.yml, and auto-open domain.
+        // The semantic dir may have just been created — reveal the title buttons.
+        refreshContextKeys();
         treeProvider.refresh();
         selectorsService.scheduleRegenerate();
         await vscode.commands.executeCommand(
@@ -786,9 +847,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await vscode.window.tabGroups.close(matchingTabs, true);
         }
 
-        // Delete the unified domain file
+        // Delete the unified domain file. Record it as an own delete so the
+        // watcher does not show the "Domain file deleted" toast — selectors
+        // regeneration is already scheduled below.
         try {
           await vscode.workspace.fs.delete(fileUri);
+          ownWrites.recordDelete(filePath);
+          treeProvider.invalidateDomain(filePath);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to delete domain: ${msg}`);
@@ -1027,8 +1092,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return;
         }
 
-        // Update context key so view/title menus appear
-        void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', true);
+        // Update context keys so view/title menus appear
+        refreshContextKeys();
         treeProvider.refresh();
         await new Promise(resolve => setTimeout(resolve, 100));
         void vscode.window.showInformationMessage('ERD Studio directory created! Now create your first domain.');
@@ -1097,6 +1162,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             fs.mkdirSync(layerDir, { recursive: true });
           }
 
+          refreshContextKeys();
           treeProvider.refresh();
           layerDecorationProvider.refresh();
           decorationProvider.refresh();
@@ -1247,31 +1313,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       'erdStudio.initializeLayerConfig',
       async () => {
-        const detected = layerService.detectLayersFromFilesystem();
-        if (detected.length === 0) {
-          const defaultLayers = layerService.getAllLayers();
-          await layerService.saveConfig(defaultLayers);
-          void vscode.window.showInformationMessage('Layer configuration saved with default layers (Silver, Gold).');
-          return;
-        }
+        // saveConfig refuses to overwrite an unreadable layers.json (H18) —
+        // surface that as a message rather than an unhandled command failure.
+        try {
+          const detected = layerService.detectLayersFromFilesystem();
+          if (detected.length === 0) {
+            const defaultLayers = layerService.getAllLayers();
+            await layerService.saveConfig(defaultLayers);
+            refreshContextKeys();
+            void vscode.window.showInformationMessage('Layer configuration saved with default layers (Silver, Gold).');
+            return;
+          }
 
-        const layerNames = detected.map(l => l.label).join(', ');
-        const choice = await vscode.window.showInformationMessage(
-          `Detected layers: ${layerNames}. Save this configuration?`,
-          'Save', 'Customize', 'Cancel',
-        );
+          const layerNames = detected.map(l => l.label).join(', ');
+          const choice = await vscode.window.showInformationMessage(
+            `Detected layers: ${layerNames}. Save this configuration?`,
+            'Save', 'Customize', 'Cancel',
+          );
 
-        if (choice === 'Save') {
-          await layerService.saveConfig(detected);
-          layerService.invalidateCache();
-          treeProvider.refresh();
-          layerDecorationProvider.refresh();
-          decorationProvider.refresh();
-          void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
-        } else if (choice === 'Customize') {
-          await layerService.saveConfig(detected);
-          const uri = vscode.Uri.file(layerService.getConfigPath());
-          await vscode.commands.executeCommand('vscode.open', uri);
+          if (choice === 'Save') {
+            await layerService.saveConfig(detected);
+            layerService.invalidateCache();
+            refreshContextKeys();
+            treeProvider.refresh();
+            layerDecorationProvider.refresh();
+            decorationProvider.refresh();
+            void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
+          } else if (choice === 'Customize') {
+            await layerService.saveConfig(detected);
+            refreshContextKeys();
+            const uri = vscode.Uri.file(layerService.getConfigPath());
+            await vscode.commands.executeCommand('vscode.open', uri);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to save layer configuration: ${msg}`);
         }
       },
     ),
@@ -1402,8 +1478,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         'Save Config', 'Later',
       ).then(async (choice) => {
         if (choice === 'Save Config') {
-          await layerService.saveConfig(detected);
+          try {
+            await layerService.saveConfig(detected);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            void vscode.window.showErrorMessage(`Failed to save layer configuration: ${msg}`);
+            return;
+          }
           layerService.invalidateCache();
+          refreshContextKeys();
           treeProvider.refresh();
           layerDecorationProvider.refresh();
           decorationProvider.refresh();
