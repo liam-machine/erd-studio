@@ -128,7 +128,7 @@ describe('composeFeedbackFields', () => {
   });
 
   describe('the screenshot field', () => {
-    it('tells the user to paste one clipboarded image', () => {
+    it('tells the user to paste the screenshot the clipboard took', () => {
       const fields = composeFeedbackFields(
         draft({ attachments: [attachment({ onClipboard: true })] }),
         diagnostics,
@@ -138,31 +138,22 @@ describe('composeFeedbackFields', () => {
       );
     });
 
-    it('tells the user to drag one image the clipboard refused', () => {
+    it('tells the user to drag the saved file when the clipboard refused it', () => {
+      // The browser may refuse the clipboard write; the saved copy is what
+      // makes that recoverable, so the field must point at the file instead.
       const fields = composeFeedbackFields(
-        draft({ attachments: [attachment({ mime: 'image/jpeg' })] }),
+        draft({ attachments: [attachment({ onClipboard: false })] }),
         diagnostics,
       );
       expect(fields.screenshot).toBe('Drag the saved screenshot file here to attach it.');
     });
 
-    it('names the count when several images are attached', () => {
-      const fields = composeFeedbackFields(
-        draft({
-          attachments: [
-            attachment({ id: 'a', onClipboard: true }),
-            attachment({ id: 'b' }),
-            attachment({ id: 'c' }),
-          ],
-        }),
-        diagnostics,
-      );
-      expect(fields.screenshot).toBe(
-        'The first of 3 images is on your clipboard — paste it here. The rest are saved to a folder you can reveal from the notification.',
-      );
+    it('treats an unrecorded clipboard result as a refusal, never a promise', () => {
+      const fields = composeFeedbackFields(draft({ attachments: [attachment()] }), diagnostics);
+      expect(fields.screenshot).toBe('Drag the saved screenshot file here to attach it.');
     });
 
-    it('has no screenshot field at all with no images', () => {
+    it('has no screenshot field at all with no image', () => {
       expect(composeFeedbackFields(draft(), diagnostics).screenshot).toBeUndefined();
     });
   });
@@ -228,9 +219,9 @@ describe('composeMarkdownReport', () => {
     const report = composeMarkdownReport(
       draft({ attachments: [attachment()], includeDiagnostics: false }),
       diagnostics,
-      { attachmentNames: ['one.png', 'two.jpg'] },
+      { attachmentNames: ['screen-capture.png'] },
     );
-    expect(report).toContain('- one.png\n- two.jpg');
+    expect(report).toContain('- screen-capture.png');
     expect(report).not.toContain('- canvas.png');
   });
 });

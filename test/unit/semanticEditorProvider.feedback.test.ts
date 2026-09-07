@@ -293,12 +293,12 @@ describe('submitFeedback', () => {
       payload: validSubmit({
         attachments: [
           {
-            id: 'a1',
-            name: 'shot.png',
+            id: 'canvas',
+            name: 'canvas.png',
             mime: 'image/png',
             bytes: 4,
             dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
-            source: 'drop',
+            source: 'canvas',
             onClipboard: true,
           },
         ],
@@ -335,12 +335,12 @@ describe('submitFeedback', () => {
       payload: validSubmit({
         attachments: [
           {
-            id: 'a1',
+            id: 'canvas',
             name: 'huge.png',
             mime: 'image/png',
             bytes: 20 * 1024 * 1024,
             dataUrl: 'data:image/png;base64,AAAA',
-            source: 'drop',
+            source: 'canvas',
           },
         ],
       }),

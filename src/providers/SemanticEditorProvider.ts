@@ -511,7 +511,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * If the active editor tab is one of our canvases, ask its webview to open
-   * the Feedback dialog (so the report can include screenshots, diagnostics
+   * the Feedback dialog (so the report can include a canvas screenshot, diagnostics
    * chips and the optional analysis). Returns false when no canvas is active
    * so the caller can fall back to the canvas-less QuickPick flow.
    */

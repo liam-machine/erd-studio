@@ -25,7 +25,6 @@ import {
   FEEDBACK_KINDS,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
-  MAX_TOTAL_ATTACHMENT_BYTES,
 } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -285,10 +284,14 @@ export function validateFeedbackAttachment(value: unknown): string | null {
 }
 
 /**
- * Validate an attachment list: an array, at most MAX_ATTACHMENTS entries, no
- * duplicate `id`, every entry valid, and the summed `bytes` at or under
- * MAX_TOTAL_ATTACHMENT_BYTES. `undefined` is valid (no attachments).
+ * Validate an attachment list: an array of at most MAX_ATTACHMENTS (one — the
+ * canvas capture) valid entries. `undefined` is valid (no attachments).
  * Returns null when valid.
+ *
+ * Still list-shaped because the wire contract is: the dialog sends the
+ * `attachments` array with nothing or one image in it, and the host reads it
+ * the same way either way. With a ceiling of one there is nothing left for a
+ * per-list aggregate to catch that the per-image ceiling has not.
  */
 export function validateFeedbackAttachments(value: unknown): string | null {
   if (value === undefined) {
@@ -298,24 +301,13 @@ export function validateFeedbackAttachments(value: unknown): string | null {
     return 'Attachments must be a list.';
   }
   if (value.length > MAX_ATTACHMENTS) {
-    return `At most ${MAX_ATTACHMENTS} images can be attached.`;
+    return 'Only one image can be attached.';
   }
-  const seen = new Set<string>();
-  let total = 0;
   for (const entry of value) {
     const error = validateFeedbackAttachment(entry);
     if (error) {
       return error;
     }
-    const attachment = entry as FeedbackAttachment;
-    if (seen.has(attachment.id)) {
-      return 'Attachment ids must be unique.';
-    }
-    seen.add(attachment.id);
-    total += attachment.bytes;
-  }
-  if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
-    return 'Attachments exceed the total size limit.';
   }
   return null;
 }

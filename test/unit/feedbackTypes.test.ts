@@ -18,7 +18,6 @@ import {
   FEEDBACK_COPY,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
-  MAX_TOTAL_ATTACHMENT_BYTES,
   READINESS_MAX,
   READINESS_WEIGHTS,
   applyRegressionPrefix,
@@ -267,14 +266,11 @@ describe('footerRoute', () => {
     expect(route.lead).toBe('Opens the prefilled form.');
   });
 
-  it('explains the clipboard hand-off for one image and for several', () => {
+  it('explains the clipboard hand-off when the screenshot is attached', () => {
     const one = footerRoute({ ...base, duplicate: null, attachmentCount: 1 });
+    expect(one.primaryLabel).toBe('Open GitHub issue');
+    expect(one.lead).toBe('Opens GitHub.');
     expect(one.rest).toBe(' Your image goes on the clipboard — paste it into the Screenshot box.');
-
-    const many = footerRoute({ ...base, duplicate: null, attachmentCount: 3 });
-    expect(many.rest).toBe(
-      ' The first of 3 images goes on the clipboard; the rest are saved to a folder you can reveal.',
-    );
   });
 
   it('promises nothing is sent from VS Code when there are no images', () => {
@@ -332,9 +328,9 @@ describe('readinessScore', () => {
     expect(readinessScore(readiness({ includeDiagnostics: true })).score).toBe(10);
   });
 
-  it('pluralises the attached-images label', () => {
-    expect(label(readiness({ attachmentCount: 1 }), 2)).toBe('1 image attached');
-    expect(label(readiness({ attachmentCount: 2 }), 2)).toBe('2 images attached');
+  it('names the one image it can be, rather than counting', () => {
+    expect(label(readiness({ attachmentCount: 1 }), 2)).toBe('Screenshot attached');
+    expect(label(readiness(), 2)).toBe('No image');
   });
 
   it('flips the context labels with the kind', () => {
@@ -369,11 +365,51 @@ describe('readinessScore', () => {
     const met = readinessScore(readiness({ includeDiagnostics: true }));
     expect(met.checks[3]).toEqual({ ok: true, label: 'Versions and recent errors attached' });
   });
+
+  it('drops the image check where no image can be attached, rather than capping the score', () => {
+    // The canvas capture is the only image route and it is bug-only, so a
+    // feature request is never asked for one — and a complete one reaches 100.
+    const complete = readinessScore(
+      readiness({
+        kind: 'feature',
+        descriptionLength: DESCRIPTION_CLEAR_CHARS,
+        contextLength: CONTEXT_MIN_CHARS + 1,
+        includeDiagnostics: true,
+      }),
+    );
+    expect(complete.score).toBe(100);
+    expect(complete.checks.map((c) => c.label)).toEqual([
+      'Clear description',
+      'Rationale given',
+      'Versions and recent errors attached',
+    ]);
+    expect(complete.checks.some((c) => c.target === 'attachments')).toBe(false);
+
+    // The remaining weights are rescaled against the checks that do apply.
+    expect(readinessScore(readiness({ kind: 'feature', includeDiagnostics: true })).score).toBe(13);
+
+    // A bug with no canvas behind the dialog is in the same position.
+    expect(
+      readinessScore(readiness({ canAttachImage: false })).checks.some(
+        (c) => c.target === 'attachments',
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps the image check when one is already attached, whatever the kind', () => {
+    // A canvas shot that rode a flip to `feature` must still be acknowledged
+    // rather than scored as if it were not there.
+    const withShot = readinessScore(
+      readiness({ kind: 'feature', attachmentCount: 1, canAttachImage: false }),
+    );
+    expect(withShot.checks[2]).toEqual({ ok: true, label: 'Screenshot attached' });
+    expect(withShot.score).toBe(20);
+  });
 });
 
 describe('attachment limits', () => {
-  it('derives the aggregate ceiling from the per-image one, so a valid report never fails on it', () => {
+  it('allows exactly one image — the canvas capture — of at most 10 MB', () => {
+    expect(MAX_ATTACHMENTS).toBe(1);
     expect(MAX_ATTACHMENT_BYTES).toBe(10 * 1024 * 1024);
-    expect(MAX_TOTAL_ATTACHMENT_BYTES).toBe(MAX_ATTACHMENTS * MAX_ATTACHMENT_BYTES);
   });
 });

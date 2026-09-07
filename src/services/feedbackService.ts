@@ -8,12 +8,14 @@
  * nothing is sent from the extension itself, so no GitHub token or scope is
  * needed. There is deliberately no "file it from here" path.
  *
- * Images: GitHub has no API for attaching images to issues, so the webview
- * copies the first image to the clipboard and the host saves every image under
- * `<globalStorage>/feedback/<stamp>/` so the rest can be dragged in. The
- * notifications branch on `attachments[0].onClipboard` — the browser clipboard
- * refuses anything but PNG, so "saved" and "on the clipboard" are not the same
- * question.
+ * Images: GitHub has no API for attaching an image to an issue, so the report
+ * carries at most one — the canvas capture — and it reaches the issue through
+ * the user's clipboard. The host also writes it under
+ * `<globalStorage>/feedback/<stamp>/` as the fallback for a refused clipboard,
+ * because the browser clipboard is allowed to say no and a user left with
+ * neither a paste nor a file has lost the screenshot entirely. The notification
+ * and the issue body both branch on `attachments[0].onClipboard`: "saved" and
+ * "on the clipboard" are not the same question.
  *
  * The pure helpers (`formatDiagnostics`, `buildIssueUrl`, `composeFeedbackFields`,
  * `composeMarkdownReport`, `ErrorLog`) have no VS Code dependency so they are
@@ -294,20 +296,16 @@ function resolveFeedbackTitle(draft: FeedbackDraft): string {
 }
 
 /**
- * The `screenshot` field body for N attachments. Branches on whether the FIRST
- * image actually made it onto the clipboard (the browser clipboard refuses
- * anything but PNG), never on whether images were saved.
+ * The `screenshot` field body for the one attached image. Branches on whether
+ * it actually made it onto the clipboard — a browser is free to refuse that
+ * write — and never on whether it was saved: the saved file is the fallback,
+ * so pointing at it while the clipboard already holds the image would send the
+ * user the long way round.
  */
-function screenshotFieldText(attachments: readonly FeedbackAttachment[]): string {
-  const onClipboard = attachments[0]?.onClipboard === true;
-  if (attachments.length === 1) {
-    return onClipboard
-      ? 'A screenshot is on your clipboard — click here and press Ctrl+V / ⌘V to attach it.'
-      : 'Drag the saved screenshot file here to attach it.';
-  }
-  return onClipboard
-    ? `The first of ${attachments.length} images is on your clipboard — paste it here. The rest are saved to a folder you can reveal from the notification.`
-    : `All ${attachments.length} images are saved to a folder you can reveal from the notification — drag them here.`;
+function screenshotFieldText(attachment: FeedbackAttachment): string {
+  return attachment.onClipboard === true
+    ? 'A screenshot is on your clipboard — click here and press Ctrl+V / ⌘V to attach it.'
+    : 'Drag the saved screenshot file here to attach it.';
 }
 
 /**
@@ -315,14 +313,14 @@ function screenshotFieldText(attachments: readonly FeedbackAttachment[]): string
  * to {@link composeIssueFields} (a `FeedbackDraft` is a structural superset of a
  * `BugReportDraft`), then applies what is kind-specific: the default title, the
  * regression prefix, `steps` → `rationale` for a feature request, and the
- * `screenshot` body for N attachments.
+ * `screenshot` body for the attached image.
  */
 export function composeFeedbackFields(
   draft: FeedbackDraft,
   diagnostics: Diagnostics | null,
 ): Record<string, string> {
   const base = composeIssueFields(draft, diagnostics);
-  const attachments = draft.attachments ?? [];
+  const [image] = draft.attachments ?? [];
 
   const fields: Record<string, string> = {
     title: resolveFeedbackTitle(draft),
@@ -330,7 +328,7 @@ export function composeFeedbackFields(
   };
   if (base.steps) fields[contextFieldForKind(draft.kind)] = base.steps;
 
-  const screenshot = attachments.length > 0 ? screenshotFieldText(attachments) : base.screenshot;
+  const screenshot = image ? screenshotFieldText(image) : base.screenshot;
   if (screenshot) fields.screenshot = screenshot;
 
   if (base.diagnostics) fields.diagnostics = base.diagnostics;
@@ -502,9 +500,13 @@ async function notifyWithReveal(message: string, folder: vscode.Uri | null): Pro
 }
 
 /**
- * Persist every attachment under `<globalStorage>/feedback/<stamp>/` — a folder
- * per report, so two reports can never interleave their images. Returns the
- * folder and the files written, or null when nothing decoded.
+ * Persist the report's image under `<globalStorage>/feedback/<stamp>/` — a
+ * folder per report, so two reports can never interleave. This is the fallback
+ * for a clipboard the browser refused: a failed copy must still leave the user
+ * a file to drag into the issue. Returns the folder and the files written, or
+ * null when nothing decoded.
+ *
+ * Takes a list because that is the wire shape; it holds one image at most.
  */
 export async function saveAttachments(
   context: vscode.ExtensionContext,
@@ -596,12 +598,11 @@ export async function submitFeedback(
       return { ok: true };
     }
 
-    const count = attachments.length;
     const message = attachments[0].onClipboard
-      ? 'ERD Studio: the first image is on your clipboard — paste it into the "Screenshot" box on GitHub.'
+      ? 'ERD Studio: the screenshot is on your clipboard — paste it into the "Screenshot" box on GitHub.'
       : folder
-        ? `ERD Studio: ${count} image${count === 1 ? '' : 's'} saved to a folder — drag ${count === 1 ? 'it' : 'them'} into the issue.`
-        : 'ERD Studio: the images could not be copied to the clipboard. Drag them from the saved folder into the GitHub issue.';
+        ? 'ERD Studio: your clipboard refused the screenshot, so it was saved to a folder — drag it into the issue.'
+        : 'ERD Studio: the screenshot could not be copied to your clipboard or saved. Attach an image on the GitHub page instead.';
     void notifyWithReveal(message, folder);
     return { ok: true };
   } catch (err) {

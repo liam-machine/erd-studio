@@ -8,9 +8,14 @@
  * absent and the dialog still files a complete report.
  *
  * Two things are deliberately local rather than round-tripped: the readiness
- * meter (so attaching an image moves the bar instantly) and the duplicate
+ * meter (so attaching the screenshot moves the bar instantly) and the duplicate
  * takeover state (so the redirect is reversible at any point). Diagnostics come
  * from the host as a finished view and are never rebuilt here.
+ *
+ * There is exactly one image route: the canvas capture. GitHub has no API for
+ * attaching an image to a prefilled issue form, so any other image has to be
+ * pasted or dropped onto the GitHub page by the user anyway — the dialog says
+ * so once, rather than running a picker whose output it cannot deliver.
  *
  * Rendered as a fixed overlay rather than a React Flow `Panel` so it also works
  * on the full-screen error page, where the canvas is unmounted.
@@ -21,7 +26,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DuplicateCandidate,
   FeedbackAttachment,
-  FeedbackAttachmentSource,
   FeedbackImageMime,
   FeedbackKind,
   ReadinessTarget,
@@ -30,7 +34,6 @@ import {
   ANALYSIS_DEBOUNCE_MS,
   FEEDBACK_COPY,
   FEEDBACK_PRE_ANALYSIS_TITLE,
-  MAX_ATTACHMENTS,
   MIN_DESCRIPTION_CHARS,
   applyRegressionPrefix,
   duplicateModeFor,
@@ -44,10 +47,9 @@ import {
 import type { ExtensionMessage } from '../../../src/types/messages';
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus, useSend } from '../../hooks/useMessageBus';
-import { acceptFiles, dataUrlToAttachment, fileToAttachment, CANVAS_ATTACHMENT_NAME } from '../../lib/feedbackAttachments';
+import { canvasAttachment } from '../../lib/feedbackAttachments';
 import { captureScreenshot, copyImageToClipboard } from '../../lib/screenshot';
 import { AnalysisPanel } from './AnalysisPanel';
-import { AttachmentGrid } from './AttachmentGrid';
 import { DiagnosticsChips } from './DiagnosticsChips';
 import { DuplicateTakeover, type FixState } from './DuplicateTakeover';
 import { FeedbackFooter } from './FeedbackFooter';
@@ -56,7 +58,7 @@ import './FeedbackDialog.css';
 /** Selector for everything the canvas screenshot must leave out (this dialog). */
 const EXCLUDE_FROM_SCREENSHOT = '.feedback, .feedback__backdrop';
 
-/** How long the drop zone stays highlighted after an "Attach one" jump. */
+/** How long the Images section stays highlighted after an "Attach one" jump. */
 const URGE_MS = 1600;
 
 /** Elements a Tab press may land on while the dialog owns focus. */
@@ -122,7 +124,6 @@ export function FeedbackDialog() {
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
   const [includeCanvasScreenshot, setIncludeCanvasScreenshot] = useState(false);
   const [attachments, setAttachments] = useState<FeedbackAttachment[]>([]);
-  const [rejects, setRejects] = useState<{ name: string; error: string }[]>([]);
   const [screenshotError, setScreenshotError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -135,12 +136,11 @@ export function FeedbackDialog() {
   const [choiceFor, setChoiceFor] = useState<number | null>(null);
   const [filingAnywayRaw, setFilingAnyway] = useState(false);
   const [regressionOfRaw, setRegressionOf] = useState<number | undefined>(undefined);
-  const [dropUrged, setDropUrged] = useState(false);
+  const [imagesUrged, setImagesUrged] = useState(false);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const contextRef = useRef<HTMLTextAreaElement>(null);
-  const attachmentIndex = useRef(0);
   const requestIdRef = useRef(0);
   const kindOverridden = useRef(false);
 
@@ -213,7 +213,6 @@ export function FeedbackDialog() {
     setIncludeDiagnostics(true);
     setIncludeCanvasScreenshot(false);
     applyAttachments([]);
-    setRejects([]);
     setScreenshotError(undefined);
     setBusy(false);
     setStatus(null);
@@ -222,8 +221,7 @@ export function FeedbackDialog() {
     setChoiceFor(null);
     setFilingAnyway(false);
     setRegressionOf(undefined);
-    setDropUrged(false);
-    attachmentIndex.current = 0;
+    setImagesUrged(false);
     kindOverridden.current = Boolean(prefill?.kind);
 
     sendRef.current({
@@ -345,56 +343,26 @@ export function FeedbackDialog() {
   }, [analysis]);
 
   // -------------------------------------------------------------------------
-  // Attachments
+  // The canvas screenshot
   // -------------------------------------------------------------------------
 
-  // Every route (picker, drop, paste) folds through `acceptFiles` one file at a
-  // time, so a batch that crosses a limit half way still keeps what fitted and
-  // says why the rest did not.
-  const handleFiles = useCallback(
-    async (files: readonly File[], source: FeedbackAttachmentSource) => {
-      const refused: { name: string; error: string }[] = [];
-      let current = attachmentsRef.current;
-      for (const file of files) {
-        const { rejected } = acceptFiles(current, [
-          { name: file.name, type: file.type, size: file.size },
-        ]);
-        if (rejected.length > 0) {
-          refused.push(rejected[0]);
-          continue;
-        }
-        try {
-          const attachment = await fileToAttachment(file, source, attachmentIndex.current++);
-          current = [...current, attachment];
-          applyAttachments(current);
-        } catch (err) {
-          refused.push({ name: file.name, error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-      setRejects(refused);
-    },
-    [applyAttachments],
-  );
-
-  const handleRemoveAttachment = useCallback(
-    (id: string) => {
-      const removed = attachmentsRef.current.find((a) => a.id === id);
-      applyAttachments(attachmentsRef.current.filter((a) => a.id !== id));
-      // Removing the thumbnail is the same gesture as unticking the box.
-      if (removed?.source === 'canvas') setIncludeCanvasScreenshot(false);
-    },
-    [applyAttachments],
-  );
-
+  /**
+   * Tick / untick the canvas screenshot. Ticking captures immediately so the
+   * user finds out here whether it worked (and whether the clipboard took it),
+   * rather than at submit time when the browser is already opening.
+   *
+   * Every failure path unticks the box: a checkbox left ticked with nothing
+   * behind it promises an image the report does not carry.
+   */
   const handleCanvasToggle = useCallback(
     async (checked: boolean) => {
       setIncludeCanvasScreenshot(checked);
       setScreenshotError(undefined);
       if (!checked) {
-        applyAttachments(attachmentsRef.current.filter((a) => a.source !== 'canvas'));
+        applyAttachments([]);
         return;
       }
-      if (attachmentsRef.current.some((a) => a.source === 'canvas')) return;
+      if (attachmentsRef.current.length > 0) return;
 
       const root = document.getElementById('root');
       if (!root) {
@@ -411,43 +379,17 @@ export function FeedbackDialog() {
         useEditorStore.getState().recordError('screenshot', reason);
         return;
       }
-      const attachment = dataUrlToAttachment(
-        shot.dataUrl,
-        CANVAS_ATTACHMENT_NAME,
-        'canvas',
-        attachmentIndex.current++,
-      );
+      const attachment = canvasAttachment(shot.dataUrl);
       if (!attachment) {
-        setScreenshotError('The screenshot was too large to attach.');
+        setScreenshotError('The screenshot could not be attached — it may be over the 10 MB limit.');
         setIncludeCanvasScreenshot(false);
         return;
       }
-      const { rejected } = acceptFiles(attachmentsRef.current, [
-        { name: attachment.name, type: attachment.mime, size: attachment.bytes },
-      ]);
-      if (rejected.length > 0) {
-        setRejects(rejected);
-        setIncludeCanvasScreenshot(false);
-        return;
-      }
-      // The canvas shot leads, because the first image is the one that goes on
-      // the clipboard for the GitHub "Screenshot" box.
-      applyAttachments([attachment, ...attachmentsRef.current]);
+      // `captureScreenshot` already tried the clipboard; record what happened so
+      // the dialog can say which of the two hand-offs the user is getting.
+      applyAttachments([{ ...attachment, onClipboard: shot.onClipboard }]);
     },
     [applyAttachments],
-  );
-
-  // A paste lands wherever the caret is, so the dialog catches it rather than
-  // the drop zone.
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent) => {
-      const files = e.clipboardData?.files;
-      if (files && files.length > 0) {
-        e.preventDefault();
-        void handleFiles(Array.from(files), 'paste');
-      }
-    },
-    [handleFiles],
   );
 
   // -------------------------------------------------------------------------
@@ -547,18 +489,20 @@ export function FeedbackDialog() {
   // -------------------------------------------------------------------------
 
   /**
-   * Put the leading image on the clipboard and stamp the result on it. The host
-   * branches both the GitHub "Screenshot" body text and its notification on
-   * this flag, so a refusal (anything but PNG, in practice) has to be recorded
-   * rather than assumed.
+   * Re-copy the screenshot to the clipboard on the way out and stamp the result
+   * on it. Re-copied because the capture may have been minutes ago and the user
+   * has had a whole dialog to put something else on the clipboard since; the
+   * flag is recorded rather than assumed because the host branches both the
+   * GitHub "Screenshot" body text and its notification on it, and a browser is
+   * free to refuse the write.
    */
   const withClipboardFlag = useCallback(async (): Promise<FeedbackAttachment[]> => {
     const list = attachmentsRef.current;
     if (list.length === 0) return [];
-    const first = list[0];
-    const blob = dataUrlToBlob(first.dataUrl, first.mime);
-    const onClipboard = blob ? await copyImageToClipboard(blob, first.mime) : false;
-    return list.map((attachment, i) => (i === 0 ? { ...attachment, onClipboard } : attachment));
+    const [image] = list;
+    const blob = dataUrlToBlob(image.dataUrl, image.mime);
+    const onClipboard = blob ? await copyImageToClipboard(blob, image.mime) : false;
+    return [{ ...image, onClipboard }];
   }, []);
 
   const submit = useCallback(
@@ -647,6 +591,9 @@ export function FeedbackDialog() {
   // Readiness & routing
   // -------------------------------------------------------------------------
 
+  /** The canvas capture is bug-only, and only where a canvas sits behind the dialog. */
+  const canCaptureCanvas = kind === 'bug' && capabilities?.canCaptureCanvas === true;
+
   const readiness = useMemo(
     () =>
       readinessScore({
@@ -655,9 +602,12 @@ export function FeedbackDialog() {
         contextLength: context.trim().length,
         attachmentCount: attachments.length,
         includeDiagnostics,
+        // The capture is the dialog's only image route, so where it is
+        // unavailable the meter must not ask for an image it cannot take.
+        canAttachImage: canCaptureCanvas,
         reasons: analysis?.reasons,
       }),
-    [kind, description, context, attachments.length, includeDiagnostics, analysis],
+    [kind, description, context, attachments.length, includeDiagnostics, canCaptureCanvas, analysis],
   );
 
   const route = useMemo(
@@ -676,22 +626,30 @@ export function FeedbackDialog() {
     [takeover, takeoverMode, filingAnyway, attachments.length, runningVersion, outdated, fixState],
   );
 
-  const handleJump = useCallback((target: ReadinessTarget) => {
-    if (target === 'description') {
-      descriptionRef.current?.focus();
-      return;
-    }
-    if (target === 'context') {
-      contextRef.current?.focus();
-      return;
-    }
-    if (target === 'diagnostics') {
-      setIncludeDiagnostics(true);
-      return;
-    }
-    setDropUrged(true);
-    window.setTimeout(() => setDropUrged(false), URGE_MS);
-  }, []);
+  const handleJump = useCallback(
+    (target: ReadinessTarget) => {
+      if (target === 'description') {
+        descriptionRef.current?.focus();
+        return;
+      }
+      if (target === 'context') {
+        contextRef.current?.focus();
+        return;
+      }
+      if (target === 'diagnostics') {
+        setIncludeDiagnostics(true);
+        return;
+      }
+      // "Attach one" has exactly one thing to attach, so attach it rather than
+      // pointing at a control. The check is only offered where that capture
+      // exists; when it is already asked for and failed, the highlight falls
+      // back to the note that says where images do go.
+      setImagesUrged(true);
+      window.setTimeout(() => setImagesUrged(false), URGE_MS);
+      if (canCaptureCanvas && !includeCanvasScreenshot) void handleCanvasToggle(true);
+    },
+    [canCaptureCanvas, includeCanvasScreenshot, handleCanvasToggle],
+  );
 
   /**
    * Change what is being filed. Available with or without an analysis — the
@@ -714,7 +672,7 @@ export function FeedbackDialog() {
   const copy = FEEDBACK_COPY[kind];
   const analysed = analysisState === 'ready' && analysis !== null;
   const showAi = capabilities?.aiAvailable === true;
-  const canCaptureCanvas = kind === 'bug' && capabilities?.canCaptureCanvas === true;
+  const canvasShot = attachments[0] ?? null;
   const restlinkLabel = filingAnyway
     ? 'Hide the new-issue form'
     : fixState === 'current'
@@ -732,7 +690,6 @@ export function FeedbackDialog() {
         aria-modal="true"
         aria-labelledby="feedback-title"
         onKeyDown={handleDialogKeyDown}
-        onPaste={handlePaste}
       >
         <div className="feedback__header">
           <KindMark kind={kind} />
@@ -872,24 +829,8 @@ export function FeedbackDialog() {
               />
             </div>
 
-            <div className="feedback__field">
+            <div className={`feedback__field${imagesUrged ? ' feedback__field--urged' : ''}`}>
               <span className="feedback__group-label">Images</span>
-              <AttachmentGrid
-                attachments={attachments}
-                max={MAX_ATTACHMENTS}
-                onRemove={handleRemoveAttachment}
-                onFiles={(files, source) => void handleFiles(files, source)}
-                dropHighlighted={dropUrged}
-              />
-              {rejects.length > 0 && (
-                <ul className="feedback__rejects">
-                  {rejects.map((reject) => (
-                    <li className="feedback__reject" key={`${reject.name}-${reject.error}`}>
-                      {reject.name} — {reject.error}
-                    </li>
-                  ))}
-                </ul>
-              )}
               {canCaptureCanvas && (
                 <label className="feedback__checkbox">
                   <input
@@ -908,6 +849,23 @@ export function FeedbackDialog() {
                   </span>
                 </label>
               )}
+              {canvasShot && (
+                <div className="feedback__attached" role="status">
+                  {canvasShot.onClipboard
+                    ? 'Copied to your clipboard — paste it into the Screenshot box on GitHub.'
+                    : 'Attached. Your clipboard refused it, so it is saved to a file the notification can reveal.'}
+                </div>
+              )}
+              {/*
+                Standing, and deliberately unconditional: GitHub takes no image
+                through a prefilled form, so every image but this one is the
+                user's own paste or drop on that page. Saying it once here beats
+                a picker that could only hand them the same job back.
+              */}
+              <p className="feedback__note">
+                Any other images are added on the GitHub page: click the Screenshot box there and
+                paste or drag them in.
+              </p>
               {screenshotError && (
                 <div className="feedback__status" role="status">
                   {screenshotError}

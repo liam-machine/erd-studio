@@ -699,116 +699,37 @@
 }
 
 /* -----------------------------------------------------------------------
-   Attachments
+   Images
+
+   One image route (the canvas capture), so there is no thumbnail grid and no
+   drop zone here — a checkbox, the line that says where the capture went, and
+   the standing note about GitHub's own Screenshot box.
    ----------------------------------------------------------------------- */
 
-.feedback__thumbs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.feedback__thumb {
-  position: relative;
-  width: 92px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--input-bg);
-  overflow: hidden;
-}
-
-.feedback__thumb-img {
-  display: block;
-  width: 100%;
-  height: 54px;
-  object-fit: cover;
-}
-
-.feedback__thumb-name {
-  padding: 3px 5px;
-  border-top: 1px solid var(--panel-border);
-  color: var(--dim-fg);
-  font-size: 9.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.feedback__thumb-remove {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  display: grid;
-  place-items: center;
-  width: 17px;
-  height: 17px;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.78);
-  color: var(--button-fg);
-  font-size: 11px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.feedback__thumb-remove:focus-visible {
-  outline: 1px solid var(--focus-border);
-}
-
-.feedback__thumb-badge {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  padding: 1px 4px;
+.feedback__attached {
+  padding: 6px 8px;
   border-radius: 3px;
-  background: var(--stage-logical);
-  color: var(--panel-bg);
-  font-size: 8.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.feedback__dropzone {
-  padding: 11px;
-  border: 1px dashed var(--input-border, var(--panel-border));
-  border-radius: 4px;
-  color: var(--dim-fg);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
   font-size: 11.5px;
-  text-align: center;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  line-height: 1.45;
 }
 
-.feedback__dropzone--over {
-  border-color: var(--focus-border);
-  background: var(--input-bg);
-  color: var(--editor-fg);
-}
-
-.feedback__dropzone--urged {
-  border-color: var(--warning-fg);
-  background: var(--warning-bg);
-}
-
-.feedback__dropzone-hint {
-  margin-top: 4px;
-  font-size: 11px;
+.feedback__note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
   color: var(--dim-fg);
 }
 
-.feedback__rejects {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.feedback__reject {
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--warning-fg);
+/* The readiness meter's "Attach one" jump lands here when there is nothing to
+   capture, so the section itself takes the highlight. */
+.feedback__field--urged {
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--warning-bg);
+  transition: background 0.12s ease;
 }
 
 .feedback__checkbox {
@@ -1009,7 +930,7 @@
   }
 
   .feedback__meter-fill,
-  .feedback__dropzone {
+  .feedback__field--urged {
     transition: none;
   }
 }

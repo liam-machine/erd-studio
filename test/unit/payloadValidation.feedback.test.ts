@@ -2,9 +2,11 @@
  * Runtime validators for the six feedback messages.
  *
  * These sit at the message boundary, so they see whatever a compromised or
- * simply buggy webview sends. Attachments matter most: they are decoded and
+ * simply buggy webview sends. The attachment matters most: it is decoded and
  * written to disk, so the mime, the declared size and the data URL's own
- * prefix all have to agree before anything touches the filesystem.
+ * prefix all have to agree before anything touches the filesystem. A report
+ * carries at most one image (the canvas capture), and the list validator is
+ * what holds that line.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -123,6 +125,8 @@ describe('validateFeedbackAttachment', () => {
       /base64 image data URL/,
     ],
     ['an unknown source', attachment({ source: 'telepathy' }), /source is not recognised/],
+    // The picker, drop and paste routes are gone; `canvas` is the only source.
+    ['a retired source', attachment({ source: 'picker' }), /source is not recognised/],
     [
       'a non-boolean clipboard flag',
       attachment({ onClipboard: 'yes' }),
@@ -144,26 +148,15 @@ describe('validateFeedbackAttachments', () => {
     expect(validateFeedbackAttachments(undefined)).toBeNull();
   });
 
-  it('accepts an empty list and a full one', () => {
+  it('accepts an empty list and the one image a report can carry', () => {
+    expect(MAX_ATTACHMENTS).toBe(1);
     expect(validateFeedbackAttachments([])).toBeNull();
-    expect(
-      validateFeedbackAttachments(
-        Array.from({ length: MAX_ATTACHMENTS }, (_, i) => attachment({ id: `a${i}` })),
-      ),
-    ).toBeNull();
+    expect(validateFeedbackAttachments([attachment()])).toBeNull();
   });
 
-  it('rejects one image too many', () => {
-    expect(
-      validateFeedbackAttachments(
-        Array.from({ length: MAX_ATTACHMENTS + 1 }, (_, i) => attachment({ id: `a${i}` })),
-      ),
-    ).toBe(`At most ${MAX_ATTACHMENTS} images can be attached.`);
-  });
-
-  it('rejects duplicate ids', () => {
-    expect(validateFeedbackAttachments([attachment(), attachment()])).toBe(
-      'Attachment ids must be unique.',
+  it('rejects a second image, whatever it is', () => {
+    expect(validateFeedbackAttachments([attachment(), attachment({ id: 'a2' })])).toBe(
+      'Only one image can be attached.',
     );
   });
 
@@ -172,26 +165,21 @@ describe('validateFeedbackAttachments', () => {
     expect(validateFeedbackAttachments({ 0: attachment() })).toBe('Attachments must be a list.');
   });
 
-  it('surfaces the first bad entry\'s own message', () => {
-    expect(
-      validateFeedbackAttachments([attachment(), attachment({ id: 'a2', mime: 'text/plain' })]),
-    ).toBe('Attachment mime type is not an accepted image type.');
+  it('surfaces the bad entry\'s own message', () => {
+    expect(validateFeedbackAttachments([attachment({ mime: 'text/plain' })])).toBe(
+      'Attachment mime type is not an accepted image type.',
+    );
   });
 
-  it('cannot fail on the aggregate once every image and the count are legal', () => {
-    // The aggregate ceiling is MAX_ATTACHMENTS × MAX_ATTACHMENT_BYTES, so a
-    // list that passes both other checks passes this one by construction —
-    // a user is never told at submit time about a limit they could not have
-    // seen at attach time.
-    const maxed = Array.from({ length: MAX_ATTACHMENTS }, (_, i) =>
-      attachment({ id: `a${i}`, bytes: MAX_ATTACHMENT_BYTES }),
+  it('takes an image right on the per-image ceiling, and nothing over it', () => {
+    // There is no aggregate ceiling to fail separately: with one image, the
+    // per-image limit is the whole-report limit, and the dialog applies it at
+    // capture time — nobody is told at submit time about a limit they could
+    // not have seen earlier.
+    expect(validateFeedbackAttachments([attachment({ bytes: MAX_ATTACHMENT_BYTES })])).toBeNull();
+    expect(validateFeedbackAttachments([attachment({ bytes: MAX_ATTACHMENT_BYTES + 1 })])).toBe(
+      'Attachment "canvas.png" is larger than the 10 MB limit.',
     );
-    expect(validateFeedbackAttachments(maxed)).toBeNull();
-
-    // One more image is refused on the count, which is the friendlier message.
-    expect(
-      validateFeedbackAttachments([...maxed, attachment({ id: 'extra', bytes: 1 })]),
-    ).toBe(`At most ${MAX_ATTACHMENTS} images can be attached.`);
   });
 });
 

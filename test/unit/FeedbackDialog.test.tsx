@@ -4,17 +4,20 @@
  *
  * What is worth pinning down here is the behaviour a user would notice if it
  * regressed: the copy swapping with the kind, the canvas checkbox only being
- * offered for a bug, Escape closing, the readiness meter moving locally when an
- * image is attached (no round trip), a confident duplicate taking the form
- * over, and the exact `submitFeedback` payload the host receives.
+ * offered for a bug, Escape closing, the readiness meter moving locally when
+ * the screenshot is attached (no round trip), a confident duplicate taking the
+ * form over, and the exact `submitFeedback` payload the host receives.
+ *
+ * The canvas capture is the dialog's only image route — there is no picker, no
+ * drop zone and no paste handler to test, because GitHub takes no image through
+ * a prefilled form and the dialog says so instead of pretending otherwise.
  *
  * The store and the message bus are mocked because this is a component test:
  * the store's own transitions live in editorStore.test.ts, and the host end of
  * every message lives in semanticEditorProvider.feedback.test.ts.
  *
  * Assertions use raw DOM (`textContent`, `className`, `hasAttribute`) — there
- * is no jest-dom here — and drag/paste are driven with plain object literals
- * because jsdom has no `DataTransfer` or `ClipboardEvent`.
+ * is no jest-dom here.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -156,8 +159,6 @@ const q = <T extends Element = HTMLElement>(selector: string) =>
   document.querySelector(selector) as T | null;
 const qq = (selector: string) => Array.from(document.querySelectorAll(selector));
 const text = (selector: string) => q(selector)?.textContent ?? '';
-const byLabel = (label: string) =>
-  qq('button').find((b) => b.getAttribute('aria-label') === label) as HTMLButtonElement | undefined;
 const buttonWithText = (needle: string) =>
   qq('button').find((b) => (b.textContent ?? '').includes(needle)) as HTMLButtonElement | undefined;
 /** The footer's primary button — the takeover has one of its own. */
@@ -173,6 +174,32 @@ const contextInput = () => q<HTMLTextAreaElement>('#feedback-context')!;
 /** The one `submitFeedback` payload posted so far. */
 const submitted = () =>
   send.mock.calls.map((c) => c[0]).filter((m) => m.type === 'submitFeedback').at(-1)?.payload;
+
+/**
+ * The capture path looks for the canvas root before it asks for a shot, so a
+ * test that ticks the checkbox has to put one in the document first. Removed
+ * again in `afterEach`.
+ */
+function installCanvasRoot(): void {
+  const root = document.createElement('div');
+  root.id = 'root';
+  document.body.appendChild(root);
+}
+
+/**
+ * Tick the canvas checkbox with a capture that succeeds. `onClipboard` is what
+ * the browser said when the PNG was offered to the clipboard — the dialog's
+ * copy turns on it, so it is never assumed.
+ */
+async function attachCanvas(onClipboard = false): Promise<void> {
+  captureScreenshot.mockResolvedValueOnce({
+    dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+    onClipboard,
+  });
+  await act(async () => {
+    fireEvent.click(q<HTMLInputElement>('.feedback__checkbox input')!);
+  });
+}
 
 beforeEach(() => {
   send.mockClear();
@@ -408,27 +435,18 @@ describe('choosing the kind without an analysis', () => {
   it('takes the canvas screenshot with it — a feature request cannot untick one', async () => {
     // The checkbox is bug-only, so an image left attached after the flip could
     // neither be seen nor removed.
-    captureScreenshot.mockResolvedValueOnce({
-      dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
-      onClipboard: false,
-    });
-    // The capture path looks for the canvas root before it asks for a shot.
-    const canvasRoot = document.createElement('div');
-    canvasRoot.id = 'root';
-    document.body.appendChild(canvasRoot);
+    installCanvasRoot();
     render(<FeedbackDialog />);
     fireEvent.change(descriptionInput(), { target: { value: 'Something happened.' } });
 
-    await act(async () => {
-      fireEvent.click(q<HTMLInputElement>('.feedback__checkbox input')!);
-    });
-    await waitFor(() => expect(text('.feedback__thumb-name')).toBe('canvas.png'));
+    await attachCanvas();
+    await waitFor(() => expect(q('.feedback__attached')).not.toBeNull());
 
     act(() => {
       fireEvent.click(buttonWithText('Not right? Make it a feature')!);
     });
 
-    expect(q('.feedback__thumb')).toBeNull();
+    expect(q('.feedback__attached')).toBeNull();
     expect(qq('.feedback__checkbox')).toHaveLength(0);
 
     await act(async () => {
@@ -457,19 +475,71 @@ describe('the readiness meter', () => {
     expect(text('.feedback__meter-row')).toContain('Ready to file');
   });
 
-  it('moves the moment an image is attached — no round trip', async () => {
+  it('moves the moment the screenshot is attached — no round trip', async () => {
+    installCanvasRoot();
     renderReady();
-    const zone = q('.feedback__dropzone')!;
-    const file = new File(['0123456789'], 'shot.png', { type: 'image/png' });
 
-    await act(async () => {
-      fireEvent.drop(zone, { dataTransfer: { files: [file] } });
-    });
+    await attachCanvas();
 
     await waitFor(() => expect(text('.feedback__meter-row')).toContain('70%'));
-    expect(text('.feedback__thumb-name')).toBe('shot.png');
+    expect(qq('.feedback__check').some((c) => (c.textContent ?? '').includes('Screenshot attached'))).toBe(
+      true,
+    );
     // Nothing was asked of the host to move the bar.
     expect(send.mock.calls.map((c) => c[0].type)).not.toContain('analyzeFeedback');
+  });
+
+  it('captures the canvas itself when the unmet image check is acted on', async () => {
+    // "Attach one" has exactly one thing to attach, so it attaches it rather
+    // than pointing the user at a control.
+    installCanvasRoot();
+    renderReady();
+    captureScreenshot.mockResolvedValueOnce({
+      dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+      onClipboard: true,
+    });
+
+    await act(async () => {
+      fireEvent.click(buttonWithText('Attach one')!);
+    });
+
+    await waitFor(() => expect(q('.feedback__attached')).not.toBeNull());
+    expect(q<HTMLInputElement>('.feedback__checkbox input')!.checked).toBe(true);
+  });
+
+  it('asks a feature request for no image, since it has no way to attach one', () => {
+    // The canvas capture is bug-only, so an image check here would be a row
+    // that can never be met above a button with nothing to do.
+    resetStore({
+      feedbackPrefill: { kind: 'feature', description: LONG_DESCRIPTION },
+      feedbackCapabilities: capabilities({ aiAvailable: true, aiProviderLabel: 'Copilot' }),
+      feedbackAnalysis: analysis({ kind: 'feature' }),
+      feedbackAnalysisState: 'ready',
+    });
+    render(<FeedbackDialog />);
+
+    expect(qq('.feedback__check').some((c) => (c.textContent ?? '').includes('No image'))).toBe(
+      false,
+    );
+    expect(buttonWithText('Attach one')).toBeUndefined();
+    // Clear description (40) + diagnostics (10) out of the 80 that apply.
+    expect(text('.feedback__meter-row')).toContain('63%');
+  });
+
+  it('drops the image check when a bug has no canvas behind the dialog', () => {
+    resetStore({
+      feedbackPrefill: { kind: 'bug', description: LONG_DESCRIPTION },
+      feedbackCapabilities: capabilities({
+        aiAvailable: true,
+        aiProviderLabel: 'Copilot',
+        canCaptureCanvas: false,
+      }),
+      feedbackAnalysis: analysis(),
+      feedbackAnalysisState: 'ready',
+    });
+    render(<FeedbackDialog />);
+
+    expect(buttonWithText('Attach one')).toBeUndefined();
   });
 
   it('moves again when the user takes the diagnostics off the report', () => {
@@ -737,23 +807,27 @@ describe('submitting', () => {
     expect(primaryButton().hasAttribute('disabled')).toBe(false);
   });
 
-  it('stamps the clipboard result on the first image so the host can say what to do', async () => {
+  it('re-copies the screenshot on the way out and stamps the result on it', async () => {
+    // The capture may have been minutes ago, and the host branches both the
+    // issue body and its notification on this flag.
+    installCanvasRoot();
     copyImageToClipboard.mockResolvedValueOnce(true);
     render(<FeedbackDialog />);
     fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
 
-    const file = new File(['0123456789'], 'shot.png', { type: 'image/png' });
-    await act(async () => {
-      fireEvent.drop(q('.feedback__dropzone')!, { dataTransfer: { files: [file] } });
-    });
-    await waitFor(() => expect(q('.feedback__thumb')).not.toBeNull());
+    await attachCanvas(false);
+    await waitFor(() => expect(q('.feedback__attached')).not.toBeNull());
 
     await act(async () => {
       fireEvent.click(primaryButton());
     });
 
     await waitFor(() => expect(submitted()?.attachments).toHaveLength(1));
-    expect(submitted().attachments[0].onClipboard).toBe(true);
+    expect(submitted().attachments[0]).toMatchObject({
+      name: 'canvas.png',
+      source: 'canvas',
+      onClipboard: true,
+    });
     expect(copyImageToClipboard).toHaveBeenCalledWith(expect.anything(), 'image/png');
   });
 
@@ -877,53 +951,88 @@ describe('diagnostics', () => {
   });
 });
 
-describe('attachments', () => {
-  it('says which types and how many are allowed', () => {
+describe('images', () => {
+  it('offers no route of its own for other images, and says where they go', () => {
+    // GitHub has no API for attaching an image to a prefilled form, so a picker
+    // here could only hand the user the same job back.
     render(<FeedbackDialog />);
-    expect(text('.feedback__dropzone')).toContain('Drop images here, paste from the clipboard, or');
-    expect(text('.feedback__dropzone-hint')).toBe('PNG, JPEG, GIF or WebP · up to 4 · 10 MB each');
-  });
-
-  it('refuses a file GitHub would not take, and says why beside its name', async () => {
-    render(<FeedbackDialog />);
-    const file = new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' });
-
-    await act(async () => {
-      fireEvent.drop(q('.feedback__dropzone')!, { dataTransfer: { files: [file] } });
-    });
-
-    await waitFor(() => expect(q('.feedback__reject')).not.toBeNull());
-    expect(text('.feedback__reject')).toBe(
-      'notes.pdf — Only PNG, JPEG, GIF and WebP images can be attached.',
+    expect(q('input[type="file"]')).toBeNull();
+    expect(text('.feedback__note')).toBe(
+      'Any other images are added on the GitHub page: click the Screenshot box there and paste or drag them in.',
     );
-    expect(q('.feedback__thumb')).toBeNull();
   });
 
-  it('removes an image again', async () => {
+  it('says the screenshot is on the clipboard once it actually is', async () => {
+    installCanvasRoot();
     render(<FeedbackDialog />);
-    const file = new File(['0123456789'], 'shot.png', { type: 'image/png' });
-    await act(async () => {
-      fireEvent.drop(q('.feedback__dropzone')!, { dataTransfer: { files: [file] } });
-    });
-    await waitFor(() => expect(q('.feedback__thumb')).not.toBeNull());
 
-    act(() => {
-      fireEvent.click(byLabel('Remove shot.png')!);
+    await attachCanvas(true);
+
+    await waitFor(() =>
+      expect(text('.feedback__attached')).toBe(
+        'Copied to your clipboard — paste it into the Screenshot box on GitHub.',
+      ),
+    );
+  });
+
+  it('points at the saved file instead when the clipboard refused it', async () => {
+    // Claiming a copy that did not happen would send the user to paste nothing.
+    installCanvasRoot();
+    render(<FeedbackDialog />);
+
+    await attachCanvas(false);
+
+    await waitFor(() =>
+      expect(text('.feedback__attached')).toBe(
+        'Attached. Your clipboard refused it, so it is saved to a file the notification can reveal.',
+      ),
+    );
+  });
+
+  it('unticking the box takes the screenshot off the report', async () => {
+    installCanvasRoot();
+    render(<FeedbackDialog />);
+    fireEvent.change(descriptionInput(), { target: { value: 'Something happened.' } });
+
+    await attachCanvas(true);
+    await waitFor(() => expect(q('.feedback__attached')).not.toBeNull());
+
+    await act(async () => {
+      fireEvent.click(q<HTMLInputElement>('.feedback__checkbox input')!);
     });
-    expect(q('.feedback__thumb')).toBeNull();
+    expect(q('.feedback__attached')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(primaryButton());
+    });
+    await waitFor(() => expect(submitted()).toBeTruthy());
+    expect(submitted().attachments).toBeUndefined();
+  });
+
+  it('unticks itself and explains when the capture fails, rather than promising an image', async () => {
+    installCanvasRoot();
+    render(<FeedbackDialog />);
+
+    // The default mock resolves with no dataUrl and an error.
+    await act(async () => {
+      fireEvent.click(q<HTMLInputElement>('.feedback__checkbox input')!);
+    });
+
+    await waitFor(() => expect(text('.feedback__status')).toBe('no canvas in jsdom'));
+    expect(q<HTMLInputElement>('.feedback__checkbox input')!.checked).toBe(false);
+    expect(q('.feedback__attached')).toBeNull();
+    expect(recordError).toHaveBeenCalledWith('screenshot', 'no canvas in jsdom');
   });
 });
 
 describe('the footer', () => {
-  it('explains the plain route, and the clipboard hand-off once an image is on', async () => {
+  it('explains the plain route, and the clipboard hand-off once the screenshot is on', async () => {
+    installCanvasRoot();
     render(<FeedbackDialog />);
     expect(text('.feedback__route')).toContain('Opens the prefilled form.');
     expect(text('.feedback__route')).toContain('nothing is sent from VS Code');
 
-    const file = new File(['0123456789'], 'shot.png', { type: 'image/png' });
-    await act(async () => {
-      fireEvent.drop(q('.feedback__dropzone')!, { dataTransfer: { files: [file] } });
-    });
+    await attachCanvas(true);
 
     await waitFor(() =>
       expect(text('.feedback__route')).toContain('paste it into the Screenshot box'),

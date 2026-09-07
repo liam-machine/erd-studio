@@ -570,7 +570,7 @@ export interface AnalyzeFeedbackMessage {
 
 /**
  * Submit the report. The host opens the prefilled GitHub issue form (or the
- * existing thread, when `commentOnIssue` is set), handles the images, and
+ * existing thread, when `commentOnIssue` is set), handles the image, and
  * replies with `feedbackSubmitted`.
  */
 export interface SubmitFeedbackMessage {
@@ -582,6 +582,7 @@ export interface SubmitFeedbackMessage {
     /** Steps to reproduce (bug) or rationale (feature). */
     steps?: string;
     includeDiagnostics: boolean;
+    /** The canvas capture, when the user asked for one. Never more than one entry. */
     attachments?: FeedbackAttachment[];
     /** Why the canvas capture failed, when the user asked for one. */
     screenshotError?: string;
