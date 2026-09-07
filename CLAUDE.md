@@ -175,7 +175,7 @@ Own writes are recorded in `ownWrites` (`src/services/ownWriteTracker.ts`, path 
 - Webview components use BEM CSS class naming
 - All colours use CSS custom properties from `webview/styles/theme.css`
 - React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
-- Extension host writes use `WorkspaceEdit` for undo/redo integration; the only direct `fs` writes are `LogicalModelService.saveModel` (atomic temp+rename, for non-editor callers) and `LayerService.saveConfig`, both of which record `ownWrites`
+- **Every canvas edit to a domain file or a `logical-models/*.yml` goes through `applyDomainEdit`'s single `WorkspaceEdit`** — one undo step, and nothing reaches disk unless `applyEdit` succeeds. Direct `fs` writes still exist elsewhere (`LogicalModelService.saveModel` for non-editor callers, `LayerService.saveConfig`, `HarnessService`, `MigrationService`, `LegacyTagCleanupService`, sync-plan and bug-report output, and `createDomain`'s `wx` create); the rule is about the editor path, not a repo-wide ban. Writers whose file is watched (domain JSON, `layers.json`, `logical-models/*.yml`) must record `ownWrites` so the watcher does not bounce the write back as a refresh
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
 - Stage switching sends `switchStage`; the extension responds with `stageData` (physical is derived on demand, never persisted; positions inherited from logical)
 - Mutation handlers target model bodies through `applyModelEdit` (v5 yml) and `parsed.logical.models` / `.relationships` in the domain file; `updateColumn` treats omitted `scdType`/`additiveType` as "keep" and `null` as "clear"

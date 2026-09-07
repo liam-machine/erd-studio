@@ -223,6 +223,30 @@ describe('activate() with a dbt project', () => {
     expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length * 2);
   });
 
+  it('refreshes the Model Library on any domain write, not just when a yml file appears or disappears', async () => {
+    // The Model Library shows a per-model "N domains" count and lists the
+    // referencing domains. Adding or removing a model reference changes that
+    // count without creating or deleting a logical-models/*.yml, so gating the
+    // refresh on modelLibraryChanged left the sidebar stale.
+    const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    await activate(context);
+
+    const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider & {
+      _onDidWriteDomain: { fire: (e: { uri: unknown; modelLibraryChanged: boolean }) => void };
+    };
+    const libraryCall = createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.modelLibrary');
+    const libraryProvider = (libraryCall![1] as { treeDataProvider: { onDidChangeTreeData: (cb: () => void) => void } }).treeDataProvider;
+
+    let refreshes = 0;
+    libraryProvider.onDidChangeTreeData(() => { refreshes++; });
+
+    const uri = vscode.Uri.file(path.join(root, '.erd-studio', 'silver', 'showcase.json'));
+    provider._onDidWriteDomain.fire({ uri, modelLibraryChanged: false });
+
+    expect(refreshes).toBeGreaterThan(0);
+  });
+
   it('routes erdStudio.reportBug through the focused canvas instead of input boxes', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);

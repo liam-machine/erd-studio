@@ -600,8 +600,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const editorWroteSubscription = editorProvider.onDidWriteDomain(({ uri, modelLibraryChanged }) => {
     treeProvider.invalidateDomain(uri.fsPath);
     treeProvider.refresh();
+    // The Model Library lists a "N domains" count and the referencing domain
+    // names per model, so ANY domain write can change what it shows — adding or
+    // removing a model reference changes the count without creating or deleting
+    // a yml file. Refresh on every write; `modelLibraryChanged` only gates the
+    // context keys, which turn on the view itself and can only change when a
+    // file appears or disappears.
+    modelLibraryProvider.refresh();
     if (modelLibraryChanged) {
-      modelLibraryProvider.refresh();
       refreshContextKeys();
     }
   });

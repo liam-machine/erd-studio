@@ -10,6 +10,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 ### Added
 
 - **Report a Bug** — `ERD Studio: Report a Bug` (command palette, sidebar, canvas toolbar and error screens) opens a prefilled GitHub issue with diagnostics (versions, OS, domain summary, recent errors) and, from a canvas, copies a screenshot to the clipboard for pasting. Nothing is sent until you submit on GitHub.
+- **`erdStudio.claudeSync.skipPermissions` setting** (default `false`) — controls whether **Execute with Claude** launches Claude Code with `--dangerously-skip-permissions`. Previously that flag was always passed with no way to turn it off and no warning; the launch is now confirmed in a modal that names the flags first.
 
 ### Fixed
 
@@ -51,6 +52,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 - Removed unused dev dependencies (`@resvg/resvg-js`, `@types/mocha`, `@vscode/test-cli`, `@vscode/test-electron`, `@vscode-elements/*`) and the non-functional `test:integration` script.
 - CI builds, type-checks and smoke-tests `mcp-server` (which shares `src/services` with the extension) on every PR.
 - The disabled Claude PR-review workflow runs with read-only permissions, is gated to repository owners/members/collaborators, and its project rules reflect the `erdStudio` identifier rename.
+- Runtime dependencies: `js-yaml` and `@types/js-yaml` removed (model YAML is now parsed with the `yaml` package's document API so comments and key order survive edits), and `yaml` bumped `^2.8.2` → `^2.9.0` to clear its published advisory. CI now runs `npm audit --omit=dev --audit-level=high` for both the extension and `mcp-server`.
 
 ## 0.6.27 — 2026-04-21
 
