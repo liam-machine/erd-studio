@@ -115,6 +115,12 @@ export interface EditorState {
   legendOpen: boolean;
   /** Whether the welcome modal is visible. */
   welcomeModalOpen: boolean;
+  /** Whether the "Report a Bug" dialog is visible. */
+  bugReportDialogOpen: boolean;
+  /** Prefill for the bug report dialog (from the command palette / error screens). */
+  bugReportPrefill: { title?: string; description?: string } | null;
+  /** Recent errors observed in the webview (oldest → newest, capped at 20). Sent with bug reports. */
+  recentErrors: string[];
   /** Active drag line state for creating relationships via column drag. */
   dragLineState: {
     sourceModelName: string;
@@ -166,6 +172,8 @@ export interface EditorState {
    * - 'select': drag on empty canvas draws a rubber-band selection box (no Shift needed) and the cursor is a crosshair.
    */
   canvasMode: 'pan' | 'select';
+  /** Transient toast message raised from anywhere in the webview (null = none). */
+  toastMessage: string | null;
 }
 
 export interface EditorActions {
@@ -218,6 +226,10 @@ export interface EditorActions {
   setLegendOpen: (open: boolean) => void;
   /** Toggle the welcome modal visibility. */
   setWelcomeModalOpen: (open: boolean) => void;
+  /** Open/close the bug report dialog, optionally with prefilled fields. */
+  setBugReportDialogOpen: (open: boolean, prefill?: { title?: string; description?: string } | null) => void;
+  /** Append an error to the recent-errors ring buffer. */
+  recordError: (source: string, message: string) => void;
   /** Start drag line for column relationship creation. */
   startDragLine: (modelName: string, columnName: string, sourceX: number, sourceY: number) => void;
   /** Update drag line endpoint as mouse moves. */
@@ -274,6 +286,8 @@ export interface EditorActions {
   selectAnnotation: (annotationId: string | null) => void;
   /** Set the canvas interaction mode. */
   setCanvasMode: (mode: 'pan' | 'select') => void;
+  /** Show (or clear with null) a transient toast notification. */
+  setToastMessage: (message: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +321,9 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   _autoLayoutFn: null,
   legendOpen: false,
   welcomeModalOpen: false,
+  bugReportDialogOpen: false,
+  bugReportPrefill: null,
+  recentErrors: [],
   dragLineState: null,
   annotationLinkDrag: null,
   discrepancyVisible: false,
@@ -324,6 +341,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   editingColumn: null,
   selectedAnnotation: null,
   canvasMode: 'pan',
+  toastMessage: null,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -381,6 +399,12 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   },
   setLegendOpen: (open) => set({ legendOpen: open }),
   setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
+  setBugReportDialogOpen: (open, prefill = null) =>
+    set({ bugReportDialogOpen: open, bugReportPrefill: open ? prefill : null }),
+  recordError: (source, message) =>
+    set((state) => ({
+      recentErrors: [...state.recentErrors, `${new Date().toISOString()} [${source}] ${message}`].slice(-20),
+    })),
   startDragLine: (modelName, columnName, sourceX, sourceY) =>
     set({
       dragLineState: {
@@ -494,4 +518,5 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   }),
 
   setCanvasMode: (mode) => set({ canvasMode: mode }),
+  setToastMessage: (message) => set({ toastMessage: message }),
 }));

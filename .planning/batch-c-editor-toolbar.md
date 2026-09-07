@@ -16,7 +16,7 @@ After Batch B:
 - `graphTransformer` accepts `DisplayDomain` and renders stage-aware nodes
 - The editor provider (`SemanticEditorProvider`) still has broken code from the removal of old services
 
-Read `plan.md` in the project root for full architectural context.
+Read `docs/archive/plan.md` for full architectural context.
 
 ---
 

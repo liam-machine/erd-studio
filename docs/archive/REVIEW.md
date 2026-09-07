@@ -1,5 +1,7 @@
 # Code Review Guidelines
 
+> **Archived.** These guidelines predate the `dbtSemantic` → `erdStudio` identifier rename (v0.6.46, PR #49) and the yml-primary physical stage. The "do NOT rename" rule and the "relationships come entirely from manifest tests" rule below no longer apply. The current review rules live in the *Code Review Checklist* and *Naming* sections of `CLAUDE.md`; this file is kept for history only.
+
 ## Always check
 
 - All domain file mutations go through `WorkspaceEdit` for undo/redo integration — never write directly via `fs`

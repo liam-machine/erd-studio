@@ -22,6 +22,13 @@ const child = spawn('node', [SERVER], {
 let buffer = '';
 const pending = new Map();
 let nextId = 1;
+// Set when any check prints ❌ so CI gets a non-zero exit code.
+let failed = false;
+
+function fail(message) {
+  failed = true;
+  console.log(`❌ ${message}`);
+}
 
 child.stdout.on('data', (chunk) => {
   buffer += chunk.toString();
@@ -56,7 +63,7 @@ function notify(method, params) {
 
 function summarize(label, msg) {
   if (msg.error) {
-    console.log(`❌ ${label}: ${JSON.stringify(msg.error)}`);
+    fail(`${label}: ${JSON.stringify(msg.error)}`);
     return false;
   }
   const text = msg.result?.content?.[0]?.text;
@@ -137,7 +144,7 @@ async function main() {
   if (ges.result?.content?.[0]?.text?.includes('marketplace.visualstudio.com')) {
     console.log('✅ get_editor_setup returns marketplace link');
   } else {
-    console.log('❌ get_editor_setup missing marketplace link');
+    fail('get_editor_setup missing marketplace link');
     console.log(ges);
   }
 
@@ -151,14 +158,17 @@ async function main() {
   if (uninitText.includes('tip') && uninitText.includes('marketplace.visualstudio.com')) {
     console.log('✅ uninitialized project returns tip pointing to extension');
   } else {
-    console.log('❌ uninitialized fallback missing tip');
+    fail('uninitialized fallback missing tip');
     console.log(uninitText.slice(0, 300));
   }
 
   // Cleanup
   fs.rmSync(UNINIT_PATH, { recursive: true, force: true });
   child.kill();
-  process.exit(0);
+  if (failed) {
+    console.error('\nSmoke test: one or more checks failed');
+  }
+  process.exit(failed ? 1 : 0);
 }
 
 main().catch((e) => {

@@ -9,16 +9,21 @@ import type { LayerService } from '../services/layerService';
  * inside the ERD Studio sidebar tree via LayerDecorationProvider.
  */
 export class SemanticFileDecorationProvider implements vscode.FileDecorationProvider {
-  // Matches the .erd-studio data directory (and the legacy non-dotted erd-studio name)
-  private static readonly SEMANTIC_PATH_PATTERN = /[/\\]\.?erd-studio[/\\]/;
-
   private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<vscode.Uri | vscode.Uri[] | undefined>();
   readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
 
+  /** Configured semantic dir, normalised to forward slashes with no leading `./` or trailing `/`. */
+  private readonly semanticDir: string;
+
   constructor(
     private readonly layerService: LayerService,
-    private readonly semanticDir: string = '.erd-studio',
-  ) {}
+    semanticDir: string = '.erd-studio',
+  ) {
+    this.semanticDir = semanticDir
+      .replace(/\\/g, '/')
+      .replace(/^(\.\/)+/, '')
+      .replace(/\/+$/, '') || '.erd-studio';
+  }
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
     const fsPath = uri.fsPath;
@@ -34,12 +39,9 @@ export class SemanticFileDecorationProvider implements vscode.FileDecorationProv
     }
 
     // --- Domain file decoration ---
-    // Only decorate .json files inside a known layer directory
+    // Only decorate .json files inside a known layer directory of the
+    // configured semantic dir (extractLayerId returns null otherwise).
     if (!fsPath.endsWith('.json')) {
-      return undefined;
-    }
-
-    if (!SemanticFileDecorationProvider.SEMANTIC_PATH_PATTERN.test(fsPath)) {
       return undefined;
     }
 

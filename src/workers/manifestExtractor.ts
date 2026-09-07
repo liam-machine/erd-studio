@@ -12,6 +12,7 @@ import type {
   ManifestRelationshipTest,
   ManifestWorkerResult,
 } from '../types/manifest';
+import { parseRefModelName, resolveModelNameFromNodeId } from '../services/nameUtils';
 
 const MODEL_KEY_PREFIX = 'model.';
 const TEST_KEY_PREFIX = 'test.';
@@ -39,20 +40,26 @@ export function extractManifestData(
     if (nodeKey.startsWith(MODEL_KEY_PREFIX)) {
       const modelInfo = extractModelInfo(node);
       if (modelInfo) {
-        models[modelInfo.name] = modelInfo;
+        // dbt versioned models share a `name` across `model.proj.name.v1`,
+        // `model.proj.name.v2`, … — keep the latest version rather than
+        // whichever node happens to be iterated last.
+        const existing = models[modelInfo.name];
+        if (!existing || isPreferredVersion(modelInfo, existing)) {
+          models[modelInfo.name] = modelInfo;
+        }
       }
       continue;
     }
 
     if (nodeKey.startsWith(TEST_KEY_PREFIX)) {
-      const relTest = extractRelationshipTest(node);
+      const relTest = extractRelationshipTest(node, nodes);
       if (relTest) {
         relationshipTests.push(relTest);
         continue;
       }
 
-      extractUniqueTest(node, uniqueColumns);
-      extractCompositeUniqueTest(node, compositeUniqueGroups);
+      extractUniqueTest(node, uniqueColumns, nodes);
+      extractCompositeUniqueTest(node, compositeUniqueGroups, nodes);
     }
   }
 
@@ -89,6 +96,9 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
     }
   }
 
+  const version = parseVersion(node.version);
+  const latestVersion = parseVersion(node.latest_version);
+
   return {
     name,
     uniqueId,
@@ -98,7 +108,42 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
     columns,
     originalFilePath:
       typeof node.original_file_path === 'string' ? node.original_file_path : undefined,
+    ...(version !== undefined ? { version } : {}),
+    ...(latestVersion !== undefined ? { latestVersion } : {}),
   };
+}
+
+/** dbt records `version` / `latest_version` as a number or string; normalise to a number. */
+function parseVersion(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    return Number(value.trim());
+  }
+  return undefined;
+}
+
+/**
+ * Decide whether `candidate` should replace `existing` when two manifest
+ * nodes resolve to the same short model name (dbt versioned models).
+ *
+ * Preference order: the node dbt marks as `latest_version`, then the highest
+ * numeric version, otherwise keep the existing entry.
+ */
+function isPreferredVersion(candidate: ManifestModelInfo, existing: ManifestModelInfo): boolean {
+  const candidateIsLatest =
+    candidate.version !== undefined && candidate.version === candidate.latestVersion;
+  const existingIsLatest =
+    existing.version !== undefined && existing.version === existing.latestVersion;
+
+  if (candidateIsLatest !== existingIsLatest) {
+    return candidateIsLatest;
+  }
+  if (candidate.version !== undefined && existing.version !== undefined) {
+    return candidate.version > existing.version;
+  }
+  return false;
 }
 
 /**
@@ -111,6 +156,7 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
  */
 function extractRelationshipTest(
   node: Record<string, unknown>,
+  nodes: Record<string, unknown>,
 ): ManifestRelationshipTest | null {
   const testMetadata = node.test_metadata as Record<string, unknown> | undefined;
   if (!testMetadata) {
@@ -134,9 +180,8 @@ function extractRelationshipTest(
     return null;
   }
 
-  const refMatch = toRef.match(/ref\(['"]([\w]+)['"]\s*\)/);
-  const twoArgRefMatch = toRef.match(/ref\(['"][^'"]+['"],\s*['"]([\w]+)['"]\s*\)/);
-  const toModel = twoArgRefMatch?.[1] ?? refMatch?.[1];
+  // Handles ref('m'), ref('proj', 'm') and versioned ref('m', v=2) / version=2
+  const toModel = parseRefModelName(toRef);
 
   if (!toModel) {
     return null;
@@ -146,16 +191,14 @@ function extractRelationshipTest(
   let fromModel: string | undefined;
 
   if (attachedNode && attachedNode.startsWith('model.')) {
-    const parts = attachedNode.split('.');
-    fromModel = parts[parts.length - 1];
+    fromModel = resolveModelNameFromNodeId(attachedNode, nodes);
   } else {
     const dependsOn = node.depends_on as { nodes?: string[] } | undefined;
     const nodeRefs = dependsOn?.nodes ?? [];
 
     for (const ref of nodeRefs) {
       if (ref.startsWith('model.')) {
-        const parts = ref.split('.');
-        const modelName = parts[parts.length - 1];
+        const modelName = resolveModelNameFromNodeId(ref, nodes);
         if (modelName !== toModel) {
           fromModel = modelName;
           break;
@@ -174,6 +217,7 @@ function extractRelationshipTest(
 function extractUniqueTest(
   node: Record<string, unknown>,
   uniqueColumns: Record<string, string[]>,
+  nodes: Record<string, unknown>,
 ): void {
   const testMetadata = node.test_metadata as Record<string, unknown> | undefined;
   if (!testMetadata || testMetadata.name !== 'unique') {
@@ -186,7 +230,7 @@ function extractUniqueTest(
     return;
   }
 
-  const modelName = resolveModelFromTestNode(node);
+  const modelName = resolveModelFromTestNode(node, nodes);
   if (!modelName) {
     return;
   }
@@ -202,6 +246,7 @@ function extractUniqueTest(
 function extractCompositeUniqueTest(
   node: Record<string, unknown>,
   compositeUniqueGroups: Record<string, string[][]>,
+  nodes: Record<string, unknown>,
 ): void {
   const testMetadata = node.test_metadata as Record<string, unknown> | undefined;
   if (!testMetadata || testMetadata.name !== 'unique_combination_of_columns') {
@@ -221,7 +266,7 @@ function extractCompositeUniqueTest(
     return;
   }
 
-  const modelName = resolveModelFromTestNode(node);
+  const modelName = resolveModelFromTestNode(node, nodes);
   if (!modelName) {
     return;
   }
@@ -232,11 +277,13 @@ function extractCompositeUniqueTest(
   compositeUniqueGroups[modelName].push(columns);
 }
 
-function resolveModelFromTestNode(node: Record<string, unknown>): string | undefined {
+function resolveModelFromTestNode(
+  node: Record<string, unknown>,
+  nodes: Record<string, unknown>,
+): string | undefined {
   const attachedNode = node.attached_node as string | undefined;
   if (attachedNode && attachedNode.startsWith('model.')) {
-    const parts = attachedNode.split('.');
-    return parts[parts.length - 1];
+    return resolveModelNameFromNodeId(attachedNode, nodes);
   }
 
   const dependsOn = node.depends_on as { nodes?: string[] } | undefined;
@@ -244,8 +291,7 @@ function resolveModelFromTestNode(node: Record<string, unknown>): string | undef
 
   for (const ref of nodeRefs) {
     if (ref.startsWith('model.')) {
-      const parts = ref.split('.');
-      return parts[parts.length - 1];
+      return resolveModelNameFromNodeId(ref, nodes);
     }
   }
 

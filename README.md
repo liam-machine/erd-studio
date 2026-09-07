@@ -83,7 +83,7 @@ ERD Studio writes a `selectors.yml` for you and auto-tags each diagram's models.
 
 #### Diff against reality
 
-Compare your design to what dbt actually built (read from `manifest.json`, 40MB+ files supported). Mismatches are colour-coded on the canvas.
+Compare your design to what dbt actually built (read from your schema YAMLs and `manifest.json` — 40MB+ manifests are parsed off the main thread). Mismatches are colour-coded on the canvas.
 
 </td>
 <td width="50%" valign="top">
@@ -100,15 +100,15 @@ When design and warehouse disagree, ERD Studio generates a JSON plan mapping eve
 
 ## Getting started
 
-**Prerequisites:** VS Code 1.85+ &bull; dbt project with `dbt_project.yml` &bull; `manifest.json` in `target/`
+**Prerequisites:** VS Code 1.85+ &bull; dbt project with `dbt_project.yml` (anywhere up to three folders deep in the workspace, or set `erdStudio.projectPath`) &bull; a compiled `manifest.json` and/or dbt schema YAMLs for the Physical stage
 
 > **Quick install:** &nbsp;<kbd>Cmd</kbd>+<kbd>P</kbd> &nbsp;&rarr;&nbsp; <code>ext install liamwynne.erd-studio</code>
 
 1. **Install** ERD Studio from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio).
 2. **Open your dbt project** in VS Code and click the ERD Studio icon in the Activity Bar.
 3. **Initialize** — follow the prompt to create the `.erd-studio/` folder.
-4. **Install the AI harness** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Install AI Coding Harness`.
-5. **Create a domain** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `dbt: Create Semantic Domain`.
+4. **Install the AI harness** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `ERD Studio: Install AI Coding Harness`.
+5. **Create a domain** — <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> &rarr; `ERD Studio: Create Semantic Domain`.
 6. **Tell your AI what to build** — describe the scope, point it at bronze, let it draft the ERD. Review on the canvas. Prompt it to generate the dbt code.
 
 The harness installs the right file for your assistant:
@@ -253,9 +253,9 @@ The thing to notice: `logical.models` is an array of **strings** — names of fi
 Open a domain on the canvas and you'll see a **Logical / Physical** toggle.
 
 - **Logical stage** — what you and the AI designed. Reads from `logical-models/*.yml` and the domain JSON.
-- **Physical stage** — what dbt actually built. Derived at runtime from `target/manifest.json` and your existing dbt schema YAMLs (`models/**/*.yml`). **Nothing is written to disk for the physical stage** — it's recomputed from the manifest each time you switch.
+- **Physical stage** — what dbt actually built. Derived at runtime from your dbt schema YAMLs (`models/**/*.yml`, always current, used first) and `target/manifest.json` (used for any model the YAMLs don't describe, and to enrich data types). Paths follow `model-paths` / `target-path` in `dbt_project.yml`. **Nothing is written to disk for the physical stage** — it's recomputed each time you switch, and schema edits are blocked while you're viewing it (moving nodes and adding notes still work, since layout is shared).
 
-Cardinality on the physical stage is inferred from your existing dbt tests:
+Relationships and cardinality on the physical stage come from your existing dbt tests — `relationships` and `unique` / `unique_combination_of_columns` declared in either the YAMLs or the manifest (both `tests:` and `data_tests:`, including dbt 1.10 `arguments:` and versioned `ref('model', v=2)`). Model and column names match case-insensitively.
 
 | dbt test on FK side | dbt test on PK side | Cardinality shown |
 |---|---|---|
@@ -284,7 +284,7 @@ The spec teaches the AI:
 
 For Claude Code, the install also adds a **PreToolUse hook** at `.claude/settings.local.json` that blocks the first edit to any `.erd-studio/` file in a session until the assistant has loaded the skill. No half-read spec, no drift.
 
-The harness embeds a version marker. When you upgrade ERD Studio, the extension detects out-of-date harness files and prompts to update.
+The harness embeds a version marker. When you upgrade ERD Studio, the extension detects out-of-date harness files and asks before updating them (**Update All** / **Choose…** / **Dismiss**) — nothing is overwritten silently. Files without the marker (ones you wrote yourself) are left alone, and only the marked ERD Studio section of `AGENTS.md` is replaced; the rest of that file is preserved.
 
 ### Auto-generated outputs
 
@@ -303,7 +303,7 @@ selectors:
           value: dim_project
 ```
 
-So `dbt run --selector domain_silver_orders` refreshes every model in your "orders" diagram. Regenerated whenever a domain changes. Selectors you write yourself (anything not prefixed `domain_`) are preserved across regenerations.
+So `dbt run --selector domain_silver_orders` refreshes every model in your "orders" diagram. Regenerated whenever a domain changes. ERD Studio only touches selectors it generated — `domain_*` entries whose description ends with `Managed by ERD Studio.` — so anything you write yourself (even a `domain_`-prefixed one) is preserved across regenerations.
 
 **Discrepancy reports** — toggle "Compare to Physical" on the canvas. ERD Studio runs a comparison between Logical and Physical and overlays the result:
 
@@ -331,9 +331,23 @@ All three write to the same files. Pick whichever fits the task.
 | Document a design decision | Edit the YAML's `rationale` field. |
 | Change a cardinality on the diagram | The canvas, or the JSON's `relationships[]`. |
 
-VS Code dirty-state, undo/redo, and git all work as you'd expect — every write goes through the editor's `WorkspaceEdit` API.
+Undo/redo and git work as you'd expect — every canvas edit goes through VS Code's `WorkspaceEdit` API and is saved immediately, with the model YAML and the domain JSON changing (and undoing) together as one step. Files edited outside the canvas (by you, git, or an AI agent) are picked up automatically.
 
 That's the whole system. Three folders, two file types, one diagram per JSON, one model per YAML.
+
+### Settings
+
+| Setting | Default | What it does |
+|---|---|---|
+| `erdStudio.projectPath` | *(auto-detect)* | dbt project root, absolute or relative to the workspace. Needs a window reload when changed (you'll be prompted). |
+| `erdStudio.semanticDir` | `.erd-studio` | Where the ERD files live, relative to the project root. Needs a window reload when changed. |
+| `erdStudio.claudeSync.skipPermissions` | `false` | Pass `--dangerously-skip-permissions` when **Execute with Claude** applies a sync plan. The launch command is always shown for confirmation first. |
+
+The pre-rename `dbtSemantic.*` settings and command IDs still work as fallbacks, so old keybindings and workspace settings carry over.
+
+### Reporting a bug
+
+**ERD Studio: Report a Bug** (command palette, the sidebar title bar, the canvas toolbar, or the button on any error screen) opens a prefilled GitHub issue in your browser — title, description, steps, and diagnostics (extension and VS Code versions, OS, a summary of the open domain, and recent errors). From a canvas it also captures a screenshot to your clipboard so you can paste it straight into the issue. Nothing is sent until you review and submit on GitHub.
 
 </details>
 

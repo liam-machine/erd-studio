@@ -126,11 +126,23 @@ export class TemplateService {
     }
 
     const templates: ModelTemplate[] = [];
-    for (const file of jsonFiles) {
+    const seenIds = new Map<string, string>();
+    for (const file of jsonFiles.sort()) {
       const filePath = path.join(templatesPath, file);
       try {
         const template = this.loadTemplateFile(filePath);
         if (template) {
+          // Template ids must be unique — the picker looks templates up by id
+          // and uses it as a React key. First file (alphabetically) wins.
+          const firstFile = seenIds.get(template.id);
+          if (firstFile) {
+            console.warn(
+              `[TemplateService] Skipping template ${file}: id "${template.id}" ` +
+              `is already defined by ${firstFile}`
+            );
+            continue;
+          }
+          seenIds.set(template.id, file);
           templates.push(template);
         }
       } catch (err) {
@@ -192,6 +204,10 @@ export class TemplateService {
 
   /**
    * Parse and validate the columns array.
+   *
+   * Copies every ColumnDef design flag (PK/FK/NK, scdType, additiveType) so a
+   * custom template can pre-flag columns; invalid values are dropped rather
+   * than passed through.
    */
   private parseColumns(value: unknown): ColumnDef[] {
     if (!Array.isArray(value)) {
@@ -202,12 +218,27 @@ export class TemplateService {
       .filter((item): item is Record<string, unknown> =>
         item !== null && typeof item === 'object' && !Array.isArray(item)
       )
-      .map((item) => ({
-        name: typeof item.name === 'string' ? item.name : '',
-        dataType: typeof item.dataType === 'string' ? item.dataType : 'VARCHAR',
-        description: typeof item.description === 'string' ? item.description : '',
-        isPrimaryKey: item.isPrimaryKey === true ? true : undefined,
-      }))
+      .map((item): ColumnDef => {
+        const col: ColumnDef = {
+          name: typeof item.name === 'string' ? item.name : '',
+          dataType: typeof item.dataType === 'string' ? item.dataType : 'VARCHAR',
+          description: typeof item.description === 'string' ? item.description : '',
+        };
+        if (item.isPrimaryKey === true) col.isPrimaryKey = true;
+        if (item.isForeignKey === true) col.isForeignKey = true;
+        if (item.isNaturalKey === true) col.isNaturalKey = true;
+        if (item.scdType === 0 || item.scdType === 1 || item.scdType === 2) {
+          col.scdType = item.scdType;
+        }
+        if (
+          item.additiveType === 'additive' ||
+          item.additiveType === 'semi-additive' ||
+          item.additiveType === 'non-additive'
+        ) {
+          col.additiveType = item.additiveType;
+        }
+        return col;
+      })
       .filter((col) => col.name.trim() !== '');
   }
 

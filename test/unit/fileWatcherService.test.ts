@@ -23,7 +23,8 @@ vi.mock('fs', async () => {
   };
 });
 
-import { FileWatcherService } from '../../src/watchers/FileWatcherService';
+import { FileWatcherService, classifySemanticPath } from '../../src/watchers/FileWatcherService';
+import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import {
   _clearMockFileWatchers,
   _mockFileWatchers,
@@ -59,6 +60,21 @@ describe('FileWatcherService', () => {
       manifestWatcher._simulateChange(vscode.Uri.file('/test/workspace/target/manifest.json'));
 
       // Advance past debounce
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('watches the default target/manifest.json path', () => {
+      const pattern = _mockFileWatchers[0]._pattern as vscode.RelativePattern;
+      expect(pattern.pattern).toBe('target/manifest.json');
+    });
+
+    it('emits onManifestChanged when manifest.json is deleted (dbt clean)', () => {
+      const listener = vi.fn();
+      service.onManifestChanged(listener);
+
+      _mockFileWatchers[0]._simulateDelete(vscode.Uri.file('/test/workspace/target/manifest.json'));
       vi.advanceTimersByTime(300);
 
       expect(listener).toHaveBeenCalledTimes(1);
@@ -133,7 +149,102 @@ describe('FileWatcherService', () => {
       semanticWatcher._simulateDelete(uri);
       vi.advanceTimersByTime(300);
 
-      expect(listener).toHaveBeenCalledWith({ uri });
+      expect(listener).toHaveBeenCalledWith({ uris: [uri] });
+    });
+
+    it('coalesces a burst of domain deletes into a single event (H33)', () => {
+      const listener = vi.fn();
+      service.onSemanticFileDeleted(listener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      const uris = Array.from({ length: 20 }, (_, i) =>
+        vscode.Uri.file(`/test/workspace/.erd-studio/silver/domain-${i}.json`));
+      for (const uri of uris) {
+        semanticWatcher._simulateDelete(uri);
+        vi.advanceTimersByTime(10);
+      }
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      const payload = listener.mock.calls[0][0] as { uris: vscode.Uri[] };
+      expect(payload.uris).toHaveLength(20);
+      expect(payload.uris.map(u => u.fsPath)).toEqual(uris.map(u => u.fsPath));
+    });
+
+    it('does not emit onSemanticFileDeleted for non-domain JSON files (H33)', () => {
+      const listener = vi.fn();
+      service.onSemanticFileDeleted(listener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      semanticWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/layers.json'));
+      semanticWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/templates/fact.json'));
+      semanticWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/logical-models/dim.json'));
+      semanticWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/.sync-plan.json'));
+      semanticWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/silver/nested/deep.json'));
+      semanticWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/.hidden/x.json'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('only includes real domain files when a mixed burst is deleted (H33)', () => {
+      const listener = vi.fn();
+      service.onSemanticFileDeleted(listener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      const domainUri = vscode.Uri.file('/test/workspace/.erd-studio/gold/reporting.json');
+      semanticWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/layers.json'));
+      semanticWatcher._simulateDelete(domainUri);
+      semanticWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/.sync-plan.json'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith({ uris: [domainUri] });
+    });
+
+    it('routes layers.json changes to onLayerConfigChanged, not onSemanticFileChanged (H18)', () => {
+      const semanticListener = vi.fn();
+      const layerListener = vi.fn();
+      service.onSemanticFileChanged(semanticListener);
+      service.onLayerConfigChanged(layerListener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/layers.json');
+      semanticWatcher._simulateChange(uri);
+      semanticWatcher._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+
+      expect(semanticListener).not.toHaveBeenCalled();
+      expect(layerListener).toHaveBeenCalledTimes(1);
+    });
+
+    it('fires onLayerConfigChanged when layers.json is created or deleted (H18)', () => {
+      const layerListener = vi.fn();
+      service.onLayerConfigChanged(layerListener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/layers.json');
+      semanticWatcher._simulateCreate(uri);
+      vi.advanceTimersByTime(300);
+      semanticWatcher._simulateDelete(uri);
+      vi.advanceTimersByTime(300);
+
+      expect(layerListener).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not treat a layers.json inside a layer directory as layer config', () => {
+      const semanticListener = vi.fn();
+      const layerListener = vi.fn();
+      service.onSemanticFileChanged(semanticListener);
+      service.onLayerConfigChanged(layerListener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/silver/layers.json');
+      semanticWatcher._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+
+      expect(layerListener).not.toHaveBeenCalled();
+      expect(semanticListener).toHaveBeenCalledWith({ uri });
     });
 
     it('does not emit onSemanticFileChanged when semantic file is deleted', () => {
@@ -172,6 +283,53 @@ describe('FileWatcherService', () => {
       expect(listener).toHaveBeenCalledTimes(2);
       expect(listener).toHaveBeenCalledWith({ uri: uri1 });
       expect(listener).toHaveBeenCalledWith({ uri: uri2 });
+    });
+  });
+
+  describe('dbt_project.yml path configuration (H30)', () => {
+    it('builds the manifest watcher from target-path', () => {
+      _clearMockFileWatchers();
+      mockDbtProjectContent = 'name: p\ntarget-path: build\n';
+      service.dispose();
+      service = new FileWatcherService('/test/workspace');
+
+      const pattern = _mockFileWatchers[0]._pattern as vscode.RelativePattern;
+      expect(pattern.pattern).toBe('build/manifest.json');
+    });
+
+    it('builds the dbt schema watcher from model-paths', () => {
+      _clearMockFileWatchers();
+      mockDbtProjectContent = 'name: p\nmodel-paths:\n  - models\n  - transform\n';
+      service.dispose();
+      service = new FileWatcherService('/test/workspace');
+
+      // dbt yml watcher is the last one created
+      const pattern = _mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern;
+      expect(pattern.pattern).toBe('{models,transform}/**/*.{yml,yaml}');
+    });
+
+    it('prefers an explicitly passed DbtProjectConfig over re-reading dbt_project.yml', () => {
+      _clearMockFileWatchers();
+      service.dispose();
+      service = new FileWatcherService('/test/workspace', '.erd-studio', {
+        targetPath: 'dbt_target',
+        modelPaths: ['marts'],
+      });
+
+      expect((_mockFileWatchers[0]._pattern as vscode.RelativePattern).pattern).toBe('dbt_target/manifest.json');
+      expect((_mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern).pattern)
+        .toBe('marts/**/*.{yml,yaml}');
+    });
+
+    it('uses dbt defaults for the watchers when dbt_project.yml has no path keys', () => {
+      _clearMockFileWatchers();
+      mockDbtProjectContent = 'name: p\n';
+      service.dispose();
+      service = new FileWatcherService('/test/workspace');
+
+      expect((_mockFileWatchers[0]._pattern as vscode.RelativePattern).pattern).toBe('target/manifest.json');
+      expect((_mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern).pattern)
+        .toBe('models/**/*.{yml,yaml}');
     });
   });
 
@@ -269,6 +427,129 @@ describe('FileWatcherService', () => {
       vi.advanceTimersByTime(300);
 
       expect(listener).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('own-write suppression (H11)', () => {
+    let tracker: OwnWriteTracker;
+
+    beforeEach(() => {
+      _clearMockFileWatchers();
+      tracker = new OwnWriteTracker();
+      service = new FileWatcherService('/test/workspace', '.erd-studio', undefined, tracker);
+    });
+
+    it('swallows a logical-model change recorded as an own write', () => {
+      const listener = vi.fn();
+      service.onLogicalModelChanged(listener);
+
+      const modelPath = '/test/workspace/.erd-studio/logical-models/dim_customer.yml';
+      // File does not exist on disk in this test, so both the record and the
+      // watcher check see the same (null) signature — an exact match.
+      tracker.recordWrite(modelPath);
+
+      const modelWatcher = _mockFileWatchers[3];
+      modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('still reports a logical-model change that was not recorded', () => {
+      const listener = vi.fn();
+      service.onLogicalModelChanged(listener);
+
+      const modelWatcher = _mockFileWatchers[3];
+      modelWatcher._simulateChange(vscode.Uri.file('/test/workspace/.erd-studio/logical-models/dim_x.yml'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener.mock.calls[0][0].modelName).toBe('dim_x');
+    });
+
+    it('consumes the record so the next event for the same file is reported', () => {
+      const listener = vi.fn();
+      service.onLogicalModelChanged(listener);
+
+      const modelPath = '/test/workspace/.erd-studio/logical-models/dim_customer.yml';
+      tracker.recordWrite(modelPath);
+
+      const modelWatcher = _mockFileWatchers[3];
+      modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+      vi.advanceTimersByTime(300);
+      expect(listener).not.toHaveBeenCalled();
+
+      modelWatcher._simulateChange(vscode.Uri.file(modelPath));
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops an own domain delete from the coalesced delete event', () => {
+      const listener = vi.fn();
+      service.onSemanticFileDeleted(listener);
+
+      const ownPath = '/test/workspace/.erd-studio/silver/mine.json';
+      const externalUri = vscode.Uri.file('/test/workspace/.erd-studio/silver/theirs.json');
+      tracker.recordDelete(ownPath);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      semanticWatcher._simulateDelete(vscode.Uri.file(ownPath));
+      semanticWatcher._simulateDelete(externalUri);
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith({ uris: [externalUri] });
+    });
+
+    it('emits nothing when every deleted domain was an own delete', () => {
+      const listener = vi.fn();
+      service.onSemanticFileDeleted(listener);
+
+      const ownPath = '/test/workspace/.erd-studio/silver/mine.json';
+      tracker.recordDelete(ownPath);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      semanticWatcher._simulateDelete(vscode.Uri.file(ownPath));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('swallows a layers.json write recorded by LayerService.saveConfig', () => {
+      const listener = vi.fn();
+      service.onLayerConfigChanged(listener);
+
+      const configPath = '/test/workspace/.erd-studio/layers.json';
+      tracker.recordWrite(configPath);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      semanticWatcher._simulateChange(vscode.Uri.file(configPath));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('classifySemanticPath', () => {
+    const root = '/ws/.erd-studio';
+
+    it('identifies {layer}/{domain}.json as a domain file', () => {
+      expect(classifySemanticPath(root, '/ws/.erd-studio/silver/orders.json')).toBe('domain');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/platinum/x.json')).toBe('domain');
+    });
+
+    it('identifies the root layers.json as layer config', () => {
+      expect(classifySemanticPath(root, '/ws/.erd-studio/layers.json')).toBe('layer-config');
+    });
+
+    it('rejects reserved directories, dotfiles, nested paths and non-json', () => {
+      expect(classifySemanticPath(root, '/ws/.erd-studio/templates/fact.json')).toBe('other');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/logical-models/dim.json')).toBe('other');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/.sync-plan.json')).toBe('other');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/silver/.draft.json')).toBe('other');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/silver/a/b.json')).toBe('other');
+      expect(classifySemanticPath(root, '/ws/.erd-studio/silver/orders.yml')).toBe('other');
+      expect(classifySemanticPath(root, '/ws/other/silver/orders.json')).toBe('other');
     });
   });
 

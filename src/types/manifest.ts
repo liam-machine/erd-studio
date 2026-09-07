@@ -46,6 +46,10 @@ export interface ManifestModelInfo {
   columns: ManifestColumn[];
   /** Original file path from manifest (e.g., "models/silver/dim_customer.sql") */
   originalFilePath?: string;
+  /** dbt model version (only set for versioned models, e.g. `model.proj.name.v2`) */
+  version?: number;
+  /** The version dbt marks as latest for this model name (versioned models only) */
+  latestVersion?: number;
 }
 
 /**

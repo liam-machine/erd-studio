@@ -1,0 +1,71 @@
+version: 2
+models:
+  # dbt 1.8+ recommended `data_tests:` key at column level
+  - name: dim_customer
+    description: Customer dimension
+    columns:
+      - name: customer_id
+        description: Surrogate key
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_name
+
+  # Classic `tests:` key, `unique` in map form carrying config
+  - name: dim_product
+    description: Product dimension
+    columns:
+      - name: product_id
+        tests:
+          - unique:
+              config:
+                severity: warn
+          - not_null
+
+  # `data_tests:` relationships with kwargs at the top level, and a
+  # versioned ref('model', v=2) target
+  - name: fct_orders
+    description: Order facts
+    columns:
+      - name: order_id
+        data_tests:
+          - unique
+      - name: customer_id
+        data_tests:
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: product_id
+        data_tests:
+          - relationships:
+              to: ref('dim_product', v=2)
+              field: product_id
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - order_id
+              - product_id
+
+  # dbt 1.10 `arguments:` nesting on a relationships test, `unique:` with
+  # an empty map value, and a two-arg + version=N ref
+  - name: fct_shipments
+    description: Shipment facts
+    columns:
+      - name: shipment_id
+        data_tests:
+          - unique:
+      - name: order_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('fct_orders')
+                field: order_id
+              config:
+                severity: error
+      - name: customer_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('modern_tests_project', 'dim_customer', version=1)
+                field: customer_id

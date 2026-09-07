@@ -111,6 +111,12 @@
         "command": "erdStudio.revealLogicalModel",
         "title": "Reveal in Explorer",
         "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.reportBug",
+        "title": "Report a Bug",
+        "category": "ERD Studio",
+        "icon": "$(bug)"
       }
     ],
     "viewsContainers": {
@@ -250,6 +256,11 @@
           "command": "erdStudio.addLayer",
           "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
           "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.reportBug",
+          "when": "view == erdStudio.domainTree",
+          "group": "navigation@9"
         }
       ]
     },
@@ -259,12 +270,17 @@
         "erdStudio.projectPath": {
           "type": "string",
           "default": "",
-          "description": "Path to dbt project root (auto-detected from workspace)"
+          "description": "Path to dbt project root (auto-detected from workspace). Changing this requires a window reload."
         },
         "erdStudio.semanticDir": {
           "type": "string",
           "default": ".erd-studio",
-          "description": "Relative path to ERD domain files within the project"
+          "description": "Relative path to ERD domain files within the project. Changing this requires a window reload."
+        },
+        "erdStudio.claudeSync.skipPermissions": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "When **Execute with Claude** launches Claude Code to apply a sync plan, pass `--dangerously-skip-permissions` so it edits files without asking. Off by default: Claude Code prompts before each file change. The launch command is always shown for confirmation first."
         },
         "dbtSemantic.projectPath": {
           "type": "string",
@@ -287,34 +303,30 @@
     "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vscode-test",
     "regen-fixtures": "tsx scripts/regen-fixtures.ts"
   },
   "devDependencies": {
-    "@resvg/resvg-js": "^2.6.2",
     "@testing-library/react": "^16.1.0",
-    "@types/js-yaml": "^4.0.9",
-    "@types/mocha": "^10.0.10",
     "@types/node": "^20.17.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "@types/vscode": "^1.85.0",
-    "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.0",
+    "@types/vscode": "1.85.0",
     "esbuild": "^0.24.0",
     "jsdom": "^25.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   },
   "dependencies": {
-    "@vscode-elements/elements": "^1.6.0",
-    "@vscode-elements/react-elements": "^0.5.0",
     "@xyflow/react": "^12.4.0",
     "elkjs": "^0.9.3",
-    "js-yaml": "^4.1.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "yaml": "^2.8.2",
-    "zustand": "^5.0.0"
+    "yaml": "^2.9.0",
+    "zustand": "^5.0.0",
+    "html-to-image": "^1.11.13"
+  },
+  "bugs": {
+    "url": "https://github.com/liam-machine/erd-studio/issues"
   }
 }

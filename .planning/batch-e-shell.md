@@ -18,7 +18,7 @@ After Batch D:
 - Commands (create, delete, rename) still target old paths
 - File watchers still watch old paths
 
-Read `plan.md` in the project root for full architectural context.
+Read `docs/archive/plan.md` for full architectural context.
 
 ---
 

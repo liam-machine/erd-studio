@@ -29,6 +29,7 @@ import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
 import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
+import { isStaleStageReply } from './lib/stageRequest';
 import { useEditorStore } from './store/editorStore';
 import { ModelNode } from './components/Graph/ModelNode';
 import { FkEdge } from './components/Graph/FkEdge';
@@ -46,20 +47,37 @@ import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
+import { BugReportDialog } from './components/BugReportDialog/BugReportDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
 import { transformDomain } from './lib/graphTransformer';
+import { applyNodeOverlays } from './lib/nodeOverlays';
 import { stageNodeColor } from './lib/stageColors';
+import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from './types/graph';
-import type { AnnotationColor } from '../src/types/semantic';
+import type { DisplayDomain } from '../src/types/display';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Module-level clipboard for annotation copy/paste (not in Zustand — never drives rendering). */
-type CopiedAnnotation = { text: string; color: AnnotationColor; width?: number; height?: number; linkedModel?: string };
-let _copiedAnnotation: CopiedAnnotation | null = null;
+/**
+ * Load a display-domain payload into the store. Shared by `domainLoaded`
+ * (initial load / host refresh) and `stageData` (stage switch reply).
+ */
+function applyDomainPayload(payload: DisplayDomain): void {
+  const s = useEditorStore.getState();
+  s.setDomain(payload);
+  if (payload.templates) {
+    s.setTemplates(payload.templates);
+  }
+  if (payload.manifestModels) {
+    s.setManifestModels(payload.manifestModels);
+  }
+  if (payload.existingModels) {
+    s.setExistingModels(payload.existingModels);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Inner component (must be inside ReactFlowProvider)
@@ -76,34 +94,18 @@ function EditorCanvas() {
   const error = useEditorStore((s) => s.error);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
-  const setDomain = useEditorStore((s) => s.setDomain);
   const setError = useEditorStore((s) => s.setError);
   const setViewport = useEditorStore((s) => s.setViewport);
   const setNodes = useEditorStore((s) => s.setNodes);
   const setEdges = useEditorStore((s) => s.setEdges);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
-  const setTemplates = useEditorStore((s) => s.setTemplates);
-  const setManifestModels = useEditorStore((s) => s.setManifestModels);
-  const setExistingModels = useEditorStore((s) => s.setExistingModels);
+  const setBugReportDialogOpen = useEditorStore((s) => s.setBugReportDialogOpen);
   const openFkDialogWithPrefill = useEditorStore((s) => s.openFkDialogWithPrefill);
-  const selectedNode = useEditorStore((s) => s.selectedNode);
-  const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
-  const setPendingDeleteConfirmation = useEditorStore((s) => s.setPendingDeleteConfirmation);
-  const selectedEdges = useEditorStore((s) => s.selectedEdges);
   const setSelectedEdges = useEditorStore((s) => s.setSelectedEdges);
   const setHighlightedColumns = useEditorStore((s) => s.setHighlightedColumns);
   const selectedEdge = useEditorStore((s) => s.selectedEdge);
   const setSelectedEdge = useEditorStore((s) => s.setSelectedEdge);
-  // Dialog state for Escape key handling
-  const newModelDialogOpen = useEditorStore((s) => s.newModelDialogOpen);
-  const newFkDialogOpen = useEditorStore((s) => s.newFkDialogOpen);
-  const addExistingModelDialogOpen = useEditorStore((s) => s.addExistingModelDialogOpen);
-  const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
-  const setNewFkDialogOpen = useEditorStore((s) => s.setNewFkDialogOpen);
-  const setAddExistingModelDialogOpen = useEditorStore((s) => s.setAddExistingModelDialogOpen);
-  const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
-  const clearFkDialogEditData = useEditorStore((s) => s.clearFkDialogEditData);
   // Context menu state
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
@@ -111,25 +113,14 @@ function EditorCanvas() {
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
-  const selectedAnnotation = useEditorStore((s) => s.selectedAnnotation);
   const selectAnnotation = useEditorStore((s) => s.selectAnnotation);
   const canvasMode = useEditorStore((s) => s.canvasMode);
-  const setCanvasMode = useEditorStore((s) => s.setCanvasMode);
   const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
   const updateAnnotationLinkDrag = useEditorStore((s) => s.updateAnnotationLinkDrag);
   const endAnnotationLinkDrag = useEditorStore((s) => s.endAnnotationLinkDrag);
   // Search state (F402)
   const searchQuery = useEditorStore((s) => s.searchQuery);
-  const focusSearchInput = useEditorStore((s) => s.focusSearchInput);
-  const triggerAutoLayout = useEditorStore((s) => s.triggerAutoLayout);
-  // Legend state
-  const legendOpen = useEditorStore((s) => s.legendOpen);
-  const setLegendOpen = useEditorStore((s) => s.setLegendOpen);
 
-  // Column selection state
-  const selectedColumns = useEditorStore((s) => s.selectedColumns);
-  const clearColumnSelection = useEditorStore((s) => s.clearColumnSelection);
-  const setEditingColumn = useEditorStore((s) => s.setEditingColumn);
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
 
@@ -169,6 +160,9 @@ function EditorCanvas() {
 
   // Toast notification for invalid selection after restore
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Store-level toast (raised by components such as the Toolbar on layout failure)
+  const storeToastMessage = useEditorStore((s) => s.toastMessage);
+  const setStoreToastMessage = useEditorStore((s) => s.setToastMessage);
 
   useEffect(() => {
     if (invalidSelectedNode) {
@@ -179,7 +173,11 @@ function EditorCanvas() {
   }, [invalidSelectedNode]);
 
   // Memoized callback for toast dismissal (prevents timer re-creation)
-  const dismissToast = useCallback(() => setToastMessage(null), []);
+  const dismissToast = useCallback(() => {
+    setToastMessage(null);
+    setStoreToastMessage(null);
+  }, [setStoreToastMessage]);
+  const activeToastMessage = toastMessage ?? storeToastMessage;
 
   // F405: Auto-expand columns on first-ever domain load.
   // This effect runs AFTER useStatePersistence's restore effect (React guarantees
@@ -213,43 +211,16 @@ function EditorCanvas() {
     (msg: ExtensionMessage) => {
       switch (msg.type) {
         case 'domainLoaded':
-          setDomain(msg.payload);
-          if (msg.payload.templates) {
-            setTemplates(msg.payload.templates);
-          }
-          if (msg.payload.manifestModels) {
-            setManifestModels(msg.payload.manifestModels);
-          }
-          if (msg.payload.existingModels) {
-            setExistingModels(msg.payload.existingModels);
-          }
+          applyDomainPayload(msg.payload);
           if (!msg.welcomeDismissed) {
             useEditorStore.getState().setWelcomeModalOpen(true);
           }
           break;
-        case 'domainUpdated':
-          setDomain(msg.payload);
-          if (msg.payload.templates) {
-            setTemplates(msg.payload.templates);
-          }
-          if (msg.payload.manifestModels) {
-            setManifestModels(msg.payload.manifestModels);
-          }
-          if (msg.payload.existingModels) {
-            setExistingModels(msg.payload.existingModels);
-          }
-          break;
         case 'stageData':
-          setDomain(msg.payload);
-          if (msg.payload.templates) {
-            setTemplates(msg.payload.templates);
-          }
-          if (msg.payload.manifestModels) {
-            setManifestModels(msg.payload.manifestModels);
-          }
-          if (msg.payload.existingModels) {
-            setExistingModels(msg.payload.existingModels);
-          }
+          // A reply for a stage the user has since switched away from — drop it
+          // so the canvas never flips back to the wrong stage.
+          if (isStaleStageReply(msg.requestId)) break;
+          applyDomainPayload(msg.payload);
           break;
         case 'discrepancyReport':
           setDiscrepancyReport(msg.payload);
@@ -261,11 +232,15 @@ function EditorCanvas() {
           setSyncPlanGenerated(msg.payload);
           break;
         case 'error':
+          useEditorStore.getState().recordError('extension', msg.payload.message);
           setError(msg.payload.message);
+          break;
+        case 'openBugReport':
+          useEditorStore.getState().setBugReportDialogOpen(true, msg.payload ?? null);
           break;
       }
     },
-    [setDomain, setError, setTemplates, setManifestModels, setExistingModels, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated],
+    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
@@ -289,424 +264,80 @@ function EditorCanvas() {
     vscode.postMessage({ type: 'requestReload' });
   }, [vscode]);
 
-  // Unified keyboard shortcut handler (Escape, Delete/Backspace, Ctrl+F)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+F / Cmd+F: Focus search input (F402)
-      // This should work regardless of focus state
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        focusSearchInput();
-        return;
-      }
+  // Initial-load failure recovery: clear the error and ask the host for the
+  // domain again (same handshake as first mount).
+  const handleRetryLoad = useCallback(() => {
+    setError(null);
+    vscode.postMessage({ type: 'ready' });
+  }, [setError, vscode]);
 
-      // Shift+? : Toggle legend panel
-      if (e.shiftKey && e.key === '?') {
-        e.preventDefault();
-        setLegendOpen(!legendOpen);
-        return;
-      }
+  // Host error toast dismissal (canvas stays mounted; see render below)
+  const dismissError = useCallback(() => setError(null), [setError]);
 
-      // Guard: Don't intercept if user is typing in an input field
-      const activeElement = document.activeElement;
-      if (
-        activeElement instanceof HTMLInputElement ||
-        activeElement instanceof HTMLTextAreaElement ||
-        activeElement instanceof HTMLSelectElement
-      ) {
-        return;
-      }
-
-      // Ctrl+C / Cmd+C: Copy selected annotation (skip if context menu is open)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedAnnotation && domain && !contextMenu) {
-        const ann = domain.viewConfig.annotations?.find((a) => a.id === selectedAnnotation);
-        if (ann) {
-          e.preventDefault();
-          _copiedAnnotation = {
-            text: ann.text,
-            color: ann.color ?? 'yellow',
-            ...(ann.width != null ? { width: ann.width } : {}),
-            ...(ann.height != null ? { height: ann.height } : {}),
-            ...(ann.linkedModel ? { linkedModel: ann.linkedModel } : {}),
-          };
-        }
-        return;
-      }
-
-      // Ctrl+V / Cmd+V: Paste copied annotation (skip if context menu is open)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && _copiedAnnotation && domain && !domain.readOnly && !contextMenu) {
-        e.preventDefault();
-        const id = crypto.randomUUID();
-        // Place relative to current viewport center
-        const { x: vx, y: vy, zoom } = reactFlowInstance.getViewport();
-        const container = document.querySelector('.react-flow');
-        const rect = container?.getBoundingClientRect();
-        const centerX = rect ? (rect.width / 2 - vx) / zoom : 200;
-        const centerY = rect ? (rect.height / 2 - vy) / zoom : 200;
-        vscode.postMessage({
-          type: 'addAnnotation',
-          payload: {
-            id,
-            text: _copiedAnnotation.text,
-            x: Math.round(centerX + 30),
-            y: Math.round(centerY + 30),
-            color: _copiedAnnotation.color,
-            ...(_copiedAnnotation.width != null ? { width: _copiedAnnotation.width } : {}),
-            ...(_copiedAnnotation.height != null ? { height: _copiedAnnotation.height } : {}),
-            ...(_copiedAnnotation.linkedModel ? { linkedModel: _copiedAnnotation.linkedModel } : {}),
-          },
-        });
-        setEditingAnnotationId(id);
-        return;
-      }
-
-      // F2: Edit selected column (rename)
-      if (e.key === 'F2' && selectedColumns.length === 1 && detailPanelOpen && domain && !domain.readOnly) {
-        e.preventDefault();
-        setEditingColumn(selectedColumns[0]);
-        return;
-      }
-
-      // ESCAPE KEY: Close dialogs first, then deselect
-      if (e.key === 'Escape') {
-        e.preventDefault();
-
-        // Close any open dialog (priority order)
-        if (newModelDialogOpen) {
-          setNewModelDialogOpen(false);
-          return;
-        }
-        if (newFkDialogOpen) {
-          setNewFkDialogOpen(false);
-          clearFkDialogPrefill();
-          clearFkDialogEditData();
-          return;
-        }
-        if (addExistingModelDialogOpen) {
-          setAddExistingModelDialogOpen(false);
-          return;
-        }
-
-        // Clear column selection first (before deselecting model)
-        if (selectedColumns.length > 0) {
-          clearColumnSelection();
-          return;
-        }
-
-        // No dialogs open — deselect nodes, edges, and annotations
-        if (selectedNode || selectedEdges.length > 0 || selectedEdge || selectedAnnotation) {
-          selectNode(null);
-          selectAnnotation(null);
-          setDetailPanelOpen(false);
-          setSelectedEdges([]);
-          setSelectedEdge(null);
-          setHighlightedColumns(new Set());
-          return;
-        }
-
-        // Nothing selected — if in select mode, return to pan mode
-        if (canvasMode === 'select') {
-          setCanvasMode('pan');
-        }
-        return;
-      }
-
-      // Shift+L: Trigger auto-layout
-      if (e.shiftKey && e.key === 'L') {
-        e.preventDefault();
-        triggerAutoLayout();
-        return;
-      }
-
-      // V / S: Canvas mode toggle (Figma-style)
-      // No modifier keys — only fires when no input has focus (guarded above).
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        if ((e.key === 'v' || e.key === 'V') && canvasMode !== 'pan') {
-          e.preventDefault();
-          setCanvasMode('pan');
-          return;
-        }
-        if ((e.key === 's' || e.key === 'S') && canvasMode !== 'select' && domain && !domain.readOnly) {
-          e.preventDefault();
-          setCanvasMode('select');
-          return;
-        }
-      }
-
-      // Alt+1/2: Switch stage tabs
-      if (e.altKey && (e.key === '1' || e.key === '2')) {
-        e.preventDefault();
-        const stageMap: Record<string, import('../src/types/semantic').Stage> = {
-          '1': 'logical',
-          '2': 'physical',
-        };
-        const targetStage = stageMap[e.key];
-        if (targetStage && domain && domain.stage !== targetStage) {
-          vscode.postMessage({ type: 'switchStage', payload: { stage: targetStage } });
-        }
-        return;
-      }
-
-      // DELETE KEY: Delete selected design models, annotations, or edges
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (!domain || domain.readOnly) return;
-
-        // Priority -1: Multi-select delete (2+ items selected) — immediate, no confirmation.
-        // Read React Flow's selection from the nodes array (source of truth for multi-select).
-        const allSelectedNodes = useEditorStore.getState().nodes.filter((n) => n.selected);
-        const selectedModelNames = allSelectedNodes
-          .filter((n): n is ModelFlowNode => n.type === 'model')
-          .map((n) => n.data.modelName);
-        // graphTransformer namespaces annotation node IDs as `annotation-${id}` —
-        // unwrap to the raw domain ID for the wire protocol.
-        const selectedAnnotationIds = allSelectedNodes
-          .filter((n): n is AnnotationFlowNode => n.type === 'annotation')
-          .map((n) => n.data.annotationId);
-        const totalSelected =
-          selectedModelNames.length + selectedAnnotationIds.length + selectedEdges.length;
-
-        if (totalSelected >= 2) {
-          e.preventDefault();
-
-          if (selectedModelNames.length > 0) {
-            vscode.postMessage({
-              type: 'removeModels',
-              payload: { modelNames: selectedModelNames },
-            });
-          }
-
-          for (const id of selectedAnnotationIds) {
-            vscode.postMessage({ type: 'removeAnnotation', payload: { id } });
-          }
-
-          // Skip edges that the model batch will cascade.
-          for (const edgeId of selectedEdges) {
-            const rel = domain.relationships.find(
-              (r) =>
-                `fk-${r.fromModel}-${r.fromColumn}-${r.toModel}-${r.toColumn}` === edgeId,
-            );
-            if (
-              !rel ||
-              selectedModelNames.includes(rel.fromModel) ||
-              selectedModelNames.includes(rel.toModel)
-            ) {
-              continue;
-            }
-            vscode.postMessage({
-              type: 'removeRelationship',
-              payload: {
-                fromModel: rel.fromModel,
-                fromColumn: rel.fromColumn,
-                toModel: rel.toModel,
-                toColumn: rel.toColumn,
-              },
-            });
-          }
-
-          selectNode(null);
-          selectAnnotation(null);
-          setSelectedEdges([]);
-          return;
-        }
-
-        // Priority 0: Delete selected annotation (no confirmation — undo exists)
-        if (selectedAnnotation) {
-          e.preventDefault();
-          vscode.postMessage({ type: 'removeAnnotation', payload: { id: selectedAnnotation } });
-          selectAnnotation(null);
-          return;
-        }
-
-        // Priority 1: Remove selected node (with confirmation)
-        if (selectedNode) {
-          const model = domain.models.find((m) => m.name === selectedNode);
-          if (model) {
-            e.preventDefault();
-            if (!detailPanelOpen) {
-              setDetailPanelOpen(true);
-            }
-            setPendingDeleteConfirmation(true);
-            return;
-          }
-        }
-
-        // Priority 1.5: Delete selected columns (immediate)
-        if (selectedColumns.length > 0 && detailPanelOpen && selectedNode) {
-          e.preventDefault();
-          for (const colName of selectedColumns) {
-            vscode.postMessage({
-              type: 'removeColumn',
-              payload: { modelName: selectedNode, columnName: colName },
-            });
-          }
-          clearColumnSelection();
-          return;
-        }
-
-        // Priority 2: Delete selected edges (no confirmation, immediate)
-        if (selectedEdges.length > 0) {
-          e.preventDefault();
-
-          for (const edgeId of selectedEdges) {
-            const rel = domain.relationships.find((r) => {
-              const expectedId = `fk-${r.fromModel}-${r.fromColumn}-${r.toModel}-${r.toColumn}`;
-              return expectedId === edgeId;
-            });
-
-            if (!rel) continue;
-
-            vscode.postMessage({
-              type: 'removeRelationship',
-              payload: {
-                fromModel: rel.fromModel,
-                fromColumn: rel.fromColumn,
-                toModel: rel.toModel,
-                toColumn: rel.toColumn,
-              },
-            });
-          }
-          return;
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    selectedNode,
-    selectedAnnotation,
-    selectedEdge,
-    selectedEdges,
-    domain,
-    detailPanelOpen,
-    newModelDialogOpen,
-    newFkDialogOpen,
-    addExistingModelDialogOpen,
-    contextMenu,
-    setDetailPanelOpen,
-    setPendingDeleteConfirmation,
-    setNewModelDialogOpen,
-    setNewFkDialogOpen,
-    setAddExistingModelDialogOpen,
-    clearFkDialogPrefill,
-    clearFkDialogEditData,
-    selectNode,
-    selectAnnotation,
-    setEditingAnnotationId,
-    reactFlowInstance,
-    setSelectedEdge,
-    setSelectedEdges,
-    setHighlightedColumns,
-    setToastMessage,
-    focusSearchInput,
-    triggerAutoLayout,
-    legendOpen,
-    setLegendOpen,
-    selectedColumns,
-    clearColumnSelection,
-    setEditingColumn,
-    canvasMode,
-    setCanvasMode,
-    // Note: vscode is omitted as it's a stable ref from useVsCodeApi
-  ]);
+  // Global keyboard shortcuts (Escape, Delete/Backspace, Ctrl+F, copy/paste
+  // notes, F2, Shift+L, Shift+?, V/S, Alt+1/2). Registered once — the hook
+  // reads store state via getState() rather than closing over selectors.
+  useCanvasShortcuts();
 
   // Get current selectedNode from store to preserve selection across domain updates
   const currentSelectedNode = useEditorStore((s) => s.selectedNode);
 
-  // Initialize nodes and edges when domain changes.
+  // Initialize nodes and edges when the domain (or discrepancy overlay) changes.
   // Preserve visual selection if the selected node still exists.
   // Clear stale edge selections that no longer exist.
-  // Apply search dimming (F402), selection dimming, and column expansion (F405).
+  //
+  // Selection / search / expansion are NOT dependencies here — they are
+  // applied by the lightweight overlay effect below. Re-running the full
+  // transform on every click used to rebuild every node/edge object (defeating
+  // memo) and drop `measured`, forcing React Flow to re-measure all nodes.
   useEffect(() => {
     if (domain) {
-      const transformOptions = discrepancyVisible && discrepancyReport
-        ? { discrepancyReport }
-        : undefined;
-      let { nodes: newNodes, edges: newEdges } = transformDomain(domain, transformOptions);
+      const state = useEditorStore.getState();
+      const prevById = new Map(state.nodes.map((n) => [n.id, n]));
 
-      // Compute connected nodes for selection dimming.
-      // When a node is selected, the selected node and its direct neighbors stay bright.
-      // When an edge is selected, only the two endpoint nodes stay bright.
-      const connectedNodeIds = new Set<string>();
-      if (currentSelectedNode) {
-        connectedNodeIds.add(currentSelectedNode);
-        // Find all nodes connected to the selected node via edges (FK edges only)
-        newEdges.forEach((edge) => {
-          if (edge.type === 'fk' && edge.data) {
-            const fkData = edge.data as FkFlowEdge['data'];
-            if (fkData && fkData.fromModel === currentSelectedNode) {
-              connectedNodeIds.add(fkData.toModel);
-            }
-            if (fkData && fkData.toModel === currentSelectedNode) {
-              connectedNodeIds.add(fkData.fromModel);
-            }
-          }
-        });
-      } else if (selectedEdge) {
-        // Edge selection: only the two endpoint models stay bright
-        const edge = newEdges.find((e) => e.id === selectedEdge);
-        if (edge?.type === 'fk' && edge.data) {
-          const fkData = edge.data as FkFlowEdge['data'];
-          if (fkData) {
-            connectedNodeIds.add(fkData.fromModel);
-            connectedNodeIds.add(fkData.toModel);
-          }
+      // Measured sizes from the current React Flow state — used both for
+      // centre-based handle side selection and to carry `measured` across
+      // the rebuild so React Flow does not re-measure unchanged nodes.
+      const nodeDimensions = new Map<string, { width: number; height: number }>();
+      for (const n of state.nodes) {
+        if (n.measured?.width != null && n.measured?.height != null) {
+          nodeDimensions.set(n.id, { width: n.measured.width, height: n.measured.height });
         }
       }
+      const isExpandedNow = (id: string) => state.allExpanded || state.expandedNodes.has(id);
 
-      // F402: Search dimming + selection dimming (additive)
-      // F405: Inject column expansion state into node data
-      const hasSelection = currentSelectedNode !== null || selectedEdge !== null;
-      const query = searchQuery.trim() ? searchQuery.toLowerCase() : '';
-      newNodes = newNodes.map((node) => {
-        if (node.type === 'annotation') {
-          // Annotations: not search-dimmable, not selection-dimmable
-          return node;
-        }
-        const modelData = node.data as ModelFlowNode['data'];
-        const searchDimmed = query ? !modelData.modelName.toLowerCase().includes(query) : false;
-        const selectionDimmed = hasSelection && !connectedNodeIds.has(node.id);
+      const transformOptions = {
+        ...(discrepancyVisible && discrepancyReport ? { discrepancyReport } : {}),
+        nodeDimensions,
+        isExpanded: isExpandedNow,
+      };
+      let { nodes: newNodes, edges: newEdges } = transformDomain(domain, transformOptions);
 
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            // Node is dimmed if either search doesn't match OR it's not connected to selection
-            dimmed: searchDimmed || selectionDimmed,
-            // F405: Column expansion (ephemeral state)
-            // Pass stable toggleExpansion reference — ModelNode calls it with its own modelName
-            isExpanded: isExpanded(node.id),
-            onToggleExpansion: toggleExpansion,
-          },
-        };
+      // Carry measured dimensions over from the previous nodes.
+      newNodes = newNodes.map((n) => {
+        const prev = prevById.get(n.id);
+        return prev?.measured?.width != null && prev.measured.height != null
+          ? { ...n, measured: prev.measured }
+          : n;
       });
 
-      // Apply selection dimming to edges (FK edges only).
-      // For node selection: an edge is bright only if both endpoints are in the connected set.
-      // For edge selection: only the selected edge stays bright.
-      newEdges = newEdges.map((edge) => {
-        if (edge.type !== 'fk' || !edge.data) return edge;
-        const fkData = edge.data as FkFlowEdge['data'];
-        if (!fkData) return edge;
-        return {
-          ...edge,
-          data: {
-            ...fkData,
-            dimmed: hasSelection && (selectedEdge
-              ? edge.id !== selectedEdge
-              : !connectedNodeIds.has(fkData.fromModel) || !connectedNodeIds.has(fkData.toModel)),
-          },
-        };
-      });
+      // F402 search dimming, selection dimming, F405 column expansion.
+      ({ nodes: newNodes, edges: newEdges } = applyNodeOverlays(newNodes, newEdges, {
+        selectedNode: state.selectedNode,
+        selectedEdge: state.selectedEdge,
+        searchQuery: state.searchQuery,
+        isExpanded: isExpandedNow,
+        toggleExpansion,
+      }));
 
       // Preserve React Flow's current selection across this rebuild.
-      // Without this, any store change that re-triggers this effect (e.g. setSelectedEdges from
-      // onSelectionChange firing during a rubber-band drag) wipes the multi-selection React Flow
-      // just applied via applyNodeChanges. Read store state directly to avoid adding `nodes` to
-      // the dep array (which would cause an infinite loop since we call setNodes below).
+      // Without this, any store change that re-triggers this effect wipes the
+      // multi-selection React Flow just applied via applyNodeChanges. Read store
+      // state directly to avoid adding `nodes` to the dep array (which would
+      // cause an infinite loop since we call setNodes below).
       const preserveSelected = new Set<string>();
-      if (currentSelectedNode) preserveSelected.add(currentSelectedNode);
-      for (const n of useEditorStore.getState().nodes) {
+      if (state.selectedNode) preserveSelected.add(state.selectedNode);
+      for (const n of state.nodes) {
         if (n.selected) preserveSelected.add(n.id);
       }
       if (preserveSelected.size > 0) {
@@ -715,20 +346,39 @@ function EditorCanvas() {
 
       // Clear stale edge selections (edges that no longer exist after domain update)
       const newEdgeIds = new Set(newEdges.map((e) => e.id));
-      if (selectedEdges.length > 0) {
-        const validEdges = selectedEdges.filter((id) => newEdgeIds.has(id));
-        if (validEdges.length !== selectedEdges.length) {
+      const currentSelectedEdges = state.selectedEdges;
+      if (currentSelectedEdges.length > 0) {
+        const validEdges = currentSelectedEdges.filter((id) => newEdgeIds.has(id));
+        if (validEdges.length !== currentSelectedEdges.length) {
           setSelectedEdges(validEdges);
         }
       }
-      if (selectedEdge && !newEdgeIds.has(selectedEdge)) {
+      if (state.selectedEdge && !newEdgeIds.has(state.selectedEdge)) {
         setSelectedEdge(null);
       }
 
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, selectedEdges, currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, discrepancyVisible, discrepancyReport]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, toggleExpansion, discrepancyVisible, discrepancyReport]);
+
+  // Lightweight overlay pass: update only the `dimmed` / `isExpanded` flags on
+  // the nodes and edges already in the store when selection, search or column
+  // expansion changes. Unchanged nodes keep their object identity so memoised
+  // components skip re-rendering and React Flow keeps its measurements.
+  useEffect(() => {
+    const { nodes: currentNodes, edges: currentEdges } = useEditorStore.getState();
+    if (currentNodes.length === 0) return;
+    const result = applyNodeOverlays(currentNodes, currentEdges, {
+      selectedNode: currentSelectedNode,
+      selectedEdge,
+      searchQuery,
+      isExpanded,
+      toggleExpansion,
+    });
+    if (result.nodes !== currentNodes) setNodes(result.nodes);
+    if (result.edges !== currentEdges) setEdges(result.edges);
+  }, [currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, setNodes, setEdges]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -941,11 +591,30 @@ function EditorCanvas() {
   }, [closeContextMenu, onPaneClick]);
 
   // --- Error state -----------------------------------------------------------
+  // Only an error with no domain to fall back on (initial load failure) takes
+  // over the whole editor. Once a domain has loaded, host errors are surfaced
+  // as a dismissable toast over the live canvas (see below) and are cleared
+  // automatically by the next domainLoaded / domainUpdated / stageData.
 
-  if (error) {
+  if (error && !domain) {
     return (
-      <div className="editor-message">
+      <div className="editor-message editor-message--error" role="alert">
         <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+        <button
+          type="button"
+          className="editor-message__retry"
+          onClick={handleRetryLoad}
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          className="editor-message__button"
+          onClick={() => setBugReportDialogOpen(true, { description: `Error shown on canvas: ${error}` })}
+        >
+          Report a Bug
+        </button>
+        <BugReportDialog />
       </div>
     );
   }
@@ -1034,8 +703,14 @@ function EditorCanvas() {
         <AddExistingModelDialog />
       </ReactFlow>
 
-      {toastMessage && (
-        <Toast message={toastMessage} variant="warning" onDismiss={dismissToast} />
+      {activeToastMessage && (
+        <Toast message={activeToastMessage} variant="warning" onDismiss={dismissToast} />
+      )}
+
+      {/* Host error surfaced over the live canvas. Sticky until dismissed or the
+          next domain payload clears it (setDomain resets error). */}
+      {error && (
+        <Toast message={error} variant="error" autoDismissMs={null} onDismiss={dismissError} />
       )}
 
       {/* Drag line for column relationship creation */}
@@ -1055,6 +730,9 @@ function EditorCanvas() {
 
       {/* Welcome modal (first-time users) */}
       <WelcomeModal />
+
+      {/* Report a Bug dialog */}
+      <BugReportDialog />
     </div>
   );
 }
@@ -1064,6 +742,20 @@ function EditorCanvas() {
 // ---------------------------------------------------------------------------
 
 export function App() {
+  // Capture uncaught webview errors so bug reports can include them.
+  useEffect(() => {
+    const record = useEditorStore.getState().recordError;
+    const onError = (e: ErrorEvent) => record('window', e.message);
+    const onRejection = (e: PromiseRejectionEvent) =>
+      record('promise', e.reason instanceof Error ? e.reason.message : String(e.reason));
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, []);
+
   return (
     <ReactFlowProvider>
       <EditorCanvas />

@@ -51,11 +51,26 @@ export type TreeElement = LayerNode | DomainNode | NewDomainNode;
 /** Default semantic directory relative to project root. */
 const DEFAULT_SEMANTIC_DIR = '.erd-studio';
 
+/** Per-domain-file summary cached against the file's mtime + size. */
+interface CachedDomainSummary {
+  readonly signature: string;
+  readonly modelCount: number;
+}
+
 export class DomainTreeProvider
   implements vscode.TreeDataProvider<TreeElement>, vscode.TreeDragAndDropController<TreeElement> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<TreeElement | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private readonly semanticDir: string;
+
+  /**
+   * Parsed-domain cache keyed by file path. Resolving a v5 domain means one
+   * YAML parse per referenced model, so without this every tree refresh cost
+   * O(domains x models) reads. Entries are validated by mtime + size so an
+   * edit is never served stale; invalidateDomain() drops entries eagerly when
+   * the file watcher reports a change.
+   */
+  private readonly summaryCache = new Map<string, CachedDomainSummary>();
 
   // TreeDragAndDropController properties
   readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
@@ -126,12 +141,66 @@ export class DomainTreeProvider
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[DomainTreeProvider] Failed to reorder layers: ${message}`);
+      // Reorder is refused when layers.json is unreadable (H18) — tell the user
+      void vscode.window.showErrorMessage(`Failed to reorder layers: ${message}`);
     }
   }
 
   /** Refresh the entire tree (or a specific element). */
   refresh(element?: TreeElement): void {
     this._onDidChangeTreeData.fire(element);
+  }
+
+  /**
+   * Drop the cached summary for one domain file (or all files when called
+   * without arguments). Called from the file watcher handlers; the mtime
+   * check in getLayerChildren is the safety net when an event is missed.
+   */
+  invalidateDomain(filePath?: string): void {
+    if (filePath === undefined) {
+      this.summaryCache.clear();
+    } else {
+      this.summaryCache.delete(path.normalize(filePath));
+    }
+  }
+
+  /**
+   * Model count for a domain file, served from the cache while the file on
+   * disk is unchanged. Falls back to an uncached parse when the file cannot
+   * be stat'ed (e.g. virtual paths in tests).
+   */
+  private getModelCount(filePath: string): number {
+    let signature: string | null = null;
+    try {
+      const stat = fs.statSync(filePath);
+      signature = `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      // Unreadable stat — parse without caching
+    }
+
+    const key = path.normalize(filePath);
+    if (signature !== null) {
+      const cached = this.summaryCache.get(key);
+      if (cached && cached.signature === signature) {
+        return cached.modelCount;
+      }
+    }
+
+    let modelCount = 0;
+    try {
+      const domain = this.domainService.getDomain(filePath);
+      modelCount = domain.logical.models.length;
+    } catch (err) {
+      console.warn(`[DomainTreeProvider] Failed to load ${filePath}:`, err);
+      // Do not cache failures — the file may be mid-write
+      this.summaryCache.delete(key);
+      return 0;
+    }
+
+    if (signature !== null) {
+      this.summaryCache.set(key, { signature, modelCount });
+    }
+    return modelCount;
   }
 
   getTreeItem(element: TreeElement): vscode.TreeItem {
@@ -170,21 +239,12 @@ export class DomainTreeProvider
     const summaries = this.domainService.listDomains(this.projectPath, this.semanticDir);
     const layerDomains = summaries.filter(s => s.layer === layer);
 
-    const domainNodes: DomainNode[] = layerDomains.map(summary => {
-      let modelCount = 0;
-      try {
-        const domain = this.domainService.getDomain(summary.filePath);
-        modelCount = domain.logical.models.length;
-      } catch (err) {
-        console.warn(`[DomainTreeProvider] Failed to load ${summary.filePath}:`, err);
-      }
-      return {
-        type: 'domain' as const,
-        summary,
-        modelCount,
-        designCount: 0,
-      };
-    });
+    const domainNodes: DomainNode[] = layerDomains.map(summary => ({
+      type: 'domain' as const,
+      summary,
+      modelCount: this.getModelCount(summary.filePath),
+      designCount: 0,
+    }));
 
     const children: TreeElement[] = [...domainNodes];
 
@@ -250,6 +310,7 @@ export class DomainTreeProvider
   }
 
   dispose(): void {
+    this.summaryCache.clear();
     this._onDidChangeTreeData.dispose();
   }
 }

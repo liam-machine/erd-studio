@@ -80,6 +80,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const setCanvasMode = useEditorStore((s) => s.setCanvasMode);
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
+  const setToastMessage = useEditorStore((s) => s.setToastMessage);
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -347,10 +348,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       setLayoutDirty(false);
     } catch (err) {
       console.error('[Toolbar] Auto layout failed:', err);
+      const detail = err instanceof Error ? err.message : String(err);
+      setToastMessage(`Auto layout failed: ${detail}`);
     } finally {
       setIsLayouting(false);
     }
-  }, [domain, nodes, edges, isLayouting, partitionStrategy, layerBound, layoutDirection, spacingPreset, setDomain, fitView, vscode]);
+  }, [domain, nodes, edges, isLayouting, partitionStrategy, layerBound, layoutDirection, spacingPreset, setDomain, fitView, vscode, setToastMessage]);
 
   const handleAutoLayout = useCallback(() => {
     if (!domain || nodes.length === 0 || isLayouting) {
@@ -397,6 +400,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     const message: WebviewMessage = { type: 'viewFile' };
     vscode.postMessage(message);
   }, [vscode]);
+
+  const setBugReportDialogOpen = useEditorStore((s) => s.setBugReportDialogOpen);
+  const handleReportBug = useCallback(() => setBugReportDialogOpen(true), [setBugReportDialogOpen]);
 
   // --- Early return if no domain -------------------------------------------
 
@@ -813,12 +819,20 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
       </Panel>
 
-      {/* View File button — top-right corner */}
-      <Panel position="top-right">
+      {/* Corner actions — top-right */}
+      <Panel position="top-right" className="toolbar__corner">
+        <button
+          className="toolbar__view-file"
+          onClick={handleReportBug}
+          title="Report a bug on GitHub (prefilled with diagnostics)"
+          aria-label="Report a bug"
+        >
+          🐞 Report Bug
+        </button>
         <button
           className="toolbar__view-file"
           onClick={handleViewFile}
-          title="Open as JaSON file"
+          title="Open as JSON file"
           aria-label="Open underlying JSON file in text editor"
         >
           {'{ }'} View File

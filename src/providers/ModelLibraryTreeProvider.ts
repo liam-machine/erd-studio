@@ -12,8 +12,7 @@ import * as fs from 'fs';
 
 import type { LogicalModelService } from '../services/logicalModelService';
 import type { DomainService } from '../services/domainService';
-import type { RawDomainFile, SemanticModel } from '../types/semantic';
-import { isDomainV5 } from '../types/semantic';
+import { getRawDomainModelNames } from '../types/semantic';
 
 // ---------------------------------------------------------------------------
 // Tree element type
@@ -104,11 +103,10 @@ export class ModelLibraryTreeProvider implements vscode.TreeDataProvider<ModelLi
 
     for (const summary of summaries) {
       try {
-        const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as RawDomainFile;
-        const rawModels = raw.logical?.models ?? [];
-        const modelNames = isDomainV5(raw)
-          ? (rawModels as string[])
-          : (rawModels as SemanticModel[]).map(m => m.name);
+        const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
+        // Format-agnostic: honours v4 inline objects, v5 name strings, and
+        // (for usage counting only) hybrid/legacy documents awaiting migration.
+        const modelNames = getRawDomainModelNames(raw);
 
         for (const name of modelNames) {
           const existing = map.get(name);

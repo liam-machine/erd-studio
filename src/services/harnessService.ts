@@ -19,10 +19,22 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '15';
+export const HARNESS_VERSION = '16';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
+
+/**
+ * Region markers wrapping the ERD Studio section inside shared files that
+ * may also hold user content (currently only Codex's AGENTS.md). Updates
+ * replace only the text between these markers so everything else the user
+ * wrote in the file survives a HARNESS_VERSION bump.
+ */
+export const CODEX_REGION_BEGIN = '<!-- BEGIN erd-studio-harness -->';
+export const CODEX_REGION_END = '<!-- END erd-studio-harness -->';
+
+/** Heading of the Codex section — used to recognise pre-region installs. */
+const CODEX_SECTION_HEADING = '## ERD Studio Domain Files';
 
 function buildVersionMarker(): string {
   return `${VERSION_MARKER_PREFIX} ${HARNESS_VERSION}${VERSION_MARKER_SUFFIX}`;
@@ -597,7 +609,7 @@ function generateCopilotInstructions(): string {
   return `---
 name: 'ERD Studio'
 description: 'Data modeling guide for ERD Studio — domain JSON format, dbt YAML tests for physical model, naming conventions'
-applyTo: '**/.erd-studio/**/*.json'
+applyTo: '**/.erd-studio/**'
 ---
 
 ${SCHEMA_CONTENT}
@@ -633,23 +645,93 @@ ${buildVersionMarker()}
 
 function generateCodexAgents(): string {
   return `
-## ERD Studio Domain Files
+${CODEX_REGION_BEGIN}
+${CODEX_SECTION_HEADING}
 
 ${SCHEMA_CONTENT}
 
 ${buildVersionMarker()}
+${CODEX_REGION_END}
 `;
+}
+
+/**
+ * Locate the ERD Studio-managed region inside an existing AGENTS.md.
+ *
+ * Prefers the BEGIN/END region markers. Falls back to the pre-v16 layout
+ * (heading … version marker, no region markers) so users upgrading from an
+ * older harness still get an in-place replacement rather than a duplicate
+ * section. Returns `null` when no managed region can be identified.
+ */
+export function findCodexRegion(content: string): { start: number; end: number } | null {
+  const beginIdx = content.indexOf(CODEX_REGION_BEGIN);
+  if (beginIdx !== -1) {
+    const endIdx = content.indexOf(CODEX_REGION_END, beginIdx);
+    if (endIdx !== -1) {
+      return { start: beginIdx, end: endIdx + CODEX_REGION_END.length };
+    }
+  }
+
+  const headingIdx = content.indexOf(CODEX_SECTION_HEADING);
+  if (headingIdx === -1) { return null; }
+  const markerRe = /<!-- erd-studio-harness: .+? -->/g;
+  markerRe.lastIndex = headingIdx;
+  const markerMatch = markerRe.exec(content);
+  if (!markerMatch) { return null; }
+  return { start: headingIdx, end: markerMatch.index + markerMatch[0].length };
+}
+
+/**
+ * Splice freshly generated Codex content into an existing AGENTS.md,
+ * replacing only the ERD Studio-managed region and preserving all other
+ * user content. Appends when no managed region exists yet.
+ */
+export function mergeCodexContent(existing: string, generated: string): string {
+  const region = findCodexRegion(existing);
+  const block = generated.trim();
+  if (!region) {
+    const sep = existing.length === 0 || existing.endsWith('\n') ? '\n' : '\n\n';
+    return existing + sep + block + '\n';
+  }
+  return existing.slice(0, region.start) + block + existing.slice(region.end);
 }
 
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
+const DEFAULT_SEMANTIC_DIR = '.erd-studio';
+
+/**
+ * Rewrite every reference to the default `.erd-studio` data directory in
+ * generated harness content to the user's configured `erdStudio.semanticDir`.
+ * Only the dotted directory token is touched; skill/hook names such as
+ * `.claude/skills/erd-studio/` and the `/tmp/.erd-studio-skill-*` flag file
+ * are left alone (no leading dot, or followed by `-`).
+ */
+export function applySemanticDir(content: string, semanticDir: string): string {
+  const dir = semanticDir.replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+  if (!dir || dir === DEFAULT_SEMANTIC_DIR) {
+    return content;
+  }
+  return content.replace(/\.erd-studio(?![\w-])/g, dir);
+}
+
 export class HarnessService {
+  /**
+   * @param semanticDir — the configured `erdStudio.semanticDir`; generated
+   *   files reference this directory instead of the default `.erd-studio`.
+   */
+  constructor(private readonly semanticDir: string = DEFAULT_SEMANTIC_DIR) {}
+
   /**
    * Generate the config file content for a given harness target.
    */
   generateContent(targetId: HarnessTarget['id']): string {
+    return applySemanticDir(this.generateDefaultContent(targetId), this.semanticDir);
+  }
+
+  private generateDefaultContent(targetId: HarnessTarget['id']): string {
     switch (targetId) {
       case 'claude':
         return generateClaudeSkill();
@@ -665,8 +747,11 @@ export class HarnessService {
   /**
    * Install a harness config file into the workspace.
    *
-   * For Codex (AGENTS.md), appends to existing file if present.
-   * For all others, creates the file (with confirmation if it already exists).
+   * For Codex (AGENTS.md), appends to an existing file on first install and
+   * replaces only the BEGIN/END-delimited ERD Studio region on update —
+   * user content elsewhere in AGENTS.md is always preserved.
+   * For all others, creates the file (refusing to overwrite unless
+   * `overwrite` is true).
    */
   install(
     workspaceRoot: string,
@@ -685,10 +770,13 @@ export class HarnessService {
 
       const content = this.generateContent(target.id);
 
-      if (target.id === 'codex' && alreadyExisted && !overwrite) {
-        // Append to existing AGENTS.md
+      if (target.id === 'codex' && alreadyExisted) {
+        // AGENTS.md is a shared file: never replace it wholesale. Without
+        // overwrite, leave an existing ERD section alone; with overwrite,
+        // replace only the managed region (or append if there is none).
         const existing = fs.readFileSync(filePath, 'utf-8');
-        if (existing.includes('## ERD Studio Domain Files')) {
+        const hasSection = findCodexRegion(existing) !== null;
+        if (hasSection && !overwrite) {
           return {
             target,
             success: true,
@@ -696,7 +784,7 @@ export class HarnessService {
             alreadyExisted: true,
           };
         }
-        fs.appendFileSync(filePath, '\n' + content, 'utf-8');
+        fs.writeFileSync(filePath, mergeCodexContent(existing, content), 'utf-8');
       } else if (alreadyExisted && !overwrite) {
         return {
           target,
@@ -713,12 +801,12 @@ export class HarnessService {
       if (target.id === 'claude') {
         // SYNC.md — progressive context loading for sync plan execution
         const syncPath = path.join(dir, 'SYNC.md');
-        fs.writeFileSync(syncPath, generateSyncGuide(), 'utf-8');
+        fs.writeFileSync(syncPath, applySemanticDir(generateSyncGuide(), this.semanticDir), 'utf-8');
 
         // enforce-skill.sh — PreToolUse hook that blocks first .erd-studio edit
         // per session so Claude loads the /erd-studio skill before making changes
         const hookPath = path.join(dir, 'enforce-skill.sh');
-        fs.writeFileSync(hookPath, generateEnforceSkillHook(), { mode: 0o755 });
+        fs.writeFileSync(hookPath, applySemanticDir(generateEnforceSkillHook(), this.semanticDir), { mode: 0o755 });
 
         // Merge hook config into .claude/settings.local.json (local only, never committed)
         try {
@@ -815,8 +903,12 @@ export class HarnessService {
 
   /**
    * Detect installed harness files whose embedded version differs from the
-   * current HARNESS_VERSION.  Returns only targets that exist AND are stale
-   * (missing marker or older version).
+   * current HARNESS_VERSION.  Returns only targets that exist, carry a
+   * version marker (i.e. were written by this extension) AND are stale.
+   *
+   * Files with NO marker are treated as unmanaged — a hand-written
+   * `.gemini/styleguide.md` or AGENTS.md is the user's, not ours — and are
+   * never reported (so they are never offered for overwrite at activation).
    */
   detectStale(workspaceRoot: string): HarnessTarget[] {
     const stale: HarnessTarget[] = [];
@@ -824,14 +916,23 @@ export class HarnessService {
       const filePath = path.join(workspaceRoot, target.relativePath);
       if (!fs.existsSync(filePath)) { continue; }
 
-      const content = fs.readFileSync(filePath, 'utf-8');
+      let content: string;
+      try {
+        content = fs.readFileSync(filePath, 'utf-8');
+      } catch {
+        continue;
+      }
 
       // For Codex, only consider it an ERD Studio harness if our section exists
-      if (target.id === 'codex' && !content.includes('## ERD Studio Domain Files')) {
+      if (target.id === 'codex' && findCodexRegion(content) === null) {
         continue;
       }
 
       const version = extractHarnessVersion(content);
+      if (version === null) {
+        // Unmanaged file — leave it alone.
+        continue;
+      }
       if (version !== HARNESS_VERSION) {
         stale.push(target);
       }

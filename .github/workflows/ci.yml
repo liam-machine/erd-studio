@@ -16,7 +16,72 @@ jobs:
           cache: npm
 
       - run: npm ci
+      # Fail on high/critical advisories in shipped (non-dev) dependencies.
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run compile
       - run: npm run build
       - run: npm run test
       - run: npm run package
+
+      # Guard against .vscodeignore regressions: the marketplace package should
+      # only contain package.json, README/CHANGELOG/LICENSE, media icons and
+      # dist/*. Sibling projects (mcp-server, forge-app), planning docs and
+      # node_modules must never be swept in. esbuild bundles every runtime
+      # dependency into dist/, so vsce's npm dependency walk is skipped.
+      - name: Check packaged file list stays lean
+        run: |
+          npx @vscode/vsce ls --no-dependencies > vsce-files.txt
+          COUNT=$(wc -l < vsce-files.txt | tr -d ' ')
+          echo "vsce would package ${COUNT} files:"
+          cat vsce-files.txt
+          if [ "$COUNT" -gt 60 ]; then
+            echo "::error::vsce ls lists ${COUNT} files (limit 60) — check .vscodeignore"
+            exit 1
+          fi
+
+  # mcp-server relative-imports ../src/services/* and bundles ../src/workers/manifestWorker.ts,
+  # so it needs the root install as well as its own: the shared services under ../src are in
+  # this project's tsconfig `include`, and some of them import `vscode` and `yaml`, which
+  # resolve from the repo-root node_modules (@types/vscode, yaml). Without the root install
+  # the type-check step fails on unresolved modules. An accidental `import 'vscode'` in a
+  # shared service still fails the esbuild step here, because `vscode` is not in the bundle's
+  # `external` list.
+  mcp-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mcp-server/package-lock.json
+
+      - name: Install root dependencies (shared services)
+        run: npm ci
+
+      - name: Install mcp-server dependencies
+        run: npm ci
+        working-directory: mcp-server
+
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.json
+        working-directory: mcp-server
+
+      - name: Build
+        run: npm run build
+        working-directory: mcp-server
+
+      - name: Smoke test
+        run: node test-smoke.mjs
+        working-directory: mcp-server
+
+      # Same gate as the root job. mcp-server's runtime advisories come in transitively via
+      # @modelcontextprotocol/sdk (hono, ip-address, qs) and are resolvable inside the declared
+      # ranges — `npm audit fix --package-lock-only` clears them with no package.json change —
+      # so this can be a hard gate. Dev-only findings (esbuild) are excluded by --omit=dev.
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: mcp-server

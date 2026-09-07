@@ -2,8 +2,8 @@
  * Typed message bus for extension ↔ webview communication.
  *
  * Messages are categorised by direction:
- *   Extension → Webview:  domainLoaded, domainUpdated, manifestRefreshed, error
- *   Webview → Extension:  ready, addModel, updatePositions, runAutoLayout, …
+ *   Extension → Webview:  domainLoaded, stageData, discrepancyReport, error, …
+ *   Webview → Extension:  ready, addModel, updatePositions, switchStage, …
  *
  * This hook subscribes to incoming messages on mount and provides a typed
  * `send` helper for outgoing messages.
@@ -20,7 +20,6 @@ export type {
   ExtensionMessage,
   WebviewMessage,
   DomainLoadedMessage,
-  DomainUpdatedMessage,
   StageDataMessage,
   DiscrepancyReportMessage,
   ErrorMessage,
@@ -31,11 +30,12 @@ export type {
   UpdateColumnMessage,
   AddRelationshipMessage,
   RemoveModelMessage,
+  RemoveModelsMessage,
   RemoveRelationshipMessage,
-  UpdateViewConfigMessage,
+  RemoveRelationshipsMessage,
+  RemoveAnnotationsMessage,
   AddExistingModelMessage,
   UpdatePositionsMessage,
-  RunAutoLayoutMessage,
   RefreshManifestMessage,
   SwitchStageMessage,
   ToggleDiscrepancyMessage,
@@ -101,4 +101,23 @@ export function useMessageBus(
   );
 
   return { send };
+}
+
+/**
+ * Get a stable, typed `send` function for outgoing messages WITHOUT
+ * registering a window `message` listener.
+ *
+ * Use this in leaf components (column rows, nodes, dialogs) that only need
+ * to post messages to the extension host. `useMessageBus(() => {})` would
+ * add one no-op listener per component instance — on a large domain that is
+ * a listener per column row, all of which fan out on every host message.
+ */
+export function useSend(): (message: WebviewMessage) => void {
+  const vscode = useVsCodeApi();
+  return useCallback(
+    (message: WebviewMessage): void => {
+      vscode.postMessage(message);
+    },
+    [vscode],
+  );
 }

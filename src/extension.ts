@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DomainService } from './services/domainService';
+import { DomainService, renameDomainInRaw } from './services/domainService';
 import { LayerService } from './services/layerService';
 import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
 import { ManifestService } from './services/manifestService';
@@ -12,15 +12,18 @@ import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
-import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/harnessService';
+import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
+import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
 import { getErdStudioSetting } from './services/configService';
+import { readDbtProjectConfig } from './services/dbtProjectConfig';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
+import { submitBugReport } from './services/feedbackService';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -31,25 +34,148 @@ import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from '
 const LAST_ACTIVATED_VERSION_KEY = 'lastActivatedVersion';
 
 /**
- * Find the dbt project root by searching workspace folders for dbt_project.yml.
- * Returns the first workspace folder containing the file.
+ * workspaceState key set once the harness install QuickPick has been offered
+ * for a workspace with no harness files, so it is not shown on every activation.
+ */
+const HARNESS_INSTALL_PROMPTED_KEY = 'erdStudio.harnessInstallPrompted';
+
+/** Directories never descended into when searching for a nested dbt project. */
+const DBT_SEARCH_SKIP_DIRS = new Set(['node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv']);
+
+/** Maximum directory depth (below a workspace folder) searched for dbt_project.yml. */
+const DBT_SEARCH_MAX_DEPTH = 3;
+
+function hasDbtProjectFile(dir: string): boolean {
+  try {
+    return fs.statSync(path.join(dir, 'dbt_project.yml')).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the dbt project root from a list of workspace folder paths and the
+ * `erdStudio.projectPath` setting. Pure (no vscode access) so it is unit-testable.
+ *
+ * Resolution order:
+ *   1. `projectPath` setting — absolute, or relative to each workspace folder —
+ *      when it contains dbt_project.yml.
+ *   2. A workspace folder whose root contains dbt_project.yml.
+ *   3. A depth-limited breadth-first search below each workspace folder
+ *      (skipping node_modules, dbt_packages, .git, target, .venv), returning
+ *      the shallowest match. Matches the recursive `workspaceContains`
+ *      activation event so activation never lands on "no project found"
+ *      for a monorepo with dbt in a subfolder.
+ */
+export function resolveDbtProjectRoot(
+  folderPaths: readonly string[],
+  projectPathSetting: string,
+): string | undefined {
+  const configured = projectPathSetting.trim();
+  if (configured) {
+    if (path.isAbsolute(configured)) {
+      if (hasDbtProjectFile(configured)) { return configured; }
+    } else {
+      for (const folder of folderPaths) {
+        const candidate = path.resolve(folder, configured);
+        if (hasDbtProjectFile(candidate)) { return candidate; }
+      }
+    }
+    console.warn(`ERD Studio: erdStudio.projectPath "${configured}" does not contain dbt_project.yml — falling back to auto-detection.`);
+  }
+
+  for (const folder of folderPaths) {
+    if (hasDbtProjectFile(folder)) { return folder; }
+  }
+
+  // Breadth-first so the shallowest match wins.
+  let frontier = [...folderPaths];
+  for (let depth = 1; depth <= DBT_SEARCH_MAX_DEPTH && frontier.length > 0; depth++) {
+    const next: string[] = [];
+    for (const dir of frontier) {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        if (!entry.isDirectory() || DBT_SEARCH_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) {
+          continue;
+        }
+        const child = path.join(dir, entry.name);
+        if (hasDbtProjectFile(child)) { return child; }
+        next.push(child);
+      }
+    }
+    frontier = next;
+  }
+
+  return undefined;
+}
+
+/**
+ * Find the dbt project root: honours `erdStudio.projectPath`, then workspace
+ * folder roots, then a shallow recursive search. See `resolveDbtProjectRoot`.
  */
 function findDbtProjectRoot(): string | undefined {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders || workspaceFolders.length === 0) {
     return undefined;
   }
+  return resolveDbtProjectRoot(
+    workspaceFolders.map(f => f.uri.fsPath),
+    getErdStudioSetting('projectPath', ''),
+  );
+}
 
-  for (const folder of workspaceFolders) {
-    const projectPath = folder.uri.fsPath;
-    const dbtProjectFile = path.join(projectPath, 'dbt_project.yml');
+const NO_PROJECT_MESSAGE =
+  'ERD Studio: No dbt project found. Open a folder containing dbt_project.yml, ' +
+  'or set erdStudio.projectPath to the dbt project folder.';
 
-    if (fs.existsSync(dbtProjectFile)) {
-      return projectPath;
+/**
+ * Register every contributed command (and its legacy dbtSemantic.* alias)
+ * with a handler that explains why ERD Studio is inactive, plus a stub
+ * custom editor for domain files. Used when no dbt project could be found so
+ * the palette, sidebar welcome buttons and domain JSON files show a helpful
+ * message instead of "command not found" / a blank editor error.
+ */
+function registerFallbackCommands(context: vscode.ExtensionContext): void {
+  const showNoProject = async (): Promise<void> => {
+    const choice = await vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Settings');
+    if (choice === 'Open Settings') {
+      void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
     }
+  };
+
+  const contributed = (context.extension.packageJSON as {
+    contributes?: { commands?: Array<{ command: string }> };
+  }).contributes?.commands ?? [];
+
+  for (const { command } of contributed) {
+    // reportBug is registered by activate() before this fallback runs and works
+    // without a project; registering it again would throw ("already exists").
+    if (!command.startsWith('erdStudio.') || command === 'erdStudio.reportBug') { continue; }
+    context.subscriptions.push(
+      vscode.commands.registerCommand(command, showNoProject),
+      vscode.commands.registerCommand(command.replace(/^erdStudio\./, 'dbtSemantic.'), showNoProject),
+    );
   }
 
-  return undefined;
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, {
+      resolveCustomTextEditor(_document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+        panel.webview.options = { enableScripts: false };
+        panel.webview.html =
+          '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);padding:1.5em">' +
+          '<h2>ERD Studio is inactive</h2>' +
+          `<p>${NO_PROJECT_MESSAGE}</p>` +
+          '<p>Reload the window after fixing the project location.</p>' +
+          '</body></html>';
+      },
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +281,32 @@ const LAYER_COLOR_OPTIONS = [
   { label: '$(edit) Custom hex color...', value: 'custom' },
 ];
 
+/**
+ * "Report a Bug" without an active canvas: gather a title and a one-line
+ * description via input boxes, then open the prefilled GitHub issue form.
+ */
+async function reportBugWithoutCanvas(
+  context: vscode.ExtensionContext,
+  prefill?: { title?: string; description?: string },
+): Promise<void> {
+  const title = await vscode.window.showInputBox({
+    title: 'ERD Studio — Report a Bug (1/2)',
+    prompt: 'One-line summary of the problem',
+    value: prefill?.title ?? '',
+    ignoreFocusOut: true,
+    validateInput: (v) => (v.trim() ? undefined : 'Please enter a short title'),
+  });
+  if (title === undefined) return;
+  const description = await vscode.window.showInputBox({
+    title: 'ERD Studio — Report a Bug (2/2)',
+    prompt: 'What happened? You can add more detail on GitHub before submitting.',
+    value: prefill?.description ?? '',
+    ignoreFocusOut: true,
+  });
+  if (description === undefined) return;
+  await submitBugReport(context, { title, description, includeDiagnostics: true });
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('ERD Studio is now active');
 
@@ -169,16 +321,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
   if (previousVersion && previousVersion !== currentVersion && hasOpenDomainCanvas()) {
-    await saveAllAndReload(`ERD Studio updated to v${currentVersion}`);
-    return;
+    // If the user cancels the reload (unsaved files), keep activating so
+    // commands and the custom editor are still registered for this host.
+    if (await saveAllAndReload(`ERD Studio updated to v${currentVersion}`)) {
+      return;
+    }
   }
+
+  // "Report a Bug" is registered before any early return so it is always
+  // reachable from the command palette, even when no dbt project is open.
+  // When a canvas is active the report is routed through its webview so it
+  // can include a screenshot and domain context.
+  let editorProviderForFeedback: SemanticEditorProvider | undefined;
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'erdStudio.reportBug',
+      async (prefill?: { title?: string; description?: string }) => {
+        if (editorProviderForFeedback?.requestBugReportDialog(prefill)) return;
+        await reportBugWithoutCanvas(context, prefill);
+      },
+    ),
+  );
 
   const workspaceRoot = findDbtProjectRoot();
   if (!workspaceRoot) {
-    void vscode.window.showWarningMessage(
-      'ERD Studio: No dbt project found. ' +
-        'Open a folder containing dbt_project.yml to activate.',
-    );
+    // Register stub commands / editor so palette entries and the sidebar
+    // welcome buttons explain the problem instead of "command not found".
+    registerFallbackCommands(context);
+    void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Settings').then(choice => {
+      if (choice === 'Open Settings') {
+        void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
+      }
+    });
     return;
   }
 
@@ -189,19 +363,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // v0.6.44 moved the default data directory from erd-studio/ to .erd-studio/.
   // Rename legacy folders in place before any service reads from disk so
   // existing projects keep working without intervention.
-  if (migrateLegacySemanticDir(workspaceRoot, semanticDir)) {
-    void vscode.window.showInformationMessage(
-      'ERD Studio: your erd-studio/ folder was renamed to .erd-studio/ (the new default location). ' +
-        'Commit the rename so collaborators stay in sync.',
-    );
+  try {
+    if (migrateLegacySemanticDir(workspaceRoot, semanticDir)) {
+      void vscode.window.showInformationMessage(
+        'ERD Studio: your erd-studio/ folder was renamed to .erd-studio/ (the new default location). ' +
+          'Commit the rename so collaborators stay in sync.',
+      );
+    }
+  } catch (err) {
+    // Never let a filesystem oddity (permissions, dangling symlink, …) in a
+    // legacy folder abort activation — the rest of the extension still works.
+    console.error('[ERD Studio] Legacy erd-studio/ migration failed:', err);
   }
+
+  // Read target-path / model-paths from dbt_project.yml once; every consumer
+  // (manifest parser, schema walker, watchers) shares this. A change to
+  // these keys is picked up by the dbt_project.yml watcher below, which
+  // prompts for a window reload.
+  const dbtConfig = readDbtProjectConfig(workspaceRoot);
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
   const logicalModelService = new LogicalModelService(workspaceRoot, semanticDir);
   domainService.setLogicalModelService(logicalModelService);
-  const manifestService = new ManifestService();
-  const ymlParserService = new YmlParserService();
+  const manifestService = new ManifestService({ dbtConfig });
+  const ymlParserService = new YmlParserService({ dbtConfig });
   const templateService = new TemplateService();
   // Status bar item shown while selectors.yml is out of sync (skipped writes).
   // Hidden as soon as a regenerate succeeds.
@@ -253,6 +439,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       onWritten: () => {
         selectorsOutOfSyncStatus?.hide();
       },
+      onNameCollision: (info) => {
+        void vscode.window.showWarningMessage(
+          `ERD Studio: selector name "${info.requestedName}" for domain ${info.domain} collides with ` +
+            `${info.conflictsWith}. Wrote "${info.assignedName}" to selectors.yml instead — ` +
+            'rename one of the domains to avoid the suffix.',
+        );
+      },
     },
   );
   const legacyTagCleanupService = new LegacyTagCleanupService(workspaceRoot);
@@ -264,7 +457,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   selectorsService.scheduleRegenerate();
 
   // Check for v4 → v5 migration (non-blocking)
-  const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService);
+  const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService, semanticDir);
   if (migrationService.needsMigration()) {
     void vscode.window.showInformationMessage(
       'ERD Studio has a new model storage format that enables cross-domain model sharing. Migrate domain files now?',
@@ -295,18 +488,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     selectorsService,
     logicalModelService,
   );
+  editorProviderForFeedback = editorProvider;
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
 
-  // Set context key so view/title menus only show when semantic dir exists
+  // Set context keys so view/title menus only show when semantic dir exists.
+  // Re-evaluated whenever the semantic dir changes on disk (watcher events) or
+  // the extension itself creates it (createDomain, addLayer, setup), so the
+  // "+ Add Layer" / "Install Harness" buttons appear without a window reload.
   const fullSemanticDirPath = path.join(workspaceRoot, semanticDir);
-  void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
-  void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
+  const refreshContextKeys = (): void => {
+    void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
+    void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
+  };
+  refreshContextKeys();
+
+  // Surface a broken layers.json once per distinct error. LayerService falls
+  // back to default layers in memory but refuses to overwrite the file, so the
+  // user must know why their custom layers vanished.
+  let lastLayerLoadErrorShown: string | null = null;
+  const warnIfLayerConfigBroken = (): void => {
+    const loadError = layerService.getLoadError();
+    if (!loadError || loadError === lastLayerLoadErrorShown) {
+      if (!loadError) { lastLayerLoadErrorShown = null; }
+      return;
+    }
+    lastLayerLoadErrorShown = loadError;
+    void vscode.window.showWarningMessage(
+      `ERD Studio: ${semanticDir}/layers.json could not be loaded (${loadError}). ` +
+      'Default layers are shown until the file is fixed; layer changes are disabled to avoid overwriting it.',
+      'Open layers.json',
+    ).then(choice => {
+      if (choice === 'Open layers.json') {
+        void vscode.window.showTextDocument(vscode.Uri.file(layerService.getConfigPath()));
+      }
+    });
+  };
+  warnIfLayerConfigBroken();
 
   // -------------------------------------------------------------------------
   // File watchers
   // -------------------------------------------------------------------------
-  const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir);
+  const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir, dbtConfig);
 
   // Manifest changed → refresh open editors
   let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -319,6 +542,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       // Superseded by a newer file-change event during the await
       if (gen !== manifestChangeGen) { return; }
+
+      if (manifestService.isMissing) {
+        // Definitive (dbt clean / target removed) — no retry, no stale data.
+        void vscode.window.showWarningMessage(
+          `dbt manifest removed (${dbtConfig.targetPath}/manifest.json). ` +
+            'Physical stage now reflects schema .yml files only. Run dbt compile to regenerate it.',
+        );
+        return;
+      }
 
       if (manifestService.isStale) {
         // Manifest likely mid-write by dbt — deduplicate and retry once after 2s
@@ -352,21 +584,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // Semantic file changed externally → refresh tree view + model library
-  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(() => {
+  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri }) => {
+    treeProvider.invalidateDomain(uri.fsPath);
     treeProvider.refresh();
     modelLibraryProvider.refresh();
+    // A pulled/created .erd-studio/ must reveal the view/title buttons without a reload
+    refreshContextKeys();
   });
 
-  // Semantic file deleted → refresh tree + model library, prompt for tag cleanup
+  // The editor wrote a domain (and possibly model files) itself. Those writes
+  // are recorded as own writes so the watchers skip them (a watcher-driven
+  // refresh would send a second, identical domainLoaded and clear the user's
+  // column selection), so the side effects the watcher used to drive are
+  // issued here directly instead.
+  const editorWroteSubscription = editorProvider.onDidWriteDomain(({ uri, modelLibraryChanged }) => {
+    treeProvider.invalidateDomain(uri.fsPath);
+    treeProvider.refresh();
+    // The Model Library lists a "N domains" count and the referencing domain
+    // names per model, so ANY domain write can change what it shows — adding or
+    // removing a model reference changes the count without creating or deleting
+    // a yml file. Refresh on every write; `modelLibraryChanged` only gates the
+    // context keys, which turn on the view itself and can only change when a
+    // file appears or disappears.
+    modelLibraryProvider.refresh();
+    if (modelLibraryChanged) {
+      refreshContextKeys();
+    }
+  });
+
+  // Domain file(s) deleted → refresh tree + model library, prompt for tag cleanup.
+  // The watcher coalesces a delete storm (branch switch) into one event and
+  // filters out layers.json / templates / logical-models / .sync-plan.json, so
+  // one toast covers the whole burst and only real domain files trigger it.
   // NOTE: reconcileAll() is NOT called automatically here because git operations
   // (pull, checkout, merge, rebase) trigger file-delete events on Windows (delete-
   // then-rename) and macOS (atomic rename via FSEvents), causing mass YAML
   // modifications. Instead, offer to run the manual sync command.
-  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(() => {
+  const semanticDeletedSubscription = fileWatcherService.onSemanticFileDeleted(({ uris }) => {
+    for (const uri of uris) {
+      treeProvider.invalidateDomain(uri.fsPath);
+    }
     treeProvider.refresh();
     modelLibraryProvider.refresh();
+    refreshContextKeys();
+    const subject = uris.length === 1
+      ? 'Domain file deleted.'
+      : `${uris.length} domain files deleted.`;
     void vscode.window.showInformationMessage(
-      'Domain file deleted. Regenerate dbt selectors.yml to drop the removed domain from the selector set.',
+      `${subject} Regenerate dbt selectors.yml to drop the removed domain${uris.length === 1 ? '' : 's'} from the selector set.`,
       'Regenerate Now',
     ).then(choice => {
       if (choice === 'Regenerate Now') {
@@ -375,14 +640,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   });
 
+  // layers.json changed externally (git pull, manual edit, delete) → drop the
+  // cached layer list so the tree, decorations and domain listing pick up the
+  // new layers; warn if the file is now unreadable.
+  const layerConfigChangedSubscription = fileWatcherService.onLayerConfigChanged(() => {
+    layerService.invalidateCache();
+    treeProvider.invalidateDomain();
+    treeProvider.refresh();
+    modelLibraryProvider.refresh();
+    layerDecorationProvider.refresh();
+    decorationProvider.refresh();
+    refreshContextKeys();
+    warnIfLayerConfigBroken();
+  });
+
   // Logical model file changed → refresh domains referencing that model + model library
   const logicalModelChangedSubscription = fileWatcherService.onLogicalModelChanged(
     async ({ modelName }) => {
+      logicalModelService.invalidateCache(modelName);
       await editorProvider.refreshDomainsReferencingModel(modelName);
       treeProvider.refresh();
       modelLibraryProvider.refresh();
       // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
-      void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
+      refreshContextKeys();
     },
   );
 
@@ -406,15 +686,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   });
 
+  // erdStudio.* settings are read once at activation (semanticDir feeds every
+  // service constructor), so a mid-session change needs a window reload.
+  const activationSettings = {
+    semanticDir,
+    projectPath: getErdStudioSetting('projectPath', ''),
+  };
+  const configChangedSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
+    if (!e.affectsConfiguration('erdStudio') && !e.affectsConfiguration('dbtSemantic')) {
+      return;
+    }
+    const nextSemanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
+    const nextProjectPath = getErdStudioSetting('projectPath', '');
+    if (
+      nextSemanticDir === activationSettings.semanticDir &&
+      nextProjectPath === activationSettings.projectPath
+    ) {
+      return;
+    }
+    void vscode.window.showWarningMessage(
+      'ERD Studio settings changed (semanticDir / projectPath). A window reload is needed for the new values to take effect.',
+      'Reload Window',
+    ).then(action => {
+      if (action === 'Reload Window') {
+        void vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }
+    });
+  });
+
   context.subscriptions.push(
     { dispose() { clearTimeout(manifestRetryTimeout); } },
+    configChangedSubscription,
     treeProvider,
     decorationProvider,
     layerDecorationProvider,
     fileWatcherService,
     manifestChangedSubscription,
     semanticChangedSubscription,
+    editorWroteSubscription,
     semanticDeletedSubscription,
+    layerConfigChangedSubscription,
     logicalModelChangedSubscription,
     dbtYmlChangedSubscription,
     projectChangedSubscription,
@@ -426,7 +737,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       return treeView;
     })(),
-    vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, editorProvider),
+    vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, editorProvider, {
+      // Keep the webview (React tree, ELK worker, in-progress discrepancy /
+      // sync-merge state) alive when the tab is hidden instead of tearing it
+      // down and rebuilding from PersistedState on every tab switch.
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.window.registerFileDecorationProvider(layerDecorationProvider),
     modelLibraryProvider,
@@ -571,7 +887,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return;
         }
 
-        // Step 6: Refresh tree, regenerate selectors.yml, and auto-open domain
+        // Step 6: Refresh tree, regenerate selectors.yml, and auto-open domain.
+        // The semantic dir may have just been created — reveal the title buttons.
+        refreshContextKeys();
         treeProvider.refresh();
         selectorsService.scheduleRegenerate();
         await vscode.commands.executeCommand(
@@ -609,9 +927,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await vscode.window.tabGroups.close(matchingTabs, true);
         }
 
-        // Delete the unified domain file
+        // Delete the unified domain file. Record it as an own delete so the
+        // watcher does not show the "Domain file deleted" toast — selectors
+        // regeneration is already scheduled below.
         try {
           await vscode.workspace.fs.delete(fileUri);
+          ownWrites.recordDelete(filePath);
+          treeProvider.invalidateDomain(filePath);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to delete domain: ${msg}`);
@@ -649,16 +971,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newSlug = newDomainSlug.trim();
         if (newSlug === oldDomainName) { return; }
 
-        // Read and update domain name in the unified file
-        let domainData: UnifiedDomain;
+        // Read and update domain name in the unified file.
+        // Validate via DomainService, but rewrite the RAW document so v5 model
+        // name references and unknown keys are preserved — re-serialising the
+        // resolved UnifiedDomain would inline model bodies into a v5 file.
+        let renamedContent: string;
         try {
-          domainData = domainService.getDomain(oldFilePath);
+          domainService.getDomain(oldFilePath);
+          renamedContent = renameDomainInRaw(fs.readFileSync(oldFilePath, 'utf-8'), newSlug);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to read domain file: ${msg}`);
           return;
         }
-        domainData.domain = newSlug;
 
         // Close old editor tabs before applying the edit (file will be deleted)
         const oldTabs = findMatchingTabs(oldFileUri);
@@ -669,7 +994,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         const edit = new vscode.WorkspaceEdit();
         edit.createFile(newFileUri, { overwrite: false, ignoreIfExists: false });
-        edit.insert(newFileUri, new vscode.Position(0, 0), JSON.stringify(domainData, null, 2) + '\n');
+        edit.insert(newFileUri, new vscode.Position(0, 0), renamedContent);
         edit.deleteFile(oldFileUri, { ignoreIfNotExists: false });
 
         const success = await vscode.workspace.applyEdit(edit);
@@ -696,7 +1021,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await manifestService.loadManifest(workspaceRoot);
           await ymlParserService.loadYmlData(workspaceRoot);
           await editorProvider.refreshAllOpenDomains();
-          void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest model data.');
+          if (manifestService.isMissing) {
+            void vscode.window.showWarningMessage(
+              `manifest.json not found at ${dbtConfig.targetPath}/manifest.json. ` +
+                'Physical stage reflects schema .yml files only — run dbt compile to generate the manifest.',
+            );
+          } else if (manifestService.isStale) {
+            void vscode.window.showWarningMessage(
+              'dbt manifest could not be parsed (it may be mid-write) — graphs show the last good data. Try again shortly.',
+            );
+          } else {
+            void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest model data.');
+          }
         },
       );
     }),
@@ -717,6 +1053,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               void vscode.window.showInformationMessage(
                 `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} model reference(s) to ${relPath}.`,
               );
+            } else if (result.status === 'noop') {
+              void vscode.window.showInformationMessage(
+                'No domains with models found — selectors.yml was not created.',
+              );
             }
             // For 'skipped': the onSkipped hook has already shown the
             // out-of-sync notification + status bar. No success toast.
@@ -731,7 +1071,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // left behind by the old SchemaTagService. Safe to run repeatedly.
     vscode.commands.registerCommand('erdStudio.stripLegacyDomainTags', async () => {
       const confirm = await vscode.window.showWarningMessage(
-        'This will scan every .yml file in your workspace and remove any `domain:*` tag from `config.tags` or top-level `tags` on each dbt model. ' +
+        'This will scan every .yml file under your dbt model-paths (default `models/`) and remove any `domain:*` tag from `config.tags` or top-level `tags` on each dbt model. ' +
           'Review and commit the changes as a single PR. Continue?',
         { modal: true },
         'Strip Tags',
@@ -843,8 +1183,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return;
         }
 
-        // Update context key so view/title menus appear
-        void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', true);
+        // Update context keys so view/title menus appear
+        refreshContextKeys();
         treeProvider.refresh();
         await new Promise(resolve => setTimeout(resolve, 100));
         void vscode.window.showInformationMessage('ERD Studio directory created! Now create your first domain.');
@@ -913,6 +1253,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             fs.mkdirSync(layerDir, { recursive: true });
           }
 
+          refreshContextKeys();
           treeProvider.refresh();
           layerDecorationProvider.refresh();
           decorationProvider.refresh();
@@ -1063,31 +1404,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       'erdStudio.initializeLayerConfig',
       async () => {
-        const detected = layerService.detectLayersFromFilesystem();
-        if (detected.length === 0) {
-          const defaultLayers = layerService.getAllLayers();
-          await layerService.saveConfig(defaultLayers);
-          void vscode.window.showInformationMessage('Layer configuration saved with default layers (Silver, Gold).');
-          return;
-        }
+        // saveConfig refuses to overwrite an unreadable layers.json (H18) —
+        // surface that as a message rather than an unhandled command failure.
+        try {
+          const detected = layerService.detectLayersFromFilesystem();
+          if (detected.length === 0) {
+            const defaultLayers = layerService.getAllLayers();
+            await layerService.saveConfig(defaultLayers);
+            refreshContextKeys();
+            void vscode.window.showInformationMessage('Layer configuration saved with default layers (Silver, Gold).');
+            return;
+          }
 
-        const layerNames = detected.map(l => l.label).join(', ');
-        const choice = await vscode.window.showInformationMessage(
-          `Detected layers: ${layerNames}. Save this configuration?`,
-          'Save', 'Customize', 'Cancel',
-        );
+          const layerNames = detected.map(l => l.label).join(', ');
+          const choice = await vscode.window.showInformationMessage(
+            `Detected layers: ${layerNames}. Save this configuration?`,
+            'Save', 'Customize', 'Cancel',
+          );
 
-        if (choice === 'Save') {
-          await layerService.saveConfig(detected);
-          layerService.invalidateCache();
-          treeProvider.refresh();
-          layerDecorationProvider.refresh();
-          decorationProvider.refresh();
-          void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
-        } else if (choice === 'Customize') {
-          await layerService.saveConfig(detected);
-          const uri = vscode.Uri.file(layerService.getConfigPath());
-          await vscode.commands.executeCommand('vscode.open', uri);
+          if (choice === 'Save') {
+            await layerService.saveConfig(detected);
+            layerService.invalidateCache();
+            refreshContextKeys();
+            treeProvider.refresh();
+            layerDecorationProvider.refresh();
+            decorationProvider.refresh();
+            void vscode.window.showInformationMessage(`Layer configuration saved to ${semanticDir}/layers.json`);
+          } else if (choice === 'Customize') {
+            await layerService.saveConfig(detected);
+            refreshContextKeys();
+            const uri = vscode.Uri.file(layerService.getConfigPath());
+            await vscode.commands.executeCommand('vscode.open', uri);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          void vscode.window.showErrorMessage(`Failed to save layer configuration: ${msg}`);
         }
       },
     ),
@@ -1097,7 +1448,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       'erdStudio.installCodingHarness',
       async () => {
-        const harnessService = new HarnessService();
+        const harnessService = new HarnessService(semanticDir);
         const existing = harnessService.detectExisting(workspaceRoot);
         const staleTargets = harnessService.detectStale(workspaceRoot);
         const staleIds = new Set(staleTargets.map(t => t.id));
@@ -1110,7 +1461,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (exists && isStale) {
             description = '$(warning) outdated — update available';
           } else if (exists) {
-            description = '$(check) installed (v' + HARNESS_VERSION + ')';
+            // A file without our version marker was not written by ERD Studio.
+            let managed = false;
+            try {
+              managed = extractHarnessVersion(
+                fs.readFileSync(path.join(workspaceRoot, target.relativePath), 'utf-8'),
+              ) !== null;
+            } catch {
+              // unreadable — treat as unmanaged
+            }
+            description = managed
+              ? '$(check) installed (v' + HARNESS_VERSION + ')'
+              : target.id === 'codex'
+                ? '$(info) existing AGENTS.md — ERD Studio section will be appended'
+                : '$(warning) existing file not managed by ERD Studio — will be replaced';
           }
           return {
             label: target.label,
@@ -1151,24 +1515,45 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
   );
 
-  // AI coding harness — auto-update stale files, prompt on fresh install
+  // AI coding harness — prompt to update stale files; offer install once per
+  // workspace when none are present. Never overwrite anything silently:
+  // harness files (AGENTS.md in particular) can hold user content.
   {
-    const harnessService = new HarnessService();
+    const harnessService = new HarnessService(semanticDir);
     const existing = harnessService.detectExisting(workspaceRoot);
     const installedCount = [...existing.values()].filter(Boolean).length;
     const staleTargets = harnessService.detectStale(workspaceRoot);
 
     if (staleTargets.length > 0) {
-      // Force-update all stale harness files silently
-      for (const target of staleTargets) {
-        harnessService.install(workspaceRoot, target, true);
-      }
       const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
-      void vscode.window.showInformationMessage(
-        `ERD Studio: Updated ${staleTargets.length} AI coding harness file(s) to v${HARNESS_VERSION} (${names}).`,
-      );
-    } else if (installedCount === 0) {
-      // No harnesses installed — prompt user to choose
+      void vscode.window.showWarningMessage(
+        `ERD Studio: ${staleTargets.length} AI coding harness file(s) outdated (${names}). Update to v${HARNESS_VERSION}?`,
+        'Update All',
+        'Choose…',
+        'Dismiss',
+      ).then(choice => {
+        if (choice === 'Update All') {
+          const results = staleTargets.map(target => harnessService.install(workspaceRoot, target, true));
+          const failed = results.filter(r => !r.success);
+          if (failed.length > 0) {
+            const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
+            void vscode.window.showErrorMessage(
+              `ERD Studio: ${failed.length} harness file(s) could not be updated. Errors: ${errors}`,
+            );
+          } else {
+            void vscode.window.showInformationMessage(
+              `ERD Studio: Updated ${results.length} AI coding harness file(s) to v${HARNESS_VERSION} (${names}).`,
+            );
+          }
+        } else if (choice === 'Choose…') {
+          // QuickPick pre-selects the outdated targets
+          void vscode.commands.executeCommand('erdStudio.installCodingHarness');
+        }
+      });
+    } else if (installedCount === 0 && !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)) {
+      // No harnesses installed — offer the QuickPick once per workspace, not
+      // on every window open. The command stays available in the palette.
+      void context.workspaceState.update(HARNESS_INSTALL_PROMPTED_KEY, true);
       void vscode.commands.executeCommand('erdStudio.installCodingHarness');
     }
   }
@@ -1184,8 +1569,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         'Save Config', 'Later',
       ).then(async (choice) => {
         if (choice === 'Save Config') {
-          await layerService.saveConfig(detected);
+          try {
+            await layerService.saveConfig(detected);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            void vscode.window.showErrorMessage(`Failed to save layer configuration: ${msg}`);
+            return;
+          }
           layerService.invalidateCache();
+          refreshContextKeys();
           treeProvider.refresh();
           layerDecorationProvider.refresh();
           decorationProvider.refresh();

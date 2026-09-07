@@ -2,12 +2,20 @@
  * FileWatcherService — manages file system watchers for dbt project files.
  *
  * Watches:
- * - target/manifest.json (dbt compile output) → triggers manifest cache invalidation
+ * - {target-path}/manifest.json (dbt compile output) → triggers manifest cache invalidation
  * - {semanticDir}/**\/*.json (semantic domain files, default .erd-studio) → triggers tree and editor refresh
+ * - {semanticDir}/layers.json → layer config reload (onLayerConfigChanged)
  * - dbt_project.yml (project configuration) → reload prompt only when path config changes
  *
  * All change events are debounced by 300ms to prevent rapid-fire triggers
- * during batch operations (e.g., git checkout, dbt compile).
+ * during batch operations (e.g., git checkout, dbt compile). Delete events for
+ * domain files are additionally coalesced into a single onSemanticFileDeleted
+ * event carrying every deleted URI, so a branch switch that removes N domains
+ * produces one event rather than N.
+ *
+ * Events caused by the extension's own writes (recorded in OwnWriteTracker by
+ * the service that wrote the file) are swallowed so a save does not bounce
+ * back as a spurious "external change".
  *
  * Usage:
  *   const watcher = new FileWatcherService(workspaceRoot);
@@ -22,7 +30,49 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
+import { LOGICAL_MODELS_DIR } from '../services/logicalModelService';
+import { LAYERS_CONFIG_FILE } from '../services/layerService';
+import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
+import {
+  modelPathsGlob,
+  readDbtProjectConfig,
+  type DbtProjectConfig,
+} from '../services/dbtProjectConfig';
+
 const DEBOUNCE_DELAY_MS = 300;
+
+/**
+ * Sub-directories of the semantic dir that never contain domain files.
+ * Deletes inside these must not surface as "Domain file deleted".
+ */
+const NON_DOMAIN_DIRS = new Set(['templates', LOGICAL_MODELS_DIR, 'logical', 'physical']);
+
+/**
+ * Classify a path under the semantic directory.
+ * A domain file is exactly `{semanticDir}/{layer}/{domain}.json` where the
+ * layer segment is not hidden and not one of the reserved directories.
+ */
+export function classifySemanticPath(
+  semanticRoot: string,
+  fsPath: string,
+): 'domain' | 'layer-config' | 'other' {
+  const rel = path.relative(semanticRoot, fsPath);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return 'other';
+  }
+  const segments = rel.split(path.sep);
+  if (segments.length === 1) {
+    return segments[0] === LAYERS_CONFIG_FILE ? 'layer-config' : 'other';
+  }
+  if (segments.length !== 2) {
+    return 'other';
+  }
+  const [dir, file] = segments;
+  if (dir.startsWith('.') || NON_DOMAIN_DIRS.has(dir) || !file.endsWith('.json') || file.startsWith('.')) {
+    return 'other';
+  }
+  return 'domain';
+}
 
 export class FileWatcherService implements vscode.Disposable {
   private readonly watchers: vscode.FileSystemWatcher[] = [];
@@ -32,7 +82,8 @@ export class FileWatcherService implements vscode.Disposable {
   // Event emitters (private — fire events internally)
   private readonly _onManifestChanged = new vscode.EventEmitter<void>();
   private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
-  private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uri: vscode.Uri }>();
+  private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uris: vscode.Uri[] }>();
+  private readonly _onLayerConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onLogicalModelChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
   private readonly _onDbtYmlChanged = new vscode.EventEmitter<void>();
   private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
@@ -40,7 +91,14 @@ export class FileWatcherService implements vscode.Disposable {
   // Public event subscriptions (consumers listen to these)
   readonly onManifestChanged = this._onManifestChanged.event;
   readonly onSemanticFileChanged = this._onSemanticFileChanged.event;
+  /**
+   * Fires once per burst of domain-file deletions with every deleted
+   * `{layer}/{domain}.json` URI. Never fires for layers.json, templates/,
+   * logical-models/ or dotfiles such as .sync-plan.json.
+   */
   readonly onSemanticFileDeleted = this._onSemanticFileDeleted.event;
+  /** Fires when {semanticDir}/layers.json is created, modified or deleted externally. */
+  readonly onLayerConfigChanged = this._onLayerConfigChanged.event;
   /** Fires when a YAML model file in {semanticDir}/logical-models/ changes. */
   readonly onLogicalModelChanged = this._onLogicalModelChanged.event;
   /** Fires when any dbt schema .yml/.yaml file under models/ changes. */
@@ -51,10 +109,22 @@ export class FileWatcherService implements vscode.Disposable {
   /** Snapshot of path-related keys from dbt_project.yml at startup. */
   private lastProjectPaths: string;
 
+  /** Domain-file deletions accumulated while the coalescing debounce is pending. */
+  private pendingDeletes = new Map<string, vscode.Uri>();
+
+  private readonly semanticRoot: string;
+
+  /** Resolved dbt paths (target-path / model-paths) the watchers are built from. */
+  private readonly dbtConfig: DbtProjectConfig;
+
   constructor(
     private readonly workspaceRoot: string,
     private readonly semanticDir: string = '.erd-studio',
+    dbtConfig?: DbtProjectConfig,
+    private readonly ownWriteTracker: OwnWriteTracker = ownWrites,
   ) {
+    this.dbtConfig = dbtConfig ?? readDbtProjectConfig(workspaceRoot);
+    this.semanticRoot = path.join(workspaceRoot, semanticDir);
     this.lastProjectPaths = this.readProjectPaths();
     this.setupManifestWatcher();
     this.setupSemanticWatcher();
@@ -64,13 +134,15 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch target/manifest.json for changes.
-   * Fires when dbt compile generates a new manifest.
+   * Watch {target-path}/manifest.json for changes.
+   * Fires when dbt compile generates a new manifest, and when it is removed
+   * (`dbt clean`) so the physical stage stops showing a manifest that no
+   * longer exists.
    */
   private setupManifestWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'target/manifest.json',
+      `${this.dbtConfig.targetPath}/manifest.json`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
@@ -84,7 +156,7 @@ export class FileWatcherService implements vscode.Disposable {
     // Track event subscriptions for disposal
     this.subscriptions.push(watcher.onDidChange(handleChange));
     this.subscriptions.push(watcher.onDidCreate(handleChange));
-    // Note: onDidDelete not handled — missing manifest is handled gracefully by ManifestService
+    this.subscriptions.push(watcher.onDidDelete(handleChange));
 
     this.watchers.push(watcher);
   }
@@ -101,17 +173,43 @@ export class FileWatcherService implements vscode.Disposable {
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
     const handleChange = (uri: vscode.Uri) => {
+      if (classifySemanticPath(this.semanticRoot, uri.fsPath) === 'layer-config') {
+        this.handleLayerConfigEvent(uri);
+        return;
+      }
       // Per-file debounce key allows parallel updates to different files
       this.debounce(`semantic:${uri.toString()}`, () => {
+        if (this.ownWriteTracker.consume(uri.fsPath)) {
+          console.log(`[FileWatcherService] Ignoring own write: ${uri.fsPath}`);
+          return;
+        }
         console.log(`[FileWatcherService] Semantic file changed: ${uri.fsPath}`);
         this.safeFireEvent(() => this._onSemanticFileChanged.fire({ uri }));
       });
     };
 
     const handleDelete = (uri: vscode.Uri) => {
-      this.debounce(`semantic-del:${uri.toString()}`, () => {
-        console.log(`[FileWatcherService] Semantic file deleted: ${uri.fsPath}`);
-        this.safeFireEvent(() => this._onSemanticFileDeleted.fire({ uri }));
+      const kind = classifySemanticPath(this.semanticRoot, uri.fsPath);
+      if (kind === 'layer-config') {
+        this.handleLayerConfigEvent(uri);
+        return;
+      }
+      if (kind !== 'domain') {
+        // layers.json, templates/, logical-models/, .sync-plan.json etc. are
+        // not domains — never surface them as "Domain file deleted".
+        return;
+      }
+      this.pendingDeletes.set(uri.toString(), uri);
+      // Single debounce key: a checkout that deletes N domains yields one event
+      this.debounce('semantic-del', () => {
+        const uris = Array.from(this.pendingDeletes.values())
+          .filter((u) => !this.ownWriteTracker.consume(u.fsPath));
+        this.pendingDeletes = new Map();
+        if (uris.length === 0) {
+          return;
+        }
+        console.log(`[FileWatcherService] ${uris.length} semantic file(s) deleted`);
+        this.safeFireEvent(() => this._onSemanticFileDeleted.fire({ uris }));
       });
     };
 
@@ -121,6 +219,21 @@ export class FileWatcherService implements vscode.Disposable {
     this.subscriptions.push(watcher.onDidDelete(handleDelete));
 
     this.watchers.push(watcher);
+  }
+
+  /**
+   * layers.json create/change/delete → single debounced onLayerConfigChanged.
+   * Own writes (LayerService.saveConfig) are swallowed like any other own write.
+   */
+  private handleLayerConfigEvent(uri: vscode.Uri): void {
+    this.debounce('layer-config', () => {
+      if (this.ownWriteTracker.consume(uri.fsPath)) {
+        console.log('[FileWatcherService] Ignoring own write to layers.json');
+        return;
+      }
+      console.log('[FileWatcherService] Layer config changed');
+      this.safeFireEvent(() => this._onLayerConfigChanged.fire());
+    });
   }
 
   /**
@@ -192,13 +305,17 @@ export class FileWatcherService implements vscode.Disposable {
   private setupLogicalModelWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      `${this.semanticDir}/logical-models/*.yml`,
+      `${this.semanticDir}/${LOGICAL_MODELS_DIR}/*.yml`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
     const handleChange = (uri: vscode.Uri) => {
       const modelName = uri.fsPath.replace(/^.*[/\\]/, '').replace(/\.yml$/, '');
       this.debounce(`logical-model:${modelName}`, () => {
+        if (this.ownWriteTracker.consume(uri.fsPath)) {
+          console.log(`[FileWatcherService] Ignoring own write to model: ${modelName}`);
+          return;
+        }
         console.log(`[FileWatcherService] Logical model changed: ${modelName}`);
         this.safeFireEvent(() => this._onLogicalModelChanged.fire({ uri, modelName }));
       });
@@ -212,14 +329,14 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch models/**\/*.{yml,yaml} for changes.
+   * Watch {model-paths}/**\/*.{yml,yaml} for changes.
    * Fires when dbt schema files are created, modified, or deleted.
    * Used to refresh the physical stage which derives from .yml source files.
    */
   private setupDbtYmlWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'models/**/*.{yml,yaml}',
+      `${modelPathsGlob(this.dbtConfig)}/**/*.{yml,yaml}`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
@@ -281,6 +398,7 @@ export class FileWatcherService implements vscode.Disposable {
       clearTimeout(timer);
     }
     this.debounceTimers.clear();
+    this.pendingDeletes.clear();
 
     // Dispose all event subscriptions (onDidChange, onDidCreate, onDidDelete handlers)
     for (const subscription of this.subscriptions) {
@@ -298,6 +416,7 @@ export class FileWatcherService implements vscode.Disposable {
     this._onManifestChanged.dispose();
     this._onSemanticFileChanged.dispose();
     this._onSemanticFileDeleted.dispose();
+    this._onLayerConfigChanged.dispose();
     this._onLogicalModelChanged.dispose();
     this._onDbtYmlChanged.dispose();
     this._onProjectConfigChanged.dispose();
