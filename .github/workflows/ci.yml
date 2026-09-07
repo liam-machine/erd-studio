@@ -40,8 +40,12 @@ jobs:
           fi
 
   # mcp-server relative-imports ../src/services/* and bundles ../src/workers/manifestWorker.ts,
-  # so it needs the root install (js-yaml, @types/vscode) plus its own. An accidental
-  # `import 'vscode'` in a shared service fails the esbuild step here.
+  # so it needs the root install as well as its own: the shared services under ../src are in
+  # this project's tsconfig `include`, and some of them import `vscode` and `yaml`, which
+  # resolve from the repo-root node_modules (@types/vscode, yaml). Without the root install
+  # the type-check step fails on unresolved modules. An accidental `import 'vscode'` in a
+  # shared service still fails the esbuild step here, because `vscode` is not in the bundle's
+  # `external` list.
   mcp-server:
     runs-on: ubuntu-latest
     steps:
@@ -72,4 +76,12 @@ jobs:
 
       - name: Smoke test
         run: node test-smoke.mjs
+        working-directory: mcp-server
+
+      # Same gate as the root job. mcp-server's runtime advisories come in transitively via
+      # @modelcontextprotocol/sdk (hono, ip-address, qs) and are resolvable inside the declared
+      # ranges — `npm audit fix --package-lock-only` clears them with no package.json change —
+      # so this can be a hard gate. Dev-only findings (esbuild) are excluded by --omit=dev.
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
         working-directory: mcp-server
