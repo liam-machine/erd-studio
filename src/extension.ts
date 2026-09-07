@@ -426,7 +426,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
       return treeView;
     })(),
-    vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, editorProvider),
+    vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, editorProvider, {
+      // Keep the webview (React tree, ELK worker, in-progress discrepancy /
+      // sync-merge state) alive when the tab is hidden instead of tearing it
+      // down and rebuilding from PersistedState on every tab switch.
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     vscode.window.registerFileDecorationProvider(decorationProvider),
     vscode.window.registerFileDecorationProvider(layerDecorationProvider),
     modelLibraryProvider,

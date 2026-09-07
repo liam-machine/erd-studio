@@ -14,7 +14,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
-import { useMessageBus } from '../../hooks/useMessageBus';
+import { useSend } from '../../hooks/useMessageBus';
 import type { ExistingModelPreview, ManifestModelPreview } from '../../../src/types/display';
 import './AddExistingModelDialog.css';
 
@@ -40,7 +40,7 @@ export function AddExistingModelDialog() {
   const existingModels = useEditorStore((s) => s.existingModels);
   const manifestModels = useEditorStore((s) => s.manifestModels);
   const modelFolder = useEditorStore((s) => s.domain?.modelFolder);
-  const { send } = useMessageBus(() => {});
+  const send = useSend();
 
   // Use existingModels if available (v5), fall back to manifestModels (v4 compat)
   const models: (ExistingModelPreview | ManifestModelPreview)[] =

@@ -8,7 +8,7 @@
 import { useCallback, useState } from 'react';
 
 import { DataTypeSelect } from '../common/DataTypeSelect';
-import { useMessageBus } from '../../hooks/useMessageBus';
+import { useSend } from '../../hooks/useMessageBus';
 import type { DisplayColumn } from '../../../src/types/display';
 import type { ColumnKeyType } from '../../../src/types/messages';
 import './BulkColumnActions.css';
@@ -34,7 +34,7 @@ export function BulkColumnActions({
   columns,
   onClearSelection,
 }: BulkColumnActionsProps) {
-  const { send } = useMessageBus(() => {});
+  const send = useSend();
   const [showTypeSelect, setShowTypeSelect] = useState(false);
 
   // Get full column data for selected columns

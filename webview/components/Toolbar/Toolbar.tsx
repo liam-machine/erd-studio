@@ -80,6 +80,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const setCanvasMode = useEditorStore((s) => s.setCanvasMode);
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
+  const setToastMessage = useEditorStore((s) => s.setToastMessage);
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -347,10 +348,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
       setLayoutDirty(false);
     } catch (err) {
       console.error('[Toolbar] Auto layout failed:', err);
+      const detail = err instanceof Error ? err.message : String(err);
+      setToastMessage(`Auto layout failed: ${detail}`);
     } finally {
       setIsLayouting(false);
     }
-  }, [domain, nodes, edges, isLayouting, partitionStrategy, layerBound, layoutDirection, spacingPreset, setDomain, fitView, vscode]);
+  }, [domain, nodes, edges, isLayouting, partitionStrategy, layerBound, layoutDirection, spacingPreset, setDomain, fitView, vscode, setToastMessage]);
 
   const handleAutoLayout = useCallback(() => {
     if (!domain || nodes.length === 0 || isLayouting) {

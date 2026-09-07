@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { BulkColumnActions } from './BulkColumnActions';
-import { useMessageBus } from '../../hooks/useMessageBus';
+import { useSend } from '../../hooks/useMessageBus';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { useEditorStore } from '../../store/editorStore';
 import type { DisplayColumn } from '../../../src/types/display';
@@ -36,7 +36,7 @@ export interface ColumnEditorProps {
 // ---------------------------------------------------------------------------
 
 export function ColumnEditor({ modelName, columns, readOnly, modelRole }: ColumnEditorProps) {
-  const { send } = useMessageBus(() => {});
+  const send = useSend();
 
   // Column selection state from store
   const selectedColumns = useEditorStore((s) => s.selectedColumns);

@@ -24,6 +24,7 @@ import type {
   AnnotationFlowEdge,
   ColumnDisplay,
 } from '../types/graph';
+import { resolveNodeDimensions } from './elkLayout';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -33,10 +34,24 @@ export interface TransformResult {
   edges: (FkFlowEdge | AnnotationFlowEdge)[];
 }
 
+/** Width/height of a rendered node, in canvas pixels. */
+export interface NodeDimensions {
+  width: number;
+  height: number;
+}
+
 /** Optional parameters for discrepancy overlay rendering. */
 export interface TransformOptions {
   /** Active cross-stage discrepancy report (e.g., physical vs logical). */
   discrepancyReport?: DiscrepancyReport;
+  /**
+   * Measured node sizes (keyed by node id) from the current React Flow state.
+   * Used to pick edge handle sides from node centres rather than top-left
+   * corners. Nodes without an entry fall back to an estimate.
+   */
+  nodeDimensions?: ReadonlyMap<string, NodeDimensions>;
+  /** Column expansion state per model — sharpens the height estimate fallback. */
+  isExpanded?: (modelName: string) => boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,19 +85,33 @@ function mapColumns(model: DisplayModel): ColumnDisplay[] {
 
 type Side = 'top' | 'right' | 'bottom' | 'left';
 
+/** A node's top-left position plus its rendered size. */
+export interface NodeRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Default annotation size when the note has not been resized (matches CSS min-width/height). */
+const DEFAULT_ANNOTATION_WIDTH = 160;
+const DEFAULT_ANNOTATION_HEIGHT = 80;
+
 /**
  * Choose which side of each node to connect, minimising visual bends.
  *
- * Compares the relative position of source and target nodes and picks
- * the axis (horizontal or vertical) with the greater distance. On that
- * axis, the source connects on the side facing the target and vice versa.
+ * Compares the relative position of the source and target node *centres*
+ * and picks the axis (horizontal or vertical) with the greater distance.
+ * On that axis, the source connects on the side facing the target and vice
+ * versa. Centres (not top-left corners) matter because a tall node next to a
+ * short one would otherwise route its edge out of the wrong side.
  */
-function pickHandleSides(
-  sourcePos: { x: number; y: number },
-  targetPos: { x: number; y: number },
+export function pickHandleSides(
+  source: NodeRect,
+  target: NodeRect,
 ): { sourceSide: Side; targetSide: Side } {
-  const dx = targetPos.x - sourcePos.x;
-  const dy = targetPos.y - sourcePos.y;
+  const dx = (target.x + target.width / 2) - (source.x + source.width / 2);
+  const dy = (target.y + target.height / 2) - (source.y + source.height / 2);
 
   if (Math.abs(dx) >= Math.abs(dy)) {
     return dx >= 0
@@ -127,6 +156,21 @@ export function transformDomain(
     positionMap.set(model.name, positions[model.name] ?? DEFAULT_POSITION);
   }
 
+  // Node id → rendered size (measured when known, else estimated) so handle
+  // sides are chosen from node centres.
+  const dimensionMap = new Map<string, NodeDimensions>();
+  const rectOf = (id: string): NodeRect => {
+    const pos = positionMap.get(id) ?? DEFAULT_POSITION;
+    const dims = dimensionMap.get(id) ?? { width: 0, height: 0 };
+    return { x: pos.x, y: pos.y, width: dims.width, height: dims.height };
+  };
+  const dimensionsFor = (id: string, data: ModelFlowNode['data']): NodeDimensions =>
+    options?.nodeDimensions?.get(id)
+      ?? resolveNodeDimensions({
+        data: { ...data, isExpanded: options?.isExpanded?.(id) ?? false },
+        measured: undefined,
+      });
+
   // --- Nodes ---------------------------------------------------------------
 
   const nodes: (ModelFlowNode | AnnotationFlowNode)[] = models.map((model) => {
@@ -134,7 +178,7 @@ export function transformDomain(
     const position = positionMap.get(model.name) ?? DEFAULT_POSITION;
     const disc = discrepancyMap.get(model.name);
 
-    return {
+    const node: ModelFlowNode = {
       id: model.name,
       type: 'model' as const,
       position,
@@ -158,6 +202,8 @@ export function transformDomain(
         } : {}),
       },
     };
+    dimensionMap.set(model.name, dimensionsFor(model.name, node.data));
+    return node;
   });
 
   // Ghost nodes for 'missing' models from discrepancy report.
@@ -169,7 +215,7 @@ export function transformDomain(
         const position = positions[md.name] ?? { x: 50 + ghostIndex * 260, y: -150 };
         ghostIndex++;
         positionMap.set(md.name, position);
-        nodes.push({
+        const ghost: ModelFlowNode = {
           id: md.name,
           type: 'model' as const,
           position,
@@ -186,7 +232,9 @@ export function transformDomain(
             discrepancySourceStage: options.discrepancyReport.sourceStage,
             discrepancyTargetStage: options.discrepancyReport.targetStage,
           },
-        });
+        };
+        dimensionMap.set(md.name, dimensionsFor(md.name, ghost.data));
+        nodes.push(ghost);
       }
     }
   }
@@ -211,13 +259,11 @@ export function transformDomain(
     .filter((rel) => allNodeNames.has(rel.fromModel) && allNodeNames.has(rel.toModel))
     .map((rel) => {
       const isSelfLoop = rel.fromModel === rel.toModel;
-      const sourcePos = positionMap.get(rel.fromModel)!;
-      const targetPos = positionMap.get(rel.toModel)!;
       // Self-refs attach to top (source) and right (target) handles so the
       // FkEdge component can arc the path over the top-right corner.
       const { sourceSide, targetSide } = isSelfLoop
         ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
-        : pickHandleSides(sourcePos, targetPos);
+        : pickHandleSides(rectOf(rel.fromModel), rectOf(rel.toModel));
 
       const relKey = `${rel.fromModel}|${rel.fromColumn}|${rel.toModel}|${rel.toColumn}`;
       const discStatus = relDiscrepancyMap.get(relKey);
@@ -247,14 +293,12 @@ export function transformDomain(
   if (options?.discrepancyReport) {
     for (const rd of options.discrepancyReport.relationships) {
       if (rd.status === 'missing') {
-        const sourcePos = positionMap.get(rd.fromModel);
-        const targetPos = positionMap.get(rd.toModel);
-        if (!sourcePos || !targetPos) continue;
+        if (!positionMap.has(rd.fromModel) || !positionMap.has(rd.toModel)) continue;
 
         const isSelfLoop = rd.fromModel === rd.toModel;
         const { sourceSide, targetSide } = isSelfLoop
           ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
-          : pickHandleSides(sourcePos, targetPos);
+          : pickHandleSides(rectOf(rd.fromModel), rectOf(rd.toModel));
         edges.push({
           id: `ghost-fk-${rd.fromModel}-${rd.fromColumn}-${rd.toModel}-${rd.toColumn}`,
           type: 'fk' as const,
@@ -299,9 +343,14 @@ export function transformDomain(
 
     // Dashed edge to linked model (only if model exists in node set)
     if (ann.linkedModel && positionMap.has(ann.linkedModel)) {
-      const annPos = { x: ann.x, y: ann.y };
-      const modelPos = positionMap.get(ann.linkedModel)!;
-      const { sourceSide, targetSide } = pickHandleSides(annPos, modelPos);
+      const annDims = options?.nodeDimensions?.get(annNodeId);
+      const annRect: NodeRect = {
+        x: ann.x,
+        y: ann.y,
+        width: annDims?.width ?? ann.width ?? DEFAULT_ANNOTATION_WIDTH,
+        height: annDims?.height ?? ann.height ?? DEFAULT_ANNOTATION_HEIGHT,
+      };
+      const { sourceSide, targetSide } = pickHandleSides(annRect, rectOf(ann.linkedModel));
       edges.push({
         id: `ann-link-${ann.id}`,
         type: 'annotationLink' as const,

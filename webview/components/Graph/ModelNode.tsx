@@ -22,7 +22,7 @@ import type { ColumnDiscrepancy } from '../../../src/types/discrepancy';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
-import { useMessageBus } from '../../hooks/useMessageBus';
+import { useSend } from '../../hooks/useMessageBus';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { KeyBadge } from '../common/KeyBadge';
 import { DataTypeSelect } from '../common/DataTypeSelect';
@@ -103,7 +103,7 @@ interface ColumnRowProps {
 }
 
 function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, discrepancySourceStage, discrepancyTargetStage }: ColumnRowProps) {
-  const { send } = useMessageBus(() => {});
+  const send = useSend();
 
   // Highlight when this column is involved in a selected edge
   const isHighlighted = useEditorStore(
@@ -501,7 +501,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
   const { modelName, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
-  const { send } = useMessageBus(() => {});
+  const send = useSend();
 
   // Show reorder handles when this node is selected and editable
   const showReorderHandles = !!selected && !readOnly;

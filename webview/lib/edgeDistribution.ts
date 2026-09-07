@@ -124,19 +124,84 @@ export function getAllEdgesForSide(
   side: Side,
   nodePositions?: NodePositionMap,
 ): string[] {
-  const sourceHandle = `node-${side}-src`;
-  const targetHandle = `node-${side}-tgt`;
+  return sortEdgesForSide(getEdgesOnSide(edges, nodeId, side), nodeId, side, nodePositions);
+}
 
-  const edgesForSide = edges.filter((edge) => {
-    const isSourceOnSide = edge.source === nodeId && edge.sourceHandle === sourceHandle;
-    const isTargetOnSide = edge.target === nodeId && edge.targetHandle === targetHandle;
-    return isSourceOnSide || isTargetOnSide;
-  });
+// ---------------------------------------------------------------------------
+// Per-side edge index (cached per edges array)
+// ---------------------------------------------------------------------------
 
+/** Stable empty group so callers can depend on identity. */
+const NO_EDGES: readonly Edge[] = Object.freeze([]);
+
+/** `${nodeId}|${side}` → edges touching that node side (either direction). */
+type SideIndex = Map<string, Edge[]>;
+
+/**
+ * Index cache keyed on the edges array identity. React Flow hands every edge
+ * component the same `edges` array until it changes, so the index is built
+ * once per graph rebuild (O(E)) instead of each edge filtering the full array
+ * on every render (O(E) per edge → O(E²) per pass).
+ */
+const sideIndexCache = new WeakMap<Edge[], SideIndex>();
+
+function sideKey(nodeId: string, side: Side): string {
+  return `${nodeId}|${side}`;
+}
+
+function buildSideIndex(edges: Edge[]): SideIndex {
+  const index: SideIndex = new Map();
+  const push = (key: string, edge: Edge) => {
+    const group = index.get(key);
+    if (group) group.push(edge);
+    else index.set(key, [edge]);
+  };
+  for (const edge of edges) {
+    const sourceSide = parseSideFromHandle(edge.sourceHandle);
+    if (sourceSide && edge.sourceHandle === `node-${sourceSide}-src`) {
+      push(sideKey(edge.source, sourceSide), edge);
+    }
+    const targetSide = parseSideFromHandle(edge.targetHandle);
+    if (targetSide && edge.targetHandle === `node-${targetSide}-tgt`) {
+      push(sideKey(edge.target, targetSide), edge);
+    }
+  }
+  return index;
+}
+
+/**
+ * All edges that connect to `nodeId` on `side`, in either direction.
+ *
+ * Returns a cached array (do not mutate) — identity is stable for a given
+ * `edges` array, so it is safe to use as a memo dependency.
+ */
+export function getEdgesOnSide(edges: Edge[], nodeId: string, side: Side): readonly Edge[] {
+  let index = sideIndexCache.get(edges);
+  if (!index) {
+    index = buildSideIndex(edges);
+    sideIndexCache.set(edges, index);
+  }
+  return index.get(sideKey(nodeId, side)) ?? NO_EDGES;
+}
+
+/**
+ * Sort a side group into its final connection order and return edge IDs.
+ *
+ * When `nodePositions` is provided, edges are ordered by the position of the
+ * node at the OTHER end (Y for left/right sides, X for top/bottom) so
+ * connection points follow the visual flow and edges do not cross.
+ * Falls back to alphabetical ID order when positions are unavailable.
+ */
+export function sortEdgesForSide(
+  edgesForSide: readonly Edge[],
+  nodeId: string,
+  side: Side,
+  nodePositions?: NodePositionMap,
+): string[] {
   // Sort by position of the connected node (other end of the edge)
   // - For left/right sides: sort by Y position (top to bottom)
   // - For top/bottom sides: sort by X position (left to right)
-  return edgesForSide
+  return [...edgesForSide]
     .sort((a, b) => {
       // If no positions provided, fall back to alphabetical sort
       if (!nodePositions) {
@@ -285,14 +350,57 @@ export function calculateEdgeOffset(
 ): EdgeOffset {
   // Get ALL edges connecting to this node side (both directions)
   // This ensures incoming and outgoing edges don't overlap at the same point
-  const edgesForSide = getAllEdgesForSide(allEdges, nodeId, side, nodePositions);
+  return calculateEdgeOffsetInGroup(
+    edgeId,
+    nodeId,
+    side,
+    getEdgesOnSide(allEdges, nodeId, side),
+    sideLength,
+    nodePositions,
+  );
+}
+
+/**
+ * Same as `calculateEdgeOffset` but for a pre-grouped side (see
+ * `getEdgesOnSide`), avoiding a scan of the full edge array per call.
+ */
+export function calculateEdgeOffsetInGroup(
+  edgeId: string,
+  nodeId: string,
+  side: Side,
+  edgesOnSide: readonly Edge[],
+  sideLength: number,
+  nodePositions?: NodePositionMap,
+): EdgeOffset {
+  const ordered = sortEdgesForSide(edgesOnSide, nodeId, side, nodePositions);
 
   // Find this edge's index in the group
-  const edgeIndex = edgesForSide.indexOf(edgeId);
+  const edgeIndex = ordered.indexOf(edgeId);
   if (edgeIndex === -1) {
     // Edge not found in group — shouldn't happen, but fallback to no offset
     return { x: 0, y: 0 };
   }
 
-  return calculateDistributionOffset(edgeIndex, edgesForSide.length, sideLength, side);
+  return calculateDistributionOffset(edgeIndex, ordered.length, sideLength, side);
+}
+
+/**
+ * Build a compact, value-comparable key of the given nodes' positions.
+ *
+ * React Flow mutates its `nodeLookup` Map in place (`adoptUserNodes` clears
+ * and refills it), so the Map identity never changes and cannot be used as a
+ * memo dependency. Subscribing to this string instead re-renders exactly when
+ * one of the listed nodes moves.
+ */
+export function buildPositionsKey(
+  nodeLookup: ReadonlyMap<string, { position?: { x: number; y: number }; internals?: { positionAbsolute?: { x: number; y: number } } }>,
+  nodeIds: readonly string[],
+): string {
+  let key = '';
+  for (const id of nodeIds) {
+    const node = nodeLookup.get(id);
+    const pos = node?.internals?.positionAbsolute ?? node?.position;
+    key += pos ? `${Math.round(pos.x)},${Math.round(pos.y)};` : ';';
+  }
+  return key;
 }

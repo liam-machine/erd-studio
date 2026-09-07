@@ -15,7 +15,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
-import { useMessageBus } from '../../hooks/useMessageBus';
+import { useSend } from '../../hooks/useMessageBus';
 import { KeyBadgeGroup } from '../common/KeyBadgeGroup';
 import type { ColumnDef, DesignModel, ModelRole, ModelTemplate } from '../../../src/types/semantic';
 import './NewModelDialog.css';
@@ -116,7 +116,7 @@ export function NewModelDialog() {
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
   const domain = useEditorStore((s) => s.domain);
   const templates = useEditorStore((s) => s.templates);
-  const { send } = useMessageBus(() => {});
+  const send = useSend();
 
   // Form state
   const [modelName, setModelName] = useState('');

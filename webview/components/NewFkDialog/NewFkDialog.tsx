@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
-import { useMessageBus } from '../../hooks/useMessageBus';
+import { useSend } from '../../hooks/useMessageBus';
 import { detectCircularFk, formatCyclePath } from '../../lib/validation';
 import type { Cardinality } from '../../../src/types/semantic';
 import './NewFkDialog.css';
@@ -115,7 +115,7 @@ export function NewFkDialog() {
   const clearFkDialogPrefill = useEditorStore((s) => s.clearFkDialogPrefill);
   const fkDialogEditData = useEditorStore((s) => s.fkDialogEditData);
   const clearFkDialogEditData = useEditorStore((s) => s.clearFkDialogEditData);
-  const { send } = useMessageBus(() => {});
+  const send = useSend();
 
   // Determine if we're in edit mode (editing an existing relationship)
   const isEditMode = fkDialogEditData !== null;

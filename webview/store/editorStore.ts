@@ -166,6 +166,8 @@ export interface EditorState {
    * - 'select': drag on empty canvas draws a rubber-band selection box (no Shift needed) and the cursor is a crosshair.
    */
   canvasMode: 'pan' | 'select';
+  /** Transient toast message raised from anywhere in the webview (null = none). */
+  toastMessage: string | null;
 }
 
 export interface EditorActions {
@@ -274,6 +276,8 @@ export interface EditorActions {
   selectAnnotation: (annotationId: string | null) => void;
   /** Set the canvas interaction mode. */
   setCanvasMode: (mode: 'pan' | 'select') => void;
+  /** Show (or clear with null) a transient toast notification. */
+  setToastMessage: (message: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +328,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   editingColumn: null,
   selectedAnnotation: null,
   canvasMode: 'pan',
+  toastMessage: null,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -494,4 +499,5 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   }),
 
   setCanvasMode: (mode) => set({ canvasMode: mode }),
+  setToastMessage: (message) => set({ toastMessage: message }),
 }));

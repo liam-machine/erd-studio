@@ -20,6 +20,7 @@ import {
   EdgeLabelRenderer,
   Position,
   useStore,
+  useStoreApi,
   useInternalNode,
   type EdgeProps,
 } from '@xyflow/react';
@@ -27,7 +28,9 @@ import type { FkFlowEdge } from '../../types/graph';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import {
-  calculateEdgeOffset,
+  calculateEdgeOffsetInGroup,
+  getEdgesOnSide,
+  buildPositionsKey,
   parseSideFromHandle,
   getSideLength,
   type NodePositionMap,
@@ -50,6 +53,9 @@ const LABEL_OFFSET = 8;
  * right side. A larger radius means the loop extends further from the node.
  */
 const SELF_LOOP_RADIUS = 55;
+
+/** Stable empty sibling group for edges whose handle side is unknown. */
+const NO_SIBLINGS: readonly import('@xyflow/react').Edge[] = Object.freeze([]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -95,27 +101,50 @@ function FkEdgeComponent({
 }: EdgeProps<FkFlowEdge>) {
   // Access all edges from React Flow store for distribution calculation
   const allEdges = useStore((state) => state.edges);
+  const storeApi = useStoreApi();
 
-  // Access node lookup for building position map
-  const nodeLookup = useStore((state) => state.nodeLookup);
+  const fromModel = data?.fromModel ?? '';
+  const toModel = data?.toModel ?? '';
 
   // Get source and target node dimensions for calculating side lengths
-  const sourceNode = useInternalNode(data?.fromModel ?? '');
-  const targetNode = useInternalNode(data?.toModel ?? '');
+  const sourceNode = useInternalNode(fromModel);
+  const targetNode = useInternalNode(toModel);
 
-  // Build position map for spatial edge sorting
-  // Memoized to avoid rebuilding when unrelated state changes
+  // Parse which side each handle is on (top/right/bottom/left)
+  const sourceSide = parseSideFromHandle(sourceHandleId);
+  const targetSide = parseSideFromHandle(targetHandleId);
+
+  // Sibling edges sharing each endpoint side (cached per edges array — O(1)).
+  const sourceGroup = sourceSide ? getEdgesOnSide(allEdges, fromModel, sourceSide) : NO_SIBLINGS;
+  const targetGroup = targetSide ? getEdgesOnSide(allEdges, toModel, targetSide) : NO_SIBLINGS;
+
+  // Nodes at the far end of every sibling edge — their positions decide this
+  // edge's slot along the side.
+  const neighbourIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of sourceGroup) ids.add(e.source === fromModel ? e.target : e.source);
+    for (const e of targetGroup) ids.add(e.source === toModel ? e.target : e.source);
+    return [...ids];
+  }, [sourceGroup, targetGroup, fromModel, toModel]);
+
+  // React Flow mutates `nodeLookup` in place, so memoising on the Map identity
+  // froze the spatial ordering at first render. Subscribe to a value key of the
+  // neighbours' positions instead — it changes exactly when one of them moves
+  // (drag, auto-layout, undo) and stays stable otherwise.
+  const positionsKey = useStore((state) => buildPositionsKey(state.nodeLookup, neighbourIds));
+
   const nodePositions = useMemo((): NodePositionMap => {
+    const lookup = storeApi.getState().nodeLookup;
     const positions: NodePositionMap = new Map();
-    for (const [nodeId, node] of nodeLookup) {
-      if (node.internals?.positionAbsolute) {
-        positions.set(nodeId, node.internals.positionAbsolute);
-      } else if (node.position) {
-        positions.set(nodeId, node.position);
-      }
+    for (const id of neighbourIds) {
+      const node = lookup.get(id);
+      if (!node) continue;
+      positions.set(id, node.internals?.positionAbsolute ?? node.position);
     }
     return positions;
-  }, [nodeLookup]);
+    // positionsKey is the real dependency: it encodes the positions read here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positionsKey, neighbourIds, storeApi]);
 
   const vscode = useVsCodeApi();
   const [hovered, setHovered] = useState(false);
@@ -139,15 +168,11 @@ function FkEdgeComponent({
   );
 
   if (!data) return null;
-  const { cardinality, stage, discrepancyStatus, fromModel, toModel, dimmed, readOnly, isSelfLoop } = data;
+  const { cardinality, stage, discrepancyStatus, dimmed, readOnly, isSelfLoop } = data;
 
   // For cardinality mismatch edges, pull the mismatch details from the report
   // The edge data only has status — we need to find the original relationship discrepancy
   // to get both cardinalities. For now, we show a visual indicator on the edge itself.
-
-  // Parse which side each handle is on (top/right/bottom/left)
-  const sourceSide = parseSideFromHandle(sourceHandleId);
-  const targetSide = parseSideFromHandle(targetHandleId);
 
   // Calculate distribution offsets to spread multiple edges along node sides
   let adjustedSourceX = sourceX;
@@ -157,12 +182,11 @@ function FkEdgeComponent({
 
   if (sourceSide) {
     const sideLength = getSideLength(sourceSide, sourceNode?.measured);
-    const sourceOffset = calculateEdgeOffset(
+    const sourceOffset = calculateEdgeOffsetInGroup(
       id,
       fromModel,
       sourceSide,
-      true, // isSource
-      allEdges,
+      sourceGroup,
       sideLength,
       nodePositions,
     );
@@ -172,12 +196,11 @@ function FkEdgeComponent({
 
   if (targetSide) {
     const sideLength = getSideLength(targetSide, targetNode?.measured);
-    const targetOffset = calculateEdgeOffset(
+    const targetOffset = calculateEdgeOffsetInGroup(
       id,
       toModel,
       targetSide,
-      false, // isSource
-      allEdges,
+      targetGroup,
       sideLength,
       nodePositions,
     );
