@@ -64,6 +64,7 @@ import { computeNewModelPositions, findOpenPosition } from '../services/position
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import { hostErrorLog, submitBugReport } from '../services/feedbackService';
+import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
 import type { ReportBugMessage, OpenBugReportMessage, RelationshipKey } from '../types/messages';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
@@ -93,9 +94,22 @@ import { describeUnsupportedDomainFormat, detectDomainFormat } from '../types/se
  */
 interface ModelFileOps {
   /** Models whose yml should be written in full (created if missing). */
-  save?: import('../types/semantic').SemanticModel[];
+  save?: ModelFileSave[];
   /** Model names whose yml should be deleted (e.g. the old name on rename). */
   delete?: string[];
+}
+
+/** A single yml write inside a {@link ModelFileOps}. */
+interface ModelFileSave {
+  /** The model as it should end up in logical-models/{model.name}.yml. */
+  model: import('../types/semantic').SemanticModel;
+  /**
+   * Name of the model file whose existing YAML document supplies comments,
+   * key order and unknown keys. Defaults to `model.name`; a rename passes the
+   * OLD name so the hand-written content of the old file is carried across to
+   * the new path instead of being regenerated from scratch.
+   */
+  fromName?: string;
 }
 
 /**
@@ -137,6 +151,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Keyed by document URI to support concurrent edits to multiple open domains.
    */
   private readonly pendingUpdates = new Map<string, boolean>();
+
+  /**
+   * logical-models/*.yml file paths this provider wrote through a
+   * WorkspaceEdit, keyed by domain document URI. An undo/redo flushes ONLY
+   * these documents — a model file the user is hand-editing in another tab is
+   * never force-saved on their behalf.
+   */
+  private readonly editedModelPaths = new Map<string, Set<string>>();
+
+  /**
+   * Fires after this provider has written a domain file (and any model files)
+   * to disk. Those writes are recorded as own writes, so the file watchers
+   * deliberately ignore them — extension.ts listens here instead to refresh
+   * the domain tree, the model library view and the context keys.
+   */
+  private readonly _onDidWriteDomain = new vscode.EventEmitter<{
+    uri: vscode.Uri;
+    /** True when a logical-models/*.yml file was created or deleted. */
+    modelLibraryChanged: boolean;
+  }>();
+
+  /** @see _onDidWriteDomain */
+  readonly onDidWriteDomain = this._onDidWriteDomain.event;
 
   /**
    * Serialization queue for document mutations. Ensures concurrent messages
@@ -234,6 +271,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly workspaceRoot: string,
     private readonly selectorsService: SelectorsService,
     readonly logicalModelService: import('../services/logicalModelService').LogicalModelService,
+    /**
+     * Shared with FileWatcherService: every file this provider writes is
+     * recorded here so the watcher can tell our own saves apart from an
+     * external edit and skip the redundant refresh (which would clear the
+     * user's selection).
+     */
+    private readonly ownWriteTracker: OwnWriteTracker = ownWrites,
   ) {}
 
   /**
@@ -743,6 +787,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       changeSubscription.dispose();
       this.disposedWebviews.add(webviewPanel.webview);
       this.openPanels.delete(panelKey);
+      this.editedModelPaths.delete(panelKey);
     });
   }
 
@@ -815,7 +860,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return this.applyDomainEdit(
       document,
       domainMutator ?? (() => { /* no domain change */ }),
-      { refreshWebview: true, webview, stage: 'logical', modelFiles: { save: [model] } },
+      { refreshWebview: true, webview, stage: 'logical', modelFiles: { save: [{ model }] } },
     );
   }
 
@@ -827,24 +872,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * - New files are created with contents (file edit).
    * - Deletions use deleteFile (VS Code snapshots the content for undo).
    *
-   * Returns the TextDocuments that were edited in place so the caller can save
-   * them after `applyEdit` succeeds (new/deleted files need no save).
+   * A save may name a different `fromName` (renames): the YAML text is then
+   * rendered from the OLD file's document, so comments, key order and unknown
+   * keys travel to the new file instead of being regenerated away.
+   *
+   * Returns the TextDocuments that were edited in place (so the caller can
+   * save them after `applyEdit` succeeds — new/deleted files need no save)
+   * plus the paths created and deleted, which the caller records as own writes.
    */
   private async addModelFileEdits(
     edit: vscode.WorkspaceEdit,
     ops: ModelFileOps | undefined,
-  ): Promise<vscode.TextDocument[]> {
+  ): Promise<{ docs: vscode.TextDocument[]; created: string[]; deleted: string[] }> {
     const docs: vscode.TextDocument[] = [];
-    if (!ops) return docs;
+    const created: string[] = [];
+    const deleted: string[] = [];
+    if (!ops) return { docs, created, deleted };
 
     for (const name of ops.delete ?? []) {
       if (!this.logicalModelService.modelExists(name)) continue;
-      edit.deleteFile(vscode.Uri.file(this.logicalModelService.modelPath(name)), { ignoreIfNotExists: true });
+      const deletePath = this.logicalModelService.modelPath(name);
+      edit.deleteFile(vscode.Uri.file(deletePath), { ignoreIfNotExists: true });
+      deleted.push(deletePath);
     }
 
-    for (const model of ops.save ?? []) {
-      const uri = vscode.Uri.file(this.logicalModelService.modelPath(model.name));
-      const yamlText = this.logicalModelService.serializeModel(model);
+    for (const { model, fromName } of ops.save ?? []) {
+      const modelPath = this.logicalModelService.modelPath(model.name);
+      const uri = vscode.Uri.file(modelPath);
+      const yamlText = this.logicalModelService.serializeModel(model, fromName);
       if (this.logicalModelService.modelExists(model.name)) {
         const modelDoc = await vscode.workspace.openTextDocument(uri);
         const range = new vscode.Range(
@@ -856,24 +911,32 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       } else {
         this.logicalModelService.ensureDir();
         edit.createFile(uri, { overwrite: false, contents: Buffer.from(yamlText, 'utf-8') });
+        created.push(modelPath);
       }
     }
 
-    return docs;
+    return { docs, created, deleted };
   }
 
   /**
    * After an undo/redo the in-memory yml documents we edited via WorkspaceEdit
    * are reverted but dirty; DomainService reads the library from disk, so
    * flush them before re-rendering.
+   *
+   * ONLY documents this provider itself wrote through a WorkspaceEdit for this
+   * domain are saved (`editedModelPaths`). A logical-models/*.yml the user has
+   * open in another tab with unsaved hand edits is never force-saved — those
+   * bytes are theirs to keep or discard.
    */
-  private async saveDirtyModelDocuments(): Promise<void> {
-    const modelsDir = this.logicalModelService.getModelsDir();
+  private async saveDirtyModelDocuments(panelKey: string): Promise<void> {
+    const ourPaths = this.editedModelPaths.get(panelKey);
+    if (!ourPaths || ourPaths.size === 0) return;
     for (const doc of vscode.workspace.textDocuments) {
       if (!doc.isDirty) continue;
-      if (path.dirname(doc.uri.fsPath) !== modelsDir) continue;
+      if (!ourPaths.has(doc.uri.fsPath)) continue;
       try {
         await doc.save();
+        this.ownWriteTracker.recordWrite(doc.uri.fsPath);
       } catch (err) {
         console.error(`[SemanticEditorProvider] Failed to save ${doc.uri.fsPath} after undo/redo:`, err);
       }
@@ -898,8 +961,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       await vscode.commands.executeCommand(command);
       await document.save();
-      await this.saveDirtyModelDocuments();
+      this.ownWriteTracker.recordWrite(document.uri.fsPath);
+      await this.saveDirtyModelDocuments(panelKey);
+      this.logicalModelService.invalidateCache();
       await this.sendDomainData(document, webview, panelKey);
+      this._onDidWriteDomain.fire({ uri: document.uri, modelLibraryChanged: true });
     } finally {
       this.pendingUpdates.delete(panelKey);
     }
@@ -956,7 +1022,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       document.positionAt(text.length),
     );
     edit.replace(document.uri, fullRange, updatedText);
-    const modelDocs = await this.addModelFileEdits(edit, modelFiles);
+    const { docs: modelDocs, created, deleted } = await this.addModelFileEdits(edit, modelFiles);
 
     this.pendingUpdates.set(panelKey, true);
     try {
@@ -968,15 +1034,55 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return false;
       }
       await document.save();
+      // Own writes are recorded only once the bytes are on disk — the tracker
+      // stats the file — so the logical-model / semantic watchers can tell
+      // this save apart from an external edit and skip the extra refresh.
+      this.ownWriteTracker.recordWrite(document.uri.fsPath);
+      for (const filePath of created) {
+        this.ownWriteTracker.recordWrite(filePath);
+      }
+      for (const filePath of deleted) {
+        this.ownWriteTracker.recordDelete(filePath);
+      }
+      const ourPaths = this.editedModelPaths.get(panelKey) ?? new Set<string>();
       for (const modelDoc of modelDocs) {
         await modelDoc.save();
+        this.ownWriteTracker.recordWrite(modelDoc.uri.fsPath);
+        // Remember which yml documents WE edited for this domain, so an
+        // undo/redo only ever flushes those (never a buffer the user is
+        // hand-editing in another tab).
+        ourPaths.add(modelDoc.uri.fsPath);
       }
+      for (const filePath of created) {
+        ourPaths.add(filePath);
+      }
+      if (ourPaths.size > 0) {
+        this.editedModelPaths.set(panelKey, ourPaths);
+      }
+      // Our own writes are suppressed at the watcher, so the refreshes it
+      // used to drive are issued here instead: this panel via sendDomainData,
+      // the sidebar/model library via onDidWriteDomain, and any OTHER open
+      // panel that shows a model we just wrote.
       if (refreshWebview && webview) {
         await this.sendDomainData(document, webview);
       }
     } finally {
       this.pendingUpdates.delete(panelKey);
     }
+
+    const touchedModels = [
+      ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
+      ...(modelFiles?.delete ?? []),
+    ];
+    for (const name of new Set(touchedModels)) {
+      this.logicalModelService.invalidateCache(name);
+      await this.refreshDomainsReferencingModel(name, panelKey);
+    }
+    this._onDidWriteDomain.fire({
+      uri: document.uri,
+      modelLibraryChanged: created.length > 0 || deleted.length > 0,
+    });
+
     onSuccess?.();
     return true;
   }
@@ -1202,11 +1308,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Refresh all open domain editors that reference a specific model.
    * Called when a logical-models/*.yml file changes externally (e.g., edited
-   * from another domain, or modified by an AI tool directly).
+   * from another domain, or modified by an AI tool directly), and by
+   * `applyDomainEdit` for the OTHER open panels after this provider wrote a
+   * model file itself (its own write is suppressed at the watcher, so the
+   * cross-panel refresh has to be driven from here).
    */
-  async refreshDomainsReferencingModel(modelName: string): Promise<void> {
+  async refreshDomainsReferencingModel(modelName: string, exceptPanelKey?: string): Promise<void> {
     for (const [panelKey, { document, webview }] of Array.from(this.openPanels.entries())) {
       if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
+        continue;
+      }
+      // The panel that made the edit has already been refreshed by
+      // applyDomainEdit — re-sending would clear the user's selection.
+      if (exceptPanelKey !== undefined && panelKey === exceptPanelKey) {
         continue;
       }
       try {
@@ -1342,7 +1456,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               p.viewConfig = vc;
             }
           },
-          { refreshWebview: true, webview, stage, modelFiles: { save: [semanticModel] } },
+          { refreshWebview: true, webview, stage, modelFiles: { save: [{ model: semanticModel }] } },
         );
 
         if (success) {
@@ -1942,7 +2056,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             refreshWebview: true,
             webview,
             stage,
-            modelFiles: { save: [renamedModel], delete: [payload.oldName] },
+            // fromName carries the OLD file's YAML document (comments, key
+            // order, unknown keys) across to the new path — see
+            // LogicalModelService.serializeModel.
+            modelFiles: { save: [{ model: renamedModel, fromName: payload.oldName }], delete: [payload.oldName] },
           },
         );
 
@@ -2481,21 +2598,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           return;
         }
 
-        // Ensure the logical model file exists — create from yml or manifest if needed
+        // Seed the logical model from yml (primary) or the manifest (fallback)
+        // when it is not in the library yet. The file is NOT written here — it
+        // rides in the same WorkspaceEdit as the domain change below, so a
+        // rejected edit leaves no orphan yml behind and one undo removes both.
+        let seededModel: import('../types/semantic').SemanticModel | undefined;
         if (!this.logicalModelService.modelExists(payload.modelName)) {
-          const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
-          const ymlModel = ymlData.models.get(payload.modelName);
-          let created = false;
+          const seedYmlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+          const ymlModel = seedYmlData.models.get(payload.modelName);
           if (ymlModel) {
-            // Create from yml source (primary)
-            created = this.logicalModelService.createFromYml(payload.modelName, ymlModel);
-          }
-          if (!created) {
-            // Fallback: create from manifest
+            seededModel = this.logicalModelService.ymlToSemanticModel(ymlModel);
+          } else {
             const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
-            created = this.logicalModelService.createFromManifest(payload.modelName, manifest) !== null;
+            const manifestModel = manifest.models.get(payload.modelName);
+            if (manifestModel) {
+              seededModel = this.logicalModelService.manifestToSemanticModel(manifestModel);
+            }
           }
-          if (!created) {
+          if (!seededModel) {
             webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found in .yml files, manifest, or logical-models/.` } });
             return;
           }
@@ -2543,7 +2663,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             vc.positions = { ...positions, [payload.modelName]: newPosition };
             p.viewConfig = vc;
           },
-          { refreshWebview: true, webview, stage },
+          {
+            refreshWebview: true,
+            webview,
+            stage,
+            ...(seededModel ? { modelFiles: { save: [{ model: seededModel }] } } : {}),
+          },
         );
 
         if (success) {

@@ -592,6 +592,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     refreshContextKeys();
   });
 
+  // The editor wrote a domain (and possibly model files) itself. Those writes
+  // are recorded as own writes so the watchers skip them (a watcher-driven
+  // refresh would send a second, identical domainLoaded and clear the user's
+  // column selection), so the side effects the watcher used to drive are
+  // issued here directly instead.
+  const editorWroteSubscription = editorProvider.onDidWriteDomain(({ uri, modelLibraryChanged }) => {
+    treeProvider.invalidateDomain(uri.fsPath);
+    treeProvider.refresh();
+    if (modelLibraryChanged) {
+      modelLibraryProvider.refresh();
+      refreshContextKeys();
+    }
+  });
+
   // Domain file(s) deleted → refresh tree + model library, prompt for tag cleanup.
   // The watcher coalesces a delete storm (branch switch) into one event and
   // filters out layers.json / templates / logical-models / .sync-plan.json, so
@@ -703,6 +717,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     fileWatcherService,
     manifestChangedSubscription,
     semanticChangedSubscription,
+    editorWroteSubscription,
     semanticDeletedSubscription,
     layerConfigChangedSubscription,
     logicalModelChangedSubscription,

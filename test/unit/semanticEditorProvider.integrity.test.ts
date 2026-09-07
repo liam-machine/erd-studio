@@ -22,6 +22,8 @@ import {
   _appliedEdits,
   _mockWorkspaceState,
   _mockDocuments,
+  _clearMockFileWatchers,
+  _mockFileWatchers,
 } from '../__mocks__/vscode';
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
@@ -31,6 +33,8 @@ import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
+import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import { FileWatcherService } from '../../src/watchers/FileWatcherService';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -40,6 +44,10 @@ interface Harness {
   root: string;
   domainPath: string;
   logicalModelService: LogicalModelService;
+  /** Tracker the provider records its own writes into (shared with watchers). */
+  ownWrites: OwnWriteTracker;
+  /** Open a second domain in another panel, sharing the same provider. */
+  openSecondDomain: (models: string[]) => Promise<ReturnType<typeof createMockWebviewPanel>>;
   panel: ReturnType<typeof createMockWebviewPanel>;
   send: (message: unknown) => Promise<void>;
   readDomain: () => { logical: { models: string[]; relationships: Array<Record<string, string>> }; viewConfig: Record<string, unknown> };
@@ -114,6 +122,7 @@ async function createHarness(): Promise<Harness> {
     globalState: { get: () => undefined, update: async () => undefined },
   } as unknown as vscode.ExtensionContext;
 
+  const ownWrites = new OwnWriteTracker();
   const provider = new SemanticEditorProvider(
     context,
     domainService,
@@ -124,6 +133,7 @@ async function createHarness(): Promise<Harness> {
     root,
     selectorsService,
     logicalModelService,
+    ownWrites,
   );
 
   const document = createMockTextDocument(domainPath, fs.readFileSync(domainPath, 'utf-8'), { persist: true });
@@ -138,6 +148,33 @@ async function createHarness(): Promise<Harness> {
     root,
     domainPath,
     logicalModelService,
+    ownWrites,
+    openSecondDomain: async (models) => {
+      const otherPath = path.join(domainDir, 'other.json');
+      fs.writeFileSync(
+        otherPath,
+        JSON.stringify(
+          {
+            schemaVersion: 5,
+            domain: 'other',
+            layer: 'silver',
+            description: 'Other domain',
+            logical: { models, relationships: [] },
+            viewConfig: { positions: {} },
+          },
+          null,
+          2,
+        ) + '\n',
+      );
+      const otherDoc = createMockTextDocument(otherPath, fs.readFileSync(otherPath, 'utf-8'), { persist: true });
+      const otherPanel = createMockWebviewPanel();
+      await provider.resolveCustomTextEditor(
+        otherDoc as unknown as vscode.TextDocument,
+        otherPanel as unknown as vscode.WebviewPanel,
+        { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => undefined }) } as unknown as vscode.CancellationToken,
+      );
+      return otherPanel;
+    },
     panel,
     send: async (message) => {
       _appliedEdits.length = 0;
@@ -271,6 +308,38 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect((domain.viewConfig.positions as Record<string, unknown>).fct_orders).toBeDefined();
     });
 
+    it('carries hand-written comments and unknown keys across to the new file (H29)', async () => {
+      // A model file a human (or an AI agent) has edited by hand.
+      const handWritten = [
+        '# Owned by the data platform team',
+        'name: fct_order',
+        'owner: analytics-team',
+        'description: Orders',
+        'columns:',
+        '  - name: order_key',
+        '    dataType: string',
+        '    description: PK # natural surrogate',
+        '    isPrimaryKey: true',
+        '  - name: customer_key',
+        '    dataType: string',
+        '    description: FK',
+        '',
+      ].join('\n');
+      fs.writeFileSync(ymlPath(h, 'fct_order'), handWritten, 'utf-8');
+      h.logicalModelService.invalidateCache('fct_order');
+
+      await h.send({ type: 'renameModel', payload: { oldName: 'fct_order', newName: 'fct_orders' } });
+
+      expect(h.errors()).toEqual([]);
+      const renamed = fs.readFileSync(ymlPath(h, 'fct_orders'), 'utf-8');
+      expect(renamed).toContain('# Owned by the data platform team');
+      expect(renamed).toContain('owner: analytics-team');
+      expect(renamed).toContain('# natural surrogate');
+      expect(renamed).toContain('name: fct_orders');
+      expect(renamed).not.toContain('name: fct_order\n');
+      expect(fs.existsSync(ymlPath(h, 'fct_order'))).toBe(false);
+    });
+
     it('leaves both files untouched when the WorkspaceEdit is rejected', async () => {
       _mockWorkspaceState.applyEditResult = false;
 
@@ -378,6 +447,164 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(ymlDoc.isDirty).toBe(false);
       expect(fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8')).toBe(reverted);
       expect(h.logicalModelService.getModel('fct_order')!.columns!.map((c) => c.name)).toEqual(['order_key', 'customer_key', 'amount']);
+    });
+
+    it('never force-saves a dirty model buffer the provider did not edit', async () => {
+      // The user is hand-editing dim_customer.yml in a normal editor tab and
+      // has NOT saved. The provider never touched that file.
+      const customerPath = ymlPath(h, 'dim_customer');
+      const onDisk = fs.readFileSync(customerPath, 'utf-8');
+      const userDoc = createMockTextDocument(customerPath, onDisk, { persist: true });
+      (vscode.workspace.textDocuments as unknown[]).push(userDoc);
+      userDoc._setText('# work in progress, not ready to save\n' + onDisk);
+      expect(userDoc.isDirty).toBe(true);
+
+      // An unrelated edit + undo on the domain the editor actually has open.
+      await h.send({
+        type: 'addColumn',
+        payload: { modelName: 'fct_order', column: { name: 'order_date', dataType: 'date', description: '' } },
+      });
+      const ourDoc = _mockDocuments.get(vscode.Uri.file(ymlPath(h, 'fct_order')).toString())!;
+      const reverted = h.logicalModelService.serializeModel(FCT_ORDER);
+      ourDoc._setText(reverted);
+
+      await h.send({ type: 'undo' });
+
+      // Our own document was flushed; the user's buffer was left alone.
+      expect(ourDoc.isDirty).toBe(false);
+      expect(userDoc.isDirty).toBe(true);
+      expect(fs.readFileSync(customerPath, 'utf-8')).toBe(onDisk);
+    });
+  });
+
+  // ---- H11: own-write suppression on the editor write path ----------------
+
+  describe('own-write suppression', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('records the domain file and the model yml a column edit wrote', async () => {
+      await h.send({
+        type: 'updateColumn',
+        payload: {
+          modelName: 'fct_order',
+          oldColumnName: 'amount',
+          column: { name: 'amount', dataType: 'numeric', description: '' },
+        },
+      });
+
+      expect(h.errors()).toEqual([]);
+      expect(h.ownWrites.has(ymlPath(h, 'fct_order'))).toBe(true);
+      expect(h.ownWrites.has(h.domainPath)).toBe(true);
+    });
+
+    it('makes the logical-model watcher swallow the edit instead of refreshing the domain', async () => {
+      await h.send({
+        type: 'addColumn',
+        payload: { modelName: 'fct_order', column: { name: 'order_date', dataType: 'date', description: '' } },
+      });
+      expect(h.errors()).toEqual([]);
+
+      vi.useFakeTimers();
+      _clearMockFileWatchers();
+      const watcherService = new FileWatcherService(h.root, '.erd-studio', undefined, h.ownWrites);
+      try {
+        const listener = vi.fn();
+        watcherService.onLogicalModelChanged(listener);
+
+        // The logical-model watcher is the fourth one the service creates.
+        _mockFileWatchers[3]._simulateChange(vscode.Uri.file(ymlPath(h, 'fct_order')));
+        vi.advanceTimersByTime(300);
+
+        expect(listener).not.toHaveBeenCalled();
+
+        // An external edit to the same file is still reported (the record was consumed).
+        _mockFileWatchers[3]._simulateChange(vscode.Uri.file(ymlPath(h, 'fct_order')));
+        vi.advanceTimersByTime(300);
+        expect(listener).toHaveBeenCalledTimes(1);
+      } finally {
+        watcherService.dispose();
+      }
+    });
+
+    it('sends the editing panel ONE domainLoaded and still refreshes the other open panel', async () => {
+      const otherPanel = await h.openSecondDomain(['fct_order']);
+      otherPanel._postedMessages.length = 0;
+
+      await h.send({
+        type: 'addColumn',
+        payload: { modelName: 'fct_order', column: { name: 'order_date', dataType: 'date', description: '' } },
+      });
+
+      const domainLoaded = (p: typeof otherPanel) =>
+        p._postedMessages.filter((m) => (m as { type: string }).type === 'domainLoaded');
+      // The editing panel is refreshed exactly once (a second one would clear
+      // the user's column selection — the H11 symptom).
+      expect(domainLoaded(h.panel)).toHaveLength(1);
+      // The other domain showing the same model is refreshed too, even though
+      // the watcher event for our own write is suppressed.
+      expect(domainLoaded(otherPanel)).toHaveLength(1);
+    });
+  });
+
+  // ---- H04: addExistingModel rides the same pipeline -----------------------
+
+  describe('addExistingModel', () => {
+    /** Seed a dbt schema.yml the model can be resolved from. */
+    const seedDbtYml = () => {
+      const modelsDir = path.join(h.root, 'models');
+      fs.mkdirSync(modelsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(modelsDir, 'schema.yml'),
+        [
+          'version: 2',
+          'models:',
+          '  - name: dim_new',
+          '    description: Seeded from dbt',
+          '    columns:',
+          '      - name: dim_new_key',
+          '        description: PK',
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+    };
+
+    it('seeds the library file inside the same WorkspaceEdit as the domain reference', async () => {
+      seedDbtYml();
+
+      await h.send({ type: 'addExistingModel', payload: { modelName: 'dim_new' } });
+
+      expect(h.errors()).toEqual([]);
+      const edit = _appliedEdits[0];
+      expect(edit._opsFor(h.domainPath).map((op) => op.kind)).toEqual(['replace']);
+      expect(edit._opsFor(ymlPath(h, 'dim_new')).map((op) => op.kind)).toEqual(['createFile']);
+      expect(h.readDomain().logical.models).toContain('dim_new');
+      expect(h.logicalModelService.getModel('dim_new')!.columns!.map((c) => c.name)).toEqual(['dim_new_key']);
+    });
+
+    it('writes nothing to the library when the WorkspaceEdit is rejected', async () => {
+      seedDbtYml();
+      _mockWorkspaceState.applyEditResult = false;
+
+      await h.send({ type: 'addExistingModel', payload: { modelName: 'dim_new' } });
+
+      expect(h.errors()).toEqual(['Failed to add model to domain.']);
+      expect(fs.existsSync(ymlPath(h, 'dim_new'))).toBe(false);
+      expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
+    });
+
+    it('does not rewrite the yml of a model that is already in the library', async () => {
+      const before = fs.readFileSync(ymlPath(h, 'dim_customer'), 'utf-8');
+
+      await h.send({ type: 'addExistingModel', payload: { modelName: 'dim_customer' } });
+
+      expect(h.errors()).toEqual([]);
+      const edit = _appliedEdits[0];
+      expect(edit._opsFor(ymlPath(h, 'dim_customer'))).toEqual([]);
+      expect(fs.readFileSync(ymlPath(h, 'dim_customer'), 'utf-8')).toBe(before);
+      expect(h.readDomain().logical.models).toContain('dim_customer');
     });
   });
 });

@@ -256,9 +256,14 @@ export class LogicalModelService {
    * When the model file already exists on disk the text is produced by the
    * same in-place edit `saveModel` performs, so hand-written comments, key
    * order and unknown keys survive editor-driven saves too.
+   *
+   * `fromName` names the model file whose existing document supplies those
+   * comments / key order / unknown keys. It exists for renames: the target
+   * file does not exist yet, so without it the document would be regenerated
+   * from scratch and everything hand-written in the old file would be lost.
    */
-  serializeModel(model: SemanticModel): string {
-    return this.renderModel(model, this.modelPath(model.name));
+  serializeModel(model: SemanticModel, fromName?: string): string {
+    return this.renderModel(model, this.modelPath(fromName ?? model.name));
   }
 
   /**
@@ -306,9 +311,14 @@ export class LogicalModelService {
   }
 
   /**
-   * Rename a model file and update the name field inside the YAML.
+   * Rename a model file and update the name field inside the YAML, carrying
+   * the existing document (comments, key order, extra keys) across.
    * Throws if the target name already exists — a model file may be shared by
    * several domains, so it must never be silently overwritten.
+   *
+   * Like `saveModel`, this bypasses VS Code's undo stack, so it is for
+   * non-editor callers. The editor renames through a WorkspaceEdit and gets
+   * the same document carry-over via `serializeModel(model, fromName)`.
    */
   renameModel(oldName: string, newName: string): void {
     const model = this.getModel(oldName);
@@ -366,20 +376,27 @@ export class LogicalModelService {
       return true;
     }
 
+    this.saveModel(this.ymlToSemanticModel(ymlModel));
+    return true;
+  }
+
+  /**
+   * Convert dbt .yml model info to a SemanticModel, without touching disk.
+   * Used by `createFromYml` and by the editor, which seeds a new library file
+   * through a WorkspaceEdit instead of writing it directly.
+   */
+  ymlToSemanticModel(ymlModel: YmlModelInfo): SemanticModel {
     const columns: ColumnDef[] = ymlModel.columns.map((col) => ({
       name: col.name,
       dataType: col.dataType ?? 'unknown',
       description: col.description ?? '',
     }));
 
-    const model: SemanticModel = {
+    return {
       name: ymlModel.name,
       description: ymlModel.description,
       columns,
     };
-
-    this.saveModel(model);
-    return true;
   }
 
   // -------------------------------------------------------------------------

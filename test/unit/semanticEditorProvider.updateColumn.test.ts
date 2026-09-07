@@ -67,6 +67,7 @@ function makeProvider(models: SemanticModel[]) {
     modelPath: (name: string) => `/ws/.erd-studio/logical-models/${name}.yml`,
     ensureDir: () => {},
     getModelsDir: () => '/ws/.erd-studio/logical-models',
+    invalidateCache: () => {},
   };
   vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(true);
   const provider = new SemanticEditorProvider(
