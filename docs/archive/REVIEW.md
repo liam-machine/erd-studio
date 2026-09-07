@@ -1,5 +1,7 @@
 # Code Review Guidelines
 
+> **Archived.** These guidelines predate the `dbtSemantic` → `erdStudio` identifier rename (v0.6.46, PR #49). The "do NOT rename" rule below no longer applies — see the *Naming* section of `CLAUDE.md` for the current identifier and compatibility-shim rules.
+
 ## Always check
 
 - All domain file mutations go through `WorkspaceEdit` for undo/redo integration — never write directly via `fs`

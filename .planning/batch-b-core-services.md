@@ -16,7 +16,7 @@ After Batch A:
 - Old reconciliation services are deleted
 - The webview doesn't compile yet — imports are broken
 
-Read `plan.md` in the project root for full architectural context.
+Read `docs/archive/plan.md` for full architectural context.
 
 ---
 

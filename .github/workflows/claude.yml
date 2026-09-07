@@ -16,16 +16,26 @@ jobs:
   review:
     runs-on: ubuntu-latest
     # Disabled: Anthropic API credit balance is too low. Re-enable by removing the `false &&` below.
+    #
+    # This repository is public. Comment-triggered runs are gated to owners/members/
+    # collaborators so an arbitrary GitHub user cannot start an agent holding the
+    # Anthropic key. While disabled the job also holds read-only permissions; when
+    # re-enabling, restore `pull-requests: write` (to post reviews), `id-token: write`
+    # (claude-code-action OIDC) and, only if "@claude fix" commits are wanted,
+    # `contents: write`.
     if: |
       false &&
       ((github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')))
+      (github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
+      contents: read
+      pull-requests: read
+      issues: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -156,8 +166,10 @@ jobs:
             - Message protocol changes must update the discriminated unions in src/types/messages.ts for both directions
             - React Flow custom node/edge types must be defined as module-level constants, not inside component render functions
 
-            **Legacy identifiers — do NOT rename:**
-            Command IDs (dbtSemantic.*), View IDs (dbt-semantic, dbtSemantic.domainTree), custom editor viewType (dbtSemantic.domainEditor), setting keys (dbtSemantic.projectPath, dbtSemantic.semanticDir), colour IDs (dbtSemantic.layer.*), command category ("category": "dbt")
+            **Identifiers and legacy compatibility shims:**
+            - All internal identifiers use the `erdStudio` prefix (`erd-studio` for the activity bar container id) and the command palette category "ERD Studio"
+            - The `dbtSemantic.*` compatibility shims must NOT be removed: every `erdStudio.*` command is also registered in code as `dbtSemantic.*` via `LEGACY_ALIASED_COMMANDS` in src/extension.ts (code-only — never contribute `dbtSemantic.*` commands in package.json), and the deprecated `dbtSemantic.projectPath` / `dbtSemantic.semanticDir` settings in package.json must stay contributed
+            - Settings must be read via `getErdStudioSetting()` (src/services/configService.ts), never `getConfiguration('erdStudio').get(...)` directly
 
             **Style:**
             - All colours must use CSS custom properties from webview/styles/theme.css — no hardcoded hex/rgb values
