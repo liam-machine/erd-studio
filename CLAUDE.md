@@ -61,7 +61,7 @@ The extension uses two design stages, each with a distinct purpose:
 | Stage | Color | Purpose | Storage |
 |-------|-------|---------|---------|
 | **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | `logical` section in domain file |
-| **Physical** | Green (`#22c55e`) | What exists in dbt — models from logical filtered by manifest; relationships & cardinality derived entirely from manifest test nodes; fully read-only | Derived at runtime, no file on disk |
+| **Physical** | Green (`#22c55e`) | What exists in dbt — logical models resolved per model from schema `.yml` files (preferred) or the manifest (fallback); relationships & cardinality derived from the union of yml and manifest test declarations; fully read-only | Derived at runtime, no file on disk |
 
 The logical stage is the editable stage stored in the domain JSON file. Physical is derived at runtime. Stage colors are defined in `webview/lib/stageColors.ts`.
 
@@ -70,14 +70,15 @@ The logical stage is the editable stage stored in the domain JSON file. Physical
 ```
 {layer}/{domain}.json ─→ getDomain() ─→ UnifiedDomain ─→ .logical → DisplayDomain
                                                                           │
-manifest.json ─→ ManifestService ─→ buildPhysicalDomain() ─→ DisplayDomain
+schema .yml   ─→ YmlParserService ─┐
+manifest.json ─→ ManifestService  ─┴→ buildPhysicalDomain() ─→ DisplayDomain
                                                                           │
                                                [message] ─→ graphTransformer ─→ React Flow
 ```
 
 1. **ManifestService** stream-parses `target/manifest.json` (handles 40MB+ files via `stream-json`). Extracts model nodes, relationship test nodes (`relationships`, `relationships_where`, custom), `unique` tests, and `unique_combination_of_columns` tests.
 2. **DomainService** reads unified domain JSON from `.erd-studio/{layer}/*.json` → `UnifiedDomain`, then extracts a stage section via `getDomainStage()` → `DisplayDomain`
-3. For physical stage: `DomainService.buildPhysicalDomain()` derives models from logical filtered by manifest. **Relationships are derived entirely from manifest relationship tests** (not copied from logical). Cardinality is inferred from manifest `unique`/`unique_combination_of_columns` tests (no unique test = "many" side). Relationships are scoped to models within the domain to prevent conformed dimensions from pulling in external edges. See `derivePhysicalRelationships()` in `domainService.ts`.
+3. For physical stage: `DomainService.buildPhysicalDomain(unified, ymlData, manifest)` resolves each logical model from the dbt schema `.yml` files (**YmlParserService**, preferred because it is always current) or, per model, falls back to the manifest — a model missing from yml but present in the manifest still appears. Models in neither source are omitted. Columns come from whichever source resolved the model, with data types enriched from the manifest. **Relationships are derived from the union of yml and manifest relationship tests** (deduped; never copied from logical). Cardinality is inferred from `unique`/`unique_combination_of_columns` tests merged from both sources (no unique test = "many" side). Model and column names are matched case-insensitively (`normaliseName()` in `src/services/nameUtils.ts`). Relationships are scoped to models within the domain to prevent conformed dimensions from pulling in external edges. See `derivePhysicalRelationships()` in `domainService.ts`. YmlParserService reads both `tests:` and `data_tests:` keys, `unique` as a scalar or map form, and dbt 1.10 `arguments:` nesting; both parsers accept versioned `ref('model', v=2)`.
 4. **DiscrepancyService** compares two `DisplayDomain` objects to produce a `DiscrepancyReport`
 5. Extension sends `domainLoaded` / `stageData` message to webview
 6. **graphTransformer** converts `DisplayDomain` → React Flow nodes + edges (with optional discrepancy overlays)
@@ -120,7 +121,7 @@ All mutations go through `WorkspaceEdit` for undo/redo integration. Physical sta
 - Extension host writes use `WorkspaceEdit` for undo/redo integration
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
 - Stage switching sends `switchStage` message; extension extracts the target stage section from the same unified file and responds with `stageData`
-- Physical stage is derived at runtime — no files on disk, positions inherited from logical domain. Models come from logical filtered by manifest; **relationships come from manifest test nodes** (not logical), with cardinality derived from `unique`/`unique_combination_of_columns` tests
+- Physical stage is derived at runtime — no files on disk, positions inherited from logical domain. Models come from logical, resolved per model against schema `.yml` (preferred) or the manifest (fallback); **relationships come from yml + manifest test declarations** (not logical), with cardinality derived from `unique`/`unique_combination_of_columns` tests merged from both sources. Name matching across stages is case-insensitive.
 - Mutation handlers target `parsed.logical.models` / `.relationships` within the domain file
 
 ## Discrepancy System

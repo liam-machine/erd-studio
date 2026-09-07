@@ -400,6 +400,160 @@ describe('DomainService', () => {
       expect(customer!.grain).toBe('One row per customer');
       expect(customer!.modelRole).toBe('domain-dim');
     });
+
+    // -----------------------------------------------------------------------
+    // H09 — per-model yml/manifest resolution and relationship-test union
+    // -----------------------------------------------------------------------
+
+    /** yml covering ONLY dim_customer (fct_orders has no schema.yml entry). */
+    function createPartialYmlData(): YmlData {
+      return {
+        models: new Map([
+          ['dim_customer', {
+            name: 'dim_customer',
+            description: 'Customer dimension from yml',
+            filePath: '/proj/models/dim_customer.yml',
+            tags: [],
+            columns: [
+              { name: 'customer_id', description: 'PK from yml', dataType: null },
+              { name: 'customer_name', description: '', dataType: 'STRING' },
+            ],
+          }],
+        ]),
+        relationshipTests: [],
+        uniqueColumns: new Map([['dim_customer', new Set(['customer_id'])]]),
+        compositeUniqueGroups: new Map(),
+      };
+    }
+
+    it('includes manifest-only models when yml covers other models (partial yml is not all-or-nothing)', () => {
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), createPartialYmlData(), createManifestWithBothModels(),
+      );
+
+      expect(result.models.map(m => m.name).sort()).toEqual(['dim_customer', 'fct_orders']);
+
+      // fct_orders came from the manifest: manifest columns + schema
+      const orders = result.models.find(m => m.name === 'fct_orders')!;
+      expect(orders.existsInManifest).toBe(true);
+      expect(orders.schema).toBe('silver_schema');
+      expect(orders.columns.map(c => c.name)).toEqual(['order_id', 'customer_id']);
+      expect(orders.columns[0].dataType).toBe('bigint');
+      // PK flag carried over from logical even for the manifest-resolved model
+      expect(orders.columns.find(c => c.name === 'order_id')!.isPrimaryKey).toBe(true);
+      expect(orders.columns.find(c => c.name === 'customer_id')!.isForeignKey).toBe(true);
+    });
+
+    it('prefers yml columns over manifest columns when both exist, enriching data types from manifest', () => {
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), createPartialYmlData(), createManifestWithBothModels(),
+      );
+
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      expect(customer.description).toBe('Customer dimension from yml');
+      // yml has no data_type on customer_id → enriched from manifest
+      expect(customer.columns.find(c => c.name === 'customer_id')!.dataType).toBe('bigint');
+      expect(customer.columns.find(c => c.name === 'customer_id')!.description).toBe('PK from yml');
+      // yml data_type wins where declared
+      expect(customer.columns.find(c => c.name === 'customer_name')!.dataType).toBe('STRING');
+    });
+
+    it('derives relationships from manifest tests even when yml has none', () => {
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), createPartialYmlData(), createManifestWithBothModels(),
+      );
+
+      expect(result.relationships).toHaveLength(1);
+      expect(result.relationships[0]).toMatchObject({
+        fromModel: 'fct_orders', fromColumn: 'customer_id',
+        toModel: 'dim_customer', toColumn: 'customer_id',
+        cardinality: 'many-to-one',
+      });
+    });
+
+    it('unions yml and manifest relationship tests, deduping identical ones', () => {
+      const yml = createPartialYmlData();
+      yml.models.set('fct_orders', {
+        name: 'fct_orders', description: '', filePath: '/proj/models/fct_orders.yml', tags: [],
+        columns: [
+          { name: 'order_id', description: '', dataType: null },
+          { name: 'customer_id', description: '', dataType: null },
+        ],
+      });
+      // Same test as the manifest (should dedupe) — spelled in a different case
+      yml.relationshipTests.push({
+        fromModel: 'FCT_ORDERS', fromColumn: 'CUSTOMER_ID', toModel: 'DIM_CUSTOMER', toColumn: 'CUSTOMER_ID',
+      });
+
+      const manifest = createManifestWithBothModels();
+      // Manifest carries an extra test the yml does not have
+      manifest.relationshipTests.push({
+        fromModel: 'dim_customer', fromColumn: 'customer_name', toModel: 'fct_orders', toColumn: 'order_id',
+      });
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), yml, manifest);
+
+      expect(result.relationships).toHaveLength(2);
+      const keys = result.relationships.map(r => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`).sort();
+      expect(keys).toEqual([
+        'dim_customer.customer_name->fct_orders.order_id',
+        'fct_orders.CUSTOMER_ID->dim_customer.CUSTOMER_ID',
+      ]);
+    });
+
+    it('omits models present in neither yml nor manifest', () => {
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), createPartialYmlData(), undefined);
+
+      expect(result.models.map(m => m.name)).toEqual(['dim_customer']);
+      expect(result.models[0].existsInManifest).toBe(false);
+      expect(result.models[0].schema).toBe('');
+    });
+
+    // -----------------------------------------------------------------------
+    // H32 — case-insensitive model/column matching in physical enrichment
+    // -----------------------------------------------------------------------
+
+    it('matches yml model and column names case-insensitively, keeping logical spelling for the model', () => {
+      const yml: YmlData = {
+        models: new Map([
+          ['DIM_CUSTOMER', {
+            name: 'DIM_CUSTOMER', description: '', filePath: '/p/x.yml', tags: [],
+            columns: [
+              { name: 'CUSTOMER_ID', description: '', dataType: null },
+              { name: 'CUSTOMER_NAME', description: '', dataType: null },
+            ],
+          }],
+        ]),
+        relationshipTests: [],
+        uniqueColumns: new Map(),
+        compositeUniqueGroups: new Map(),
+      };
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), yml, createManifest());
+
+      const customer = result.models.find(m => m.name === 'dim_customer');
+      expect(customer).toBeDefined();
+      // yml column spelling is displayed, manifest data type enriched, PK flag carried from logical
+      const pk = customer!.columns.find(c => c.name === 'CUSTOMER_ID')!;
+      expect(pk.dataType).toBe('bigint');
+      expect(pk.isPrimaryKey).toBe(true);
+    });
+
+    it('derives cardinality case-insensitively from uniqueness tests', () => {
+      const manifest = createManifestWithBothModels();
+      manifest.uniqueColumns = new Map([['DIM_CUSTOMER', new Set(['CUSTOMER_ID'])]]);
+      manifest.relationshipTests = [{
+        fromModel: 'FCT_ORDERS', fromColumn: 'customer_id', toModel: 'Dim_Customer', toColumn: 'Customer_Id',
+      }];
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, manifest);
+
+      expect(result.relationships).toHaveLength(1);
+      // Edge model names are rewritten to the domain's (logical) spelling
+      expect(result.relationships[0].fromModel).toBe('fct_orders');
+      expect(result.relationships[0].toModel).toBe('dim_customer');
+      expect(result.relationships[0].cardinality).toBe('many-to-one');
+    });
   });
 
   describe('derivePhysicalRelationships', () => {

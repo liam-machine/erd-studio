@@ -3,6 +3,7 @@ import * as path from 'path';
 import { YmlParserService } from '../../src/services/ymlParserService';
 
 const FIXTURE_PROJECT_PATH = path.resolve(__dirname, '../fixtures/dbt-project');
+const MODERN_TESTS_PROJECT_PATH = path.resolve(__dirname, '../fixtures/dbt-project-modern-tests');
 
 describe('YmlParserService', () => {
   let service: YmlParserService;
@@ -224,6 +225,83 @@ describe('YmlParserService', () => {
       );
       expect(rel).toBeDefined();
       expect(rel!.toModel).toBe('fct_sale');
+    });
+  });
+
+  describe('modern dbt test syntax (data_tests, unique map form, arguments) — H09/H10', () => {
+    it('reads column-level `data_tests:` scalar unique tests', async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      expect(data.models.size).toBe(4);
+      expect(data.uniqueColumns.get('dim_customer')?.has('customer_id')).toBe(true);
+      expect(data.uniqueColumns.get('fct_orders')?.has('order_id')).toBe(true);
+    });
+
+    it('recognises `unique` in map form carrying config under `tests:`', async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      expect(data.uniqueColumns.get('dim_product')?.has('product_id')).toBe(true);
+    });
+
+    it('recognises `unique:` with an empty value under `data_tests:`', async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      expect(data.uniqueColumns.get('fct_shipments')?.has('shipment_id')).toBe(true);
+    });
+
+    it('reads relationships tests declared under `data_tests:`', async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      const rel = data.relationshipTests.find(
+        (t) => t.fromModel === 'fct_orders' && t.fromColumn === 'customer_id',
+      );
+      expect(rel).toBeDefined();
+      expect(rel!.toModel).toBe('dim_customer');
+      expect(rel!.toColumn).toBe('customer_id');
+    });
+
+    it("accepts versioned ref('model', v=N) targets", async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      const rel = data.relationshipTests.find(
+        (t) => t.fromModel === 'fct_orders' && t.fromColumn === 'product_id',
+      );
+      expect(rel).toBeDefined();
+      expect(rel!.toModel).toBe('dim_product');
+    });
+
+    it('reads relationships kwargs nested under dbt 1.10 `arguments:`', async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      const rel = data.relationshipTests.find(
+        (t) => t.fromModel === 'fct_shipments' && t.fromColumn === 'order_id',
+      );
+      expect(rel).toBeDefined();
+      expect(rel!.toModel).toBe('fct_orders');
+      expect(rel!.toColumn).toBe('order_id');
+    });
+
+    it("accepts two-arg ref('project', 'model', version=N) under `arguments:`", async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      const rel = data.relationshipTests.find(
+        (t) => t.fromModel === 'fct_shipments' && t.fromColumn === 'customer_id',
+      );
+      expect(rel).toBeDefined();
+      expect(rel!.toModel).toBe('dim_customer');
+      expect(rel!.toColumn).toBe('customer_id');
+    });
+
+    it('extracts all four relationship tests across tests/data_tests/arguments forms', async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      expect(data.relationshipTests).toHaveLength(4);
+    });
+
+    it('reads model-level unique_combination_of_columns nested under `arguments:`', async () => {
+      const data = await service.loadYmlData(MODERN_TESTS_PROJECT_PATH);
+
+      expect(data.compositeUniqueGroups.get('fct_orders')).toEqual([['order_id', 'product_id']]);
     });
   });
 });

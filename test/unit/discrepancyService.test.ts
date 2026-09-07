@@ -367,6 +367,70 @@ describe('DiscrepancyService.compare', () => {
     });
   });
 
+  describe('case-insensitive name matching (H32)', () => {
+    it('matches columns whose names differ only in case, keeping the source spelling', () => {
+      const source = makeDomain({
+        stage: 'logical',
+        models: [makeModel('dim_customer', [makeColumn('customer_id', 'int'), makeColumn('name', 'varchar')])],
+      });
+      const target = makeDomain({
+        stage: 'physical',
+        models: [makeModel('dim_customer', [makeColumn('CUSTOMER_ID', 'int'), makeColumn('NAME', 'varchar')])],
+      });
+
+      const report = compare(source, target);
+
+      expect(report.models[0].columns.map((c) => c.status)).toEqual(['matched', 'matched']);
+      expect(report.models[0].columns.map((c) => c.name)).toEqual(['customer_id', 'name']);
+      expect(report.summary).toMatchObject({ matchedColumns: 2, extraColumns: 0, missingColumns: 0 });
+    });
+
+    it('still reports type mismatches on case-differing column names', () => {
+      const source = makeDomain({ models: [makeModel('m', [makeColumn('amount', 'int')])] });
+      const target = makeDomain({ models: [makeModel('m', [makeColumn('AMOUNT', 'decimal')])] });
+
+      const report = compare(source, target);
+
+      expect(report.models[0].columns[0]).toMatchObject({ name: 'amount', status: 'type-mismatch' });
+    });
+
+    it('matches models whose names differ only in case, keeping the source spelling', () => {
+      const source = makeDomain({ models: [makeModel('dim_customer', [makeColumn('id')])] });
+      const target = makeDomain({ models: [makeModel('DIM_CUSTOMER', [makeColumn('id')])] });
+
+      const report = compare(source, target);
+
+      expect(report.models).toHaveLength(1);
+      expect(report.models[0]).toMatchObject({ name: 'dim_customer', status: 'matched' });
+      expect(report.summary).toMatchObject({ totalModels: 1, matchedModels: 1, extraModels: 0, missingModels: 0 });
+    });
+
+    it('matches relationships case-insensitively on model and column names', () => {
+      const source = makeDomain({
+        models: [makeModel('a'), makeModel('b')],
+        relationships: [makeRel(['fct_orders', 'customer_id'], ['dim_customer', 'customer_id'])],
+      });
+      const target = makeDomain({
+        models: [makeModel('a'), makeModel('b')],
+        relationships: [makeRel(['FCT_ORDERS', 'CUSTOMER_ID'], ['DIM_CUSTOMER', 'CUSTOMER_ID'])],
+      });
+
+      const report = compare(source, target);
+
+      expect(report.relationships).toHaveLength(1);
+      expect(report.relationships[0]).toMatchObject({ fromModel: 'fct_orders', status: 'matched' });
+    });
+
+    it('applies stubColumns suppression case-insensitively', () => {
+      const source = makeDomain({ models: [makeModel('dim_ref', [makeColumn('id')])] });
+      const target = makeDomain({ models: [makeModel('DIM_REF', [makeColumn('ID'), makeColumn('extra_col')])] });
+
+      const report = compare(source, target, new Set(['dim_ref']));
+
+      expect(report.models[0].columns.map((c) => c.status)).toEqual(['matched']);
+    });
+  });
+
   describe('empty domains', () => {
     it('returns empty report when both domains have no models', () => {
       const report = compare(makeDomain(), makeDomain());
