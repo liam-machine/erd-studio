@@ -302,14 +302,129 @@ export interface RawDomainFile {
 }
 
 /**
+ * On-disk format of a raw (JSON.parse'd) domain document.
+ *
+ * - `v5`     — `logical.models` is an array of model name strings (central model store).
+ * - `v4`     — `logical.models` is an array of inline SemanticModel objects (deprecated,
+ *              migratable via "ERD Studio: Migrate to v5").
+ * - `hybrid` — the document contradicts itself: `schemaVersion >= 5` with inline model
+ *              objects, a mix of strings and objects, or entries that are neither.
+ *              Must be repaired (migration) before it can be loaded or edited.
+ * - `legacy` — pre-v4 layout: `schemaVersion < 4` and/or a top-level `models` array
+ *              instead of a `logical` section. Not supported by the editor.
+ */
+export type DomainFormat = 'v4' | 'v5' | 'hybrid' | 'legacy';
+
+/**
+ * Single source of truth for domain file format detection.
+ *
+ * Every reader/writer of domain JSON (DomainService, SemanticEditorProvider,
+ * ModelLibraryTreeProvider, MigrationService) must use this so that a file is
+ * never read as one format and written as another.
+ *
+ * Rules (in order):
+ * 1. `schemaVersion < 4` or a top-level `models` array → `legacy`
+ * 2. Any `logical.models` entry that is neither a string nor a plain object,
+ *    or a mix of strings and objects → `hybrid`
+ * 3. All entries are objects: `hybrid` if `schemaVersion >= 5`, else `v4`
+ * 4. All entries are strings → `v5` (content wins over a stale schemaVersion)
+ * 5. Empty `logical.models`: `v5` if `schemaVersion >= 5`, else `v4`
+ */
+export function detectDomainFormat(raw: unknown): DomainFormat {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return 'legacy';
+  }
+  const obj = raw as Record<string, unknown>;
+  const version = typeof obj.schemaVersion === 'number' ? obj.schemaVersion : undefined;
+
+  if (version !== undefined && version < LEGACY_SCHEMA_VERSION) return 'legacy';
+  if (Array.isArray(obj.models)) return 'legacy';
+
+  const logical = obj.logical;
+  const models: unknown[] =
+    logical && typeof logical === 'object' && !Array.isArray(logical) && Array.isArray((logical as Record<string, unknown>).models)
+      ? ((logical as Record<string, unknown>).models as unknown[])
+      : [];
+
+  let strings = 0;
+  let objects = 0;
+  for (const entry of models) {
+    if (typeof entry === 'string') {
+      strings++;
+    } else if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      objects++;
+    } else {
+      return 'hybrid';
+    }
+  }
+
+  if (strings > 0 && objects > 0) return 'hybrid';
+  if (objects > 0) {
+    return version !== undefined && version >= CURRENT_SCHEMA_VERSION ? 'hybrid' : 'v4';
+  }
+  if (strings > 0) return 'v5';
+  return version !== undefined && version >= CURRENT_SCHEMA_VERSION ? 'v5' : 'v4';
+}
+
+/**
+ * Human-readable explanation for a domain format the editor cannot load,
+ * including the remediation. Returns null for `v4` and `v5`.
+ */
+export function describeUnsupportedDomainFormat(format: DomainFormat, filePath: string): string | null {
+  switch (format) {
+    case 'legacy':
+      return (
+        `Domain file ${filePath} uses a pre-v${LEGACY_SCHEMA_VERSION} layout ` +
+        `(schemaVersion < ${LEGACY_SCHEMA_VERSION} or a top-level "models" array) that is no longer supported. ` +
+        'Run "ERD Studio: Migrate to v5" to convert it, or move "models"/"relationships" ' +
+        `under a "logical" section and set "schemaVersion" to ${CURRENT_SCHEMA_VERSION}.`
+      );
+    case 'hybrid':
+      return (
+        `Domain file ${filePath} mixes inline model objects with model name references ` +
+        `(or declares schemaVersion ${CURRENT_SCHEMA_VERSION} with inline models). ` +
+        'Run "ERD Studio: Migrate to v5" to repair it, or edit the file so every entry in ' +
+        '"logical.models" is a model name string.'
+      );
+    default:
+      return null;
+  }
+}
+
+/**
+ * Extract model names from a raw domain document regardless of its format.
+ * String entries are used as-is; inline objects contribute their `name`;
+ * anything else is skipped. Legacy top-level `models` arrays are honoured.
+ */
+export function getRawDomainModelNames(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const obj = raw as Record<string, unknown>;
+  const logicalModels = (obj.logical as Record<string, unknown> | undefined)?.models;
+  const source: unknown[] = Array.isArray(logicalModels)
+    ? logicalModels
+    : Array.isArray(obj.models)
+      ? obj.models
+      : [];
+
+  const names: string[] = [];
+  for (const entry of source) {
+    if (typeof entry === 'string') {
+      names.push(entry);
+    } else if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).name === 'string') {
+      names.push((entry as Record<string, unknown>).name as string);
+    }
+  }
+  return names;
+}
+
+/**
  * Type guard: returns true if the domain file uses v5 format (model name references).
+ *
+ * @deprecated Use {@link detectDomainFormat} — it distinguishes `hybrid` and
+ * `legacy` documents that this boolean cannot express.
  */
 export function isDomainV5(raw: RawDomainFile): boolean {
-  if (raw.schemaVersion >= 5) return true;
-  // Also detect by content: if models array contains strings, it's v5
-  const models = raw.logical?.models ?? [];
-  if (models.length === 0) return true; // empty is ambiguous, treat as v5
-  return typeof models[0] === 'string';
+  return detectDomainFormat(raw) === 'v5';
 }
 
 // ---------------------------------------------------------------------------

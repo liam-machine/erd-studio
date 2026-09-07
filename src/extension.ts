@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DomainService } from './services/domainService';
+import { DomainService, renameDomainInRaw } from './services/domainService';
 import { LayerService } from './services/layerService';
 import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
 import { ManifestService } from './services/manifestService';
@@ -692,16 +692,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newSlug = newDomainSlug.trim();
         if (newSlug === oldDomainName) { return; }
 
-        // Read and update domain name in the unified file
-        let domainData: UnifiedDomain;
+        // Read and update domain name in the unified file.
+        // Validate via DomainService, but rewrite the RAW document so v5 model
+        // name references and unknown keys are preserved — re-serialising the
+        // resolved UnifiedDomain would inline model bodies into a v5 file.
+        let renamedContent: string;
         try {
-          domainData = domainService.getDomain(oldFilePath);
+          domainService.getDomain(oldFilePath);
+          renamedContent = renameDomainInRaw(fs.readFileSync(oldFilePath, 'utf-8'), newSlug);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Failed to read domain file: ${msg}`);
           return;
         }
-        domainData.domain = newSlug;
 
         // Close old editor tabs before applying the edit (file will be deleted)
         const oldTabs = findMatchingTabs(oldFileUri);
@@ -712,7 +715,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         const edit = new vscode.WorkspaceEdit();
         edit.createFile(newFileUri, { overwrite: false, ignoreIfExists: false });
-        edit.insert(newFileUri, new vscode.Position(0, 0), JSON.stringify(domainData, null, 2) + '\n');
+        edit.insert(newFileUri, new vscode.Position(0, 0), renamedContent);
         edit.deleteFile(oldFileUri, { ignoreIfNotExists: false });
 
         const success = await vscode.workspace.applyEdit(edit);

@@ -51,6 +51,7 @@ import type {
   ModelContext,
 } from '../types/syncPlan';
 import type { NodePosition, Relationship } from '../types/semantic';
+import { describeUnsupportedDomainFormat, detectDomainFormat } from '../types/semantic';
 
 /**
  * logical-models/*.yml operations to bundle into a domain WorkspaceEdit so the
@@ -603,14 +604,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Detect whether a parsed domain document uses v5 format (model name references).
+   *
+   * Delegates to the shared {@link detectDomainFormat} so reads and writes agree.
+   * Throws for `legacy`/`hybrid` documents so a mutation never silently casts a
+   * mixed or pre-v4 file into one branch — every caller runs inside a try/catch
+   * that reports the error to the webview.
    */
   private isDomainV5(parsed: Record<string, unknown>): boolean {
-    const version = parsed.schemaVersion as number;
-    if (version >= 5) return true;
-    const section = this.getStageSection(parsed, 'logical');
-    const models = section.models as unknown[];
-    if (!models || models.length === 0) return false;
-    return typeof models[0] === 'string';
+    const format = detectDomainFormat(parsed);
+    const unsupported = describeUnsupportedDomainFormat(format, 'being edited');
+    if (unsupported) {
+      throw new Error(unsupported);
+    }
+    return format === 'v5';
   }
 
   /**

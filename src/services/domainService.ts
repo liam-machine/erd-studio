@@ -12,8 +12,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { DomainSummary, Layer, SemanticDomain, SemanticModel, StageData, UnifiedDomain, ViewConfig } from '../types/semantic';
-import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
+import type { DomainFormat, DomainSummary, Layer, NodePosition, Relationship, SemanticDomain, SemanticModel, StageData, UnifiedDomain, ViewConfig } from '../types/semantic';
+import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship } from '../types/display';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
@@ -33,6 +33,28 @@ interface RelationshipTest {
 }
 
 const DEFAULT_SEMANTIC_DIR = '.erd-studio';
+
+const VALID_CARDINALITIES: ReadonlySet<Cardinality> = new Set<Cardinality>([
+  'many-to-one', 'one-to-one', 'one-to-many', 'many-to-many',
+]);
+
+/**
+ * Rewrite the `domain` slug in the raw text of a domain file.
+ *
+ * Operates on the parsed JSON document rather than DomainService's resolved
+ * UnifiedDomain so that v5 model name references, `stubColumns`, and any
+ * unknown keys survive byte-for-byte (apart from re-indentation). Used by the
+ * Rename Domain command.
+ */
+export function renameDomainInRaw(rawText: string, newSlug: string): string {
+  const parsed = JSON.parse(rawText) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Domain file does not contain a JSON object');
+  }
+  const doc = parsed as Record<string, unknown>;
+  doc.domain = newSlug;
+  return JSON.stringify(doc, null, 2) + '\n';
+}
 
 export class DomainService {
   private logicalModelService: LogicalModelService | null = null;
@@ -355,13 +377,22 @@ export class DomainService {
       );
     }
 
-    return this.validateDomainFields(obj, filePath);
+    // Format check — legacy (pre-v4) and hybrid (mixed / self-contradicting)
+    // documents are rejected with a remediation hint rather than silently
+    // loaded as an empty or half-resolved domain.
+    const format = detectDomainFormat(obj);
+    const unsupported = describeUnsupportedDomainFormat(format, filePath);
+    if (unsupported) {
+      throw new Error(unsupported);
+    }
+
+    return this.validateDomainFields(obj, filePath, format);
   }
 
   /**
    * Validate a unified domain file.
    */
-  private validateDomainFields(obj: Record<string, unknown>, filePath: string): UnifiedDomain {
+  private validateDomainFields(obj: Record<string, unknown>, filePath: string, format: DomainFormat): UnifiedDomain {
     const domain = typeof obj.domain === 'string' ? obj.domain : path.basename(filePath, '.json');
     const layer = this.parseLayer(obj.layer, filePath);
 
@@ -384,7 +415,7 @@ export class DomainService {
       layer,
       description: typeof obj.description === 'string' ? obj.description : '',
       ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
-      logical: this.parseStageData(obj.logical) ?? { ...emptyStage },
+      logical: this.parseStageData(obj.logical, format, filePath) ?? { ...emptyStage },
       ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
       viewConfig: globalViewConfig,
     };
@@ -392,46 +423,96 @@ export class DomainService {
 
   /**
    * Parse a stage data section from a domain file.
-   * Handles both v4 (inline SemanticModel[]) and v5 (string[] name references).
+   * Handles both v4 (inline SemanticModel[]) and v5 (string[] name references)
+   * as decided by {@link detectDomainFormat} — hybrid/legacy documents are
+   * rejected before this point, so every entry is guaranteed to match `format`.
    * For v5, resolves model names via LogicalModelService.
    * Returns null if the section is missing or invalid.
    */
-  private parseStageData(value: unknown): StageData | null {
+  private parseStageData(value: unknown, format: DomainFormat, filePath: string): StageData | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return null;
     }
 
     const obj = value as Record<string, unknown>;
     const rawModels = Array.isArray(obj.models) ? obj.models : [];
-    const relationships = Array.isArray(obj.relationships) ? (obj.relationships as StageData['relationships']) : [];
-
-    // Detect v5 format: models array contains strings (name references)
-    const isV5 = rawModels.length > 0 && typeof rawModels[0] === 'string';
+    const relationships = this.parseRelationships(obj.relationships, filePath);
 
     let models: SemanticModel[];
-    if (isV5 && this.logicalModelService) {
-      // Resolve model name references from logical-models/*.yml
+    if (format === 'v5') {
+      const names = rawModels.filter((m): m is string => typeof m === 'string');
+      if (this.logicalModelService) {
+        // Resolve model name references from logical-models/*.yml
+        models = [];
+        for (const name of names) {
+          const model = this.logicalModelService.getModel(name);
+          if (model) {
+            models.push(model);
+          } else {
+            // Broken reference — create a placeholder so the UI can show an error
+            console.warn(`[DomainService] Model "${name}" not found in logical-models/`);
+            models.push({ name, columns: [] });
+          }
+        }
+      } else {
+        // v5 format but no LogicalModelService available (e.g., testing)
+        // Create placeholder models from names
+        models = names.map(name => ({ name, columns: [] }));
+      }
+    } else {
+      // v4 format: inline model objects — each must carry a string name
       models = [];
-      for (const name of rawModels as string[]) {
-        const model = this.logicalModelService.getModel(name);
-        if (model) {
-          models.push(model);
+      for (const entry of rawModels) {
+        const candidate = entry as Record<string, unknown> | null;
+        if (candidate && typeof candidate === 'object' && typeof candidate.name === 'string') {
+          models.push(candidate as unknown as SemanticModel);
         } else {
-          // Broken reference — create a placeholder so the UI can show an error
-          console.warn(`[DomainService] Model "${name}" not found in logical-models/`);
-          models.push({ name, columns: [] });
+          console.warn(`[DomainService] Skipping inline model without a string "name" in ${filePath}`);
         }
       }
-    } else if (isV5) {
-      // v5 format but no LogicalModelService available (e.g., testing)
-      // Create placeholder models from names
-      models = (rawModels as string[]).map(name => ({ name, columns: [] }));
-    } else {
-      // v4 format: inline model objects
-      models = rawModels as SemanticModel[];
     }
 
     return { models, relationships };
+  }
+
+  /**
+   * Validate the relationships array entry-by-entry. Entries missing any of the
+   * four string endpoints are dropped with a warning; an unrecognised
+   * cardinality falls back to many-to-one.
+   */
+  private parseRelationships(value: unknown, filePath: string): Relationship[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    const relationships: Relationship[] = [];
+    for (const entry of value) {
+      const r = entry as Record<string, unknown> | null;
+      if (
+        !r || typeof r !== 'object' || Array.isArray(r) ||
+        typeof r.fromModel !== 'string' || typeof r.fromColumn !== 'string' ||
+        typeof r.toModel !== 'string' || typeof r.toColumn !== 'string'
+      ) {
+        console.warn(`[DomainService] Skipping malformed relationship entry in ${filePath}: ${JSON.stringify(entry)}`);
+        continue;
+      }
+
+      const cardinality = VALID_CARDINALITIES.has(r.cardinality as Cardinality)
+        ? (r.cardinality as Cardinality)
+        : 'many-to-one';
+      if (cardinality !== r.cardinality) {
+        console.warn(
+          `[DomainService] Relationship ${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn} in ${filePath} ` +
+          `has invalid cardinality ${JSON.stringify(r.cardinality)}; defaulting to many-to-one`,
+        );
+      }
+
+      relationships.push({
+        ...(r as unknown as Relationship),
+        cardinality,
+      });
+    }
+    return relationships;
   }
 
   private parseLayer(value: unknown, filePath: string): Layer {
@@ -464,7 +545,7 @@ export class DomainService {
         ? (obj.layoutOptions as Record<string, string>)
         : undefined,
       positions: obj.positions && typeof obj.positions === 'object' && !Array.isArray(obj.positions)
-        ? (obj.positions as Record<string, { x: number; y: number }>)
+        ? this.parsePositions(obj.positions as Record<string, unknown>)
         : undefined,
       annotations: Array.isArray(obj.annotations)
         ? (obj.annotations as unknown[]).filter(
@@ -475,6 +556,28 @@ export class DomainService {
           )
         : undefined,
     };
+  }
+
+  /**
+   * Keep only position entries with finite numeric x/y. Malformed entries
+   * (string coordinates, null, non-objects) are dropped so the model is
+   * auto-positioned instead of reaching the canvas with NaN coordinates.
+   */
+  private parsePositions(value: Record<string, unknown>): Record<string, NodePosition> {
+    const positions: Record<string, NodePosition> = {};
+    for (const [name, entry] of Object.entries(value)) {
+      const p = entry as Record<string, unknown> | null;
+      if (
+        p && typeof p === 'object' && !Array.isArray(p) &&
+        typeof p.x === 'number' && Number.isFinite(p.x) &&
+        typeof p.y === 'number' && Number.isFinite(p.y)
+      ) {
+        positions[name] = { x: p.x, y: p.y };
+      } else {
+        console.warn(`[DomainService] Ignoring malformed viewConfig.positions entry for "${name}"`);
+      }
+    }
+    return positions;
   }
 }
 
