@@ -20,6 +20,7 @@ import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
 import { getErdStudioSetting } from './services/configService';
+import { readDbtProjectConfig } from './services/dbtProjectConfig';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 import { submitBugReport } from './services/feedbackService';
@@ -373,12 +374,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     console.error('[ERD Studio] Legacy erd-studio/ migration failed:', err);
   }
 
+  // Read target-path / model-paths from dbt_project.yml once; every consumer
+  // (manifest parser, schema walker, watchers) shares this. A change to
+  // these keys is picked up by the dbt_project.yml watcher below, which
+  // prompts for a window reload.
+  const dbtConfig = readDbtProjectConfig(workspaceRoot);
+
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
   const logicalModelService = new LogicalModelService(workspaceRoot, semanticDir);
   domainService.setLogicalModelService(logicalModelService);
-  const manifestService = new ManifestService();
-  const ymlParserService = new YmlParserService();
+  const manifestService = new ManifestService({ dbtConfig });
+  const ymlParserService = new YmlParserService({ dbtConfig });
   const templateService = new TemplateService();
   // Status bar item shown while selectors.yml is out of sync (skipped writes).
   // Hidden as soon as a regenerate succeeds.
@@ -429,6 +436,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
       onWritten: () => {
         selectorsOutOfSyncStatus?.hide();
+      },
+      onNameCollision: (info) => {
+        void vscode.window.showWarningMessage(
+          `ERD Studio: selector name "${info.requestedName}" for domain ${info.domain} collides with ` +
+            `${info.conflictsWith}. Wrote "${info.assignedName}" to selectors.yml instead — ` +
+            'rename one of the domains to avoid the suffix.',
+        );
       },
     },
   );
@@ -513,7 +527,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // -------------------------------------------------------------------------
   // File watchers
   // -------------------------------------------------------------------------
-  const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir);
+  const fileWatcherService = new FileWatcherService(workspaceRoot, semanticDir, dbtConfig);
 
   // Manifest changed → refresh open editors
   let manifestRetryTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -526,6 +540,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       // Superseded by a newer file-change event during the await
       if (gen !== manifestChangeGen) { return; }
+
+      if (manifestService.isMissing) {
+        // Definitive (dbt clean / target removed) — no retry, no stale data.
+        void vscode.window.showWarningMessage(
+          `dbt manifest removed (${dbtConfig.targetPath}/manifest.json). ` +
+            'Physical stage now reflects schema .yml files only. Run dbt compile to regenerate it.',
+        );
+        return;
+      }
 
       if (manifestService.isStale) {
         // Manifest likely mid-write by dbt — deduplicate and retry once after 2s
@@ -641,8 +664,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   });
 
+  // erdStudio.* settings are read once at activation (semanticDir feeds every
+  // service constructor), so a mid-session change needs a window reload.
+  const activationSettings = {
+    semanticDir,
+    projectPath: getErdStudioSetting('projectPath', ''),
+  };
+  const configChangedSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
+    if (!e.affectsConfiguration('erdStudio') && !e.affectsConfiguration('dbtSemantic')) {
+      return;
+    }
+    const nextSemanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
+    const nextProjectPath = getErdStudioSetting('projectPath', '');
+    if (
+      nextSemanticDir === activationSettings.semanticDir &&
+      nextProjectPath === activationSettings.projectPath
+    ) {
+      return;
+    }
+    void vscode.window.showWarningMessage(
+      'ERD Studio settings changed (semanticDir / projectPath). A window reload is needed for the new values to take effect.',
+      'Reload Window',
+    ).then(action => {
+      if (action === 'Reload Window') {
+        void vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }
+    });
+  });
+
   context.subscriptions.push(
     { dispose() { clearTimeout(manifestRetryTimeout); } },
+    configChangedSubscription,
     treeProvider,
     decorationProvider,
     layerDecorationProvider,
@@ -941,7 +993,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await manifestService.loadManifest(workspaceRoot);
           await ymlParserService.loadYmlData(workspaceRoot);
           await editorProvider.refreshAllOpenDomains();
-          void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest model data.');
+          if (manifestService.isMissing) {
+            void vscode.window.showWarningMessage(
+              `manifest.json not found at ${dbtConfig.targetPath}/manifest.json. ` +
+                'Physical stage reflects schema .yml files only — run dbt compile to generate the manifest.',
+            );
+          } else if (manifestService.isStale) {
+            void vscode.window.showWarningMessage(
+              'dbt manifest could not be parsed (it may be mid-write) — graphs show the last good data. Try again shortly.',
+            );
+          } else {
+            void vscode.window.showInformationMessage('Manifest refreshed. Graphs updated with latest model data.');
+          }
         },
       );
     }),
@@ -1357,7 +1420,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(
       'erdStudio.installCodingHarness',
       async () => {
-        const harnessService = new HarnessService();
+        const harnessService = new HarnessService(semanticDir);
         const existing = harnessService.detectExisting(workspaceRoot);
         const staleTargets = harnessService.detectStale(workspaceRoot);
         const staleIds = new Set(staleTargets.map(t => t.id));
@@ -1428,7 +1491,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // workspace when none are present. Never overwrite anything silently:
   // harness files (AGENTS.md in particular) can hold user content.
   {
-    const harnessService = new HarnessService();
+    const harnessService = new HarnessService(semanticDir);
     const existing = harnessService.detectExisting(workspaceRoot);
     const installedCount = [...existing.values()].filter(Boolean).length;
     const staleTargets = harnessService.detectStale(workspaceRoot);

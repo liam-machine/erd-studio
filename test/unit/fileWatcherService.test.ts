@@ -65,6 +65,21 @@ describe('FileWatcherService', () => {
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
+    it('watches the default target/manifest.json path', () => {
+      const pattern = _mockFileWatchers[0]._pattern as vscode.RelativePattern;
+      expect(pattern.pattern).toBe('target/manifest.json');
+    });
+
+    it('emits onManifestChanged when manifest.json is deleted (dbt clean)', () => {
+      const listener = vi.fn();
+      service.onManifestChanged(listener);
+
+      _mockFileWatchers[0]._simulateDelete(vscode.Uri.file('/test/workspace/target/manifest.json'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
     it('emits onManifestChanged when manifest.json is created', () => {
       const listener = vi.fn();
       service.onManifestChanged(listener);
@@ -271,6 +286,53 @@ describe('FileWatcherService', () => {
     });
   });
 
+  describe('dbt_project.yml path configuration (H30)', () => {
+    it('builds the manifest watcher from target-path', () => {
+      _clearMockFileWatchers();
+      mockDbtProjectContent = 'name: p\ntarget-path: build\n';
+      service.dispose();
+      service = new FileWatcherService('/test/workspace');
+
+      const pattern = _mockFileWatchers[0]._pattern as vscode.RelativePattern;
+      expect(pattern.pattern).toBe('build/manifest.json');
+    });
+
+    it('builds the dbt schema watcher from model-paths', () => {
+      _clearMockFileWatchers();
+      mockDbtProjectContent = 'name: p\nmodel-paths:\n  - models\n  - transform\n';
+      service.dispose();
+      service = new FileWatcherService('/test/workspace');
+
+      // dbt yml watcher is the last one created
+      const pattern = _mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern;
+      expect(pattern.pattern).toBe('{models,transform}/**/*.{yml,yaml}');
+    });
+
+    it('prefers an explicitly passed DbtProjectConfig over re-reading dbt_project.yml', () => {
+      _clearMockFileWatchers();
+      service.dispose();
+      service = new FileWatcherService('/test/workspace', '.erd-studio', {
+        targetPath: 'dbt_target',
+        modelPaths: ['marts'],
+      });
+
+      expect((_mockFileWatchers[0]._pattern as vscode.RelativePattern).pattern).toBe('dbt_target/manifest.json');
+      expect((_mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern).pattern)
+        .toBe('marts/**/*.{yml,yaml}');
+    });
+
+    it('uses dbt defaults for the watchers when dbt_project.yml has no path keys', () => {
+      _clearMockFileWatchers();
+      mockDbtProjectContent = 'name: p\n';
+      service.dispose();
+      service = new FileWatcherService('/test/workspace');
+
+      expect((_mockFileWatchers[0]._pattern as vscode.RelativePattern).pattern).toBe('target/manifest.json');
+      expect((_mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern).pattern)
+        .toBe('models/**/*.{yml,yaml}');
+    });
+  });
+
   describe('project config watcher', () => {
     it('emits onProjectConfigChanged when target-path changes', () => {
       const listener = vi.fn();
@@ -374,7 +436,7 @@ describe('FileWatcherService', () => {
     beforeEach(() => {
       _clearMockFileWatchers();
       tracker = new OwnWriteTracker();
-      service = new FileWatcherService('/test/workspace', '.erd-studio', tracker);
+      service = new FileWatcherService('/test/workspace', '.erd-studio', undefined, tracker);
     });
 
     it('swallows a logical-model change recorded as an own write', () => {

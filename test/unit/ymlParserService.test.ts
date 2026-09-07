@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { YmlParserService } from '../../src/services/ymlParserService';
 
@@ -201,6 +203,83 @@ describe('YmlParserService', () => {
     it('returns empty when cache is empty', () => {
       const folders = service.getModelFolders(FIXTURE_PROJECT_PATH);
       expect(folders).toEqual([]);
+    });
+  });
+
+  describe('walk scope (H31 / H30)', () => {
+    let tmpDir: string;
+
+    const schema = (name: string, extra = '') =>
+      `version: 2\nmodels:\n  - name: ${name}\n    description: ${name} desc${extra}\n`;
+
+    const writeYml = (rel: string, content: string) => {
+      const full = path.join(tmpDir, rel);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, content, 'utf-8');
+    };
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yml-walk-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('ignores schema files in dbt_packages/, dbt_modules/, logs/ and venvs', async () => {
+      writeYml('models/silver/dim_customer.yml', schema('dim_customer'));
+      writeYml('models/dbt_packages/pkg/models/leaked.yml', schema('leaked_via_nested_packages'));
+      writeYml('models/dbt_modules/pkg/models/old.yml', schema('leaked_via_dbt_modules'));
+      writeYml('models/logs/x.yml', schema('leaked_via_logs'));
+      writeYml('models/env/lib/site-packages/x.yml', schema('leaked_via_env'));
+      writeYml('models/.direnv/x.yml', schema('leaked_via_direnv'));
+      writeYml('models/target/x.yml', schema('leaked_via_target'));
+
+      const data = await service.loadYmlData(tmpDir);
+      expect(Array.from(data.models.keys())).toEqual(['dim_customer']);
+    });
+
+    it('does not let a package model shadow a project model of the same name', async () => {
+      writeYml('models/silver/dim_customer.yml', schema('dim_customer', '\n    columns:\n      - name: customer_id\n        tests: [unique]'));
+      writeYml(
+        'dbt_packages/dbt_project_evaluator/models/dim_customer.yml',
+        schema('dim_customer', '\n    columns:\n      - name: pkg_col\n        tests:\n          - relationships: { to: ref(\'other\'), field: id }'),
+      );
+      writeYml('dbt_packages/elementary/models/elementary_test_results.yml', schema('elementary_test_results'));
+
+      const data = await service.loadYmlData(tmpDir);
+      expect(data.models.has('elementary_test_results')).toBe(false);
+      const model = data.models.get('dim_customer')!;
+      expect(model.filePath).toContain(path.join('models', 'silver'));
+      expect(model.columns.map((c) => c.name)).toEqual(['customer_id']);
+      // Package tests are not merged into the project's test data either
+      expect(data.relationshipTests).toEqual([]);
+      expect(data.uniqueColumns.get('dim_customer')?.has('customer_id')).toBe(true);
+    });
+
+    it('only walks the configured model-paths', async () => {
+      writeYml('models/a.yml', schema('in_models'));
+      writeYml('transform/marts/b.yml', schema('in_transform'));
+      writeYml('seeds/c.yml', schema('in_seeds'));
+
+      const defaults = await new YmlParserService().loadYmlData(tmpDir);
+      expect(Array.from(defaults.models.keys())).toEqual(['in_models']);
+
+      const custom = new YmlParserService({ dbtConfig: { modelPaths: ['transform'] } });
+      const data = await custom.loadYmlData(tmpDir);
+      expect(Array.from(data.models.keys())).toEqual(['in_transform']);
+      expect(custom.getModelFolders(tmpDir)).toEqual(['transform/marts']);
+
+      const multi = new YmlParserService({ dbtConfig: { modelPaths: ['models', 'transform'] } });
+      const both = await multi.loadYmlData(tmpDir);
+      expect(Array.from(both.models.keys()).sort()).toEqual(['in_models', 'in_transform']);
+    });
+
+    it('falls back to models/ when modelPaths is empty', async () => {
+      writeYml('models/a.yml', schema('in_models'));
+      const svc = new YmlParserService({ dbtConfig: { modelPaths: [] } });
+      const data = await svc.loadYmlData(tmpDir);
+      expect(Array.from(data.models.keys())).toEqual(['in_models']);
     });
   });
 

@@ -19,6 +19,33 @@ import type {
   ManifestWorkerError,
   ManifestWorkerResult,
 } from '../types/manifest';
+import {
+  defaultDbtProjectConfig,
+  resolveManifestPath,
+  type DbtProjectConfig,
+} from './dbtProjectConfig';
+
+/** Default upper bound for a single worker parse before it is abandoned. */
+export const DEFAULT_PARSE_TIMEOUT_MS = 120_000;
+
+/**
+ * Thrown by the parser when `manifest.json` does not exist at all. Unlike a
+ * malformed or truncated file (which is transient — dbt is mid-write), a
+ * missing file is definitive: `dbt clean` ran, or dbt was never compiled.
+ */
+export class ManifestMissingError extends Error {
+  constructor(public readonly manifestPath: string) {
+    super(`manifest.json not found at ${manifestPath}. Run "dbt compile" to generate it.`);
+    this.name = 'ManifestMissingError';
+  }
+}
+
+export interface ManifestServiceOptions {
+  /** dbt project paths (target-path, model-paths). Defaults to dbt's own defaults. */
+  dbtConfig?: Partial<DbtProjectConfig>;
+  /** Abort a worker parse that runs longer than this. */
+  parseTimeoutMs?: number;
+}
 
 /** Reconstruct Maps and Sets from the worker's plain-object result. */
 function deserializeWorkerResult(raw: ManifestWorkerResult): ManifestData {
@@ -44,6 +71,21 @@ export class ManifestService {
   private loadPromise: Promise<ManifestData> | null = null;
   private loadId = 0;
 
+  /** Worker for the in-flight parse, so invalidate() can cancel it. */
+  private activeWorker: Worker | null = null;
+
+  private readonly dbtConfig: DbtProjectConfig;
+  private readonly parseTimeoutMs: number;
+
+  constructor(options: ManifestServiceOptions = {}) {
+    const defaults = defaultDbtProjectConfig();
+    this.dbtConfig = {
+      targetPath: options.dbtConfig?.targetPath ?? defaults.targetPath,
+      modelPaths: options.dbtConfig?.modelPaths?.length ? options.dbtConfig.modelPaths : defaults.modelPaths,
+    };
+    this.parseTimeoutMs = options.parseTimeoutMs ?? DEFAULT_PARSE_TIMEOUT_MS;
+  }
+
   /**
    * Last successfully parsed manifest data. Survives invalidate() so it can
    * serve as a fallback when a parse fails (e.g. manifest mid-write by dbt).
@@ -57,6 +99,21 @@ export class ManifestService {
   private _isStale = false;
   get isStale(): boolean {
     return this._isStale;
+  }
+
+  /**
+   * True when the most recent loadManifest() found no manifest.json on disk.
+   * Distinct from isStale: a missing file is definitive (not mid-write), so
+   * no fallback data is served and no retry is scheduled.
+   */
+  private _isMissing = false;
+  get isMissing(): boolean {
+    return this._isMissing;
+  }
+
+  /** Absolute path of the manifest this service reads for `projectPath`. */
+  getManifestPath(projectPath: string): string {
+    return resolveManifestPath(projectPath, this.dbtConfig);
   }
 
   /**
@@ -103,9 +160,25 @@ export class ManifestService {
         this.cache = result;
         this.lastKnownGood = result;
         this._isStale = false;
+        this._isMissing = false;
       }
       return result;
     } catch (err) {
+      if (err instanceof ManifestMissingError) {
+        // Definitive: the file is gone (dbt clean / never compiled). Serving
+        // last-known-good here would show models from a manifest that no
+        // longer exists, so drop it and report empty, non-stale data.
+        console.warn(`[ManifestService] ${err.message}`);
+        const empty = this.emptyManifest();
+        if (currentLoadId === this.loadId) {
+          this.lastKnownGood = null;
+          this.cache = empty;
+          this._isStale = false;
+          this._isMissing = true;
+        }
+        return empty;
+      }
+
       // Parse failed — likely manifest is mid-write by dbt.
       // Return stale data (or empty) so the graph stays visible.
       const message = err instanceof Error ? err.message : String(err);
@@ -161,12 +234,20 @@ export class ManifestService {
     this.cache = null;
     this.loadPromise = null;
     this._isStale = false;
+    this._isMissing = false;
+    // Cancel any in-flight parse — its result would be discarded by the
+    // loadId guard anyway, so don't let it keep chewing through a 60MB file.
+    if (this.activeWorker) {
+      void this.activeWorker.terminate();
+      this.activeWorker = null;
+    }
   }
 
   /**
    * Get unique top-level model folders from the manifest.
    * Extracts the first two path segments (e.g., "models/silver") from each model's
-   * originalFilePath. Only includes paths starting with "models/".
+   * originalFilePath. Only includes paths inside a configured model path
+   * (dbt_project.yml `model-paths`, default "models/").
    *
    * @returns Sorted array of folder paths (e.g., ["models/gold", "models/silver"])
    */
@@ -177,14 +258,18 @@ export class ManifestService {
 
     const folders = new Set<string>();
     for (const model of this.cache.models.values()) {
-      const filePath = model.originalFilePath;
-      if (!filePath || !filePath.startsWith('models/')) {
+      const filePath = model.originalFilePath?.replace(/\\/g, '/');
+      if (!filePath) {
+        continue;
+      }
+      const modelPath = this.dbtConfig.modelPaths.find((mp) => filePath.startsWith(mp + '/'));
+      if (!modelPath) {
         continue;
       }
 
-      const parts = filePath.split('/');
-      if (parts.length >= 2) {
-        folders.add(`${parts[0]}/${parts[1]}`);
+      const rest = filePath.slice(modelPath.length + 1).split('/');
+      if (rest.length >= 2) {
+        folders.add(`${modelPath}/${rest[0]}`);
       }
     }
 
@@ -196,14 +281,10 @@ export class ManifestService {
    * File existence and 0-byte checks run on the main thread for fast rejection.
    */
   private parseManifest(projectPath: string): Promise<ManifestData> {
-    const manifestPath = path.join(projectPath, 'target', 'manifest.json');
+    const manifestPath = this.getManifestPath(projectPath);
 
     if (!fs.existsSync(manifestPath)) {
-      console.warn(
-        `[ManifestService] manifest.json not found at ${manifestPath}. ` +
-        'Run "dbt compile" to generate it.'
-      );
-      return Promise.resolve(this.emptyManifest());
+      return Promise.reject(new ManifestMissingError(manifestPath));
     }
 
     // Guard: file exists but is 0 bytes — dbt truncates the file before
@@ -224,9 +305,26 @@ export class ManifestService {
         ? path.resolve(__dirname, '..', '..', 'dist', 'manifestWorker.js')
         : path.join(__dirname, 'manifestWorker.js');
       const worker = new Worker(workerPath);
+      this.activeWorker = worker;
+      let timedOut = false;
+
+      const settle = () => {
+        clearTimeout(timer);
+        if (this.activeWorker === worker) {
+          this.activeWorker = null;
+        }
+      };
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        settle();
+        void worker.terminate();
+        reject(new Error(`Manifest parse timed out after ${this.parseTimeoutMs}ms`));
+      }, this.parseTimeoutMs);
 
       worker.once('message', (msg: ManifestWorkerResult | ManifestWorkerError) => {
-        worker.terminate();
+        settle();
+        void worker.terminate();
         if ('error' in msg) {
           console.error(`[ManifestService] Failed to parse manifest: ${(msg as ManifestWorkerError).error}`);
           reject(new Error(`Failed to parse manifest.json: ${(msg as ManifestWorkerError).error}`));
@@ -236,14 +334,25 @@ export class ManifestService {
       });
 
       worker.once('error', (err) => {
-        worker.terminate();
+        settle();
+        void worker.terminate();
         reject(new Error(`Manifest worker crashed: ${err.message}`));
       });
 
       worker.once('exit', (code) => {
-        // Fires if the worker exits without posting a message (e.g. OOM kill).
-        // If resolve/reject was already called, this is a no-op.
-        reject(new Error(`Manifest worker exited unexpectedly with code ${code}`));
+        // Fires if the worker exits without posting a message (e.g. OOM kill,
+        // or terminated by invalidate()/timeout). If resolve/reject was
+        // already called, this is a no-op.
+        const cancelled = this.activeWorker !== worker;
+        settle();
+        if (timedOut) {
+          return;
+        }
+        reject(new Error(
+          cancelled
+            ? 'Manifest parse cancelled by invalidate()'
+            : `Manifest worker exited unexpectedly with code ${code}`,
+        ));
       });
 
       worker.postMessage(manifestPath);

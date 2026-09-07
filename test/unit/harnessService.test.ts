@@ -46,11 +46,32 @@ describe('HarnessService', () => {
       expect(content).toContain('schemaVersion');
     });
 
-    it('generates Copilot instructions with applyTo glob', () => {
+    it('generates Copilot instructions with applyTo glob covering JSON and YAML', () => {
       const content = service.generateContent('copilot');
-      expect(content).toContain("applyTo: '**/.erd-studio/**/*.json'");
+      expect(content).toContain("applyTo: '**/.erd-studio/**'");
+      expect(content).not.toContain("applyTo: '**/.erd-studio/**/*.json'");
       expect(content).toContain("name: 'ERD Studio'");
       expect(content).toContain('# ERD Studio');
+    });
+
+    it('rewrites the data directory when a custom semanticDir is configured', () => {
+      const custom = new HarnessService('docs/erd');
+      for (const target of HARNESS_TARGETS) {
+        const content = custom.generateContent(target.id);
+        expect(content).not.toContain('.erd-studio/');
+        expect(content).toContain('docs/erd/');
+        // Version marker and skill identifiers are untouched
+        expect(extractHarnessVersion(content)).toBe(HARNESS_VERSION);
+      }
+      expect(custom.generateContent('copilot')).toContain("applyTo: '**/docs/erd/**'");
+      expect(custom.generateContent('claude')).toContain('name: erd-studio');
+    });
+
+    it('leaves content unchanged for the default semanticDir', () => {
+      const explicit = new HarnessService('.erd-studio');
+      for (const target of HARNESS_TARGETS) {
+        expect(explicit.generateContent(target.id)).toBe(service.generateContent(target.id));
+      }
     });
 
     it('generates Gemini styleguide with review rules', () => {
@@ -277,6 +298,21 @@ describe('HarnessService', () => {
 
       const version = extractHarnessVersion(content);
       expect(version).toBe(HARNESS_VERSION);
+    });
+
+    it('writes companion files using the custom semanticDir', () => {
+      const custom = new HarnessService('.erd');
+      const target = HARNESS_TARGETS.find((t) => t.id === 'claude')!;
+      custom.install(tmpDir, target);
+
+      const hook = fs.readFileSync(path.join(tmpDir, '.claude/skills/erd-studio/enforce-skill.sh'), 'utf-8');
+      expect(hook).toContain('*/.erd/*)');
+      expect(hook).not.toContain('*/.erd-studio/*)');
+      // The per-session flag file keeps its name — it is not a data directory reference
+      expect(hook).toContain('/tmp/.erd-studio-skill-');
+
+      const sync = fs.readFileSync(path.join(tmpDir, '.claude/skills/erd-studio/SYNC.md'), 'utf-8');
+      expect(sync).not.toContain('.erd-studio/');
     });
 
     it('writes enforce-skill.sh alongside Claude SKILL.md', () => {
