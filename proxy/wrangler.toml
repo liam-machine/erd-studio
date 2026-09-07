@@ -7,10 +7,18 @@ name = "erd-studio-feedback-proxy"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
-# The public URL the extension's HOSTED_ANALYSIS_ENDPOINT points at. Put a
-# custom domain in front of it if you would rather not ship a workers.dev
-# hostname inside a published extension.
+# The public URL the extension's HOSTED_ANALYSIS_ENDPOINT points at.
+#
+# A workers.dev hostname embeds the account subdomain, which is derived from the
+# account holder's email — and this URL ships inside a published VSIX and is read
+# aloud by the consent modal. The custom domain below avoids putting a personal
+# handle in front of every user. workers.dev stays enabled as a fallback while
+# the DNS record settles; set it false once the custom domain is serving.
 workers_dev = true
+
+[[routes]]
+pattern = "erd-studio.liam-is-an.ai"
+custom_domain = true
 
 # Keeps the counts-only log lines (see `log()` in src/index.js) visible in the
 # dashboard and in `wrangler tail`. No prompt or completion text is ever logged.
