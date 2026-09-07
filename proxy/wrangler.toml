@@ -57,8 +57,14 @@ KILL_SWITCH = "off"
 
 # Upstream chat-completions API, and the only model this Worker will ask for.
 # The client's `model` field is discarded and replaced with this one.
+#
+# Check this id against the provider's live model list before deploying: DeepSeek
+# retired `deepseek-chat` and `deepseek-reasoner` on 2026-07-24, so an id that
+# was correct when this was written now 400s on every request. Because the
+# Worker overrides whatever the client sends, a stale id here breaks the tier
+# for everyone at once, and the extension reports only "unavailable".
 UPSTREAM_URL = "https://api.deepseek.com/chat/completions"
-MODEL = "deepseek-chat"
+MODEL = "deepseek-v4-flash"
 
 # Caps. The extension's prompt is ~2-3 KB and its reply is a few hundred
 # tokens; these are generous but finite.

@@ -136,7 +136,7 @@ export const HOSTED_ANALYSIS_PROVIDER = 'DeepSeek';
  * client, so this is what the request *asks* for, not what it gets. It is
  * therefore **not** a disclosure: {@link HOSTED_ANALYSIS_PROVIDER} is.
  */
-export const HOSTED_ANALYSIS_MODEL = 'deepseek-chat';
+export const HOSTED_ANALYSIS_MODEL = 'deepseek-v4-flash';
 
 /** Base URL of an OpenAI-compatible chat-completions API. String, default ''. */
 export const FEEDBACK_ENDPOINT_SETTING = 'feedback.endpoint';

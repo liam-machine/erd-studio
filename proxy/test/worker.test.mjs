@@ -109,7 +109,7 @@ function upstreamOk() {
     return new Response(
       JSON.stringify({
         id: 'chatcmpl-123',
-        model: 'deepseek-chat',
+        model: 'server-choice',
         usage: { total_tokens: 412 },
         choices: [
           { index: 0, finish_reason: 'stop', message: { role: 'assistant', content: COMPLETION_TEXT } },
@@ -213,8 +213,12 @@ describe('the kill switch', () => {
 
 describe('the request the upstream actually receives', () => {
   it('is rebuilt from an allowlist: the client cannot choose the model or the spend', async () => {
-    await call(makeRequest(), makeEnv());
-    assert.equal(upstreamCall.body.model, 'deepseek-chat');
+    // The env value, not the production default: this asserts that the SERVER's
+    // model wins over the client's `gpt-4o-please`, which is the invariant.
+    // Pinning the real id here would make the test fail the day the provider
+    // retires it — which is how `deepseek-chat` got shipped past its retirement.
+    await call(makeRequest(), makeEnv({ MODEL: 'server-choice' }));
+    assert.equal(upstreamCall.body.model, 'server-choice');
     assert.equal(upstreamCall.body.temperature, 0);
     assert.equal(upstreamCall.body.max_tokens, 900);
     assert.equal(upstreamCall.body.stream, false);

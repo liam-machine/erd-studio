@@ -90,7 +90,7 @@ function disableAiAssist(): void {
  */
 function configureHosted(
   endpoint = 'https://feedback.erd.example',
-  model = 'deepseek-chat',
+  model = 'fixture-model',
   provider = 'DeepSeek',
 ): void {
   setHostedAnalysisTargetForTests({ endpoint, model, provider });
@@ -253,7 +253,7 @@ describe('the hosted last resort', () => {
     enableAiAssist();
     setHostedAnalysisTargetForTests({
       endpoint: 'https://feedback.erd.example',
-      model: 'deepseek-chat',
+      model: 'fixture-model',
       provider: '   ',
     });
     const context = makeContext();
@@ -332,7 +332,7 @@ describe('the hosted last resort', () => {
     // user's, to somebody else's server.
     expect(call[1].headers.Authorization).toBeUndefined();
     const body = JSON.parse(call[1].body);
-    expect(body.model).toBe('deepseek-chat');
+    expect(body.model).toBe('fixture-model');
     expect(body.messages[1].content).toContain('Renamed a model and the edge vanished.');
   });
 });
@@ -694,7 +694,7 @@ describe('consent (runs last: declining is remembered for the session)', () => {
     await analyzeFeedback(context, request, { fetch });
     expect(info).not.toHaveBeenCalled();
 
-    configureHosted('https://switched.erd.example', 'deepseek-chat', 'SomeOtherAI');
+    configureHosted('https://switched.erd.example', 'fixture-model', 'SomeOtherAI');
     await analyzeFeedback(context, request, { fetch });
 
     expect(info).toHaveBeenCalledTimes(1);

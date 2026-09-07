@@ -76,7 +76,7 @@ const DEFAULTS = {
   /** Upstream chat-completions URL. */
   UPSTREAM_URL: 'https://api.deepseek.com/chat/completions',
   /** The only model this Worker will ask for, whatever the client sent. */
-  MODEL: 'deepseek-chat',
+  MODEL: 'deepseek-v4-flash',
   /** Max request body. The extension's prompt is ~2-3 KB. */
   MAX_BODY_BYTES: 24 * 1024,
   /** Max upstream response we will buffer. */
