@@ -2,8 +2,8 @@
  * Typed message bus for extension ↔ webview communication.
  *
  * Messages are categorised by direction:
- *   Extension → Webview:  domainLoaded, domainUpdated, manifestRefreshed, error
- *   Webview → Extension:  ready, addModel, updatePositions, runAutoLayout, …
+ *   Extension → Webview:  domainLoaded, stageData, discrepancyReport, error, …
+ *   Webview → Extension:  ready, addModel, updatePositions, switchStage, …
  *
  * This hook subscribes to incoming messages on mount and provides a typed
  * `send` helper for outgoing messages.
@@ -20,7 +20,6 @@ export type {
   ExtensionMessage,
   WebviewMessage,
   DomainLoadedMessage,
-  DomainUpdatedMessage,
   StageDataMessage,
   DiscrepancyReportMessage,
   ErrorMessage,
@@ -31,11 +30,12 @@ export type {
   UpdateColumnMessage,
   AddRelationshipMessage,
   RemoveModelMessage,
+  RemoveModelsMessage,
   RemoveRelationshipMessage,
-  UpdateViewConfigMessage,
+  RemoveRelationshipsMessage,
+  RemoveAnnotationsMessage,
   AddExistingModelMessage,
   UpdatePositionsMessage,
-  RunAutoLayoutMessage,
   RefreshManifestMessage,
   SwitchStageMessage,
   ToggleDiscrepancyMessage,

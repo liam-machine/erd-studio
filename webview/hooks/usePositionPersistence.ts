@@ -91,22 +91,17 @@ export function usePositionPersistence(): {
       }
     }
 
-    // Send model position delta.
-    if (Object.keys(modelPositions).length > 0) {
-      const message: WebviewMessage = {
-        type: 'updatePositions',
-        payload: { positions: modelPositions },
-      };
-      vscode.postMessage(message);
-    }
-
-    // Send annotation position updates.
-    for (const ann of annotationPositions) {
-      vscode.postMessage({
-        type: 'updateAnnotationPosition',
-        payload: ann,
-      } as WebviewMessage);
-    }
+    // One message for the whole drag — model and annotation positions travel
+    // together so the host applies them in a single WorkspaceEdit (one undo
+    // step for a multi-select drag instead of one per note).
+    const message: WebviewMessage = {
+      type: 'updatePositions',
+      payload: {
+        positions: modelPositions,
+        ...(annotationPositions.length > 0 ? { annotations: annotationPositions } : {}),
+      },
+    };
+    vscode.postMessage(message);
 
     // Optimistic local update with full merge for correct UI rendering.
     const existingPositions = latestDomain.viewConfig.positions ?? {};

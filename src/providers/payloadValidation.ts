@@ -170,3 +170,37 @@ export function validatePositions(value: unknown): string | null {
   }
   return null;
 }
+
+export interface AnnotationPositionPayload {
+  id: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Validate the optional `annotations` list carried by `updatePositions`
+ * (`[{ id, x, y }]`). Returns the validated list (empty when absent) or an
+ * error string. Ids must be non-empty strings; coordinates finite numbers.
+ */
+export function validateAnnotationPositions(value: unknown): AnnotationPositionPayload[] | string {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    return 'Annotation positions must be a list of { id, x, y }.';
+  }
+  const result: AnnotationPositionPayload[] = [];
+  for (const entry of value) {
+    const id = (entry as { id?: unknown } | null)?.id;
+    if (typeof id !== 'string' || !id.trim()) {
+      return 'Annotation position ids must be non-empty strings.';
+    }
+    const error = validatePoint(entry);
+    if (error) {
+      return `Position for annotation "${id}" is invalid: ${error}`;
+    }
+    const point = entry as { x: number; y: number };
+    result.push({ id, x: point.x, y: point.y });
+  }
+  return result;
+}
