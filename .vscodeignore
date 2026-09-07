@@ -41,6 +41,10 @@ media/demo.gif
 dev-preview.html
 .worktrees/**
 *.vsix
+# Scratch files the deploy workflow creates next to package.json
+marketplace.json
+vsce-show.err
+vsce-files.txt
 .DS_Store
 **/.DS_Store
 

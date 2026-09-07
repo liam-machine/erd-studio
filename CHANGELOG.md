@@ -5,6 +5,12 @@ All notable changes to the ERD Studio extension.
 The `Unreleased` heading below is renamed to the released version by the deploy workflow
 (`scripts/release.mjs changelog`). Add user-facing notes under it as part of each PR.
 
+## Unreleased
+
+### Fixed
+
+- **Published package no longer carries deploy scratch files.** v0.6.47 shipped with `marketplace.json` (147 KB of marketplace metadata) and `vsce-show.err` inside the extension, because the deploy job wrote them next to `package.json` before packaging. They now go to the runner's temp directory, `.vscodeignore` excludes them as a second guard, and the deploy job asserts the packaged file list the same way CI does.
+
 ## 0.6.47 — 2026-09-07
 
 ### Added
