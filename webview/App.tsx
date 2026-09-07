@@ -52,6 +52,12 @@ import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
 import { transformDomain } from './lib/graphTransformer';
 import { stageNodeColor } from './lib/stageColors';
+import {
+  isTextEntryElement,
+  isLegendToggleShortcut,
+  altStageShortcut,
+  resolveSingleDeleteTarget,
+} from './lib/keyboardShortcuts';
 import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from './types/graph';
 import type { AnnotationColor } from '../src/types/semantic';
 
@@ -299,6 +305,16 @@ function EditorCanvas() {
     vscode.postMessage({ type: 'requestReload' });
   }, [vscode]);
 
+  // Initial-load failure recovery: clear the error and ask the host for the
+  // domain again (same handshake as first mount).
+  const handleRetryLoad = useCallback(() => {
+    setError(null);
+    vscode.postMessage({ type: 'ready' });
+  }, [setError, vscode]);
+
+  // Host error toast dismissal (canvas stays mounted; see render below)
+  const dismissError = useCallback(() => setError(null), [setError]);
+
   // Unified keyboard shortcut handler (Escape, Delete/Backspace, Ctrl+F)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -310,20 +326,17 @@ function EditorCanvas() {
         return;
       }
 
-      // Shift+? : Toggle legend panel
-      if (e.shiftKey && e.key === '?') {
-        e.preventDefault();
-        setLegendOpen(!legendOpen);
+      // Guard: Don't intercept if user is typing in an input field
+      // (input / textarea / select / contentEditable). Everything below this
+      // point is a canvas shortcut and must not steal printable characters.
+      if (isTextEntryElement(document.activeElement)) {
         return;
       }
 
-      // Guard: Don't intercept if user is typing in an input field
-      const activeElement = document.activeElement;
-      if (
-        activeElement instanceof HTMLInputElement ||
-        activeElement instanceof HTMLTextAreaElement ||
-        activeElement instanceof HTMLSelectElement
-      ) {
+      // Shift+? : Toggle legend panel (after the guard so '?' can be typed)
+      if (isLegendToggleShortcut(e)) {
+        e.preventDefault();
+        setLegendOpen(!legendOpen);
         return;
       }
 
@@ -447,15 +460,12 @@ function EditorCanvas() {
         }
       }
 
-      // Alt+1/2: Switch stage tabs
-      if (e.altKey && (e.key === '1' || e.key === '2')) {
+      // Alt+1/2: Switch stage tabs. Matched on e.code (Digit1/Digit2) because
+      // macOS maps Option+1/2 to '¡'/'™' at the e.key level.
+      const targetStage = altStageShortcut(e);
+      if (targetStage) {
         e.preventDefault();
-        const stageMap: Record<string, import('../src/types/semantic').Stage> = {
-          '1': 'logical',
-          '2': 'physical',
-        };
-        const targetStage = stageMap[e.key];
-        if (targetStage && domain && domain.stage !== targetStage) {
+        if (domain && domain.stage !== targetStage) {
           vscode.postMessage({ type: 'switchStage', payload: { stage: targetStage, requestId: nextStageRequestId() } });
         }
         return;
@@ -523,29 +533,29 @@ function EditorCanvas() {
           return;
         }
 
+        // Single-item delete. Priority order lives in resolveSingleDeleteTarget:
+        // annotation > columns > model > edges. Columns must beat the model so
+        // Delete with column rows selected removes the columns instead of
+        // opening the delete-model confirmation.
+        const deleteTarget = resolveSingleDeleteTarget({
+          selectedAnnotation,
+          selectedNode,
+          modelExists: !!selectedNode && domain.models.some((m) => m.name === selectedNode),
+          selectedColumnCount: selectedColumns.length,
+          detailPanelOpen,
+          selectedEdgeCount: selectedEdges.length,
+        });
+
         // Priority 0: Delete selected annotation (no confirmation — undo exists)
-        if (selectedAnnotation) {
+        if (deleteTarget === 'annotation' && selectedAnnotation) {
           e.preventDefault();
           vscode.postMessage({ type: 'removeAnnotation', payload: { id: selectedAnnotation } });
           selectAnnotation(null);
           return;
         }
 
-        // Priority 1: Remove selected node (with confirmation)
-        if (selectedNode) {
-          const model = domain.models.find((m) => m.name === selectedNode);
-          if (model) {
-            e.preventDefault();
-            if (!detailPanelOpen) {
-              setDetailPanelOpen(true);
-            }
-            setPendingDeleteConfirmation(true);
-            return;
-          }
-        }
-
-        // Priority 1.5: Delete selected columns (immediate)
-        if (selectedColumns.length > 0 && detailPanelOpen && selectedNode) {
+        // Priority 1: Delete selected columns (immediate)
+        if (deleteTarget === 'columns' && selectedNode) {
           e.preventDefault();
           for (const colName of selectedColumns) {
             vscode.postMessage({
@@ -557,8 +567,18 @@ function EditorCanvas() {
           return;
         }
 
-        // Priority 2: Delete selected edges (no confirmation, immediate)
-        if (selectedEdges.length > 0) {
+        // Priority 2: Remove selected node (with confirmation)
+        if (deleteTarget === 'model') {
+          e.preventDefault();
+          if (!detailPanelOpen) {
+            setDetailPanelOpen(true);
+          }
+          setPendingDeleteConfirmation(true);
+          return;
+        }
+
+        // Priority 3: Delete selected edges (no confirmation, immediate)
+        if (deleteTarget === 'edges') {
           e.preventDefault();
 
           for (const edgeId of selectedEdges) {
@@ -955,11 +975,22 @@ function EditorCanvas() {
   }, [closeContextMenu, onPaneClick]);
 
   // --- Error state -----------------------------------------------------------
+  // Only an error with no domain to fall back on (initial load failure) takes
+  // over the whole editor. Once a domain has loaded, host errors are surfaced
+  // as a dismissable toast over the live canvas (see below) and are cleared
+  // automatically by the next domainLoaded / domainUpdated / stageData.
 
-  if (error) {
+  if (error && !domain) {
     return (
-      <div className="editor-message">
+      <div className="editor-message editor-message--error" role="alert">
         <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+        <button
+          type="button"
+          className="editor-message__retry"
+          onClick={handleRetryLoad}
+        >
+          Retry
+        </button>
         <button
           type="button"
           className="editor-message__button"
@@ -1058,6 +1089,12 @@ function EditorCanvas() {
 
       {toastMessage && (
         <Toast message={toastMessage} variant="warning" onDismiss={dismissToast} />
+      )}
+
+      {/* Host error surfaced over the live canvas. Sticky until dismissed or the
+          next domain payload clears it (setDomain resets error). */}
+      {error && (
+        <Toast message={error} variant="error" autoDismissMs={null} onDismiss={dismissError} />
       )}
 
       {/* Drag line for column relationship creation */}
