@@ -12,7 +12,7 @@ import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
-import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION } from './services/harnessService';
+import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
@@ -32,25 +32,146 @@ import { submitBugReport } from './services/feedbackService';
 const LAST_ACTIVATED_VERSION_KEY = 'lastActivatedVersion';
 
 /**
- * Find the dbt project root by searching workspace folders for dbt_project.yml.
- * Returns the first workspace folder containing the file.
+ * workspaceState key set once the harness install QuickPick has been offered
+ * for a workspace with no harness files, so it is not shown on every activation.
+ */
+const HARNESS_INSTALL_PROMPTED_KEY = 'erdStudio.harnessInstallPrompted';
+
+/** Directories never descended into when searching for a nested dbt project. */
+const DBT_SEARCH_SKIP_DIRS = new Set(['node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv']);
+
+/** Maximum directory depth (below a workspace folder) searched for dbt_project.yml. */
+const DBT_SEARCH_MAX_DEPTH = 3;
+
+function hasDbtProjectFile(dir: string): boolean {
+  try {
+    return fs.statSync(path.join(dir, 'dbt_project.yml')).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the dbt project root from a list of workspace folder paths and the
+ * `erdStudio.projectPath` setting. Pure (no vscode access) so it is unit-testable.
+ *
+ * Resolution order:
+ *   1. `projectPath` setting — absolute, or relative to each workspace folder —
+ *      when it contains dbt_project.yml.
+ *   2. A workspace folder whose root contains dbt_project.yml.
+ *   3. A depth-limited breadth-first search below each workspace folder
+ *      (skipping node_modules, dbt_packages, .git, target, .venv), returning
+ *      the shallowest match. Matches the recursive `workspaceContains`
+ *      activation event so activation never lands on "no project found"
+ *      for a monorepo with dbt in a subfolder.
+ */
+export function resolveDbtProjectRoot(
+  folderPaths: readonly string[],
+  projectPathSetting: string,
+): string | undefined {
+  const configured = projectPathSetting.trim();
+  if (configured) {
+    if (path.isAbsolute(configured)) {
+      if (hasDbtProjectFile(configured)) { return configured; }
+    } else {
+      for (const folder of folderPaths) {
+        const candidate = path.resolve(folder, configured);
+        if (hasDbtProjectFile(candidate)) { return candidate; }
+      }
+    }
+    console.warn(`ERD Studio: erdStudio.projectPath "${configured}" does not contain dbt_project.yml — falling back to auto-detection.`);
+  }
+
+  for (const folder of folderPaths) {
+    if (hasDbtProjectFile(folder)) { return folder; }
+  }
+
+  // Breadth-first so the shallowest match wins.
+  let frontier = [...folderPaths];
+  for (let depth = 1; depth <= DBT_SEARCH_MAX_DEPTH && frontier.length > 0; depth++) {
+    const next: string[] = [];
+    for (const dir of frontier) {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        if (!entry.isDirectory() || DBT_SEARCH_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) {
+          continue;
+        }
+        const child = path.join(dir, entry.name);
+        if (hasDbtProjectFile(child)) { return child; }
+        next.push(child);
+      }
+    }
+    frontier = next;
+  }
+
+  return undefined;
+}
+
+/**
+ * Find the dbt project root: honours `erdStudio.projectPath`, then workspace
+ * folder roots, then a shallow recursive search. See `resolveDbtProjectRoot`.
  */
 function findDbtProjectRoot(): string | undefined {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders || workspaceFolders.length === 0) {
     return undefined;
   }
+  return resolveDbtProjectRoot(
+    workspaceFolders.map(f => f.uri.fsPath),
+    getErdStudioSetting('projectPath', ''),
+  );
+}
 
-  for (const folder of workspaceFolders) {
-    const projectPath = folder.uri.fsPath;
-    const dbtProjectFile = path.join(projectPath, 'dbt_project.yml');
+const NO_PROJECT_MESSAGE =
+  'ERD Studio: No dbt project found. Open a folder containing dbt_project.yml, ' +
+  'or set erdStudio.projectPath to the dbt project folder.';
 
-    if (fs.existsSync(dbtProjectFile)) {
-      return projectPath;
+/**
+ * Register every contributed command (and its legacy dbtSemantic.* alias)
+ * with a handler that explains why ERD Studio is inactive, plus a stub
+ * custom editor for domain files. Used when no dbt project could be found so
+ * the palette, sidebar welcome buttons and domain JSON files show a helpful
+ * message instead of "command not found" / a blank editor error.
+ */
+function registerFallbackCommands(context: vscode.ExtensionContext): void {
+  const showNoProject = async (): Promise<void> => {
+    const choice = await vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Settings');
+    if (choice === 'Open Settings') {
+      void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
     }
+  };
+
+  const contributed = (context.extension.packageJSON as {
+    contributes?: { commands?: Array<{ command: string }> };
+  }).contributes?.commands ?? [];
+
+  for (const { command } of contributed) {
+    if (!command.startsWith('erdStudio.')) { continue; }
+    context.subscriptions.push(
+      vscode.commands.registerCommand(command, showNoProject),
+      vscode.commands.registerCommand(command.replace(/^erdStudio\./, 'dbtSemantic.'), showNoProject),
+    );
   }
 
-  return undefined;
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, {
+      resolveCustomTextEditor(_document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+        panel.webview.options = { enableScripts: false };
+        panel.webview.html =
+          '<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);padding:1.5em">' +
+          '<h2>ERD Studio is inactive</h2>' +
+          `<p>${NO_PROJECT_MESSAGE}</p>` +
+          '<p>Reload the window after fixing the project location.</p>' +
+          '</body></html>';
+      },
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -196,8 +317,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
   if (previousVersion && previousVersion !== currentVersion && hasOpenDomainCanvas()) {
-    await saveAllAndReload(`ERD Studio updated to v${currentVersion}`);
-    return;
+    // If the user cancels the reload (unsaved files), keep activating so
+    // commands and the custom editor are still registered for this host.
+    if (await saveAllAndReload(`ERD Studio updated to v${currentVersion}`)) {
+      return;
+    }
   }
 
   // "Report a Bug" is registered before any early return so it is always
@@ -217,10 +341,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const workspaceRoot = findDbtProjectRoot();
   if (!workspaceRoot) {
-    void vscode.window.showWarningMessage(
-      'ERD Studio: No dbt project found. ' +
-        'Open a folder containing dbt_project.yml to activate.',
-    );
+    // Register stub commands / editor so palette entries and the sidebar
+    // welcome buttons explain the problem instead of "command not found".
+    registerFallbackCommands(context);
+    void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Settings').then(choice => {
+      if (choice === 'Open Settings') {
+        void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
+      }
+    });
     return;
   }
 
@@ -231,11 +359,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // v0.6.44 moved the default data directory from erd-studio/ to .erd-studio/.
   // Rename legacy folders in place before any service reads from disk so
   // existing projects keep working without intervention.
-  if (migrateLegacySemanticDir(workspaceRoot, semanticDir)) {
-    void vscode.window.showInformationMessage(
-      'ERD Studio: your erd-studio/ folder was renamed to .erd-studio/ (the new default location). ' +
-        'Commit the rename so collaborators stay in sync.',
-    );
+  try {
+    if (migrateLegacySemanticDir(workspaceRoot, semanticDir)) {
+      void vscode.window.showInformationMessage(
+        'ERD Studio: your erd-studio/ folder was renamed to .erd-studio/ (the new default location). ' +
+          'Commit the rename so collaborators stay in sync.',
+      );
+    }
+  } catch (err) {
+    // Never let a filesystem oddity (permissions, dangling symlink, …) in a
+    // legacy folder abort activation — the rest of the extension still works.
+    console.error('[ERD Studio] Legacy erd-studio/ migration failed:', err);
   }
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
@@ -306,7 +440,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   selectorsService.scheduleRegenerate();
 
   // Check for v4 → v5 migration (non-blocking)
-  const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService);
+  const migrationService = new MigrationService(workspaceRoot, layerService, logicalModelService, semanticDir);
   if (migrationService.needsMigration()) {
     void vscode.window.showInformationMessage(
       'ERD Studio has a new model storage format that enables cross-domain model sharing. Migrate domain files now?',
@@ -763,6 +897,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               void vscode.window.showInformationMessage(
                 `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} model reference(s) to ${relPath}.`,
               );
+            } else if (result.status === 'noop') {
+              void vscode.window.showInformationMessage(
+                'No domains with models found — selectors.yml was not created.',
+              );
             }
             // For 'skipped': the onSkipped hook has already shown the
             // out-of-sync notification + status bar. No success toast.
@@ -1156,7 +1294,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (exists && isStale) {
             description = '$(warning) outdated — update available';
           } else if (exists) {
-            description = '$(check) installed (v' + HARNESS_VERSION + ')';
+            // A file without our version marker was not written by ERD Studio.
+            let managed = false;
+            try {
+              managed = extractHarnessVersion(
+                fs.readFileSync(path.join(workspaceRoot, target.relativePath), 'utf-8'),
+              ) !== null;
+            } catch {
+              // unreadable — treat as unmanaged
+            }
+            description = managed
+              ? '$(check) installed (v' + HARNESS_VERSION + ')'
+              : target.id === 'codex'
+                ? '$(info) existing AGENTS.md — ERD Studio section will be appended'
+                : '$(warning) existing file not managed by ERD Studio — will be replaced';
           }
           return {
             label: target.label,
@@ -1197,7 +1348,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ),
   );
 
-  // AI coding harness — auto-update stale files, prompt on fresh install
+  // AI coding harness — prompt to update stale files; offer install once per
+  // workspace when none are present. Never overwrite anything silently:
+  // harness files (AGENTS.md in particular) can hold user content.
   {
     const harnessService = new HarnessService();
     const existing = harnessService.detectExisting(workspaceRoot);
@@ -1205,16 +1358,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const staleTargets = harnessService.detectStale(workspaceRoot);
 
     if (staleTargets.length > 0) {
-      // Force-update all stale harness files silently
-      for (const target of staleTargets) {
-        harnessService.install(workspaceRoot, target, true);
-      }
       const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
-      void vscode.window.showInformationMessage(
-        `ERD Studio: Updated ${staleTargets.length} AI coding harness file(s) to v${HARNESS_VERSION} (${names}).`,
-      );
-    } else if (installedCount === 0) {
-      // No harnesses installed — prompt user to choose
+      void vscode.window.showWarningMessage(
+        `ERD Studio: ${staleTargets.length} AI coding harness file(s) outdated (${names}). Update to v${HARNESS_VERSION}?`,
+        'Update All',
+        'Choose…',
+        'Dismiss',
+      ).then(choice => {
+        if (choice === 'Update All') {
+          const results = staleTargets.map(target => harnessService.install(workspaceRoot, target, true));
+          const failed = results.filter(r => !r.success);
+          if (failed.length > 0) {
+            const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
+            void vscode.window.showErrorMessage(
+              `ERD Studio: ${failed.length} harness file(s) could not be updated. Errors: ${errors}`,
+            );
+          } else {
+            void vscode.window.showInformationMessage(
+              `ERD Studio: Updated ${results.length} AI coding harness file(s) to v${HARNESS_VERSION} (${names}).`,
+            );
+          }
+        } else if (choice === 'Choose…') {
+          // QuickPick pre-selects the outdated targets
+          void vscode.commands.executeCommand('erdStudio.installCodingHarness');
+        }
+      });
+    } else if (installedCount === 0 && !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)) {
+      // No harnesses installed — offer the QuickPick once per workspace, not
+      // on every window open. The command stays available in the palette.
+      void context.workspaceState.update(HARNESS_INSTALL_PROMPTED_KEY, true);
       void vscode.commands.executeCommand('erdStudio.installCodingHarness');
     }
   }

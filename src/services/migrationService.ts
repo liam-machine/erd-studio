@@ -76,6 +76,29 @@ const LEGACY_SEMANTIC_DIR = 'erd-studio';
 /** Files/dirs whose presence identifies a folder as an ERD Studio data dir. */
 const ERD_DIR_MARKERS = ['layers.json', 'logical-models', 'templates'];
 
+/** lstat that never throws — symlinks are reported as-is (not followed). */
+function safeLstat(p: string): fs.Stats | null {
+  try {
+    return fs.lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/** True when the file parses as JSON with a `schemaVersion` field (a domain file). */
+function looksLikeDomainFile(filePath: string): boolean {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
+    return (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as { schemaVersion?: unknown }).schemaVersion === 'number'
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Returns the absolute path of a legacy erd-studio/ data directory that
  * should be renamed to .erd-studio/, or null when no migration applies.
@@ -84,8 +107,13 @@ const ERD_DIR_MARKERS = ['layers.json', 'logical-models', 'templates'];
  *   - the effective semanticDir is the default '.erd-studio' (a custom
  *     setting means the user manages the location themselves)
  *   - '.erd-studio' does not already exist
- *   - 'erd-studio' exists, is a directory, and looks like an ERD data dir
- *     (has a known marker, or a layer subdirectory containing .json files)
+ *   - 'erd-studio' exists, is a real directory (not a symlink), and looks
+ *     like an ERD data dir: has a known marker, or a layer subdirectory
+ *     containing a domain-shaped JSON file (one with a `schemaVersion`)
+ *
+ * Symlinked entries are never followed and per-entry filesystem errors
+ * (dangling links, permissions) are treated as "not a layer dir" so this
+ * never throws out of activation.
  */
 export function findLegacySemanticDir(
   workspaceRoot: string,
@@ -95,17 +123,35 @@ export function findLegacySemanticDir(
   if (fs.existsSync(path.join(workspaceRoot, semanticDir))) return null;
 
   const legacy = path.join(workspaceRoot, LEGACY_SEMANTIC_DIR);
-  if (!fs.existsSync(legacy) || !fs.statSync(legacy).isDirectory()) return null;
+  const legacyStat = safeLstat(legacy);
+  if (!legacyStat || !legacyStat.isDirectory()) return null;
 
   const hasMarker = ERD_DIR_MARKERS.some((m) => fs.existsSync(path.join(legacy, m)));
   if (hasMarker) return legacy;
 
-  const hasLayerWithDomains = fs.readdirSync(legacy).some((entry) => {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(legacy);
+  } catch {
+    return null;
+  }
+
+  const hasLayerWithDomains = entries.some((entry) => {
     const sub = path.join(legacy, entry);
-    return (
-      fs.statSync(sub).isDirectory() &&
-      fs.readdirSync(sub).some((f) => f.endsWith('.json'))
-    );
+    const subStat = safeLstat(sub);
+    if (!subStat || !subStat.isDirectory()) return false;
+    let files: string[];
+    try {
+      files = fs.readdirSync(sub);
+    } catch {
+      return false;
+    }
+    return files.some((f) => {
+      if (!f.endsWith('.json')) return false;
+      const filePath = path.join(sub, f);
+      const fileStat = safeLstat(filePath);
+      return !!fileStat && fileStat.isFile() && looksLikeDomainFile(filePath);
+    });
   });
   return hasLayerWithDomains ? legacy : null;
 }
@@ -133,6 +179,8 @@ export class MigrationService {
     private readonly workspaceRoot: string,
     private readonly layerService: LayerService,
     private readonly logicalModelService: LogicalModelService,
+    /** Semantic directory relative to workspaceRoot (the `erdStudio.semanticDir` setting). */
+    private readonly semanticDir: string = DEFAULT_SEMANTIC_DIR,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -148,7 +196,7 @@ export class MigrationService {
    * Uses the shared {@link detectDomainFormat} so this agrees with DomainService.
    */
   findV4Domains(): string[] {
-    const semanticDir = path.join(this.workspaceRoot, '.erd-studio');
+    const semanticDir = path.join(this.workspaceRoot, this.semanticDir);
     if (!fs.existsSync(semanticDir)) {
       return [];
     }

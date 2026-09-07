@@ -2,7 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion } from '../../src/services/harnessService';
+import {
+  HarnessService,
+  HARNESS_TARGETS,
+  HARNESS_VERSION,
+  CODEX_REGION_BEGIN,
+  CODEX_REGION_END,
+  extractHarnessVersion,
+  findCodexRegion,
+  mergeCodexContent,
+} from '../../src/services/harnessService';
 
 describe('HarnessService', () => {
   let service: HarnessService;
@@ -55,6 +64,17 @@ describe('HarnessService', () => {
       const content = service.generateContent('codex');
       expect(content).toContain('## ERD Studio Domain Files');
       expect(content).toContain('# ERD Studio');
+    });
+
+    it('wraps the Codex section in BEGIN/END region markers with the version marker inside', () => {
+      const content = service.generateContent('codex');
+      const begin = content.indexOf(CODEX_REGION_BEGIN);
+      const end = content.indexOf(CODEX_REGION_END);
+      const version = content.indexOf(`<!-- erd-studio-harness: ${HARNESS_VERSION} -->`);
+      expect(begin).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(begin);
+      expect(version).toBeGreaterThan(begin);
+      expect(version).toBeLessThan(end);
     });
 
     it('all formats include schema content', () => {
@@ -148,6 +168,73 @@ describe('HarnessService', () => {
       const content = fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf-8');
       const matches = content.match(/## ERD Studio Domain Files/g);
       expect(matches).toHaveLength(1);
+    });
+
+    it('preserves user content in AGENTS.md when updating with overwrite=true', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'codex')!;
+      const agentsPath = path.join(tmpDir, 'AGENTS.md');
+      fs.writeFileSync(agentsPath, '# Team rules\n\nNEVER touch prod.\n');
+      service.install(tmpDir, target); // first install appends
+
+      // Simulate a HARNESS_VERSION bump by rewriting the embedded marker,
+      // and add user content *after* the ERD section too.
+      const installed = fs.readFileSync(agentsPath, 'utf-8')
+        .replace(`<!-- erd-studio-harness: ${HARNESS_VERSION} -->`, '<!-- erd-studio-harness: 1 -->')
+        + '\n## Deployment\n\nUse pnpm.\n';
+      fs.writeFileSync(agentsPath, installed);
+      expect(service.detectStale(tmpDir).map(t => t.id)).toEqual(['codex']);
+
+      const result = service.install(tmpDir, target, true);
+      expect(result.success).toBe(true);
+
+      const content = fs.readFileSync(agentsPath, 'utf-8');
+      expect(content).toContain('# Team rules');
+      expect(content).toContain('NEVER touch prod.');
+      expect(content).toContain('## Deployment');
+      expect(content).toContain('Use pnpm.');
+      expect(content).toContain(`<!-- erd-studio-harness: ${HARNESS_VERSION} -->`);
+      expect(content).not.toContain('<!-- erd-studio-harness: 1 -->');
+      expect(content.match(/## ERD Studio Domain Files/g)).toHaveLength(1);
+      expect(content.match(new RegExp(CODEX_REGION_BEGIN, 'g'))).toHaveLength(1);
+      // User content ordering is preserved: rules before the section, deployment after.
+      expect(content.indexOf('# Team rules')).toBeLessThan(content.indexOf(CODEX_REGION_BEGIN));
+      expect(content.indexOf(CODEX_REGION_END)).toBeLessThan(content.indexOf('## Deployment'));
+      expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('upgrades a pre-region (v15-style) Codex section in place without duplicating it', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'codex')!;
+      const agentsPath = path.join(tmpDir, 'AGENTS.md');
+      fs.writeFileSync(
+        agentsPath,
+        '# Team rules\n\nUse pnpm.\n\n## ERD Studio Domain Files\n\nold schema text\n\n<!-- erd-studio-harness: 15 -->\n\n## After\n\nkeep me\n',
+      );
+      expect(service.detectStale(tmpDir).map(t => t.id)).toEqual(['codex']);
+
+      const result = service.install(tmpDir, target, true);
+      expect(result.success).toBe(true);
+
+      const content = fs.readFileSync(agentsPath, 'utf-8');
+      expect(content).toContain('Use pnpm.');
+      expect(content).toContain('keep me');
+      expect(content).not.toContain('old schema text');
+      expect(content.match(/## ERD Studio Domain Files/g)).toHaveLength(1);
+      expect(content).toContain(CODEX_REGION_BEGIN);
+      expect(content).toContain(`<!-- erd-studio-harness: ${HARNESS_VERSION} -->`);
+      expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('appends (never replaces) when overwrite=true and AGENTS.md has no ERD section', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'codex')!;
+      const agentsPath = path.join(tmpDir, 'AGENTS.md');
+      fs.writeFileSync(agentsPath, '# Hand-written\n');
+
+      const result = service.install(tmpDir, target, true);
+      expect(result.success).toBe(true);
+
+      const content = fs.readFileSync(agentsPath, 'utf-8');
+      expect(content.startsWith('# Hand-written\n')).toBe(true);
+      expect(content).toContain(CODEX_REGION_BEGIN);
     });
 
     it('refuses to overwrite non-Codex files by default', () => {
@@ -383,6 +470,36 @@ describe('HarnessService', () => {
     });
   });
 
+  describe('findCodexRegion / mergeCodexContent', () => {
+    it('finds a BEGIN/END delimited region', () => {
+      const content = `before\n${CODEX_REGION_BEGIN}\nbody\n${CODEX_REGION_END}\nafter\n`;
+      const region = findCodexRegion(content)!;
+      expect(content.slice(region.start, region.end)).toBe(`${CODEX_REGION_BEGIN}\nbody\n${CODEX_REGION_END}`);
+    });
+
+    it('falls back to heading…version-marker for pre-region installs', () => {
+      const content = 'before\n## ERD Studio Domain Files\nbody\n<!-- erd-studio-harness: 3 -->\nafter\n';
+      const region = findCodexRegion(content)!;
+      expect(content.slice(region.start, region.end)).toBe('## ERD Studio Domain Files\nbody\n<!-- erd-studio-harness: 3 -->');
+    });
+
+    it('returns null when no managed region exists', () => {
+      expect(findCodexRegion('# nothing here\n')).toBeNull();
+      expect(findCodexRegion('## ERD Studio Domain Files\nno marker\n')).toBeNull();
+    });
+
+    it('mergeCodexContent replaces only the managed region', () => {
+      const existing = `A\n${CODEX_REGION_BEGIN}\nold\n${CODEX_REGION_END}\nB\n`;
+      const merged = mergeCodexContent(existing, `\n${CODEX_REGION_BEGIN}\nnew\n${CODEX_REGION_END}\n`);
+      expect(merged).toBe(`A\n${CODEX_REGION_BEGIN}\nnew\n${CODEX_REGION_END}\nB\n`);
+    });
+
+    it('mergeCodexContent appends when no managed region exists', () => {
+      const merged = mergeCodexContent('A\n', `\n${CODEX_REGION_BEGIN}\nnew\n${CODEX_REGION_END}\n`);
+      expect(merged).toBe(`A\n\n${CODEX_REGION_BEGIN}\nnew\n${CODEX_REGION_END}\n`);
+    });
+  });
+
   describe('extractHarnessVersion', () => {
     it('extracts version from marker', () => {
       expect(extractHarnessVersion('<!-- erd-studio-harness: 1 -->\nsome content')).toBe('1');
@@ -405,15 +522,23 @@ describe('HarnessService', () => {
       expect(service.detectStale(tmpDir)).toEqual([]);
     });
 
-    it('detects harness with missing version marker as stale', () => {
+    it('treats a file with no version marker as unmanaged (never stale)', () => {
       const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
       const filePath = path.join(tmpDir, target.relativePath);
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, '# Old content with no version marker\n');
 
-      const stale = service.detectStale(tmpDir);
-      expect(stale).toHaveLength(1);
-      expect(stale[0].id).toBe('claude');
+      expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('never flags a hand-written .gemini/styleguide.md as stale', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'gemini')!;
+      const filePath = path.join(tmpDir, target.relativePath);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, '# Our own Gemini review rules\n\nBe nice.\n');
+
+      expect(service.detectStale(tmpDir)).toEqual([]);
+      expect(service.detectExisting(tmpDir).get('gemini')).toBe(true);
     });
 
     it('detects harness with old version as stale', () => {
@@ -436,7 +561,7 @@ describe('HarnessService', () => {
 
     it('detects stale Codex when ERD Studio section exists with old version', () => {
       const agentsPath = path.join(tmpDir, 'AGENTS.md');
-      fs.writeFileSync(agentsPath, '<!-- erd-studio-harness: 0 -->\n\n## ERD Studio Domain Files\nold content\n');
+      fs.writeFileSync(agentsPath, '## ERD Studio Domain Files\nold content\n\n<!-- erd-studio-harness: 0 -->\n');
 
       const stale = service.detectStale(tmpDir);
       expect(stale).toHaveLength(1);

@@ -38,8 +38,10 @@ export function hasOpenDomainCanvas(): boolean {
  *
  * @param reason — short user-facing phrase shown in the status bar before the
  *   reload, e.g. "ERD Studio updated to v0.6.33".
+ * @returns true when a reload was requested; false when the user cancelled
+ *   because files could not be saved (the caller should carry on as normal).
  */
-export async function saveAllAndReload(reason: string): Promise<void> {
+export async function saveAllAndReload(reason: string): Promise<boolean> {
   void vscode.window.setStatusBarMessage(
     `$(sync~spin) ${reason} — saving your work and reloading…`,
     5000,
@@ -60,10 +62,11 @@ export async function saveAllAndReload(reason: string): Promise<void> {
       'Reload Anyway',
       'Cancel',
     );
-    if (choice !== 'Reload Anyway') return;
+    if (choice !== 'Reload Anyway') return false;
   }
 
   // Brief delay so the status bar message is visible before the reload kicks in.
   await new Promise(resolve => setTimeout(resolve, 600));
   await vscode.commands.executeCommand('workbench.action.reloadWindow');
+  return true;
 }

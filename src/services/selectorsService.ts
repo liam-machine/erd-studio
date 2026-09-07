@@ -60,7 +60,9 @@ export interface SkipInfo {
 
 export type RegenerateResult =
   | { status: 'written'; selectorsWritten: number; modelsReferenced: number; filePath: string }
-  | { status: 'skipped'; reason: SkipReason; filePath: string; detail: string };
+  | { status: 'skipped'; reason: SkipReason; filePath: string; detail: string }
+  /** Nothing to write and no file on disk — the workspace was left untouched. */
+  | { status: 'noop'; filePath: string };
 
 export interface SelectorsServiceHooks {
   /**
@@ -127,6 +129,10 @@ export class SelectorsService {
    *   - `'skipped'`: file was NOT touched. Includes reason and detail. The
    *     host should surface a notification telling the user what to fix and
    *     offering a re-sync action.
+   *   - `'noop'`: there are no domains with models AND `selectors.yml` does
+   *     not exist. Nothing is written so merely opening a dbt repo with the
+   *     extension installed never dirties its git status. (An existing file
+   *     is still regenerated so stale `domain_*` selectors get removed.)
    *
    * Skip conditions (any of these):
    *   - `selectors.yml` is open in an editor with unsaved edits
@@ -188,6 +194,11 @@ export class SelectorsService {
         description: `All models in the ${summary.domain} domain (${summary.layer} layer). Managed by ERD Studio.`,
         definition: { union: members },
       });
+    }
+
+    // Nothing to write and nothing on disk: leave the workspace untouched.
+    if (generated.length === 0 && !fs.existsSync(filePath)) {
+      return { status: 'noop', filePath };
     }
 
     const loaded = this.loadDocAndExtractUserItems(filePath);
