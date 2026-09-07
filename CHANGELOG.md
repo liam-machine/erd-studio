@@ -5,7 +5,7 @@ All notable changes to the ERD Studio extension.
 The `Unreleased` heading below is renamed to the released version by the deploy workflow
 (`scripts/release.mjs changelog`). Add user-facing notes under it as part of each PR.
 
-## Unreleased
+## 0.6.48 — 2026-09-07
 
 ### Fixed
 
