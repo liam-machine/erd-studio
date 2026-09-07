@@ -110,7 +110,7 @@ export const FEEDBACK_HOSTED_FALLBACK_SETTING = 'feedback.hostedFallback';
  * `wrangler dev`. The proxy holds the API key, so no key is ever sent with a
  * hosted request.
  */
-export const HOSTED_ANALYSIS_ENDPOINT = '';
+export const HOSTED_ANALYSIS_ENDPOINT = 'https://erd-studio-feedback-proxy.liam-alex93.workers.dev';
 
 /**
  * The third party that actually receives the text, named as a user should see
@@ -128,7 +128,7 @@ export const HOSTED_ANALYSIS_ENDPOINT = '';
  * endpoint shipped without a named provider simply resolves to `'none'` rather
  * than sending text under a disclosure that omits the recipient.
  */
-export const HOSTED_ANALYSIS_PROVIDER = '';
+export const HOSTED_ANALYSIS_PROVIDER = 'DeepSeek';
 
 /**
  * Model id sent to {@link HOSTED_ANALYSIS_ENDPOINT}. Advisory only — the proxy

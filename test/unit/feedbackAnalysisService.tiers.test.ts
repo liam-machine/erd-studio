@@ -137,6 +137,11 @@ beforeEach(() => {
   vscode._resetMockConfiguration();
   vscode._resetMockLanguageModels();
   clearKnownIssueCache();
+  // Start every test with NO hosted tier, whatever the shipped build points at.
+  // Falling through to the real constant would make these assertions change
+  // meaning the day the service goes live — which is exactly what happened.
+  // A test that wants the tier calls configureHosted().
+  setHostedAnalysisTargetForTests({ endpoint: '', model: '', provider: '' });
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -208,12 +213,26 @@ describe('resolveAnalysisTier', () => {
 });
 
 describe('the hosted last resort', () => {
-  it('ships inert: with no endpoint compiled in, the tier does not exist', async () => {
-    // The constant is empty in every published build until the service is
-    // live. Nothing about the extension may change while it is.
-    expect(HOSTED_ANALYSIS_ENDPOINT).toBe('');
+  it('does not exist when the build compiled in no endpoint', async () => {
+    // The behaviour, not the shipped value: an empty endpoint means no tier, so
+    // a build that has not deployed a proxy yet behaves exactly as it did with
+    // three tiers. `beforeEach` has already cleared the target.
     enableAiAssist();
     expect(await resolveAnalysisTier(makeContext())).toBe('none');
+  });
+
+  it('ships an endpoint and a provider together, or neither', () => {
+    // The disclosure invariant, checked against what this build actually ships:
+    // an endpoint with no named recipient cannot be consented to honestly, and
+    // resolveAnalysisTier() would silently drop to 'none' rather than send.
+    const endpoint = HOSTED_ANALYSIS_ENDPOINT.trim();
+    const provider = HOSTED_ANALYSIS_PROVIDER.trim();
+    expect(Boolean(endpoint)).toBe(Boolean(provider));
+    if (endpoint) {
+      // Only https reaches a real user; loopback is for `wrangler dev`.
+      expect(endpoint.startsWith('https://')).toBe(true);
+      expect(endpoint.endsWith('/chat/completions')).toBe(false);
+    }
   });
 
   it('is used when the user has neither a language model nor an endpoint', async () => {
@@ -239,7 +258,7 @@ describe('the hosted last resort', () => {
     });
     const context = makeContext();
 
-    expect(HOSTED_ANALYSIS_PROVIDER).toBe('');
+    // (What this build itself ships is pinned separately, above.)
     expect(await resolveAnalysisTier(context)).toBe('none');
     expect(await analysisProviderLabel(context)).toBeNull();
   });

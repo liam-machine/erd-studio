@@ -21,6 +21,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE } from '../../src/providers/SemanticEditorProvider';
+import { setHostedAnalysisTargetForTests } from '../../src/services/feedbackAnalysisService';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
@@ -125,6 +126,10 @@ beforeEach(() => {
   vscode._resetMockGithubSession();
   vscode._resetMockLanguageModels();
   recordPending.mockClear();
+  // No hosted tier unless a test asks for one, whatever endpoint this build
+  // ships. These assertions are about the payload the provider sends, not about
+  // whether a proxy happens to be deployed.
+  setHostedAnalysisTargetForTests({ endpoint: '', model: '', provider: '' });
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -132,6 +137,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  setHostedAnalysisTargetForTests(null);
   // One test stubs the global fetch so the duplicate check never reaches the
   // network; unstub here so a failure inside it cannot leak into the next file.
   vi.unstubAllGlobals();

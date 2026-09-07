@@ -26,7 +26,7 @@ enabled = true
 # Create it with `wrangler kv namespace create ANALYSIS_KV` and paste the id.
 [[kv_namespaces]]
 binding = "ANALYSIS_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "1bb1c6e9232342a3a68997f27f633563"
 
 # ---------------------------------------------------------------------------
 # Variables
@@ -82,6 +82,9 @@ DAILY_BUDGET = "450"
 # Upstream timeout, in ms. The extension gives up at 20 s, so finish first.
 UPSTREAM_TIMEOUT_MS = "18000"
 
-# Salt for the stored IP hash. Set it to any random string (or move it to a
-# secret) so the rate-limit keys are not a plain hash of an IP address.
-IP_HASH_SALT = "change-me"
+# Salt for the stored IP hash — deliberately NOT here. This repo is public, and
+# a published salt lets anyone recompute the hash for a given IP, which is the
+# whole point of salting it. It is set as a secret instead:
+#   npx wrangler secret put IP_HASH_SALT
+# src/index.js falls back to an unsalted hash if it is missing, so the Worker
+# still runs, just with weaker key privacy.
