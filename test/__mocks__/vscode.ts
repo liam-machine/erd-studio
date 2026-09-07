@@ -4,13 +4,54 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+// ---------------------------------------------------------------------------
+// Configuration (workspace.getConfiguration)
+// ---------------------------------------------------------------------------
+
+/** Per-scope values of one setting, mirroring `WorkspaceConfiguration.inspect()`. */
+export interface MockConfigValues<T = unknown> {
+  defaultValue?: T;
+  globalValue?: T;
+  workspaceValue?: T;
+  workspaceFolderValue?: T;
+}
+
+/** Configured settings keyed by `<section>.<key>` (e.g. `erdStudio.semanticDir`). */
+const _mockConfigValues = new Map<string, MockConfigValues>();
+
+/** Configure the scoped values of one setting; scopes left out stay unset. */
+export function _setMockConfiguration(section: string, key: string, values: MockConfigValues): void {
+  _mockConfigValues.set(`${section}.${key}`, { ...values });
+}
+
+/** Forget every configured setting (call in beforeEach). */
+export function _resetMockConfiguration(): void {
+  _mockConfigValues.clear();
+}
+
+/** Effective value the way VS Code resolves it: folder > workspace > global > default. */
+function effectiveConfigValue(values: MockConfigValues | undefined): unknown {
+  return (
+    values?.workspaceFolderValue ??
+    values?.workspaceValue ??
+    values?.globalValue ??
+    values?.defaultValue
+  );
+}
+
 export const workspace = {
-  getConfiguration: () => ({
-    get: (key: string, defaultValue?: unknown) => defaultValue,
-    /** `inspect` returns undefined so getErdStudioSetting falls back to defaults. */
-    inspect: (_key: string) => undefined as unknown,
+  getConfiguration: (section?: string) => ({
+    get: (key: string, defaultValue?: unknown) => {
+      const values = _mockConfigValues.get(section ? `${section}.${key}` : key);
+      return effectiveConfigValue(values) ?? defaultValue;
+    },
+    /** Scoped values as VS Code reports them; every scope is undefined when nothing is configured. */
+    inspect: (key: string) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      return { key: fullKey, ...(_mockConfigValues.get(fullKey) ?? {}) } as { key: string } & MockConfigValues;
+    },
   }),
-  workspaceFolders: [],
+  workspaceFolders: [] as Array<{ uri: { fsPath: string }; name?: string; index?: number }>,
   textDocuments: [] as unknown[],
   // Replaced below with implementations backed by the mock document registry.
   applyEdit: async (_edit: unknown): Promise<boolean> => true,
@@ -46,16 +87,71 @@ export const window = {
     show: () => {},
     dispose: () => {},
   }),
+  showTextDocument: async () => undefined,
+  /** Runs the task immediately with a no-op progress reporter. */
+  withProgress: async <R>(
+    _options: unknown,
+    task: (progress: { report: (value: unknown) => void }, token: unknown) => Thenable<R>,
+  ): Promise<R> =>
+    task({ report: () => {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => {} }) }),
   registerTreeDataProvider: () => ({ dispose: () => {} }),
   registerCustomEditorProvider: () => ({ dispose: () => {} }),
-  createTreeView: () => ({ dispose: () => {} }),
-  tabGroups: { all: [] as Array<{ tabs: Array<{ input: unknown }> }> },
+  registerFileDecorationProvider: () => ({ dispose: () => {} }),
+  createTreeView: (_viewId?: string, _options?: unknown) => ({ dispose: () => {} }),
+  createStatusBarItem: (_alignment?: unknown, _priority?: number): MockStatusBarItem => ({
+    text: '',
+    tooltip: undefined,
+    command: undefined,
+    backgroundColor: undefined,
+    show: () => {},
+    hide: () => {},
+    dispose: () => {},
+  }),
+  tabGroups: {
+    all: [] as Array<{ tabs: Array<{ input: unknown }> }>,
+    /** Set `activeTab` to `{ input: new TabInputCustom(uri, viewType) }` to simulate a focused canvas. */
+    activeTabGroup: { activeTab: undefined as { input: unknown } | undefined },
+  },
   /** Open terminals — createTerminal adds to this list; tests may splice to simulate close. */
   terminals: [] as MockTerminal[],
   createTerminal: (options?: { name?: string; cwd?: string }): MockTerminal => {
     const terminal = createMockTerminal(options?.name ?? 'terminal');
     window.terminals.push(terminal);
     return terminal;
+  },
+};
+
+/** Minimal mock of vscode.StatusBarItem. */
+export interface MockStatusBarItem {
+  text: string;
+  tooltip: string | undefined;
+  command: string | undefined;
+  backgroundColor: unknown;
+  show: () => void;
+  hide: () => void;
+  dispose: () => void;
+}
+
+export enum StatusBarAlignment {
+  Left = 1,
+  Right = 2,
+}
+
+export enum ProgressLocation {
+  SourceControl = 1,
+  Window = 10,
+  Notification = 15,
+}
+
+/** Mirrors `vscode.version`. */
+export const version = '1.85.0-mock';
+
+export const env = {
+  /** Resolves true (browser opened); spy on it to assert the URL a bug report opens. */
+  openExternal: async (_target: unknown): Promise<boolean> => true,
+  clipboard: {
+    writeText: async (_text: string): Promise<void> => {},
+    readText: async (): Promise<string> => '',
   },
 };
 
@@ -96,9 +192,34 @@ export class TabInputCustom {
   constructor(public readonly uri: unknown, public readonly viewType: string) {}
 }
 
+/** Every command registered via commands.registerCommand, in registration order. */
+export const _registeredCommands: Array<{ command: string; callback: (...args: any[]) => unknown }> = [];
+
+/** Forget every registered command (call in beforeEach when a test runs activate()). */
+export function _resetRegisteredCommands(): void {
+  _registeredCommands.length = 0;
+}
+
 export const commands = {
-  registerCommand: () => ({ dispose: () => {} }),
-  executeCommand: async () => undefined,
+  /** Records the registration; like VS Code, registering an id twice throws. */
+  registerCommand: (command: string, callback: (...args: any[]) => unknown) => {
+    if (_registeredCommands.some((entry) => entry.command === command)) {
+      throw new Error(`command '${command}' already exists`);
+    }
+    const entry = { command, callback };
+    _registeredCommands.push(entry);
+    return {
+      dispose: () => {
+        const idx = _registeredCommands.indexOf(entry);
+        if (idx !== -1) _registeredCommands.splice(idx, 1);
+      },
+    };
+  },
+  /** Runs the registered handler when one exists (mirrors VS Code); resolves undefined otherwise. */
+  executeCommand: async (command: string, ...args: unknown[]): Promise<unknown> => {
+    const entry = _registeredCommands.find((e) => e.command === command);
+    return entry ? await entry.callback(...args) : undefined;
+  },
 };
 
 /** Creates a mock URI that stringifies to its path (matching VS Code webview behaviour). */
@@ -160,6 +281,14 @@ export class ThemeIcon {
     this.id = id;
     this.color = color;
   }
+}
+
+export class FileDecoration {
+  constructor(
+    public badge?: string,
+    public tooltip?: string,
+    public color?: ThemeColor,
+  ) {}
 }
 
 export class EventEmitter {
