@@ -275,6 +275,28 @@ describe('MigrationService (domain format → v5)', () => {
     expect(migration.needsMigration()).toBe(false);
   });
 
+  it('ignores an unrelated JSON file in a layer directory (no schemaVersion)', () => {
+    // A scratch file that happens to have a top-level `models` array would be
+    // classified 'legacy' by detectDomainFormat alone — but it is not a domain
+    // file and must never be offered for migration or rewritten.
+    const notesPath = writeDomain('notes', {
+      note: 'my scratch file',
+      models: [{ name: 'x' }, { name: 'y' }],
+      relationships: [{ a: 1 }],
+    });
+    const before = fs.readFileSync(notesPath, 'utf-8');
+
+    expect(migration.findV4Domains()).toEqual([]);
+    expect(migration.needsMigration()).toBe(false);
+
+    const result = migration.migrate();
+    expect(result.domainsConverted).toBe(0);
+    expect(result.modelsCreated).toBe(0);
+    expect(fs.readFileSync(notesPath, 'utf-8')).toBe(before);
+    expect(lms.modelExists('x')).toBe(false);
+    expect(lms.modelExists('y')).toBe(false);
+  });
+
   it('migrates a v4 file with inline models', () => {
     const p = writeDomain('v4', {
       schemaVersion: 4, domain: 'v4', layer: 'silver',

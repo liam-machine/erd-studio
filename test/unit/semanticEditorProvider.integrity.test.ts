@@ -255,6 +255,32 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(h.readDomain().logical.models).toContain('dim_product');
     });
 
+    // dbt permits uppercase and digit-leading model names. Names discovered in
+    // the user's own project must not be held to ERD Studio's authoring
+    // convention — only to the path-safety rule.
+    it.each(['DimCustomer', '2024_snapshot'])('accepts the legal dbt model name %s', async (name) => {
+      const modelsDir = path.join(h.root, 'models');
+      fs.mkdirSync(modelsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(modelsDir, 'schema.yml'),
+        ['version: 2', 'models:', `  - name: ${name}`, '    columns:', '      - name: id', ''].join('\n'),
+        'utf-8',
+      );
+
+      await h.send({ type: 'addExistingModel', payload: { modelName: name } });
+
+      expect(h.errors()).toEqual([]);
+      expect(h.readDomain().logical.models).toContain(name);
+      expect(h.logicalModelService.getModel(name)!.columns!.map((c) => c.name)).toEqual(['id']);
+    });
+
+    it('still refuses a model name that escapes the library directory', async () => {
+      await h.send({ type: 'addExistingModel', payload: { modelName: '../escaped' } });
+
+      expect(h.errors().join(' ')).toMatch(/path separators/);
+      expect(_appliedEdits).toHaveLength(0);
+    });
+
     it('writes nothing to the library when the WorkspaceEdit is rejected', async () => {
       _mockWorkspaceState.applyEditResult = false;
 

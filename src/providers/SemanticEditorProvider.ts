@@ -86,7 +86,7 @@ import type {
   ModelContext,
 } from '../types/syncPlan';
 import type { NodePosition, Relationship } from '../types/semantic';
-import { describeUnsupportedDomainFormat, detectDomainFormat } from '../types/semantic';
+import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 
 /**
  * logical-models/*.yml operations to bundle into a domain WorkspaceEdit so the
@@ -132,6 +132,8 @@ import {
   validateColumnDefs,
   validateModelName,
   validateAnnotationPositions,
+  validateAnnotationUpdate,
+  validateModelNameSafety,
   validatePoint,
   validatePositions,
   type AnnotationPositionPayload,
@@ -310,7 +312,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const logicalModels = this.logicalModelService.listModels();
     for (const model of logicalModels) {
       if (existingModelNames.has(model.name)) continue;
-      const absPath = this.logicalModelService.modelPath(model.name);
+      // A yml whose internal `name:` is not path-safe cannot be added to a
+      // domain — skip it rather than failing the whole payload.
+      const absPath = this.logicalModelService.resolveModelPath(model.name);
+      if (absPath === null) continue;
       existingModels.push({
         name: model.name,
         schema: model.schema ?? '',
@@ -739,6 +744,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'updateAnnotation': {
             const payload = (message as { payload?: { id: string; text?: string; color?: string; linkedModel?: string | null; width?: number; height?: number } }).payload;
             if (payload) {
+              const updateError = validateAnnotationUpdate(payload);
+              if (updateError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update annotation: ${updateError}` } });
+                break;
+              }
               await this.queueEdit(panelKey, () =>
                 this.handleUpdateAnnotation(document, webviewPanel.webview, payload));
             }
@@ -1325,14 +1335,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       try {
         const text = document.getText();
-        const parsed = JSON.parse(text) as Record<string, unknown>;
-        const section = this.getStageSection(parsed, 'logical');
-        const models = (section.models ?? []) as unknown[];
+        const parsed = JSON.parse(text) as unknown;
 
-        // Check if this domain references the changed model
-        const referencesModel = models.some((m) =>
-          typeof m === 'string' ? m === modelName : (m as Record<string, unknown>).name === modelName,
-        );
+        // Check if this domain references the changed model. The shared
+        // format-agnostic extractor handles v5 name strings, v4/hybrid inline
+        // objects and legacy top-level `models` — and tolerates junk entries.
+        const referencesModel = getRawDomainModelNames(parsed).includes(modelName);
 
         if (referencesModel) {
           await this.sendDomainData(document, webview, panelKey);
@@ -2579,8 +2587,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
-      // The name may be used to create a logical-models/*.yml file below.
-      const nameError = validateModelName(payload.modelName);
+      // The name comes from the user's own dbt project (yml / manifest), where
+      // uppercase and digit-leading names are legal, so only the path-safety
+      // rule applies here — not the authoring convention. It may still be used
+      // to create a logical-models/*.yml file below.
+      const nameError = validateModelNameSafety(payload.modelName);
       if (nameError) {
         webview.postMessage({ type: 'error', payload: { message: `Failed to add model: ${nameError}` } });
         return;

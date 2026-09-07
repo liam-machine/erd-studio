@@ -85,15 +85,28 @@ function safeLstat(p: string): fs.Stats | null {
   }
 }
 
+/**
+ * True when a parsed JSON document is a domain file: an object carrying a
+ * numeric `schemaVersion`.
+ *
+ * Every ERD Studio domain file has one, of every vintage, so this is what
+ * separates a domain from an unrelated `.json` a user happens to keep in a
+ * layer directory. Migration must never restructure a file that fails this
+ * test, no matter what `detectDomainFormat` would call it.
+ */
+export function isDomainDocument(parsed: unknown): boolean {
+  return (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    !Array.isArray(parsed) &&
+    typeof (parsed as { schemaVersion?: unknown }).schemaVersion === 'number'
+  );
+}
+
 /** True when the file parses as JSON with a `schemaVersion` field (a domain file). */
 function looksLikeDomainFile(filePath: string): boolean {
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
-    return (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      typeof (parsed as { schemaVersion?: unknown }).schemaVersion === 'number'
-    );
+    return isDomainDocument(JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown);
   } catch {
     return false;
   }
@@ -193,7 +206,10 @@ export class MigrationService {
    * - `hybrid` files (schemaVersion 5 with inline objects, or mixed entries)
    * - `legacy` pre-v4 files (schemaVersion < 4 or top-level `models`)
    *
-   * Uses the shared {@link detectDomainFormat} so this agrees with DomainService.
+   * Uses the shared {@link detectDomainFormat} so this agrees with DomainService,
+   * but only for files that {@link isDomainDocument} recognises as domain files
+   * (a numeric `schemaVersion`) — an unrelated `.json` a user keeps in a layer
+   * directory is never a migration candidate, however it happens to be shaped.
    */
   findV4Domains(): string[] {
     const semanticDir = path.join(this.workspaceRoot, this.semanticDir);
@@ -214,6 +230,11 @@ export class MigrationService {
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
           const parsed = JSON.parse(content) as unknown;
+          // Only ERD Studio domain files are migration candidates. Without this
+          // guard any parseable .json in a layer directory that happens to have
+          // a top-level `models` array would be classified 'legacy' and
+          // silently restructured.
+          if (!isDomainDocument(parsed)) continue;
           const format = detectDomainFormat(parsed);
           if (format === 'hybrid' || format === 'legacy') {
             v4Paths.push(filePath);

@@ -11,7 +11,9 @@ import {
   validateColumnDef,
   validateColumnDefs,
   validateModelName,
+  validateModelNameSafety,
   validateAnnotationPositions,
+  validateAnnotationUpdate,
   validatePoint,
   validatePositions,
   findDuplicateNames,
@@ -50,6 +52,79 @@ describe('validateModelName', () => {
     for (const name of ['dim_ok', '1bad', 'Bad', 'has-dash']) {
       expect(validateModelName(name) === null).toBe(MODEL_NAME_PATTERN.test(name));
     }
+  });
+});
+
+describe('validateModelNameSafety', () => {
+  // dbt itself permits uppercase and digit-leading model names, so a name
+  // discovered in the user's project (Add Existing Model) must not be held to
+  // the authoring convention — only to what is safe as a file name.
+  it.each(['DimCustomer', '2024_snapshot', 'Fct-Order', 'dim customer', 'dim_customer'])(
+    'accepts the legal dbt model name %j',
+    (name) => {
+      expect(validateModelNameSafety(name)).toBeNull();
+    },
+  );
+
+  it.each([
+    ['../escaped', /path separators/],
+    ['sub/dir', /path separators/],
+    ['a\\b', /path separators/],
+    ['..', /path separators/],
+    ['/abs/path', /path separators/],
+    ['C:name', /file system path/],
+    ['.', /file system path/],
+    ['', /empty/],
+    ['   ', /empty/],
+  ])('rejects the unsafe name %j', (name, pattern) => {
+    expect(validateModelNameSafety(name)).toMatch(pattern);
+  });
+
+  it('rejects non-string input', () => {
+    expect(validateModelNameSafety(undefined)).toMatch(/required/);
+    expect(validateModelNameSafety(42)).toMatch(/required/);
+  });
+
+  it('is strictly weaker than the authoring check', () => {
+    for (const name of ['dim_ok', 'DimCustomer', '1abc', 'has-dash', '../escape', '']) {
+      if (validateModelName(name) === null) {
+        expect(validateModelNameSafety(name)).toBeNull();
+      }
+    }
+  });
+});
+
+describe('validateAnnotationUpdate', () => {
+  it('accepts a minimal and a full payload', () => {
+    expect(validateAnnotationUpdate({ id: 'a1' })).toBeNull();
+    expect(
+      validateAnnotationUpdate({
+        id: 'a1', text: 'note', color: 'yellow', linkedModel: 'dim_customer', width: 200, height: 120,
+      }),
+    ).toBeNull();
+  });
+
+  it('accepts a null linkedModel (unlink)', () => {
+    expect(validateAnnotationUpdate({ id: 'a1', linkedModel: null })).toBeNull();
+  });
+
+  it.each([
+    [{ id: '' }, /non-empty string/],
+    [{ id: 42 }, /non-empty string/],
+    [{}, /non-empty string/],
+    [{ id: 'a1', text: 3 }, /text must be a string/],
+    [{ id: 'a1', color: {} }, /colour must be a string/],
+    [{ id: 'a1', linkedModel: 7 }, /linked model/],
+    [{ id: 'a1', width: Number.NaN }, /width must be a finite number/],
+    [{ id: 'a1', height: Number.POSITIVE_INFINITY }, /height must be a finite number/],
+    [{ id: 'a1', width: '200' }, /width must be a finite number/],
+  ])('rejects %j', (payload, pattern) => {
+    expect(validateAnnotationUpdate(payload)).toMatch(pattern);
+  });
+
+  it('rejects non-object input', () => {
+    expect(validateAnnotationUpdate(null)).toMatch(/must be an object/);
+    expect(validateAnnotationUpdate([])).toMatch(/must be an object/);
   });
 });
 

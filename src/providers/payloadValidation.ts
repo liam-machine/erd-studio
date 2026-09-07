@@ -18,12 +18,15 @@ import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, MODEL_NAME_RULE, findDuplicate
 // ---------------------------------------------------------------------------
 
 /**
- * Validate a model name. The name is used as a file name under
- * `logical-models/`, so path separators, `..`, and leading digits are rejected
- * (the pattern only admits `[a-z][a-z0-9_]*`, but the explicit checks give a
- * clearer error and guard against future pattern loosening).
+ * Path-safety check for a model name, independent of authoring style.
+ *
+ * A model name becomes a file name under `logical-models/`, so anything that
+ * could resolve outside that directory — path separators, `..`, an absolute
+ * path, a Windows drive prefix, a NUL byte — is rejected. Nothing else is:
+ * names that come from the user's own dbt project (Add Existing Model) are
+ * whatever dbt allows, including uppercase and digit-leading names.
  */
-export function validateModelName(name: unknown): string | null {
+export function validateModelNameSafety(name: unknown): string | null {
   if (typeof name !== 'string') {
     return 'Model name is required.';
   }
@@ -34,7 +37,26 @@ export function validateModelName(name: unknown): string | null {
   if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('..')) {
     return 'Model name cannot contain path separators.';
   }
-  if (!MODEL_NAME_PATTERN.test(trimmed)) {
+  if (trimmed.includes('\0') || /^[A-Za-z]:/.test(trimmed) || trimmed === '.') {
+    return 'Model name cannot be a file system path.';
+  }
+  return null;
+}
+
+/**
+ * Validate a model name the user authored (New Model dialog, rename). On top
+ * of {@link validateModelNameSafety} this enforces the project's naming
+ * convention (`[a-z][a-z0-9_]*`) so newly created models stay consistent.
+ *
+ * Do NOT use this for names discovered in the dbt project — see
+ * {@link validateModelNameSafety}.
+ */
+export function validateModelName(name: unknown): string | null {
+  const safetyError = validateModelNameSafety(name);
+  if (safetyError) {
+    return safetyError;
+  }
+  if (!MODEL_NAME_PATTERN.test((name as string).trim())) {
     return MODEL_NAME_RULE;
   }
   return null;
@@ -203,4 +225,47 @@ export function validateAnnotationPositions(value: unknown): AnnotationPositionP
     result.push({ id, x: point.x, y: point.y });
   }
   return result;
+}
+
+/**
+ * Validate an `updateAnnotation` payload. The id addresses an existing note,
+ * and every optional field is written straight into `viewConfig.annotations`,
+ * so a non-finite width/height (which would serialise as `null` in the domain
+ * JSON) or a non-string id/text/colour is rejected here.
+ */
+export function validateAnnotationUpdate(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Annotation update must be an object.';
+  }
+  const payload = value as {
+    id?: unknown;
+    text?: unknown;
+    color?: unknown;
+    linkedModel?: unknown;
+    width?: unknown;
+    height?: unknown;
+  };
+  if (typeof payload.id !== 'string' || !payload.id.trim()) {
+    return 'Annotation id must be a non-empty string.';
+  }
+  if (payload.text !== undefined && typeof payload.text !== 'string') {
+    return 'Annotation text must be a string.';
+  }
+  if (payload.color !== undefined && typeof payload.color !== 'string') {
+    return 'Annotation colour must be a string.';
+  }
+  if (
+    payload.linkedModel !== undefined &&
+    payload.linkedModel !== null &&
+    typeof payload.linkedModel !== 'string'
+  ) {
+    return 'Annotation linked model must be a model name or null.';
+  }
+  for (const key of ['width', 'height'] as const) {
+    const size = payload[key];
+    if (size !== undefined && !isFiniteNumber(size)) {
+      return `Annotation ${key} must be a finite number.`;
+    }
+  }
+  return null;
 }

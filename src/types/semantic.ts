@@ -306,7 +306,7 @@ export interface RawDomainFile {
  *
  * - `v5`     — `logical.models` is an array of model name strings (central model store).
  * - `v4`     — `logical.models` is an array of inline SemanticModel objects (deprecated,
- *              migratable via "ERD Studio: Migrate to v5").
+ *              migratable via "ERD Studio: Migrate Domains to Central Model Store").
  * - `hybrid` — the document contradicts itself: `schemaVersion >= 5` with inline model
  *              objects, a mix of strings and objects, or entries that are neither.
  *              Must be repaired (migration) before it can be loaded or edited.
@@ -376,14 +376,14 @@ export function describeUnsupportedDomainFormat(format: DomainFormat, filePath: 
       return (
         `Domain file ${filePath} uses a pre-v${LEGACY_SCHEMA_VERSION} layout ` +
         `(schemaVersion < ${LEGACY_SCHEMA_VERSION} or a top-level "models" array) that is no longer supported. ` +
-        'Run "ERD Studio: Migrate to v5" to convert it, or move "models"/"relationships" ' +
+        'Run "ERD Studio: Migrate Domains to Central Model Store" to convert it, or move "models"/"relationships" ' +
         `under a "logical" section and set "schemaVersion" to ${CURRENT_SCHEMA_VERSION}.`
       );
     case 'hybrid':
       return (
         `Domain file ${filePath} mixes inline model objects with model name references ` +
         `(or declares schemaVersion ${CURRENT_SCHEMA_VERSION} with inline models). ` +
-        'Run "ERD Studio: Migrate to v5" to repair it, or edit the file so every entry in ' +
+        'Run "ERD Studio: Migrate Domains to Central Model Store" to repair it, or edit the file so every entry in ' +
         '"logical.models" is a model name string.'
       );
     default:

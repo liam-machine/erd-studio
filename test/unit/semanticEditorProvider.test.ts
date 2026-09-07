@@ -466,6 +466,23 @@ describe('payload validation (H21)', () => {
     await waitForError(panel, /path separators/);
     expect(applyEditSpy).not.toHaveBeenCalled();
   });
+
+  it('rejects an updateAnnotation with a non-finite size before touching disk', async () => {
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({
+      type: 'updateAnnotation',
+      payload: { id: 'note-1', width: Number.NaN, height: 120 },
+    });
+    await waitForError(panel, /width must be a finite number/);
+    expect(applyEditSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects an updateAnnotation without a string id', async () => {
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({ type: 'updateAnnotation', payload: { id: 42, text: 'hi' } });
+    await waitForError(panel, /id must be a non-empty string/);
+    expect(applyEditSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -761,7 +761,7 @@ describe('DomainService format handling', () => {
         viewConfig: {},
       });
       expect(() => service.getDomain(filePath)).toThrow(/no longer supported/);
-      expect(() => service.getDomain(filePath)).toThrow(/Migrate to v5/);
+      expect(() => service.getDomain(filePath)).toThrow(/Migrate Domains to Central Model Store/);
     });
 
     it('rejects a top-level models array even at schemaVersion 5', () => {
@@ -786,7 +786,7 @@ describe('DomainService format handling', () => {
         logical: { models: [{ name: 'dim_x', columns: [] }], relationships: [] },
         viewConfig: {},
       });
-      expect(() => service.getDomain(filePath)).toThrow(/Migrate to v5/);
+      expect(() => service.getDomain(filePath)).toThrow(/Migrate Domains to Central Model Store/);
     });
 
     it('rejects mixed string/object model arrays instead of creating placeholder nodes', () => {
@@ -938,7 +938,29 @@ describe('DomainService format handling', () => {
       const brokenPath = path.join(tmpRoot, '.erd-studio', 'silver', 'broken.json');
       fs.writeFileSync(brokenPath, JSON.stringify(resolved, null, 2));
 
-      expect(() => service.getDomain(brokenPath)).toThrow(/Migrate to v5/);
+      expect(() => service.getDomain(brokenPath)).toThrow(/Migrate Domains to Central Model Store/);
+    });
+
+    it('renders a broken-reference placeholder for an unsafe model name instead of failing the canvas', () => {
+      fs.cpSync(path.join(FIXTURE_PROJECT_PATH, '.erd-studio'), path.join(tmpRoot, '.erd-studio'), { recursive: true });
+      service.setLogicalModelService(new LogicalModelService(tmpRoot));
+
+      const filePath = path.join(tmpRoot, '.erd-studio', 'silver', 'showcase.json');
+      const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      const goodNames: string[] = [...raw.logical.models];
+      raw.logical.models.push('../evil');
+      fs.writeFileSync(filePath, JSON.stringify(raw, null, 2));
+
+      const domain = service.getDomain(filePath);
+      const names = domain.logical.models.map((m) => m.name);
+      // Every real model still resolves...
+      for (const name of goodNames) {
+        expect(names).toContain(name);
+      }
+      // ...and the unsafe entry degrades to a single empty placeholder node.
+      const placeholder = domain.logical.models.find((m) => m.name === '../evil');
+      expect(placeholder).toBeDefined();
+      expect(placeholder!.columns).toEqual([]);
     });
   });
 });

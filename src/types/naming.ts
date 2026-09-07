@@ -1,10 +1,14 @@
 /**
  * Naming rules shared by the extension host and the webview.
  *
- * Model names become file names under `.erd-studio/logical-models/`, so the
- * pattern deliberately excludes path separators, dots, and leading digits.
- * The same pattern is used by the New Model dialog (webview) and by every
- * host-side handler that accepts a model name from the webview.
+ * This pattern is the *authoring* convention: it governs names the user types
+ * in the New Model dialog (webview) and in a rename, and the host enforces it
+ * through `validateModelName`.
+ *
+ * It is deliberately NOT applied to names discovered in the user's dbt project
+ * ("Add Existing Model"), where dbt permits uppercase and digit-leading names.
+ * Those go through `validateModelNameSafety`, which only rules out anything
+ * unsafe as a file name under `.erd-studio/logical-models/`.
  */
 
 /** A model name: lowercase, starts with a letter, then letters/digits/underscores. */

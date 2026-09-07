@@ -102,8 +102,13 @@ export class LogicalModelService {
   invalidateCache(name?: string): void {
     if (name === undefined) {
       this.cache.clear();
-    } else {
-      this.cache.delete(this.modelPath(name));
+      return;
+    }
+    // An unsafe name was never cached (nothing was read for it), so there is
+    // nothing to drop — and dropping a cache entry must never throw.
+    const filePath = this.resolveModelPath(name);
+    if (filePath !== null) {
+      this.cache.delete(filePath);
     }
   }
 
@@ -165,18 +170,41 @@ export class LogicalModelService {
   }
 
   /**
-   * Check if a model file exists.
+   * Resolve a model name to its file path without throwing.
+   *
+   * Read paths must degrade rather than fail: a hand-edited or AI-written
+   * domain file can reference a name that is not path-safe, and one bad entry
+   * must show as one broken-reference node, not take down the whole canvas.
+   * Write paths keep using {@link modelPath}, which throws.
+   */
+  resolveModelPath(name: string): string | null {
+    try {
+      return this.modelPath(name);
+    } catch (err) {
+      console.warn(`[LogicalModelService] Unsafe model name: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Check if a model file exists. An unsafe name has no file (and is never
+   * looked up on disk), so this returns false rather than throwing.
    */
   modelExists(name: string): boolean {
-    return fs.existsSync(this.modelPath(name));
+    const filePath = this.resolveModelPath(name);
+    return filePath !== null && fs.existsSync(filePath);
   }
 
   /**
    * Read a single model from its YAML file.
-   * Returns null if the file doesn't exist or is invalid.
+   * Returns null if the name is not path-safe, or the file doesn't exist or is
+   * invalid — callers render a broken-reference placeholder for null.
    */
   getModel(name: string): SemanticModel | null {
-    const filePath = this.modelPath(name);
+    const filePath = this.resolveModelPath(name);
+    if (filePath === null) {
+      return null;
+    }
     try {
       return this.readModelFile(filePath, name);
     } catch (err) {

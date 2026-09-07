@@ -528,4 +528,32 @@ describe('LogicalModelService.modelPath', () => {
     expect(() => service.saveModel({ name: '../escaped', columns: [] })).toThrow(/Invalid model name/);
     expect(fs.existsSync(path.join(tempDir, '.erd-studio', 'escaped.yml'))).toBe(false);
   });
+
+  // Read paths must degrade, not explode: a hand-edited or AI-written domain
+  // file referencing an unsafe name should produce one broken node, not take
+  // down the whole canvas.
+  it.each(['../escaped', 'sub/dir', 'a\\b', '..', ''])(
+    'getModel returns null for the unsafe name %j instead of throwing',
+    (name) => {
+      expect(() => service.getModel(name)).not.toThrow();
+      expect(service.getModel(name)).toBeNull();
+    },
+  );
+
+  it.each(['../escaped', 'sub/dir', '..'])(
+    'modelExists returns false for the unsafe name %j instead of throwing',
+    (name) => {
+      expect(() => service.modelExists(name)).not.toThrow();
+      expect(service.modelExists(name)).toBe(false);
+    },
+  );
+
+  it('invalidateCache tolerates an unsafe name', () => {
+    expect(() => service.invalidateCache('../escaped')).not.toThrow();
+  });
+
+  it('resolveModelPath returns null for unsafe names and a path for safe ones', () => {
+    expect(service.resolveModelPath('../escaped')).toBeNull();
+    expect(service.resolveModelPath('dim_customer')).toBe(service.modelPath('dim_customer'));
+  });
 });
