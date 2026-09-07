@@ -71,12 +71,17 @@ jobs:
       # with "version already exists".
       - name: Determine next version
         run: |
-          if ! npx @vscode/vsce show liamwynne.erd-studio --json > marketplace.json 2> vsce-show.err; then
+          # Write scratch files under RUNNER_TEMP, never the working tree: this
+          # step runs before `vsce package`, so anything left in the repo root
+          # ships to users (v0.6.47 went out carrying marketplace.json).
+          SHOW_JSON="${RUNNER_TEMP}/marketplace.json"
+          SHOW_ERR="${RUNNER_TEMP}/vsce-show.err"
+          if ! npx @vscode/vsce show liamwynne.erd-studio --json > "$SHOW_JSON" 2> "$SHOW_ERR"; then
             echo "::warning::vsce show failed; falling back to package.json version"
-            cat vsce-show.err
-            echo '{}' > marketplace.json
+            cat "$SHOW_ERR"
+            echo '{}' > "$SHOW_JSON"
           fi
-          NEW_VERSION=$(node scripts/release.mjs next-version --marketplace-json marketplace.json)
+          NEW_VERSION=$(node scripts/release.mjs next-version --marketplace-json "$SHOW_JSON")
           npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
           echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
           echo "Releasing v${NEW_VERSION}"
@@ -113,4 +118,13 @@ jobs:
           AZURE_PAT: ${{ secrets.AZURE_PAT }}
         run: |
           npx @vscode/vsce package --no-dependencies -o erd-studio.vsix
+          # CI's file-list gate only sees the PR checkout; this job creates
+          # files of its own, so assert the real published contents here too.
+          npx @vscode/vsce ls --no-dependencies > vsce-files.txt
+          COUNT=$(wc -l < vsce-files.txt | tr -d ' ')
+          echo "Publishing ${COUNT} files:"; cat vsce-files.txt
+          if [ "$COUNT" -gt 60 ]; then
+            echo "::error::vsce would publish ${COUNT} files (limit 60) — check .vscodeignore and this job's scratch files"
+            exit 1
+          fi
           npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT"
