@@ -66,6 +66,7 @@ function validateForm(
   leftEntity: string,
   rightEntity: string,
   existingModelNames: string[],
+  libraryModelNames: string[] = [],
 ): Record<string, string> {
   const errors: Record<string, string> = {};
 
@@ -80,6 +81,10 @@ function validateForm(
     errors.modelName = `Add content after "${template.prefix}" (e.g., ${template.prefix}example)`;
   } else if (existingModelNames.includes(modelName)) {
     errors.modelName = `Model "${modelName}" already exists in this domain`;
+  } else if (libraryModelNames.includes(modelName)) {
+    // The model library (logical-models/) is shared across domains — a new
+    // model must not overwrite one another domain already uses.
+    errors.modelName = `Model "${modelName}" already exists in the model library — use "Add Existing Model" instead`;
   }
 
   // Bridge entity validation (check for requiresLeftEntity/requiresRightEntity flags)
@@ -116,6 +121,7 @@ export function NewModelDialog() {
   const setNewModelDialogOpen = useEditorStore((s) => s.setNewModelDialogOpen);
   const domain = useEditorStore((s) => s.domain);
   const templates = useEditorStore((s) => s.templates);
+  const existingModels = useEditorStore((s) => s.existingModels);
   const { send } = useMessageBus(() => {});
 
   // Form state
@@ -142,10 +148,17 @@ export function NewModelDialog() {
     [domain],
   );
 
+  // Models that already have a logical-models/*.yml but are not in this domain.
+  // Creating a "new" model with one of these names would overwrite a shared file.
+  const libraryModelNames = useMemo(
+    () => existingModels.filter((m) => m.source === 'logical').map((m) => m.name),
+    [existingModels],
+  );
+
   // Validation (guard: template may be undefined when no templates are loaded)
   const errors = useMemo(
-    () => template ? validateForm(modelName, template, leftEntity, rightEntity, existingModelNames) : {},
-    [modelName, template, leftEntity, rightEntity, existingModelNames],
+    () => template ? validateForm(modelName, template, leftEntity, rightEntity, existingModelNames, libraryModelNames) : {},
+    [modelName, template, leftEntity, rightEntity, existingModelNames, libraryModelNames],
   );
 
   // Only flag columns that have been touched (non-empty name) but are invalid.

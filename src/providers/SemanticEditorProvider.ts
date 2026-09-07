@@ -50,6 +50,17 @@ import type {
 } from '../types/syncPlan';
 import type { NodePosition, Relationship } from '../types/semantic';
 
+/**
+ * logical-models/*.yml operations to bundle into a domain WorkspaceEdit so the
+ * model file and the domain file change (and undo) together.
+ */
+interface ModelFileOps {
+  /** Models whose yml should be written in full (created if missing). */
+  save?: import('../types/semantic').SemanticModel[];
+  /** Model names whose yml should be deleted (e.g. the old name on rename). */
+  delete?: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
@@ -392,12 +403,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'undo': {
             await vscode.commands.executeCommand('undo');
             await document.save();
+            await this.saveDirtyModelDocuments();
             await this.sendDomainData(document, webviewPanel.webview, panelKey);
             break;
           }
           case 'redo': {
             await vscode.commands.executeCommand('redo');
             await document.save();
+            await this.saveDirtyModelDocuments();
             await this.sendDomainData(document, webviewPanel.webview, panelKey);
             break;
           }
@@ -570,10 +583,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Apply a mutation to a model stored in logical-models/{name}.yml (v5 path).
-   * Reads the model, applies the mutator callback, writes back, and refreshes the view.
+   * Reads the model, applies the mutator callback, and writes it back through
+   * the same WorkspaceEdit as the domain file so both files form one undo step
+   * (see `applyDomainEdit` / `addModelFileEdits`). Nothing touches disk until
+   * `vscode.workspace.applyEdit` succeeds.
    *
    * For handlers that also need to modify the domain file (e.g., cascade column rename
    * into relationships), pass a domainMutator callback.
+   *
+   * Throws if the model is not in the library (callers' catch blocks surface it).
+   * Returns false when the WorkspaceEdit was rejected — callers must report that.
    */
   private async applyModelEdit(
     document: vscode.TextDocument,
@@ -584,38 +603,97 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<boolean> {
     const model = this.logicalModelService.getModel(modelName);
     if (!model) {
-      webview.postMessage({ type: 'error', payload: { message: `Model "${modelName}" not found in logical-models/.` } });
-      return false;
+      throw new Error(`Model "${modelName}" not found in logical-models/.`);
     }
 
     modelMutator(model);
-    this.logicalModelService.saveModel(model);
 
-    // If there's also a domain-level mutation (e.g., relationship cascade), apply it
-    if (domainMutator) {
-      const success = await this.applyDomainEdit(
-        document,
-        domainMutator,
-        { refreshWebview: true, webview, stage: 'logical' },
-      );
-      return success;
+    // Even when there is no domain-level change, the domain document is still
+    // re-written (with identical content) so its undo stack gains an element
+    // grouped with the yml edit — the custom editor's undo/redo operate on the
+    // domain resource, and the group pulls the yml change along with it.
+    return this.applyDomainEdit(
+      document,
+      domainMutator ?? (() => { /* no domain change */ }),
+      { refreshWebview: true, webview, stage: 'logical', modelFiles: { save: [model] } },
+    );
+  }
+
+  /**
+   * Add logical-models/*.yml operations to a WorkspaceEdit so they are applied
+   * (and undone / redone) together with the domain file change.
+   *
+   * - Existing files are replaced in full via their TextDocument (text edit).
+   * - New files are created with contents (file edit).
+   * - Deletions use deleteFile (VS Code snapshots the content for undo).
+   *
+   * Returns the TextDocuments that were edited in place so the caller can save
+   * them after `applyEdit` succeeds (new/deleted files need no save).
+   */
+  private async addModelFileEdits(
+    edit: vscode.WorkspaceEdit,
+    ops: ModelFileOps | undefined,
+  ): Promise<vscode.TextDocument[]> {
+    const docs: vscode.TextDocument[] = [];
+    if (!ops) return docs;
+
+    for (const name of ops.delete ?? []) {
+      if (!this.logicalModelService.modelExists(name)) continue;
+      edit.deleteFile(vscode.Uri.file(this.logicalModelService.modelPath(name)), { ignoreIfNotExists: true });
     }
 
-    // No domain change — just refresh the view
-    await this.sendDomainData(document, webview);
-    return true;
+    for (const model of ops.save ?? []) {
+      const uri = vscode.Uri.file(this.logicalModelService.modelPath(model.name));
+      const yamlText = this.logicalModelService.serializeModel(model);
+      if (this.logicalModelService.modelExists(model.name)) {
+        const modelDoc = await vscode.workspace.openTextDocument(uri);
+        const range = new vscode.Range(
+          modelDoc.positionAt(0),
+          modelDoc.positionAt(modelDoc.getText().length),
+        );
+        edit.replace(uri, range, yamlText);
+        docs.push(modelDoc);
+      } else {
+        this.logicalModelService.ensureDir();
+        edit.createFile(uri, { overwrite: false, contents: Buffer.from(yamlText, 'utf-8') });
+      }
+    }
+
+    return docs;
+  }
+
+  /**
+   * After an undo/redo the in-memory yml documents we edited via WorkspaceEdit
+   * are reverted but dirty; DomainService reads the library from disk, so
+   * flush them before re-rendering.
+   */
+  private async saveDirtyModelDocuments(): Promise<void> {
+    const modelsDir = this.logicalModelService.getModelsDir();
+    for (const doc of vscode.workspace.textDocuments) {
+      if (!doc.isDirty) continue;
+      if (path.dirname(doc.uri.fsPath) !== modelsDir) continue;
+      try {
+        await doc.save();
+      } catch (err) {
+        console.error(`[SemanticEditorProvider] Failed to save ${doc.uri.fsPath} after undo/redo:`, err);
+      }
+    }
   }
 
   /**
    * Generic helper to apply a stage-scoped mutation to the domain JSON and persist it.
    * Handles the common WorkspaceEdit pattern used by all mutation handlers.
+   *
+   * `options.modelFiles` adds logical-models/*.yml writes/deletes to the same
+   * WorkspaceEdit so the domain change and the model file change are atomic
+   * and share one undo step.
    */
   private async applyDomainEdit(
     document: vscode.TextDocument,
     mutator: (section: Record<string, unknown>, parsed: Record<string, unknown>) => void,
-    options: { refreshWebview?: boolean; webview?: vscode.Webview; stage: 'logical' },
+    options: { refreshWebview?: boolean; webview?: vscode.Webview; stage: 'logical'; modelFiles?: ModelFileOps },
   ): Promise<boolean> {
-    const { refreshWebview = true, webview, stage } = options;
+    const { refreshWebview = true, webview, stage, modelFiles } = options;
     const panelKey = document.uri.toString();
 
     const text = document.getText();
@@ -631,6 +709,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       document.positionAt(text.length),
     );
     edit.replace(document.uri, fullRange, updatedText);
+    const modelDocs = await this.addModelFileEdits(edit, modelFiles);
 
     this.pendingUpdates.set(panelKey, true);
     const success = await vscode.workspace.applyEdit(edit);
@@ -638,6 +717,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (success) {
       try {
         await document.save();
+        for (const modelDoc of modelDocs) {
+          await modelDoc.save();
+        }
         if (refreshWebview && webview) {
           await this.sendDomainData(document, webview);
         }
@@ -935,8 +1017,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({ type: 'error', payload: { message: `Model "${model.name}" already exists in this domain.` } });
           return;
         }
+        // The model library is shared across domains — never overwrite a
+        // logical-models/{name}.yml that another domain may depend on.
+        if (this.logicalModelService.modelExists(model.name)) {
+          webview.postMessage({
+            type: 'error',
+            payload: {
+              message: `Model "${model.name}" already exists in the model library (logical-models/${model.name}.yml). ` +
+                'Use "Add Existing Model" to reference it in this domain, or choose a different name.',
+            },
+          });
+          return;
+        }
 
-        // Create the central model file
+        // Central model file — written via the same WorkspaceEdit as the domain
+        // change so creating the model is a single, atomic, undoable step.
         const semanticModel: import('../types/semantic').SemanticModel = {
           name: model.name,
           schema: model.schema,
@@ -944,7 +1039,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           columns: model.columns,
           ...(model.modelRole ? { modelRole: model.modelRole } : {}),
         };
-        this.logicalModelService.saveModel(semanticModel);
 
         // Add name reference + position to domain file
         const success = await this.applyDomainEdit(
@@ -967,7 +1061,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               p.viewConfig = vc;
             }
           },
-          { refreshWebview: true, webview, stage },
+          { refreshWebview: true, webview, stage, modelFiles: { save: [semanticModel] } },
         );
 
         if (success) {
@@ -1079,7 +1173,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       if (this.isDomainV5(parsed)) {
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
           if (columns.some((c) => c.name === payload.column.name)) {
             throw new Error(`Column "${payload.column.name}" already exists.`);
@@ -1094,6 +1188,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           });
           model.columns = columns;
         });
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to add column.' } });
+        }
         return;
       }
 
@@ -1177,7 +1274,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
         } : undefined;
 
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
           const columnIndex = columns.findIndex((c) => c.name === payload.oldColumnName);
           if (columnIndex === -1) throw new Error(`Column "${payload.oldColumnName}" not found.`);
@@ -1196,6 +1293,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             ...(payload.column.additiveType ? { additiveType: payload.column.additiveType } : {}),
           } as ColumnDef;
         }, domainMutator);
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to update column.' } });
+        }
         return;
       }
 
@@ -1289,7 +1389,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V5: write to central model file, cascade orphaned relationships in the domain.
       // No-op silently if the column or model is already gone (e.g. spam-clicked delete).
       if (this.isDomainV5(parsed)) {
-        await this.applyModelEdit(
+        const ok = await this.applyModelEdit(
           document,
           webview,
           payload.modelName,
@@ -1306,6 +1406,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             );
           },
         );
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to remove column.' } });
+        }
         return;
       }
 
@@ -1365,7 +1468,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.isDomainV5(parsed)) {
         const fieldMap: Record<string, keyof ColumnDef> = { PK: 'isPrimaryKey', FK: 'isForeignKey', NK: 'isNaturalKey' };
         const fieldName = fieldMap[payload.keyType];
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
           const column = columns.find((c) => c.name === payload.columnName);
           if (!column) throw new Error(`Column "${payload.columnName}" not found.`);
@@ -1375,6 +1478,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             delete (column as unknown as Record<string, unknown>)[fieldName];
           }
         });
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to toggle key type.' } });
+        }
         return;
       }
 
@@ -1438,7 +1544,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       if (this.isDomainV5(parsed)) {
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
           if (payload.orderedNames.length !== columns.length) {
             throw new Error(`Column count mismatch: expected ${columns.length}, got ${payload.orderedNames.length}.`);
@@ -1450,6 +1556,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             return col;
           });
         });
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to reorder columns.' } });
+        }
         return;
       }
 
@@ -1568,10 +1677,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       // V5: rename central model file + update domain references
       if (this.isDomainV5(parsed)) {
-        // Rename the model file
-        this.logicalModelService.renameModel(payload.oldName, trimmedNew);
+        const currentNames = (section.models ?? []) as string[];
+        if (currentNames.includes(trimmedNew)) {
+          webview.postMessage({ type: 'error', payload: { message: `Model "${trimmedNew}" already exists in this domain.` } });
+          return;
+        }
+        // The model library is shared across domains — renaming onto an
+        // existing yml would silently replace another domain's model.
+        if (this.logicalModelService.modelExists(trimmedNew)) {
+          webview.postMessage({
+            type: 'error',
+            payload: {
+              message: `Model "${trimmedNew}" already exists in the model library (logical-models/${trimmedNew}.yml). ` +
+                'Choose a different name, or use "Add Existing Model" to reference it in this domain.',
+            },
+          });
+          return;
+        }
+        const existingModel = this.logicalModelService.getModel(payload.oldName);
+        if (!existingModel) {
+          webview.postMessage({ type: 'error', payload: { message: `Model "${payload.oldName}" not found in logical-models/.` } });
+          return;
+        }
+        const renamedModel: import('../types/semantic').SemanticModel = { ...existingModel, name: trimmedNew };
 
-        // Update domain: model reference name, relationships, positions
+        // Update domain (model reference name, relationships, positions) and
+        // create-new + delete-old yml in one WorkspaceEdit so the rename is atomic
+        // and a single undo restores both files.
         const success = await this.applyDomainEdit(
           document,
           (sec, p) => {
@@ -1592,7 +1724,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               delete positions[payload.oldName];
             }
           },
-          { refreshWebview: true, webview, stage },
+          {
+            refreshWebview: true,
+            webview,
+            stage,
+            modelFiles: { save: [renamedModel], delete: [payload.oldName] },
+          },
         );
 
         if (success) {
@@ -1736,10 +1873,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           const keepLabel = fileIsSingle ? 'Keep File' : 'Keep Files';
           void vscode.window
             .showInformationMessage(prompt, deleteLabel, keepLabel)
-            .then((choice) => {
+            .then(async (choice) => {
               if (choice !== deleteLabel) return;
+              // Delete through a WorkspaceEdit so VS Code snapshots the files
+              // and the deletion is undoable, rather than a bare unlink.
+              const deleteEdit = new vscode.WorkspaceEdit();
               for (const name of filesToOffer) {
-                this.logicalModelService.deleteModel(name);
+                deleteEdit.deleteFile(
+                  vscode.Uri.file(this.logicalModelService.modelPath(name)),
+                  { ignoreIfNotExists: true },
+                );
+              }
+              const deleted = await vscode.workspace.applyEdit(deleteEdit);
+              if (!deleted) {
+                void vscode.window.showErrorMessage('Failed to delete model file(s).');
+                return;
               }
               const summary = fileIsSingle
                 ? `Deleted logical-models/${filesToOffer[0]}.yml`
@@ -2361,7 +2509,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       if (this.isDomainV5(parsed)) {
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const existing = model.rationale ?? {};
           const patched = { ...existing };
           for (const [key, val] of Object.entries(payload.rationale)) {
@@ -2370,6 +2518,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           if (Object.keys(patched).length > 0) { model.rationale = patched as Rationale; } else { delete model.rationale; }
         });
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to update design rationale.' } });
+        }
         return;
       }
 
@@ -2414,10 +2565,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       if (this.isDomainV5(parsed)) {
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const description = payload.description?.trim() || undefined;
           if (description) { model.description = description; } else { delete model.description; }
         });
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to update description.' } });
+        }
         return;
       }
 
@@ -2456,10 +2610,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       if (this.isDomainV5(parsed)) {
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const grain = payload.grain?.trim() || undefined;
           if (grain) { model.grain = grain; } else { delete model.grain; }
         });
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to update grain statement.' } });
+        }
         return;
       }
 
@@ -2498,9 +2655,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const text = document.getText();
       const parsed = JSON.parse(text) as Record<string, unknown>;
       if (this.isDomainV5(parsed)) {
-        await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           if (payload.modelRole) { model.modelRole = payload.modelRole as import('../types/semantic').ModelRole; } else { delete model.modelRole; }
         });
+        if (!ok) {
+          webview.postMessage({ type: 'error', payload: { message: 'Failed to update model role.' } });
+        }
         return;
       }
 

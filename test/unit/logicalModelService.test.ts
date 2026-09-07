@@ -139,6 +139,46 @@ describe('LogicalModelService', () => {
     it('throws when renaming a non-existent model', () => {
       expect(() => service.renameModel('nonexistent', 'new')).toThrow();
     });
+
+    it('refuses to rename onto an existing model file (shared library must not be overwritten)', () => {
+      service.saveModel({
+        name: 'dim_customer',
+        columns: [{ name: 'customer_key', dataType: 'string', description: '', isPrimaryKey: true }],
+      });
+      service.saveModel({ name: 'dim_customer_tmp', columns: [{ name: 'x', dataType: 'int', description: '' }] });
+
+      expect(() => service.renameModel('dim_customer_tmp', 'dim_customer')).toThrow(/already exists/);
+
+      // Neither file was touched
+      expect(service.getModel('dim_customer')!.columns!.map((c) => c.name)).toEqual(['customer_key']);
+      expect(service.modelExists('dim_customer_tmp')).toBe(true);
+    });
+  });
+
+  describe('atomic writes', () => {
+    it('saveModel leaves no temp files behind and writes the full content', () => {
+      service.saveModel({ name: 'dim_a', columns: [{ name: 'a_key', dataType: 'string', description: '' }] });
+      service.saveModel({ name: 'dim_a', columns: [{ name: 'a_key', dataType: 'string', description: '' }, { name: 'b', dataType: 'int', description: '' }] });
+
+      const files = fs.readdirSync(service.getModelsDir());
+      expect(files).toEqual(['dim_a.yml']);
+      expect(service.getModel('dim_a')!.columns!.map((c) => c.name)).toEqual(['a_key', 'b']);
+    });
+
+    it('serializeModel returns exactly what saveModel writes', () => {
+      const model = {
+        name: 'fct_sales',
+        description: 'Sales facts',
+        grain: 'one row per sale',
+        columns: [
+          { name: 'sale_key', dataType: 'string', description: 'PK', isPrimaryKey: true },
+          { name: 'amount', dataType: 'decimal', description: '', additiveType: 'additive' as const },
+        ],
+      };
+      service.saveModel(model);
+      const onDisk = fs.readFileSync(service.modelPath('fct_sales'), 'utf-8');
+      expect(service.serializeModel(model)).toBe(onDisk);
+    });
   });
 
   describe('createFromManifest', () => {

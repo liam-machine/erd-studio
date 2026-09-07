@@ -153,12 +153,36 @@ export class LogicalModelService {
   /**
    * Save a model to its YAML file. Creates the file if it doesn't exist,
    * overwrites if it does.
+   *
+   * The write is atomic: content goes to a sibling temp file first and is then
+   * renamed over the target, so a crash mid-write never leaves a truncated yml.
+   *
+   * Note: this bypasses VS Code's undo stack. Editor-driven mutations should
+   * go through the SemanticEditorProvider's WorkspaceEdit path instead (which
+   * uses `serializeModel()`), so the yml change is undoable together with the
+   * domain change. Use this for non-editor callers (migration, seeding, CLI).
    */
   saveModel(model: SemanticModel): void {
     this.ensureDir();
     const filePath = this.modelPath(model.name);
     const yamlContent = this.modelToYaml(model);
-    fs.writeFileSync(filePath, yamlContent, 'utf-8');
+    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.writeFileSync(tmpPath, yamlContent, 'utf-8');
+      fs.renameSync(tmpPath, filePath);
+    } catch (err) {
+      try { fs.unlinkSync(tmpPath); } catch { /* temp file may not exist */ }
+      throw err;
+    }
+  }
+
+  /**
+   * Serialize a model to the YAML text that `saveModel` would write, without
+   * touching disk. Used by the editor to route yml writes through a
+   * WorkspaceEdit so they share an undo step with the domain file change.
+   */
+  serializeModel(model: SemanticModel): string {
+    return this.modelToYaml(model);
   }
 
   /**
@@ -173,11 +197,16 @@ export class LogicalModelService {
 
   /**
    * Rename a model file and update the name field inside the YAML.
+   * Throws if the target name already exists — a model file may be shared by
+   * several domains, so it must never be silently overwritten.
    */
   renameModel(oldName: string, newName: string): void {
     const model = this.getModel(oldName);
     if (!model) {
       throw new Error(`Model "${oldName}" not found in logical-models/`);
+    }
+    if (newName !== oldName && this.modelExists(newName)) {
+      throw new Error(`Model "${newName}" already exists in logical-models/`);
     }
     model.name = newName;
     this.saveModel(model);

@@ -28,6 +28,7 @@ import './DetailPanel.css';
 export function DetailPanel() {
   const vscode = useVsCodeApi();
   const domain = useEditorStore((s) => s.domain);
+  const existingModels = useEditorStore((s) => s.existingModels);
   const selectedNode = useEditorStore((s) => s.selectedNode);
   const detailPanelOpen = useEditorStore((s) => s.detailPanelOpen);
   const selectNode = useEditorStore((s) => s.selectNode);
@@ -71,9 +72,17 @@ export function DetailPanel() {
       if (domain && trimmed !== selectedNode && domain.models.some((m) => m.name === trimmed)) {
         return 'A model with this name already exists';
       }
+      // logical-models/ is shared across domains — renaming onto an existing
+      // library model would overwrite a file another domain depends on.
+      if (
+        trimmed !== selectedNode &&
+        existingModels.some((m) => m.source === 'logical' && m.name === trimmed)
+      ) {
+        return 'A model with this name already exists in the model library';
+      }
       return '';
     },
-    [domain, selectedNode],
+    [domain, selectedNode, existingModels],
   );
 
   const handleStartRename = useCallback(() => {
