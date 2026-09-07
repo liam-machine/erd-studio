@@ -51,6 +51,7 @@ import { BugReportDialog } from './components/BugReportDialog/BugReportDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
 import { transformDomain } from './lib/graphTransformer';
+import { applyNodeOverlays } from './lib/nodeOverlays';
 import { stageNodeColor } from './lib/stageColors';
 import {
   isTextEntryElement,
@@ -178,6 +179,9 @@ function EditorCanvas() {
 
   // Toast notification for invalid selection after restore
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Store-level toast (raised by components such as the Toolbar on layout failure)
+  const storeToastMessage = useEditorStore((s) => s.toastMessage);
+  const setStoreToastMessage = useEditorStore((s) => s.setToastMessage);
 
   useEffect(() => {
     if (invalidSelectedNode) {
@@ -188,7 +192,11 @@ function EditorCanvas() {
   }, [invalidSelectedNode]);
 
   // Memoized callback for toast dismissal (prevents timer re-creation)
-  const dismissToast = useCallback(() => setToastMessage(null), []);
+  const dismissToast = useCallback(() => {
+    setToastMessage(null);
+    setStoreToastMessage(null);
+  }, [setStoreToastMessage]);
+  const activeToastMessage = toastMessage ?? storeToastMessage;
 
   // F405: Auto-expand columns on first-ever domain load.
   // This effect runs AFTER useStatePersistence's restore effect (React guarantees
@@ -647,100 +655,62 @@ function EditorCanvas() {
   // Get current selectedNode from store to preserve selection across domain updates
   const currentSelectedNode = useEditorStore((s) => s.selectedNode);
 
-  // Initialize nodes and edges when domain changes.
+  // Initialize nodes and edges when the domain (or discrepancy overlay) changes.
   // Preserve visual selection if the selected node still exists.
   // Clear stale edge selections that no longer exist.
-  // Apply search dimming (F402), selection dimming, and column expansion (F405).
+  //
+  // Selection / search / expansion are NOT dependencies here — they are
+  // applied by the lightweight overlay effect below. Re-running the full
+  // transform on every click used to rebuild every node/edge object (defeating
+  // memo) and drop `measured`, forcing React Flow to re-measure all nodes.
   useEffect(() => {
     if (domain) {
-      const transformOptions = discrepancyVisible && discrepancyReport
-        ? { discrepancyReport }
-        : undefined;
-      let { nodes: newNodes, edges: newEdges } = transformDomain(domain, transformOptions);
+      const state = useEditorStore.getState();
+      const prevById = new Map(state.nodes.map((n) => [n.id, n]));
 
-      // Compute connected nodes for selection dimming.
-      // When a node is selected, the selected node and its direct neighbors stay bright.
-      // When an edge is selected, only the two endpoint nodes stay bright.
-      const connectedNodeIds = new Set<string>();
-      if (currentSelectedNode) {
-        connectedNodeIds.add(currentSelectedNode);
-        // Find all nodes connected to the selected node via edges (FK edges only)
-        newEdges.forEach((edge) => {
-          if (edge.type === 'fk' && edge.data) {
-            const fkData = edge.data as FkFlowEdge['data'];
-            if (fkData && fkData.fromModel === currentSelectedNode) {
-              connectedNodeIds.add(fkData.toModel);
-            }
-            if (fkData && fkData.toModel === currentSelectedNode) {
-              connectedNodeIds.add(fkData.fromModel);
-            }
-          }
-        });
-      } else if (selectedEdge) {
-        // Edge selection: only the two endpoint models stay bright
-        const edge = newEdges.find((e) => e.id === selectedEdge);
-        if (edge?.type === 'fk' && edge.data) {
-          const fkData = edge.data as FkFlowEdge['data'];
-          if (fkData) {
-            connectedNodeIds.add(fkData.fromModel);
-            connectedNodeIds.add(fkData.toModel);
-          }
+      // Measured sizes from the current React Flow state — used both for
+      // centre-based handle side selection and to carry `measured` across
+      // the rebuild so React Flow does not re-measure unchanged nodes.
+      const nodeDimensions = new Map<string, { width: number; height: number }>();
+      for (const n of state.nodes) {
+        if (n.measured?.width != null && n.measured?.height != null) {
+          nodeDimensions.set(n.id, { width: n.measured.width, height: n.measured.height });
         }
       }
+      const isExpandedNow = (id: string) => state.allExpanded || state.expandedNodes.has(id);
 
-      // F402: Search dimming + selection dimming (additive)
-      // F405: Inject column expansion state into node data
-      const hasSelection = currentSelectedNode !== null || selectedEdge !== null;
-      const query = searchQuery.trim() ? searchQuery.toLowerCase() : '';
-      newNodes = newNodes.map((node) => {
-        if (node.type === 'annotation') {
-          // Annotations: not search-dimmable, not selection-dimmable
-          return node;
-        }
-        const modelData = node.data as ModelFlowNode['data'];
-        const searchDimmed = query ? !modelData.modelName.toLowerCase().includes(query) : false;
-        const selectionDimmed = hasSelection && !connectedNodeIds.has(node.id);
+      const transformOptions = {
+        ...(discrepancyVisible && discrepancyReport ? { discrepancyReport } : {}),
+        nodeDimensions,
+        isExpanded: isExpandedNow,
+      };
+      let { nodes: newNodes, edges: newEdges } = transformDomain(domain, transformOptions);
 
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            // Node is dimmed if either search doesn't match OR it's not connected to selection
-            dimmed: searchDimmed || selectionDimmed,
-            // F405: Column expansion (ephemeral state)
-            // Pass stable toggleExpansion reference — ModelNode calls it with its own modelName
-            isExpanded: isExpanded(node.id),
-            onToggleExpansion: toggleExpansion,
-          },
-        };
+      // Carry measured dimensions over from the previous nodes.
+      newNodes = newNodes.map((n) => {
+        const prev = prevById.get(n.id);
+        return prev?.measured?.width != null && prev.measured.height != null
+          ? { ...n, measured: prev.measured }
+          : n;
       });
 
-      // Apply selection dimming to edges (FK edges only).
-      // For node selection: an edge is bright only if both endpoints are in the connected set.
-      // For edge selection: only the selected edge stays bright.
-      newEdges = newEdges.map((edge) => {
-        if (edge.type !== 'fk' || !edge.data) return edge;
-        const fkData = edge.data as FkFlowEdge['data'];
-        if (!fkData) return edge;
-        return {
-          ...edge,
-          data: {
-            ...fkData,
-            dimmed: hasSelection && (selectedEdge
-              ? edge.id !== selectedEdge
-              : !connectedNodeIds.has(fkData.fromModel) || !connectedNodeIds.has(fkData.toModel)),
-          },
-        };
-      });
+      // F402 search dimming, selection dimming, F405 column expansion.
+      ({ nodes: newNodes, edges: newEdges } = applyNodeOverlays(newNodes, newEdges, {
+        selectedNode: state.selectedNode,
+        selectedEdge: state.selectedEdge,
+        searchQuery: state.searchQuery,
+        isExpanded: isExpandedNow,
+        toggleExpansion,
+      }));
 
       // Preserve React Flow's current selection across this rebuild.
-      // Without this, any store change that re-triggers this effect (e.g. setSelectedEdges from
-      // onSelectionChange firing during a rubber-band drag) wipes the multi-selection React Flow
-      // just applied via applyNodeChanges. Read store state directly to avoid adding `nodes` to
-      // the dep array (which would cause an infinite loop since we call setNodes below).
+      // Without this, any store change that re-triggers this effect wipes the
+      // multi-selection React Flow just applied via applyNodeChanges. Read store
+      // state directly to avoid adding `nodes` to the dep array (which would
+      // cause an infinite loop since we call setNodes below).
       const preserveSelected = new Set<string>();
-      if (currentSelectedNode) preserveSelected.add(currentSelectedNode);
-      for (const n of useEditorStore.getState().nodes) {
+      if (state.selectedNode) preserveSelected.add(state.selectedNode);
+      for (const n of state.nodes) {
         if (n.selected) preserveSelected.add(n.id);
       }
       if (preserveSelected.size > 0) {
@@ -749,20 +719,39 @@ function EditorCanvas() {
 
       // Clear stale edge selections (edges that no longer exist after domain update)
       const newEdgeIds = new Set(newEdges.map((e) => e.id));
-      if (selectedEdges.length > 0) {
-        const validEdges = selectedEdges.filter((id) => newEdgeIds.has(id));
-        if (validEdges.length !== selectedEdges.length) {
+      const currentSelectedEdges = state.selectedEdges;
+      if (currentSelectedEdges.length > 0) {
+        const validEdges = currentSelectedEdges.filter((id) => newEdgeIds.has(id));
+        if (validEdges.length !== currentSelectedEdges.length) {
           setSelectedEdges(validEdges);
         }
       }
-      if (selectedEdge && !newEdgeIds.has(selectedEdge)) {
+      if (state.selectedEdge && !newEdgeIds.has(state.selectedEdge)) {
         setSelectedEdge(null);
       }
 
       setNodes(newNodes);
       setEdges(newEdges);
     }
-  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, selectedEdges, currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, discrepancyVisible, discrepancyReport]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, toggleExpansion, discrepancyVisible, discrepancyReport]);
+
+  // Lightweight overlay pass: update only the `dimmed` / `isExpanded` flags on
+  // the nodes and edges already in the store when selection, search or column
+  // expansion changes. Unchanged nodes keep their object identity so memoised
+  // components skip re-rendering and React Flow keeps its measurements.
+  useEffect(() => {
+    const { nodes: currentNodes, edges: currentEdges } = useEditorStore.getState();
+    if (currentNodes.length === 0) return;
+    const result = applyNodeOverlays(currentNodes, currentEdges, {
+      selectedNode: currentSelectedNode,
+      selectedEdge,
+      searchQuery,
+      isExpanded,
+      toggleExpansion,
+    });
+    if (result.nodes !== currentNodes) setNodes(result.nodes);
+    if (result.edges !== currentEdges) setEdges(result.edges);
+  }, [currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, setNodes, setEdges]);
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -1087,8 +1076,8 @@ function EditorCanvas() {
         <AddExistingModelDialog />
       </ReactFlow>
 
-      {toastMessage && (
-        <Toast message={toastMessage} variant="warning" onDismiss={dismissToast} />
+      {activeToastMessage && (
+        <Toast message={activeToastMessage} variant="warning" onDismiss={dismissToast} />
       )}
 
       {/* Host error surfaced over the live canvas. Sticky until dismissed or the

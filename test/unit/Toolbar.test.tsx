@@ -81,6 +81,7 @@ const mockStoreState: Record<string, unknown> = {
   discrepancyCompareStage: null,
   setDiscrepancyVisible: noop,
   setDiscrepancyCompareStage: noop,
+  setToastMessage: vi.fn(),
 };
 
 vi.mock('../../webview/store/editorStore', () => ({
@@ -202,5 +203,22 @@ describe('Toolbar layout-dirty button', () => {
   it('clean button title describes auto-layout', () => {
     render(<Toolbar {...defaultProps} />);
     expect(layoutButton().title).toMatch(/auto-layout/i);
+  });
+
+  it('re-enables the button and raises a toast when layout fails (H28)', async () => {
+    mockRunElkLayout.mockRejectedValueOnce(new Error('ELK layout worker crashed: boom'));
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<Toolbar {...defaultProps} />);
+
+    await act(async () => {
+      fireEvent.click(layoutButton());
+    });
+
+    expect(layoutButton().hasAttribute('disabled')).toBe(false);
+    expect(layoutButton().textContent).not.toContain('Running');
+    expect(mockStoreState.setToastMessage).toHaveBeenCalledWith(
+      'Auto layout failed: ELK layout worker crashed: boom',
+    );
+    consoleSpy.mockRestore();
   });
 });

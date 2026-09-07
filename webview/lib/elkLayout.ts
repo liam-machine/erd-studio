@@ -12,8 +12,9 @@
 
 import ELK from 'elkjs/lib/elk-api';
 import type { ELK as IELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
-import type { ModelFlowNode, FkFlowEdge } from '../types/graph';
+import type { ModelFlowNode, ModelNodeData, FkFlowEdge } from '../types/graph';
 import type { NodePosition, LayoutOptions, ModelRole } from '../../src/types/semantic';
+import { COLLAPSED_COLUMN_LIMIT } from '../hooks/useColumnExpansion';
 
 // ---------------------------------------------------------------------------
 // Node size estimation (matches ModelNode CSS)
@@ -45,15 +46,61 @@ const NODE_BORDER = 4;
 /** Height of the grain subtitle row (padding: 1px 10px 4px + 10px font ≈ 15px). */
 const NODE_GRAIN_HEIGHT = 15;
 
-function estimateNodeHeight(columnCount: number, hasGrain: boolean): number {
+/**
+ * Estimate a node's rendered height from the number of column rows actually
+ * drawn (see `countVisibleColumnRows`) and whether a grain subtitle is shown.
+ */
+export function estimateNodeHeight(rowCount: number, hasGrain: boolean): number {
   const grainHeight = hasGrain ? NODE_GRAIN_HEIGHT : 0;
 
   const columnsHeight =
-    columnCount > 0
-      ? NODE_COLUMNS_PADDING + columnCount * NODE_COLUMN_HEIGHT
+    rowCount > 0
+      ? NODE_COLUMNS_PADDING + rowCount * NODE_COLUMN_HEIGHT
       : NODE_COLUMNS_PADDING + NODE_EMPTY_ROW_HEIGHT;
 
   return NODE_BORDER + NODE_HEADER_HEIGHT + grainHeight + columnsHeight + NODE_FOOTER_HEIGHT;
+}
+
+/**
+ * Number of rows ModelNode actually renders in its columns section.
+ *
+ * Mirrors the rendering rules in `ModelNode.tsx`:
+ *   - stub models show only PK/NK columns
+ *   - collapsed nodes show at most `COLLAPSED_COLUMN_LIMIT` columns plus a
+ *     "...and N more" button row
+ *   - expanded nodes with more than the limit also render a "Show less" row
+ *
+ * Using the full column count (the old behaviour) over-reserved
+ * `(columns - 5) * rowHeight` per node on auto-collapsed domains (≥30 models).
+ */
+export function countVisibleColumnRows(
+  data: Pick<ModelNodeData, 'columns' | 'isStub' | 'isExpanded'>,
+): number {
+  const visible = data.isStub
+    ? data.columns.filter((c) => c.isPrimaryKey || c.isNaturalKey)
+    : data.columns;
+  const expanded = data.isExpanded ?? false;
+
+  if (expanded) {
+    return visible.length + (data.columns.length > COLLAPSED_COLUMN_LIMIT ? 1 : 0);
+  }
+  if (visible.length > COLLAPSED_COLUMN_LIMIT) {
+    return COLLAPSED_COLUMN_LIMIT + 1;
+  }
+  return visible.length;
+}
+
+/**
+ * Best-known size for a model node: React Flow's measured DOM size when
+ * available, otherwise an estimate from the rows that will be rendered.
+ */
+export function resolveNodeDimensions(
+  node: Pick<ModelFlowNode, 'data' | 'measured'>,
+): { width: number; height: number } {
+  return {
+    width: node.measured?.width ?? estimateNodeWidth(node.data),
+    height: node.measured?.height ?? estimateNodeHeight(countVisibleColumnRows(node.data), !!node.data.grain),
+  };
 }
 
 // --- Width estimation constants (approximates ModelNode CSS rendering) ---
@@ -108,8 +155,8 @@ const MAX_NODE_WIDTH = 560;
  * slightly more space than the minimum estimate, preventing overlap
  * when font rendering or badge widths differ from the approximation.
  */
-function estimateNodeWidth(node: ModelFlowNode): number {
-  const { modelName, columns } = node.data;
+export function estimateNodeWidth(data: Pick<ModelNodeData, 'modelName' | 'columns'>): number {
+  const { modelName, columns } = data;
 
   // Header: name + layer badge + padding
   const headerWidth =
@@ -350,6 +397,40 @@ export const ROLE_AWARE_ELK_OPTIONS: Record<string, string> = {
 
 let elkInstance: IELK | null = null;
 
+/** The Worker backing `elkInstance`, so a crashed worker can be terminated. */
+let elkWorker: Worker | null = null;
+
+/**
+ * Rejecters for layouts that are currently in flight. elkjs only listens for
+ * `onmessage`, so an uncaught worker error (OOM, termination, DataCloneError
+ * while posting the error object) would otherwise leave `elk.layout()` pending
+ * forever — and the Layout button disabled with a spinner.
+ */
+const pendingRejecters = new Set<(err: Error) => void>();
+
+/** Give up on a layout after this long and recycle the worker. */
+export const LAYOUT_TIMEOUT_MS = 30_000;
+
+/**
+ * Discard the current ELK instance/worker and fail every in-flight layout.
+ * The next `runElkLayout()` call spins up a fresh worker.
+ */
+function resetElk(err: Error): void {
+  elkInstance = null;
+  const worker = elkWorker;
+  elkWorker = null;
+  try {
+    worker?.terminate();
+  } catch {
+    // Worker may already be dead — nothing to do.
+  }
+  const rejecters = [...pendingRejecters];
+  pendingRejecters.clear();
+  for (const reject of rejecters) {
+    reject(err);
+  }
+}
+
 function getElk(): IELK {
   if (!elkInstance) {
     elkInstance = new ELK({
@@ -360,11 +441,47 @@ function getElk(): IELK {
         const url = URL.createObjectURL(blob);
         const worker = new Worker(url);
         URL.revokeObjectURL(url);
+        worker.onerror = (event: ErrorEvent) => {
+          const detail = event?.message ? `: ${event.message}` : '';
+          resetElk(new Error(`ELK layout worker crashed${detail}`));
+        };
+        elkWorker = worker;
         return worker;
       },
     });
   }
   return elkInstance;
+}
+
+/**
+ * Run `elk.layout()` but guarantee the promise settles: it rejects if the
+ * worker raises an uncaught error or the layout exceeds `LAYOUT_TIMEOUT_MS`,
+ * in both cases recycling the worker so the next attempt starts clean.
+ */
+function layoutWithGuard(elk: IELK, graph: ElkNode): Promise<ElkNode> {
+  return new Promise<ElkNode>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = <T,>(fn: (value: T) => void) => (value: T) => {
+      if (settled) return;
+      settled = true;
+      pendingRejecters.delete(rejectOnce);
+      if (timer !== null) clearTimeout(timer);
+      fn(value);
+    };
+    const rejectOnce = finish<Error>(reject);
+    const resolveOnce = finish<ElkNode>(resolve);
+
+    pendingRejecters.add(rejectOnce);
+    timer = setTimeout(() => {
+      resetElk(new Error(`ELK layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s`));
+    }, LAYOUT_TIMEOUT_MS);
+
+    elk.layout(graph).then(resolveOnce, (err: unknown) => {
+      rejectOnce(err instanceof Error ? err : new Error(String(err)));
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -373,22 +490,24 @@ function getElk(): IELK {
 
 /**
  * Convert React Flow nodes into ELK children nodes.
- * Each node gets an estimated width (based on content) and height (based on
- * column count and whether a grain subtitle is present) so the layered layout
- * reserves the correct amount of space.
+ * Each node uses its measured DOM size when React Flow has one; otherwise an
+ * estimated width (based on content) and height (based on the rows actually
+ * rendered — collapsed/stub aware — and whether a grain subtitle is present)
+ * so the layered layout reserves the correct amount of space.
  *
  * When `partitions` is provided, each node gets a `layoutOptions` entry
  * assigning it to the given spatial partition index.
  */
-function toElkChildren(
+export function toElkChildren(
   nodes: ModelFlowNode[],
   partitions: Map<string, number> | null,
 ): ElkNode[] {
   return nodes.map((node) => {
+    const { width, height } = resolveNodeDimensions(node);
     const elkNode: ElkNode = {
       id: node.id,
-      width: estimateNodeWidth(node),
-      height: estimateNodeHeight(node.data.columns.length, !!node.data.grain),
+      width,
+      height,
     };
     if (partitions !== null) {
       elkNode.layoutOptions = {
@@ -519,7 +638,7 @@ export async function runElkLayout(
     edges: toElkEdges(edges),
   };
 
-  const layouted = await elk.layout(graph);
+  const layouted = await layoutWithGuard(elk, graph);
 
   // Extract positions from the layouted graph
   const positions: Record<string, NodePosition> = {};
