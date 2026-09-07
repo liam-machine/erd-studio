@@ -13,7 +13,7 @@
  * Uses React Flow's zoom/pan APIs and the editor store for domain data.
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { Panel, useReactFlow, useStore } from '@xyflow/react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
@@ -32,6 +32,13 @@ import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge 
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './Toolbar.css';
+
+/**
+ * Breathing room the corner actions keep from the toolbar, in px. Below this
+ * they collapse to the overflow menu — the two are separately positioned
+ * panels, so "touching" already reads as broken.
+ */
+const CORNER_MIN_GAP = 16;
 
 // ---------------------------------------------------------------------------
 // Layer badge display
@@ -110,6 +117,32 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Corner actions (Send feedback / View File).
+  //
+  // They are labelled buttons whenever there is room for them, and collapse to
+  // a single overflow glyph only when they would actually run into the
+  // top-centre toolbar — which is measured, not guessed at, because the
+  // toolbar's width depends on the domain name, the search box and which
+  // stage-specific controls are showing. A CSS breakpoint could only ever
+  // approximate that.
+  const [cornerMenuOpen, setCornerMenuOpen] = useState(false);
+  const [cornerCollapsed, setCornerCollapsed] = useState(false);
+  const cornerMenuRef = useRef<HTMLDivElement>(null);
+  /** The corner's own box, whose right edge is pinned to the canvas edge. */
+  const cornerRef = useRef<HTMLDivElement>(null);
+  /** The widest toolbar row; the container is centred, so this is its right edge. */
+  const toolbarRowRef = useRef<HTMLDivElement>(null);
+  /**
+   * Width of the corner with both labels showing, cached from a render where
+   * they actually were. Once collapsed the element is ~28px wide and can no
+   * longer answer "would the full version fit?", so the last honest
+   * measurement is what the comparison keeps using.
+   */
+  const expandedCornerWidthRef = useRef(0);
+  // Read inside `measureCorner`, which must not be re-created on every toggle.
+  const cornerCollapsedRef = useRef(cornerCollapsed);
+  cornerCollapsedRef.current = cornerCollapsed;
+
   // Search input ref (for Ctrl+F focus)
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -172,6 +205,95 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [modelDropdownOpen]);
+
+  // --- Corner collapse: measured, not guessed -------------------------------
+
+  /**
+   * Collapse the corner only when the labelled buttons would overlap the
+   * toolbar. Both edges are read from the live layout: the toolbar's right edge
+   * moves with its content, and the corner's right edge is pinned to the canvas
+   * edge, so the question is simply whether the full-width corner would still
+   * start clear of the toolbar.
+   *
+   * There is no feedback loop to oscillate on — collapsing changes neither the
+   * toolbar's width nor the corner's right edge, and the width it is compared
+   * against is the cached expanded one — so a single threshold is enough.
+   *
+   * Where nothing can be measured (jsdom, a hidden panel: every rect is zero)
+   * the corner stays expanded. Not knowing is not a reason to hide the labels.
+   */
+  const measureCorner = useCallback(() => {
+    const corner = cornerRef.current;
+    const row = toolbarRowRef.current;
+    if (!corner || !row) return;
+
+    const cornerRect = corner.getBoundingClientRect();
+    // Only a render that is showing the labels can tell us how wide they are.
+    if (!cornerCollapsedRef.current && cornerRect.width > 0) {
+      expandedCornerWidthRef.current = cornerRect.width;
+    }
+    const expandedWidth = expandedCornerWidthRef.current;
+    if (expandedWidth <= 0) return;
+
+    const toolbarRight = row.getBoundingClientRect().right;
+    if (toolbarRight <= 0) return;
+    setCornerCollapsed(cornerRect.right - expandedWidth < toolbarRight + CORNER_MIN_GAP);
+  }, []);
+
+  // Keyed on the toolbar existing at all: this component renders nothing
+  // without a domain, and an effect that ran during that gap would observe a
+  // null row and never look again.
+  const toolbarRendered = domain !== null;
+
+  useLayoutEffect(() => {
+    if (!toolbarRendered) return;
+    measureCorner();
+
+    // The toolbar changes width without the window moving (a longer domain
+    // name, the search box, the stage-specific controls), and the window
+    // changes without the toolbar moving (the VS Code sidebar opening). Both
+    // have to re-run the comparison.
+    const observer =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => measureCorner()) : null;
+    if (observer && toolbarRowRef.current) observer.observe(toolbarRowRef.current);
+    window.addEventListener('resize', measureCorner);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measureCorner);
+    };
+  }, [measureCorner, toolbarRendered]);
+
+  // An overflow menu left open behind an expansion would be a popup hanging off
+  // a trigger that no longer exists.
+  useEffect(() => {
+    if (!cornerCollapsed) setCornerMenuOpen(false);
+  }, [cornerCollapsed]);
+
+  // --- Corner menu click-outside / Escape handler --------------------------
+
+  useEffect(() => {
+    if (!cornerMenuOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (cornerMenuRef.current && !cornerMenuRef.current.contains(e.target as Node)) {
+        setCornerMenuOpen(false);
+      }
+    };
+    // Escape closes the menu without reaching the canvas shortcut handler,
+    // which would otherwise clear the selection behind it.
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setCornerMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [cornerMenuOpen]);
 
   // --- Discrepancy dropdown click-outside handler --------------------------
 
@@ -397,12 +519,16 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   // --- View File handler ----------------------------------------------------
 
   const handleViewFile = useCallback(() => {
+    setCornerMenuOpen(false);
     const message: WebviewMessage = { type: 'viewFile' };
     vscode.postMessage(message);
   }, [vscode]);
 
-  const setBugReportDialogOpen = useEditorStore((s) => s.setBugReportDialogOpen);
-  const handleReportBug = useCallback(() => setBugReportDialogOpen(true), [setBugReportDialogOpen]);
+  const setFeedbackDialogOpen = useEditorStore((s) => s.setFeedbackDialogOpen);
+  const handleSendFeedback = useCallback(() => {
+    setCornerMenuOpen(false);
+    setFeedbackDialogOpen(true);
+  }, [setFeedbackDialogOpen]);
 
   // --- Early return if no domain -------------------------------------------
 
@@ -424,7 +550,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     <>
       <Panel position="top-center" className="toolbar-container">
         {/* Row 1: Controls */}
-        <div className="toolbar toolbar--attached-bottom">
+        <div className="toolbar toolbar--attached-bottom" ref={toolbarRowRef}>
         {/* Domain info */}
         <div className="toolbar__section toolbar__domain">
           <span className="toolbar__domain-name">{domain.domain}</span>
@@ -819,24 +945,66 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />
       </Panel>
 
-      {/* Corner actions — top-right */}
+      {/*
+        Corner actions — top-right. Labelled while they fit; one overflow glyph
+        once they would run into the toolbar. `measureCorner` decides which,
+        from the live layout rather than a breakpoint.
+      */}
       <Panel position="top-right" className="toolbar__corner">
-        <button
-          className="toolbar__view-file"
-          onClick={handleReportBug}
-          title="Report a bug on GitHub (prefilled with diagnostics)"
-          aria-label="Report a bug"
-        >
-          🐞 Report Bug
-        </button>
-        <button
-          className="toolbar__view-file"
-          onClick={handleViewFile}
-          title="Open as JSON file"
-          aria-label="Open underlying JSON file in text editor"
-        >
-          {'{ }'} View File
-        </button>
+        <div className="toolbar__corner-actions" ref={cornerRef}>
+          {cornerCollapsed ? (
+            <div className="toolbar__corner-menu" ref={cornerMenuRef}>
+              <button
+                className={`toolbar__corner-trigger${cornerMenuOpen ? ' toolbar__corner-trigger--active' : ''}`}
+                onClick={() => setCornerMenuOpen((open) => !open)}
+                title="More actions"
+                aria-label="More actions"
+                aria-haspopup="menu"
+                aria-expanded={cornerMenuOpen}
+              >
+                ⋯
+              </button>
+              {cornerMenuOpen && (
+                <div className="toolbar__dropdown-menu toolbar__corner-list" role="menu">
+                  <button
+                    className="toolbar__dropdown-item"
+                    onClick={handleSendFeedback}
+                    role="menuitem"
+                  >
+                    💬 Send feedback
+                  </button>
+                  <button
+                    className="toolbar__dropdown-item"
+                    onClick={handleViewFile}
+                    role="menuitem"
+                    title="Open the underlying JSON file in a text editor"
+                  >
+                    {'{ }'} Open as JSON file
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <button
+                className="toolbar__corner-button"
+                onClick={handleSendFeedback}
+                title="Send feedback"
+                aria-label="Send feedback"
+              >
+                💬 Feedback
+              </button>
+              <button
+                className="toolbar__corner-button"
+                onClick={handleViewFile}
+                title="Open as JSON file"
+                aria-label="Open underlying JSON file in text editor"
+              >
+                {'{ }'} View File
+              </button>
+            </>
+          )}
+        </div>
       </Panel>
     </>
   );

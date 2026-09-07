@@ -26,9 +26,14 @@ docs/**
 !CHANGELOG.md
 features.json
 
-# Sibling projects that live in this repo but are not part of the extension
+# Sibling projects that live in this repo but are not part of the extension.
+# .vscodeignore is a DENYLIST — a new top-level directory ships unless it is
+# named here, and CI fails if `vsce ls --no-dependencies` lists more than 60
+# files. `proxy/` is the hand-deployed Cloudflare Worker behind the feedback
+# analysis hosted tier (see proxy/README.md); it must never reach the VSIX.
 forge-app/**
 mcp-server/**
+proxy/**
 data engineer plugin/**
 
 # Media only referenced from the external assets repo (README uses the

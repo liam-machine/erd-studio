@@ -149,8 +149,8 @@ export function useCanvasShortcuts(): void {
         e.preventDefault();
 
         // Close any open dialog (priority order)
-        if (s.bugReportDialogOpen) {
-          s.setBugReportDialogOpen(false);
+        if (s.feedbackDialogOpen) {
+          s.setFeedbackDialogOpen(false);
           return;
         }
         if (s.newModelDialogOpen) {

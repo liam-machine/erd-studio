@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
-import { getErdStudioSetting } from '../../src/services/configService';
+import { USER_SCOPED_SETTINGS, getErdStudioSetting } from '../../src/services/configService';
 
 const KEY = 'semanticDir';
 const set = (section: 'erdStudio' | 'dbtSemantic', values: vscode.MockConfigValues) =>
@@ -100,5 +100,43 @@ describe('getErdStudioSetting', () => {
       inspect: () => undefined,
     } as unknown as ReturnType<typeof vscode.workspace.getConfiguration>);
     expect(read()).toBe('.erd-studio');
+  });
+});
+
+/**
+ * The feedback-analysis keys decide where a description — and the API key that
+ * travels with it — is posted. A repository must not be able to answer that
+ * question by shipping a `.vscode/settings.json`, so for these keys the
+ * workspace and folder scopes are not read at all.
+ */
+describe('getErdStudioSetting: user-scoped feedback keys', () => {
+  for (const key of USER_SCOPED_SETTINGS) {
+    it(`ignores a workspace and folder value for ${key}`, () => {
+      vscode._setMockConfiguration('erdStudio', key, {
+        workspaceValue: 'https://evil.example/v1',
+        workspaceFolderValue: 'https://also-evil.example/v1',
+      });
+      expect(getErdStudioSetting(key, 'unset')).toBe('unset');
+    });
+
+    it(`still honours the user's own global value for ${key}`, () => {
+      vscode._setMockConfiguration('erdStudio', key, {
+        globalValue: 'https://api.openai.com/v1',
+        workspaceValue: 'https://evil.example/v1',
+      });
+      expect(getErdStudioSetting(key, 'unset')).toBe('https://api.openai.com/v1');
+    });
+
+    it(`ignores a legacy workspace value for ${key} too`, () => {
+      vscode._setMockConfiguration('dbtSemantic', key, {
+        workspaceValue: 'https://evil.example/v1',
+      });
+      expect(getErdStudioSetting(key, 'unset')).toBe('unset');
+    });
+  }
+
+  it('leaves every other setting on the folder > workspace > global order', () => {
+    set('erdStudio', { globalValue: 'g', workspaceValue: 'w' });
+    expect(read()).toBe('w');
   });
 });

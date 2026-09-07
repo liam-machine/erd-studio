@@ -4,7 +4,6 @@ import {
   ErrorLog,
   buildIssueUrl,
   composeIssueFields,
-  decodePngDataUrl,
   formatDiagnostics,
   GITHUB_REPO,
   BUG_REPORT_TEMPLATE,
@@ -112,32 +111,20 @@ describe('feedbackService', () => {
       expect(fields.diagnostics).toBeUndefined();
     });
 
-    it('adds a paste hint when a screenshot is on the clipboard', () => {
+    it('carries the diagnostics block through when they are asked for', () => {
       const fields = composeIssueFields(
-        {
-          title: 't',
-          description: 'd',
-          includeDiagnostics: true,
-          screenshotDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
-          screenshotOnClipboard: true,
-        },
+        { title: 't', description: 'd', includeDiagnostics: true },
         baseDiagnostics,
       );
       expect(fields.diagnostics).toContain('ERD Studio: 0.6.46');
-      expect(fields.screenshot).toMatch(/clipboard/);
-    });
-  });
-
-  describe('decodePngDataUrl', () => {
-    it('decodes a valid PNG data URL', () => {
-      const bytes = decodePngDataUrl('data:image/png;base64,iVBORw0KGgo=');
-      expect(bytes).not.toBeNull();
-      expect(bytes![0]).toBe(0x89);
     });
 
-    it('rejects non-PNG or malformed input', () => {
-      expect(decodePngDataUrl('data:image/jpeg;base64,AAAA')).toBeNull();
-      expect(decodePngDataUrl('not a data url')).toBeNull();
+    it('never fills the Screenshot box — nothing is attached from here', () => {
+      const fields = composeIssueFields(
+        { title: 't', description: 'd', includeDiagnostics: true },
+        baseDiagnostics,
+      );
+      expect(fields.screenshot).toBeUndefined();
     });
   });
 });

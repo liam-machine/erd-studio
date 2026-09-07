@@ -1,4 +1,4 @@
-# ERD Studio manages selectors prefixed with `domain_` — regenerated automatically.
+# ERD Studio manages selectors prefixed with `domain_` whose description ends with "Managed by ERD Studio." — regenerated automatically.
 # Other selectors below are user-managed and preserved across regenerates.
 
 selectors:
@@ -8,6 +8,18 @@ selectors:
       union:
         - method: fqn
           value: fct_large_table
+  - name: domain_silver_showcase
+    description: All models in the showcase domain (silver layer). Managed by ERD Studio.
+    definition:
+      union:
+        - method: fqn
+          value: fct_task_event
+        - method: fqn
+          value: dim_project
+        - method: fqn
+          value: dim_task
+        - method: fqn
+          value: fct_order
   # User-managed: nightly incremental refresh job
   # Keep in sync with airflow DAG `incrementals_v2`
   - name: incremental_critical

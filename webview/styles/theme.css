@@ -65,6 +65,15 @@ body {
   --error-fg: var(--vscode-errorForeground);
   --warning-fg: var(--vscode-editorWarning-foreground, #cca700);
 
+  /* Feedback dialog — status & assist colours */
+  --ok-fg:      var(--vscode-charts-green, #2f8a48);
+  --ok-bg:      rgba(47, 138, 72, 0.12);
+  --ai-fg:      var(--vscode-charts-purple, #b48ce8);
+  --ai-bg:      rgba(180, 140, 232, 0.10);
+  --dim-fg:     var(--vscode-descriptionForeground, #8a94a3);
+  --error-bg:   rgba(239, 68, 68, 0.12);
+  --warning-bg: rgba(224, 167, 43, 0.12);
+
   /* -----------------------------------------------------------------------
      Design tokens — stage colours (fixed, no runtime palette swapping)
      ----------------------------------------------------------------------- */

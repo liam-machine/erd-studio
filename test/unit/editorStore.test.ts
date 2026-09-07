@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEditorStore } from '../../webview/store/editorStore';
 import type { DisplayDomain } from '../../src/types/display';
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
+import type { FeedbackAnalysis } from '../../src/types/feedback';
 import type { FkEdgeData } from '../../webview/types/graph';
 
 function domain(stage: 'logical' | 'physical', extra: Partial<DisplayDomain> = {}): DisplayDomain {
@@ -25,6 +26,18 @@ function domain(stage: 'logical' | 'physical', extra: Partial<DisplayDomain> = {
     positionDraggable: true,
     ...extra,
   } as DisplayDomain;
+}
+
+/** A minimal analysis reply, for the feedback-dialog lifecycle assertions. */
+function analysis(): FeedbackAnalysis {
+  return {
+    kind: 'bug',
+    confidence: 0.9,
+    title: 'Edge vanished after a rename',
+    context: '1. Rename a model',
+    reasons: { desc: null, ctx: null, image: null },
+    duplicates: [],
+  };
 }
 
 const report = {
@@ -330,16 +343,49 @@ describe('editorStore bug report support', () => {
   });
 
   it('keeps the prefill only while the dialog is open', () => {
-    state().setBugReportDialogOpen(true, { title: 'Edge vanished' });
-    expect(state().bugReportDialogOpen).toBe(true);
-    expect(state().bugReportPrefill).toEqual({ title: 'Edge vanished' });
+    state().setFeedbackDialogOpen(true, { kind: 'bug', title: 'Edge vanished' });
+    expect(state().feedbackDialogOpen).toBe(true);
+    expect(state().feedbackPrefill).toEqual({ kind: 'bug', title: 'Edge vanished' });
 
-    state().setBugReportDialogOpen(false, { title: 'ignored' });
-    expect(state().bugReportDialogOpen).toBe(false);
-    expect(state().bugReportPrefill).toBeNull();
+    state().setFeedbackDialogOpen(false, { title: 'ignored' });
+    expect(state().feedbackDialogOpen).toBe(false);
+    expect(state().feedbackPrefill).toBeNull();
 
-    state().setBugReportDialogOpen(true);
-    expect(state().bugReportPrefill).toBeNull();
+    state().setFeedbackDialogOpen(true);
+    expect(state().feedbackPrefill).toBeNull();
+  });
+
+  it('throws the analysis away when the dialog closes', () => {
+    state().setFeedbackDialogOpen(true);
+    state().setFeedbackAnalysisPending();
+    expect(state().feedbackAnalysisState).toBe('thinking');
+
+    state().setFeedbackAnalysis(analysis());
+    expect(state().feedbackAnalysis).not.toBeNull();
+    expect(state().feedbackAnalysisState).toBe('ready');
+
+    state().setFeedbackAnalysis(null, 'The analysis could not be completed.');
+    expect(state().feedbackAnalysisState).toBe('error');
+    expect(state().feedbackError).toBe('The analysis could not be completed.');
+
+    state().setFeedbackDialogOpen(false);
+    expect(state().feedbackAnalysis).toBeNull();
+    expect(state().feedbackAnalysisState).toBe('idle');
+    expect(state().feedbackError).toBeNull();
+  });
+
+  it('stores the host diagnostics and capability snapshot verbatim', () => {
+    const view = { chips: [{ label: 'ERD Studio 0.6.49', tone: 'normal' as const }], text: 'ERD Studio: 0.6.49' };
+    const capabilities = {
+      extensionVersion: '0.6.49',
+      aiAvailable: false,
+      aiProviderLabel: null,
+      githubHandle: null,
+      canCaptureCanvas: true,
+    };
+    state().setFeedbackContext(view, capabilities);
+    expect(state().feedbackDiagnostics).toEqual(view);
+    expect(state().feedbackCapabilities).toEqual(capabilities);
   });
 });
 

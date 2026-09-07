@@ -12,6 +12,8 @@
 
 import type { Cardinality, ColumnDef, ModelRole, Stage } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, MODEL_NAME_RULE, findDuplicateNames } from '../types/naming';
+import type { DuplicateMode, FeedbackKind } from '../types/feedback';
+import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
 // Model names
@@ -151,6 +153,272 @@ export function isValidKeyType(value: unknown): value is KeyType {
 
 export function isValidStage(value: unknown): value is Stage {
   return value === 'logical' || value === 'physical';
+}
+
+// ---------------------------------------------------------------------------
+// Feedback
+// ---------------------------------------------------------------------------
+
+/** Type guard for `FeedbackKind`. */
+export function isValidFeedbackKind(value: unknown): value is FeedbackKind {
+  return typeof value === 'string' && (FEEDBACK_KINDS as readonly string[]).includes(value);
+}
+
+/** Type guard for `DuplicateMode`. */
+export function isValidDuplicateMode(value: unknown): value is DuplicateMode {
+  return typeof value === 'string' && (DUPLICATE_MODES as readonly string[]).includes(value);
+}
+
+/** True for a positive, whole issue number. */
+function isIssueNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value > 0;
+}
+
+/** Validate an optional `string[]` field, e.g. `webviewErrors`. */
+function validateStringList(value: unknown, label: string): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    return `${label} must be a list of strings.`;
+  }
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      return `${label} must be a list of strings.`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Validate the optional domain summary carried on the feedback messages. It
+ * only ever reaches the diagnostics text, so the checks are shape checks.
+ */
+function validateFeedbackDomainSummary(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Domain summary must be an object.';
+  }
+  const domain = value as {
+    name?: unknown;
+    layer?: unknown;
+    stage?: unknown;
+    modelCount?: unknown;
+    relationshipCount?: unknown;
+    schemaVersion?: unknown;
+  };
+  for (const key of ['name', 'layer', 'stage'] as const) {
+    if (typeof domain[key] !== 'string') {
+      return `Domain summary ${key} must be a string.`;
+    }
+  }
+  for (const key of ['modelCount', 'relationshipCount'] as const) {
+    if (!isFiniteNumber(domain[key])) {
+      return `Domain summary ${key} must be a finite number.`;
+    }
+  }
+  if (domain.schemaVersion !== undefined && !isFiniteNumber(domain.schemaVersion)) {
+    return 'Domain summary schemaVersion must be a finite number.';
+  }
+  return null;
+}
+
+/** Validate a `requestFeedbackContext` payload (all fields optional). Returns null when valid. */
+export function validateRequestFeedbackContextPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Feedback context request must be an object.';
+  }
+  const payload = value as { webviewErrors?: unknown; domain?: unknown };
+  return (
+    validateStringList(payload.webviewErrors, 'Webview errors') ??
+    validateFeedbackDomainSummary(payload.domain)
+  );
+}
+
+/**
+ * Validate an `analyzeFeedback` payload: finite integer `requestId`, valid
+ * `kind`, optional boolean `kindChosenByUser`, non-empty string `description`,
+ * optional string `context`, optional `trigger` of `"debounce"` or `"user"`.
+ */
+export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Feedback analysis request must be an object.';
+  }
+  const payload = value as {
+    requestId?: unknown;
+    kind?: unknown;
+    kindChosenByUser?: unknown;
+    description?: unknown;
+    context?: unknown;
+    trigger?: unknown;
+  };
+  if (!isFiniteNumber(payload.requestId) || !Number.isInteger(payload.requestId)) {
+    return 'Analysis request id must be a finite integer.';
+  }
+  if (!isValidFeedbackKind(payload.kind)) {
+    return 'Feedback kind must be "bug" or "feature".';
+  }
+  if (typeof payload.description !== 'string') {
+    return 'Description must be a string.';
+  }
+  if (!payload.description.trim()) {
+    return 'Description cannot be empty.';
+  }
+  if (payload.context !== undefined && typeof payload.context !== 'string') {
+    return 'Context must be a string.';
+  }
+  // Decides whether the kind is stated to the model as the user's decision, so
+  // a non-boolean is refused rather than read as "yes".
+  if (
+    payload.kindChosenByUser !== undefined &&
+    typeof payload.kindChosenByUser !== 'boolean'
+  ) {
+    return 'Kind-chosen flag must be a boolean.';
+  }
+  // `trigger` decides whether an unprimed language-model request is allowed to
+  // run, so an unrecognised value is refused rather than read as "user".
+  if (
+    payload.trigger !== undefined &&
+    payload.trigger !== 'debounce' &&
+    payload.trigger !== 'user'
+  ) {
+    return 'Analysis trigger must be "debounce" or "user".';
+  }
+  return null;
+}
+
+/**
+ * Validate a `submitFeedback` payload: valid `kind`, string `title` and
+ * `description`, optional string `steps`, boolean `includeDiagnostics`,
+ * optional positive integer `regressionOf` / `commentOnIssue`, optional
+ * string[] `webviewErrors`, optional domain summary.
+ */
+export function validateSubmitFeedbackPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Feedback submission must be an object.';
+  }
+  const payload = value as {
+    kind?: unknown;
+    title?: unknown;
+    description?: unknown;
+    steps?: unknown;
+    includeDiagnostics?: unknown;
+    webviewErrors?: unknown;
+    regressionOf?: unknown;
+    commentOnIssue?: unknown;
+    domain?: unknown;
+  };
+  if (!isValidFeedbackKind(payload.kind)) {
+    return 'Feedback kind must be "bug" or "feature".';
+  }
+  if (typeof payload.title !== 'string') {
+    return 'Title must be a string.';
+  }
+  if (typeof payload.description !== 'string') {
+    return 'Description must be a string.';
+  }
+  if (payload.steps !== undefined && typeof payload.steps !== 'string') {
+    return 'Steps must be a string.';
+  }
+  if (typeof payload.includeDiagnostics !== 'boolean') {
+    return 'Diagnostics flag must be a boolean.';
+  }
+  for (const key of ['regressionOf', 'commentOnIssue'] as const) {
+    if (payload[key] !== undefined && !isIssueNumber(payload[key])) {
+      return `Issue number for ${key} must be a positive integer.`;
+    }
+  }
+  return (
+    validateStringList(payload.webviewErrors, 'Webview errors') ??
+    validateFeedbackDomainSummary(payload.domain)
+  );
+}
+
+/** Validate a `copyFeedbackReport` payload (same rules minus the issue numbers). */
+export function validateCopyFeedbackReportPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Feedback report must be an object.';
+  }
+  const payload = value as {
+    kind?: unknown;
+    title?: unknown;
+    description?: unknown;
+    steps?: unknown;
+    includeDiagnostics?: unknown;
+    webviewErrors?: unknown;
+    domain?: unknown;
+  };
+  if (!isValidFeedbackKind(payload.kind)) {
+    return 'Feedback kind must be "bug" or "feature".';
+  }
+  if (typeof payload.title !== 'string') {
+    return 'Title must be a string.';
+  }
+  if (typeof payload.description !== 'string') {
+    return 'Description must be a string.';
+  }
+  if (payload.steps !== undefined && typeof payload.steps !== 'string') {
+    return 'Steps must be a string.';
+  }
+  if (typeof payload.includeDiagnostics !== 'boolean') {
+    return 'Diagnostics flag must be a boolean.';
+  }
+  return (
+    validateStringList(payload.webviewErrors, 'Webview errors') ??
+    validateFeedbackDomainSummary(payload.domain)
+  );
+}
+
+/**
+ * Validate a `setFeedbackProvider` payload: one of the four known choices,
+ * plus the same optional diagnostics context `requestFeedbackContext` carries
+ * (the reply is a full `feedbackContext`).
+ *
+ * An unrecognised choice is refused rather than coerced to `auto`: writing a
+ * value the resolver does not know would silently restore the old precedence
+ * and send the text somewhere the user did not pick.
+ */
+export function validateSetFeedbackProviderPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Provider choice must be an object.';
+  }
+  const payload = value as { provider?: unknown; webviewErrors?: unknown; domain?: unknown };
+  if (!isFeedbackAiProviderChoice(payload.provider)) {
+    return 'Analysis provider must be "auto", "vscode", "endpoint" or "hosted".';
+  }
+  return (
+    validateStringList(payload.webviewErrors, 'Webview errors') ??
+    validateFeedbackDomainSummary(payload.domain)
+  );
+}
+
+/**
+ * Validate an `openFeedbackLink` payload. `issue` opens a GitHub thread (with
+ * `comment` for the new-comment anchor); `extension` opens the Extensions view.
+ */
+export function validateOpenFeedbackLinkPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Feedback link must be an object.';
+  }
+  const payload = value as { target?: unknown; issue?: unknown; comment?: unknown };
+  if (payload.target === 'extension') {
+    return null;
+  }
+  if (payload.target !== 'issue') {
+    return 'Feedback link target must be "issue" or "extension".';
+  }
+  if (!isIssueNumber(payload.issue)) {
+    return 'Issue number must be a positive integer.';
+  }
+  if (payload.comment !== undefined && typeof payload.comment !== 'boolean') {
+    return 'Comment flag must be a boolean.';
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

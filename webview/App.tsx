@@ -47,7 +47,7 @@ import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
-import { BugReportDialog } from './components/BugReportDialog/BugReportDialog';
+import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
 import { transformDomain } from './lib/graphTransformer';
@@ -100,7 +100,7 @@ function EditorCanvas() {
   const setEdges = useEditorStore((s) => s.setEdges);
   const selectNode = useEditorStore((s) => s.selectNode);
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
-  const setBugReportDialogOpen = useEditorStore((s) => s.setBugReportDialogOpen);
+  const setFeedbackDialogOpen = useEditorStore((s) => s.setFeedbackDialogOpen);
   const openFkDialogWithPrefill = useEditorStore((s) => s.openFkDialogWithPrefill);
   const setSelectedEdges = useEditorStore((s) => s.setSelectedEdges);
   const setHighlightedColumns = useEditorStore((s) => s.setHighlightedColumns);
@@ -235,8 +235,13 @@ function EditorCanvas() {
           useEditorStore.getState().recordError('extension', msg.payload.message);
           setError(msg.payload.message);
           break;
-        case 'openBugReport':
-          useEditorStore.getState().setBugReportDialogOpen(true, msg.payload ?? null);
+        case 'openFeedback':
+          useEditorStore.getState().setFeedbackDialogOpen(true, msg.payload ?? null);
+          break;
+        case 'feedbackContext':
+          useEditorStore
+            .getState()
+            .setFeedbackContext(msg.payload.diagnostics, msg.payload.capabilities);
           break;
       }
     },
@@ -610,11 +615,11 @@ function EditorCanvas() {
         <button
           type="button"
           className="editor-message__button"
-          onClick={() => setBugReportDialogOpen(true, { description: `Error shown on canvas: ${error}` })}
+          onClick={() => setFeedbackDialogOpen(true, { kind: 'bug', description: `Error shown on canvas: ${error}` })}
         >
           Report a Bug
         </button>
-        <BugReportDialog />
+        <FeedbackDialog />
       </div>
     );
   }
@@ -731,8 +736,8 @@ function EditorCanvas() {
       {/* Welcome modal (first-time users) */}
       <WelcomeModal />
 
-      {/* Report a Bug dialog */}
-      <BugReportDialog />
+      {/* Feedback dialog (bug reports and feature requests) */}
+      <FeedbackDialog />
     </div>
   );
 }
@@ -742,7 +747,7 @@ function EditorCanvas() {
 // ---------------------------------------------------------------------------
 
 export function App() {
-  // Capture uncaught webview errors so bug reports can include them.
+  // Capture uncaught webview errors so feedback reports can include them.
   useEffect(() => {
     const record = useEditorStore.getState().recordError;
     const onError = (e: ErrorEvent) => record('window', e.message);

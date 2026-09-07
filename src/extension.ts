@@ -23,7 +23,11 @@ import { getErdStudioSetting } from './services/configService';
 import { readDbtProjectConfig } from './services/dbtProjectConfig';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
-import { submitBugReport } from './services/feedbackService';
+import { submitFeedback } from './services/feedbackService';
+import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
+import { ReportTrackingService } from './services/reportTrackingService';
+import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
+import type { FeedbackKind } from './types/feedback';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -135,6 +139,22 @@ const NO_PROJECT_MESSAGE =
   'or set erdStudio.projectPath to the dbt project folder.';
 
 /**
+ * Commands added after the `dbtSemantic.*` → `erdStudio.*` rename. They never
+ * had a legacy id, so no user keybinding can reference one — registering an
+ * alias for them would only widen the compatibility surface we are stuck with.
+ * Consumed by `registerFallbackCommands` and mirrored by
+ * `test/unit/extension.activate.test.ts`; `LEGACY_ALIASED_COMMANDS` at the end
+ * of `activate()` is the matching allow-list of pre-rename names.
+ */
+export const NO_LEGACY_ALIAS = new Set([
+  'erdStudio.reportBug',
+  'erdStudio.setFeedbackApiKey',
+  'erdStudio.clearFeedbackApiKey',
+  'erdStudio.refreshMyReports',
+  'erdStudio.openTrackedReport',
+]);
+
+/**
  * Register every contributed command (and its legacy dbtSemantic.* alias)
  * with a handler that explains why ERD Studio is inactive, plus a stub
  * custom editor for domain files. Used when no dbt project could be found so
@@ -157,8 +177,10 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
     // reportBug is registered by activate() before this fallback runs and works
     // without a project; registering it again would throw ("already exists").
     if (!command.startsWith('erdStudio.') || command === 'erdStudio.reportBug') { continue; }
+    context.subscriptions.push(vscode.commands.registerCommand(command, showNoProject));
+    // Post-rename commands never had a dbtSemantic.* id — see NO_LEGACY_ALIAS.
+    if (NO_LEGACY_ALIAS.has(command)) { continue; }
     context.subscriptions.push(
-      vscode.commands.registerCommand(command, showNoProject),
       vscode.commands.registerCommand(command.replace(/^erdStudio\./, 'dbtSemantic.'), showNoProject),
     );
   }
@@ -281,16 +303,34 @@ const LAYER_COLOR_OPTIONS = [
   { label: '$(edit) Custom hex color...', value: 'custom' },
 ];
 
+/** QuickPick labels for the canvas-less kind step, one per `FeedbackKind`. */
+const FEEDBACK_KIND_PICKS: ReadonlyArray<{ label: string; kind: FeedbackKind }> = [
+  { label: 'Report a bug', kind: 'bug' },
+  { label: 'Request a feature', kind: 'feature' },
+];
+
 /**
- * "Report a Bug" without an active canvas: gather a title and a one-line
- * description via input boxes, then open the prefilled GitHub issue form.
+ * "Send Feedback" without an active canvas: pick the kind, then gather a title
+ * and a one-line description via input boxes, then open the prefilled GitHub
+ * issue form. No duplicate check and no analysis — both of those need the
+ * webview's dialog.
+ *
+ * Cancelling any of the three steps abandons the report.
  */
-async function reportBugWithoutCanvas(
+async function sendFeedbackWithoutCanvas(
   context: vscode.ExtensionContext,
-  prefill?: { title?: string; description?: string },
+  prefill?: { kind?: FeedbackKind; title?: string; description?: string },
+  tracking?: ReportTrackingService,
 ): Promise<void> {
+  const picked = await vscode.window.showQuickPick(
+    FEEDBACK_KIND_PICKS.map(p => p.label),
+    { title: 'ERD Studio — Send Feedback (1/3)', placeHolder: 'What would you like to send?' },
+  );
+  if (picked === undefined) return;
+  const kind = FEEDBACK_KIND_PICKS.find(p => p.label === picked)?.kind ?? prefill?.kind ?? 'bug';
+
   const title = await vscode.window.showInputBox({
-    title: 'ERD Studio — Report a Bug (1/2)',
+    title: 'ERD Studio — Send Feedback (2/3)',
     prompt: 'One-line summary of the problem',
     value: prefill?.title ?? '',
     ignoreFocusOut: true,
@@ -298,13 +338,18 @@ async function reportBugWithoutCanvas(
   });
   if (title === undefined) return;
   const description = await vscode.window.showInputBox({
-    title: 'ERD Studio — Report a Bug (2/2)',
+    title: 'ERD Studio — Send Feedback (3/3)',
     prompt: 'What happened? You can add more detail on GitHub before submitting.',
     value: prefill?.description ?? '',
     ignoreFocusOut: true,
   });
   if (description === undefined) return;
-  await submitBugReport(context, { title, description, includeDiagnostics: true });
+  const result = await submitFeedback(context, { kind, title, description, includeDiagnostics: true });
+  // The browser is where the issue is actually filed, so all we can record is
+  // that one was opened; the tracker reconciles it against GitHub later.
+  if (result.ok && result.commentedOn === undefined) {
+    await tracking?.recordPending(title, kind);
+  }
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -328,17 +373,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   }
 
-  // "Report a Bug" is registered before any early return so it is always
+  // "Send Feedback" is registered before any early return so it is always
   // reachable from the command palette, even when no dbt project is open.
-  // When a canvas is active the report is routed through its webview so it
-  // can include a screenshot and domain context.
+  // When a canvas is active the report is routed through its webview so it can
+  // include the diagnostics chips and the optional AI analysis.
   let editorProviderForFeedback: SemanticEditorProvider | undefined;
+  let trackingServiceForFeedback: ReportTrackingService | undefined;
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'erdStudio.reportBug',
-      async (prefill?: { title?: string; description?: string }) => {
-        if (editorProviderForFeedback?.requestBugReportDialog(prefill)) return;
-        await reportBugWithoutCanvas(context, prefill);
+      async (prefill?: { kind?: FeedbackKind; title?: string; description?: string }) => {
+        if (editorProviderForFeedback?.requestFeedbackDialog(prefill)) return;
+        await sendFeedbackWithoutCanvas(context, prefill, trackingServiceForFeedback);
       },
     ),
   );
@@ -489,6 +535,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     logicalModelService,
   );
   editorProviderForFeedback = editorProvider;
+
+  // Report tracking is constructed here, before refreshContextKeys() is defined
+  // and called below, so nothing can reference a service that does not exist
+  // yet. It owns its own `erdStudio.hasTrackedReports` context key (which gates
+  // the My Reports view) — refreshContextKeys deliberately knows nothing about it.
+  const trackingService = new ReportTrackingService(context);
+  const myReportsProvider = new MyReportsTreeProvider(trackingService);
+  trackingServiceForFeedback = trackingService;
+  editorProvider.setReportTracking(trackingService);
+
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
 
@@ -752,6 +808,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         canSelectMany: false,
       });
     })(),
+    trackingService,
+    myReportsProvider,
+    vscode.window.createTreeView('erdStudio.myReports', {
+      treeDataProvider: myReportsProvider,
+      canSelectMany: false,
+    }),
+    trackingService.onDidChangeReports(() => {
+      myReportsProvider.refresh();
+    }),
+    vscode.commands.registerCommand('erdStudio.setFeedbackApiKey', () => setFeedbackApiKey(context)),
+    vscode.commands.registerCommand('erdStudio.clearFeedbackApiKey', () => clearFeedbackApiKey(context)),
+    vscode.commands.registerCommand('erdStudio.refreshMyReports', () => trackingService.refresh({ force: true })),
+    // Code-only (never contributed): the row's own command, so it stays out of
+    // the palette and out of registerFallbackCommands.
+    vscode.commands.registerCommand('erdStudio.openTrackedReport', (node?: MyReportNode) => {
+      if (node?.report?.url) { void vscode.env.openExternal(vscode.Uri.parse(node.report.url)); }
+    }),
     vscode.commands.registerCommand('erdStudio.deleteLogicalModel', async (node: ModelLibraryNode | undefined) => {
       if (!node || node.type !== 'model') {
         void vscode.window.showErrorMessage('Delete Model: No model selected. Right-click a model in the Model Library.');
@@ -1514,6 +1587,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ),
   );
+
+  // One poll for the issues this user filed. No-ops without a silent GitHub
+  // session, with `feedback.trackReports` off, or when the cache is still
+  // fresh, so it costs nothing on a normal activation.
+  void trackingService.refresh();
 
   // AI coding harness — prompt to update stale files; offer install once per
   // workspace when none are present. Never overwrite anything silently:

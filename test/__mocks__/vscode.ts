@@ -39,6 +39,20 @@ function effectiveConfigValue(values: MockConfigValues | undefined): unknown {
   );
 }
 
+/** `vscode.ConfigurationTarget`, which `update()` takes as its scope. */
+export const ConfigurationTarget = {
+  Global: 1,
+  Workspace: 2,
+  WorkspaceFolder: 3,
+} as const;
+
+/** Which `MockConfigValues` field a ConfigurationTarget writes. */
+const CONFIG_TARGET_FIELD: Record<number, keyof MockConfigValues> = {
+  [ConfigurationTarget.Global]: 'globalValue',
+  [ConfigurationTarget.Workspace]: 'workspaceValue',
+  [ConfigurationTarget.WorkspaceFolder]: 'workspaceFolderValue',
+};
+
 export const workspace = {
   getConfiguration: (section?: string) => ({
     get: (key: string, defaultValue?: unknown) => {
@@ -49,6 +63,22 @@ export const workspace = {
     inspect: (key: string) => {
       const fullKey = section ? `${section}.${key}` : key;
       return { key: fullKey, ...(_mockConfigValues.get(fullKey) ?? {}) } as { key: string } & MockConfigValues;
+    },
+    /**
+     * Write one scope of a setting, so a test can read back what production
+     * code actually persisted. Defaults to Global, as VS Code does when no
+     * target is given and the setting has no workspace value.
+     */
+    update: async (key: string, value: unknown, target: number = ConfigurationTarget.Global) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      const field = CONFIG_TARGET_FIELD[target] ?? 'globalValue';
+      const current = _mockConfigValues.get(fullKey) ?? {};
+      if (value === undefined) {
+        delete current[field];
+      } else {
+        current[field] = value;
+      }
+      _mockConfigValues.set(fullKey, current);
     },
   }),
   workspaceFolders: [] as Array<{ uri: { fsPath: string }; name?: string; index?: number }>,
@@ -81,6 +111,7 @@ export const window = {
   showErrorMessage: async () => undefined,
   showInputBox: async () => undefined,
   showQuickPick: async () => undefined,
+  showOpenDialog: async () => _mockOpenDialogResult,
   setStatusBarMessage: (_message: string, _hideAfterTimeout?: number) => ({ dispose: () => {} }),
   createOutputChannel: () => ({
     appendLine: () => {},
@@ -702,4 +733,245 @@ export class RelativePattern {
     this.base = typeof base === 'string' ? base : base.uri.fsPath;
     this.pattern = pattern;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Open dialog (unused by the current design; present so a host-side picker
+// does not require another mock change)
+// ---------------------------------------------------------------------------
+
+let _mockOpenDialogResult: Array<{ fsPath: string }> | undefined;
+
+/** Set what `window.showOpenDialog` resolves to; `undefined` means "cancelled". */
+export function _setMockOpenDialogResult(result: Array<{ fsPath: string }> | undefined): void {
+  _mockOpenDialogResult = result;
+}
+
+export function _resetMockOpenDialogResult(): void {
+  _mockOpenDialogResult = undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Language Model API (feature-detected in production — absent by default here)
+// ---------------------------------------------------------------------------
+
+export interface MockLanguageModel {
+  id: string;
+  name: string;
+  /** Text the model returns for any request. */
+  reply: string;
+  /**
+   * When set, `sendRequest` rejects with this instead of replying — what VS
+   * Code does when the user dismisses its language model access dialog.
+   */
+  error?: unknown;
+}
+
+/** The subset of `vscode.lm` the feature-detection shim reaches for. */
+export interface MockLanguageModelNamespace {
+  selectChatModels(selector?: { vendor?: string; family?: string }): Promise<
+    Array<{
+      id: string;
+      name: string;
+      sendRequest(
+        messages: unknown[],
+        options?: unknown,
+        token?: unknown,
+      ): Promise<{ text: AsyncIterable<string> }>;
+    }>
+  >;
+}
+
+/**
+ * `vscode.lm` — undefined unless a test installs one, so the production
+ * feature-detection path (`typeof api.lm?.selectChatModels === 'function'`)
+ * behaves exactly as it does on a VS Code 1.85 host, where the namespace does
+ * not exist at all.
+ *
+ * These are `let` exports rather than properties on a frozen namespace object
+ * because a module namespace cannot gain new keys at runtime; the ESM live
+ * binding gives production code the current value on every read.
+ */
+export let lm: MockLanguageModelNamespace | undefined;
+
+export let LanguageModelChatMessage: { User(content: string): unknown } | undefined;
+
+let _mockLanguageModels: MockLanguageModel[] | null = null;
+
+/**
+ * Install a fake `vscode.lm`. Pass `null`/`undefined` (the default) to remove
+ * the namespace, which is what a VS Code 1.85 host looks like.
+ */
+export function _setMockLanguageModels(models: MockLanguageModel[] | null | undefined): void {
+  _mockLanguageModels = models ?? null;
+  if (_mockLanguageModels === null) {
+    lm = undefined;
+    LanguageModelChatMessage = undefined;
+    return;
+  }
+  lm = {
+    selectChatModels: async (_selector?: { vendor?: string; family?: string }) =>
+      (_mockLanguageModels ?? []).map((model) => ({
+        id: model.id,
+        name: model.name,
+        sendRequest: async () => {
+          if (model.error !== undefined) throw model.error;
+          return {
+            text: (async function* () {
+              yield model.reply;
+            })(),
+          };
+        },
+      })),
+  };
+  LanguageModelChatMessage = {
+    User: (content: string) => ({ role: 'user', content }),
+  };
+}
+
+/** Remove the fake `vscode.lm` (call in beforeEach). */
+export function _resetMockLanguageModels(): void {
+  _setMockLanguageModels(null);
+}
+
+// ---------------------------------------------------------------------------
+// Authentication
+// ---------------------------------------------------------------------------
+
+export interface MockAuthSession {
+  id: string;
+  accessToken: string;
+  account: { id: string; label: string };
+  scopes: string[];
+}
+
+let _mockGithubSession: MockAuthSession | null = null;
+let _mockAuthError: unknown = null;
+
+/** Install (or clear) the session returned by `authentication.getSession`. */
+export function _setMockGithubSession(session: MockAuthSession | null): void {
+  _mockGithubSession = session;
+}
+
+/**
+ * Make `authentication.getSession` reject, as it does on a host with no GitHub
+ * authentication provider registered (the built-in extension disabled, some
+ * remote hosts). Pass `null` to go back to resolving normally.
+ */
+export function _setMockAuthError(error: unknown): void {
+  _mockAuthError = error;
+}
+
+export function _resetMockGithubSession(): void {
+  _mockGithubSession = null;
+  _mockAuthError = null;
+}
+
+export const authentication = {
+  /**
+   * Resolves `undefined` by default, so the silent "no session" path is what a
+   * test gets unless it opts in. `createIfNone` mints one, mirroring the
+   * interactive sign-in.
+   */
+  getSession: async (
+    _providerId: string,
+    _scopes: readonly string[],
+    options?: { silent?: boolean; createIfNone?: boolean },
+  ): Promise<MockAuthSession | undefined> => {
+    if (_mockAuthError) throw _mockAuthError;
+    if (_mockGithubSession) return _mockGithubSession;
+    if (options?.createIfNone) {
+      _mockGithubSession = {
+        id: 'mock-session',
+        accessToken: 'mock-token',
+        account: { id: '1', label: 'mockuser' },
+        scopes: ['read:user'],
+      };
+      return _mockGithubSession;
+    }
+    return undefined;
+  },
+  onDidChangeSessions: (_listener: (e: unknown) => void) => ({ dispose: () => {} }),
+};
+
+// ---------------------------------------------------------------------------
+// ExtensionContext building blocks (SecretStorage / Memento)
+// ---------------------------------------------------------------------------
+
+/** Minimal mock of vscode.SecretStorage. */
+export interface MockSecretStorage {
+  get(key: string): Promise<string | undefined>;
+  store(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
+  onDidChange: (listener: (e: { key: string }) => void) => { dispose: () => void };
+  /** Test helper: seed a value without going through store(). */
+  _seed(key: string, value: string): void;
+}
+
+/** Build a Map-backed SecretStorage for an ExtensionContext fake. */
+export function createMockSecretStorage(): MockSecretStorage {
+  const store = new Map<string, string>();
+  return {
+    get: async (key) => store.get(key),
+    store: async (key, value) => {
+      store.set(key, value);
+    },
+    delete: async (key) => {
+      store.delete(key);
+    },
+    onDidChange: () => ({ dispose: () => {} }),
+    _seed: (key, value) => {
+      store.set(key, value);
+    },
+  };
+}
+
+/** Minimal mock of vscode.Memento — `get` / `update` only, as production uses. */
+export interface MockMemento {
+  get<T>(key: string, defaultValue?: T): T | undefined;
+  update(key: string, value: unknown): Promise<void>;
+  /** Test helper: seed a value without going through update(). */
+  _seed(key: string, value: unknown): void;
+}
+
+/** Build a Map-backed Memento for an ExtensionContext fake. */
+export function createMockMemento(seed?: Iterable<readonly [string, unknown]>): MockMemento {
+  const store = new Map<string, unknown>(seed ?? []);
+  return {
+    get: <T>(key: string, defaultValue?: T) =>
+      (store.has(key) ? (store.get(key) as T) : defaultValue),
+    update: async (key: string, value: unknown) => {
+      store.set(key, value);
+    },
+    _seed: (key: string, value: unknown) => {
+      store.set(key, value);
+    },
+  };
+}
+
+/** The pieces of an ExtensionContext fake every suite needs. */
+export interface MockExtensionContextOptions {
+  /** Root the globalStorageUri is placed under. */
+  storageRoot: string;
+  extensionRoot: string;
+  packageJSON?: unknown;
+  globalStateSeed?: Iterable<readonly [string, unknown]>;
+  workspaceStateSeed?: Iterable<readonly [string, unknown]>;
+}
+
+/**
+ * Shared ExtensionContext factory. Every fake needs `secrets` and a real
+ * `globalState` now that the feedback services read both, so build them here
+ * rather than repeating an object literal in each suite.
+ */
+export function createMockExtensionContext(options: MockExtensionContextOptions) {
+  return {
+    subscriptions: [] as Array<{ dispose: () => void }>,
+    extension: { packageJSON: options.packageJSON ?? { version: '0.0.0-test' } },
+    extensionUri: Uri.file(options.extensionRoot),
+    globalStorageUri: Uri.file(`${options.storageRoot}/.global-storage`),
+    globalState: createMockMemento(options.globalStateSeed),
+    workspaceState: createMockMemento(options.workspaceStateSeed),
+    secrets: createMockSecretStorage(),
+  };
 }

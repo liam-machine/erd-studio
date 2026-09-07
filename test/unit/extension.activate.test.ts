@@ -19,7 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { activate } from '../../src/extension';
+import { activate, NO_LEGACY_ALIAS } from '../../src/extension';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 
@@ -51,6 +51,7 @@ function makeContext(root: string): Context {
       get: (key: string) => workspaceState.get(key),
       update: async (key: string, value: unknown) => { workspaceState.set(key, value); },
     },
+    secrets: vscode.createMockSecretStorage(),
   } as unknown as Context;
 }
 
@@ -72,6 +73,8 @@ beforeEach(() => {
   vscode._resetMockConfiguration();
   vscode._resetMockWorkspace();
   vscode._clearMockFileWatchers();
+  vscode._resetMockGithubSession();
+  vscode._resetMockLanguageModels();
   vscode.workspace.workspaceFolders = [];
   vscode.window.tabGroups.all = [];
   vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
@@ -103,9 +106,12 @@ describe('activate() without a dbt project', () => {
     expect(registered()[0]).toBe('erdStudio.reportBug');
     for (const command of CONTRIBUTED) {
       expect(count(command), command).toBe(1);
-      if (command !== 'erdStudio.reportBug') {
-        expect(count(legacyAlias(command)), legacyAlias(command)).toBe(1);
-      }
+      // Post-rename ids never gained a dbtSemantic.* alias — but the stub for
+      // the erdStudio.* id is still registered, so nothing reports "command
+      // not found".
+      expect(count(legacyAlias(command)), legacyAlias(command)).toBe(
+        NO_LEGACY_ALIAS.has(command) ? 0 : 1,
+      );
     }
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), 'Open Settings');
   });
@@ -143,17 +149,49 @@ describe('activate() without a dbt project', () => {
 
   it('erdStudio.reportBug is live before the early return: cancelling the title opens nothing', async () => {
     await activate(context);
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue('Report a bug');
     const input = vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue(undefined);
     const open = vi.spyOn(vscode.env, 'openExternal');
 
     await vscode.commands.executeCommand('erdStudio.reportBug');
 
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(pick.mock.calls[0][0]).toEqual(['Report a bug', 'Request a feature']);
     expect(input).toHaveBeenCalledTimes(1);
     expect(open).not.toHaveBeenCalled();
   });
 
+  it('cancelling the kind QuickPick abandons the report before any input box', async () => {
+    await activate(context);
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue(undefined);
+    const input = vi.spyOn(vscode.window, 'showInputBox');
+    const open = vi.spyOn(vscode.env, 'openExternal');
+
+    await vscode.commands.executeCommand('erdStudio.reportBug');
+
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(input).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('picking "Request a feature" opens the feature-request template', async () => {
+    await activate(context);
+    vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue('Request a feature');
+    vi.spyOn(vscode.window, 'showInputBox')
+      .mockResolvedValueOnce('Multi-domain search')
+      .mockResolvedValueOnce('So I can find a model anywhere');
+    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+
+    await vscode.commands.executeCommand('erdStudio.reportBug');
+
+    const url = decodeURIComponent(String(open.mock.calls[0][0]).replace(/\+/g, ' '));
+    expect(url).toContain('template=feature_request.yml');
+    expect(url).toContain('title=Multi-domain search');
+  });
+
   it('erdStudio.reportBug without a canvas gathers title + description and opens the prefilled issue', async () => {
     await activate(context);
+    vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue('Report a bug');
     const input = vi.spyOn(vscode.window, 'showInputBox')
       .mockResolvedValueOnce('Palette crash')
       .mockResolvedValueOnce('It exploded');
@@ -186,8 +224,12 @@ describe('activate() with a dbt project', () => {
       expect(count(command), command).toBe(1);
     }
     // Every command that existed under the old prefix keeps working from old keybindings.
-    for (const command of CONTRIBUTED.filter((c) => c !== 'erdStudio.reportBug')) {
+    for (const command of CONTRIBUTED.filter((c) => !NO_LEGACY_ALIAS.has(c))) {
       expect(count(legacyAlias(command)), legacyAlias(command)).toBe(1);
+    }
+    // …and the ones added after the rename never gained one.
+    for (const command of CONTRIBUTED.filter((c) => NO_LEGACY_ALIAS.has(c))) {
+      expect(count(legacyAlias(command)), legacyAlias(command)).toBe(0);
     }
     // Aliases are registered in code only — never contributed in package.json.
     expect(CONTRIBUTED.some((c) => c.startsWith('dbtSemantic.'))).toBe(false);
@@ -218,7 +260,11 @@ describe('activate() with a dbt project', () => {
     expect(viewType).toBe(DOMAIN_EDITOR_VIEW_TYPE);
     expect(typeof provider.resolveCustomTextEditor).toBe('function');
     expect(options).toEqual({ webviewOptions: { retainContextWhenHidden: true } });
-    expect(createTreeView.mock.calls.map((c) => c[0]).sort()).toEqual(['erdStudio.domainTree', 'erdStudio.modelLibrary']);
+    expect(createTreeView.mock.calls.map((c) => c[0])).toEqual([
+      'erdStudio.domainTree',
+      'erdStudio.modelLibrary',
+      'erdStudio.myReports',
+    ]);
     expect(registerDecorations).toHaveBeenCalledTimes(2);
     expect(context.subscriptions.length).toBeGreaterThan(CONTRIBUTED.length * 2);
   });
@@ -267,8 +313,22 @@ describe('activate() with a dbt project', () => {
 
     await vscode.commands.executeCommand('erdStudio.reportBug', { title: 'From palette' });
 
-    expect(panel._postedMessages).toContainEqual({ type: 'openBugReport', payload: { title: 'From palette' } });
+    expect(panel._postedMessages).toContainEqual({ type: 'openFeedback', payload: { title: 'From palette' } });
     expect(input).not.toHaveBeenCalled();
+  });
+
+  it('erdStudio.openTrackedReport opens the row\'s issue URL and ignores a missing node', async () => {
+    await activate(context);
+    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+
+    await vscode.commands.executeCommand('erdStudio.openTrackedReport');
+    expect(open).not.toHaveBeenCalled();
+
+    await vscode.commands.executeCommand('erdStudio.openTrackedReport', {
+      type: 'report',
+      report: { number: 42, url: 'https://github.com/liam-machine/erd-studio/issues/42' },
+    });
+    expect(String(open.mock.calls[0][0])).toBe('https://github.com/liam-machine/erd-studio/issues/42');
   });
 });
 

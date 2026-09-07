@@ -14,6 +14,12 @@ import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { ModelFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 import type { ModelTemplate, Stage } from '../../src/types/semantic';
 import type { GroundTruth } from '../../src/types/syncPlan';
+import type {
+  FeedbackAnalysis,
+  FeedbackCapabilities,
+  FeedbackDiagnosticsView,
+  FeedbackKind,
+} from '../../src/types/feedback';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -115,11 +121,21 @@ export interface EditorState {
   legendOpen: boolean;
   /** Whether the welcome modal is visible. */
   welcomeModalOpen: boolean;
-  /** Whether the "Report a Bug" dialog is visible. */
-  bugReportDialogOpen: boolean;
-  /** Prefill for the bug report dialog (from the command palette / error screens). */
-  bugReportPrefill: { title?: string; description?: string } | null;
-  /** Recent errors observed in the webview (oldest → newest, capped at 20). Sent with bug reports. */
+  /** Whether the Feedback dialog is visible. */
+  feedbackDialogOpen: boolean;
+  /** Prefill for the Feedback dialog (from the command palette / error screens). */
+  feedbackPrefill: { kind?: FeedbackKind; title?: string; description?: string } | null;
+  /** Diagnostics view pushed by the host, or null before the first `feedbackContext`. */
+  feedbackDiagnostics: FeedbackDiagnosticsView | null;
+  /** Capability snapshot pushed by the host, or null before the first `feedbackContext`. */
+  feedbackCapabilities: FeedbackCapabilities | null;
+  /** Latest analysis reply, or null when none has arrived (or none was possible). */
+  feedbackAnalysis: FeedbackAnalysis | null;
+  /** Analysis lifecycle for the assist panel. */
+  feedbackAnalysisState: 'idle' | 'thinking' | 'ready' | 'error';
+  /** Error sentence from the last failed analysis or submit, or null. */
+  feedbackError: string | null;
+  /** Recent errors observed in the webview (oldest → newest, capped at 20). Sent with feedback reports. */
   recentErrors: string[];
   /** Active drag line state for creating relationships via column drag. */
   dragLineState: {
@@ -226,8 +242,20 @@ export interface EditorActions {
   setLegendOpen: (open: boolean) => void;
   /** Toggle the welcome modal visibility. */
   setWelcomeModalOpen: (open: boolean) => void;
-  /** Open/close the bug report dialog, optionally with prefilled fields. */
-  setBugReportDialogOpen: (open: boolean, prefill?: { title?: string; description?: string } | null) => void;
+  /** Open/close the Feedback dialog, optionally with prefilled fields. */
+  setFeedbackDialogOpen: (
+    open: boolean,
+    prefill?: { kind?: FeedbackKind; title?: string; description?: string } | null,
+  ) => void;
+  /** Store the host's diagnostics + capability snapshot. */
+  setFeedbackContext: (
+    diagnostics: FeedbackDiagnosticsView,
+    capabilities: FeedbackCapabilities,
+  ) => void;
+  /** Store an analysis reply, or the sentence explaining why it failed. */
+  setFeedbackAnalysis: (analysis: FeedbackAnalysis | null, error?: string) => void;
+  /** Move the analysis panel to 'thinking'. */
+  setFeedbackAnalysisPending: () => void;
   /** Append an error to the recent-errors ring buffer. */
   recordError: (source: string, message: string) => void;
   /** Start drag line for column relationship creation. */
@@ -321,8 +349,13 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   _autoLayoutFn: null,
   legendOpen: false,
   welcomeModalOpen: false,
-  bugReportDialogOpen: false,
-  bugReportPrefill: null,
+  feedbackDialogOpen: false,
+  feedbackPrefill: null,
+  feedbackDiagnostics: null,
+  feedbackCapabilities: null,
+  feedbackAnalysis: null,
+  feedbackAnalysisState: 'idle',
+  feedbackError: null,
   recentErrors: [],
   dragLineState: null,
   annotationLinkDrag: null,
@@ -399,8 +432,32 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   },
   setLegendOpen: (open) => set({ legendOpen: open }),
   setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
-  setBugReportDialogOpen: (open, prefill = null) =>
-    set({ bugReportDialogOpen: open, bugReportPrefill: open ? prefill : null }),
+  setFeedbackDialogOpen: (open, prefill = null) =>
+    set(
+      open
+        ? { feedbackDialogOpen: true, feedbackPrefill: prefill }
+        : {
+            // Closing throws the whole conversation away: a reopened dialog
+            // re-requests its context and re-runs its own analysis, so a stale
+            // verdict or error can never greet the next report.
+            feedbackDialogOpen: false,
+            feedbackPrefill: null,
+            feedbackAnalysis: null,
+            feedbackAnalysisState: 'idle' as const,
+            feedbackError: null,
+          },
+    ),
+  setFeedbackContext: (diagnostics, capabilities) =>
+    set({ feedbackDiagnostics: diagnostics, feedbackCapabilities: capabilities }),
+  setFeedbackAnalysis: (analysis, error) =>
+    set({
+      feedbackAnalysis: analysis,
+      // No analysis and no error is the benign "no model configured" reply —
+      // the panel goes back to its idle prose rather than showing a failure.
+      feedbackAnalysisState: error ? 'error' : analysis ? 'ready' : 'idle',
+      feedbackError: error ?? null,
+    }),
+  setFeedbackAnalysisPending: () => set({ feedbackAnalysisState: 'thinking', feedbackError: null }),
   recordError: (source, message) =>
     set((state) => ({
       recentErrors: [...state.recentErrors, `${new Date().toISOString()} [${source}] ${message}`].slice(-20),

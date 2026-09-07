@@ -7,12 +7,12 @@ columns:
   - name: customer_id
     dataType: INT
     description: FK to dim_customer
-  - name: project_id
-    dataType: INT
-    description: FK to dim_project
   - name: order_date
     dataType: DATE
     description: Date the order was placed
+  - name: project_id
+    dataType: INT
+    description: FK to dim_project
   - name: amount
     dataType: DECIMAL
     description: Order total amount
