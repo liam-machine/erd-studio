@@ -517,29 +517,36 @@ describe('the first-run primer', () => {
     resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: true }) });
     render(<FeedbackDialog />);
 
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+
     expect(text('.feedback__primer')).toContain('Analyse this for me');
     expect(text('.feedback__primer-note')).toBe('Uses your own model. VS Code will ask once.');
     // The idle prose gives way to the button rather than sitting beside it.
     expect(q('.feedback__idle')).toBeNull();
-
-    act(() => {
-      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
-    });
     act(() => {
       vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 10);
     });
     expect(analyses()).toHaveLength(0);
   });
 
-  it('runs nothing until there is enough to analyse', () => {
+  it('shows what to do rather than a dead button before anything is written', () => {
     resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: true }) });
     render(<FeedbackDialog />);
 
-    expect(buttonWithText('Analyse this for me')!.hasAttribute('disabled')).toBe(true);
+    // A greyed-out "Analyse this for me" whose note talks about VS Code's
+    // dialog reads as "this feature is broken", not "write something first".
+    expect(buttonWithText('Analyse this for me')).toBeFalsy();
+    expect(text('.feedback__idle')).toContain('Describe the problem above');
+
     act(() => {
       fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
     });
-    expect(buttonWithText('Analyse this for me')!.hasAttribute('disabled')).toBe(false);
+
+    const primer = buttonWithText('Analyse this for me');
+    expect(primer).toBeTruthy();
+    expect(primer!.hasAttribute('disabled')).toBe(false);
   });
 
   it('asks explicitly when the button is pressed', () => {

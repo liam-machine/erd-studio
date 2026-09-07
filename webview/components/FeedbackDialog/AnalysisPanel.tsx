@@ -108,7 +108,13 @@ export function AnalysisPanel({
   // The primer replaces the idle prose, never a result or a request in flight:
   // a failed first run has to leave the button there, or a dismissed VS Code
   // dialog would kill the feature silently for the rest of the session.
-  const showPrimer = needsPriming && !ready && state !== 'thinking';
+  //
+  // `canAnalyse` is part of the condition rather than only the disabled state:
+  // with nothing written yet there is nothing to analyse, and a greyed-out
+  // button whose note talks about VS Code's dialog reads as "this feature is
+  // broken" rather than "write something first". The idle prose below says
+  // exactly what to do, so show that until there is something to send.
+  const showPrimer = needsPriming && canAnalyse && !ready && state !== 'thinking';
   const related = analysis ? relatedDuplicates(analysis.duplicates) : [];
   const takeover = analysis ? pickTakeoverDuplicate(analysis.duplicates) : null;
 
