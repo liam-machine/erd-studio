@@ -165,6 +165,21 @@ export interface RemoveColumnMessage {
 }
 
 /**
+ * Column shape accepted by `updateColumn`.
+ *
+ * `scdType` / `additiveType` are three-state so that edit surfaces which only
+ * know part of a column (e.g. canvas inline rename) don't erase attributes they
+ * never displayed:
+ *   - `undefined` (omitted) — keep the existing value on disk
+ *   - `null`                — explicitly clear the value
+ *   - a value               — set it
+ */
+export type UpdateColumnPayloadColumn = Omit<ColumnDef, 'scdType' | 'additiveType'> & {
+  scdType?: ColumnDef['scdType'] | null;
+  additiveType?: ColumnDef['additiveType'] | null;
+};
+
+/**
  * Request to update an existing column in a model.
  */
 export interface UpdateColumnMessage {
@@ -172,7 +187,7 @@ export interface UpdateColumnMessage {
   payload: {
     modelName: string;
     oldColumnName: string;
-    column: ColumnDef;
+    column: UpdateColumnPayloadColumn;
   };
 }
 

@@ -15,7 +15,7 @@ import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { useEditorStore } from '../../store/editorStore';
 import type { DisplayColumn } from '../../../src/types/display';
 import type { ColumnDef, ModelRole } from '../../../src/types/semantic';
-import type { ColumnKeyType } from '../../../src/types/messages';
+import type { ColumnKeyType, UpdateColumnPayloadColumn } from '../../../src/types/messages';
 import './ColumnEditor.css';
 
 // ---------------------------------------------------------------------------
@@ -84,11 +84,18 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
 
   // Handle saving a column (add or update)
   const handleColumnUpdate = useCallback(
-    (oldName: string, updated: ColumnDef, isNew: boolean) => {
+    (oldName: string, updated: UpdateColumnPayloadColumn, isNew: boolean) => {
       if (isNew) {
+        // addColumn has nothing to fall back to — drop explicit-clear sentinels.
+        const { scdType, additiveType, ...rest } = updated;
+        const column: ColumnDef = {
+          ...rest,
+          ...(scdType != null ? { scdType } : {}),
+          ...(additiveType ? { additiveType } : {}),
+        };
         send({
           type: 'addColumn',
-          payload: { modelName, column: updated },
+          payload: { modelName, column },
         });
         setIsAddingColumn(false);
       } else {

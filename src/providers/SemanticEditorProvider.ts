@@ -37,6 +37,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplayDomain } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignModel, Stage } from '../types/semantic';
+import type { UpdateColumnPayloadColumn } from '../types/messages';
 import type { GroundTruth } from '../types/syncPlan';
 import {
   deriveModelAction,
@@ -1354,7 +1355,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
-  private validateColumnDef(column: ColumnDef): string | null {
+  private validateColumnDef(column: Pick<ColumnDef, 'name' | 'dataType'>): string | null {
     return validateColumnDefPayload(column);
   }
 
@@ -1448,7 +1449,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleUpdateColumn(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    payload: { modelName: string; oldColumnName: string; column: ColumnDef },
+    payload: { modelName: string; oldColumnName: string; column: UpdateColumnPayloadColumn },
     stage: 'logical',
   ): Promise<void> {
     try {
@@ -1484,6 +1485,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             throw new Error(`Column "${payload.column.name}" already exists.`);
           }
           const existing = columns[columnIndex];
+          // Omitted (undefined) keeps the existing value; explicit null clears it.
+          const newScd = payload.column.scdType === undefined ? existing.scdType : payload.column.scdType;
+          const newAdditive = payload.column.additiveType === undefined ? existing.additiveType : payload.column.additiveType;
           columns[columnIndex] = {
             name: payload.column.name,
             dataType: payload.column.dataType,
@@ -1491,8 +1495,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             ...(payload.column.isPrimaryKey ?? existing.isPrimaryKey ? { isPrimaryKey: true } : {}),
             ...(payload.column.isForeignKey ?? existing.isForeignKey ? { isForeignKey: true } : {}),
             ...(payload.column.isNaturalKey ?? existing.isNaturalKey ? { isNaturalKey: true } : {}),
-            ...(payload.column.scdType != null ? { scdType: payload.column.scdType } : {}),
-            ...(payload.column.additiveType ? { additiveType: payload.column.additiveType } : {}),
+            ...(newScd != null ? { scdType: newScd } : {}),
+            ...(newAdditive ? { additiveType: newAdditive } : {}),
           } as ColumnDef;
         }, domainMutator);
         if (!ok) {
@@ -1530,6 +1534,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const newPK = payload.column.isPrimaryKey ?? existingPK;
       const newFK = payload.column.isForeignKey ?? existingFK;
       const newNK = payload.column.isNaturalKey ?? existingNK;
+      // Omitted (undefined) keeps the existing value; explicit null clears it.
+      const existingScd = columns[columnIndex].scdType as ColumnDef['scdType'];
+      const existingAdditive = columns[columnIndex].additiveType as ColumnDef['additiveType'];
+      const newScd = payload.column.scdType === undefined ? existingScd : payload.column.scdType;
+      const newAdditive = payload.column.additiveType === undefined ? existingAdditive : payload.column.additiveType;
       columns[columnIndex] = {
         name: payload.column.name,
         dataType: payload.column.dataType,
@@ -1537,8 +1546,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         ...(newPK ? { isPrimaryKey: true } : {}),
         ...(newFK ? { isForeignKey: true } : {}),
         ...(newNK ? { isNaturalKey: true } : {}),
-        ...(payload.column.scdType != null ? { scdType: payload.column.scdType } : {}),
-        ...(payload.column.additiveType ? { additiveType: payload.column.additiveType } : {}),
+        ...(newScd != null ? { scdType: newScd } : {}),
+        ...(newAdditive ? { additiveType: newAdditive } : {}),
       };
 
       // Cascade column rename into relationships

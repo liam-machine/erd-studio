@@ -157,6 +157,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
     if (!editingField) return;
     const trimmed = localValue.trim();
     const description = (column as unknown as { description?: string }).description ?? '';
+    // Forward SCD/additive so an inline rename or type change doesn't erase them.
     const baseColumn = {
       name: column.name,
       dataType: column.dataType,
@@ -164,6 +165,8 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
       isPrimaryKey: column.isPrimaryKey,
       isForeignKey: column.isForeignKey,
       isNaturalKey: column.isNaturalKey,
+      ...(column.scdType != null ? { scdType: column.scdType } : {}),
+      ...(column.additiveType ? { additiveType: column.additiveType } : {}),
     };
 
     if (editingField === 'name') {
@@ -426,6 +429,8 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
                     isPrimaryKey: column.isPrimaryKey,
                     isForeignKey: column.isForeignKey,
                     isNaturalKey: column.isNaturalKey,
+                    ...(column.scdType != null ? { scdType: column.scdType } : {}),
+                    ...(column.additiveType ? { additiveType: column.additiveType } : {}),
                   },
                 },
               });
