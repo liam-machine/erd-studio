@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt projects. Design your data warehouse across two stages — Logical (columns, types, FK design) and Physical (read-only manifest view) — with cross-stage discrepancy comparison.",
-  "version": "0.6.48",
+  "version": "0.6.49",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -318,7 +318,12 @@
           "scope": "machine",
           "type": "string",
           "default": "auto",
-          "enum": ["auto", "vscode", "endpoint", "hosted"],
+          "enum": [
+            "auto",
+            "vscode",
+            "endpoint",
+            "hosted"
+          ],
           "enumItemLabels": [
             "Automatic",
             "Your editor's model (Copilot)",
