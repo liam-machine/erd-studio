@@ -511,14 +511,6 @@ export interface RequestReloadMessage {
 // ---------------------------------------------------------------------------
 
 /**
- * Request the extension to check if the manifest is stale
- * (source files modified after last compile).
- */
-export interface CheckManifestStalenessMessage {
-  type: 'checkManifestStaleness';
-}
-
-/**
  * Request the extension to generate a .sync-plan.json file
  * from the user's ground truth selections.
  */
@@ -634,7 +626,6 @@ export type WebviewMessage =
   | ViewFileMessage
   | ReportBugMessage
   | RequestReloadMessage
-  | CheckManifestStalenessMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage
   | LaunchClaudeSyncMessage

@@ -12,8 +12,8 @@
  *   Webview → Extension:  ready, switchStage, refreshManifest, undo/redo,
  *                         schema mutations (addModel … removeRelationships),
  *                         canvas metadata (updatePositions, *Annotation*),
- *                         sync flow (toggleDiscrepancy, checkManifestStaleness,
- *                         generateSyncPlan, runDbtCompile, launchClaudeSync),
+ *                         sync flow (toggleDiscrepancy, generateSyncPlan,
+ *                         runDbtCompile, launchClaudeSync),
  *                         viewFile, requestReload, dismissWelcome, reportBug
  *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
  *                         requestId), discrepancyReport, manifestStaleness,
@@ -110,6 +110,41 @@ interface ModelFileSave {
    * the new path instead of being regenerated from scratch.
    */
   fromName?: string;
+}
+
+/**
+ * Drop every trace of removed models from the domain's shared `viewConfig`:
+ * their persisted node positions and any annotation still linked to them (a
+ * dangling `linkedModel` renders a dashed edge to a node that no longer
+ * exists). Mutates `parsed` in place.
+ *
+ * Shared by the V5 and V4 arms of `handleRemoveModels` so the cleanup cannot
+ * drift between them. A domain with no `viewConfig` is left without one rather
+ * than gaining an empty stub.
+ */
+function pruneViewConfigForRemovedModels(
+  parsed: Record<string, unknown>,
+  removed: ReadonlySet<string>,
+): void {
+  const viewConfig = parsed.viewConfig;
+  if (!viewConfig || typeof viewConfig !== 'object' || Array.isArray(viewConfig)) return;
+  const vc = viewConfig as Record<string, unknown>;
+
+  const positions = vc.positions;
+  if (positions && typeof positions === 'object' && !Array.isArray(positions)) {
+    for (const name of removed) delete (positions as Record<string, unknown>)[name];
+  }
+
+  const annotations = vc.annotations;
+  if (Array.isArray(annotations)) {
+    for (const annotation of annotations) {
+      if (!annotation || typeof annotation !== 'object') continue;
+      const ann = annotation as Record<string, unknown>;
+      if (typeof ann.linkedModel === 'string' && removed.has(ann.linkedModel)) {
+        delete ann.linkedModel;
+      }
+    }
+  }
 }
 
 /**
@@ -434,7 +469,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
           'refreshManifest', 'dismissWelcome',
-          'viewFile', 'checkManifestStaleness', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
+          'viewFile', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'removeAnnotations',
           'requestReload', 'reportBug',
         ]);
@@ -699,10 +734,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             if (payload) {
               await this.handleToggleDiscrepancy(panelKey, document, webviewPanel.webview, payload);
             }
-            break;
-          }
-          case 'checkManifestStaleness': {
-            await this.handleCheckManifestStaleness(webviewPanel.webview);
             break;
           }
           case 'generateSyncPlan': {
@@ -2140,9 +2171,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Batch-remove one or more models in a single document edit.
-   * Cascades all relationships referencing any listed model and removes their
-   * viewConfig positions. Produces one WorkspaceEdit (one undo step, one save)
-   * regardless of how many models are deleted.
+   * Cascades all relationships referencing any listed model and prunes the
+   * shared viewConfig (their stored positions, plus any annotation whose
+   * `linkedModel` pointed at them) via `pruneViewConfigForRemovedModels`, the
+   * same helper in both the V5 and V4 arms. Produces one WorkspaceEdit (one
+   * undo step, one save) regardless of how many models are deleted.
    *
    * In V5, after the domain is updated, prompts the user once to optionally
    * delete the underlying logical-models/*.yml files for any names that exist
@@ -2177,9 +2210,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 !namesSet.has(rel.toModel as string),
             );
 
-            const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
-            const positions = (vc.positions ?? {}) as Record<string, unknown>;
-            for (const name of namesSet) delete positions[name];
+            pruneViewConfigForRemovedModels(p, namesSet);
           },
           { refreshWebview: true, webview, stage },
         );
@@ -2243,11 +2274,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               !namesSet.has(rel.toModel as string),
           );
 
-          const viewConfig = (p.viewConfig ?? {}) as Record<string, unknown>;
-          const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
-          for (const name of namesSet) delete positions[name];
-          viewConfig.positions = positions;
-          p.viewConfig = viewConfig;
+          pruneViewConfigForRemovedModels(p, namesSet);
         },
         {
           webview,
@@ -3127,18 +3154,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   // ---------------------------------------------------------------------------
   // Sync reconciliation handlers
   // ---------------------------------------------------------------------------
-
-  /**
-   * Check manifest staleness and send the result to the webview.
-   */
-  private async handleCheckManifestStaleness(webview: vscode.Webview): Promise<void> {
-    try {
-      const staleness = await checkManifestStaleness(this.workspaceRoot);
-      webview.postMessage({ type: 'manifestStaleness', payload: staleness });
-    } catch (err) {
-      console.error('[SemanticEditorProvider] Staleness check failed:', err);
-    }
-  }
 
   /**
    * Generate a .sync-plan.json file from user's ground truth selections.

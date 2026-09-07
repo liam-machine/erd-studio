@@ -130,7 +130,7 @@ Extension <-> Webview communication uses discriminated unions on `type` field:
   - lifecycle/navigation: `ready`, `dismissWelcome`, `viewFile`, `requestReload`, `switchStage`, `refreshManifest`, `undo`, `redo`
   - schema mutations: `addModel`, `addExistingModel`, `renameModel`, `removeModel`, `removeModels`, `addColumn`, `removeColumn`, `updateColumn`, `reorderColumns`, `toggleColumnKey`, `updateModelDescription`, `updateModelGrain`, `updateModelRole`, `updateModelRationale`, `addRelationship`, `updateRelationship`, `editRelationship`, `removeRelationship`, `removeRelationships`
   - canvas metadata: `updatePositions`, `addAnnotation`, `updateAnnotation`, `removeAnnotation`, `removeAnnotations`
-  - sync/discrepancy: `toggleDiscrepancy`, `checkManifestStaleness`, `generateSyncPlan`, `runDbtCompile`, `launchClaudeSync`
+  - sync/discrepancy: `toggleDiscrepancy`, `generateSyncPlan`, `runDbtCompile`, `launchClaudeSync`
   - feedback: `reportBug`
 
 Every type in the unions has a live sender and handler — do not add a message type without wiring both ends (unknown types are logged by the `default:` branch, never silently dropped). Multi-select operations are batched: `removeModels`, `removeAnnotations`, `removeRelationships` and `updatePositions` (which carries `annotations?: [{id,x,y}]` for notes moved in the same drag) each produce **one** `WorkspaceEdit`, one save, one `domainLoaded` — i.e. one undo step. `switchStage` carries a `requestId` that the host echoes on `stageData` so the webview can drop stale replies (`webview/lib/stageRequest.ts`).
@@ -139,7 +139,7 @@ Every type in the unions has a live sender and handler — do not add a message 
 
 ```
 ready, updatePositions, switchStage, toggleDiscrepancy, refreshManifest, dismissWelcome,
-viewFile, checkManifestStaleness, generateSyncPlan, runDbtCompile, launchClaudeSync,
+viewFile, generateSyncPlan, runDbtCompile, launchClaudeSync,
 addAnnotation, updateAnnotation, removeAnnotation, removeAnnotations, requestReload, reportBug
 ```
 

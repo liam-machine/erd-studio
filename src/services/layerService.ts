@@ -38,6 +38,14 @@ const RESERVED_DIR_NAMES = new Set(['templates', LOGICAL_MODELS_DIR]);
 /** Sentinel signature used when layers.json is absent. */
 const NO_FILE_SIGNATURE = 'missing';
 
+/**
+ * Copy a layer list so the caller can mutate it freely. LayerConfig holds only
+ * primitives, so a shallow copy per layer fully detaches it from the cache.
+ */
+function cloneLayers(layers: LayerConfig[]): LayerConfig[] {
+  return layers.map(l => ({ ...l }));
+}
+
 export class LayerService {
   private config: LayersConfigFile | null = null;
   private readonly configPath: string;
@@ -105,11 +113,18 @@ export class LayerService {
    * Results are cached in memory for performance. The cache is validated
    * against the file's mtime + size on every call, so an external edit
    * (git pull, manual edit, deletion) is picked up without a window reload.
+   *
+   * The returned array (and every layer in it) is a **copy** of the cache.
+   * The CRUD methods below mutate what they get back from here and only hand
+   * it to `saveConfig`, which is the single place the cache is replaced — so a
+   * save that throws (unreadable layers.json, write failure) leaves the
+   * in-memory layers exactly as they were on disk. It also means no caller can
+   * corrupt the cache by editing a layer object it was handed.
    */
   loadConfig(): LayerConfig[] {
     const signature = this.fileSignature();
     if (this.config && signature === this.loadedSignature) {
-      return this.config.layers;
+      return cloneLayers(this.config.layers);
     }
 
     this.loadError = null;
@@ -119,12 +134,12 @@ export class LayerService {
       // Use defaults
       this.config = {
         schemaVersion: LAYERS_SCHEMA_VERSION,
-        layers: [...DEFAULT_LAYERS],
+        layers: cloneLayers(DEFAULT_LAYERS),
       };
     }
     this.loadedSignature = signature;
 
-    return this.config.layers;
+    return cloneLayers(this.config.layers);
   }
 
   /**
@@ -135,7 +150,7 @@ export class LayerService {
   private fallbackToDefaults(reason: string): LayersConfigFile {
     console.error(`[LayerService] ${reason}`);
     this.loadError = reason;
-    return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: [...DEFAULT_LAYERS] };
+    return { schemaVersion: LAYERS_SCHEMA_VERSION, layers: cloneLayers(DEFAULT_LAYERS) };
   }
 
   /**
@@ -418,6 +433,12 @@ export class LayerService {
 
   /**
    * Save layer configurations to layers.json.
+   *
+   * This is the only place the in-memory cache is replaced, and it is replaced
+   * only after the bytes land on disk. Callers (the CRUD methods below) mutate
+   * a copy handed out by `loadConfig`, so a refused or failed save leaves the
+   * cache — and therefore the tree, decorations and layer pickers — matching
+   * what is actually on disk.
    */
   async saveConfig(layers: LayerConfig[]): Promise<void> {
     // Never overwrite a layers.json we could not read: the in-memory layers
@@ -454,7 +475,8 @@ export class LayerService {
     );
     this.ownWriteTracker.recordWrite(this.configPath);
 
-    // Update cache
+    // Commit to the cache only now that the write succeeded. `config.layers`
+    // is freshly built above, so the cache never aliases the caller's array.
     this.config = config;
     this.loadError = null;
     this.loadedSignature = this.fileSignature();

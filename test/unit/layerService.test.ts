@@ -157,6 +157,97 @@ describe('LayerService', () => {
     });
   });
 
+  /**
+   * A save that is refused (unreadable layers.json) or fails must leave the
+   * in-memory layers exactly as they are on disk — otherwise the tree, the
+   * decorations and the layer pickers show a phantom layer nobody saved.
+   */
+  describe('a refused save does not corrupt the in-memory layers', () => {
+    const defaultIds = DEFAULT_LAYERS.map(l => l.id);
+    const BROKEN = '{ "schemaVersion": 1, "layers": [ { "id": "bronze", }, ] }';
+
+    /** Break layers.json, then confirm the service is serving defaults + an error. */
+    function breakConfig(): void {
+      fs.writeFileSync(configPath, BROKEN);
+      expect(service.getLoadError()).toMatch(/Invalid JSON/);
+      expect(service.getAllLayers().map(l => l.id)).toEqual(defaultIds);
+    }
+
+    /** Every read path must still describe the on-disk (default) layers. */
+    function expectUnchanged(): void {
+      expect(service.getAllLayers().map(l => l.id)).toEqual(defaultIds);
+      expect(service.getValidLayerIds()).toEqual(defaultIds);
+      expect(service.getCreatableLayers().map(l => l.id)).toEqual(defaultIds);
+      expect(service.getAllLayers()).toEqual(DEFAULT_LAYERS);
+      expect(fs.readFileSync(configPath, 'utf-8')).toBe(BROKEN);
+    }
+
+    it('addLayer does not leave the new layer in memory', async () => {
+      breakConfig();
+      await expect(
+        service.addLayer({ id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', creatable: true }),
+      ).rejects.toThrow(/could not be loaded/);
+      expect(service.hasLayer('bronze')).toBe(false);
+      expectUnchanged();
+    });
+
+    it('removeLayer does not leave the layer removed in memory', async () => {
+      breakConfig();
+      await expect(service.removeLayer('silver')).rejects.toThrow(/could not be loaded/);
+      expect(service.hasLayer('silver')).toBe(true);
+      expectUnchanged();
+    });
+
+    it('renameLayer does not leave the layer renamed in memory', async () => {
+      breakConfig();
+      await expect(service.renameLayer('silver', 'bronze', 'Bronze')).rejects.toThrow(/could not be loaded/);
+      expect(service.hasLayer('bronze')).toBe(false);
+      expect(service.getLabel('silver')).toBe('Silver');
+      expectUnchanged();
+    });
+
+    it('updateLayer / updateLayerColor do not leave the edit in memory', async () => {
+      breakConfig();
+      await expect(service.updateLayerColor('silver', '#ABCDEF')).rejects.toThrow(/could not be loaded/);
+      await expect(service.updateLayer('silver', { label: 'Renamed', creatable: false })).rejects.toThrow(/could not be loaded/);
+      expect(service.getColor('silver')).toBe(DEFAULT_LAYERS[0].color);
+      expect(service.getLabel('silver')).toBe('Silver');
+      expect(service.isCreatable('silver')).toBe(true);
+      expectUnchanged();
+    });
+
+    it('reorderLayers does not leave the new order in memory', async () => {
+      breakConfig();
+      await expect(service.reorderLayers([...defaultIds].reverse())).rejects.toThrow(/could not be loaded/);
+      expectUnchanged();
+    });
+
+    it('recovers normally once the file is fixed', async () => {
+      breakConfig();
+      await expect(
+        service.addLayer({ id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', creatable: true }),
+      ).rejects.toThrow(/could not be loaded/);
+
+      writeWithNewMtime(configPath, layerJson(['silver', 'gold']), 5);
+      await service.addLayer({ id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', creatable: true });
+      expect(service.getAllLayers().map(l => l.id)).toEqual(['silver', 'gold', 'bronze']);
+    });
+  });
+
+  describe('the cached layers are not aliased', () => {
+    it('mutating a returned layer list or layer leaves the service untouched', async () => {
+      await service.saveConfig([...DEFAULT_LAYERS]);
+
+      const first = service.getAllLayers();
+      first.push({ id: 'ghost', label: 'Ghost', abbreviation: 'GHO', color: '#000000', creatable: true, order: 9 });
+      first[0].label = 'Tampered';
+
+      expect(service.getAllLayers().map(l => l.id)).toEqual(DEFAULT_LAYERS.map(l => l.id));
+      expect(service.getLabel(DEFAULT_LAYERS[0].id)).toBe(DEFAULT_LAYERS[0].label);
+      expect(service.hasLayer('ghost')).toBe(false);
+    });
+  });
+
   describe('saveConfig', () => {
     it('records the write with the own-write tracker so the watcher can ignore it', async () => {
       await service.saveConfig([...DEFAULT_LAYERS]);

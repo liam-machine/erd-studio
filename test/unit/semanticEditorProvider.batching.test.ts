@@ -427,8 +427,92 @@ describe('applyDomainEdit pipeline (H35)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// H35 — removeModels cleans the shared viewConfig identically in both arms
+// ---------------------------------------------------------------------------
+
+/** Rewrite the open domain as a v4 inline-model file so the V4 arm runs. */
+function downgradeToV4(file: string, doc: MockDoc) {
+  const v4 = readDomain(file);
+  v4.schemaVersion = 4;
+  v4.logical.models = v4.logical.models.map((name: string) => ({ name, schema: '', description: '', columns: [] }));
+  fs.writeFileSync(file, JSON.stringify(v4, null, 2) + '\n');
+  doc._setText(fs.readFileSync(file, 'utf-8'));
+  doc.isDirty = false;
+}
+
+async function linkNotes(panel: MockPanel) {
+  await panel._simulateMessage({ type: 'addAnnotation', payload: { id: 'linked', text: 'about dim_task', x: 0, y: 0, linkedModel: 'dim_task' } });
+  await panel._simulateMessage({ type: 'addAnnotation', payload: { id: 'kept', text: 'about dim_project', x: 0, y: 0, linkedModel: 'dim_project' } });
+}
+
+function expectPruned(file: string) {
+  const domain = readDomain(file);
+  expect(domain.viewConfig.positions).not.toHaveProperty('dim_task');
+  expect(domain.viewConfig.positions).toHaveProperty('dim_project');
+  const notes = domain.viewConfig.annotations as Array<Record<string, unknown>>;
+  expect(notes.find((a) => a.id === 'linked')).not.toHaveProperty('linkedModel');
+  expect(notes.find((a) => a.id === 'kept')!.linkedModel).toBe('dim_project');
+}
+
+describe('removeModels viewConfig cleanup (H35)', () => {
+  it('V5: prunes the removed model\'s position and annotation links in ONE edit', async () => {
+    const { doc, panel, file } = await openShowcase();
+    await linkNotes(panel);
+    expect(readDomain(file).viewConfig.positions).toHaveProperty('dim_task');
+
+    const before = counters(panel, doc);
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task'] } });
+
+    const after = counters(panel, doc);
+    expect(after.edits - before.edits).toBe(1);
+    expect(after.saves - before.saves).toBe(1);
+    expect(after.loads - before.loads).toBe(1);
+    expect(readDomain(file).logical.models).not.toContain('dim_task');
+    expectPruned(file);
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('V4: prunes exactly the same way (the two arms share one helper)', async () => {
+    const { doc, panel, file } = await openShowcase();
+    await linkNotes(panel);
+    downgradeToV4(file, doc);
+
+    await panel._simulateMessage({ type: 'removeModel', payload: { modelName: 'dim_task' } });
+
+    const domain = readDomain(file);
+    expect(domain.logical.models.map((m: { name: string }) => m.name)).not.toContain('dim_task');
+    expectPruned(file);
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('does not invent a viewConfig for a domain that has none', async () => {
+    const { doc, panel, file } = await openShowcase();
+    const domain = readDomain(file);
+    delete domain.viewConfig;
+    fs.writeFileSync(file, JSON.stringify(domain, null, 2) + '\n');
+    doc._setText(fs.readFileSync(file, 'utf-8'));
+    doc.isDirty = false;
+
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_task'] } });
+
+    const afterV5 = readDomain(file);
+    expect(afterV5.logical.models).not.toContain('dim_task');
+    expect(afterV5).not.toHaveProperty('viewConfig');
+
+    // Same for the V4 arm, which used to write an empty viewConfig stub.
+    downgradeToV4(file, doc);
+    await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_project'] } });
+
+    const afterV4 = readDomain(file);
+    expect(afterV4.logical.models.map((m: { name: string }) => m.name)).not.toContain('dim_project');
+    expect(afterV4).not.toHaveProperty('viewConfig');
+    expect(lastError(panel)).toBeUndefined();
+  });
+});
+
 describe('dead protocol surface (H35)', () => {
-  it.each(['updateViewConfig', 'toggleStubColumns', 'updateAnnotationPosition', 'runAutoLayout'])(
+  it.each(['updateViewConfig', 'toggleStubColumns', 'updateAnnotationPosition', 'runAutoLayout', 'checkManifestStaleness'])(
     '%s is no longer handled — logged as unknown, nothing written',
     async (type) => {
       const { doc, panel } = await openShowcase();
