@@ -154,7 +154,9 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
   }).contributes?.commands ?? [];
 
   for (const { command } of contributed) {
-    if (!command.startsWith('erdStudio.')) { continue; }
+    // reportBug is registered by activate() before this fallback runs and works
+    // without a project; registering it again would throw ("already exists").
+    if (!command.startsWith('erdStudio.') || command === 'erdStudio.reportBug') { continue; }
     context.subscriptions.push(
       vscode.commands.registerCommand(command, showNoProject),
       vscode.commands.registerCommand(command.replace(/^erdStudio\./, 'dbtSemantic.'), showNoProject),

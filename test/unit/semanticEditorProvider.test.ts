@@ -20,6 +20,8 @@ import { ManifestService } from '../../src/services/manifestService';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
+import { DOMAIN_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
+import { hostErrorLog } from '../../src/services/feedbackService';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,6 +79,8 @@ function buildProvider(root: string) {
   const selectorsService = new SelectorsService(domainService, root, '.erd-studio');
   const context = {
     extensionUri: vscode.Uri.file(REPO_ROOT),
+    globalStorageUri: vscode.Uri.file(path.join(root, '.global-storage')),
+    extension: { packageJSON: { version: '0.0.0-test' } },
     globalState: { get: () => true, update: async () => {} },
     subscriptions: [],
   } as unknown as import('vscode').ExtensionContext;
@@ -591,5 +595,153 @@ describe('message boundary (H21)', () => {
     // The boundary must not poison the edit queue: a later mutation still runs.
     panel._simulateMessage({ type: 'updateModelRationale', payload: { modelName: 'dim_task', rationale: 'after' } });
     await waitForType(panel, 'domainLoaded', 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug reports — `reportBug` message and requestBugReportDialog()
+// ---------------------------------------------------------------------------
+
+/** 1×1 transparent PNG. */
+const TINY_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+const bugPayload = (overrides: Record<string, unknown> = {}) => ({
+  title: 'Edge vanished after rename',
+  description: 'Renamed dim_task and the FK edge disappeared.',
+  includeDiagnostics: true,
+  domain: { name: 'showcase', layer: 'silver', stage: 'logical', modelCount: 4, relationshipCount: 3, schemaVersion: 5 },
+  ...overrides,
+});
+
+describe('bug reports (reportBug message)', () => {
+  it('opens the prefilled GitHub issue for a valid payload', async () => {
+    const { panel } = await openShowcase(root);
+    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+
+    panel._simulateMessage({ type: 'reportBug', payload: bugPayload() });
+
+    await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    const url = String(open.mock.calls[0][0]);
+    expect(url).toMatch(/^https:\/\/github\.com\/liam-machine\/erd-studio\/issues\/new\?/);
+    expect(url).toContain('template=bug_report.yml');
+    const decoded = decodeURIComponent(url.replace(/\+/g, ' '));
+    expect(decoded).toContain('title=Edge vanished after rename');
+    expect(decoded).toContain('description=Renamed dim_task and the FK edge disappeared.');
+    expect(decoded).toContain('silver/showcase (stage=logical, schemaVersion=5)');
+    expect(decoded).toContain('ERD Studio: 0.0.0-test');
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('is accepted while viewing the physical stage (it is not a schema mutation)', async () => {
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+
+    panel._simulateMessage({ type: 'reportBug', payload: bugPayload() });
+
+    await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    expect(lastError(panel)).not.toBe(PHYSICAL_READ_ONLY_MESSAGE);
+  });
+
+  it('ignores a malformed payload without opening anything or raising an error', async () => {
+    const { panel } = await openShowcase(root);
+    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+
+    await panel._simulateMessage({ type: 'reportBug', payload: { title: 'no description' } });
+    await panel._simulateMessage({ type: 'reportBug', payload: null });
+    await panel._simulateMessage({ type: 'reportBug' });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(open).not.toHaveBeenCalled();
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('tells the user when the browser could not be opened, including the link', async () => {
+    const { panel } = await openShowcase(root);
+    vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(false);
+    const showError = vi.spyOn(vscode.window, 'showErrorMessage');
+
+    panel._simulateMessage({ type: 'reportBug', payload: bugPayload() });
+
+    await vi.waitFor(() =>
+      expect(showError).toHaveBeenCalledWith(expect.stringMatching(/could not open the browser.*github\.com\/liam-machine\/erd-studio/)),
+    );
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('turns a thrown error into a notification and records it for later diagnostics', async () => {
+    const { panel } = await openShowcase(root);
+    vi.spyOn(vscode.env, 'openExternal').mockRejectedValue(new Error('EPERM'));
+    const showError = vi.spyOn(vscode.window, 'showErrorMessage');
+
+    panel._simulateMessage({ type: 'reportBug', payload: bugPayload() });
+
+    await vi.waitFor(() =>
+      expect(showError).toHaveBeenCalledWith(expect.stringContaining('could not open the bug report (EPERM)')),
+    );
+    expect(hostErrorLog.recent().at(-1)).toMatch(/\[reportBug\] EPERM$/);
+    expect(types(panel)).not.toContain('error');
+  });
+
+  it('saves the screenshot under global storage and points the user at the clipboard', async () => {
+    const { panel } = await openShowcase(root);
+    vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+
+    panel._simulateMessage({
+      type: 'reportBug',
+      payload: bugPayload({ screenshotDataUrl: TINY_PNG, screenshotOnClipboard: true }),
+    });
+
+    await vi.waitFor(() =>
+      expect(info).toHaveBeenCalledWith(expect.stringContaining('on the clipboard'), 'Reveal Screenshot'),
+    );
+    const saved = fs.readdirSync(path.join(root, '.global-storage', 'bug-reports'));
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatch(/^erd-studio-.*\.png$/);
+  });
+});
+
+describe('requestBugReportDialog', () => {
+  afterEach(() => {
+    vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
+  });
+
+  it('routes to the focused canvas and returns true', async () => {
+    const { provider, panel, doc } = await openShowcase(root);
+    vscode.window.tabGroups.activeTabGroup.activeTab = {
+      input: new vscode.TabInputCustom(doc.uri, DOMAIN_EDITOR_VIEW_TYPE),
+    };
+
+    expect(provider.requestBugReportDialog({ title: 'From palette' })).toBe(true);
+
+    await vi.waitFor(() =>
+      expect(posted(panel).at(-1)).toEqual({ type: 'openBugReport', payload: { title: 'From palette' } }),
+    );
+  });
+
+  it('returns false (so the caller falls back to input boxes) when no canvas of ours is focused', async () => {
+    const { provider, panel } = await openShowcase(root);
+    const before = posted(panel).length;
+
+    vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
+    expect(provider.requestBugReportDialog()).toBe(false);
+
+    // A text editor tab (not a custom editor input)
+    vscode.window.tabGroups.activeTabGroup.activeTab = { input: { uri: vscode.Uri.file('/elsewhere.json') } };
+    expect(provider.requestBugReportDialog()).toBe(false);
+
+    // One of our canvases, but for a document this provider has not opened
+    vscode.window.tabGroups.activeTabGroup.activeTab = {
+      input: new vscode.TabInputCustom(
+        vscode.Uri.file(path.join(root, '.erd-studio', 'silver', 'other.json')),
+        DOMAIN_EDITOR_VIEW_TYPE,
+      ),
+    };
+    expect(provider.requestBugReportDialog()).toBe(false);
+
+    expect(posted(panel).length).toBe(before);
   });
 });
