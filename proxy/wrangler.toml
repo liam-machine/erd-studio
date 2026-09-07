@@ -14,7 +14,11 @@ compatibility_date = "2025-01-01"
 # aloud by the consent modal. The custom domain below avoids putting a personal
 # handle in front of every user. workers.dev stays enabled as a fallback while
 # the DNS record settles; set it false once the custom domain is serving.
-workers_dev = true
+# OFF deliberately. A workers.dev hostname is a second public door to the same
+# Worker, the same DAILY_BUDGET and the same upstream key — and it embeds the
+# account subdomain, which is derived from the operator's email. The custom
+# domain below is the only entrance.
+workers_dev = false
 
 [[routes]]
 pattern = "erd-studio.liam-is-an.ai"
