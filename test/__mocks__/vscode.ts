@@ -39,6 +39,20 @@ function effectiveConfigValue(values: MockConfigValues | undefined): unknown {
   );
 }
 
+/** `vscode.ConfigurationTarget`, which `update()` takes as its scope. */
+export const ConfigurationTarget = {
+  Global: 1,
+  Workspace: 2,
+  WorkspaceFolder: 3,
+} as const;
+
+/** Which `MockConfigValues` field a ConfigurationTarget writes. */
+const CONFIG_TARGET_FIELD: Record<number, keyof MockConfigValues> = {
+  [ConfigurationTarget.Global]: 'globalValue',
+  [ConfigurationTarget.Workspace]: 'workspaceValue',
+  [ConfigurationTarget.WorkspaceFolder]: 'workspaceFolderValue',
+};
+
 export const workspace = {
   getConfiguration: (section?: string) => ({
     get: (key: string, defaultValue?: unknown) => {
@@ -49,6 +63,22 @@ export const workspace = {
     inspect: (key: string) => {
       const fullKey = section ? `${section}.${key}` : key;
       return { key: fullKey, ...(_mockConfigValues.get(fullKey) ?? {}) } as { key: string } & MockConfigValues;
+    },
+    /**
+     * Write one scope of a setting, so a test can read back what production
+     * code actually persisted. Defaults to Global, as VS Code does when no
+     * target is given and the setting has no workspace value.
+     */
+    update: async (key: string, value: unknown, target: number = ConfigurationTarget.Global) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      const field = CONFIG_TARGET_FIELD[target] ?? 'globalValue';
+      const current = _mockConfigValues.get(fullKey) ?? {};
+      if (value === undefined) {
+        delete current[field];
+      } else {
+        current[field] = value;
+      }
+      _mockConfigValues.set(fullKey, current);
     },
   }),
   workspaceFolders: [] as Array<{ uri: { fsPath: string }; name?: string; index?: number }>,

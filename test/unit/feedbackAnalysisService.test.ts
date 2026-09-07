@@ -116,6 +116,81 @@ describe('buildAnalysisPrompt', () => {
   });
 });
 
+/**
+ * The classification regression.
+ *
+ * The prompt used to open "The user is filing this as a bug, but decide for
+ * yourself" on **every** fresh dialog, because `bug` is the kind the dialog
+ * opens on — so a model was told, as a fact, something the user had never said,
+ * and then asked to disagree with it. "I want a new ability to have a new
+ * feature" came back classified as a bug.
+ */
+describe('buildAnalysisPrompt and the kind', () => {
+  const wish = 'I want a new ability to have a new feature.';
+
+  it('states no kind at all when the user has not chosen one', () => {
+    const prompt = buildAnalysisPrompt({ kind: 'bug', description: wish, issues: [] });
+
+    expect(prompt).toContain('The user has not said which kind this is');
+    expect(prompt).not.toMatch(/filing this as a bug/i);
+    // Nothing anywhere in it should read as the user having said "bug".
+    expect(prompt.slice(0, prompt.indexOf(wish))).not.toMatch(/\bbug\b/i);
+  });
+
+  it('does not label the context field by a kind nobody picked either', () => {
+    // "steps they gave" over a feature request's rationale is the same anchor
+    // by another route.
+    const prompt = buildAnalysisPrompt({
+      kind: 'bug',
+      description: wish,
+      context: 'Today I copy the diagram by hand.',
+      issues: [],
+    });
+    expect(prompt).toContain('--- what else they said ---');
+    expect(prompt).not.toContain('--- steps they gave ---');
+  });
+
+  it('states the kind, and labels the context, once the user has actually chosen', () => {
+    const prompt = buildAnalysisPrompt({
+      kind: 'feature',
+      kindChosenByUser: true,
+      description: wish,
+      context: 'Today I copy the diagram by hand.',
+      issues: [],
+    });
+    expect(prompt).toContain('The user has chosen to file this as a feature request');
+    expect(prompt).toContain('--- why they want it ---');
+  });
+
+  it('keeps the bug headings for a chosen bug', () => {
+    const prompt = buildAnalysisPrompt({
+      kind: 'bug',
+      kindChosenByUser: true,
+      description: 'The edge vanished.',
+      context: '1. Rename it',
+      issues: [],
+    });
+    expect(prompt).toContain('The user has chosen to file this as a bug');
+    expect(prompt).toContain('--- steps they gave ---');
+  });
+
+  it('defines the two kinds, so the model is not left to guess what they mean', () => {
+    // Without this the system prompt never said what separates them.
+    expect(ANALYSIS_SYSTEM_PROMPT).toMatch(/behaviour that already exists/i);
+    expect(ANALYSIS_SYSTEM_PROMPT).toMatch(/does not exist yet/i);
+    // The phrasing that was being misread, called out by name.
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain('"I want"');
+    expect(ANALYSIS_SYSTEM_PROMPT).toMatch(/a new ability to/i);
+  });
+
+  it('asks for confidence as a probability, not a flourish', () => {
+    // The dialog now renders both sides of it, so an inflated number is not a
+    // harmless one.
+    expect(ANALYSIS_SYSTEM_PROMPT).toMatch(/0\.5 means/i);
+    expect(ANALYSIS_SYSTEM_PROMPT).toMatch(/do not inflate/i);
+  });
+});
+
 describe('parseAnalysisResponse', () => {
   const reply = (extra: Record<string, unknown> = {}) =>
     JSON.stringify({
@@ -123,7 +198,7 @@ describe('parseAnalysisResponse', () => {
       confidence: 0.82,
       title: 'FK edge disappears after a model rename',
       context: '1. Rename dim_task',
-      reasons: { desc: null, ctx: 'Steps would help.', image: null },
+      reasons: { desc: null, ctx: 'Steps would help.' },
       duplicates: [],
       ...extra,
     });
@@ -136,7 +211,7 @@ describe('parseAnalysisResponse', () => {
       title: 'FK edge disappears after a model rename',
       context: '1. Rename dim_task',
     });
-    expect(analysis?.reasons).toEqual({ desc: null, ctx: 'Steps would help.', image: null });
+    expect(analysis?.reasons).toEqual({ desc: null, ctx: 'Steps would help.' });
   });
 
   it('parses a ```json fenced block', () => {
@@ -285,15 +360,15 @@ describe('parseAnalysisResponse', () => {
 
   it('normalises the reasons object, turning blanks into null', () => {
     const analysis = parseAnalysisResponse(
-      reply({ reasons: { desc: '  ', ctx: '  Add steps. ', image: 42 } }),
+      reply({ reasons: { desc: '  ', ctx: '  Add steps. ' } }),
       'bug',
       issues,
     );
-    expect(analysis?.reasons).toEqual({ desc: null, ctx: 'Add steps.', image: null });
+    expect(analysis?.reasons).toEqual({ desc: null, ctx: 'Add steps.' });
   });
 
   it('tolerates a missing reasons object entirely', () => {
     const analysis = parseAnalysisResponse(reply({ reasons: undefined }), 'bug', issues);
-    expect(analysis?.reasons).toEqual({ desc: null, ctx: null, image: null });
+    expect(analysis?.reasons).toEqual({ desc: null, ctx: null });
   });
 });

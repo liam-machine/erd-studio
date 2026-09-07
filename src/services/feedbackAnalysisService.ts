@@ -48,7 +48,11 @@ import * as vscode from 'vscode';
 import { getErdStudioSetting } from './configService';
 import { GITHUB_REPO, hostErrorLog } from './feedbackService';
 import {
+  FEEDBACK_AI_PROVIDER_CHOICES,
+  isFeedbackAiProviderChoice,
   isFeedbackKind,
+  type FeedbackAiOption,
+  type FeedbackAiProviderChoice,
   type FeedbackAnalysis,
   type FeedbackAnalysisReasons,
   type FeedbackKind,
@@ -94,6 +98,21 @@ export const FEEDBACK_AI_ASSIST_SETTING = 'feedback.aiAssist';
 
 /** Off switch for the hosted last-resort tier. Boolean, default true. */
 export const FEEDBACK_HOSTED_FALLBACK_SETTING = 'feedback.hostedFallback';
+
+/**
+ * Which destination the user has pinned. Enum, default `'auto'`.
+ *
+ * `auto` is the original precedence — the user's own model first — and is what
+ * every existing install has. The other values pin one tier and are the answer
+ * to "I have Copilot, but I do not want my feedback going through it": pinning
+ * `hosted` sends the analysis to the author's relay even on a machine where a
+ * language model is right there.
+ *
+ * User-scoped like every other analysis setting (see `USER_SCOPED_SETTINGS`):
+ * a checked-in `.vscode/settings.json` must not be able to redirect the
+ * request, and choosing the destination is exactly that.
+ */
+export const FEEDBACK_PROVIDER_SETTING = 'feedback.provider';
 
 /**
  * Base URL of the hosted analysis proxy — a build-time constant, not a setting,
@@ -230,15 +249,20 @@ export const ANALYSIS_SYSTEM_PROMPT = [
   'Reply with a single JSON object and nothing else — no prose, no code fence.',
   '',
   'The object has exactly these keys:',
-  '  "kind"        — "bug" or "feature".',
-  '  "confidence"  — a number from 0 to 1: how sure you are of "kind".',
+  '  "kind"        — "bug" or "feature". A bug is behaviour that already exists',
+  '                  and is wrong: something broke, vanished, or did not do what',
+  '                  it says. A feature is behaviour that does not exist yet and',
+  '                  is being asked for.',
+  '  "confidence"  — your probability from 0 to 1 that "kind" is right. 0.5 means',
+  '                  you genuinely cannot tell. Do not inflate it: the dialog',
+  '                  shows this split to the user, who decides.',
   '  "title"       — a short issue title in plain language, no trailing full stop.',
   '  "context"     — the steps to reproduce (for a bug) or the rationale (for a',
   '                  feature), drawn only from what the user wrote. Empty string',
   '                  when they gave none.',
-  '  "reasons"     — an object with "desc", "ctx" and "image": one short sentence',
-  '                  each, written to the user, saying what is missing and why it',
-  '                  would help. Use null for anything already covered.',
+  '  "reasons"     — an object with "desc" and "ctx": one short sentence each,',
+  '                  written to the user, saying what is missing and why it would',
+  '                  help. Use null for anything already covered.',
   '  "duplicates"  — an array of { "number", "match", "why" } for existing issues',
   '                  that may already cover this report. "number" must be one of',
   '                  the numbers in the issue list. "match" runs 0 to 1, where 0.7',
@@ -247,6 +271,11 @@ export const ANALYSIS_SYSTEM_PROMPT = [
   '',
   'Rules:',
   '- Use only the text you are given. Never invent behaviour, versions or issues.',
+  '- "kind" is about what is being asked for, not the writer\'s tone. "I want",',
+  '  "it would be good if", "can you add", "please support", "a new ability to…"',
+  '  are feature requests however annoyed the writer sounds; a crash is a bug',
+  '  however politely it is worded.',
+  '- Nobody has told you which kind this is. Read it off what they wrote.',
   '- Only "number", "match" and "why" are read from each duplicate; do not restate',
   '  an issue\'s title, state or status, and never cite a number that is not listed.',
   '- Prefer no duplicate over a doubtful one: wrongly telling someone their problem',
@@ -262,13 +291,28 @@ export const ANALYSIS_SYSTEM_PROMPT = [
  */
 export function buildAnalysisPrompt(input: {
   kind: FeedbackKind;
+  /**
+   * Whether `kind` is a decision the **user** made — they pressed a segment in
+   * the header, or the command palette opened the dialog as one kind — rather
+   * than the `bug` the dialog merely opens on.
+   *
+   * This is the difference between a fact and an anchor. The prompt used to
+   * open "The user is filing this as a bug, but decide for yourself", on every
+   * fresh dialog, because `bug` is the opening default — so a model was told,
+   * as fact, something the user had never said, and then asked to disagree with
+   * it. "I want a new ability to…" came back classified as a bug.
+   */
+  kindChosenByUser?: boolean;
   description: string;
   context?: string;
   issues: readonly AnalysisIssueSummary[];
 }): string {
+  const chosen = input.kindChosenByUser === true;
   const parts: string[] = [
-    `The user is filing this as a ${input.kind === 'bug' ? 'bug' : 'feature request'}, ` +
-      'but decide for yourself from what they wrote.',
+    chosen
+      ? `The user has chosen to file this as a ${input.kind === 'bug' ? 'bug' : 'feature request'}. ` +
+        'Say so in "kind" unless what they wrote plainly contradicts it.'
+      : 'The user has not said which kind this is. Decide from what they wrote.',
     '',
     '--- what they wrote ---',
     input.description.trim(),
@@ -276,9 +320,16 @@ export function buildAnalysisPrompt(input: {
 
   const context = input.context?.trim();
   if (context) {
+    // Labelled by the user's own choice where there is one; a neutral heading
+    // otherwise, because "steps they gave" over a feature request's rationale
+    // is the same anchor by another route.
     parts.push(
       '',
-      input.kind === 'bug' ? '--- steps they gave ---' : '--- why they want it ---',
+      !chosen
+        ? '--- what else they said ---'
+        : input.kind === 'bug'
+          ? '--- steps they gave ---'
+          : '--- why they want it ---',
       context,
     );
   }
@@ -349,7 +400,6 @@ export function parseAnalysisResponse(
   const reasons: FeedbackAnalysisReasons = {
     desc: asOptionalString(reasonsSource.desc),
     ctx: asOptionalString(reasonsSource.ctx),
-    image: asOptionalString(reasonsSource.image),
   };
 
   return {
@@ -649,25 +699,153 @@ async function hasLanguageModel(): Promise<boolean> {
   }
 }
 
+/** Names for the picker rows when nothing about them can be resolved. */
+const PROVIDER_FALLBACK_LABELS: Readonly<Record<FeedbackAiProviderChoice, string>> = {
+  auto: 'Automatic',
+  vscode: 'Your editor\u2019s model',
+  endpoint: 'Your own API endpoint',
+  hosted: 'ERD Studio service',
+};
+
+/** The pinned destination, or `'auto'`. An unrecognised value reads as `'auto'`. */
+export function analysisProviderChoice(): FeedbackAiProviderChoice {
+  const raw = getErdStudioSetting<string>(FEEDBACK_PROVIDER_SETTING, 'auto');
+  return isFeedbackAiProviderChoice(raw) ? raw : 'auto';
+}
+
+/** Whether the user's own endpoint is fully configured (URL + model + key). */
+async function endpointReady(context: vscode.ExtensionContext): Promise<boolean> {
+  return Boolean(endpointBaseUrl() && endpointModel() && (await readApiKey(context)));
+}
+
 /**
- * Which tier is available right now, in the order the user's own choices win:
- * their language model, then their endpoint, then the author's hosted proxy,
- * then nothing. Returns `'none'` when `feedback.aiAssist` is off, or when none
- * of the three is configured. Performs no network work and never prompts.
+ * Whether the hosted relay is usable.
+ *
+ * The provider is part of the gate, not just the copy: without a named
+ * recipient there is no disclosure that could be consented to, so the tier is
+ * treated as if it were not built in. `feedback.hostedFallback` remains a
+ * veto — turning it off removes the tier outright, including from an explicit
+ * pin, because "never send my text there" has to mean that even when the
+ * picker is the thing asking.
+ */
+function hostedReady(): boolean {
+  return Boolean(hostedFallbackEnabled() && hostedBaseUrl() && hostedModel() && hostedProvider());
+}
+
+/**
+ * Which tier is available right now. Returns `'none'` when `feedback.aiAssist`
+ * is off, when the pinned destination is not usable here, or when nothing is
+ * configured at all. Performs no network work and never prompts.
+ *
+ * With `feedback.provider` at its default `'auto'` the order is the one the
+ * user's own choices win: their language model, then their endpoint, then the
+ * author's hosted proxy. Any other value pins a single tier and does **not**
+ * fall through — a pin that cannot be honoured resolves to `'none'` rather than
+ * quietly sending the text somewhere the user did not choose. The dialog says
+ * so and offers the picker, so this is visible rather than silent.
  */
 export async function resolveAnalysisTier(
   context: vscode.ExtensionContext,
 ): Promise<AnalysisTier> {
   if (!aiAssistEnabled()) return 'none';
-  if (await hasLanguageModel()) return 'languageModel';
-  if (endpointBaseUrl() && endpointModel() && (await readApiKey(context))) return 'endpoint';
-  // The provider is part of the gate, not just the copy: without a named
-  // recipient there is no disclosure that could be consented to, so the tier is
-  // treated as if it were not built in.
-  if (hostedFallbackEnabled() && hostedBaseUrl() && hostedModel() && hostedProvider()) {
-    return 'hosted';
+
+  switch (analysisProviderChoice()) {
+    case 'vscode':
+      return (await hasLanguageModel()) ? 'languageModel' : 'none';
+    case 'endpoint':
+      return (await endpointReady(context)) ? 'endpoint' : 'none';
+    case 'hosted':
+      return hostedReady() ? 'hosted' : 'none';
+    default:
+      break;
   }
+
+  if (await hasLanguageModel()) return 'languageModel';
+  if (await endpointReady(context)) return 'endpoint';
+  if (hostedReady()) return 'hosted';
   return 'none';
+}
+
+/**
+ * Every destination the dialog's picker offers, in the order it renders them.
+ *
+ * Unavailable rows are included with a `note` saying why, because the two
+ * reasons a row is unavailable — "this machine has no language model" and "you
+ * turned the hosted relay off" — are both things the user can act on, and a
+ * picker that omits them turns a two-second fix into a settings hunt.
+ */
+export async function listAnalysisOptions(
+  context: vscode.ExtensionContext,
+): Promise<FeedbackAiOption[]> {
+  // The master switch is not a destination, so it is not a row in the picker —
+  // but it does make every row unavailable. Reporting Copilot as available
+  // while `feedback.aiAssist` is off would give the user a picker where every
+  // choice does nothing.
+  if (!aiAssistEnabled()) {
+    return FEEDBACK_AI_PROVIDER_CHOICES.map((id) => ({
+      id,
+      label: PROVIDER_FALLBACK_LABELS[id],
+      available: false,
+      note: 'Feedback analysis is turned off (erdStudio.feedback.aiAssist).',
+    }));
+  }
+
+  const [lm, endpoint] = await Promise.all([hasLanguageModel(), endpointReady(context)]);
+  const hosted = hostedReady();
+  const hostedConfigured = Boolean(hostedBaseUrl() && hostedModel() && hostedProvider());
+
+  return [
+    {
+      id: 'auto',
+      label: 'Automatic',
+      available: lm || endpoint || hosted,
+      note:
+        lm || endpoint || hosted
+          ? 'Your own model first, then your endpoint, then the ERD Studio service.'
+          : 'Nothing is configured to analyse with.',
+    },
+    {
+      id: 'vscode',
+      label: lm ? 'Your editor\u2019s model (Copilot)' : 'Your editor\u2019s model',
+      available: lm,
+      note: lm
+        ? 'Runs on your own Copilot subscription. VS Code asks for access once.'
+        : 'This editor offers no language model.',
+    },
+    {
+      id: 'endpoint',
+      label: endpoint ? endpointHost() : 'Your own API endpoint',
+      available: endpoint,
+      note: endpoint
+        ? 'Your configured OpenAI-compatible endpoint, with your key.'
+        : 'Set feedback.endpoint and feedback.model, then run “ERD Studio: Set Feedback API Key”.',
+    },
+    {
+      id: 'hosted',
+      label: hostedConfigured ? `ERD Studio service (${hostedProvider()})` : 'ERD Studio service',
+      available: hosted,
+      note: hosted
+        ? `A relay run by the extension author, forwarding to ${hostedProvider()}. Uses none of your quota; it asks before the first request.`
+        : hostedConfigured
+          ? 'Turned off by erdStudio.feedback.hostedFallback.'
+          : 'Not available in this build.',
+    },
+  ];
+}
+
+/**
+ * Pin (or un-pin) the analysis destination, globally.
+ *
+ * Written to the **global** target on purpose: the setting is user-scoped, so a
+ * workspace value would be read by nothing and the picker would appear to do
+ * nothing at all.
+ */
+export async function setAnalysisProviderChoice(
+  choice: FeedbackAiProviderChoice,
+): Promise<void> {
+  await vscode.workspace
+    .getConfiguration('erdStudio')
+    .update(FEEDBACK_PROVIDER_SETTING, choice, vscode.ConfigurationTarget.Global);
 }
 
 /**
@@ -865,11 +1043,17 @@ function hostedConsentCopy(
  * `request.userInitiated` says the user pressed a button for this one. It only
  * matters for an unprimed tier 1, where a debounced request is declined rather
  * than made — see {@link FEEDBACK_LM_PRIMED_KEY}.
+ *
+ * `request.kindChosenByUser` says whether `request.kind` is a decision or just
+ * the kind the dialog opens on. Only the former is stated to the model; see
+ * {@link buildAnalysisPrompt}.
  */
 export async function analyzeFeedback(
   context: vscode.ExtensionContext,
   request: {
     kind: FeedbackKind;
+    /** True when `kind` is the user's own choice rather than the dialog's default. */
+    kindChosenByUser?: boolean;
     description: string;
     context?: string;
     userInitiated?: boolean;
@@ -887,6 +1071,7 @@ export async function analyzeFeedback(
   const issues = await fetchKnownIssues(deps.fetch);
   const prompt = buildAnalysisPrompt({
     kind: request.kind,
+    kindChosenByUser: request.kindChosenByUser,
     description: request.description,
     context: request.context,
     issues,

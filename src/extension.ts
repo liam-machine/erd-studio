@@ -312,7 +312,8 @@ const FEEDBACK_KIND_PICKS: ReadonlyArray<{ label: string; kind: FeedbackKind }> 
 /**
  * "Send Feedback" without an active canvas: pick the kind, then gather a title
  * and a one-line description via input boxes, then open the prefilled GitHub
- * issue form. No screenshot and no analysis — both of those need the webview.
+ * issue form. No duplicate check and no analysis — both of those need the
+ * webview's dialog.
  *
  * Cancelling any of the three steps abandons the report.
  */
@@ -375,7 +376,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // "Send Feedback" is registered before any early return so it is always
   // reachable from the command palette, even when no dbt project is open.
   // When a canvas is active the report is routed through its webview so it can
-  // include screenshots, diagnostics chips and the optional AI analysis.
+  // include the diagnostics chips and the optional AI analysis.
   let editorProviderForFeedback: SemanticEditorProvider | undefined;
   let trackingServiceForFeedback: ReportTrackingService | undefined;
   context.subscriptions.push(

@@ -165,14 +165,25 @@ describe('requestFeedbackContext', () => {
     expect(payload.diagnostics.text).toContain('silver/showcase');
     expect(payload.diagnostics.chips[0]).toEqual({ label: 'ERD Studio 0.0.0-test', tone: 'normal' });
     expect(payload.diagnostics.chips.some((c: { tone: string }) => c.tone === 'error')).toBe(true);
-    expect(payload.capabilities).toEqual({
+    expect(payload.capabilities).toMatchObject({
       extensionVersion: '0.0.0-test',
       aiAvailable: false,
       aiProviderLabel: null,
+      aiProvider: 'auto',
       aiNeedsPriming: false,
       githubHandle: null,
-      canCaptureCanvas: true,
     });
+    // The picker is always listed, whatever resolves — a pinned destination
+    // that is unavailable here has to leave a visible way back.
+    expect(payload.capabilities.aiOptions.map((o: { id: string }) => o.id)).toEqual([
+      'auto',
+      'vscode',
+      'endpoint',
+      'hosted',
+    ]);
+    expect(payload.capabilities.aiOptions.every((o: { available: boolean }) => !o.available)).toBe(
+      true,
+    );
   });
 
   it('reads the GitHub session silently — nobody is nagged to sign in', async () => {
@@ -220,7 +231,7 @@ describe('requestFeedbackContext', () => {
   });
 
   it('still answers when the host has no GitHub authentication provider', async () => {
-    // Losing the diagnostics disclosure and the screenshot checkbox because a
+    // Losing the diagnostics disclosure and the whole dialog because a
     // decorative handle could not be read would be absurd.
     vscode._setMockAuthError(new Error('No authentication provider "github" registered.'));
     const { panel } = await openShowcase(root);
@@ -230,7 +241,7 @@ describe('requestFeedbackContext', () => {
     await vi.waitFor(() => expect(types(panel)).toContain('feedbackContext'));
     expect(lastOf(panel, 'feedbackContext').capabilities).toMatchObject({
       githubHandle: null,
-      canCaptureCanvas: true,
+      aiProvider: 'auto',
     });
     expect(types(panel)).not.toContain('error');
     expect(hostErrorLog.recent().at(-1)).toMatch(/sendFeedbackContext\.getSession/);
@@ -310,34 +321,25 @@ describe('submitFeedback', () => {
     expect(recordPending).not.toHaveBeenCalled();
   });
 
-  it('replies without waiting for the sticky notification to be dismissed', async () => {
-    // A notification carrying a "Reveal Folder" button never auto-hides, and
-    // the dialog disables Cancel, Escape and the backdrop until this reply
-    // lands — so the reply must not be behind the user dismissing a toast.
+  it('replies without waiting for the comment notification to be dismissed', async () => {
+    // The dialog disables Cancel, Escape and the backdrop until this reply
+    // lands, and a notification is free to sit there until the user deals with
+    // it — so the reply must not be behind one.
     const { panel } = await openShowcase(root);
     vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+    vi.spyOn(vscode.env.clipboard, 'writeText').mockResolvedValue(undefined);
     const info = vi
       .spyOn(vscode.window, 'showInformationMessage')
       .mockReturnValue(new Promise(() => {}) as Promise<undefined>);
 
     panel._simulateMessage({
       type: 'submitFeedback',
-      payload: validSubmit({
-        attachments: [
-          {
-            id: 'canvas',
-            name: 'canvas.png',
-            mime: 'image/png',
-            bytes: 4,
-            dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
-            source: 'canvas',
-            onClipboard: true,
-          },
-        ],
-      }),
+      payload: validSubmit({ commentOnIssue: 42 }),
     });
 
-    await vi.waitFor(() => expect(lastOf(panel, 'feedbackSubmitted')).toEqual({ ok: true }));
+    await vi.waitFor(() =>
+      expect(lastOf(panel, 'feedbackSubmitted')).toEqual({ ok: true, commentedOn: 42 }),
+    );
     expect(info).toHaveBeenCalled();
   });
 
@@ -358,31 +360,103 @@ describe('submitFeedback', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('refuses an oversize attachment before anything is written to disk', async () => {
+  it('writes nothing to disk and raises no image notification — nothing is attached', async () => {
+    // The old flow saved the capture under global storage as the fallback for
+    // a refused clipboard. With no capture there is no folder, no file and no
+    // notification explaining which of the two hand-offs the user got.
     const { panel } = await openShowcase(root);
     vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+
+    panel._simulateMessage({ type: 'submitFeedback', payload: validSubmit() });
+
+    await vi.waitFor(() => expect(lastOf(panel, 'feedbackSubmitted')).toEqual({ ok: true }));
+    expect(fs.existsSync(path.join(root, '.global-storage', 'feedback'))).toBe(false);
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('ignores an attachments array a stale webview still sends', async () => {
+    // An older bundle against a newer host must still be able to file: the
+    // field is simply not read any more, not a validation failure.
+    const { panel } = await openShowcase(root);
+    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
 
     panel._simulateMessage({
       type: 'submitFeedback',
       payload: validSubmit({
-        attachments: [
-          {
-            id: 'canvas',
-            name: 'huge.png',
-            mime: 'image/png',
-            bytes: 20 * 1024 * 1024,
-            dataUrl: 'data:image/png;base64,AAAA',
-            source: 'canvas',
-          },
-        ],
+        attachments: [{ id: 'canvas', name: 'canvas.png', mime: 'image/png' }],
       }),
     });
 
-    await vi.waitFor(() => expect(lastOf(panel, 'feedbackSubmitted')?.ok).toBe(false));
-    expect(lastOf(panel, 'feedbackSubmitted').error).toBe(
-      'Attachment "huge.png" is larger than the 10 MB limit.',
-    );
+    await vi.waitFor(() => expect(lastOf(panel, 'feedbackSubmitted')).toEqual({ ok: true }));
+    expect(String(open.mock.calls[0][0])).not.toContain('screenshot');
     expect(fs.existsSync(path.join(root, '.global-storage', 'feedback'))).toBe(false);
+  });
+});
+
+describe('setFeedbackProvider', () => {
+  it('pins the destination globally and answers with a fresh context', async () => {
+    // Someone with Copilot could not previously reach any other destination —
+    // the resolver tried theirs first and stopped.
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_AI_ASSIST_SETTING, { globalValue: true });
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    setHostedAnalysisTargetForTests({
+      endpoint: 'https://relay.example',
+      model: 'm',
+      provider: 'ExampleAI',
+    });
+    const { panel } = await openShowcase(root);
+
+    panel._simulateMessage({ type: 'requestFeedbackContext', payload: {} });
+    await vi.waitFor(() => expect(types(panel)).toContain('feedbackContext'));
+    expect(lastOf(panel, 'feedbackContext').capabilities.aiProviderLabel).toBe('Copilot');
+
+    panel._simulateMessage({ type: 'setFeedbackProvider', payload: { provider: 'hosted' } });
+
+    await vi.waitFor(() =>
+      expect(lastOf(panel, 'feedbackContext').capabilities.aiProvider).toBe('hosted'),
+    );
+    const capabilities = lastOf(panel, 'feedbackContext').capabilities;
+    expect(capabilities.aiAvailable).toBe(true);
+    expect(capabilities.aiProviderLabel).toBe('relay.example \u2192 ExampleAI');
+    // The pin is a user decision, so it is written to the global target — a
+    // workspace value would be read by nothing (the key is user-scoped).
+    expect(
+      vscode.workspace.getConfiguration('erdStudio').inspect('feedback.provider')?.globalValue,
+    ).toBe('hosted');
+  });
+
+  it('resolves to no tier rather than falling back when the pin is unavailable', async () => {
+    // Falling through would send the text to a destination the user pinned
+    // away from, which is the whole thing the pin exists to prevent.
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_AI_ASSIST_SETTING, { globalValue: true });
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    const { panel } = await openShowcase(root);
+
+    panel._simulateMessage({ type: 'setFeedbackProvider', payload: { provider: 'endpoint' } });
+
+    await vi.waitFor(() =>
+      expect(lastOf(panel, 'feedbackContext').capabilities.aiProvider).toBe('endpoint'),
+    );
+    const capabilities = lastOf(panel, 'feedbackContext').capabilities;
+    expect(capabilities.aiAvailable).toBe(false);
+    expect(capabilities.aiProviderLabel).toBeNull();
+    // …but the picker still lists the model that IS here, so there is a way back.
+    expect(capabilities.aiOptions.find((o: { id: string }) => o.id === 'vscode').available).toBe(
+      true,
+    );
+  });
+
+  it('refuses an unknown destination rather than coercing it to auto', async () => {
+    const { panel } = await openShowcase(root);
+
+    panel._simulateMessage({ type: 'setFeedbackProvider', payload: { provider: 'copilot' } });
+
+    await vi.waitFor(() => expect(lastError(panel)).toBeDefined());
+    expect(lastError(panel)).toMatch(/^Failed to switch the analysis provider: /);
+    expect(
+      vscode.workspace.getConfiguration('erdStudio').inspect('feedback.provider')?.globalValue,
+    ).toBeUndefined();
   });
 });
 
@@ -478,17 +552,14 @@ describe('copyFeedbackReport', () => {
     const write = vi.spyOn(vscode.env.clipboard, 'writeText').mockResolvedValue(undefined);
     vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
 
-    panel._simulateMessage({
-      type: 'copyFeedbackReport',
-      payload: { ...validSubmit(), attachmentNames: ['canvas.png'] },
-    });
+    panel._simulateMessage({ type: 'copyFeedbackReport', payload: validSubmit() });
 
     await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1));
     const report = String(write.mock.calls[0][0]);
     expect(report).toContain('# Edge vanished after rename');
     expect(report).toContain('## What happened?');
-    expect(report).toContain('- canvas.png');
     expect(report).toContain('## Diagnostics');
+    expect(report).not.toContain('## Attachments');
   });
 
   it('rejects a malformed payload with a generic error', async () => {

@@ -12,20 +12,8 @@
 
 import type { Cardinality, ColumnDef, ModelRole, Stage } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, MODEL_NAME_RULE, findDuplicateNames } from '../types/naming';
-import type {
-  DuplicateMode,
-  FeedbackAttachment,
-  FeedbackImageMime,
-  FeedbackKind,
-} from '../types/feedback';
-import {
-  DUPLICATE_MODES,
-  FEEDBACK_ATTACHMENT_SOURCES,
-  FEEDBACK_IMAGE_MIMES,
-  FEEDBACK_KINDS,
-  MAX_ATTACHMENTS,
-  MAX_ATTACHMENT_BYTES,
-} from '../types/feedback';
+import type { DuplicateMode, FeedbackKind } from '../types/feedback';
+import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
 // Model names
@@ -176,11 +164,6 @@ export function isValidFeedbackKind(value: unknown): value is FeedbackKind {
   return typeof value === 'string' && (FEEDBACK_KINDS as readonly string[]).includes(value);
 }
 
-/** Type guard for an accepted image mime type. */
-export function isValidFeedbackImageMime(value: unknown): value is FeedbackImageMime {
-  return typeof value === 'string' && (FEEDBACK_IMAGE_MIMES as readonly string[]).includes(value);
-}
-
 /** Type guard for `DuplicateMode`. */
 export function isValidDuplicateMode(value: unknown): value is DuplicateMode {
   return typeof value === 'string' && (DUPLICATE_MODES as readonly string[]).includes(value);
@@ -242,76 +225,6 @@ function validateFeedbackDomainSummary(value: unknown): string | null {
   return null;
 }
 
-/**
- * Validate one attachment: id/name non-empty strings, accepted mime, finite
- * positive `bytes` at or under MAX_ATTACHMENT_BYTES, a `data:<mime>;base64,`
- * dataUrl whose declared mime matches `mime`, and a known `source`.
- * Returns null when valid.
- */
-export function validateFeedbackAttachment(value: unknown): string | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return 'Attachment must be an object.';
-  }
-  const attachment = value as Partial<FeedbackAttachment>;
-  if (typeof attachment.id !== 'string' || !attachment.id.trim()) {
-    return 'Attachment id must be a non-empty string.';
-  }
-  if (typeof attachment.name !== 'string' || !attachment.name.trim()) {
-    return 'Attachment name must be a non-empty string.';
-  }
-  if (!isValidFeedbackImageMime(attachment.mime)) {
-    return 'Attachment mime type is not an accepted image type.';
-  }
-  if (!isFiniteNumber(attachment.bytes) || attachment.bytes <= 0) {
-    return 'Attachment size must be a positive number of bytes.';
-  }
-  if (attachment.bytes > MAX_ATTACHMENT_BYTES) {
-    return `Attachment "${attachment.name}" is larger than the 10 MB limit.`;
-  }
-  if (typeof attachment.dataUrl !== 'string' || !attachment.dataUrl.startsWith(`data:${attachment.mime};base64,`)) {
-    return 'Attachment data URL must be a base64 image data URL matching its mime type.';
-  }
-  if (
-    typeof attachment.source !== 'string' ||
-    !(FEEDBACK_ATTACHMENT_SOURCES as readonly string[]).includes(attachment.source)
-  ) {
-    return 'Attachment source is not recognised.';
-  }
-  if (attachment.onClipboard !== undefined && typeof attachment.onClipboard !== 'boolean') {
-    return 'Attachment onClipboard must be a boolean.';
-  }
-  return null;
-}
-
-/**
- * Validate an attachment list: an array of at most MAX_ATTACHMENTS (one — the
- * canvas capture) valid entries. `undefined` is valid (no attachments).
- * Returns null when valid.
- *
- * Still list-shaped because the wire contract is: the dialog sends the
- * `attachments` array with nothing or one image in it, and the host reads it
- * the same way either way. With a ceiling of one there is nothing left for a
- * per-list aggregate to catch that the per-image ceiling has not.
- */
-export function validateFeedbackAttachments(value: unknown): string | null {
-  if (value === undefined) {
-    return null;
-  }
-  if (!Array.isArray(value)) {
-    return 'Attachments must be a list.';
-  }
-  if (value.length > MAX_ATTACHMENTS) {
-    return 'Only one image can be attached.';
-  }
-  for (const entry of value) {
-    const error = validateFeedbackAttachment(entry);
-    if (error) {
-      return error;
-    }
-  }
-  return null;
-}
-
 /** Validate a `requestFeedbackContext` payload (all fields optional). Returns null when valid. */
 export function validateRequestFeedbackContextPayload(value: unknown): string | null {
   if (value === undefined) {
@@ -329,8 +242,8 @@ export function validateRequestFeedbackContextPayload(value: unknown): string | 
 
 /**
  * Validate an `analyzeFeedback` payload: finite integer `requestId`, valid
- * `kind`, non-empty string `description`, optional string `context`, optional
- * `trigger` of `"debounce"` or `"user"`.
+ * `kind`, optional boolean `kindChosenByUser`, non-empty string `description`,
+ * optional string `context`, optional `trigger` of `"debounce"` or `"user"`.
  */
 export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -339,6 +252,7 @@ export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
   const payload = value as {
     requestId?: unknown;
     kind?: unknown;
+    kindChosenByUser?: unknown;
     description?: unknown;
     context?: unknown;
     trigger?: unknown;
@@ -358,6 +272,14 @@ export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
   if (payload.context !== undefined && typeof payload.context !== 'string') {
     return 'Context must be a string.';
   }
+  // Decides whether the kind is stated to the model as the user's decision, so
+  // a non-boolean is refused rather than read as "yes".
+  if (
+    payload.kindChosenByUser !== undefined &&
+    typeof payload.kindChosenByUser !== 'boolean'
+  ) {
+    return 'Kind-chosen flag must be a boolean.';
+  }
   // `trigger` decides whether an unprimed language-model request is allowed to
   // run, so an unrecognised value is refused rather than read as "user".
   if (
@@ -373,9 +295,8 @@ export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
 /**
  * Validate a `submitFeedback` payload: valid `kind`, string `title` and
  * `description`, optional string `steps`, boolean `includeDiagnostics`,
- * attachments via validateFeedbackAttachments, optional positive integer
- * `regressionOf` / `commentOnIssue`, optional string[] `webviewErrors`,
- * optional domain summary.
+ * optional positive integer `regressionOf` / `commentOnIssue`, optional
+ * string[] `webviewErrors`, optional domain summary.
  */
 export function validateSubmitFeedbackPayload(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -387,8 +308,6 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
     description?: unknown;
     steps?: unknown;
     includeDiagnostics?: unknown;
-    attachments?: unknown;
-    screenshotError?: unknown;
     webviewErrors?: unknown;
     regressionOf?: unknown;
     commentOnIssue?: unknown;
@@ -409,13 +328,6 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
   if (typeof payload.includeDiagnostics !== 'boolean') {
     return 'Diagnostics flag must be a boolean.';
   }
-  if (payload.screenshotError !== undefined && typeof payload.screenshotError !== 'string') {
-    return 'Screenshot error must be a string.';
-  }
-  const attachmentsError = validateFeedbackAttachments(payload.attachments);
-  if (attachmentsError) {
-    return attachmentsError;
-  }
   for (const key of ['regressionOf', 'commentOnIssue'] as const) {
     if (payload[key] !== undefined && !isIssueNumber(payload[key])) {
       return `Issue number for ${key} must be a positive integer.`;
@@ -427,7 +339,7 @@ export function validateSubmitFeedbackPayload(value: unknown): string | null {
   );
 }
 
-/** Validate a `copyFeedbackReport` payload (same rules minus attachments/issue numbers). */
+/** Validate a `copyFeedbackReport` payload (same rules minus the issue numbers). */
 export function validateCopyFeedbackReportPayload(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return 'Feedback report must be an object.';
@@ -438,7 +350,6 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
     description?: unknown;
     steps?: unknown;
     includeDiagnostics?: unknown;
-    attachmentNames?: unknown;
     webviewErrors?: unknown;
     domain?: unknown;
   };
@@ -457,9 +368,28 @@ export function validateCopyFeedbackReportPayload(value: unknown): string | null
   if (typeof payload.includeDiagnostics !== 'boolean') {
     return 'Diagnostics flag must be a boolean.';
   }
-  const namesError = validateStringList(payload.attachmentNames, 'Attachment names');
-  if (namesError) {
-    return namesError;
+  return (
+    validateStringList(payload.webviewErrors, 'Webview errors') ??
+    validateFeedbackDomainSummary(payload.domain)
+  );
+}
+
+/**
+ * Validate a `setFeedbackProvider` payload: one of the four known choices,
+ * plus the same optional diagnostics context `requestFeedbackContext` carries
+ * (the reply is a full `feedbackContext`).
+ *
+ * An unrecognised choice is refused rather than coerced to `auto`: writing a
+ * value the resolver does not know would silently restore the old precedence
+ * and send the text somewhere the user did not pick.
+ */
+export function validateSetFeedbackProviderPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Provider choice must be an object.';
+  }
+  const payload = value as { provider?: unknown; webviewErrors?: unknown; domain?: unknown };
+  if (!isFeedbackAiProviderChoice(payload.provider)) {
+    return 'Analysis provider must be "auto", "vscode", "endpoint" or "hosted".';
   }
   return (
     validateStringList(payload.webviewErrors, 'Webview errors') ??

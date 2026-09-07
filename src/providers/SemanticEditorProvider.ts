@@ -78,9 +78,12 @@ import {
 } from '../services/feedbackService';
 import {
   analysisNeedsPriming,
+  analysisProviderChoice,
   analysisProviderLabel,
   analyzeFeedback,
+  listAnalysisOptions,
   resolveAnalysisTier,
+  setAnalysisProviderChoice,
 } from '../services/feedbackAnalysisService';
 import type { ReportTrackingService } from '../services/reportTrackingService';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
@@ -88,6 +91,7 @@ import type {
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
   OpenFeedbackLinkMessage,
+  SetFeedbackProviderMessage,
   OpenFeedbackMessage,
   RelationshipKey,
   RequestFeedbackContextMessage,
@@ -202,6 +206,7 @@ import {
   validateCopyFeedbackReportPayload,
   validateOpenFeedbackLinkPayload,
   validateRequestFeedbackContextPayload,
+  validateSetFeedbackProviderPayload,
   validateSubmitFeedbackPayload,
   type AnnotationPositionPayload,
 } from './payloadValidation';
@@ -485,9 +490,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const tier = await resolveAnalysisTier(this.context);
     // The handle is decoration: it labels the auth pill and helps the tracker
     // reconcile. A host with no GitHub authentication provider registered
-    // rejects here, and losing the diagnostics disclosure and the screenshot
-    // checkbox over that would be absurd — so this one call is guarded and the
-    // rest of the payload is posted regardless.
+    // rejects here, and losing the diagnostics disclosure and the whole dialog
+    // over that would be absurd — so this one call is guarded and the rest of
+    // the payload is posted regardless.
     let githubHandle: string | null = null;
     try {
       const session = await vscode.authentication.getSession('github', ['read:user'], {
@@ -505,12 +510,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           extensionVersion: String(this.context.extension.packageJSON.version ?? 'unknown'),
           aiAvailable: tier !== 'none',
           aiProviderLabel: tier === 'none' ? null : await analysisProviderLabel(this.context),
+          // The picker is listed whatever the resolved tier is, so a pinned
+          // destination that is not available here (Copilot on a machine
+          // without it) still leaves a visible way back rather than taking the
+          // whole panel down with it.
+          aiProvider: analysisProviderChoice(),
+          aiOptions: await listAnalysisOptions(this.context),
           // Tier 1 on a machine where no request has succeeded yet: the dialog
           // shows its button rather than running on the debounce, so VS Code's
           // access dialog is raised by a click and not by typing.
           aiNeedsPriming: analysisNeedsPriming(this.context, tier),
           githubHandle,
-          canCaptureCanvas: true,
         },
       },
     });
@@ -518,9 +528,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * If the active editor tab is one of our canvases, ask its webview to open
-   * the Feedback dialog (so the report can include a canvas screenshot, diagnostics
-   * chips and the optional analysis). Returns false when no canvas is active
-   * so the caller can fall back to the canvas-less QuickPick flow.
+   * the Feedback dialog (so the report can include the diagnostics chips and
+   * the optional analysis). Returns false when no canvas is active so the
+   * caller can fall back to the canvas-less QuickPick flow.
    */
   requestFeedbackDialog(prefill?: OpenFeedbackMessage['payload']): boolean {
     const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
@@ -572,8 +582,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'viewFile', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'removeAnnotations',
           'requestReload',
-          'requestFeedbackContext', 'analyzeFeedback', 'submitFeedback',
-          'copyFeedbackReport', 'openFeedbackLink',
+          'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
+          'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -804,6 +814,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             try {
               const result = await analyzeFeedback(this.context, {
                 kind: payload.kind,
+                kindChosenByUser: payload.kindChosenByUser,
                 description: payload.description,
                 context: payload.context,
                 userInitiated: payload.trigger === 'user',
@@ -822,6 +833,37 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                   requestId: payload.requestId,
                   analysis: null,
                   error: 'The analysis could not be completed.',
+                },
+              });
+            }
+            break;
+          }
+          case 'setFeedbackProvider': {
+            const payload = (message as SetFeedbackProviderMessage).payload;
+            const validationError = validateSetFeedbackProviderPayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: `Failed to switch the analysis provider: ${validationError}` },
+              });
+              break;
+            }
+            try {
+              await setAnalysisProviderChoice(payload.provider);
+              // Reply with a whole fresh context, not just the new label: the
+              // switch can change whether a tier resolves at all and whether
+              // the first request has to be asked for by a click, and the
+              // dialog reads both from `capabilities`.
+              await this.sendFeedbackContext(webviewPanel.webview, {
+                webviewErrors: payload.webviewErrors,
+                domain: payload.domain,
+              });
+            } catch (err) {
+              hostErrorLog.record('setFeedbackProvider', err);
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: {
+                  message: `Failed to switch the analysis provider: ${err instanceof Error ? err.message : String(err)}`,
                 },
               });
             }
@@ -874,12 +916,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             try {
-              await copyFeedbackReport(
-                this.context,
-                payload,
-                payload.domain,
-                payload.attachmentNames,
-              );
+              await copyFeedbackReport(this.context, payload, payload.domain);
             } catch (err) {
               hostErrorLog.record('copyFeedbackReport', err);
               this.post(webviewPanel.webview, {

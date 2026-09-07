@@ -620,27 +620,12 @@ describe('message boundary (H21)', () => {
 // Feedback — `submitFeedback` message and requestFeedbackDialog()
 // ---------------------------------------------------------------------------
 
-/** 1×1 transparent PNG. */
-const TINY_PNG =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-
 const feedbackPayload = (overrides: Record<string, unknown> = {}) => ({
   kind: 'bug' as const,
   title: 'Edge vanished after rename',
   description: 'Renamed dim_task and the FK edge disappeared.',
   includeDiagnostics: true,
   domain: { name: 'showcase', layer: 'silver', stage: 'logical', modelCount: 4, relationshipCount: 3, schemaVersion: 5 },
-  ...overrides,
-});
-
-/** One attachment carrying the tiny PNG, as the dialog would send it. */
-const pngAttachment = (overrides: Record<string, unknown> = {}) => ({
-  id: '1-canvas-png',
-  name: 'canvas.png',
-  mime: 'image/png' as const,
-  bytes: 70,
-  dataUrl: TINY_PNG,
-  source: 'canvas' as const,
   ...overrides,
 });
 
@@ -722,24 +707,18 @@ describe('feedback (submitFeedback message)', () => {
     expect(types(panel)).not.toContain('error');
   });
 
-  it('saves the images under a per-report global-storage folder and offers to reveal it', async () => {
+  it('writes nothing to global storage — a report carries no files at all', async () => {
+    // The dialog captures no image, so there is nothing to save as the
+    // fallback for a refused clipboard, and no folder to reveal.
     const { panel } = await openShowcase(root);
     vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
 
-    panel._simulateMessage({
-      type: 'submitFeedback',
-      payload: feedbackPayload({ attachments: [pngAttachment({ onClipboard: true })] }),
-    });
+    panel._simulateMessage({ type: 'submitFeedback', payload: feedbackPayload() });
 
-    await vi.waitFor(() =>
-      expect(info).toHaveBeenCalledWith(expect.stringContaining('on your clipboard'), 'Reveal Folder'),
-    );
-    const feedbackDir = path.join(root, '.global-storage', 'feedback');
-    const stamps = fs.readdirSync(feedbackDir);
-    expect(stamps).toHaveLength(1);
-    const saved = fs.readdirSync(path.join(feedbackDir, stamps[0]));
-    expect(saved).toEqual([`erd-studio-${stamps[0]}-01.png`]);
+    await vi.waitFor(() => expect(lastSubmitted(panel)?.ok).toBe(true));
+    expect(fs.existsSync(path.join(root, '.global-storage', 'feedback'))).toBe(false);
+    expect(info).not.toHaveBeenCalled();
   });
 });
 

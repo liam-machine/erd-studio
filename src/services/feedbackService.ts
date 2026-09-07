@@ -8,32 +8,26 @@
  * nothing is sent from the extension itself, so no GitHub token or scope is
  * needed. There is deliberately no "file it from here" path.
  *
- * Images: GitHub has no API for attaching an image to an issue, so the report
- * carries at most one — the canvas capture — and it reaches the issue through
- * the user's clipboard. The host also writes it under
- * `<globalStorage>/feedback/<stamp>/` as the fallback for a refused clipboard,
- * because the browser clipboard is allowed to say no and a user left with
- * neither a paste nor a file has lost the screenshot entirely. The notification
- * and the issue body both branch on `attachments[0].onClipboard`: "saved" and
- * "on the clipboard" are not the same question.
+ * Images: the report carries none, and the extension captures none. GitHub has
+ * no API for attaching an image to a prefilled issue form, so anything the
+ * extension grabbed could only be handed back to the user to paste on
+ * github.com themselves — the job they already have, done twice, plus a
+ * clipboard that is allowed to refuse and a file left on disk to explain. The
+ * issue form keeps its Screenshot box and the dialog says once where images go
+ * (`FEEDBACK_IMAGE_NOTE` in `src/types/feedback.ts`); that is the whole of it.
  *
  * The pure helpers (`formatDiagnostics`, `buildIssueUrl`, `composeFeedbackFields`,
  * `composeMarkdownReport`, `ErrorLog`) have no VS Code dependency so they are
  * unit-testable; the VS Code-facing functions live at the bottom of the file.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
 
 import {
   applyRegressionPrefix,
-  FEEDBACK_MIME_EXTENSIONS,
-  type FeedbackAttachment,
   type FeedbackDiagnosticsChip,
   type FeedbackDiagnosticsView,
   type FeedbackDraft,
-  type FeedbackImageMime,
   type FeedbackKind,
 } from '../types/feedback';
 
@@ -88,12 +82,6 @@ export interface BugReportDraft {
   description: string;
   steps?: string;
   includeDiagnostics: boolean;
-  /** PNG data URL of the canvas, if the user chose to include a screenshot. */
-  screenshotDataUrl?: string;
-  /** Whether the webview managed to place the PNG on the clipboard. */
-  screenshotOnClipboard?: boolean;
-  /** Why capture failed, when the user asked for a screenshot but none arrived. */
-  screenshotError?: string;
   /** Errors the webview collected (from `error` messages and window errors). */
   webviewErrors?: string[];
 }
@@ -235,23 +223,7 @@ export function composeIssueFields(
   };
   if (draft.steps?.trim()) fields.steps = draft.steps.trim();
   if (diagnostics && draft.includeDiagnostics) fields.diagnostics = formatDiagnostics(diagnostics);
-  if (draft.screenshotDataUrl) {
-    fields.screenshot = draft.screenshotOnClipboard
-      ? 'A screenshot is on your clipboard — click here and press Ctrl+V / ⌘V to attach it.'
-      : 'Drag the saved screenshot file here to attach it.';
-  }
   return fields;
-}
-
-/** Decode a `data:image/png;base64,...` URL into bytes. Returns null if malformed. */
-export function decodePngDataUrl(dataUrl: string): Buffer | null {
-  const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
-  if (!match) return null;
-  try {
-    return Buffer.from(match[1], 'base64');
-  } catch {
-    return null;
-  }
 }
 
 /** Issue form template file name for feature requests. */
@@ -296,41 +268,27 @@ function resolveFeedbackTitle(draft: FeedbackDraft): string {
 }
 
 /**
- * The `screenshot` field body for the one attached image. Branches on whether
- * it actually made it onto the clipboard — a browser is free to refuse that
- * write — and never on whether it was saved: the saved file is the fallback,
- * so pointing at it while the clipboard already holds the image would send the
- * user the long way round.
- */
-function screenshotFieldText(attachment: FeedbackAttachment): string {
-  return attachment.onClipboard === true
-    ? 'A screenshot is on your clipboard — click here and press Ctrl+V / ⌘V to attach it.'
-    : 'Drag the saved screenshot file here to attach it.';
-}
-
-/**
  * Compose the issue-form fields for a feedback draft. Delegates the shared part
  * to {@link composeIssueFields} (a `FeedbackDraft` is a structural superset of a
  * `BugReportDraft`), then applies what is kind-specific: the default title, the
- * regression prefix, `steps` → `rationale` for a feature request, and the
- * `screenshot` body for the attached image.
+ * regression prefix, and `steps` → `rationale` for a feature request.
+ *
+ * The bug form's `screenshot` field is left **empty** rather than prefilled.
+ * Nothing is attached from the extension, so any text there would be an
+ * instruction sitting in a box the user has to clear before they can drop an
+ * image into it. The dialog says where images go before the browser opens.
  */
 export function composeFeedbackFields(
   draft: FeedbackDraft,
   diagnostics: Diagnostics | null,
 ): Record<string, string> {
   const base = composeIssueFields(draft, diagnostics);
-  const [image] = draft.attachments ?? [];
 
   const fields: Record<string, string> = {
     title: resolveFeedbackTitle(draft),
     description: base.description,
   };
   if (base.steps) fields[contextFieldForKind(draft.kind)] = base.steps;
-
-  const screenshot = image ? screenshotFieldText(image) : base.screenshot;
-  if (screenshot) fields.screenshot = screenshot;
-
   if (base.diagnostics) fields.diagnostics = base.diagnostics;
   return fields;
 }
@@ -342,7 +300,6 @@ export function composeFeedbackFields(
 export function composeMarkdownReport(
   draft: FeedbackDraft,
   diagnostics: Diagnostics | null,
-  options: { attachmentNames?: string[] } = {},
 ): string {
   const sections: string[] = [`# ${resolveFeedbackTitle(draft)}`];
 
@@ -360,11 +317,6 @@ export function composeMarkdownReport(
   const context = draft.steps?.trim();
   if (context) {
     sections.push(`## ${CONTEXT_HEADING[draft.kind]}`, context);
-  }
-
-  const names = options.attachmentNames ?? (draft.attachments ?? []).map((a) => a.name);
-  if (names.length > 0) {
-    sections.push('## Attachments', names.map((name) => `- ${name}`).join('\n'));
   }
 
   if (diagnostics && draft.includeDiagnostics) {
@@ -403,33 +355,6 @@ export function buildDiagnosticsView(d: Diagnostics): FeedbackDiagnosticsView {
   return { chips: buildDiagnosticsChips(d), text: formatDiagnostics(d) };
 }
 
-/**
- * Decode any accepted image data URL. Unlike {@link decodePngDataUrl} (PNG-only,
- * kept for the single-screenshot path) this accepts png/jpeg/gif/webp and
- * returns the mime alongside the bytes. Null on a malformed or unaccepted URL.
- */
-export function decodeImageDataUrl(
-  dataUrl: string,
-): { mime: FeedbackImageMime; bytes: Buffer } | null {
-  const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
-  if (!match) return null;
-  try {
-    return { mime: match[1] as FeedbackImageMime, bytes: Buffer.from(match[2], 'base64') };
-  } catch {
-    return null;
-  }
-}
-
-/** File name for a saved attachment: `erd-studio-<stamp>-<index><ext>`. */
-export function attachmentFileName(
-  attachment: FeedbackAttachment,
-  index: number,
-  stamp: string,
-): string {
-  const extension = FEEDBACK_MIME_EXTENSIONS[attachment.mime] ?? '.png';
-  return `erd-studio-${stamp}-${String(index).padStart(2, '0')}${extension}`;
-}
-
 // ---------------------------------------------------------------------------
 // VS Code-facing helpers
 // ---------------------------------------------------------------------------
@@ -452,92 +377,14 @@ export function collectDiagnostics(
 }
 
 /**
- * Persist a screenshot PNG under global storage so the user can drag it into
- * the issue if the clipboard route failed. Returns the file URI, or null on
- * malformed input / write failure.
- */
-export async function saveScreenshot(
-  context: vscode.ExtensionContext,
-  dataUrl: string,
-): Promise<vscode.Uri | null> {
-  const bytes = decodePngDataUrl(dataUrl);
-  if (!bytes) return null;
-  try {
-    const dir = path.join(context.globalStorageUri.fsPath, 'bug-reports');
-    fs.mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const file = path.join(dir, `erd-studio-${stamp}.png`);
-    fs.writeFileSync(file, bytes);
-    return vscode.Uri.file(file);
-  } catch (err) {
-    hostErrorLog.record('saveScreenshot', err);
-    return null;
-  }
-}
-
-/** Notification action that opens the saved-images folder in the OS file manager. */
-const REVEAL_FOLDER_ACTION = 'Reveal Folder';
-
-/**
- * Show a notification that optionally offers to reveal the saved-images folder.
+ * The whole submit path: open the prefilled GitHub issue form, or — when
+ * `draft.commentOnIssue` is set — put the Markdown report on the clipboard and
+ * open that thread's comment box. Nothing is filed from here; the user presses
+ * Submit on GitHub.
  *
- * Callers must NOT await this. A notification carrying an action button is
- * sticky, so the promise only settles when the user clicks or dismisses it —
- * and the dialog stays disabled (Cancel, Escape and the backdrop included)
- * until `submitFeedback` returns. It therefore swallows its own failures
- * rather than becoming an unhandled rejection on the floor.
- */
-async function notifyWithReveal(message: string, folder: vscode.Uri | null): Promise<void> {
-  try {
-    const actions = folder ? [REVEAL_FOLDER_ACTION] : [];
-    const choice = await vscode.window.showInformationMessage(message, ...actions);
-    if (choice === REVEAL_FOLDER_ACTION && folder) {
-      await vscode.commands.executeCommand('revealFileInOS', folder);
-    }
-  } catch (err) {
-    hostErrorLog.record('notifyWithReveal', err);
-  }
-}
-
-/**
- * Persist the report's image under `<globalStorage>/feedback/<stamp>/` — a
- * folder per report, so two reports can never interleave. This is the fallback
- * for a clipboard the browser refused: a failed copy must still leave the user
- * a file to drag into the issue. Returns the folder and the files written, or
- * null when nothing decoded.
- *
- * Takes a list because that is the wire shape; it holds one image at most.
- */
-export async function saveAttachments(
-  context: vscode.ExtensionContext,
-  attachments: readonly FeedbackAttachment[],
-): Promise<{ folder: vscode.Uri; files: vscode.Uri[] } | null> {
-  if (attachments.length === 0) return null;
-  try {
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const dir = path.join(context.globalStorageUri.fsPath, 'feedback', stamp);
-    const files: vscode.Uri[] = [];
-    attachments.forEach((attachment, index) => {
-      const decoded = decodeImageDataUrl(attachment.dataUrl);
-      if (!decoded) return;
-      if (files.length === 0) fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, attachmentFileName(attachment, index + 1, stamp));
-      fs.writeFileSync(file, decoded.bytes);
-      files.push(vscode.Uri.file(file));
-    });
-    if (files.length === 0) return null;
-    return { folder: vscode.Uri.file(dir), files };
-  } catch (err) {
-    hostErrorLog.record('saveAttachments', err);
-    return null;
-  }
-}
-
-/**
- * The whole submit path: open the prefilled GitHub issue form (or, when
- * `draft.commentOnIssue` is set, put the Markdown report on the clipboard and
- * open that thread's comment box), save the images, and say what to do with
- * them. Nothing is filed from here — the user presses Submit on GitHub.
+ * No images are involved in either branch. The extension attaches none, so
+ * there is no clipboard write to succeed or fail, no folder to reveal and no
+ * notification whose whole job was to explain which of those happened.
  *
  * Never throws: failures are recorded on `hostErrorLog` and returned so the
  * dialog can un-stick its primary button.
@@ -551,9 +398,6 @@ export async function submitFeedback(
     const diagnostics = draft.includeDiagnostics
       ? collectDiagnostics(context, domain, draft.webviewErrors ?? [])
       : null;
-    const attachments = draft.attachments ?? [];
-    const saved = await saveAttachments(context, attachments);
-    const folder = saved?.folder ?? null;
     const commentOn = draft.commentOnIssue;
 
     if (commentOn != null) {
@@ -566,11 +410,10 @@ export async function submitFeedback(
         );
         return { ok: false, error: 'Could not open the browser.' };
       }
-      // Deliberately not awaited: a sticky notification would otherwise hold
-      // the dialog's busy state open until the user dismisses it.
-      void notifyWithReveal(
+      // Deliberately not awaited: a notification carrying an action button is
+      // sticky, and the dialog stays disabled until this function returns.
+      void vscode.window.showInformationMessage(
         `ERD Studio: your report is on the clipboard — paste it as a comment on #${commentOn}.`,
-        folder,
       );
       return { ok: true, commentedOn: commentOn };
     }
@@ -586,24 +429,6 @@ export async function submitFeedback(
       );
       return { ok: false, error: 'Could not open the browser.' };
     }
-
-    if (attachments.length === 0) {
-      // The user asked for a screenshot but capture failed — say so rather than
-      // filing the report with a silently missing image.
-      if (draft.screenshotError) {
-        void vscode.window.showWarningMessage(
-          `ERD Studio: the screenshot could not be captured. ${draft.screenshotError}`,
-        );
-      }
-      return { ok: true };
-    }
-
-    const message = attachments[0].onClipboard
-      ? 'ERD Studio: the screenshot is on your clipboard — paste it into the "Screenshot" box on GitHub.'
-      : folder
-        ? 'ERD Studio: your clipboard refused the screenshot, so it was saved to a folder — drag it into the issue.'
-        : 'ERD Studio: the screenshot could not be copied to your clipboard or saved. Attach an image on the GitHub page instead.';
-    void notifyWithReveal(message, folder);
     return { ok: true };
   } catch (err) {
     hostErrorLog.record('submitFeedback', err);
@@ -620,14 +445,11 @@ export async function copyFeedbackReport(
   context: vscode.ExtensionContext,
   draft: FeedbackDraft,
   domain?: Diagnostics['domain'],
-  attachmentNames?: string[],
 ): Promise<void> {
   const diagnostics = draft.includeDiagnostics
     ? collectDiagnostics(context, domain, draft.webviewErrors ?? [])
     : null;
-  await vscode.env.clipboard.writeText(
-    composeMarkdownReport(draft, diagnostics, { attachmentNames }),
-  );
+  await vscode.env.clipboard.writeText(composeMarkdownReport(draft, diagnostics));
   void vscode.window.showInformationMessage('ERD Studio: the report is on your clipboard.');
 }
 

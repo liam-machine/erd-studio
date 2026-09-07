@@ -71,16 +71,84 @@
 }
 
 /*
- * The kind switch in the header. It uses the same underlined-link treatment as
- * the readiness actions, so the two places it can appear (here and inside the
- * analysis verdict) read as one control rather than two.
+ * The kind switch: a permanent header fixture, not a link that appears and
+ * disappears with the analysis panel. Both destinations are always visible, so
+ * "bug" reads as the current answer rather than as a fixed default — and the
+ * feature-request template stays one click away on a host with no model at all.
  */
-.feedback__flip {
+.feedback__kindswitch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin-left: 2px;
-  color: var(--dim-fg);
 }
 
-.feedback__flip:disabled {
+.feedback__segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  background: var(--input-bg);
+}
+
+.feedback__segment {
+  padding: 2px 10px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim-fg);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.feedback__segment:hover:not(:disabled):not(.feedback__segment--on) {
+  color: var(--editor-fg);
+}
+
+.feedback__segment--on {
+  background: var(--error-bg);
+  color: var(--error-fg);
+  font-weight: 600;
+}
+
+.feedback--feature .feedback__segment--on {
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+
+.feedback__segment:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* "auto" — the analysis owns the choice. A hint while it does, a button back. */
+.feedback__kindhint {
+  font-size: 10.5px;
+  color: var(--dim-fg);
+  opacity: 0.85;
+  cursor: help;
+}
+
+.feedback__kindauto {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dim-fg);
+  font-family: inherit;
+  font-size: 10.5px;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.feedback__kindauto:hover:not(:disabled) {
+  color: var(--editor-fg);
+}
+
+.feedback__kindauto:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -271,6 +339,62 @@
   color: var(--ai-fg);
 }
 
+/*
+ * The destination picker. A native <select> on purpose: it is keyboard- and
+ * screen-reader-correct for free, it renders unavailable rows as disabled
+ * without any work, and its popup escapes the dialog's own scroll container —
+ * which a hand-rolled menu inside `.feedback__scroll` would not.
+ */
+.feedback__ai-picker {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.feedback__ai-select {
+  max-width: 260px;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.feedback__ai-select:hover,
+.feedback__ai-select:focus {
+  border-color: color-mix(in srgb, var(--ai-fg) 45%, transparent);
+  background: var(--input-bg);
+  outline: none;
+}
+
+/* The popup is drawn by the host, which does not inherit the head's colours. */
+.feedback__ai-select option {
+  background: var(--input-bg);
+  color: var(--editor-fg);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Visible to assistive technology only — the select's own label. */
+.feedback__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .feedback__ai-note {
   margin-left: auto;
   font-size: 10.5px;
@@ -350,7 +474,7 @@
   color: var(--error-fg);
 }
 
-/* Verdict chip + kind flip */
+/* Verdict chip. Read-only — the control that changes it is in the header. */
 
 .feedback__verdict {
   display: flex;
@@ -380,6 +504,35 @@
   font-size: 11px;
   font-weight: 400;
   opacity: 0.8;
+}
+
+/*
+ * The side the analysis did not pick, shown at its own share rather than left
+ * out. A single chip made a 51/49 guess look exactly like a certainty, so the
+ * one case where the user most needs to check the header switch was the one
+ * case the panel gave them no reason to.
+ */
+.feedback__verdict-other {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 4px;
+  color: var(--dim-fg);
+  font-size: 12px;
+}
+
+/* A verdict too slim to present as settled reads as a proposal, not a result. */
+.feedback__verdict-chip--unsure {
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
+.feedback__verdict-hint {
+  font-size: 10.5px;
+  color: var(--dim-fg);
+  opacity: 0.85;
 }
 
 /* Readiness meter */
@@ -724,50 +877,18 @@
 /* -----------------------------------------------------------------------
    Images
 
-   One image route (the canvas capture), so there is no thumbnail grid and no
-   drop zone here — a checkbox, the line that says where the capture went, and
-   the standing note about GitHub's own Screenshot box.
+   No control lives here — GitHub accepts no image through a prefilled issue
+   form, so the section is one sentence saying where images do go. There is no
+   checkbox, no picker, no drop zone and no thumbnail, because there is nothing
+   the dialog could do with an image that the user does not have to redo on
+   github.com anyway.
    ----------------------------------------------------------------------- */
-
-.feedback__attached {
-  padding: 6px 8px;
-  border-radius: 3px;
-  background: var(--ok-bg);
-  color: var(--ok-fg);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
 
 .feedback__note {
   margin: 0;
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--dim-fg);
-}
-
-/* The readiness meter's "Attach one" jump lands here when there is nothing to
-   capture, so the section itself takes the highlight. */
-.feedback__field--urged {
-  margin: -6px -8px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: var(--warning-bg);
-  transition: background 0.12s ease;
-}
-
-.feedback__checkbox {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--editor-fg);
-  cursor: pointer;
-}
-
-.feedback__checkbox input {
-  margin: 2px 0 0;
-  flex: none;
 }
 
 /* -----------------------------------------------------------------------
@@ -952,8 +1073,7 @@
     animation: none;
   }
 
-  .feedback__meter-fill,
-  .feedback__field--urged {
+  .feedback__meter-fill {
     transition: none;
   }
 }

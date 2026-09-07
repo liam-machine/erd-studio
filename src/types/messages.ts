@@ -9,8 +9,8 @@
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel, updatePositions, switchStage,
  *                         toggleDiscrepancy, requestFeedbackContext,
- *                         analyzeFeedback, submitFeedback, copyFeedbackReport,
- *                         openFeedbackLink
+ *                         analyzeFeedback, setFeedbackProvider, submitFeedback,
+ *                         copyFeedbackReport, openFeedbackLink
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -22,7 +22,8 @@
  * The physical stage is read-only: every webview → extension type that does not
  * write a domain file is listed in `NON_MUTATION_TYPES` in
  * `SemanticEditorProvider`. The six feedback types above all belong there —
- * filing feedback is never a domain mutation.
+ * filing feedback is never a domain mutation, and choosing which model triages
+ * it writes a user setting, not a domain file.
  */
 
 import type { DisplayDomain } from './display';
@@ -30,8 +31,8 @@ import type { DiscrepancyReport } from './discrepancy';
 import type { AnnotationColor, Rationale, Cardinality, ColumnDef, DesignModel, ModelRole, Stage } from './semantic';
 import type { GroundTruth } from './syncPlan';
 import type {
+  FeedbackAiProviderChoice,
   FeedbackAnalysis,
-  FeedbackAttachment,
   FeedbackCapabilities,
   FeedbackDiagnosticsView,
   FeedbackKind,
@@ -563,6 +564,14 @@ export interface AnalyzeFeedbackMessage {
     /** Monotonic per-panel id; echoed on `feedbackAnalysis`. */
     requestId: number;
     kind: FeedbackKind;
+    /**
+     * True when `kind` is the user's own choice — a segment they pressed, or a
+     * kind the command palette opened the dialog with — rather than the `bug`
+     * the dialog merely starts on. The host states the kind to the model only
+     * when this is true; stating the default as fact is what used to get "I
+     * want a new ability to…" classified as a bug.
+     */
+    kindChosenByUser?: boolean;
     description: string;
     context?: string;
     /**
@@ -577,9 +586,32 @@ export interface AnalyzeFeedbackMessage {
 }
 
 /**
+ * Pin which model destination does the analysis — or `auto` to restore the
+ * default precedence. The host writes `erdStudio.feedback.provider` globally
+ * and replies with a fresh `feedbackContext`, so the dialog learns the new
+ * label, the new availability and whether priming is needed again.
+ *
+ * On the physical-stage allowlist with the other feedback types: it writes a
+ * user setting, never a domain file.
+ */
+export interface SetFeedbackProviderMessage {
+  type: 'setFeedbackProvider';
+  payload: {
+    provider: FeedbackAiProviderChoice;
+    /**
+     * The same context `requestFeedbackContext` carries, because the reply is a
+     * full `feedbackContext` — rebuilding it needs the diagnostics inputs, and
+     * the host does not keep the dialog's copy of them.
+     */
+    webviewErrors?: string[];
+    domain?: FeedbackDomainSummary;
+  };
+}
+
+/**
  * Submit the report. The host opens the prefilled GitHub issue form (or the
- * existing thread, when `commentOnIssue` is set), handles the image, and
- * replies with `feedbackSubmitted`.
+ * existing thread, when `commentOnIssue` is set) and replies with
+ * `feedbackSubmitted`. No image travels with it — the dialog attaches none.
  */
 export interface SubmitFeedbackMessage {
   type: 'submitFeedback';
@@ -590,10 +622,6 @@ export interface SubmitFeedbackMessage {
     /** Steps to reproduce (bug) or rationale (feature). */
     steps?: string;
     includeDiagnostics: boolean;
-    /** The canvas capture, when the user asked for one. Never more than one entry. */
-    attachments?: FeedbackAttachment[];
-    /** Why the canvas capture failed, when the user asked for one. */
-    screenshotError?: string;
     /** Recent errors the webview observed (oldest → newest). */
     webviewErrors?: string[];
     regressionOf?: number;
@@ -616,7 +644,6 @@ export interface CopyFeedbackReportMessage {
     description: string;
     steps?: string;
     includeDiagnostics: boolean;
-    attachmentNames?: string[];
     webviewErrors?: string[];
     domain?: FeedbackDomainSummary;
   };
@@ -767,6 +794,7 @@ export type WebviewMessage =
   | ViewFileMessage
   | RequestFeedbackContextMessage
   | AnalyzeFeedbackMessage
+  | SetFeedbackProviderMessage
   | SubmitFeedbackMessage
   | CopyFeedbackReportMessage
   | OpenFeedbackLinkMessage

@@ -1,18 +1,23 @@
 /**
  * AnalysisPanel — the optional assist panel above the form.
  *
- * It renders only when a model is actually configured; with no tier the whole
- * panel is absent and the dialog is exactly the one it was before, because
- * assistance here is never load-bearing.
+ * It renders whenever *some* destination could do the analysis — not only when
+ * one currently resolves. That difference matters: pinning a provider that is
+ * unavailable on this machine has to leave the picker on screen, or the switch
+ * that caused the problem takes the way back down with it. With nothing
+ * configured at all the whole panel is absent and the dialog is exactly the one
+ * it was before, because assistance here is never load-bearing.
  *
- * Everything it shows is a suggestion. The verdict is one click from being
- * flipped, and the readiness meter is computed locally from what is in the
- * dialog right now — the model supplies only the prose for the unmet checks,
- * so attaching an image moves the bar with no round trip.
+ * Everything it shows is a suggestion. The kind lives in the dialog header (a
+ * permanent segmented control, reachable with or without a model); the
+ * readiness meter is computed locally from what is in the dialog right now, and
+ * the model supplies only the prose for the unmet checks.
  */
 
 import type {
   DuplicateCandidate,
+  FeedbackAiOption,
+  FeedbackAiProviderChoice,
   FeedbackAnalysis,
   FeedbackKind,
   ReadinessResult,
@@ -21,7 +26,7 @@ import type {
 import {
   FEEDBACK_COPY,
   READINESS_GOOD_PCT,
-  otherKind,
+  kindSplit,
   pickTakeoverDuplicate,
   relatedDuplicates,
 } from '../../../src/types/feedback';
@@ -31,13 +36,24 @@ export interface AnalysisPanelProps {
   analysis: FeedbackAnalysis | null;
   /** Locally computed — never returned by the model. */
   readiness: ReadinessResult;
+  /**
+   * The kind the dialog is currently on. The split below is always the model's
+   * own answer, so this is only used to notice that the user has overruled it
+   * and say so, rather than leaving two panels quietly disagreeing.
+   */
   kind: FeedbackKind;
-  onFlipKind: () => void;
   /** Focus (or highlight) whatever the unmet check is about. */
   onJump: (target: ReadinessTarget) => void;
   errorMessage?: string;
-  /** "Copilot", or the endpoint's hostname. */
+  /** "Copilot", the endpoint's hostname, or "<relay> → <provider>". Null when nothing resolves. */
   providerLabel: string | null;
+  /** The pinned destination, or `auto`. */
+  provider: FeedbackAiProviderChoice;
+  /** Every destination the picker offers, available or not. */
+  providerOptions: FeedbackAiOption[];
+  onProviderChange: (provider: FeedbackAiProviderChoice) => void;
+  /** False when the pinned destination cannot run here — the picker stays, the analysis does not. */
+  available: boolean;
   /** Open one of the possibly-related issues on GitHub. */
   onOpenIssue: (candidate: DuplicateCandidate) => void;
   /**
@@ -94,17 +110,20 @@ export function AnalysisPanel({
   analysis,
   readiness,
   kind,
-  onFlipKind,
   onJump,
   errorMessage,
   providerLabel,
+  provider,
+  providerOptions,
+  onProviderChange,
+  available,
   onOpenIssue,
   needsPriming,
   primerNote,
   canAnalyse,
   onAnalyse,
 }: AnalysisPanelProps) {
-  const ready = state === 'ready' && analysis !== null;
+  const ready = available && state === 'ready' && analysis !== null;
   // The primer replaces the idle prose, never a result or a request in flight:
   // a failed first run has to leave the button there, or a dismissed VS Code
   // dialog would kill the feature silently for the rest of the session.
@@ -114,9 +133,10 @@ export function AnalysisPanel({
   // button whose note talks about VS Code's dialog reads as "this feature is
   // broken" rather than "write something first". The idle prose below says
   // exactly what to do, so show that until there is something to send.
-  const showPrimer = needsPriming && canAnalyse && !ready && state !== 'thinking';
-  const related = analysis ? relatedDuplicates(analysis.duplicates) : [];
+  const showPrimer = available && needsPriming && canAnalyse && !ready && state !== 'thinking';
+  const related = ready && analysis ? relatedDuplicates(analysis.duplicates) : [];
   const takeover = analysis ? pickTakeoverDuplicate(analysis.duplicates) : null;
+  const selected = providerOptions.find((option) => option.id === provider) ?? null;
 
   return (
     <>
@@ -133,21 +153,57 @@ export function AnalysisPanel({
           >
             <path d="M8 1.9 9.6 6 13.8 7.6 9.6 9.2 8 13.3 6.4 9.2 2.2 7.6 6.4 6Z" />
           </svg>
-          <span>{providerLabel ?? 'Analysis'}</span>
+          {/*
+            A picker rather than a label. Someone with Copilot could not
+            previously reach any other destination — the resolver tried theirs
+            first and stopped — so "I have Copilot but would rather not spend it
+            triaging my own bug report" was unsayable. Unavailable rows stay in
+            the list, disabled, with their reason in the note below.
+          */}
+          <label className="feedback__ai-picker">
+            <span className="feedback__sr-only">Which model analyses this</span>
+            <select
+              className="feedback__ai-select"
+              value={provider}
+              onChange={(e) => onProviderChange(e.target.value as FeedbackAiProviderChoice)}
+            >
+              {providerOptions.map((option) => (
+                <option key={option.id} value={option.id} disabled={!option.available}>
+                  {option.id === 'auto' && providerLabel
+                    ? `Automatic — ${providerLabel}`
+                    : option.label}
+                  {option.available ? '' : ' (unavailable)'}
+                </option>
+              ))}
+            </select>
+          </label>
           <span className="feedback__ai-note">
-            {state === 'thinking' ? 'analysing' : 'reads only what you typed'}
+            {state === 'thinking' && available ? 'analysing' : 'reads only what you typed'}
           </span>
         </div>
 
         <div className="feedback__ai-body">
-          {state === 'thinking' && (
+          {/*
+            The pinned destination cannot run here. Never silently fall back to
+            another one — the point of pinning is that the text goes where the
+            user said and nowhere else — so say what is wrong and leave the
+            picker above as the fix.
+          */}
+          {!available && (
+            <div className="feedback__idle">
+              No analysis will run.{selected?.note ? ` ${selected.note}` : ''} Pick another
+              destination above, or file the report as it is — nothing here is required.
+            </div>
+          )}
+
+          {available && state === 'thinking' && (
             <div className="feedback__thinking">
               <span className="feedback__pulse" />
               <span>Reading your description and the open issues…</span>
             </div>
           )}
 
-          {state === 'error' && (
+          {available && state === 'error' && (
             <div className="feedback__error">
               {errorMessage ?? 'The analysis could not be completed.'}
             </div>
@@ -167,7 +223,7 @@ export function AnalysisPanel({
             </div>
           )}
 
-          {!showPrimer && !ready && state !== 'thinking' && state !== 'error' && (
+          {available && !showPrimer && !ready && state !== 'thinking' && state !== 'error' && (
             <div className="feedback__idle">
               Describe the problem above and the analysis will pick the type, draft a title, pull out
               the steps and check whether it has already been reported.
@@ -176,16 +232,44 @@ export function AnalysisPanel({
 
           {ready && analysis && (
             <>
+              {/*
+                Both sides, always, and always the model's own answer — the
+                confidence belongs to what it picked, not to what the user
+                subsequently chose. One chip reading "Feature request 86%" said
+                nothing about how close the other side came, so a 51/49 guess
+                and a near-certainty looked identical, and the case where the
+                user most needs the header switch was the one case the panel
+                gave them no reason to reach for it. Read-only: the control that
+                changes the kind is in the header, where it is reachable whether
+                or not this panel exists at all.
+              */}
               <div className="feedback__verdict">
-                <span className="feedback__verdict-chip">
-                  {FEEDBACK_COPY[kind].verdict}
-                  <span className="feedback__verdict-confidence">
-                    {Math.round(analysis.confidence * 100)}%
-                  </span>
-                </span>
-                <button type="button" className="feedback__check-act" onClick={onFlipKind}>
-                  Not right? Make it a {otherKind(kind)}
-                </button>
+                {(() => {
+                  const split = kindSplit(analysis.kind, analysis.confidence);
+                  return (
+                    <>
+                      <span
+                        className={`feedback__verdict-chip${
+                          split.closeCall ? ' feedback__verdict-chip--unsure' : ''
+                        }`}
+                      >
+                        {FEEDBACK_COPY[split.kind].verdict}
+                        <span className="feedback__verdict-confidence">{split.percent}%</span>
+                      </span>
+                      <span className="feedback__verdict-other">
+                        {FEEDBACK_COPY[split.other].verdict}
+                        <span className="feedback__verdict-confidence">{split.otherPercent}%</span>
+                      </span>
+                      <span className="feedback__verdict-hint">
+                        {kind !== split.kind
+                          ? `You chose ${FEEDBACK_COPY[kind].verdict.toLowerCase()} — this is the analysis's own read`
+                          : split.closeCall
+                            ? 'Close call — pick one in the header'
+                            : 'Change it in the header if it is wrong'}
+                      </span>
+                    </>
+                  );
+                })()}
               </div>
 
               <div className="feedback__meter">

@@ -314,6 +314,25 @@
           "default": true,
           "markdownDescription": "Let the Feedback dialog make **one** request to a language model to draft a title, pick bug vs feature, and check for duplicate issues. Only what you typed is sent — diagnostics, file paths and model names never are. Your own model is used where VS Code has one (VS Code asks for access itself, once); otherwise `#erdStudio.feedback.endpoint#`, or — if `#erdStudio.feedback.hostedFallback#` is on — a relay run by the extension author that forwards your description to a named third-party AI provider under the author's account. That last one always asks first and names both. Turn this off to make no request at all."
         },
+        "erdStudio.feedback.provider": {
+          "scope": "machine",
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "vscode", "endpoint", "hosted"],
+          "enumItemLabels": [
+            "Automatic",
+            "Your editor's model (Copilot)",
+            "Your own API endpoint",
+            "ERD Studio service"
+          ],
+          "markdownEnumDescriptions": [
+            "Your editor's language model first, then `#erdStudio.feedback.endpoint#`, then the ERD Studio service. The original behaviour.",
+            "Only your editor's own language model. Nothing is sent anywhere else; if this editor has none, the Feedback dialog simply shows no analysis.",
+            "Only `#erdStudio.feedback.endpoint#`, with the key you stored via **ERD Studio: Set Feedback API Key**.",
+            "Only the small relay run by the extension author, which forwards your description to a third-party AI provider under the author's account. Pick this if you have Copilot but would rather not spend it on triaging feedback. Requires `#erdStudio.feedback.hostedFallback#` to be on, and asks before the first request."
+          ],
+          "markdownDescription": "Which model triages your feedback. `auto` keeps the original precedence — your own model first. Any other value pins one destination and does **not** fall through: if the one you pick is unavailable here, the dialog says so and offers the picker rather than quietly sending your text somewhere you did not choose."
+        },
         "erdStudio.feedback.hostedFallback": {
           "scope": "machine",
           "type": "boolean",
@@ -378,8 +397,7 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "yaml": "^2.9.0",
-    "zustand": "^5.0.0",
-    "html-to-image": "^1.11.13"
+    "zustand": "^5.0.0"
   },
   "bugs": {
     "url": "https://github.com/liam-machine/erd-studio/issues"

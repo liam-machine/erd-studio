@@ -21,6 +21,7 @@ export const USER_SCOPED_SETTINGS: ReadonlySet<string> = new Set([
   'feedback.endpoint',
   'feedback.model',
   'feedback.hostedFallback',
+  'feedback.provider',
 ]);
 
 /**

@@ -7,15 +7,24 @@
  * those lands in an editable field, and with no model configured the panel is
  * absent and the dialog still files a complete report.
  *
+ * The kind is a live two-way negotiation. It starts on `bug` because that is
+ * what most reports are, the analysis moves it as the description takes shape,
+ * and the segmented control in the header is always there for the user to
+ * overrule it — after which the analysis stops moving it, until they hand it
+ * back with "auto". The control is a permanent header fixture rather than a
+ * link inside the analysis panel: on a host where no tier resolves that panel
+ * never renders, and the feature-request template has to stay reachable.
+ *
  * Two things are deliberately local rather than round-tripped: the readiness
- * meter (so attaching the screenshot moves the bar instantly) and the duplicate
+ * meter (so ticking diagnostics moves the bar instantly) and the duplicate
  * takeover state (so the redirect is reversible at any point). Diagnostics come
  * from the host as a finished view and are never rebuilt here.
  *
- * There is exactly one image route: the canvas capture. GitHub has no API for
- * attaching an image to a prefilled issue form, so any other image has to be
- * pasted or dropped onto the GitHub page by the user anyway — the dialog says
- * so once, rather than running a picker whose output it cannot deliver.
+ * There is no image route at all, and that is the feature. GitHub has no API
+ * for attaching an image to a prefilled issue form, so anything captured here
+ * could only be handed back to the user to paste on github.com themselves —
+ * the job they already have, done twice, with a clipboard that may refuse and a
+ * file on disk to explain. The dialog says where images go, once, and stops.
  *
  * Rendered as a fixed overlay rather than a React Flow `Panel` so it also works
  * on the full-screen error page, where the canvas is unmounted.
@@ -25,21 +34,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   DuplicateCandidate,
-  FeedbackAttachment,
-  FeedbackImageMime,
+  FeedbackAiProviderChoice,
   FeedbackKind,
   ReadinessTarget,
 } from '../../../src/types/feedback';
 import {
   ANALYSIS_DEBOUNCE_MS,
   FEEDBACK_COPY,
+  FEEDBACK_IMAGE_NOTE,
+  FEEDBACK_KINDS,
   FEEDBACK_PRE_ANALYSIS_TITLE,
   MIN_DESCRIPTION_CHARS,
   applyRegressionPrefix,
   duplicateModeFor,
   footerRoute,
   isVersionOlder,
-  otherKind,
   pickTakeoverDuplicate,
   readinessScore,
   stripRegressionPrefix,
@@ -47,39 +56,15 @@ import {
 import type { ExtensionMessage } from '../../../src/types/messages';
 import { useEditorStore } from '../../store/editorStore';
 import { useMessageBus, useSend } from '../../hooks/useMessageBus';
-import { canvasAttachment } from '../../lib/feedbackAttachments';
-import { captureScreenshot, copyImageToClipboard } from '../../lib/screenshot';
 import { AnalysisPanel } from './AnalysisPanel';
 import { DiagnosticsChips } from './DiagnosticsChips';
 import { DuplicateTakeover, type FixState } from './DuplicateTakeover';
 import { FeedbackFooter } from './FeedbackFooter';
 import './FeedbackDialog.css';
 
-/** Selector for everything the canvas screenshot must leave out (this dialog). */
-const EXCLUDE_FROM_SCREENSHOT = '.feedback, .feedback__backdrop';
-
-/** How long the Images section stays highlighted after an "Attach one" jump. */
-const URGE_MS = 1600;
-
 /** Elements a Tab press may land on while the dialog owns focus. */
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
-
-/**
- * Rebuild a blob from an attachment's data URL so it can go on the clipboard.
- * Returns null for a payload `atob` refuses, which is treated as "not copied".
- */
-function dataUrlToBlob(dataUrl: string, mime: FeedbackImageMime): Blob | null {
-  const payload = dataUrl.slice(dataUrl.indexOf(',') + 1);
-  try {
-    const binary = atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: mime });
-  } catch {
-    return null;
-  }
-}
 
 /** Bug / lightbulb glyph beside the dialog title. */
 function KindMark({ kind }: { kind: FeedbackKind }) {
@@ -102,6 +87,89 @@ function KindMark({ kind }: { kind: FeedbackKind }) {
   );
 }
 
+/** Short label for each kind's segment. Kept out of `FEEDBACK_COPY` — that file is the frozen issue-form copy. */
+const KIND_SEGMENT_LABEL: Readonly<Record<FeedbackKind, string>> = {
+  bug: 'Bug',
+  feature: 'Feature',
+};
+
+interface KindSwitchProps {
+  kind: FeedbackKind;
+  /** True once the user has picked a segment themselves. */
+  locked: boolean;
+  /** True when an analysis has actually chosen the current kind. */
+  chosenByAnalysis: boolean;
+  /** Whether handing control back to the analysis would do anything. */
+  canAuto: boolean;
+  disabled: boolean;
+  onPick: (kind: FeedbackKind) => void;
+  onAuto: () => void;
+}
+
+/**
+ * The bug/feature segmented control.
+ *
+ * Both destinations are visible at all times, which is the whole point: the old
+ * "Not right? Make it a feature" link was one control that moved between the
+ * header and the analysis panel depending on state, and read as though `bug`
+ * were a permanent default rather than a first guess.
+ *
+ * The trailing chip is the negotiation made legible — "auto" while the analysis
+ * owns the choice, and a button back to it once the user has taken over.
+ */
+function KindSwitch({
+  kind,
+  locked,
+  chosenByAnalysis,
+  canAuto,
+  disabled,
+  onPick,
+  onAuto,
+}: KindSwitchProps) {
+  return (
+    <div className="feedback__kindswitch">
+      <div className="feedback__segmented" role="group" aria-label="What are you filing?">
+        {FEEDBACK_KINDS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            className={`feedback__segment${option === kind ? ' feedback__segment--on' : ''}`}
+            onClick={() => onPick(option)}
+            disabled={disabled}
+            aria-pressed={option === kind}
+          >
+            {KIND_SEGMENT_LABEL[option]}
+          </button>
+        ))}
+      </div>
+      {locked && canAuto ? (
+        <button
+          type="button"
+          className="feedback__kindauto"
+          onClick={onAuto}
+          disabled={disabled}
+          title="Let the analysis choose again as you type"
+        >
+          your choice · auto
+        </button>
+      ) : (
+        canAuto && (
+          <span
+            className="feedback__kindhint"
+            title={
+              chosenByAnalysis
+                ? 'Chosen by the analysis — pick one yourself to overrule it'
+                : 'The analysis will choose as you type — pick one yourself to overrule it'
+            }
+          >
+            {chosenByAnalysis ? 'chosen for you' : 'auto'}
+          </span>
+        )
+      )}
+    </div>
+  );
+}
+
 export function FeedbackDialog() {
   const send = useSend();
 
@@ -118,15 +186,15 @@ export function FeedbackDialog() {
   const setAnalysisPending = useEditorStore((s) => s.setFeedbackAnalysisPending);
 
   const [kind, setKind] = useState<FeedbackKind>('bug');
+  // True once the user has picked a kind themselves. While false the analysis
+  // owns the choice and re-applies it on every reply; the "auto" button clears
+  // it, and the effect below then re-applies the current analysis immediately.
+  const [kindLocked, setKindLocked] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [context, setContext] = useState('');
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
-  const [includeCanvasScreenshot, setIncludeCanvasScreenshot] = useState(false);
-  const [attachments, setAttachments] = useState<FeedbackAttachment[]>([]);
-  const [screenshotError, setScreenshotError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [titleFromAnalysis, setTitleFromAnalysis] = useState(false);
   const [userTitle, setUserTitle] = useState('');
@@ -136,18 +204,20 @@ export function FeedbackDialog() {
   const [choiceFor, setChoiceFor] = useState<number | null>(null);
   const [filingAnywayRaw, setFilingAnyway] = useState(false);
   const [regressionOfRaw, setRegressionOf] = useState<number | undefined>(undefined);
-  const [imagesUrged, setImagesUrged] = useState(false);
   // Set once a request has actually come back with an analysis, so the primer
   // button gives way to the debounce for the rest of this dialog. The host
   // persists the same fact in globalState for every future dialog; this is only
   // what keeps the button from reappearing between here and the next open.
   const [primedHere, setPrimedHere] = useState(false);
+  // Bumped whenever the analysis destination changes. It is in the debounce's
+  // dependency list purely so a switch re-runs the analysis on text that has
+  // not changed — nothing else about a provider swap need move.
+  const [providerEpoch, setProviderEpoch] = useState(0);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const contextRef = useRef<HTMLTextAreaElement>(null);
   const requestIdRef = useRef(0);
-  const kindOverridden = useRef(false);
   // The description the dialog was *opened* with, if any. Text nobody typed is
   // not text anybody chose to send: the canvas error screen prefills the raw
   // host exception, which carries absolute domain paths and model names, so the
@@ -159,13 +229,11 @@ export function FeedbackDialog() {
   const lastRequestedRef = useRef<{ text: string; id: number } | null>(null);
 
   // Mirrors of state the async handlers and the debounce read without being
-  // re-created (and therefore re-scheduled) on every keystroke. `attachments`
-  // is the exception: it is written only through `applyAttachments`, because a
-  // render-phase assignment could rewind a change an in-flight file read has
-  // already made.
-  const attachmentsRef = useRef(attachments);
+  // re-created (and therefore re-scheduled) on every keystroke.
   const kindRef = useRef(kind);
   kindRef.current = kind;
+  const kindLockedRef = useRef(kindLocked);
+  kindLockedRef.current = kindLocked;
   const contextRefValue = useRef(context);
   contextRefValue.current = context;
   const userTitleRef = useRef(userTitle);
@@ -178,12 +246,6 @@ export function FeedbackDialog() {
   sendRef.current = send;
 
   const close = useCallback(() => setOpen(false), [setOpen]);
-
-  /** The single writer for the attachment list, keeping state and ref in step. */
-  const applyAttachments = useCallback((next: FeedbackAttachment[]) => {
-    attachmentsRef.current = next;
-    setAttachments(next);
-  }, []);
 
   const domainSummary = useMemo(
     () =>
@@ -216,6 +278,9 @@ export function FeedbackDialog() {
     if (!open) return;
     const prefill = prefillRef.current;
     setKind(prefill?.kind ?? 'bug');
+    // A caller that named a kind has already decided; the analysis may not
+    // quietly move it underneath them.
+    setKindLocked(Boolean(prefill?.kind));
     setTitle(prefill?.title ?? '');
     setUserTitle(prefill?.title ?? '');
     // The mirror is written during render, so it would still hold the previous
@@ -230,22 +295,16 @@ export function FeedbackDialog() {
     lastRequestedRef.current = null;
     setContext('');
     setIncludeDiagnostics(true);
-    setIncludeCanvasScreenshot(false);
-    applyAttachments([]);
-    setScreenshotError(undefined);
     setBusy(false);
-    setStatus(null);
     setSubmitError(null);
     setTitleFromAnalysis(false);
     setChoiceFor(null);
     setFilingAnyway(false);
     setRegressionOf(undefined);
-    setImagesUrged(false);
     // Cleared with everything else: the host's `feedbackContext` reply, asked
     // for a few lines below, is the authority on whether the primer is needed,
     // and a stale `true` here would hide a button that is still required.
     setPrimedHere(false);
-    kindOverridden.current = Boolean(prefill?.kind);
 
     sendRef.current({
       type: 'requestFeedbackContext',
@@ -257,7 +316,7 @@ export function FeedbackDialog() {
 
     const id = window.setTimeout(() => descriptionRef.current?.focus(), 0);
     return () => window.clearTimeout(id);
-  }, [open, applyAttachments]);
+  }, [open]);
 
   // Escape closes. Handled on the capture phase from `window` rather than
   // through the canvas key handler, so it also works on the error screen.
@@ -357,6 +416,11 @@ export function FeedbackDialog() {
         payload: {
           requestId: requestIdRef.current,
           kind: kindRef.current,
+          // The difference between a decision and a default. The host states
+          // the kind to the model only when the user actually picked it —
+          // otherwise the `bug` this dialog opens on would be presented as
+          // something they said, and the model would agree with it.
+          kindChosenByUser: kindLockedRef.current,
           description: trimmed,
           context: contextRefValue.current.trim() || undefined,
           trigger,
@@ -407,70 +471,63 @@ export function FeedbackDialog() {
     capabilities?.aiAvailable,
     needsPriming,
     descriptionIsUntouchedPrefill,
+    providerEpoch,
     runAnalysis,
     setAnalysis,
   ]);
 
   // Land a reply in the fields, without ever overwriting the user: a title they
-  // typed and a context they filled in both win.
+  // typed, a context they filled in and a kind they picked all win.
+  //
+  // `kindLocked` is a dependency rather than a ref precisely so that clearing it
+  // re-runs this effect and re-applies the analysis's kind — which is what the
+  // "auto" button means. Nothing else here has to know about that button.
   useEffect(() => {
     if (!analysis) return;
-    if (!kindOverridden.current) setKind(analysis.kind);
+    if (!kindLocked) setKind(analysis.kind);
     if (!userTitleRef.current.trim() && analysis.title.trim()) {
       setTitle(analysis.title);
       setTitleFromAnalysis(true);
     }
     if (analysis.context.trim() && !contextRefValue.current.trim()) setContext(analysis.context);
-  }, [analysis]);
+  }, [analysis, kindLocked]);
 
   // -------------------------------------------------------------------------
-  // The canvas screenshot
+  // Which model does the analysis
   // -------------------------------------------------------------------------
+
+  const aiOptions = useMemo(() => capabilities?.aiOptions ?? [], [capabilities]);
 
   /**
-   * Tick / untick the canvas screenshot. Ticking captures immediately so the
-   * user finds out here whether it worked (and whether the clipboard took it),
-   * rather than at submit time when the browser is already opening.
+   * Switch the analysis destination.
    *
-   * Every failure path unticks the box: a checkbox left ticked with nothing
-   * behind it promises an image the report does not carry.
+   * Everything the previous model said is dropped first. A verdict, a title and
+   * a duplicate list are that model's answer; carrying them across a switch
+   * would leave the panel attributing one model's output to another. The host
+   * writes the setting and replies with a fresh `feedbackContext`, and the
+   * epoch bump makes the debounce re-run on the description already typed.
    */
-  const handleCanvasToggle = useCallback(
-    async (checked: boolean) => {
-      setIncludeCanvasScreenshot(checked);
-      setScreenshotError(undefined);
-      if (!checked) {
-        applyAttachments([]);
-        return;
-      }
-      if (attachmentsRef.current.length > 0) return;
-
-      const root = document.getElementById('root');
-      if (!root) {
-        setIncludeCanvasScreenshot(false);
-        return;
-      }
-      setStatus('Capturing the canvas…');
-      const shot = await captureScreenshot(root, EXCLUDE_FROM_SCREENSHOT);
-      setStatus(null);
-      if (!shot.dataUrl) {
-        const reason = shot.error ?? 'capture failed';
-        setScreenshotError(reason);
-        setIncludeCanvasScreenshot(false);
-        useEditorStore.getState().recordError('screenshot', reason);
-        return;
-      }
-      const attachment = canvasAttachment(shot.dataUrl);
-      if (!attachment) {
-        setScreenshotError('The screenshot could not be attached — it may be over the 10 MB limit.');
-        setIncludeCanvasScreenshot(false);
-        return;
-      }
-      // `captureScreenshot` already tried the clipboard; record what happened so
-      // the dialog can say which of the two hand-offs the user is getting.
-      applyAttachments([{ ...attachment, onClipboard: shot.onClipboard }]);
+  const handleProviderChange = useCallback(
+    (provider: FeedbackAiProviderChoice) => {
+      if (provider === capabilities?.aiProvider) return;
+      // Any reply still in flight belongs to the old destination.
+      requestIdRef.current += 1;
+      lastRequestedRef.current = null;
+      setAnalysis(null);
+      // Priming is a fact about a tier, not about the dialog: the new one may
+      // need its own first click, and the host's reply is what says so.
+      setPrimedHere(false);
+      setProviderEpoch((epoch) => epoch + 1);
+      send({
+        type: 'setFeedbackProvider',
+        payload: {
+          provider,
+          webviewErrors: useEditorStore.getState().recentErrors,
+          domain: domainSummary,
+        },
+      });
     },
-    [applyAttachments],
+    [send, capabilities?.aiProvider, domainSummary, setAnalysis],
   );
 
   // -------------------------------------------------------------------------
@@ -569,29 +626,11 @@ export function FeedbackDialog() {
   // Submit
   // -------------------------------------------------------------------------
 
-  /**
-   * Re-copy the screenshot to the clipboard on the way out and stamp the result
-   * on it. Re-copied because the capture may have been minutes ago and the user
-   * has had a whole dialog to put something else on the clipboard since; the
-   * flag is recorded rather than assumed because the host branches both the
-   * GitHub "Screenshot" body text and its notification on it, and a browser is
-   * free to refuse the write.
-   */
-  const withClipboardFlag = useCallback(async (): Promise<FeedbackAttachment[]> => {
-    const list = attachmentsRef.current;
-    if (list.length === 0) return [];
-    const [image] = list;
-    const blob = dataUrlToBlob(image.dataUrl, image.mime);
-    const onClipboard = blob ? await copyImageToClipboard(blob, image.mime) : false;
-    return [{ ...image, onClipboard }];
-  }, []);
-
   const submit = useCallback(
-    async (options?: { commentOnIssue?: number }) => {
+    (options?: { commentOnIssue?: number }) => {
       if (busy) return;
       setBusy(true);
       setSubmitError(null);
-      const outgoing = await withClipboardFlag();
       send({
         type: 'submitFeedback',
         payload: {
@@ -600,8 +639,6 @@ export function FeedbackDialog() {
           description: description.trim(),
           steps: context.trim() || undefined,
           includeDiagnostics,
-          attachments: outgoing.length > 0 ? outgoing : undefined,
-          screenshotError,
           webviewErrors: useEditorStore.getState().recentErrors,
           regressionOf,
           commentOnIssue: options?.commentOnIssue,
@@ -611,14 +648,12 @@ export function FeedbackDialog() {
     },
     [
       busy,
-      withClipboardFlag,
       send,
       kind,
       title,
       description,
       context,
       includeDiagnostics,
-      screenshotError,
       regressionOf,
       domainSummary,
     ],
@@ -628,7 +663,7 @@ export function FeedbackDialog() {
   const handleTakeoverPrimary = useCallback(() => {
     if (!takeover || !takeoverMode) return;
     if (takeoverMode === 'open') {
-      void submit({ commentOnIssue: takeover.number });
+      submit({ commentOnIssue: takeover.number });
       return;
     }
     if (takeoverMode === 'declined') {
@@ -646,7 +681,7 @@ export function FeedbackDialog() {
   const handleTakeoverGhost = useCallback(() => {
     if (!takeover || !takeoverMode) return;
     if (takeoverMode === 'declined') {
-      void submit({ commentOnIssue: takeover.number });
+      submit({ commentOnIssue: takeover.number });
       return;
     }
     openIssue(takeover);
@@ -661,19 +696,15 @@ export function FeedbackDialog() {
         description: description.trim(),
         steps: context.trim() || undefined,
         includeDiagnostics,
-        attachmentNames: attachments.map((a) => a.name),
         webviewErrors: useEditorStore.getState().recentErrors,
         domain: domainSummary,
       },
     });
-  }, [send, kind, title, description, context, includeDiagnostics, attachments, domainSummary]);
+  }, [send, kind, title, description, context, includeDiagnostics, domainSummary]);
 
   // -------------------------------------------------------------------------
   // Readiness & routing
   // -------------------------------------------------------------------------
-
-  /** The canvas capture is bug-only, and only where a canvas sits behind the dialog. */
-  const canCaptureCanvas = kind === 'bug' && capabilities?.canCaptureCanvas === true;
 
   const readiness = useMemo(
     () =>
@@ -681,14 +712,10 @@ export function FeedbackDialog() {
         kind,
         descriptionLength: description.trim().length,
         contextLength: context.trim().length,
-        attachmentCount: attachments.length,
         includeDiagnostics,
-        // The capture is the dialog's only image route, so where it is
-        // unavailable the meter must not ask for an image it cannot take.
-        canAttachImage: canCaptureCanvas,
         reasons: analysis?.reasons,
       }),
-    [kind, description, context, attachments.length, includeDiagnostics, canCaptureCanvas, analysis],
+    [kind, description, context, includeDiagnostics, analysis],
   );
 
   const route = useMemo(
@@ -699,67 +726,48 @@ export function FeedbackDialog() {
             ? { number: takeover.number, mode: takeoverMode, fixedIn: takeover.fixedIn }
             : null,
         filingAnyway,
-        attachmentCount: attachments.length,
         version: runningVersion,
         outdated,
         versionKnown: fixState !== 'unknown',
       }),
-    [takeover, takeoverMode, filingAnyway, attachments.length, runningVersion, outdated, fixState],
+    [takeover, takeoverMode, filingAnyway, runningVersion, outdated, fixState],
   );
 
-  const handleJump = useCallback(
-    (target: ReadinessTarget) => {
-      if (target === 'description') {
-        descriptionRef.current?.focus();
-        return;
-      }
-      if (target === 'context') {
-        contextRef.current?.focus();
-        return;
-      }
-      if (target === 'diagnostics') {
-        setIncludeDiagnostics(true);
-        return;
-      }
-      // "Attach one" has exactly one thing to attach, so attach it rather than
-      // pointing at a control. The check is only offered where that capture
-      // exists; when it is already asked for and failed, the highlight falls
-      // back to the note that says where images do go.
-      setImagesUrged(true);
-      window.setTimeout(() => setImagesUrged(false), URGE_MS);
-      if (canCaptureCanvas && !includeCanvasScreenshot) void handleCanvasToggle(true);
-    },
-    [canCaptureCanvas, includeCanvasScreenshot, handleCanvasToggle],
-  );
+  const handleJump = useCallback((target: ReadinessTarget) => {
+    if (target === 'description') {
+      descriptionRef.current?.focus();
+      return;
+    }
+    if (target === 'context') {
+      contextRef.current?.focus();
+      return;
+    }
+    setIncludeDiagnostics(true);
+  }, []);
 
-  /**
-   * Change what is being filed. Available with or without an analysis — the
-   * bug/feature choice is core, and hanging it off the optional AI panel would
-   * make a feature request unreachable in the shipped default configuration.
-   *
-   * A canvas screenshot is bug-only, so the flip to `feature` takes it with it:
-   * its checkbox disappears, and an attachment nobody can see or untick must
-   * not ride along on the report.
-   */
-  const handleFlipKind = useCallback(() => {
-    kindOverridden.current = true;
-    const next = otherKind(kindRef.current);
-    if (next === 'feature') void handleCanvasToggle(false);
+  /** Take the kind over from the analysis. */
+  const handlePickKind = useCallback((next: FeedbackKind) => {
+    setKindLocked(true);
     setKind(next);
-  }, [handleCanvasToggle]);
+  }, []);
+
+  /** Hand it back. The analysis effect re-applies the current verdict. */
+  const handleAutoKind = useCallback(() => setKindLocked(false), []);
 
   if (!open) return null;
 
   const copy = FEEDBACK_COPY[kind];
   const analysed = analysisState === 'ready' && analysis !== null;
-  const showAi = capabilities?.aiAvailable === true;
-  const canvasShot = attachments[0] ?? null;
+  // The panel renders whenever any destination could work, not only when one
+  // currently resolves: pinning a provider that is unavailable here has to
+  // leave the picker on screen, or the way back disappears with it.
+  const showAi = capabilities?.aiAvailable === true || aiOptions.some((option) => option.available);
   const restlinkLabel = filingAnyway
     ? 'Hide the new-issue form'
     : fixState === 'current'
       ? 'Report it as a regression'
       : 'File it as a new issue anyway';
-  const primaryAction = collapsed ? handleTakeoverPrimary : () => void submit();
+  const primaryAction = collapsed ? handleTakeoverPrimary : () => submit();
 
   return (
     <>
@@ -778,21 +786,19 @@ export function FeedbackDialog() {
             {analysed ? copy.head : FEEDBACK_PRE_ANALYSIS_TITLE}
           </h3>
           {/*
-            The kind switch lives here whenever the analysis panel is not
-            showing its own copy of it — with `feedback.aiAssist` off (the
-            shipped default) that panel never renders, and this is the only way
-            to reach the feature-request template from a canvas.
+            A permanent header fixture. On a host where no tier resolves the
+            analysis panel never renders, and this is then the only route to the
+            feature-request template — so it must not move inside that panel.
           */}
-          {!(showAi && analysed) && (
-            <button
-              type="button"
-              className="feedback__check-act feedback__flip"
-              onClick={handleFlipKind}
-              disabled={busy}
-            >
-              Not right? Make it a {otherKind(kind)}
-            </button>
-          )}
+          <KindSwitch
+            kind={kind}
+            locked={kindLocked}
+            chosenByAnalysis={analysed && !kindLocked}
+            canAuto={showAi}
+            disabled={busy}
+            onPick={handlePickKind}
+            onAuto={handleAutoKind}
+          />
           <button
             type="button"
             className="feedback__close"
@@ -840,10 +846,13 @@ export function FeedbackDialog() {
               analysis={analysis}
               readiness={readiness}
               kind={kind}
-              onFlipKind={handleFlipKind}
               onJump={handleJump}
               errorMessage={analysisError ?? undefined}
               providerLabel={capabilities?.aiProviderLabel ?? null}
+              provider={capabilities?.aiProvider ?? 'auto'}
+              providerOptions={aiOptions}
+              onProviderChange={handleProviderChange}
+              available={capabilities?.aiAvailable === true}
               onOpenIssue={openIssue}
               needsPriming={needsPriming || descriptionIsUntouchedPrefill}
               primerNote={
@@ -918,48 +927,14 @@ export function FeedbackDialog() {
               />
             </div>
 
-            <div className={`feedback__field${imagesUrged ? ' feedback__field--urged' : ''}`}>
+            {/*
+              Not a control — a fact. GitHub accepts no image through a
+              prefilled issue form, so there is nothing here to tick, pick or
+              capture; saying where images do go is the entire section.
+            */}
+            <div className="feedback__field">
               <span className="feedback__group-label">Images</span>
-              {canCaptureCanvas && (
-                <label className="feedback__checkbox">
-                  <input
-                    type="checkbox"
-                    checked={includeCanvasScreenshot}
-                    onChange={(e) => void handleCanvasToggle(e.target.checked)}
-                    disabled={busy}
-                  />
-                  <span>
-                    Attach a screenshot of the canvas{' '}
-                    {domain && (
-                      <span className="feedback__hint">
-                        ({domain.layer}/{domain.domain}, {domain.stage})
-                      </span>
-                    )}
-                  </span>
-                </label>
-              )}
-              {canvasShot && (
-                <div className="feedback__attached" role="status">
-                  {canvasShot.onClipboard
-                    ? 'Copied to your clipboard — paste it into the Screenshot box on GitHub.'
-                    : 'Attached. Your clipboard refused it, so it is saved to a file the notification can reveal.'}
-                </div>
-              )}
-              {/*
-                Standing, and deliberately unconditional: GitHub takes no image
-                through a prefilled form, so every image but this one is the
-                user's own paste or drop on that page. Saying it once here beats
-                a picker that could only hand them the same job back.
-              */}
-              <p className="feedback__note">
-                Any other images are added on the GitHub page: click the Screenshot box there and
-                paste or drag them in.
-              </p>
-              {screenshotError && (
-                <div className="feedback__status" role="status">
-                  {screenshotError}
-                </div>
-              )}
+              <p className="feedback__note">{FEEDBACK_IMAGE_NOTE}</p>
             </div>
 
             <DiagnosticsChips
@@ -969,11 +944,6 @@ export function FeedbackDialog() {
             />
           </div>
 
-          {status && (
-            <div className="feedback__status" role="status">
-              {status}
-            </div>
-          )}
           {submitError && (
             <div className="feedback__status feedback__status--error" role="alert">
               {submitError}

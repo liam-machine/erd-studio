@@ -3,8 +3,9 @@
  *
  * These helpers are the only logic the webview and the extension host share, so
  * they are unit-tested here rather than through either end. The readiness score
- * in particular is computed locally on purpose (attaching an image must move
- * the bar with no round trip), which makes its bands worth pinning down.
+ * in particular is computed locally on purpose (ticking the diagnostics box
+ * must move the bar with no round trip), which makes its bands worth pinning
+ * down.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -15,16 +16,18 @@ import {
   DESCRIPTION_THIN_CHARS,
   DUPLICATE_RELATED_THRESHOLD,
   DUPLICATE_TAKEOVER_THRESHOLD,
+  FEEDBACK_AI_PROVIDER_CHOICES,
   FEEDBACK_COPY,
-  MAX_ATTACHMENTS,
-  MAX_ATTACHMENT_BYTES,
+  KIND_CONFIDENCE_CLOSE,
   READINESS_MAX,
   READINESS_WEIGHTS,
   applyRegressionPrefix,
   compareVersions,
   duplicateModeFor,
   footerRoute,
+  isFeedbackAiProviderChoice,
   isFeedbackKind,
+  kindSplit,
   isVersionOlder,
   otherKind,
   pickTakeoverDuplicate,
@@ -52,7 +55,6 @@ function readiness(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
     kind: 'bug',
     descriptionLength: 0,
     contextLength: 0,
-    attachmentCount: 0,
     includeDiagnostics: false,
     ...overrides,
   };
@@ -203,7 +205,7 @@ describe('stripRegressionPrefix', () => {
 });
 
 describe('footerRoute', () => {
-  const base = { filingAnyway: false, attachmentCount: 0, version: '0.6.41', outdated: false };
+  const base = { filingAnyway: false, version: '0.6.41', outdated: false };
 
   it('hands the footer to an open duplicate', () => {
     const route = footerRoute({ ...base, duplicate: { number: 42, mode: 'open' } });
@@ -266,14 +268,7 @@ describe('footerRoute', () => {
     expect(route.lead).toBe('Opens the prefilled form.');
   });
 
-  it('explains the clipboard hand-off when the screenshot is attached', () => {
-    const one = footerRoute({ ...base, duplicate: null, attachmentCount: 1 });
-    expect(one.primaryLabel).toBe('Open GitHub issue');
-    expect(one.lead).toBe('Opens GitHub.');
-    expect(one.rest).toBe(' Your image goes on the clipboard — paste it into the Screenshot box.');
-  });
-
-  it('promises nothing is sent from VS Code when there are no images', () => {
+  it('promises nothing is sent from VS Code — there is only ever the one route', () => {
     const route = footerRoute({ ...base, duplicate: null });
     expect(route.rest).toBe(
       ' You review it and press Submit on GitHub — nothing is sent from VS Code.',
@@ -285,10 +280,7 @@ describe('readinessScore', () => {
   it('sums its weights to 100, so the score is a percentage of real points', () => {
     expect(READINESS_MAX).toBe(100);
     expect(
-      READINESS_WEIGHTS.description +
-        READINESS_WEIGHTS.context +
-        READINESS_WEIGHTS.attachment +
-        READINESS_WEIGHTS.diagnostics,
+      READINESS_WEIGHTS.description + READINESS_WEIGHTS.context + READINESS_WEIGHTS.diagnostics,
     ).toBe(100);
   });
 
@@ -299,7 +291,6 @@ describe('readinessScore', () => {
         readiness({
           descriptionLength: DESCRIPTION_CLEAR_CHARS,
           contextLength: CONTEXT_MIN_CHARS + 1,
-          attachmentCount: 1,
           includeDiagnostics: true,
         }),
       ).score,
@@ -307,8 +298,8 @@ describe('readinessScore', () => {
   });
 
   it('has three description bands at exactly CLEAR and THIN', () => {
-    expect(readinessScore(readiness({ descriptionLength: DESCRIPTION_CLEAR_CHARS })).score).toBe(40);
-    expect(readinessScore(readiness({ descriptionLength: DESCRIPTION_THIN_CHARS })).score).toBe(22);
+    expect(readinessScore(readiness({ descriptionLength: DESCRIPTION_CLEAR_CHARS })).score).toBe(45);
+    expect(readinessScore(readiness({ descriptionLength: DESCRIPTION_THIN_CHARS })).score).toBe(25);
     expect(readinessScore(readiness({ descriptionLength: DESCRIPTION_THIN_CHARS - 1 })).score).toBe(0);
   });
 
@@ -320,17 +311,21 @@ describe('readinessScore', () => {
 
   it('requires context strictly longer than CONTEXT_MIN_CHARS', () => {
     expect(readinessScore(readiness({ contextLength: CONTEXT_MIN_CHARS })).score).toBe(0);
-    expect(readinessScore(readiness({ contextLength: CONTEXT_MIN_CHARS + 1 })).score).toBe(30);
+    expect(readinessScore(readiness({ contextLength: CONTEXT_MIN_CHARS + 1 })).score).toBe(35);
   });
 
-  it('scores an image at 20 and diagnostics at 10', () => {
-    expect(readinessScore(readiness({ attachmentCount: 1 })).score).toBe(20);
-    expect(readinessScore(readiness({ includeDiagnostics: true })).score).toBe(10);
+  it('scores the diagnostics at 20', () => {
+    expect(readinessScore(readiness({ includeDiagnostics: true })).score).toBe(20);
   });
 
-  it('names the one image it can be, rather than counting', () => {
-    expect(label(readiness({ attachmentCount: 1 }), 2)).toBe('Screenshot attached');
-    expect(label(readiness(), 2)).toBe('No image');
+  it('asks for no image at all — there is no route the dialog could offer', () => {
+    // Every check applies to every report now, so the meter has a fixed
+    // denominator and nothing that could sit there permanently unmeetable.
+    for (const kind of ['bug', 'feature'] as const) {
+      const checks = readinessScore(readiness({ kind })).checks;
+      expect(checks).toHaveLength(3);
+      expect(checks.some((c) => /image|screenshot/i.test(c.label))).toBe(false);
+    }
   });
 
   it('flips the context labels with the kind', () => {
@@ -354,62 +349,93 @@ describe('readinessScore', () => {
 
   it('offers a jump target on every unmet check and none on a met one', () => {
     const empty = readinessScore(readiness());
-    expect(empty.checks.map((c) => c.target)).toEqual([
-      'description',
-      'context',
-      'attachments',
-      'diagnostics',
-    ]);
+    expect(empty.checks.map((c) => c.target)).toEqual(['description', 'context', 'diagnostics']);
     expect(empty.checks.every((c) => typeof c.act === 'string')).toBe(true);
 
     const met = readinessScore(readiness({ includeDiagnostics: true }));
-    expect(met.checks[3]).toEqual({ ok: true, label: 'Versions and recent errors attached' });
+    expect(met.checks[2]).toEqual({ ok: true, label: 'Versions and recent errors attached' });
   });
 
-  it('drops the image check where no image can be attached, rather than capping the score', () => {
-    // The canvas capture is the only image route and it is bug-only, so a
-    // feature request is never asked for one — and a complete one reaches 100.
-    const complete = readinessScore(
-      readiness({
-        kind: 'feature',
-        descriptionLength: DESCRIPTION_CLEAR_CHARS,
-        contextLength: CONTEXT_MIN_CHARS + 1,
-        includeDiagnostics: true,
-      }),
-    );
-    expect(complete.score).toBe(100);
-    expect(complete.checks.map((c) => c.label)).toEqual([
-      'Clear description',
-      'Rationale given',
-      'Versions and recent errors attached',
-    ]);
-    expect(complete.checks.some((c) => c.target === 'attachments')).toBe(false);
-
-    // The remaining weights are rescaled against the checks that do apply.
-    expect(readinessScore(readiness({ kind: 'feature', includeDiagnostics: true })).score).toBe(13);
-
-    // A bug with no canvas behind the dialog is in the same position.
-    expect(
-      readinessScore(readiness({ canAttachImage: false })).checks.some(
-        (c) => c.target === 'attachments',
-      ),
-    ).toBe(false);
-  });
-
-  it('keeps the image check when one is already attached, whatever the kind', () => {
-    // A canvas shot that rode a flip to `feature` must still be acknowledged
-    // rather than scored as if it were not there.
-    const withShot = readinessScore(
-      readiness({ kind: 'feature', attachmentCount: 1, canAttachImage: false }),
-    );
-    expect(withShot.checks[2]).toEqual({ ok: true, label: 'Screenshot attached' });
-    expect(withShot.score).toBe(20);
+  it('reaches 100 on a complete report of either kind', () => {
+    // The denominator no longer depends on the kind, so a feature request is
+    // not capped by a check it could never meet.
+    for (const kind of ['bug', 'feature'] as const) {
+      expect(
+        readinessScore(
+          readiness({
+            kind,
+            descriptionLength: DESCRIPTION_CLEAR_CHARS,
+            contextLength: CONTEXT_MIN_CHARS + 1,
+            includeDiagnostics: true,
+          }),
+        ).score,
+      ).toBe(100);
+    }
   });
 });
 
-describe('attachment limits', () => {
-  it('allows exactly one image — the canvas capture — of at most 10 MB', () => {
-    expect(MAX_ATTACHMENTS).toBe(1);
-    expect(MAX_ATTACHMENT_BYTES).toBe(10 * 1024 * 1024);
+describe('kindSplit', () => {
+  /**
+   * The choice is binary, so one confidence describes both sides. The model is
+   * deliberately not asked for two numbers: two numbers can disagree about what
+   * they sum to, and reconciling that would mean inventing an answer.
+   */
+  it('gives the remainder to the other kind', () => {
+    expect(kindSplit('feature', 0.86)).toEqual({
+      kind: 'feature',
+      percent: 86,
+      other: 'bug',
+      otherPercent: 14,
+      closeCall: false,
+    });
+  });
+
+  it('always sums to 100, at every rounding', () => {
+    for (const c of [0.5, 0.501, 0.555, 0.666, 0.775, 0.999, 1]) {
+      const split = kindSplit('bug', c);
+      expect(split.percent + split.otherPercent).toBe(100);
+    }
+  });
+
+  it('calls it close below the threshold and settled at or above it', () => {
+    expect(kindSplit('bug', KIND_CONFIDENCE_CLOSE - 0.01).closeCall).toBe(true);
+    expect(kindSplit('bug', KIND_CONFIDENCE_CLOSE).closeCall).toBe(false);
+    // A 51/49 guess and a near-certainty used to look identical in the panel.
+    expect(kindSplit('bug', 0.51).closeCall).toBe(true);
+    expect(kindSplit('bug', 0.95).closeCall).toBe(false);
+  });
+
+  it('never shows the picked kind losing its own split', () => {
+    // A model that returns kind:"bug" with confidence 0.3 has contradicted
+    // itself. "Bug 30% / Feature 70%" under a verdict chip reading *Bug* is a
+    // worse answer than admitting it is a coin toss.
+    const split = kindSplit('bug', 0.3);
+    expect(split.percent).toBe(50);
+    expect(split.otherPercent).toBe(50);
+    expect(split.closeCall).toBe(true);
+  });
+
+  it('treats a missing or nonsense confidence as an even split', () => {
+    for (const value of [NaN, Infinity, -1, undefined as unknown as number]) {
+      const split = kindSplit('feature', value);
+      expect(split.percent).toBe(50);
+      expect(split.closeCall).toBe(true);
+    }
+    expect(kindSplit('feature', 2).percent).toBe(100);
+  });
+});
+
+describe('analysis provider choices', () => {
+  it('recognises exactly the four destinations', () => {
+    expect([...FEEDBACK_AI_PROVIDER_CHOICES]).toEqual(['auto', 'vscode', 'endpoint', 'hosted']);
+    for (const choice of FEEDBACK_AI_PROVIDER_CHOICES) {
+      expect(isFeedbackAiProviderChoice(choice)).toBe(true);
+    }
+  });
+
+  it('rejects anything else, so an unknown value can never be written as a pin', () => {
+    for (const value of ['copilot', 'Auto', '', null, undefined, 3, {}]) {
+      expect(isFeedbackAiProviderChoice(value)).toBe(false);
+    }
   });
 });

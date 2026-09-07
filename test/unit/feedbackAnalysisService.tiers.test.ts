@@ -37,13 +37,16 @@ import {
   FEEDBACK_HOSTED_FALLBACK_SETTING,
   FEEDBACK_LM_PRIMED_KEY,
   FEEDBACK_MODEL_SETTING,
+  FEEDBACK_PROVIDER_SETTING,
   HOSTED_ANALYSIS_ENDPOINT,
   HOSTED_ANALYSIS_PROVIDER,
   analysisNeedsPriming,
+  analysisProviderChoice,
   analysisProviderLabel,
   analyzeFeedback,
   clearFeedbackApiKey,
   clearKnownIssueCache,
+  listAnalysisOptions,
   resolveAnalysisTier,
   setFeedbackApiKey,
   setHostedAnalysisTargetForTests,
@@ -94,6 +97,11 @@ function configureHosted(
   provider = 'DeepSeek',
 ): void {
   setHostedAnalysisTargetForTests({ endpoint, model, provider });
+}
+
+/** Pin the analysis destination, as the dialog's picker does. */
+function pinProvider(choice: string): void {
+  vscode._setMockConfiguration('erdStudio', FEEDBACK_PROVIDER_SETTING, { globalValue: choice });
 }
 
 /** Turn the master switch on; without it every tier is `'none'`. */
@@ -209,6 +217,144 @@ describe('resolveAnalysisTier', () => {
     const context = makeContext();
     await context.secrets.store(FEEDBACK_API_KEY_SECRET, 'sk-test');
     expect(await resolveAnalysisTier(context)).toBe('none');
+  });
+});
+
+describe('pinning the destination (feedback.provider)', () => {
+  /**
+   * The problem this solves: `auto` tries the user's own language model first
+   * and stops there. Someone with Copilot could not previously choose anything
+   * else — not the hosted relay, not their own endpoint — however much they
+   * would rather not spend their subscription triaging a bug report.
+   */
+  it('defaults to auto, which is the original precedence', async () => {
+    enableAiAssist();
+    expect(analysisProviderChoice()).toBe('auto');
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    configureHosted();
+    expect(await resolveAnalysisTier(makeContext())).toBe('languageModel');
+  });
+
+  it('reads an unrecognised value as auto rather than as "no tier"', async () => {
+    // A value from a newer build, or a hand-edited settings file, must not turn
+    // the feature off — it is a preference, not a switch.
+    enableAiAssist();
+    pinProvider('quantum-oracle');
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    expect(analysisProviderChoice()).toBe('auto');
+    expect(await resolveAnalysisTier(makeContext())).toBe('languageModel');
+  });
+
+  it('sends the analysis to the hosted relay even with a language model right there', async () => {
+    enableAiAssist();
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    configureHosted();
+    pinProvider('hosted');
+
+    expect(await resolveAnalysisTier(makeContext())).toBe('hosted');
+    expect(await analysisProviderLabel(makeContext())).toBe('feedback.erd.example \u2192 DeepSeek');
+  });
+
+  it('uses only the language model when pinned to it, whatever else is configured', async () => {
+    enableAiAssist();
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    configureEndpoint();
+    configureHosted();
+    const context = makeContext();
+    await context.secrets.store(FEEDBACK_API_KEY_SECRET, 'sk-test');
+    pinProvider('vscode');
+
+    expect(await resolveAnalysisTier(context)).toBe('languageModel');
+  });
+
+  it('resolves to none rather than falling through when the pin is unavailable', async () => {
+    // Falling back would send the text to the destination the user pinned away
+    // from, which is the one thing the pin exists to prevent.
+    enableAiAssist();
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    configureHosted();
+    pinProvider('endpoint');
+
+    expect(await resolveAnalysisTier(makeContext())).toBe('none');
+    expect(await analysisProviderLabel(makeContext())).toBeNull();
+  });
+
+  it('still lets hostedFallback veto an explicit hosted pin', async () => {
+    // "Never send my text there" has to mean that even when the picker asks.
+    enableAiAssist();
+    configureHosted();
+    pinProvider('hosted');
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_HOSTED_FALLBACK_SETTING, {
+      globalValue: false,
+    });
+
+    expect(await resolveAnalysisTier(makeContext())).toBe('none');
+  });
+
+  it('is still "none" for every pin while the master switch is off', async () => {
+    disableAiAssist();
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    configureHosted();
+    for (const choice of ['auto', 'vscode', 'endpoint', 'hosted']) {
+      pinProvider(choice);
+      expect(await resolveAnalysisTier(makeContext())).toBe('none');
+    }
+  });
+});
+
+describe('listAnalysisOptions', () => {
+  it('lists all four rows in picker order, whatever resolves', async () => {
+    enableAiAssist();
+    const rows = await listAnalysisOptions(makeContext());
+    expect(rows.map((r) => r.id)).toEqual(['auto', 'vscode', 'endpoint', 'hosted']);
+    expect(rows.every((r) => typeof r.note === 'string' && r.note.length > 0)).toBe(true);
+  });
+
+  it('marks what can actually run here, and says why the rest cannot', async () => {
+    enableAiAssist();
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    configureHosted();
+
+    const rows = await listAnalysisOptions(makeContext());
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId.vscode.available).toBe(true);
+    expect(byId.hosted.available).toBe(true);
+    expect(byId.endpoint.available).toBe(false);
+    // The unavailable row keeps its reason, so the fix is not a settings hunt.
+    expect(byId.endpoint.note).toMatch(/feedback\.endpoint/);
+  });
+
+  it('names the hosted relay\'s onward provider, because the user did not pick it', async () => {
+    enableAiAssist();
+    configureHosted('https://feedback.erd.example', 'fixture-model', 'ExampleAI');
+    const rows = await listAnalysisOptions(makeContext());
+    const hosted = rows.find((r) => r.id === 'hosted')!;
+    expect(hosted.label).toContain('ExampleAI');
+    expect(hosted.note).toContain('ExampleAI');
+  });
+
+  it('says the hosted row was turned off, rather than pretending it does not exist', async () => {
+    enableAiAssist();
+    configureHosted();
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_HOSTED_FALLBACK_SETTING, {
+      globalValue: false,
+    });
+
+    const hosted = (await listAnalysisOptions(makeContext())).find((r) => r.id === 'hosted')!;
+    expect(hosted.available).toBe(false);
+    expect(hosted.note).toMatch(/hostedFallback/);
+  });
+
+  it('reports every row unavailable while the master switch is off', async () => {
+    // Otherwise the dialog would render a picker whose every choice does
+    // nothing, with no hint that one switch is holding them all down.
+    disableAiAssist();
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    configureHosted();
+
+    const rows = await listAnalysisOptions(makeContext());
+    expect(rows.every((r) => !r.available)).toBe(true);
+    expect(rows.every((r) => /aiAssist/.test(r.note ?? ''))).toBe(true);
   });
 });
 

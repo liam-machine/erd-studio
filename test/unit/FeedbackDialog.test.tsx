@@ -3,14 +3,14 @@
  * FeedbackDialog — the one dialog behind "Send feedback".
  *
  * What is worth pinning down here is the behaviour a user would notice if it
- * regressed: the copy swapping with the kind, the canvas checkbox only being
- * offered for a bug, Escape closing, the readiness meter moving locally when
- * the screenshot is attached (no round trip), a confident duplicate taking the
- * form over, and the exact `submitFeedback` payload the host receives.
+ * regressed: the copy swapping with the kind, the analysis moving the kind
+ * until the user overrules it, the destination picker, Escape closing, the
+ * readiness meter moving locally (no round trip), a confident duplicate taking
+ * the form over, and the exact `submitFeedback` payload the host receives.
  *
- * The canvas capture is the dialog's only image route — there is no picker, no
- * drop zone and no paste handler to test, because GitHub takes no image through
- * a prefilled form and the dialog says so instead of pretending otherwise.
+ * There is no image route at all — no checkbox, no picker, no drop zone, no
+ * paste handler — because GitHub takes no image through a prefilled form. The
+ * dialog says where images go and stops, and that sentence is asserted below.
  *
  * The store and the message bus are mocked because this is a component test:
  * the store's own transitions live in editorStore.test.ts, and the host end of
@@ -26,7 +26,9 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import {
   ANALYSIS_DEBOUNCE_MS,
   FEEDBACK_COPY,
+  FEEDBACK_IMAGE_NOTE,
   FEEDBACK_PRE_ANALYSIS_TITLE,
+  type FeedbackAiOption,
   type FeedbackAnalysis,
   type FeedbackCapabilities,
   type FeedbackDiagnosticsView,
@@ -44,20 +46,6 @@ vi.mock('../../webview/hooks/useMessageBus', () => ({
   useMessageBus: (handler: (message: unknown) => void) => {
     busListeners.push(handler);
   },
-}));
-
-// html-to-image needs a real canvas; the capture path is covered in
-// screenshot.test.ts, so it is stubbed out here.
-const captureScreenshot = vi.hoisted(() =>
-  vi.fn().mockResolvedValue({ dataUrl: null, onClipboard: false, error: 'no canvas in jsdom' }),
-);
-const copyImageToClipboard = vi.hoisted(() => vi.fn().mockResolvedValue(false));
-
-vi.mock('../../webview/lib/screenshot', () => ({
-  captureScreenshot,
-  copyImageToClipboard,
-  copyPngToClipboard: vi.fn().mockResolvedValue(false),
-  MAX_PNG_BYTES: 12 * 1024 * 1024,
 }));
 
 const recordError = vi.hoisted(() => vi.fn());
@@ -90,16 +78,40 @@ const diagnostics: FeedbackDiagnosticsView = {
   text: 'ERD Studio: 0.6.49',
 };
 
+/** The picker rows, with only `vscode` available unless a test says otherwise. */
+function options(overrides: Partial<Record<string, boolean>> = {}): FeedbackAiOption[] {
+  return [
+    { id: 'auto', label: 'Automatic', available: overrides.auto ?? true },
+    { id: 'vscode', label: 'Your editor\u2019s model (Copilot)', available: overrides.vscode ?? true },
+    { id: 'endpoint', label: 'Your own API endpoint', available: overrides.endpoint ?? false },
+    { id: 'hosted', label: 'ERD Studio service (DeepSeek)', available: overrides.hosted ?? true },
+  ];
+}
+
 function capabilities(overrides: Partial<FeedbackCapabilities> = {}): FeedbackCapabilities {
   return {
     extensionVersion: '0.6.49',
     aiAvailable: false,
     aiProviderLabel: null,
+    aiProvider: 'auto',
+    // Nothing available by default, so the panel is absent exactly as it is on
+    // a host with no model at all.
+    aiOptions: options({ auto: false, vscode: false, hosted: false }),
     aiNeedsPriming: false,
     githubHandle: null,
-    canCaptureCanvas: true,
     ...overrides,
   };
+}
+
+/** Capabilities with a working model behind them, which is the common case. */
+function withModel(overrides: Partial<FeedbackCapabilities> = {}): FeedbackCapabilities {
+  return capabilities({
+    aiAvailable: true,
+    aiProviderLabel: 'Copilot',
+    aiProvider: 'auto',
+    aiOptions: options(),
+    ...overrides,
+  });
 }
 
 function analysis(overrides: Partial<FeedbackAnalysis> = {}): FeedbackAnalysis {
@@ -108,7 +120,7 @@ function analysis(overrides: Partial<FeedbackAnalysis> = {}): FeedbackAnalysis {
     confidence: 0.9,
     title: 'FK edge disappears after a model rename',
     context: '',
-    reasons: { desc: null, ctx: null, image: null },
+    reasons: { desc: null, ctx: null },
     duplicates: [],
     ...overrides,
   };
@@ -176,37 +188,17 @@ const contextInput = () => q<HTMLTextAreaElement>('#feedback-context')!;
 const submitted = () =>
   send.mock.calls.map((c) => c[0]).filter((m) => m.type === 'submitFeedback').at(-1)?.payload;
 
-/**
- * The capture path looks for the canvas root before it asks for a shot, so a
- * test that ticks the checkbox has to put one in the document first. Removed
- * again in `afterEach`.
- */
-function installCanvasRoot(): void {
-  const root = document.createElement('div');
-  root.id = 'root';
-  document.body.appendChild(root);
-}
-
-/**
- * Tick the canvas checkbox with a capture that succeeds. `onClipboard` is what
- * the browser said when the PNG was offered to the clipboard — the dialog's
- * copy turns on it, so it is never assumed.
- */
-async function attachCanvas(onClipboard = false): Promise<void> {
-  captureScreenshot.mockResolvedValueOnce({
-    dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
-    onClipboard,
-  });
-  await act(async () => {
-    fireEvent.click(q<HTMLInputElement>('.feedback__checkbox input')!);
-  });
-}
+/** The kind segmented control's two buttons. */
+const segment = (label: 'Bug' | 'Feature') =>
+  qq('.feedback__segment').find((b) => b.textContent === label) as HTMLButtonElement;
+/** Which segment is currently on. */
+const activeKind = () => q('.feedback__segment--on')?.textContent ?? '';
+/** The analysis destination picker. */
+const providerSelect = () => q<HTMLSelectElement>('.feedback__ai-select');
 
 beforeEach(() => {
   send.mockClear();
   busListeners.length = 0;
-  captureScreenshot.mockClear();
-  copyImageToClipboard.mockClear();
   setFeedbackDialogOpen.mockClear();
   setFeedbackAnalysis.mockClear();
   setFeedbackAnalysisPending.mockClear();
@@ -216,9 +208,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  // Only the canvas-capture test installs one; leaving it behind would let a
-  // later test capture a screenshot it never asked for.
-  document.getElementById('root')?.remove();
 });
 
 // ---------------------------------------------------------------------------
@@ -305,22 +294,14 @@ describe('per-kind copy', () => {
     expect(contextInput().placeholder).toBe(FEEDBACK_COPY.feature.contextPlaceholder);
   });
 
-  it('offers the canvas screenshot for a bug, naming the canvas it would capture', () => {
-    render(<FeedbackDialog />);
-    expect(text('.feedback__checkbox')).toContain('Attach a screenshot of the canvas');
-    expect(text('.feedback__checkbox')).toContain('(silver/showcase, logical)');
-  });
-
-  it('does not offer a canvas screenshot on a feature request', () => {
-    resetStore({ feedbackPrefill: { kind: 'feature' } });
-    render(<FeedbackDialog />);
-    expect(qq('.feedback__checkbox')).toHaveLength(0);
-  });
-
-  it('hides the canvas checkbox when there is no canvas to capture', () => {
-    resetStore({ feedbackCapabilities: capabilities({ canCaptureCanvas: false }) });
-    render(<FeedbackDialog />);
-    expect(qq('.feedback__checkbox')).toHaveLength(0);
+  it('says the same thing about images whatever the kind', () => {
+    // There is no capture and no checkbox, so nothing here varies by kind.
+    for (const kind of ['bug', 'feature'] as const) {
+      resetStore({ feedbackPrefill: { kind } });
+      const { unmount } = render(<FeedbackDialog />);
+      expect(text('.feedback__note')).toBe(FEEDBACK_IMAGE_NOTE);
+      unmount();
+    }
   });
 });
 
@@ -442,9 +423,9 @@ describe('the analysis panel', () => {
     expect(q('.feedback__ai')).toBeNull();
   });
 
-  it('shows its idle prose, then the provider name, once a model is available', () => {
+  it('shows its idle prose, and names the resolved destination on the auto row', () => {
     resetStore({
-      feedbackCapabilities: capabilities({ aiAvailable: true, aiProviderLabel: 'api.example.com' }),
+      feedbackCapabilities: withModel({ aiProviderLabel: 'api.example.com' }),
     });
     render(<FeedbackDialog />);
     expect(text('.feedback__ai-head')).toContain('api.example.com');
@@ -452,17 +433,14 @@ describe('the analysis panel', () => {
   });
 
   it('shows the thinking state while a request is in flight', () => {
-    resetStore({
-      feedbackCapabilities: capabilities({ aiAvailable: true, aiProviderLabel: 'Copilot' }),
-      feedbackAnalysisState: 'thinking',
-    });
+    resetStore({ feedbackCapabilities: withModel(), feedbackAnalysisState: 'thinking' });
     render(<FeedbackDialog />);
     expect(text('.feedback__thinking')).toContain('Reading your description and the open issues…');
   });
 
   it('shows a failure sentence rather than pretending nothing happened', () => {
     resetStore({
-      feedbackCapabilities: capabilities({ aiAvailable: true, aiProviderLabel: 'Copilot' }),
+      feedbackCapabilities: withModel(),
       feedbackAnalysisState: 'error',
       feedbackError: 'The analysis could not be completed.',
     });
@@ -470,30 +448,147 @@ describe('the analysis panel', () => {
     expect(text('.feedback__error')).toBe('The analysis could not be completed.');
   });
 
-  it('offers to flip the kind, and flipping it swaps the copy', () => {
+  it('leaves the kind control in the header and shows only a hint beside the verdict', () => {
+    // One control, in one place. It used to move between the header and this
+    // panel depending on state, which read as two different things.
     resetStore({
-      feedbackCapabilities: capabilities({ aiAvailable: true, aiProviderLabel: 'Copilot' }),
+      feedbackCapabilities: withModel(),
       feedbackAnalysis: analysis(),
       feedbackAnalysisState: 'ready',
     });
     render(<FeedbackDialog />);
 
-    const flip = buttonWithText('Not right? Make it a feature')!;
-    expect(flip).toBeTruthy();
-    act(() => {
-      fireEvent.click(flip);
-    });
-    expect(text('label[for="feedback-description"]')).toBe(FEEDBACK_COPY.feature.descLabel);
+    expect(q('.feedback__header .feedback__segmented')).not.toBeNull();
+    expect(q('.feedback__ai .feedback__segmented')).toBeNull();
+    expect(text('.feedback__verdict-hint')).toContain('Change it in the header');
   });
 
-  it('never shows two flip links at once', () => {
+  it('shows both kinds with their share, not just the winner', () => {
+    // One chip reading "Feature request 86%" said nothing about how close the
+    // other side came, so a 51/49 guess looked exactly like a certainty.
     resetStore({
-      feedbackCapabilities: capabilities({ aiAvailable: true, aiProviderLabel: 'Copilot' }),
+      feedbackCapabilities: withModel(),
+      feedbackAnalysis: analysis({ kind: 'feature', confidence: 0.86 }),
+      feedbackAnalysisState: 'ready',
+    });
+    render(<FeedbackDialog />);
+
+    expect(text('.feedback__verdict-chip')).toContain('Feature request');
+    expect(text('.feedback__verdict-chip')).toContain('86%');
+    expect(text('.feedback__verdict-other')).toContain('Bug');
+    expect(text('.feedback__verdict-other')).toContain('14%');
+  });
+
+  it('says so when the two kinds are a coin toss', () => {
+    resetStore({
+      feedbackCapabilities: withModel(),
+      feedbackAnalysis: analysis({ kind: 'feature', confidence: 0.52 }),
+      feedbackAnalysisState: 'ready',
+    });
+    render(<FeedbackDialog />);
+
+    expect(text('.feedback__verdict-hint')).toContain('Close call');
+    expect(q('.feedback__verdict-chip--unsure')).not.toBeNull();
+  });
+
+  it('keeps quiet about a close call when the split is decisive', () => {
+    resetStore({
+      feedbackCapabilities: withModel(),
+      feedbackAnalysis: analysis({ kind: 'bug', confidence: 0.94 }),
+      feedbackAnalysisState: 'ready',
+    });
+    render(<FeedbackDialog />);
+
+    expect(text('.feedback__verdict-hint')).toBe('Change it in the header if it is wrong');
+    expect(q('.feedback__verdict-chip--unsure')).toBeNull();
+  });
+
+  it('keeps showing the model\'s own read after the user overrules it, and says so', () => {
+    // The confidence belongs to what the model picked, not to what the user
+    // then chose — but two panels quietly disagreeing is worse than either.
+    resetStore({
+      feedbackCapabilities: withModel(),
+      feedbackAnalysis: analysis({ kind: 'feature', confidence: 0.9 }),
+      feedbackAnalysisState: 'ready',
+    });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.click(segment('Bug'));
+    });
+
+    expect(activeKind()).toBe('Bug');
+    expect(text('.feedback__verdict-chip')).toContain('Feature request');
+    expect(text('.feedback__verdict-hint')).toContain('You chose bug');
+  });
+
+  it('stays on screen with the picker when the pinned destination is unavailable', () => {
+    // Losing the panel would take the way back down with it.
+    resetStore({
+      feedbackCapabilities: capabilities({
+        aiAvailable: false,
+        aiProvider: 'endpoint',
+        aiOptions: options({ endpoint: false }),
+      }),
+    });
+    render(<FeedbackDialog />);
+
+    expect(q('.feedback__ai')).not.toBeNull();
+    expect(providerSelect()!.value).toBe('endpoint');
+    expect(text('.feedback__idle')).toContain('No analysis will run');
+  });
+});
+
+describe('choosing which model does the analysis', () => {
+  it('lists every destination, disabling the ones that cannot run here', () => {
+    resetStore({ feedbackCapabilities: withModel() });
+    render(<FeedbackDialog />);
+
+    const rows = qq('.feedback__ai-select option') as HTMLOptionElement[];
+    expect(rows.map((o) => o.value)).toEqual(['auto', 'vscode', 'endpoint', 'hosted']);
+    expect(rows.find((o) => o.value === 'endpoint')!.disabled).toBe(true);
+    expect(rows.find((o) => o.value === 'hosted')!.disabled).toBe(false);
+  });
+
+  it('pins the hosted service even though a language model is right there', () => {
+    // The whole point: the resolver used to try the user's own model first and
+    // stop, so "I have Copilot but would rather not spend it" was unsayable.
+    resetStore({ feedbackCapabilities: withModel() });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(providerSelect()!, { target: { value: 'hosted' } });
+    });
+
+    const posted = send.mock.calls.map((c) => c[0]).find((m) => m.type === 'setFeedbackProvider');
+    expect(posted.payload.provider).toBe('hosted');
+    expect(posted.payload.domain).toMatchObject({ name: 'showcase' });
+  });
+
+  it('drops the previous model\'s verdict rather than attributing it to the new one', () => {
+    resetStore({
+      feedbackCapabilities: withModel(),
       feedbackAnalysis: analysis(),
       feedbackAnalysisState: 'ready',
     });
     render(<FeedbackDialog />);
-    expect(qq('button').filter((b) => (b.textContent ?? '').startsWith('Not right?'))).toHaveLength(1);
+
+    act(() => {
+      fireEvent.change(providerSelect()!, { target: { value: 'hosted' } });
+    });
+
+    expect(setFeedbackAnalysis).toHaveBeenCalledWith(null);
+  });
+
+  it('says nothing to the host when the destination did not actually change', () => {
+    resetStore({ feedbackCapabilities: withModel({ aiProvider: 'hosted' }) });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(providerSelect()!, { target: { value: 'hosted' } });
+    });
+
+    expect(send.mock.calls.map((c) => c[0].type)).not.toContain('setFeedbackProvider');
   });
 });
 
@@ -717,15 +812,19 @@ describe('the first-run primer', () => {
  * off by default, so if the only flip link lived in the analysis panel there
  * would be no route from a canvas to the feature-request template at all.
  */
-describe('choosing the kind without an analysis', () => {
-  it('offers the flip with no model configured, and files against the feature template', async () => {
+describe('choosing the kind', () => {
+  it('offers both kinds with no model configured, and files against the feature template', async () => {
+    // With no tier the analysis panel never renders, so the header control is
+    // the only route to the feature-request template.
     render(<FeedbackDialog />);
     expect(q('.feedback__ai')).toBeNull();
+    expect(activeKind()).toBe('Bug');
 
     act(() => {
-      fireEvent.click(buttonWithText('Not right? Make it a feature')!);
+      fireEvent.click(segment('Feature'));
     });
 
+    expect(activeKind()).toBe('Feature');
     expect(text('label[for="feedback-description"]')).toBe(FEEDBACK_COPY.feature.descLabel);
     expect(text('label[for="feedback-context"]')).toBe(FEEDBACK_COPY.feature.contextLabel);
 
@@ -738,39 +837,123 @@ describe('choosing the kind without an analysis', () => {
     expect(submitted().kind).toBe('feature');
   });
 
-  it('flips back again', () => {
+  it('switches back again', () => {
     render(<FeedbackDialog />);
     act(() => {
-      fireEvent.click(buttonWithText('Not right? Make it a feature')!);
+      fireEvent.click(segment('Feature'));
     });
     act(() => {
-      fireEvent.click(buttonWithText('Not right? Make it a bug')!);
+      fireEvent.click(segment('Bug'));
     });
+    expect(activeKind()).toBe('Bug');
     expect(text('label[for="feedback-description"]')).toBe(FEEDBACK_COPY.bug.descLabel);
   });
 
-  it('takes the canvas screenshot with it — a feature request cannot untick one', async () => {
-    // The checkbox is bug-only, so an image left attached after the flip could
-    // neither be seen nor removed.
-    installCanvasRoot();
+  it('tells the host whether the kind is a choice or just the default', () => {
+    // The prompt states the kind to the model only when the user picked it.
+    // Sending the dialog's opening `bug` as though they had said it is what got
+    // "I want a new ability to…" classified as a bug.
+    vi.useFakeTimers();
+    resetStore({ feedbackCapabilities: withModel() });
     render(<FeedbackDialog />);
-    fireEvent.change(descriptionInput(), { target: { value: 'Something happened.' } });
 
-    await attachCanvas();
-    await waitFor(() => expect(q('.feedback__attached')).not.toBeNull());
+    fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 10);
+    });
+    const first = send.mock.calls.map((c) => c[0]).filter((m) => m.type === 'analyzeFeedback').at(-1);
+    expect(first.payload.kind).toBe('bug');
+    expect(first.payload.kindChosenByUser).toBe(false);
 
     act(() => {
-      fireEvent.click(buttonWithText('Not right? Make it a feature')!);
+      fireEvent.click(segment('Feature'));
+    });
+    fireEvent.change(descriptionInput(), { target: { value: `${LONG_DESCRIPTION} More.` } });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 10);
+    });
+    const second = send.mock.calls.map((c) => c[0]).filter((m) => m.type === 'analyzeFeedback').at(-1);
+    expect(second.payload.kind).toBe('feature');
+    expect(second.payload.kindChosenByUser).toBe(true);
+  });
+
+  it('lets the analysis move the kind while nobody has overruled it', () => {
+    // The dialog opens on `bug` because most reports are; the analysis is what
+    // turns that first guess into an answer.
+    resetStore({ feedbackCapabilities: withModel() });
+    const { rerender } = render(<FeedbackDialog />);
+    expect(activeKind()).toBe('Bug');
+
+    storeState.feedbackAnalysis = analysis({ kind: 'feature' });
+    storeState.feedbackAnalysisState = 'ready';
+    act(() => {
+      rerender(<FeedbackDialog />);
     });
 
-    expect(q('.feedback__attached')).toBeNull();
-    expect(qq('.feedback__checkbox')).toHaveLength(0);
+    expect(activeKind()).toBe('Feature');
+    expect(text('label[for="feedback-description"]')).toBe(FEEDBACK_COPY.feature.descLabel);
+  });
 
-    await act(async () => {
-      fireEvent.click(primaryButton());
+  it('stops the analysis moving it once the user has picked one', () => {
+    resetStore({ feedbackCapabilities: withModel() });
+    const { rerender } = render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.click(segment('Bug'));
     });
-    await waitFor(() => expect(submitted()).toBeTruthy());
-    expect(submitted().attachments).toBeUndefined();
+    storeState.feedbackAnalysis = analysis({ kind: 'feature' });
+    storeState.feedbackAnalysisState = 'ready';
+    act(() => {
+      rerender(<FeedbackDialog />);
+    });
+
+    expect(activeKind()).toBe('Bug');
+  });
+
+  it('hands the choice back to the analysis on "auto"', () => {
+    resetStore({
+      feedbackCapabilities: withModel(),
+      feedbackAnalysis: analysis({ kind: 'feature' }),
+      feedbackAnalysisState: 'ready',
+    });
+    render(<FeedbackDialog />);
+    expect(activeKind()).toBe('Feature');
+
+    act(() => {
+      fireEvent.click(segment('Bug'));
+    });
+    expect(activeKind()).toBe('Bug');
+
+    act(() => {
+      fireEvent.click(buttonWithText('your choice')!);
+    });
+    // Handing it back re-applies the verdict that is already on screen, rather
+    // than waiting for the next request to come round.
+    expect(activeKind()).toBe('Feature');
+  });
+
+  it('never lets the analysis move a kind the caller asked for', () => {
+    // The command palette's "Request a feature" has already decided.
+    resetStore({
+      feedbackPrefill: { kind: 'feature' },
+      feedbackCapabilities: withModel(),
+    });
+    const { rerender } = render(<FeedbackDialog />);
+
+    storeState.feedbackAnalysis = analysis({ kind: 'bug' });
+    storeState.feedbackAnalysisState = 'ready';
+    act(() => {
+      rerender(<FeedbackDialog />);
+    });
+
+    expect(activeKind()).toBe('Feature');
+  });
+
+  it('shows no auto affordance at all when no model could ever choose', () => {
+    render(<FeedbackDialog />);
+    expect(q('.feedback__kindhint')).toBeNull();
+    expect(buttonWithText('your choice')).toBeUndefined();
+    expect(q('.feedback__segmented')).not.toBeNull();
   });
 });
 
@@ -778,7 +961,7 @@ describe('the readiness meter', () => {
   function renderReady() {
     resetStore({
       feedbackPrefill: { kind: 'bug', description: LONG_DESCRIPTION },
-      feedbackCapabilities: capabilities({ aiAvailable: true, aiProviderLabel: 'Copilot' }),
+      feedbackCapabilities: withModel(),
       feedbackAnalysis: analysis(),
       feedbackAnalysisState: 'ready',
     });
@@ -787,85 +970,40 @@ describe('the readiness meter', () => {
 
   it('scores what is in the dialog right now', () => {
     renderReady();
-    // Clear description (40) + diagnostics (10); no steps, no image.
-    expect(text('.feedback__meter-row')).toContain('50%');
+    // Clear description (45) + diagnostics (20); no steps.
+    expect(text('.feedback__meter-row')).toContain('65%');
     expect(text('.feedback__meter-row')).toContain('Ready to file');
   });
 
-  it('moves the moment the screenshot is attached — no round trip', async () => {
-    installCanvasRoot();
+  it('asks for no image, and offers nothing to attach one with', () => {
     renderReady();
-
-    await attachCanvas();
-
-    await waitFor(() => expect(text('.feedback__meter-row')).toContain('70%'));
-    expect(qq('.feedback__check').some((c) => (c.textContent ?? '').includes('Screenshot attached'))).toBe(
-      true,
-    );
-    // Nothing was asked of the host to move the bar.
-    expect(send.mock.calls.map((c) => c[0].type)).not.toContain('analyzeFeedback');
+    const checks = qq('.feedback__check').map((c) => c.textContent ?? '');
+    expect(checks.some((c) => /image|screenshot/i.test(c))).toBe(false);
+    expect(buttonWithText('Attach one')).toBeUndefined();
   });
 
-  it('captures the canvas itself when the unmet image check is acted on', async () => {
-    // "Attach one" has exactly one thing to attach, so it attaches it rather
-    // than pointing the user at a control.
-    installCanvasRoot();
-    renderReady();
-    captureScreenshot.mockResolvedValueOnce({
-      dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
-      onClipboard: true,
-    });
-
-    await act(async () => {
-      fireEvent.click(buttonWithText('Attach one')!);
-    });
-
-    await waitFor(() => expect(q('.feedback__attached')).not.toBeNull());
-    expect(q<HTMLInputElement>('.feedback__checkbox input')!.checked).toBe(true);
-  });
-
-  it('asks a feature request for no image, since it has no way to attach one', () => {
-    // The canvas capture is bug-only, so an image check here would be a row
-    // that can never be met above a button with nothing to do.
+  it('scores the same three checks on a feature request', () => {
+    // The denominator no longer depends on the kind, because no check does.
     resetStore({
       feedbackPrefill: { kind: 'feature', description: LONG_DESCRIPTION },
-      feedbackCapabilities: capabilities({ aiAvailable: true, aiProviderLabel: 'Copilot' }),
+      feedbackCapabilities: withModel(),
       feedbackAnalysis: analysis({ kind: 'feature' }),
       feedbackAnalysisState: 'ready',
     });
     render(<FeedbackDialog />);
-
-    expect(qq('.feedback__check').some((c) => (c.textContent ?? '').includes('No image'))).toBe(
-      false,
-    );
-    expect(buttonWithText('Attach one')).toBeUndefined();
-    // Clear description (40) + diagnostics (10) out of the 80 that apply.
-    expect(text('.feedback__meter-row')).toContain('63%');
+    expect(text('.feedback__meter-row')).toContain('65%');
+    expect(qq('.feedback__check')).toHaveLength(3);
   });
 
-  it('drops the image check when a bug has no canvas behind the dialog', () => {
-    resetStore({
-      feedbackPrefill: { kind: 'bug', description: LONG_DESCRIPTION },
-      feedbackCapabilities: capabilities({
-        aiAvailable: true,
-        aiProviderLabel: 'Copilot',
-        canCaptureCanvas: false,
-      }),
-      feedbackAnalysis: analysis(),
-      feedbackAnalysisState: 'ready',
-    });
-    render(<FeedbackDialog />);
-
-    expect(buttonWithText('Attach one')).toBeUndefined();
-  });
-
-  it('moves again when the user takes the diagnostics off the report', () => {
+  it('moves again when the user takes the diagnostics off the report — no round trip', () => {
     renderReady();
     act(() => {
       fireEvent.click(buttonWithText('remove')!);
     });
-    expect(text('.feedback__meter-row')).toContain('40%');
+    expect(text('.feedback__meter-row')).toContain('45%');
     expect(text('.feedback__diagnostics-toggle')).toBe('put back');
+    // Nothing was asked of the host to move the bar.
+    expect(send.mock.calls.map((c) => c[0].type)).not.toContain('analyzeFeedback');
   });
 
   it('says why a check is unmet and offers a way to fix it', () => {
@@ -1113,7 +1251,9 @@ describe('submitting', () => {
       includeDiagnostics: true,
       domain: { name: 'showcase', layer: 'silver', modelCount: 0 },
     });
+    // Nothing image-shaped rides along any more.
     expect(submitted().attachments).toBeUndefined();
+    expect(submitted().screenshotError).toBeUndefined();
   });
 
   it('refuses to send an entirely empty report', () => {
@@ -1122,30 +1262,6 @@ describe('submitting', () => {
 
     fireEvent.change(descriptionInput(), { target: { value: 'Something happened.' } });
     expect(primaryButton().hasAttribute('disabled')).toBe(false);
-  });
-
-  it('re-copies the screenshot on the way out and stamps the result on it', async () => {
-    // The capture may have been minutes ago, and the host branches both the
-    // issue body and its notification on this flag.
-    installCanvasRoot();
-    copyImageToClipboard.mockResolvedValueOnce(true);
-    render(<FeedbackDialog />);
-    fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
-
-    await attachCanvas(false);
-    await waitFor(() => expect(q('.feedback__attached')).not.toBeNull());
-
-    await act(async () => {
-      fireEvent.click(primaryButton());
-    });
-
-    await waitFor(() => expect(submitted()?.attachments).toHaveLength(1));
-    expect(submitted().attachments[0]).toMatchObject({
-      name: 'canvas.png',
-      source: 'canvas',
-      onClipboard: true,
-    });
-    expect(copyImageToClipboard).toHaveBeenCalledWith(expect.anything(), 'image/png');
   });
 
   it('reports a failure inside the dialog and re-enables the button', async () => {
@@ -1231,7 +1347,7 @@ describe('submitting', () => {
 });
 
 describe('Copy report', () => {
-  it('posts the same report for the clipboard, naming the attachments', () => {
+  it('posts the same report for the clipboard', () => {
     render(<FeedbackDialog />);
     fireEvent.change(descriptionInput(), { target: { value: 'It vanished.' } });
 
@@ -1244,8 +1360,8 @@ describe('Copy report', () => {
       kind: 'bug',
       description: 'It vanished.',
       includeDiagnostics: true,
-      attachmentNames: [],
     });
+    expect(copied.payload.attachmentNames).toBeUndefined();
   });
 });
 
@@ -1269,91 +1385,22 @@ describe('diagnostics', () => {
 });
 
 describe('images', () => {
-  it('offers no route of its own for other images, and says where they go', () => {
-    // GitHub has no API for attaching an image to a prefilled form, so a picker
-    // here could only hand the user the same job back.
+  it('offers no route of its own at all, and says where images do go', () => {
+    // GitHub has no API for attaching an image to a prefilled form, so anything
+    // captured here could only be handed back to the user to paste themselves.
     render(<FeedbackDialog />);
     expect(q('input[type="file"]')).toBeNull();
-    expect(text('.feedback__note')).toBe(
-      'Any other images are added on the GitHub page: click the Screenshot box there and paste or drag them in.',
-    );
-  });
-
-  it('says the screenshot is on the clipboard once it actually is', async () => {
-    installCanvasRoot();
-    render(<FeedbackDialog />);
-
-    await attachCanvas(true);
-
-    await waitFor(() =>
-      expect(text('.feedback__attached')).toBe(
-        'Copied to your clipboard — paste it into the Screenshot box on GitHub.',
-      ),
-    );
-  });
-
-  it('points at the saved file instead when the clipboard refused it', async () => {
-    // Claiming a copy that did not happen would send the user to paste nothing.
-    installCanvasRoot();
-    render(<FeedbackDialog />);
-
-    await attachCanvas(false);
-
-    await waitFor(() =>
-      expect(text('.feedback__attached')).toBe(
-        'Attached. Your clipboard refused it, so it is saved to a file the notification can reveal.',
-      ),
-    );
-  });
-
-  it('unticking the box takes the screenshot off the report', async () => {
-    installCanvasRoot();
-    render(<FeedbackDialog />);
-    fireEvent.change(descriptionInput(), { target: { value: 'Something happened.' } });
-
-    await attachCanvas(true);
-    await waitFor(() => expect(q('.feedback__attached')).not.toBeNull());
-
-    await act(async () => {
-      fireEvent.click(q<HTMLInputElement>('.feedback__checkbox input')!);
-    });
-    expect(q('.feedback__attached')).toBeNull();
-
-    await act(async () => {
-      fireEvent.click(primaryButton());
-    });
-    await waitFor(() => expect(submitted()).toBeTruthy());
-    expect(submitted().attachments).toBeUndefined();
-  });
-
-  it('unticks itself and explains when the capture fails, rather than promising an image', async () => {
-    installCanvasRoot();
-    render(<FeedbackDialog />);
-
-    // The default mock resolves with no dataUrl and an error.
-    await act(async () => {
-      fireEvent.click(q<HTMLInputElement>('.feedback__checkbox input')!);
-    });
-
-    await waitFor(() => expect(text('.feedback__status')).toBe('no canvas in jsdom'));
-    expect(q<HTMLInputElement>('.feedback__checkbox input')!.checked).toBe(false);
-    expect(q('.feedback__attached')).toBeNull();
-    expect(recordError).toHaveBeenCalledWith('screenshot', 'no canvas in jsdom');
+    expect(qq('.feedback__checkbox')).toHaveLength(0);
+    expect(text('.feedback__note')).toBe(FEEDBACK_IMAGE_NOTE);
+    expect(text('.feedback__note')).toContain('Screenshot box');
   });
 });
 
 describe('the footer', () => {
-  it('explains the plain route, and the clipboard hand-off once the screenshot is on', async () => {
-    installCanvasRoot();
+  it('explains the one route there is', () => {
     render(<FeedbackDialog />);
     expect(text('.feedback__route')).toContain('Opens the prefilled form.');
     expect(text('.feedback__route')).toContain('nothing is sent from VS Code');
-
-    await attachCanvas(true);
-
-    await waitFor(() =>
-      expect(text('.feedback__route')).toContain('paste it into the Screenshot box'),
-    );
   });
 
   it('labels the signed-in account without ever offering to sign in', () => {
