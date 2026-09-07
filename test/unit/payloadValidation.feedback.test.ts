@@ -223,6 +223,12 @@ describe('validateAnalyzeFeedbackPayload', () => {
     expect(validateAnalyzeFeedbackPayload(payload({ context: '1. Rename it' }))).toBeNull();
   });
 
+  it('accepts either trigger, and none at all', () => {
+    expect(validateAnalyzeFeedbackPayload(payload({ trigger: 'debounce' }))).toBeNull();
+    expect(validateAnalyzeFeedbackPayload(payload({ trigger: 'user' }))).toBeNull();
+    expect(validateAnalyzeFeedbackPayload(payload({ trigger: undefined }))).toBeNull();
+  });
+
   it.each([
     ['a non-object', null, /must be an object/],
     ['a fractional request id', payload({ requestId: 1.5 }), /finite integer/],
@@ -231,6 +237,10 @@ describe('validateAnalyzeFeedbackPayload', () => {
     ['a non-string description', payload({ description: 42 }), /Description must be a string/],
     ['a blank description', payload({ description: '   ' }), /cannot be empty/],
     ['a non-string context', payload({ context: 42 }), /Context must be a string/],
+    // `trigger` decides whether an unprimed language-model request may run, so
+    // anything unrecognised is refused rather than read as a user action.
+    ['an unknown trigger', payload({ trigger: 'click' }), /trigger must be/],
+    ['a non-string trigger', payload({ trigger: true }), /trigger must be/],
   ])('rejects %s', (_label, value, pattern) => {
     expect(validateAnalyzeFeedbackPayload(value)).toMatch(pattern as RegExp);
   });

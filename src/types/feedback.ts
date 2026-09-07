@@ -180,6 +180,14 @@ export interface FeedbackCapabilities {
   aiAvailable: boolean;
   /** Human label for the configured tier, e.g. "Copilot" or "api.example.com". Null when unavailable. */
   aiProviderLabel: string | null;
+  /**
+   * True when the analysis may not auto-run yet: the tier is the user's own
+   * language model and no request has succeeded on this machine. The panel
+   * renders its "Analyse this for me" button instead of running on the
+   * debounce, because VS Code's own access dialog must be triggered by
+   * something the user pressed rather than by them typing.
+   */
+  aiNeedsPriming: boolean;
   /** GitHub handle from a silent session, or null. Never triggers a sign-in prompt. */
   githubHandle: string | null;
   /** True when a canvas is behind the dialog and a screenshot can be captured. */

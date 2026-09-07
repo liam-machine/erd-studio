@@ -6,7 +6,8 @@ import * as vscode from 'vscode';
  * A repository can ship a `.vscode/settings.json`, and a workspace value
  * normally wins over the user's. For the feedback analysis that would mean a
  * checked-in file could point the request — and the API key stored in secret
- * storage that travels with it — at a host of the repo author's choosing. These
+ * storage that travels with it — at a host of the repo author's choosing, or
+ * silently switch a destination the user has decided about on or off. These
  * keys are contributed with `"scope": "machine"`, which already keeps workspace
  * values out of `inspect()`; this list is the belt to that pair of braces,
  * because {@link getErdStudioSetting} reads `inspect()` directly rather than
@@ -19,6 +20,7 @@ export const USER_SCOPED_SETTINGS: ReadonlySet<string> = new Set([
   'feedback.aiAssist',
   'feedback.endpoint',
   'feedback.model',
+  'feedback.hostedFallback',
 ]);
 
 /**

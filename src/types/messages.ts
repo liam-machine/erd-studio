@@ -565,6 +565,14 @@ export interface AnalyzeFeedbackMessage {
     kind: FeedbackKind;
     description: string;
     context?: string;
+    /**
+     * What asked for this run. `'user'` means the user pressed the panel's
+     * "Analyse this for me" button; `'debounce'` (the default when omitted)
+     * means they were typing. The host declines a `'debounce'` run on the
+     * user's own language model until one `'user'` run has succeeded, because
+     * VS Code's access dialog may not be raised out of the blue.
+     */
+    trigger?: 'debounce' | 'user';
   };
 }
 

@@ -95,6 +95,7 @@ function capabilities(overrides: Partial<FeedbackCapabilities> = {}): FeedbackCa
     extensionVersion: '0.6.49',
     aiAvailable: false,
     aiProviderLabel: null,
+    aiNeedsPriming: false,
     githubHandle: null,
     canCaptureCanvas: true,
     ...overrides,
@@ -324,6 +325,19 @@ describe('per-kind copy', () => {
 });
 
 describe('the prefill', () => {
+  /**
+   * The canvas error screen opens the dialog with the host's raw exception,
+   * which names absolute domain file paths and dbt model names. It is the one
+   * description in the dialog nobody typed, and the only path by which text a
+   * user never wrote — and may not have read — could reach a model.
+   */
+  const CANVAS_ERROR =
+    'Error shown on canvas: Invalid JSON in domain file ' +
+    '/Users/liam/work/acme-private/.erd-studio/silver/customer-360.json: Unexpected token }';
+
+  const analyses = () =>
+    send.mock.calls.map((c) => c[0]).filter((m) => m.type === 'analyzeFeedback');
+
   it('seeds the kind and both text fields', () => {
     resetStore({
       feedbackPrefill: { kind: 'bug', title: 'From palette', description: 'Error shown on canvas' },
@@ -331,6 +345,94 @@ describe('the prefill', () => {
     render(<FeedbackDialog />);
     expect(titleInput().value).toBe('From palette');
     expect(descriptionInput().value).toBe('Error shown on canvas');
+  });
+
+  it('never sends a prefilled description on the debounce, even on a primed machine', () => {
+    vi.useFakeTimers();
+    resetStore({
+      feedbackCapabilities: capabilities({
+        aiAvailable: true,
+        aiProviderLabel: 'Copilot',
+        aiNeedsPriming: false,
+      }),
+      feedbackPrefill: { kind: 'bug', description: CANVAS_ERROR },
+    });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 50);
+    });
+
+    expect(analyses()).toHaveLength(0);
+    // Not silently dead either: the send is offered as a deliberate click.
+    expect(text('.feedback__primer')).toContain('Analyse this for me');
+    expect(text('.feedback__primer-note')).toBe(
+      'This text was filled in for you — nothing is sent until you ask.',
+    );
+  });
+
+  it('resumes the debounce the moment the user makes the description theirs', () => {
+    vi.useFakeTimers();
+    resetStore({
+      feedbackCapabilities: capabilities({
+        aiAvailable: true,
+        aiProviderLabel: 'Copilot',
+        aiNeedsPriming: false,
+      }),
+      feedbackPrefill: { kind: 'bug', description: CANVAS_ERROR },
+    });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: `${CANVAS_ERROR}.` } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 50);
+    });
+
+    expect(analyses()).toHaveLength(1);
+    expect(analyses()[0].payload.description).toBe(`${CANVAS_ERROR}.`);
+    expect(q('.feedback__primer')).toBeNull();
+  });
+
+  it('sends it only when the user asks for it by hand', () => {
+    resetStore({
+      feedbackCapabilities: capabilities({
+        aiAvailable: true,
+        aiProviderLabel: 'Copilot',
+        aiNeedsPriming: false,
+      }),
+      feedbackPrefill: { kind: 'bug', description: CANVAS_ERROR },
+    });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.click(buttonWithText('Analyse this for me')!);
+    });
+
+    expect(analyses()).toHaveLength(1);
+    expect(analyses()[0].payload).toMatchObject({ description: CANVAS_ERROR, trigger: 'user' });
+  });
+
+  it('leaves the ordinary debounce alone when nothing was prefilled', () => {
+    vi.useFakeTimers();
+    resetStore({
+      feedbackCapabilities: capabilities({
+        aiAvailable: true,
+        aiProviderLabel: 'Copilot',
+        aiNeedsPriming: false,
+      }),
+    });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 50);
+    });
+
+    expect(analyses()).toHaveLength(1);
   });
 });
 
@@ -392,6 +494,214 @@ describe('the analysis panel', () => {
     });
     render(<FeedbackDialog />);
     expect(qq('button').filter((b) => (b.textContent ?? '').startsWith('Not right?'))).toHaveLength(1);
+  });
+});
+
+/**
+ * The first run on a machine has to be asked for.
+ *
+ * Tier 1 is the user's own model, and VS Code raises its access dialog on the
+ * back of the request — the API guidance is that this follows a user-initiated
+ * action rather than appearing while someone types. So the panel offers one
+ * button, and only after a request has come back does the debounce take over.
+ */
+describe('the first-run primer', () => {
+  const primed = (overrides: Partial<FeedbackCapabilities> = {}) =>
+    capabilities({ aiAvailable: true, aiProviderLabel: 'Copilot', ...overrides });
+
+  const analyses = () =>
+    send.mock.calls.map((c) => c[0]).filter((m) => m.type === 'analyzeFeedback');
+
+  it('offers a button instead of running on the debounce', () => {
+    vi.useFakeTimers();
+    resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: true }) });
+    render(<FeedbackDialog />);
+
+    expect(text('.feedback__primer')).toContain('Analyse this for me');
+    expect(text('.feedback__primer-note')).toBe('Uses your own model. VS Code will ask once.');
+    // The idle prose gives way to the button rather than sitting beside it.
+    expect(q('.feedback__idle')).toBeNull();
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 10);
+    });
+    expect(analyses()).toHaveLength(0);
+  });
+
+  it('runs nothing until there is enough to analyse', () => {
+    resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: true }) });
+    render(<FeedbackDialog />);
+
+    expect(buttonWithText('Analyse this for me')!.hasAttribute('disabled')).toBe(true);
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    expect(buttonWithText('Analyse this for me')!.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('asks explicitly when the button is pressed', () => {
+    resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: true }) });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      fireEvent.click(buttonWithText('Analyse this for me')!);
+    });
+
+    expect(analyses()).toHaveLength(1);
+    // `trigger: 'user'` is what lets the host raise VS Code's dialog at all.
+    expect(analyses()[0].payload).toMatchObject({
+      kind: 'bug',
+      description: LONG_DESCRIPTION,
+      trigger: 'user',
+    });
+    expect(setFeedbackAnalysisPending).toHaveBeenCalled();
+  });
+
+  it('hands over to the debounce once a reply has landed', () => {
+    vi.useFakeTimers();
+    resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: true }) });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      fireEvent.click(buttonWithText('Analyse this for me')!);
+    });
+    act(() => {
+      for (const listener of busListeners) {
+        listener({
+          type: 'feedbackAnalysis',
+          payload: { requestId: analyses()[0].payload.requestId, analysis: analysis() },
+        });
+      }
+    });
+
+    expect(buttonWithText('Analyse this for me')).toBeUndefined();
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: `${LONG_DESCRIPTION} Again.` } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 10);
+    });
+
+    expect(analyses()).toHaveLength(2);
+    expect(analyses()[1].payload.trigger).toBe('debounce');
+  });
+
+  it('does not repeat the primer\'s own request when the debounce takes over', () => {
+    // Handing over re-runs the debounce effect with an unchanged description.
+    // Without a guard that is a second, identical model request for one button
+    // press — and the verdict the user just asked for drops back to a spinner.
+    vi.useFakeTimers();
+    resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: true }) });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      fireEvent.click(buttonWithText('Analyse this for me')!);
+    });
+    act(() => {
+      for (const listener of busListeners) {
+        listener({
+          type: 'feedbackAnalysis',
+          payload: { requestId: analyses()[0].payload.requestId, analysis: analysis() },
+        });
+      }
+    });
+    setFeedbackAnalysisPending.mockClear();
+
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 50);
+    });
+
+    expect(analyses()).toHaveLength(1);
+    // The panel is left showing the answer rather than reverting to "thinking".
+    expect(setFeedbackAnalysisPending).not.toHaveBeenCalled();
+  });
+
+  it('still re-analyses an edit that lands back on the same text', () => {
+    // The guard is "same text AND same request id". An A -> B -> A edit has a
+    // moved id (the effect cleanup bumps it on every change), so it runs again.
+    vi.useFakeTimers();
+    resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: false }) });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 50);
+    });
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: `${LONG_DESCRIPTION} extra` } });
+    });
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 50);
+    });
+
+    expect(analyses()).toHaveLength(2);
+    expect(analyses()[1].payload.description).toBe(LONG_DESCRIPTION);
+  });
+
+  it('brings the button back when the request failed — a dismissed dialog is not a yes', () => {
+    resetStore({ feedbackCapabilities: primed({ aiNeedsPriming: true }) });
+    render(<FeedbackDialog />);
+
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      fireEvent.click(buttonWithText('Analyse this for me')!);
+    });
+    act(() => {
+      for (const listener of busListeners) {
+        listener({
+          type: 'feedbackAnalysis',
+          payload: {
+            requestId: analyses()[0].payload.requestId,
+            analysis: null,
+            error: 'The analysis could not be completed.',
+          },
+        });
+      }
+    });
+
+    expect(buttonWithText('Analyse this for me')).toBeTruthy();
+  });
+
+  it('never shows the primer for a tier that asks its own consent question', () => {
+    vi.useFakeTimers();
+    resetStore({
+      feedbackCapabilities: capabilities({
+        aiAvailable: true,
+        aiProviderLabel: 'api.example.com',
+        aiNeedsPriming: false,
+      }),
+    });
+    render(<FeedbackDialog />);
+
+    expect(q('.feedback__primer')).toBeNull();
+    act(() => {
+      fireEvent.change(descriptionInput(), { target: { value: LONG_DESCRIPTION } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(ANALYSIS_DEBOUNCE_MS + 10);
+    });
+    expect(analyses()).toHaveLength(1);
+    expect(analyses()[0].payload.trigger).toBe('debounce');
   });
 });
 

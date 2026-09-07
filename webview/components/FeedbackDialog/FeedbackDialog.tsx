@@ -137,12 +137,26 @@ export function FeedbackDialog() {
   const [filingAnywayRaw, setFilingAnyway] = useState(false);
   const [regressionOfRaw, setRegressionOf] = useState<number | undefined>(undefined);
   const [imagesUrged, setImagesUrged] = useState(false);
+  // Set once a request has actually come back with an analysis, so the primer
+  // button gives way to the debounce for the rest of this dialog. The host
+  // persists the same fact in globalState for every future dialog; this is only
+  // what keeps the button from reappearing between here and the next open.
+  const [primedHere, setPrimedHere] = useState(false);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const contextRef = useRef<HTMLTextAreaElement>(null);
   const requestIdRef = useRef(0);
   const kindOverridden = useRef(false);
+  // The description the dialog was *opened* with, if any. Text nobody typed is
+  // not text anybody chose to send: the canvas error screen prefills the raw
+  // host exception, which carries absolute domain paths and model names, so the
+  // debounce must not carry it to a model on its own. Editing a single
+  // character makes the description the user's again and the debounce resumes.
+  const prefilledDescriptionRef = useRef('');
+  // The text and id of the request most recently sent, so a debounce cannot
+  // repeat one that is still the current answer. See `runAnalysis`.
+  const lastRequestedRef = useRef<{ text: string; id: number } | null>(null);
 
   // Mirrors of state the async handlers and the debounce read without being
   // re-created (and therefore re-scheduled) on every keystroke. `attachments`
@@ -209,6 +223,11 @@ export function FeedbackDialog() {
     // prefilled title would then be overwritten by a suggestion.
     userTitleRef.current = prefill?.title ?? '';
     setDescription(prefill?.description ?? '');
+    // Written during render for the same reason as `userTitleRef` above: the
+    // analysis effect runs in this same commit and has to see it already set,
+    // or the very first debounce would carry the prefill to the model.
+    prefilledDescriptionRef.current = prefill?.description ?? '';
+    lastRequestedRef.current = null;
     setContext('');
     setIncludeDiagnostics(true);
     setIncludeCanvasScreenshot(false);
@@ -222,6 +241,10 @@ export function FeedbackDialog() {
     setFilingAnyway(false);
     setRegressionOf(undefined);
     setImagesUrged(false);
+    // Cleared with everything else: the host's `feedbackContext` reply, asked
+    // for a few lines below, is the authority on whether the primer is needed,
+    // and a stale `true` here would hide a button that is still required.
+    setPrimedHere(false);
     kindOverridden.current = Boolean(prefill?.kind);
 
     sendRef.current({
@@ -284,6 +307,10 @@ export function FeedbackDialog() {
   useMessageBus((message: ExtensionMessage) => {
     if (message.type === 'feedbackAnalysis') {
       if (message.payload.requestId !== requestIdRef.current) return;
+      // A reply with an analysis means the model answered — on tier 1 that is
+      // VS Code's dialog already dealt with, so the debounce may take over. A
+      // null one (declined dialog, timeout) leaves the button where it is.
+      if (message.payload.analysis) setPrimedHere(true);
       setAnalysis(message.payload.analysis, message.payload.error);
       return;
     }
@@ -297,17 +324,33 @@ export function FeedbackDialog() {
     }
   });
 
-  // One debounced call per description edit, and never below the minimum
-  // length — a three-word draft costs a round trip and tells the model nothing.
-  useEffect(() => {
-    if (!open || !capabilities?.aiAvailable) return;
-    const trimmed = description.trim();
-    if (trimmed.length < MIN_DESCRIPTION_CHARS) {
-      if (useEditorStore.getState().feedbackAnalysisState !== 'idle') setAnalysis(null);
-      return;
-    }
-    const timer = window.setTimeout(() => {
+  /**
+   * Ask the host for one analysis. `trigger` is the difference between the user
+   * pressing the primer button and them merely typing: the host refuses a
+   * debounced request on the user's own language model until one asked-for run
+   * has succeeded, because VS Code's access dialog may not appear out of the
+   * blue.
+   *
+   * A debounced call never repeats the request that is still the current one.
+   * Two paths would otherwise duplicate it: the primer reply flipping
+   * `needsPriming` false re-runs the debounce effect with an unchanged
+   * description (and the run it replaces registered no cleanup, so the id has
+   * not moved), and a timer armed by the last keystroke is still pending when
+   * the button is pressed within the debounce window. A `'user'` click always
+   * goes through, so a failed first run can still be retried by hand.
+   *
+   * The id is half the comparison because the effect's cleanup increments it on
+   * every description change: an A → B → A edit has a moved id and re-runs,
+   * while the primer flip — which runs no cleanup — does not.
+   */
+  const runAnalysis = useCallback(
+    (trimmed: string, trigger: 'debounce' | 'user') => {
+      const last = lastRequestedRef.current;
+      const isRepeat =
+        last !== null && last.text === trimmed && last.id === requestIdRef.current;
+      if (trigger === 'debounce' && isRepeat) return;
       requestIdRef.current += 1;
+      lastRequestedRef.current = { text: trimmed, id: requestIdRef.current };
       setAnalysisPending();
       sendRef.current({
         type: 'analyzeFeedback',
@@ -316,8 +359,38 @@ export function FeedbackDialog() {
           kind: kindRef.current,
           description: trimmed,
           context: contextRefValue.current.trim() || undefined,
+          trigger,
         },
       });
+    },
+    [setAnalysisPending],
+  );
+
+  // Whether the first run still has to be asked for by a click. The host
+  // decides (it owns the globalState flag); `primedHere` only covers the gap
+  // between a success and the next `feedbackContext`.
+  const needsPriming = capabilities?.aiNeedsPriming === true && !primedHere;
+
+  // True while the description is still exactly the text the dialog was opened
+  // with. The canvas error screen prefills the host's raw exception — which
+  // names absolute domain file paths and dbt model names — so this is the one
+  // description in the dialog the user did not write and may not have read.
+  // Nothing auto-sends it; the primer button offers it as a deliberate choice.
+  const descriptionIsUntouchedPrefill =
+    prefilledDescriptionRef.current.trim().length > 0 &&
+    description.trim() === prefilledDescriptionRef.current.trim();
+
+  // One debounced call per description edit, and never below the minimum
+  // length — a three-word draft costs a round trip and tells the model nothing.
+  useEffect(() => {
+    if (!open || !capabilities?.aiAvailable || needsPriming || descriptionIsUntouchedPrefill) return;
+    const trimmed = description.trim();
+    if (trimmed.length < MIN_DESCRIPTION_CHARS) {
+      if (useEditorStore.getState().feedbackAnalysisState !== 'idle') setAnalysis(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      runAnalysis(trimmed, 'debounce');
     }, ANALYSIS_DEBOUNCE_MS);
     return () => {
       // Whatever this run put in flight is stale from here on. The cleanup runs
@@ -328,7 +401,15 @@ export function FeedbackDialog() {
       requestIdRef.current += 1;
       window.clearTimeout(timer);
     };
-  }, [open, description, capabilities?.aiAvailable, setAnalysis, setAnalysisPending]);
+  }, [
+    open,
+    description,
+    capabilities?.aiAvailable,
+    needsPriming,
+    descriptionIsUntouchedPrefill,
+    runAnalysis,
+    setAnalysis,
+  ]);
 
   // Land a reply in the fields, without ever overwriting the user: a title they
   // typed and a context they filled in both win.
@@ -764,6 +845,14 @@ export function FeedbackDialog() {
               errorMessage={analysisError ?? undefined}
               providerLabel={capabilities?.aiProviderLabel ?? null}
               onOpenIssue={openIssue}
+              needsPriming={needsPriming || descriptionIsUntouchedPrefill}
+              primerNote={
+                needsPriming
+                  ? 'Uses your own model. VS Code will ask once.'
+                  : 'This text was filled in for you — nothing is sent until you ask.'
+              }
+              canAnalyse={description.trim().length >= MIN_DESCRIPTION_CHARS}
+              onAnalyse={() => runAnalysis(description.trim(), 'user')}
             />
           )}
 

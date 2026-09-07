@@ -311,8 +311,14 @@
         "erdStudio.feedback.aiAssist": {
           "scope": "machine",
           "type": "boolean",
-          "default": false,
-          "markdownDescription": "Let the Feedback dialog make **one** request to a language model to draft a title, pick bug vs feature, and check for duplicate issues. Only what you typed is sent — diagnostics, file paths and model names never are. Off by default; you are asked to confirm the destination the first time."
+          "default": true,
+          "markdownDescription": "Let the Feedback dialog make **one** request to a language model to draft a title, pick bug vs feature, and check for duplicate issues. Only what you typed is sent — diagnostics, file paths and model names never are. Your own model is used where VS Code has one (VS Code asks for access itself, once); otherwise `#erdStudio.feedback.endpoint#`, or — if `#erdStudio.feedback.hostedFallback#` is on — a relay run by the extension author that forwards your description to a named third-party AI provider under the author's account. That last one always asks first and names both. Turn this off to make no request at all."
+        },
+        "erdStudio.feedback.hostedFallback": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "As a last resort — when VS Code offers no language model and `#erdStudio.feedback.endpoint#` is empty — allow the Feedback dialog to send your description to a small relay run by the extension author, which forwards it to a third-party AI provider under the author's account and that provider's terms. You are always asked first — the prompt names the relay and the provider — and the request carries only what you typed. Turn this off to keep feedback analysis on your own model or endpoint only."
         },
         "erdStudio.feedback.endpoint": {
           "scope": "machine",

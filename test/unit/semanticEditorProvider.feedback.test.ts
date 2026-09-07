@@ -29,7 +29,11 @@ import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import type { ReportTrackingService } from '../../src/services/reportTrackingService';
-import { FEEDBACK_AI_ASSIST_SETTING } from '../../src/services/feedbackAnalysisService';
+import {
+  FEEDBACK_AI_ASSIST_SETTING,
+  FEEDBACK_LM_PRIMED_KEY,
+  clearKnownIssueCache,
+} from '../../src/services/feedbackAnalysisService';
 import { hostErrorLog } from '../../src/services/feedbackService';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -128,6 +132,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // One test stubs the global fetch so the duplicate check never reaches the
+  // network; unstub here so a failure inside it cannot leak into the next file.
+  vi.unstubAllGlobals();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -156,6 +163,7 @@ describe('requestFeedbackContext', () => {
       extensionVersion: '0.0.0-test',
       aiAvailable: false,
       aiProviderLabel: null,
+      aiNeedsPriming: false,
       githubHandle: null,
       canCaptureCanvas: true,
     });
@@ -173,7 +181,7 @@ describe('requestFeedbackContext', () => {
     }
   });
 
-  it('reports the AI provider when one is configured', async () => {
+  it('reports the AI provider when one is configured, and that it needs priming', async () => {
     vscode._setMockConfiguration('erdStudio', FEEDBACK_AI_ASSIST_SETTING, { globalValue: true });
     vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
     const { panel } = await openShowcase(root);
@@ -184,6 +192,24 @@ describe('requestFeedbackContext', () => {
     expect(lastOf(panel, 'feedbackContext').capabilities).toMatchObject({
       aiAvailable: true,
       aiProviderLabel: 'Copilot',
+      // Nothing has been asked for on this machine yet, so the dialog offers
+      // its button rather than firing on the debounce.
+      aiNeedsPriming: true,
+    });
+  });
+
+  it('stops asking for a click once a language-model request has succeeded', async () => {
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_AI_ASSIST_SETTING, { globalValue: true });
+    vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
+    const { panel, context } = await openShowcase(root);
+    await context.globalState.update(FEEDBACK_LM_PRIMED_KEY, true);
+
+    panel._simulateMessage({ type: 'requestFeedbackContext', payload: {} });
+
+    await vi.waitFor(() => expect(types(panel)).toContain('feedbackContext'));
+    expect(lastOf(panel, 'feedbackContext').capabilities).toMatchObject({
+      aiAvailable: true,
+      aiNeedsPriming: false,
     });
   });
 
@@ -381,6 +407,62 @@ describe('analyzeFeedback', () => {
     await vi.waitFor(() => expect(lastError(panel)).toBeDefined());
     expect(lastError(panel)).toMatch(/^Failed to analyse feedback: /);
     expect(types(panel)).not.toContain('feedbackAnalysis');
+  });
+
+  it('rejects an unrecognised trigger rather than reading it as a user action', async () => {
+    const { panel } = await openShowcase(root);
+
+    panel._simulateMessage({
+      type: 'analyzeFeedback',
+      payload: { requestId: 3, kind: 'bug', description: 'It vanished.', trigger: 'yes' },
+    });
+
+    await vi.waitFor(() => expect(lastError(panel)).toBeDefined());
+    expect(lastError(panel)).toMatch(/trigger must be/);
+    expect(types(panel)).not.toContain('feedbackAnalysis');
+  });
+
+  it('carries the trigger through: a debounce is declined before priming, a click is not', async () => {
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_AI_ASSIST_SETTING, { globalValue: true });
+    vscode._setMockLanguageModels([
+      {
+        id: 'gpt-4o',
+        name: 'GPT-4o',
+        reply: JSON.stringify({
+          kind: 'bug',
+          confidence: 0.8,
+          title: 'Edge vanished',
+          context: '',
+          reasons: {},
+          duplicates: [],
+        }),
+      },
+    ]);
+    // The provider injects no fetch, so the duplicate check would reach the
+    // real GitHub. Answer it with an empty list instead of touching the network.
+    clearKnownIssueCache();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, status: 200, text: async () => '[]' })),
+    );
+    const { panel, context } = await openShowcase(root);
+    const description = 'Renamed a model and the edge vanished from the canvas.';
+
+    panel._simulateMessage({
+      type: 'analyzeFeedback',
+      payload: { requestId: 1, kind: 'bug', description, trigger: 'debounce' },
+    });
+    await vi.waitFor(() => expect(lastOf(panel, 'feedbackAnalysis')?.requestId).toBe(1));
+    expect(lastOf(panel, 'feedbackAnalysis').analysis).toBeNull();
+    expect(context.globalState.get(FEEDBACK_LM_PRIMED_KEY)).toBeUndefined();
+
+    panel._simulateMessage({
+      type: 'analyzeFeedback',
+      payload: { requestId: 2, kind: 'bug', description, trigger: 'user' },
+    });
+    await vi.waitFor(() => expect(lastOf(panel, 'feedbackAnalysis')?.requestId).toBe(2));
+    expect(lastOf(panel, 'feedbackAnalysis').analysis?.title).toBe('Edge vanished');
+    expect(context.globalState.get(FEEDBACK_LM_PRIMED_KEY)).toBe(true);
   });
 });
 

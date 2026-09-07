@@ -329,7 +329,8 @@ export function validateRequestFeedbackContextPayload(value: unknown): string | 
 
 /**
  * Validate an `analyzeFeedback` payload: finite integer `requestId`, valid
- * `kind`, non-empty string `description`, optional string `context`.
+ * `kind`, non-empty string `description`, optional string `context`, optional
+ * `trigger` of `"debounce"` or `"user"`.
  */
 export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -340,6 +341,7 @@ export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
     kind?: unknown;
     description?: unknown;
     context?: unknown;
+    trigger?: unknown;
   };
   if (!isFiniteNumber(payload.requestId) || !Number.isInteger(payload.requestId)) {
     return 'Analysis request id must be a finite integer.';
@@ -355,6 +357,15 @@ export function validateAnalyzeFeedbackPayload(value: unknown): string | null {
   }
   if (payload.context !== undefined && typeof payload.context !== 'string') {
     return 'Context must be a string.';
+  }
+  // `trigger` decides whether an unprimed language-model request is allowed to
+  // run, so an unrecognised value is refused rather than read as "user".
+  if (
+    payload.trigger !== undefined &&
+    payload.trigger !== 'debounce' &&
+    payload.trigger !== 'user'
+  ) {
+    return 'Analysis trigger must be "debounce" or "user".';
   }
   return null;
 }

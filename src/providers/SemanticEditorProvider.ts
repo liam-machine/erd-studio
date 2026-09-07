@@ -77,6 +77,7 @@ import {
   submitFeedback,
 } from '../services/feedbackService';
 import {
+  analysisNeedsPriming,
   analysisProviderLabel,
   analyzeFeedback,
   resolveAnalysisTier,
@@ -468,7 +469,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * The GitHub session is read **silently** — the handle is only ever used to
    * label the auth pill and to track filed issues, and nobody is nagged to sign
    * in. `resolveAnalysisTier` / `analysisProviderLabel` decide whether the AI
-   * panel renders at all; both answer "none" unless `feedback.aiAssist` is on.
+   * panel renders at all, and `analysisNeedsPriming` whether it must be asked
+   * for by a click first; all three answer "no" unless `feedback.aiAssist` is
+   * on.
    */
   private async sendFeedbackContext(
     webview: vscode.Webview,
@@ -502,6 +505,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           extensionVersion: String(this.context.extension.packageJSON.version ?? 'unknown'),
           aiAvailable: tier !== 'none',
           aiProviderLabel: tier === 'none' ? null : await analysisProviderLabel(this.context),
+          // Tier 1 on a machine where no request has succeeded yet: the dialog
+          // shows its button rather than running on the debounce, so VS Code's
+          // access dialog is raised by a click and not by typing.
+          aiNeedsPriming: analysisNeedsPriming(this.context, tier),
           githubHandle,
           canCaptureCanvas: true,
         },
@@ -799,6 +806,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 kind: payload.kind,
                 description: payload.description,
                 context: payload.context,
+                userInitiated: payload.trigger === 'user',
               });
               this.post(webviewPanel.webview, {
                 type: 'feedbackAnalysis',

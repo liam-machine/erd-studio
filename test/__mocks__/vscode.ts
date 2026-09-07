@@ -730,6 +730,11 @@ export interface MockLanguageModel {
   name: string;
   /** Text the model returns for any request. */
   reply: string;
+  /**
+   * When set, `sendRequest` rejects with this instead of replying — what VS
+   * Code does when the user dismisses its language model access dialog.
+   */
+  error?: unknown;
 }
 
 /** The subset of `vscode.lm` the feature-detection shim reaches for. */
@@ -779,11 +784,14 @@ export function _setMockLanguageModels(models: MockLanguageModel[] | null | unde
       (_mockLanguageModels ?? []).map((model) => ({
         id: model.id,
         name: model.name,
-        sendRequest: async () => ({
-          text: (async function* () {
-            yield model.reply;
-          })(),
-        }),
+        sendRequest: async () => {
+          if (model.error !== undefined) throw model.error;
+          return {
+            text: (async function* () {
+              yield model.reply;
+            })(),
+          };
+        },
       })),
   };
   LanguageModelChatMessage = {

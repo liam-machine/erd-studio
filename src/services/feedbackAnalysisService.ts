@@ -7,7 +7,8 @@
  * report. Every one of those is a *suggestion*: the dialog stays fully usable
  * with no model at all, and nothing here ever blocks or fails a report.
  *
- * Three tiers, tried in order:
+ * Four tiers, tried in order. The user's own model and the user's own endpoint
+ * always win; the hosted service is the last resort:
  *   1. VS Code's Language Model API — feature-detected at runtime through
  *      `getLanguageModelApi()`, because `engines.vscode` stays at ^1.85.0 and
  *      `vscode.lm` does not exist in `@types/vscode` 1.85.0. On an older host
@@ -15,8 +16,24 @@
  *   2. An OpenAI-compatible chat-completions endpoint reached with the Node
  *      global `fetch` — base URL and model id from settings, API key from
  *      `context.secrets`, never from settings.json.
- *   3. Nothing configured — `resolveAnalysisTier()` returns `'none'` and the
+ *   3. The author's hosted proxy — the same OpenAI-compatible request with no
+ *      Authorization header (the proxy holds the key), at the build-time
+ *      {@link HOSTED_ANALYSIS_ENDPOINT}. While that constant — or
+ *      {@link HOSTED_ANALYSIS_PROVIDER}, which names the third party the proxy
+ *      forwards to — ships empty, the tier does not exist and behaviour is
+ *      identical to the three-tier build.
+ *   4. Nothing configured — `resolveAnalysisTier()` returns `'none'` and the
  *      dialog renders no AI panel at all.
+ *
+ * Consent is split by who chose the destination. Tier 1 shows no modal of our
+ * own: VS Code owns that dialog, it already names the extension, and a second
+ * modal in front of it is noise. What tier 1 does instead is honour the API
+ * guidance that `selectChatModels` be called "as part of a user-initiated
+ * action" — the first request on a machine must carry `userInitiated`, which is
+ * the dialog's "Analyse this for me" button; once one has succeeded,
+ * {@link FEEDBACK_LM_PRIMED_KEY} is set and the debounce runs freely for ever
+ * after. Tiers 2 and 3 always ask, naming the host the text is posted to,
+ * because the user did not pick that destination in an OS-owned dialog.
  *
  * Privacy: only what the user typed and the public issue list reach the model.
  * `buildAnalysisPrompt()` deliberately takes no `Diagnostics` parameter, so
@@ -56,8 +73,70 @@ export const FEEDBACK_API_KEY_SECRET = 'erdStudio.feedback.apiKey';
  */
 export const FEEDBACK_AI_CONSENT_KEY = 'erdStudio.feedback.aiConsent';
 
-/** Master off switch. Boolean, default false. */
+/**
+ * globalState key recording that one tier-1 request has completed on this
+ * machine.
+ *
+ * VS Code's own consent dialog is an authentication prompt it owns, and the
+ * API guidance is that `selectChatModels` "should be called as part of a
+ * user-initiated action ... and not 'out of the blue'". An 850 ms debounce
+ * while someone types is exactly the case that warns against, so the first
+ * tier-1 request has to come from a button. Once one has *succeeded* the user
+ * has already answered VS Code's dialog and there is nothing left to be
+ * surprised by, so the flag is set and the debounce takes over. A dismissed
+ * dialog fails the request and leaves the flag unset, which brings the button
+ * back rather than leaving the feature silently dead.
+ */
+export const FEEDBACK_LM_PRIMED_KEY = 'erdStudio.feedback.lmPrimed';
+
+/** Master switch. Boolean, default **true**. */
 export const FEEDBACK_AI_ASSIST_SETTING = 'feedback.aiAssist';
+
+/** Off switch for the hosted last-resort tier. Boolean, default true. */
+export const FEEDBACK_HOSTED_FALLBACK_SETTING = 'feedback.hostedFallback';
+
+/**
+ * Base URL of the hosted analysis proxy — a build-time constant, not a setting,
+ * because it is the extension author's own service rather than something a user
+ * or a repository configures.
+ *
+ * **It ships empty on purpose.** While it is `''` the hosted tier does not
+ * exist: `resolveAnalysisTier()` can never return `'hosted'`, no consent modal
+ * mentioning it can ever appear, and the extension behaves exactly as it did
+ * with three tiers. The client is ready before the service is; filling this in
+ * (see `proxy/`) is what turns the tier on, in one place, for one release.
+ *
+ * Only `https:` is accepted, plus `http:` on loopback for a local
+ * `wrangler dev`. The proxy holds the API key, so no key is ever sent with a
+ * hosted request.
+ */
+export const HOSTED_ANALYSIS_ENDPOINT = '';
+
+/**
+ * The third party that actually receives the text, named as a user should see
+ * it (e.g. `'DeepSeek'`).
+ *
+ * The proxy is a relay: it holds the operator's key and forwards the prose to
+ * an upstream model provider under that provider's terms. The consent modal has
+ * to name that provider, not just the relay — the user cannot refuse a
+ * processor they were never told about, and this is the one tier where the
+ * extension, not the user, chose the destination.
+ *
+ * **Fill this in with the same commit that fills {@link
+ * HOSTED_ANALYSIS_ENDPOINT}.** It is not a nicety: `resolveAnalysisTier()`
+ * treats the hosted tier as absent while either constant is empty, so an
+ * endpoint shipped without a named provider simply resolves to `'none'` rather
+ * than sending text under a disclosure that omits the recipient.
+ */
+export const HOSTED_ANALYSIS_PROVIDER = '';
+
+/**
+ * Model id sent to {@link HOSTED_ANALYSIS_ENDPOINT}. Advisory only — the proxy
+ * rewrites `model` to its own allowlisted value rather than trusting the
+ * client, so this is what the request *asks* for, not what it gets. It is
+ * therefore **not** a disclosure: {@link HOSTED_ANALYSIS_PROVIDER} is.
+ */
+export const HOSTED_ANALYSIS_MODEL = 'deepseek-chat';
 
 /** Base URL of an OpenAI-compatible chat-completions API. String, default ''. */
 export const FEEDBACK_ENDPOINT_SETTING = 'feedback.endpoint';
@@ -108,7 +187,7 @@ export interface AnalysisIssueSummary {
 }
 
 /** Which tier would be used, without performing any network or auth work. */
-export type AnalysisTier = 'languageModel' | 'endpoint' | 'none';
+export type AnalysisTier = 'languageModel' | 'endpoint' | 'hosted' | 'none';
 
 /**
  * The bit of a `fetch` response this service reads. Declared structurally so
@@ -457,7 +536,16 @@ let lastRejectedEndpoint: string | null = null;
  * the tier `'none'` and degrades the dialog exactly like an unconfigured one.
  */
 function endpointBaseUrl(): string {
-  const raw = getErdStudioSetting<string>(FEEDBACK_ENDPOINT_SETTING, '').trim().replace(/\/+$/, '');
+  return safeBaseUrl(getErdStudioSetting<string>(FEEDBACK_ENDPOINT_SETTING, ''));
+}
+
+/**
+ * `value` with trailing slashes stripped, or `''` when it is not somewhere a
+ * request may be sent. Shared by the user's endpoint and the hosted proxy so
+ * there is one rule about what a base URL may be, not two.
+ */
+function safeBaseUrl(value: string): string {
+  const raw = value.trim().replace(/\/+$/, '');
   if (!raw) return '';
 
   let url: URL;
@@ -471,6 +559,46 @@ function endpointBaseUrl(): string {
   if (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname)) return raw;
   rejectEndpoint(raw, `${url.protocol}// is not allowed for a remote endpoint`);
   return '';
+}
+
+let hostedTargetOverride: { endpoint: string; model: string; provider?: string } | null = null;
+
+/**
+ * Overrides the build-time hosted target. **Tests only** — nothing in the
+ * extension calls this.
+ *
+ * {@link HOSTED_ANALYSIS_ENDPOINT} ships empty, so without a seam the hosted
+ * tier would be untestable in exactly the build that ships. Pass `null` to go
+ * back to the constants.
+ */
+export function setHostedAnalysisTargetForTests(
+  target: { endpoint: string; model: string; provider?: string } | null,
+): void {
+  hostedTargetOverride = target;
+}
+
+/** The hosted proxy's base URL, or `''` when the tier is not built in. */
+function hostedBaseUrl(): string {
+  return safeBaseUrl(hostedTargetOverride?.endpoint ?? HOSTED_ANALYSIS_ENDPOINT);
+}
+
+/** The model id asked of the hosted proxy (which is free to rewrite it). */
+function hostedModel(): string {
+  return (hostedTargetOverride?.model ?? HOSTED_ANALYSIS_MODEL).trim();
+}
+
+/**
+ * The third party the proxy forwards to, or `''` when the build did not name
+ * one — in which case the tier does not exist. See
+ * {@link HOSTED_ANALYSIS_PROVIDER}.
+ */
+function hostedProvider(): string {
+  return (hostedTargetOverride?.provider ?? HOSTED_ANALYSIS_PROVIDER).trim();
+}
+
+/** Whether the user (or their organisation) left the hosted last resort on. */
+function hostedFallbackEnabled(): boolean {
+  return getErdStudioSetting<boolean>(FEEDBACK_HOSTED_FALLBACK_SETTING, true) === true;
 }
 
 /** Record a refused endpoint once per distinct value — this runs on every keystroke. */
@@ -488,9 +616,14 @@ function endpointModel(): string {
   return getErdStudioSetting<string>(FEEDBACK_MODEL_SETTING, '').trim();
 }
 
-/** Whether the user turned AI assist on at all. */
+/**
+ * Whether AI assist is on at all. Defaults to **true**: with tier 1 the model
+ * is the user's own and VS Code gates it with its own dialog, and with no tier
+ * configured this switch changes nothing. It stays user-scoped, so a repository
+ * cannot flip it either way.
+ */
 function aiAssistEnabled(): boolean {
-  return getErdStudioSetting<boolean>(FEEDBACK_AI_ASSIST_SETTING, false) === true;
+  return getErdStudioSetting<boolean>(FEEDBACK_AI_ASSIST_SETTING, true) === true;
 }
 
 /** The stored API key, or `''`. Never throws. */
@@ -517,9 +650,10 @@ async function hasLanguageModel(): Promise<boolean> {
 }
 
 /**
- * Which tier is available right now. Returns `'none'` when `feedback.aiAssist`
- * is off, or when neither a language model nor an endpoint + model + key is
- * configured. Performs no network work and never prompts.
+ * Which tier is available right now, in the order the user's own choices win:
+ * their language model, then their endpoint, then the author's hosted proxy,
+ * then nothing. Returns `'none'` when `feedback.aiAssist` is off, or when none
+ * of the three is configured. Performs no network work and never prompts.
  */
 export async function resolveAnalysisTier(
   context: vscode.ExtensionContext,
@@ -527,22 +661,72 @@ export async function resolveAnalysisTier(
   if (!aiAssistEnabled()) return 'none';
   if (await hasLanguageModel()) return 'languageModel';
   if (endpointBaseUrl() && endpointModel() && (await readApiKey(context))) return 'endpoint';
+  // The provider is part of the gate, not just the copy: without a named
+  // recipient there is no disclosure that could be consented to, so the tier is
+  // treated as if it were not built in.
+  if (hostedFallbackEnabled() && hostedBaseUrl() && hostedModel() && hostedProvider()) {
+    return 'hosted';
+  }
   return 'none';
 }
 
-/** Human label for the resolved tier ("Copilot", or the endpoint's hostname). */
+/**
+ * True when the resolved tier may not run on the debounce yet: the user's own
+ * model, on a machine where no tier-1 request has succeeded. The dialog renders
+ * its "Analyse this for me" button instead of auto-running, and that click is
+ * the user-initiated action VS Code's guidance asks for.
+ */
+export function analysisNeedsPriming(
+  context: vscode.ExtensionContext,
+  tier: AnalysisTier,
+): boolean {
+  return tier === 'languageModel' && !isLanguageModelPrimed(context);
+}
+
+/** Whether one tier-1 request has already completed on this machine. */
+function isLanguageModelPrimed(context: vscode.ExtensionContext): boolean {
+  return context.globalState.get<unknown>(FEEDBACK_LM_PRIMED_KEY) === true;
+}
+
+/** Record that tier 1 works here, so the debounce may run from now on. */
+async function markLanguageModelPrimed(context: vscode.ExtensionContext): Promise<void> {
+  if (isLanguageModelPrimed(context)) return;
+  try {
+    await context.globalState.update(FEEDBACK_LM_PRIMED_KEY, true);
+  } catch (err) {
+    // Losing the flag only costs one more button click, so this never throws.
+    hostErrorLog.record('feedbackAnalysis.primed', err);
+  }
+}
+
+/**
+ * Human label for the resolved tier: "Copilot", the endpoint's hostname, or
+ * "<relay host> → <provider>" for the hosted tier, which has two parties.
+ */
 export async function analysisProviderLabel(
   context: vscode.ExtensionContext,
 ): Promise<string | null> {
   const tier = await resolveAnalysisTier(context);
   if (tier === 'languageModel') return 'Copilot';
   if (tier === 'endpoint') return endpointHost();
+  // Named as the relay *and* the onward recipient, so the panel does not
+  // re-establish "the author is who reads this" after the modal said otherwise.
+  if (tier === 'hosted') return `${hostedHost()} \u2192 ${hostedProvider()}`;
   return null;
 }
 
 /** Hostname of the configured endpoint, falling back to the raw setting. */
 function endpointHost(): string {
-  const base = endpointBaseUrl();
+  return hostOf(endpointBaseUrl());
+}
+
+/** Hostname of the hosted proxy — what the consent modal has to name. */
+function hostedHost(): string {
+  return hostOf(hostedBaseUrl());
+}
+
+/** The host part of a base URL, falling back to the URL itself. */
+function hostOf(base: string): string {
   try {
     return new URL(base).host || base;
   } catch {
@@ -551,13 +735,25 @@ function endpointHost(): string {
 }
 
 /**
- * The destination a consent applies to: the product name for VS Code's own
- * model, otherwise the host the request is actually posted to. Null when
- * nothing is configured.
+ * The destination a consent of **ours** applies to: the host the request is
+ * posted to. Null for tier 1, which is not ours to gate — VS Code's own
+ * authentication dialog is the consent there, and it already names the
+ * extension — and null when nothing is configured.
+ *
+ * For the hosted tier the value is `"<relay host>|<provider>"` rather than the
+ * host alone, because the disclosure names both and consent belongs to the
+ * disclosure it was given against. Repointing the relay at a different model
+ * provider therefore asks again instead of inheriting a "yes" that was about a
+ * different processor — and a build that shipped the older, host-only copy
+ * re-asks once, which is the correct side to fail on.
  */
 export function analysisConsentTarget(tier: AnalysisTier): string | null {
-  if (tier === 'languageModel') return 'Copilot';
   if (tier === 'endpoint') return endpointHost() || null;
+  if (tier === 'hosted') {
+    const host = hostedHost();
+    const provider = hostedProvider();
+    return host && provider ? `${host}|${provider}` : null;
+  }
   return null;
 }
 
@@ -583,32 +779,92 @@ export async function ensureAnalysisConsent(
   context: vscode.ExtensionContext,
   tier: AnalysisTier,
 ): Promise<boolean> {
-  const host = analysisConsentTarget(tier);
-  if (!host) return false;
-  if (context.globalState.get<unknown>(FEEDBACK_AI_CONSENT_KEY) === host) return true;
-  if (declinedThisSession.has(host)) return false;
+  // Tier 1 is the user's own model, reached through VS Code's own consent
+  // dialog — which names this extension and is the real gate. A modal of ours
+  // in front of it would be a second question about the same decision.
+  if (tier === 'languageModel') return true;
 
+  // What consent is stored and compared against — the whole disclosure, not
+  // just the hostname (see `analysisConsentTarget`).
+  const target = analysisConsentTarget(tier);
+  if (!target) return false;
+  if (context.globalState.get<unknown>(FEEDBACK_AI_CONSENT_KEY) === target) return true;
+  if (declinedThisSession.has(target)) return false;
+
+  const { message, accept, decline } =
+    tier === 'hosted'
+      ? hostedConsentCopy(hostedHost(), hostedProvider())
+      : endpointConsentCopy(endpointHost());
   const choice = await vscode.window.showInformationMessage(
-    `ERD Studio: send your feedback description to ${host} to draft a title, pick the type and ` +
-      'look for duplicates? Only what you typed is sent — diagnostics, file paths and model ' +
-      'names are never included.',
+    message,
     { modal: true },
-    'Enable AI assist',
-    'Not now',
+    accept,
+    decline,
   );
-  if (choice !== 'Enable AI assist') {
-    declinedThisSession.add(host);
+  if (choice !== accept) {
+    declinedThisSession.add(target);
     return false;
   }
-  await context.globalState.update(FEEDBACK_AI_CONSENT_KEY, host);
+  await context.globalState.update(FEEDBACK_AI_CONSENT_KEY, target);
   return true;
+}
+
+/** The prompt for an endpoint the user configured themselves. */
+function endpointConsentCopy(host: string): {
+  message: string;
+  accept: string;
+  decline: string;
+} {
+  return {
+    message:
+      `ERD Studio: send your feedback description to ${host} to draft a title, pick the type ` +
+      'and look for duplicates? Only what you typed is sent — diagnostics, file paths and ' +
+      'model names are never included.',
+    accept: 'Enable AI assist',
+    decline: 'Not now',
+  };
+}
+
+/**
+ * The prompt for the author's hosted service.
+ *
+ * This one always asks, even though tier 1 no longer does, because the user did
+ * not choose this destination — the extension did. So it says whose service it
+ * is, **who it is forwarded to**, what leaves the machine, and how to turn it
+ * off.
+ *
+ * Naming `provider` is the point of the sentence: the author's Worker is a
+ * relay holding the author's key, and the text is processed by a third party
+ * under that party's terms. A consent given about the relay alone would not
+ * cover the party that actually receives the prose.
+ */
+function hostedConsentCopy(
+  host: string,
+  provider: string,
+): { message: string; accept: string; decline: string } {
+  return {
+    message:
+      'ERD Studio: no language model is configured, so your feedback description can be sent ' +
+      `to ${host}, a relay run by the extension author, which forwards it to ${provider} — a ` +
+      "third-party AI provider — under the author's account and that provider's terms, to " +
+      'draft a title, pick the type and look for duplicates. Only what you typed is sent — ' +
+      'diagnostics, file paths and model names are never included. You can turn this off in ' +
+      'settings.',
+    accept: 'Use it',
+    decline: 'No thanks',
+  };
 }
 
 /**
  * Run one analysis. Never throws and never blocks a report: returns
- * `{ analysis: null }` when no tier is configured, when consent was declined,
- * when the call timed out, or when the reply could not be parsed. Errors are
- * recorded on `hostErrorLog`.
+ * `{ analysis: null }` when no tier is configured, when tier 1 is still waiting
+ * for its first user-initiated run, when consent was declined, when the call
+ * timed out, or when the reply could not be parsed. Errors are recorded on
+ * `hostErrorLog`.
+ *
+ * `request.userInitiated` says the user pressed a button for this one. It only
+ * matters for an unprimed tier 1, where a debounced request is declined rather
+ * than made — see {@link FEEDBACK_LM_PRIMED_KEY}.
  */
 export async function analyzeFeedback(
   context: vscode.ExtensionContext,
@@ -616,11 +872,16 @@ export async function analyzeFeedback(
     kind: FeedbackKind;
     description: string;
     context?: string;
+    userInitiated?: boolean;
   },
   deps: AnalysisDependencies = {},
 ): Promise<{ analysis: FeedbackAnalysis | null; error?: string }> {
   const tier = await resolveAnalysisTier(context);
   if (tier === 'none') return { analysis: null };
+  // Not a failure: the dialog is showing its button and is waiting for a click.
+  if (analysisNeedsPriming(context, tier) && request.userInitiated !== true) {
+    return { analysis: null };
+  }
   if (!(await ensureAnalysisConsent(context, tier))) return { analysis: null };
 
   const issues = await fetchKnownIssues(deps.fetch);
@@ -633,15 +894,18 @@ export async function analyzeFeedback(
 
   let raw: string | null;
   try {
-    raw =
-      tier === 'languageModel'
-        ? await requestViaLanguageModel(prompt)
-        : await requestViaEndpoint(context, prompt, deps.fetch);
+    raw = await requestForTier(context, tier, prompt, deps.fetch);
   } catch (err) {
     hostErrorLog.record('feedbackAnalysis.request', err);
     return { analysis: null, error: 'The analysis could not be completed.' };
   }
   if (raw === null) return { analysis: null, error: 'The analysis could not be completed.' };
+
+  // One tier-1 request has now gone all the way through VS Code's dialog, so
+  // the debounce may run unattended from here on — in this report and every
+  // future one. A failure above never reaches this line, which is the point:
+  // a dismissed dialog leaves the button in place.
+  if (tier === 'languageModel') await markLanguageModelPrimed(context);
 
   const analysis = parseAnalysisResponse(raw, request.kind, issues);
   if (!analysis) {
@@ -749,27 +1013,56 @@ async function requestViaLanguageModel(prompt: string): Promise<string | null> {
   }
 }
 
-/**
- * Tier 2 — an OpenAI-compatible `POST <endpoint>/chat/completions`. Returns the
- * assistant message content, or null when the call failed or the shape was not
- * what we asked for.
- */
-async function requestViaEndpoint(
+/** Dispatch one request to whichever tier resolved. */
+async function requestForTier(
   context: vscode.ExtensionContext,
+  tier: AnalysisTier,
+  prompt: string,
+  injectedFetch?: AnalysisFetch,
+): Promise<string | null> {
+  if (tier === 'languageModel') return requestViaLanguageModel(prompt);
+  if (tier === 'hosted') {
+    // No key: the proxy holds it. Everything else is the tier-2 request.
+    return postChatCompletion(hostedBaseUrl(), hostedModel(), null, prompt, injectedFetch);
+  }
+  return postChatCompletion(
+    endpointBaseUrl(),
+    endpointModel(),
+    await readApiKey(context),
+    prompt,
+    injectedFetch,
+  );
+}
+
+/**
+ * Tiers 2 and 3 — an OpenAI-compatible `POST <base>/chat/completions`. Returns
+ * the assistant message content, or null when the call failed or the shape was
+ * not what we asked for.
+ *
+ * `key` is the bearer token for the user's own endpoint, and `null` for the
+ * hosted proxy, which authenticates itself and must never be sent one. That is
+ * the only difference between the two tiers on the wire, which is why they
+ * share this function rather than having a client each.
+ */
+async function postChatCompletion(
+  base: string,
+  model: string,
+  key: string | null,
   prompt: string,
   injectedFetch?: AnalysisFetch,
 ): Promise<string | null> {
   const doFetch = resolveFetch(injectedFetch);
-  const base = endpointBaseUrl();
-  const model = endpointModel();
-  const key = await readApiKey(context);
-  if (!doFetch || !base || !model || !key) return null;
+  if (!doFetch || !base || !model) return null;
+  if (key !== null && !key) return null;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (key) headers.Authorization = `Bearer ${key}`;
 
   const abort = abortAfter(ANALYSIS_TIMEOUT_MS);
   try {
     const call = doFetch(`${base}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      headers,
       body: JSON.stringify({
         model,
         messages: [

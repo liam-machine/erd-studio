@@ -40,6 +40,23 @@ export interface AnalysisPanelProps {
   providerLabel: string | null;
   /** Open one of the possibly-related issues on GitHub. */
   onOpenIssue: (candidate: DuplicateCandidate) => void;
+  /**
+   * True while the first run on this machine still has to be asked for. The
+   * panel then offers a button instead of running on the debounce, because the
+   * tier is the user's own model and VS Code raises its access dialog on the
+   * back of this request — that has to follow something they pressed.
+   */
+  needsPriming: boolean;
+  /**
+   * The line under the primer button, saying why it is there: VS Code's access
+   * dialog on tier 1, or "this text was filled in for you" when the dialog was
+   * opened with a description the user has not touched.
+   */
+  primerNote: string;
+  /** False while the description is too short to be worth a request. */
+  canAnalyse: boolean;
+  /** Run the first analysis. Only ever called from the primer button. */
+  onAnalyse: () => void;
 }
 
 /** Tick / warning glyph beside a readiness row. */
@@ -82,8 +99,16 @@ export function AnalysisPanel({
   errorMessage,
   providerLabel,
   onOpenIssue,
+  needsPriming,
+  primerNote,
+  canAnalyse,
+  onAnalyse,
 }: AnalysisPanelProps) {
   const ready = state === 'ready' && analysis !== null;
+  // The primer replaces the idle prose, never a result or a request in flight:
+  // a failed first run has to leave the button there, or a dismissed VS Code
+  // dialog would kill the feature silently for the rest of the session.
+  const showPrimer = needsPriming && !ready && state !== 'thinking';
   const related = analysis ? relatedDuplicates(analysis.duplicates) : [];
   const takeover = analysis ? pickTakeoverDuplicate(analysis.duplicates) : null;
 
@@ -122,7 +147,21 @@ export function AnalysisPanel({
             </div>
           )}
 
-          {!ready && state !== 'thinking' && state !== 'error' && (
+          {showPrimer && (
+            <div className="feedback__primer">
+              <button
+                type="button"
+                className="feedback__button feedback__button--primary feedback__primer-button"
+                onClick={onAnalyse}
+                disabled={!canAnalyse}
+              >
+                Analyse this for me
+              </button>
+              <span className="feedback__primer-note">{primerNote}</span>
+            </div>
+          )}
+
+          {!showPrimer && !ready && state !== 'thinking' && state !== 'error' && (
             <div className="feedback__idle">
               Describe the problem above and the analysis will pick the type, draft a title, pull out
               the steps and check whether it has already been reported.

@@ -293,6 +293,29 @@
   color: var(--dim-fg);
 }
 
+/*
+ * The first-run primer: one button where the idle prose would be. It is the
+ * user-initiated action VS Code's language model access dialog has to follow,
+ * so it is deliberately the only thing to press in the panel.
+ */
+.feedback__primer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.feedback__primer-button {
+  padding: 4px 11px;
+  font-size: 12px;
+}
+
+.feedback__primer-note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--dim-fg);
+}
+
 .feedback__thinking {
   display: flex;
   align-items: center;
