@@ -480,6 +480,8 @@ export interface ReportBugMessage {
     screenshotDataUrl?: string;
     /** True when the webview successfully wrote the PNG to the clipboard. */
     screenshotOnClipboard?: boolean;
+    /** Why the screenshot could not be captured, when the user asked for one. */
+    screenshotError?: string;
     /** Recent errors the webview observed (oldest → newest). */
     webviewErrors?: string[];
     /** Summary of the domain shown on the canvas, for diagnostics. */

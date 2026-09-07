@@ -76,6 +76,8 @@ export interface BugReportDraft {
   screenshotDataUrl?: string;
   /** Whether the webview managed to place the PNG on the clipboard. */
   screenshotOnClipboard?: boolean;
+  /** Why capture failed, when the user asked for a screenshot but none arrived. */
+  screenshotError?: string;
   /** Errors the webview collected (from `error` messages and window errors). */
   webviewErrors?: string[];
 }
@@ -308,7 +310,16 @@ export async function submitBugReport(
     return;
   }
 
-  if (!draft.screenshotDataUrl) return;
+  // The user asked for a screenshot but capture failed — say so rather than
+  // filing the report with a silently missing image.
+  if (!draft.screenshotDataUrl) {
+    if (draft.screenshotError) {
+      void vscode.window.showWarningMessage(
+        `ERD Studio: the screenshot could not be captured. ${draft.screenshotError}`,
+      );
+    }
+    return;
+  }
 
   const actions = screenshotUri ? ['Reveal Screenshot'] : [];
   const message = draft.screenshotOnClipboard

@@ -79,6 +79,7 @@ export function BugReportDialog() {
 
     let screenshotDataUrl: string | undefined;
     let screenshotOnClipboard = false;
+    let screenshotError: string | undefined;
     if (includeScreenshot) {
       setStatus('Capturing screenshot…');
       const root = document.getElementById('root');
@@ -88,7 +89,8 @@ export function BugReportDialog() {
           screenshotDataUrl = shot.dataUrl;
           screenshotOnClipboard = shot.onClipboard;
         } else {
-          useEditorStore.getState().recordError('screenshot', shot.error ?? 'capture failed');
+          screenshotError = shot.error ?? 'capture failed';
+          useEditorStore.getState().recordError('screenshot', screenshotError);
         }
       }
     }
@@ -103,6 +105,7 @@ export function BugReportDialog() {
         includeDiagnostics,
         screenshotDataUrl,
         screenshotOnClipboard,
+        screenshotError,
         webviewErrors: state.recentErrors,
         domain: domain
           ? {

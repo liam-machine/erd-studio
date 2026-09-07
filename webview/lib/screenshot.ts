@@ -9,12 +9,38 @@
  * Why not fetch fonts/stylesheets: the webview CSP blocks most network
  * access, and VS Code uses system fonts, so `skipFonts` keeps capture
  * reliable without embedding @font-face rules.
+ *
+ * Why the timeout: `html-to-image` resolves its rasterised image inside a
+ * `requestAnimationFrame` callback, and the browser stops firing those while
+ * the document is hidden. If the user switches VS Code tabs (or the window is
+ * minimised) between pressing the button and the capture finishing, the
+ * promise never settles. `withTimeout` turns that into a normal "no
+ * screenshot" result so the bug report still gets filed.
  */
 
 import { toBlob } from 'html-to-image';
 
 /** Refuse to ship absurdly large PNGs through postMessage. */
 const MAX_PNG_BYTES = 12 * 1024 * 1024;
+
+/** How long to wait for the rasteriser before giving up on the screenshot. */
+export const CAPTURE_TIMEOUT_MS = 15_000;
+
+/** Sentinel resolved by `withTimeout` when `promise` takes too long. */
+const TIMED_OUT = Symbol('capture-timeout');
+
+/**
+ * Resolve `promise`, or the `TIMED_OUT` sentinel once `ms` have elapsed.
+ * The timer is always cleared so a slow-but-successful capture does not keep
+ * the webview awake.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 export interface ScreenshotResult {
   /** `data:image/png;base64,...` or null when capture failed. */
@@ -62,7 +88,7 @@ export async function captureScreenshot(
       getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim() ||
       getComputedStyle(document.body).backgroundColor ||
       '#1e1e1e';
-    blob = await toBlob(root, {
+    const raster = toBlob(root, {
       filter: (node) =>
         !(excludeSelector && node instanceof Element && node.matches(excludeSelector)),
       backgroundColor: background,
@@ -70,6 +96,17 @@ export async function captureScreenshot(
       skipFonts: true,
       cacheBust: false,
     });
+    const settled = await withTimeout(raster, CAPTURE_TIMEOUT_MS);
+    if (settled === TIMED_OUT) {
+      return {
+        dataUrl: null,
+        onClipboard: false,
+        error:
+          'Screenshot timed out. This usually means the editor tab was hidden mid-capture — ' +
+          'keep the canvas visible and try again, or attach an image on GitHub.',
+      };
+    }
+    blob = settled;
   } catch (err) {
     return { dataUrl: null, onClipboard: false, error: err instanceof Error ? err.message : String(err) };
   }
