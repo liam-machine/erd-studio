@@ -623,8 +623,12 @@ function secondsUntilNextUtcDay(now) {
  */
 async function callUpstream(env, body) {
   const key = env.DEEPSEEK_API_KEY;
-  if (typeof key !== 'string' || key.length === 0) {
-    // Deployed without the secret. Refuse rather than call anything.
+  if (typeof key !== 'string' || key.trim().length === 0) {
+    // Deployed without the secret, or with an empty one — `wrangler secret put`
+    // run without a TTY reads nothing from stdin and uploads an empty string,
+    // which `wrangler secret list` then reports as present. Say which it is:
+    // from the outside this is indistinguishable from any other outage.
+    log({ event: 'no_upstream_key', kind: typeof key === 'string' ? 'empty' : 'absent' });
     return { ok: false, status: 503, error: 'unavailable', upstreamStatus: 0 };
   }
 
