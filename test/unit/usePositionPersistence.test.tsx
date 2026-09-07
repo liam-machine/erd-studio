@@ -64,6 +64,71 @@ afterEach(() => {
 });
 
 describe('usePositionPersistence', () => {
+  it('sends model AND annotation positions in ONE updatePositions message (H27)', () => {
+    useEditorStore.setState({
+      nodes: [
+        makeNode('a'),
+        {
+          id: 'annotation-n1',
+          type: 'annotation',
+          position: { x: 0, y: 0 },
+          data: { annotationId: 'n1', text: '', color: 'yellow' },
+        } as unknown as ModelFlowNode,
+      ],
+      domain: {
+        ...domain,
+        viewConfig: {
+          ...domain.viewConfig,
+          annotations: [{ id: 'n1', text: '', x: 0, y: 0 }, { id: 'n2', text: '', x: 5, y: 5 }],
+        },
+      } as unknown as DisplayDomain,
+    });
+    const { result } = renderHook(() => usePositionPersistence());
+
+    act(() => {
+      result.current.onNodesChange([
+        { type: 'position', id: 'a', position: { x: 100, y: 200 }, dragging: false },
+        { type: 'position', id: 'annotation-n1', position: { x: 30.4, y: 40.6 }, dragging: false },
+      ]);
+    });
+    act(() => {
+      visibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(mockVsCode.postMessage).toHaveBeenCalledTimes(1);
+    expect(mockVsCode.postMessage).toHaveBeenCalledWith({
+      type: 'updatePositions',
+      payload: {
+        positions: { a: { x: 100, y: 200 } },
+        annotations: [{ id: 'n1', x: 30, y: 41 }],
+      },
+    });
+    // No per-annotation message, and the optimistic update moved only n1.
+    const annotations = useEditorStore.getState().domain?.viewConfig.annotations;
+    expect(annotations).toEqual([
+      expect.objectContaining({ id: 'n1', x: 30, y: 41 }),
+      expect.objectContaining({ id: 'n2', x: 5, y: 5 }),
+    ]);
+  });
+
+  it('omits the annotations key when only models moved', () => {
+    const { result } = renderHook(() => usePositionPersistence());
+    act(() => {
+      result.current.onNodesChange([
+        { type: 'position', id: 'b', position: { x: 7, y: 8 }, dragging: false },
+      ]);
+    });
+    act(() => {
+      visibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(mockVsCode.postMessage).toHaveBeenCalledWith({
+      type: 'updatePositions',
+      payload: { positions: { b: { x: 7, y: 8 } } },
+    });
+  });
+
   it('applies two synchronous change batches without dropping the first (H41)', () => {
     const { result } = renderHook(() => usePositionPersistence());
 

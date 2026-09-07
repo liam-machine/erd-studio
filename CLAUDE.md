@@ -99,17 +99,19 @@ manifest.json ─→ ManifestService  ─┴→ buildPhysicalDomain() ─→ Dis
 |-----------|---------|
 | `components/` | React components — `Graph/` (ModelNode, FkEdge), `DetailPanel/`, `DiscrepancyPanel/`, `WelcomeModal/`, `Toolbar/` (StageTabs), dialogs |
 | `store/` | Zustand store (`editorStore.ts`) — UI state, selection, dialogs, active stage, discrepancy |
-| `hooks/` | `useMessageBus` (extension comms), `useVsCodeApi`, position/state persistence |
-| `lib/` | Pure functions — `graphTransformer`, `elkLayout`, `stageColors`, `columnSort` |
+| `hooks/` | `useMessageBus` (extension comms), `useVsCodeApi`, `useCanvasShortcuts` (global keydown — reads store via `getState()`, registered once), position/state persistence |
+| `lib/` | Pure functions — `graphTransformer`, `elkLayout`, `stageColors`, `keyboardShortcuts` |
 | `styles/` | `theme.css` — CSS custom properties mapping VS Code theme vars |
 
 ### Message Protocol (`src/types/messages.ts`)
 
 Extension <-> Webview communication uses discriminated unions on `type` field:
-- **Extension -> Webview**: `domainLoaded`, `domainUpdated`, `stageData`, `discrepancyReport`, `error`
-- **Webview -> Extension**: `ready`, `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `editRelationship`, `updateRelationship`, `renameModel`, `removeModel`, `addExistingModel`, `toggleColumnKey`, `updateModelRationale`, `updateModelGrain`, `updateModelRole`, `updateViewConfig`, `updatePositions`, `runAutoLayout`, `switchStage`, `toggleDiscrepancy`, `refreshManifest`, `undo`, `redo`
+- **Extension -> Webview**: `domainLoaded`, `stageData`, `discrepancyReport`, `manifestStaleness`, `syncPlanGenerated`, `openBugReport`, `error`
+- **Webview -> Extension**: `ready`, `addModel`, `addColumn`, `removeColumn`, `updateColumn`, `addRelationship`, `removeRelationship`, `removeRelationships`, `editRelationship`, `updateRelationship`, `renameModel`, `removeModel`, `removeModels`, `addExistingModel`, `toggleColumnKey`, `updateModelRationale`, `updateModelGrain`, `updateModelRole`, `updatePositions`, `switchStage`, `toggleDiscrepancy`, `refreshManifest`, `undo`, `redo`, annotation messages (`addAnnotation`, `updateAnnotation`, `removeAnnotation`, `removeAnnotations`)
 
-All mutations go through `WorkspaceEdit` for undo/redo integration. While a panel is viewing the physical stage the host rejects schema mutations (and `undo`/`redo`) with a `"Physical stage is read-only"` `error` message; only shared canvas metadata writes (`updatePositions`, annotations, `toggleStubColumns`, `generateSyncPlan`) are allowed through. Payloads are validated at the message boundary by `src/providers/payloadValidation.ts` (model names via the shared `MODEL_NAME_PATTERN` in `src/types/naming.ts`, column lists incl. duplicates, `keyType`, `cardinality`, `modelRole`, finite positions). `switchStage` carries a `requestId` that the host echoes on `stageData` so the webview can drop stale replies (`webview/lib/stageRequest.ts`).
+Every type in the unions has a live sender and handler — do not add a message type without wiring both ends. Multi-select operations are batched: `removeModels`, `removeAnnotations`, `removeRelationships` and `updatePositions` (which carries `annotations?: [{id,x,y}]` for notes moved in the same drag) each produce **one** `WorkspaceEdit`, one save, one `domainLoaded` — i.e. one undo step.
+
+All domain-file writes go through `applyDomainEdit()` in `SemanticEditorProvider` (the only place a domain `WorkspaceEdit` is built: parse → mutate → replace → `applyEdit` → save → refresh, with `pendingUpdates` held so the change listener never double-saves). A mutator throws `EditAborted` to bail out after reporting its own error; pass `errorLabel` for the applyEdit-rejected case and `onSuccess` for follow-up work such as `selectorsService.scheduleRegenerate()`. Never hand-inline the `WorkspaceEdit` pattern in a handler. While a panel is viewing the physical stage the host rejects schema mutations (and `undo`/`redo`) with a `"Physical stage is read-only"` `error` message; only shared canvas metadata writes (`updatePositions`, annotations, `generateSyncPlan`) are allowed through. Payloads are validated at the message boundary by `src/providers/payloadValidation.ts` (model names via the shared `MODEL_NAME_PATTERN` in `src/types/naming.ts`, column lists incl. duplicates, `keyType`, `cardinality`, `modelRole`, finite positions). `switchStage` carries a `requestId` that the host echoes on `stageData` so the webview can drop stale replies (`webview/lib/stageRequest.ts`).
 
 ## Key Conventions
 

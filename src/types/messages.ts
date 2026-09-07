@@ -2,19 +2,23 @@
  * Message protocol types for extension ↔ webview communication.
  *
  * Messages are categorised by direction:
- *   Extension → Webview:  domainLoaded, domainUpdated, stageData, discrepancyReport, error
+ *   Extension → Webview:  domainLoaded, stageData, discrepancyReport, error
  *   Webview → Extension:  ready, addModel, addColumn, removeColumn, addRelationship,
- *                         removeModel, removeRelationship, editRelationship, updateViewConfig,
- *                         addExistingModel, updatePositions, runAutoLayout, switchStage,
+ *                         removeModel(s), removeRelationship(s), editRelationship,
+ *                         addExistingModel, updatePositions, switchStage,
  *                         toggleDiscrepancy
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
+ *
+ * Every message type in the `WebviewMessage` union has a `case` in
+ * `SemanticEditorProvider`, and every `ExtensionMessage` type is posted by the
+ * host — do not add a type without wiring both ends.
  */
 
 import type { DisplayDomain } from './display';
 import type { DiscrepancyReport } from './discrepancy';
-import type { AnnotationColor, Rationale, Cardinality, ColumnDef, DesignModel, LayoutOptions, ModelRole, Stage } from './semantic';
+import type { AnnotationColor, Rationale, Cardinality, ColumnDef, DesignModel, ModelRole, Stage } from './semantic';
 import type { GroundTruth } from './syncPlan';
 
 // ---------------------------------------------------------------------------
@@ -30,15 +34,6 @@ export interface DomainLoadedMessage {
   payload: DisplayDomain;
   /** Whether the user has already dismissed the welcome modal (persisted in globalState). */
   welcomeDismissed?: boolean;
-}
-
-/**
- * Sent when the domain is updated due to a mutation (add/remove model, etc.).
- * Contains the updated display domain.
- */
-export interface DomainUpdatedMessage {
-  type: 'domainUpdated';
-  payload: DisplayDomain;
 }
 
 /**
@@ -116,7 +111,6 @@ export interface OpenBugReportMessage {
 export type ExtensionMessage =
   | OpenBugReportMessage
   | DomainLoadedMessage
-  | DomainUpdatedMessage
   | StageDataMessage
   | DiscrepancyReportMessage
   | ManifestStalenessMessage
@@ -240,17 +234,32 @@ export interface RemoveModelsMessage {
   };
 }
 
+/** Composite identity of an FK relationship: (fromModel, fromColumn, toModel, toColumn). */
+export interface RelationshipKey {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+  toColumn: string;
+}
+
 /**
  * Request to remove an FK relationship.
  * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
  */
 export interface RemoveRelationshipMessage {
   type: 'removeRelationship';
+  payload: RelationshipKey;
+}
+
+/**
+ * Request to remove several FK relationships in a single edit (multi-select
+ * delete). Keys that no longer exist are skipped; an error is reported only
+ * when none of them matched. One WorkspaceEdit, one undo step.
+ */
+export interface RemoveRelationshipsMessage {
+  type: 'removeRelationships';
   payload: {
-    fromModel: string;
-    fromColumn: string;
-    toModel: string;
-    toColumn: string;
+    relationships: RelationshipKey[];
   };
 }
 
@@ -290,17 +299,6 @@ export interface EditRelationshipMessage {
 }
 
 /**
- * Request to update view configuration (layout options, etc.).
- */
-export interface UpdateViewConfigMessage {
-  type: 'updateViewConfig';
-  payload: {
-    layoutOptions?: LayoutOptions;
-    showFkEdges?: boolean;
-  };
-}
-
-/**
  * Request to add an existing model from the manifest to the domain.
  */
 export interface AddExistingModelMessage {
@@ -313,19 +311,17 @@ export interface AddExistingModelMessage {
 /**
  * Request to update node positions on the canvas.
  * Positions are debounced and merged into viewConfig.positions.
+ *
+ * `annotations` carries the final positions of any annotation nodes moved in
+ * the same drag so a multi-drag of models and notes is one WorkspaceEdit and
+ * one undo step. Unknown annotation ids are ignored.
  */
 export interface UpdatePositionsMessage {
   type: 'updatePositions';
   payload: {
     positions: Record<string, { x: number; y: number }>;
+    annotations?: Array<{ id: string; x: number; y: number }>;
   };
-}
-
-/**
- * Request to run ELK auto-layout on the graph.
- */
-export interface RunAutoLayoutMessage {
-  type: 'runAutoLayout';
 }
 
 /**
@@ -416,19 +412,6 @@ export interface UpdateModelRoleMessage {
   payload: {
     modelName: string;
     modelRole: ModelRole | null;
-  };
-}
-
-/**
- * Toggle whether a model's physical-only columns are suppressed during
- * discrepancy comparison (stub column mode). Stored in the domain JSON.
- */
-export interface ToggleStubColumnsMessage {
-  type: 'toggleStubColumns';
-  payload: {
-    modelName: string;
-    /** True = suppress physical-only columns for this model; false = remove from stub list. */
-    stub: boolean;
   };
 }
 
@@ -607,15 +590,13 @@ export interface RemoveAnnotationMessage {
 }
 
 /**
- * Request to update an annotation's position (sent on drag end).
- * Separate from updateAnnotation for high-frequency drag performance.
+ * Request to remove several canvas annotations in a single edit (multi-select
+ * delete). Unknown ids are ignored. One WorkspaceEdit, one undo step.
  */
-export interface UpdateAnnotationPositionMessage {
-  type: 'updateAnnotationPosition';
+export interface RemoveAnnotationsMessage {
+  type: 'removeAnnotations';
   payload: {
-    id: string;
-    x: number;
-    y: number;
+    ids: string[];
   };
 }
 
@@ -632,12 +613,11 @@ export type WebviewMessage =
   | RemoveModelMessage
   | RemoveModelsMessage
   | RemoveRelationshipMessage
+  | RemoveRelationshipsMessage
   | UpdateRelationshipMessage
   | EditRelationshipMessage
-  | UpdateViewConfigMessage
   | AddExistingModelMessage
   | UpdatePositionsMessage
-  | RunAutoLayoutMessage
   | RefreshManifestMessage
   | UndoMessage
   | RedoMessage
@@ -646,7 +626,6 @@ export type WebviewMessage =
   | UpdateModelDescriptionMessage
   | UpdateModelGrainMessage
   | UpdateModelRoleMessage
-  | ToggleStubColumnsMessage
   | SwitchStageMessage
   | ToggleDiscrepancyMessage
   | ReorderColumnsMessage
@@ -660,7 +639,7 @@ export type WebviewMessage =
   | AddAnnotationMessage
   | UpdateAnnotationMessage
   | RemoveAnnotationMessage
-  | UpdateAnnotationPositionMessage;
+  | RemoveAnnotationsMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

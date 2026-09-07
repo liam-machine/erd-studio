@@ -11,6 +11,7 @@ import {
   validateColumnDef,
   validateColumnDefs,
   validateModelName,
+  validateAnnotationPositions,
   validatePoint,
   validatePositions,
   findDuplicateNames,
@@ -131,5 +132,22 @@ describe('positions', () => {
     expect(validatePositions({ '': { x: 0, y: 0 } })).toMatch(/non-empty/);
     expect(validatePositions([])).toMatch(/map/);
     expect(validatePositions(null)).toMatch(/map/);
+  });
+
+  it('validateAnnotationPositions returns the list, or an error string (H27)', () => {
+    expect(validateAnnotationPositions(undefined)).toEqual([]);
+    expect(validateAnnotationPositions(null)).toEqual([]);
+    expect(validateAnnotationPositions([{ id: 'n1', x: 1, y: 2 }, { id: 'n2', x: -3.5, y: 0 }])).toEqual([
+      { id: 'n1', x: 1, y: 2 },
+      { id: 'n2', x: -3.5, y: 0 },
+    ]);
+    // Extra properties are stripped from the returned entries
+    expect(validateAnnotationPositions([{ id: 'n1', x: 1, y: 2, text: 'x' }])).toEqual([{ id: 'n1', x: 1, y: 2 }]);
+    expect(validateAnnotationPositions({ id: 'n1', x: 1, y: 2 })).toMatch(/list/);
+    expect(validateAnnotationPositions([{ id: '', x: 1, y: 2 }])).toMatch(/non-empty/);
+    expect(validateAnnotationPositions([{ x: 1, y: 2 }])).toMatch(/non-empty/);
+    expect(validateAnnotationPositions([null])).toMatch(/non-empty/);
+    expect(validateAnnotationPositions([{ id: 'n1', x: NaN, y: 2 }])).toMatch(/"n1".*finite/);
+    expect(validateAnnotationPositions([{ id: 'n1', x: 1 }])).toMatch(/"n1"/);
   });
 });

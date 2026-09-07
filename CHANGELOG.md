@@ -9,6 +9,9 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 
 ### Fixed
 
+- **Multi-select delete and drag are one undo step** — deleting a rubber-band selection that includes notes and standalone relationships now removes them in a single edit (one Cmd+Z restores everything, matching models), and dragging several notes together is persisted as one edit instead of one per note.
+- **Undo/redo no longer double-saves** — each toolbar undo/redo wrote the domain file and re-rendered the canvas twice; it now does so once.
+
 - **Leaner marketplace package** — the `.vsix` no longer bundles internal planning and review notes, the `mcp-server` project metadata, or an unused 314 KB demo GIF. Only `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, the icons and the built `dist/` bundles ship. CI now fails if the packaged file list grows unexpectedly.
 - **Releases only when something shipped changes** — docs-only, fixture-only and planning-only PRs no longer publish a new marketplace version (every release triggers a save-all + window reload for users with a canvas open).
 - **Deploy resilience** — the version bump is now computed against the latest published marketplace version (so a desynced repo can no longer fail with "version already exists") and is committed and pushed *before* publishing, so a failed publish never leaves `main` behind the marketplace. The redundant duplicate production build during publish was removed.
@@ -16,6 +19,9 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 
 ### Internal
 
+- Every domain-file write in `SemanticEditorProvider` now goes through the single `applyDomainEdit` pipeline (the 13 hand-inlined `WorkspaceEdit` copies are gone), which also releases its change-listener guard if `applyEdit` throws. New batched messages `removeAnnotations` / `removeRelationships`, and `updatePositions` carries annotation positions.
+- Dead protocol surface removed: `updateViewConfig`, `runAutoLayout`, `toggleStubColumns`, `updateAnnotationPosition` (webview → host) and `domainUpdated` (host → webview) had no sender or no handler. Unused webview files `EditableColumnRow.tsx/.css`, `columnGrouping.ts` and `columnSort.ts` deleted.
+- The canvas keyboard handler moved from `App.tsx` into `useCanvasShortcuts`, which reads store state at keypress time and registers its window listener once (it previously re-subscribed on every selection change via a 35-entry dependency array).
 - `tsx` is declared as a dev dependency (the fixture-regeneration script no longer relies on `npx` auto-install).
 - `@types/vscode` is pinned to `1.85.0` to match `engines.vscode`, so APIs newer than the minimum supported VS Code fail type-checking instead of throwing for users on older versions.
 - Removed unused dev dependencies (`@resvg/resvg-js`, `@types/mocha`, `@vscode/test-cli`, `@vscode/test-electron`, `@vscode-elements/*`) and the non-functional `test:integration` script.
