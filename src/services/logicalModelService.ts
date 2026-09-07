@@ -10,7 +10,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as yaml from 'js-yaml';
+import { Document, parseDocument, isAlias, isMap, isScalar, isSeq } from 'yaml';
+import type { YAMLMap, YAMLSeq } from 'yaml';
 
 import type { ColumnDef, SemanticModel } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
@@ -25,6 +26,22 @@ interface CachedModel {
   readonly signature: string;
   readonly model: SemanticModel;
 }
+
+/**
+ * Stringify options for model files. `lineWidth: 0` disables folding so
+ * long descriptions are never re-wrapped, keeping diffs limited to the
+ * fields that actually changed.
+ */
+const STRINGIFY_OPTIONS = { lineWidth: 0 } as const;
+
+/** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
+const MODEL_KEYS = ['name', 'schema', 'description', 'grain', 'modelRole', 'rationale', 'columns'] as const;
+const RATIONALE_KEYS = ['purpose', 'design', 'grainChoice', 'roleChoice', 'scdStrategy', 'measures'] as const;
+const COLUMN_KEYS = [
+  'name', 'dataType', 'description',
+  'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
+  'scdType', 'additiveType',
+] as const;
 
 // ---------------------------------------------------------------------------
 // YAML schema for model files
@@ -93,9 +110,10 @@ export class LogicalModelService {
   /**
    * Read + parse a YAML model file, serving from the cache when the file on
    * disk is unchanged. Returns a fresh deep copy so callers may mutate freely.
-   * Returns null when the file is missing; throws on read/parse failure.
+   * Returns null when the file is missing, empty, not a mapping, or has no
+   * `name`; throws on read/parse failure.
    */
-  private readModelFile(filePath: string): SemanticModel | null {
+  private readModelFile(filePath: string, fallbackName: string): SemanticModel | null {
     let stat: fs.Stats;
     try {
       stat = fs.statSync(filePath);
@@ -109,12 +127,12 @@ export class LogicalModelService {
       return structuredClone(cached.model);
     }
     const content = fs.readFileSync(filePath, 'utf-8');
-    const raw = yaml.load(content) as YamlModel;
-    if (!raw || !raw.name) {
+    const raw = this.parseModelFile(content);
+    if (!raw || raw.name === undefined || raw.name === null || raw.name === '') {
       this.cache.delete(filePath);
       return null;
     }
-    const model = this.yamlToModel(raw);
+    const model = this.yamlToModel(raw, fallbackName);
     this.cache.set(filePath, { signature, model: structuredClone(model) });
     return model;
   }
@@ -160,7 +178,7 @@ export class LogicalModelService {
   getModel(name: string): SemanticModel | null {
     const filePath = this.modelPath(name);
     try {
-      return this.readModelFile(filePath);
+      return this.readModelFile(filePath, name);
     } catch (err) {
       console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
       return null;
@@ -179,7 +197,7 @@ export class LogicalModelService {
     const models: SemanticModel[] = [];
     for (const file of files) {
       try {
-        const model = this.readModelFile(path.join(this.modelsDir, file));
+        const model = this.readModelFile(path.join(this.modelsDir, file), file.replace(/\.yml$/, ''));
         if (model) {
           models.push(model);
         }
@@ -208,8 +226,14 @@ export class LogicalModelService {
   // -------------------------------------------------------------------------
 
   /**
-   * Save a model to its YAML file. Creates the file if it doesn't exist,
-   * overwrites if it does.
+   * Save a model to its YAML file. Creates the file if it doesn't exist.
+   *
+   * When the file already exists it is edited in place: only the keys that
+   * actually changed are touched, so comments, key order, unknown keys and
+   * scalar styles that a user or AI agent put in the file survive UI edits.
+   * (One caveat of the `yaml` Document API: folded `>` block scalars are
+   * re-emitted on a single line — their value is unchanged.) A file that
+   * fails to parse is rewritten from scratch.
    *
    * The write is atomic: content goes to a sibling temp file first and is then
    * renamed over the target, so a crash mid-write never leaves a truncated yml.
@@ -222,28 +246,51 @@ export class LogicalModelService {
   saveModel(model: SemanticModel): void {
     this.ensureDir();
     const filePath = this.modelPath(model.name);
-    const yamlContent = this.modelToYaml(model);
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    try {
-      fs.writeFileSync(tmpPath, yamlContent, 'utf-8');
-      fs.renameSync(tmpPath, filePath);
-    } catch (err) {
-      try { fs.unlinkSync(tmpPath); } catch { /* temp file may not exist */ }
-      throw err;
-    }
-    // Record so the logical-model watcher does not bounce this save back as
-    // an external change (which would trigger a second identical domainLoaded).
-    this.ownWriteTracker.recordWrite(filePath);
-    this.cache.delete(filePath);
+    this.writeAtomic(filePath, this.renderModel(model, filePath));
   }
 
   /**
    * Serialize a model to the YAML text that `saveModel` would write, without
    * touching disk. Used by the editor to route yml writes through a
    * WorkspaceEdit so they share an undo step with the domain file change.
+   * When the model file already exists on disk the text is produced by the
+   * same in-place edit `saveModel` performs, so hand-written comments, key
+   * order and unknown keys survive editor-driven saves too.
    */
   serializeModel(model: SemanticModel): string {
-    return this.modelToYaml(model);
+    return this.renderModel(model, this.modelPath(model.name));
+  }
+
+  /**
+   * Produce the full YAML text for a model: the existing document at
+   * `filePath` edited in place when it can be parsed, otherwise a fresh
+   * document generated from the model.
+   */
+  private renderModel(model: SemanticModel, filePath: string): string {
+    const doc = this.loadEditableDocument(filePath) ?? new Document(this.modelToPlain(model));
+    if (isMap(doc.contents)) {
+      this.applyModel(doc, doc.contents, model);
+    }
+    return doc.toString(STRINGIFY_OPTIONS);
+  }
+
+  /**
+   * Atomically write `content` to `filePath` (temp file + rename), record it
+   * as our own write so the logical-model watcher does not bounce it back as
+   * an external change (which would trigger a second identical domainLoaded),
+   * and drop any cached parse for the path.
+   */
+  private writeAtomic(filePath: string, content: string): void {
+    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.writeFileSync(tmpPath, content, 'utf-8');
+      fs.renameSync(tmpPath, filePath);
+    } catch (err) {
+      try { fs.unlinkSync(tmpPath); } catch { /* temp file may not exist */ }
+      throw err;
+    }
+    this.ownWriteTracker.recordWrite(filePath);
+    this.cache.delete(filePath);
   }
 
   /**
@@ -271,8 +318,17 @@ export class LogicalModelService {
     if (newName !== oldName && this.modelExists(newName)) {
       throw new Error(`Model "${newName}" already exists in logical-models/`);
     }
-    model.name = newName;
-    this.saveModel(model);
+    // Carry the existing document (comments, key order, extra keys) across
+    // to the new file rather than regenerating it from the parsed model.
+    const doc = this.loadEditableDocument(this.modelPath(oldName));
+    if (doc) {
+      this.ensureDir();
+      doc.set('name', newName);
+      this.writeAtomic(this.modelPath(newName), doc.toString(STRINGIFY_OPTIONS));
+    } else {
+      model.name = newName;
+      this.saveModel(model);
+    }
     this.deleteModel(oldName);
   }
 
@@ -361,46 +417,240 @@ export class LogicalModelService {
   // YAML ↔ SemanticModel conversion
   // -------------------------------------------------------------------------
 
-  private yamlToModel(raw: YamlModel): SemanticModel {
+  /**
+   * Parse a model file into a plain object without scalar coercion.
+   *
+   * The `yaml` package resolves `007` to `7` and (under a `%YAML 1.1`
+   * directive) `2024-01-01` to a Date. Model fields are strings by contract,
+   * so every non-string scalar is read back from its original source text
+   * instead of its resolved value. Booleans and nulls are kept as-is.
+   * Returns null for an empty file or a file whose root is not a mapping.
+   * Throws on YAML syntax errors.
+   */
+  private parseModelFile(content: string): YamlModel | null {
+    const doc = parseDocument(content);
+    if (doc.errors.length > 0) {
+      throw doc.errors[0];
+    }
+    const raw = this.toPlain(doc, doc.contents);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return null;
+    }
+    return raw as YamlModel;
+  }
+
+  /** Convert a node tree to plain JS, preserving scalar source text for non-string values. */
+  private toPlain(doc: Document, node: unknown): unknown {
+    if (isAlias(node)) {
+      return this.toPlain(doc, node.resolve(doc));
+    }
+    if (isMap(node)) {
+      const obj: Record<string, unknown> = {};
+      for (const pair of node.items) {
+        obj[String(this.toPlain(doc, pair.key))] = this.toPlain(doc, pair.value);
+      }
+      return obj;
+    }
+    if (isSeq(node)) {
+      return node.items.map((item) => this.toPlain(doc, item));
+    }
+    if (isScalar(node)) {
+      return this.scalarValue(node);
+    }
+    return node ?? null;
+  }
+
+  /** Resolved value for strings/booleans/null; original source text for anything else. */
+  private scalarValue(node: { value: unknown; source?: string }): unknown {
+    const v = node.value;
+    if (typeof v === 'string' || typeof v === 'boolean' || v === null || v === undefined) {
+      return v ?? null;
+    }
+    return node.source ?? String(v);
+  }
+
+  private yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
+    const str = (v: unknown): string | undefined =>
+      v === undefined || v === null ? undefined : String(v);
+    const bool = (v: unknown): boolean =>
+      v === true || (typeof v === 'string' && /^(true|yes|on)$/i.test(v.trim()));
+
     const model: SemanticModel = {
-      name: raw.name,
+      name: str(raw.name) || fallbackName,
     };
 
-    if (raw.schema) model.schema = raw.schema;
-    if (raw.description) model.description = raw.description;
-    if (raw.grain) model.grain = raw.grain;
-    if (raw.modelRole) model.modelRole = raw.modelRole as SemanticModel['modelRole'];
-    if (raw.rationale) {
+    const schema = str(raw.schema);
+    const description = str(raw.description);
+    const grain = str(raw.grain);
+    const modelRole = str(raw.modelRole);
+    if (schema) model.schema = schema;
+    if (description) model.description = description;
+    if (grain) model.grain = grain;
+    if (modelRole) model.modelRole = modelRole as SemanticModel['modelRole'];
+    if (raw.rationale && typeof raw.rationale === 'object') {
       model.rationale = {};
-      if (raw.rationale.purpose) model.rationale.purpose = raw.rationale.purpose;
-      if (raw.rationale.design) model.rationale.design = raw.rationale.design;
-      if (raw.rationale.grainChoice) model.rationale.grainChoice = raw.rationale.grainChoice;
-      if (raw.rationale.roleChoice) model.rationale.roleChoice = raw.rationale.roleChoice;
-      if (raw.rationale.scdStrategy) model.rationale.scdStrategy = raw.rationale.scdStrategy;
-      if (raw.rationale.measures) model.rationale.measures = raw.rationale.measures;
+      for (const key of RATIONALE_KEYS) {
+        const value = str((raw.rationale as Record<string, unknown>)[key]);
+        if (value) model.rationale[key] = value;
+      }
     }
 
     if (raw.columns && Array.isArray(raw.columns)) {
-      model.columns = raw.columns.map((col) => {
-        const column: ColumnDef = {
-          name: col.name,
-          dataType: col.dataType ?? 'unknown',
-          description: col.description ?? '',
-        };
-        if (col.isPrimaryKey) column.isPrimaryKey = true;
-        if (col.isForeignKey) column.isForeignKey = true;
-        if (col.isNaturalKey) column.isNaturalKey = true;
-        if (col.scdType !== undefined) column.scdType = col.scdType as ColumnDef['scdType'];
-        if (col.additiveType) column.additiveType = col.additiveType as ColumnDef['additiveType'];
-        return column;
-      });
+      model.columns = raw.columns
+        .filter((col): col is YamlColumn => !!col && typeof col === 'object')
+        .map((col) => {
+          const column: ColumnDef = {
+            name: str(col.name) ?? '',
+            dataType: str(col.dataType) ?? 'unknown',
+            description: str(col.description) ?? '',
+          };
+          if (bool(col.isPrimaryKey)) column.isPrimaryKey = true;
+          if (bool(col.isForeignKey)) column.isForeignKey = true;
+          if (bool(col.isNaturalKey)) column.isNaturalKey = true;
+          if (col.scdType !== undefined && col.scdType !== null) {
+            const scdType = Number(col.scdType);
+            if (Number.isFinite(scdType)) column.scdType = scdType as ColumnDef['scdType'];
+          }
+          const additiveType = str(col.additiveType);
+          if (additiveType) column.additiveType = additiveType as ColumnDef['additiveType'];
+          return column;
+        });
     }
 
     return model;
   }
 
-  private modelToYaml(model: SemanticModel): string {
-    // Build a clean object for YAML serialization, omitting undefined/empty fields
+  /**
+   * Parse an existing model file for in-place editing. Returns null when the
+   * file is missing, malformed, or its root is not a mapping — callers then
+   * fall back to regenerating the file.
+   */
+  private loadEditableDocument(filePath: string): Document | null {
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    try {
+      const doc = parseDocument(fs.readFileSync(filePath, 'utf-8'));
+      if (doc.errors.length > 0 || !isMap(doc.contents)) {
+        return null;
+      }
+      return doc;
+    } catch (err) {
+      console.warn(`[LogicalModelService] Rewriting unparseable model file ${filePath}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Apply a model onto an existing document, touching only managed keys
+   * whose value differs. Keys ERD Studio does not know about are preserved.
+   */
+  private applyModel(doc: Document, root: YAMLMap, model: SemanticModel): void {
+    this.syncMap(doc, root, this.modelToPlain(model), MODEL_KEYS);
+  }
+
+  /**
+   * Bring `map` in line with `desired` for the given managed keys:
+   * absent keys are removed, unchanged keys are left alone (preserving
+   * comments and scalar style), nested `rationale` maps and `columns`
+   * sequences are merged recursively.
+   */
+  private syncMap(
+    doc: Document,
+    map: YAMLMap,
+    desired: Record<string, unknown>,
+    managedKeys: readonly string[],
+  ): void {
+    for (const key of managedKeys) {
+      if (!(key in desired)) {
+        if (map.has(key)) map.delete(key);
+        continue;
+      }
+      const value = desired[key];
+      const existing = map.get(key, true);
+
+      if (key === 'rationale' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {
+        this.syncMap(doc, existing, value as Record<string, unknown>, RATIONALE_KEYS);
+        continue;
+      }
+      if (key === 'columns' && isSeq(existing) && Array.isArray(value)) {
+        this.syncColumns(doc, existing, value as Record<string, unknown>[]);
+        continue;
+      }
+      if (isScalar(existing)) {
+        if (existing.value === value) continue;
+        if (this.scalarValue(existing) === value) {
+          // Same text, but the parser coerced it (e.g. `007` -> 7). Pin the
+          // node to the string the model actually uses so it is not written
+          // back as `7`; the node's comments are untouched.
+          existing.value = value;
+          continue;
+        }
+        // YAMLMap.set updates the existing Scalar's value in place, keeping
+        // its style and comments.
+        map.set(key, value);
+        continue;
+      }
+      map.set(key, this.isScalarLike(value) ? value : doc.createNode(value));
+    }
+  }
+
+  /**
+   * Merge desired columns into an existing sequence. Columns are matched by
+   * name (falling back to position for renames) so per-column comments and
+   * unknown keys follow the column; order follows the model.
+   */
+  private syncColumns(doc: Document, seq: YAMLSeq, desired: Record<string, unknown>[]): void {
+    const existing: (YAMLMap | null)[] = seq.items.map((item) => (isMap(item) ? item : null));
+    const claimed = new Set<number>();
+
+    const nameOf = (item: YAMLMap): string | undefined => {
+      const nameNode = item.get('name', true);
+      if (isScalar(nameNode)) {
+        const v = this.scalarValue(nameNode);
+        return v === null ? undefined : String(v);
+      }
+      return nameNode === undefined || nameNode === null ? undefined : String(nameNode);
+    };
+
+    // Pass 1: match by name.
+    const matches: (YAMLMap | null)[] = desired.map((col) => {
+      const idx = existing.findIndex((item, i) => item !== null && !claimed.has(i) && nameOf(item) === String(col.name));
+      if (idx === -1) return null;
+      claimed.add(idx);
+      return existing[idx];
+    });
+
+    // Pass 2: unmatched desired columns reuse an unclaimed existing node at
+    // the same position (a rename keeps its comments).
+    desired.forEach((_, i) => {
+      if (matches[i] !== null) return;
+      const candidate = existing[i];
+      if (candidate && !claimed.has(i)) {
+        claimed.add(i);
+        matches[i] = candidate;
+      }
+    });
+
+    seq.items = desired.map((col, i) => {
+      const node = matches[i];
+      if (node) {
+        this.syncMap(doc, node, col, COLUMN_KEYS);
+        return node;
+      }
+      return doc.createNode(col);
+    });
+  }
+
+  private isScalarLike(value: unknown): boolean {
+    return value === null || ['string', 'number', 'boolean'].includes(typeof value);
+  }
+
+  /**
+   * Build a clean plain object for serialisation, omitting undefined/empty
+   * fields. Key order here defines the order used for new files.
+   */
+  private modelToPlain(model: SemanticModel): Record<string, unknown> {
     const obj: Record<string, unknown> = { name: model.name };
 
     if (model.schema) obj.schema = model.schema;
@@ -435,13 +685,6 @@ export class LogicalModelService {
       });
     }
 
-    return yaml.dump(obj, {
-      indent: 2,
-      lineWidth: 120,
-      noRefs: true,
-      sortKeys: false,
-      quotingType: '"',
-      forceQuotes: false,
-    });
+    return obj;
   }
 }

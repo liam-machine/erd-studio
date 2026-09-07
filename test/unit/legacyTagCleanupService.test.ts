@@ -148,6 +148,104 @@ describe('LegacyTagCleanupService', () => {
     expect(result.tagsRemoved).toBe(0);
   });
 
+  it('does not re-wrap long descriptions or reformat flow sequences in touched files', () => {
+    const longDescription =
+      'This is a deliberately long plain-scalar description that comfortably exceeds the default eighty column fold width used by the yaml stringifier.';
+    const filePath = writeYaml(
+      tmpDir,
+      'models/silver/dim_long.yml',
+      [
+        'version: 2',
+        'models:',
+        '  - name: dim_long',
+        `    description: ${longDescription}`,
+        '    tags: [domain:silver-customer, pii]',
+        '    columns:',
+        '      - name: id',
+        '        description: >',
+        '          A folded block scalar whose single source line is also longer than eighty characters wide.',
+        '',
+      ].join('\n'),
+    );
+
+    const svc = new LegacyTagCleanupService(tmpDir);
+    const result = svc.stripAll();
+    expect(result.tagsRemoved).toBe(1);
+
+    const after = fs.readFileSync(filePath, 'utf-8');
+    expect(after).toContain(`    description: ${longDescription}\n`);
+    expect(after).toContain(
+      '          A folded block scalar whose single source line is also longer than eighty characters wide.\n',
+    );
+    expect(after).toContain('tags: [ pii ]');
+    expect(after).not.toContain('domain:silver-customer');
+  });
+
+  it('skips files with YAML syntax errors instead of rewriting a partial document', () => {
+    const broken = [
+      'version: 2',
+      'models:',
+      '  - name: dim_broken',
+      '    tags: [domain:oops',
+      '',
+    ].join('\n');
+    const filePath = writeYaml(tmpDir, 'models/dim_broken.yml', broken);
+
+    const svc = new LegacyTagCleanupService(tmpDir);
+    const result = svc.stripAll();
+
+    expect(result.filesModified).toBe(0);
+    expect(result.errors.some((e) => e.includes('dim_broken.yml'))).toBe(true);
+    expect(fs.readFileSync(filePath, 'utf-8')).toBe(broken);
+  });
+
+  it('only scans dbt model-paths (default models/), leaving other YAML untouched', () => {
+    const outside = [
+      'version: 2',
+      'models:',
+      '  - name: stray',
+      '    tags:',
+      '      - domain:stray',
+      '',
+    ].join('\n');
+    const strayPath = writeYaml(tmpDir, 'docs/stray.yml', outside);
+    const seedPath = writeYaml(tmpDir, 'seeds/schema.yml', outside);
+    writeYaml(
+      tmpDir,
+      'models/dim_in.yml',
+      ['version: 2', 'models:', '  - name: dim_in', '    tags:', '      - domain:in', ''].join('\n'),
+    );
+
+    const svc = new LegacyTagCleanupService(tmpDir);
+    const result = svc.stripAll();
+
+    expect(result.filesScanned).toBe(1);
+    expect(result.tagsRemoved).toBe(1);
+    expect(fs.readFileSync(strayPath, 'utf-8')).toBe(outside);
+    expect(fs.readFileSync(seedPath, 'utf-8')).toBe(outside);
+  });
+
+  it('honours custom model-paths from dbt_project.yml', () => {
+    writeYaml(
+      tmpDir,
+      'dbt_project.yml',
+      ['name: my_project', 'version: 1.0.0', 'model-paths:', '  - transform', '  - marts', ''].join('\n'),
+    );
+    const tagged = (name: string) =>
+      ['version: 2', 'models:', `  - name: ${name}`, '    tags:', `      - domain:${name}`, ''].join('\n');
+    writeYaml(tmpDir, 'transform/a.yml', tagged('a'));
+    writeYaml(tmpDir, 'marts/b.yml', tagged('b'));
+    const defaultPath = writeYaml(tmpDir, 'models/c.yml', tagged('c'));
+
+    const svc = new LegacyTagCleanupService(tmpDir);
+    const result = svc.stripAll();
+
+    expect(result.filesScanned).toBe(2);
+    expect(result.tagsRemoved).toBe(2);
+    // models/ is not in model-paths for this project, so it is not touched.
+    expect(fs.readFileSync(defaultPath, 'utf-8')).toBe(tagged('c'));
+  });
+
   it('leaves non-model YAML files alone', () => {
     const filePath = writeYaml(
       tmpDir,

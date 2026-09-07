@@ -323,6 +323,151 @@ describe('LogicalModelService', () => {
     });
   });
 
+  describe('hand-edited files survive UI edits (comment/ordering preservation)', () => {
+    function writeModelFile(name: string, content: string): string {
+      service.ensureDir();
+      const filePath = service.modelPath(name);
+      fs.writeFileSync(filePath, content, 'utf-8');
+      return filePath;
+    }
+
+    it('keeps comments, key order and unknown keys when a column is edited', () => {
+      const filePath = writeModelFile('dim_customer', [
+        '# Owned by the customer data team',
+        'name: dim_customer',
+        'description: Customer dimension',
+        'owner: data-team # not an ERD Studio field',
+        'columns:',
+        '  # surrogate key',
+        '  - name: customer_id',
+        '    dataType: INT',
+        '    isPrimaryKey: true',
+        '  # contact details',
+        '  - name: email',
+        '    dataType: VARCHAR',
+        '    description: Primary email',
+        '',
+      ].join('\n'));
+
+      const model = service.getModel('dim_customer')!;
+      model.columns![1].dataType = 'TEXT';
+      service.saveModel(model);
+
+      const after = fs.readFileSync(filePath, 'utf-8');
+      expect(after).toContain('# Owned by the customer data team');
+      expect(after).toContain('# surrogate key');
+      expect(after).toContain('# contact details');
+      expect(after).toContain('owner: data-team # not an ERD Studio field');
+      expect(after).toContain('dataType: TEXT');
+      expect(after).not.toContain('dataType: VARCHAR');
+      // Key order untouched: name still first, description before owner.
+      expect(after.indexOf('name: dim_customer')).toBeLessThan(after.indexOf('description:'));
+      expect(after.indexOf('description:')).toBeLessThan(after.indexOf('owner:'));
+    });
+
+    it('does not rewrite untouched fields (byte-identical apart from the edit)', () => {
+      const original = [
+        'name: fct_orders',
+        'description: A very long plain description that would be re-wrapped by a default 80-column stringifier if the whole file were regenerated on save.',
+        'grain: |',
+        '  One row per order line. This literal block keeps its own line breaks even though it is longer than eighty columns.',
+        '  Second line of the literal block.',
+        'columns:',
+        '  - name: order_id',
+        '    dataType: INT',
+        '',
+      ].join('\n');
+      const filePath = writeModelFile('fct_orders', original);
+
+      const model = service.getModel('fct_orders')!;
+      model.columns!.push({ name: 'order_total', dataType: 'DECIMAL', description: '' });
+      service.saveModel(model);
+
+      const after = fs.readFileSync(filePath, 'utf-8');
+      expect(after.startsWith(original.trimEnd())).toBe(true);
+      expect(after).toContain('  - name: order_total\n    dataType: DECIMAL');
+    });
+
+    it('keeps date-like and numeric-looking scalars as strings on read and write', () => {
+      const filePath = writeModelFile('dim_date', [
+        'name: dim_date',
+        'description: 2024-01-01',
+        'columns:',
+        '  - name: 007',
+        '    dataType: INT',
+        '    scdType: 2',
+        '  - name: on',
+        '    dataType: VARCHAR',
+        '',
+      ].join('\n'));
+
+      const model = service.getModel('dim_date')!;
+      expect(model.description).toBe('2024-01-01');
+      expect(model.columns![0].name).toBe('007');
+      expect(model.columns![0].scdType).toBe(2);
+      expect(model.columns![1].name).toBe('on');
+
+      // Re-saving an unchanged model must not coerce anything. The
+      // numeric-looking name is pinned as an explicit string (quoted) rather
+      // than being written back as `7`.
+      service.saveModel(model);
+      const after = fs.readFileSync(filePath, 'utf-8');
+      expect(after).toContain('description: 2024-01-01');
+      expect(after).not.toContain('T00:00:00');
+      expect(after).toMatch(/name: ["']007["']/);
+      expect(after).not.toMatch(/name: 7\b/);
+      expect(after).toContain('scdType: 2');
+      expect(service.getModel('dim_date')!.columns![0].name).toBe('007');
+    });
+
+    it('removes managed keys the model no longer has and preserves a renamed column\'s comment', () => {
+      const filePath = writeModelFile('dim_product', [
+        'name: dim_product',
+        'grain: One row per product',
+        'columns:',
+        '  - name: product_id',
+        '    dataType: INT',
+        '    isPrimaryKey: true',
+        '  # legacy name, to be renamed',
+        '  - name: prod_nm',
+        '    dataType: VARCHAR',
+        '',
+      ].join('\n'));
+
+      const model = service.getModel('dim_product')!;
+      delete model.grain;
+      model.columns![1].name = 'product_name';
+      service.saveModel(model);
+
+      const after = fs.readFileSync(filePath, 'utf-8');
+      expect(after).not.toContain('grain:');
+      expect(after).not.toContain('prod_nm');
+      expect(after).toContain('# legacy name, to be renamed');
+      expect(after).toContain('name: product_name');
+    });
+
+    it('carries the existing document across a rename', () => {
+      writeModelFile('old_model', [
+        '# keep me',
+        'name: old_model',
+        'description: Test',
+        '',
+      ].join('\n'));
+
+      service.renameModel('old_model', 'new_model');
+      const after = fs.readFileSync(service.modelPath('new_model'), 'utf-8');
+      expect(after).toContain('# keep me');
+      expect(after).toContain('name: new_model');
+      expect(service.modelExists('old_model')).toBe(false);
+    });
+
+    it('returns null for a file with YAML syntax errors instead of a partial model', () => {
+      writeModelFile('broken', 'name: broken\ncolumns: [unclosed\n');
+      expect(service.getModel('broken')).toBeNull();
+      expect(service.listModels()).toHaveLength(0);
+    });
+  });
+
   describe('reads fixture files', () => {
     it('reads dim_project.yml from test fixtures', () => {
       const fixtureService = new LogicalModelService(
