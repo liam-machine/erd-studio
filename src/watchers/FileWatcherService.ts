@@ -2,7 +2,7 @@
  * FileWatcherService — manages file system watchers for dbt project files.
  *
  * Watches:
- * - target/manifest.json (dbt compile output) → triggers manifest cache invalidation
+ * - {target-path}/manifest.json (dbt compile output) → triggers manifest cache invalidation
  * - {semanticDir}/**\/*.json (semantic domain files, default .erd-studio) → triggers tree and editor refresh
  * - dbt_project.yml (project configuration) → reload prompt only when path config changes
  *
@@ -21,6 +21,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+
+import {
+  modelPathsGlob,
+  readDbtProjectConfig,
+  type DbtProjectConfig,
+} from '../services/dbtProjectConfig';
 
 const DEBOUNCE_DELAY_MS = 300;
 
@@ -51,10 +57,15 @@ export class FileWatcherService implements vscode.Disposable {
   /** Snapshot of path-related keys from dbt_project.yml at startup. */
   private lastProjectPaths: string;
 
+  /** Resolved dbt paths (target-path / model-paths) the watchers are built from. */
+  private readonly dbtConfig: DbtProjectConfig;
+
   constructor(
     private readonly workspaceRoot: string,
     private readonly semanticDir: string = '.erd-studio',
+    dbtConfig?: DbtProjectConfig,
   ) {
+    this.dbtConfig = dbtConfig ?? readDbtProjectConfig(workspaceRoot);
     this.lastProjectPaths = this.readProjectPaths();
     this.setupManifestWatcher();
     this.setupSemanticWatcher();
@@ -64,13 +75,15 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch target/manifest.json for changes.
-   * Fires when dbt compile generates a new manifest.
+   * Watch {target-path}/manifest.json for changes.
+   * Fires when dbt compile generates a new manifest, and when it is removed
+   * (`dbt clean`) so the physical stage stops showing a manifest that no
+   * longer exists.
    */
   private setupManifestWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'target/manifest.json',
+      `${this.dbtConfig.targetPath}/manifest.json`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
@@ -84,7 +97,7 @@ export class FileWatcherService implements vscode.Disposable {
     // Track event subscriptions for disposal
     this.subscriptions.push(watcher.onDidChange(handleChange));
     this.subscriptions.push(watcher.onDidCreate(handleChange));
-    // Note: onDidDelete not handled — missing manifest is handled gracefully by ManifestService
+    this.subscriptions.push(watcher.onDidDelete(handleChange));
 
     this.watchers.push(watcher);
   }
@@ -212,14 +225,14 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch models/**\/*.{yml,yaml} for changes.
+   * Watch {model-paths}/**\/*.{yml,yaml} for changes.
    * Fires when dbt schema files are created, modified, or deleted.
    * Used to refresh the physical stage which derives from .yml source files.
    */
   private setupDbtYmlWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      'models/**/*.{yml,yaml}',
+      `${modelPathsGlob(this.dbtConfig)}/**/*.{yml,yaml}`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 

@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { ManifestService } from '../../src/services/manifestService';
 
@@ -72,6 +74,8 @@ describe('ManifestService', () => {
 
       expect(data).toBeDefined();
       expect(data.models.size).toBe(0);
+      expect(service.isMissing).toBe(true);
+      expect(service.isStale).toBe(false);
     });
 
     it('deduplicates concurrent calls', async () => {
@@ -383,6 +387,86 @@ describe('ManifestService', () => {
     });
   });
 
+  describe('worker lifecycle (H25)', () => {
+    it('invalidate() terminates the in-flight parse worker', async () => {
+      const pending = service.loadManifest(FIXTURE_PROJECT_PATH);
+      // Worker has been spawned synchronously inside parseManifest
+      expect((service as unknown as { activeWorker: unknown }).activeWorker).not.toBeNull();
+
+      service.invalidate();
+      expect((service as unknown as { activeWorker: unknown }).activeWorker).toBeNull();
+
+      // The superseded load settles (with fallback data) instead of hanging,
+      // and nothing is cached because the loadId moved on.
+      const result = await pending;
+      expect(result.models.size).toBe(0);
+      expect(service.getModelNames()).toEqual([]);
+
+      // A fresh load after cancellation works normally
+      const fresh = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(fresh.models.size).toBe(4);
+      expect(service.isStale).toBe(false);
+    });
+
+    it('clears the worker handle once a parse completes', async () => {
+      await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect((service as unknown as { activeWorker: unknown }).activeWorker).toBeNull();
+    });
+
+    it('abandons a parse that exceeds parseTimeoutMs and falls back', async () => {
+      const slow = new ManifestService({ parseTimeoutMs: 1 });
+      const data = await slow.loadManifest(FIXTURE_PROJECT_PATH);
+      // Timed out → treated as a transient failure: empty + stale, worker released
+      expect(data.models.size).toBe(0);
+      expect(slow.isStale).toBe(true);
+      expect((slow as unknown as { activeWorker: unknown }).activeWorker).toBeNull();
+    });
+  });
+
+  describe('dbt_project.yml paths (H30)', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manifest-paths-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('reads manifest.json from the configured target-path', async () => {
+      fs.mkdirSync(path.join(tmpDir, 'build'), { recursive: true });
+      fs.copyFileSync(
+        path.join(FIXTURE_PROJECT_PATH, 'target', 'manifest.json'),
+        path.join(tmpDir, 'build', 'manifest.json'),
+      );
+
+      const custom = new ManifestService({ dbtConfig: { targetPath: 'build' } });
+      expect(custom.getManifestPath(tmpDir)).toBe(path.join(tmpDir, 'build', 'manifest.json'));
+      const data = await custom.loadManifest(tmpDir);
+      expect(data.models.size).toBe(4);
+      expect(custom.isMissing).toBe(false);
+
+      // Default service still looks in target/ and finds nothing here
+      const data2 = await new ManifestService().loadManifest(tmpDir);
+      expect(data2.models.size).toBe(0);
+    });
+
+    it('getModelFolders honours configured model-paths', async () => {
+      // Fixture models live under models/silver, models/gold and models/staging
+      await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(service.getModelFolders()).toEqual(['models/gold', 'models/silver', 'models/staging']);
+
+      const other = new ManifestService({ dbtConfig: { modelPaths: ['transform'] } });
+      await other.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(other.getModelFolders()).toEqual([]);
+
+      const both = new ManifestService({ dbtConfig: { modelPaths: ['transform', 'models'] } });
+      await both.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(both.getModelFolders()).toEqual(['models/gold', 'models/silver', 'models/staging']);
+    });
+  });
+
   describe('blank-screen defense (truncated manifest)', () => {
     it('returns lastKnownGood when manifest is 0 bytes after having good data', async () => {
       // First load succeeds — populates lastKnownGood
@@ -422,6 +506,36 @@ describe('ManifestService', () => {
       const data = await service.loadManifest(ZERO_BYTE_PATH);
       expect(data.models.size).toBe(0);
       expect(service.isStale).toBe(true);
+    });
+
+    it('treats a missing manifest as definitive: clears lastKnownGood and reports empty, non-stale data (H25)', async () => {
+      // Good load first
+      const goodData = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(goodData.models.size).toBe(4);
+
+      // dbt clean → manifest gone. Must NOT serve the 4 stale models.
+      service.invalidate();
+      const afterDelete = await service.loadManifest('/nonexistent/path');
+      expect(afterDelete.models.size).toBe(0);
+      expect(service.isMissing).toBe(true);
+      expect(service.isStale).toBe(false);
+      expect(service.hasModel('dim_task')).toBe(false);
+
+      // lastKnownGood was dropped: a subsequent transient parse failure has
+      // nothing to fall back to and must not resurrect the deleted manifest.
+      service.invalidate();
+      expect(service.isMissing).toBe(false); // reset by invalidate
+      const afterMalformed = await service.loadManifest(MALFORMED_PROJECT_PATH);
+      expect(afterMalformed.models.size).toBe(0);
+      expect(service.isStale).toBe(true);
+      expect(service.isMissing).toBe(false);
+
+      // Recompiling brings data back and clears both flags
+      service.invalidate();
+      const recovered = await service.loadManifest(FIXTURE_PROJECT_PATH);
+      expect(recovered.models.size).toBe(4);
+      expect(service.isMissing).toBe(false);
+      expect(service.isStale).toBe(false);
     });
 
     it('simulates full manifest-change cycle: load → invalidate → truncated file → fallback preserves data', async () => {

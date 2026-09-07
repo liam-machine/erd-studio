@@ -259,12 +259,12 @@
         "erdStudio.projectPath": {
           "type": "string",
           "default": "",
-          "description": "Path to dbt project root (auto-detected from workspace)"
+          "description": "Path to dbt project root (auto-detected from workspace). Changing this requires a window reload."
         },
         "erdStudio.semanticDir": {
           "type": "string",
           "default": ".erd-studio",
-          "description": "Relative path to ERD domain files within the project"
+          "description": "Relative path to ERD domain files within the project. Changing this requires a window reload."
         },
         "dbtSemantic.projectPath": {
           "type": "string",

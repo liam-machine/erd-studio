@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '15';
+export const HARNESS_VERSION = '16';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -597,7 +597,7 @@ function generateCopilotInstructions(): string {
   return `---
 name: 'ERD Studio'
 description: 'Data modeling guide for ERD Studio — domain JSON format, dbt YAML tests for physical model, naming conventions'
-applyTo: '**/.erd-studio/**/*.json'
+applyTo: '**/.erd-studio/**'
 ---
 
 ${SCHEMA_CONTENT}
@@ -645,11 +645,38 @@ ${buildVersionMarker()}
 // Service
 // ---------------------------------------------------------------------------
 
+const DEFAULT_SEMANTIC_DIR = '.erd-studio';
+
+/**
+ * Rewrite every reference to the default `.erd-studio` data directory in
+ * generated harness content to the user's configured `erdStudio.semanticDir`.
+ * Only the dotted directory token is touched; skill/hook names such as
+ * `.claude/skills/erd-studio/` and the `/tmp/.erd-studio-skill-*` flag file
+ * are left alone (no leading dot, or followed by `-`).
+ */
+export function applySemanticDir(content: string, semanticDir: string): string {
+  const dir = semanticDir.replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+  if (!dir || dir === DEFAULT_SEMANTIC_DIR) {
+    return content;
+  }
+  return content.replace(/\.erd-studio(?![\w-])/g, dir);
+}
+
 export class HarnessService {
+  /**
+   * @param semanticDir — the configured `erdStudio.semanticDir`; generated
+   *   files reference this directory instead of the default `.erd-studio`.
+   */
+  constructor(private readonly semanticDir: string = DEFAULT_SEMANTIC_DIR) {}
+
   /**
    * Generate the config file content for a given harness target.
    */
   generateContent(targetId: HarnessTarget['id']): string {
+    return applySemanticDir(this.generateDefaultContent(targetId), this.semanticDir);
+  }
+
+  private generateDefaultContent(targetId: HarnessTarget['id']): string {
     switch (targetId) {
       case 'claude':
         return generateClaudeSkill();
@@ -713,12 +740,12 @@ export class HarnessService {
       if (target.id === 'claude') {
         // SYNC.md — progressive context loading for sync plan execution
         const syncPath = path.join(dir, 'SYNC.md');
-        fs.writeFileSync(syncPath, generateSyncGuide(), 'utf-8');
+        fs.writeFileSync(syncPath, applySemanticDir(generateSyncGuide(), this.semanticDir), 'utf-8');
 
         // enforce-skill.sh — PreToolUse hook that blocks first .erd-studio edit
         // per session so Claude loads the /erd-studio skill before making changes
         const hookPath = path.join(dir, 'enforce-skill.sh');
-        fs.writeFileSync(hookPath, generateEnforceSkillHook(), { mode: 0o755 });
+        fs.writeFileSync(hookPath, applySemanticDir(generateEnforceSkillHook(), this.semanticDir), { mode: 0o755 });
 
         // Merge hook config into .claude/settings.local.json (local only, never committed)
         try {

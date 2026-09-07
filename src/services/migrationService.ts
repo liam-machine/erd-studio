@@ -113,6 +113,7 @@ export class MigrationService {
     private readonly workspaceRoot: string,
     private readonly layerService: LayerService,
     private readonly logicalModelService: LogicalModelService,
+    private readonly semanticDirName: string = DEFAULT_SEMANTIC_DIR,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -123,7 +124,7 @@ export class MigrationService {
    * Scan all domain files and return paths of those with schemaVersion < 5.
    */
   findV4Domains(): string[] {
-    const semanticDir = path.join(this.workspaceRoot, '.erd-studio');
+    const semanticDir = path.join(this.workspaceRoot, this.semanticDirName);
     if (!fs.existsSync(semanticDir)) {
       return [];
     }

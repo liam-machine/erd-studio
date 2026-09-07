@@ -20,12 +20,26 @@ import type {
   YmlModelInfo,
   YmlRelationshipTest,
 } from '../types/ymlData';
+import { defaultDbtProjectConfig, type DbtProjectConfig } from './dbtProjectConfig';
 
-/** Directories to skip during filesystem walk. */
+/**
+ * Directories to skip during filesystem walk. Mirrors LegacyTagCleanupService.
+ * `dbt_packages` / `dbt_modules` matter most: installed packages
+ * (dbt_utils, elementary, dbt_project_evaluator, ...) ship their own model
+ * schema files which would otherwise pollute the model picker and shadow
+ * project models of the same name.
+ */
 const EXCLUDED_DIRS = new Set([
-  'node_modules', 'target', '.git', '.venv', 'venv',
+  'node_modules', 'target', '.git',
+  '.venv', 'venv', 'env', '.direnv', 'site-packages',
   '__pycache__', 'dist', '.tox', '.mypy_cache',
+  'dbt_packages', 'dbt_modules', 'logs',
 ]);
+
+export interface YmlParserServiceOptions {
+  /** dbt project paths (model-paths). Defaults to dbt's own defaults. */
+  dbtConfig?: Pick<DbtProjectConfig, 'modelPaths'>;
+}
 
 /**
  * Regex to extract a model name from a dbt ref() call.
@@ -38,6 +52,14 @@ export class YmlParserService {
   private cache: YmlData | null = null;
   private loadPromise: Promise<YmlData> | null = null;
   private loadId = 0;
+
+  /** Model directories (relative to the project root) to scan for schema files. */
+  private readonly modelPaths: string[];
+
+  constructor(options: YmlParserServiceOptions = {}) {
+    const configured = options.dbtConfig?.modelPaths ?? [];
+    this.modelPaths = configured.length > 0 ? [...configured] : defaultDbtProjectConfig().modelPaths;
+  }
 
   /**
    * Parse all dbt schema .yml files and cache the result.
@@ -90,14 +112,15 @@ export class YmlParserService {
 
     const folders = new Set<string>();
     for (const model of this.cache.models.values()) {
-      const relativePath = path.relative(projectPath, model.filePath);
-      if (!relativePath.startsWith('models' + path.sep) && !relativePath.startsWith('models/')) {
+      const relativePath = path.relative(projectPath, model.filePath).replace(/\\/g, '/');
+      const modelPath = this.modelPaths.find((mp) => relativePath.startsWith(mp + '/'));
+      if (!modelPath) {
         continue;
       }
 
-      const parts = relativePath.split(/[/\\]/);
-      if (parts.length >= 2) {
-        folders.add(`${parts[0]}/${parts[1]}`);
+      const rest = relativePath.slice(modelPath.length + 1).split('/');
+      if (rest.length >= 2) {
+        folders.add(`${modelPath}/${rest[0]}`);
       }
     }
 
@@ -138,12 +161,15 @@ export class YmlParserService {
   }
 
   /**
-   * Recursively walk the project directory collecting .yml/.yaml files.
-   * Skips excluded directories and files outside the models/ tree.
+   * Recursively walk each configured model directory (dbt_project.yml
+   * `model-paths`, default `models/`) collecting .yml/.yaml files.
+   * Skips excluded directories (packages, venvs, build output).
    */
   private findYmlFiles(projectPath: string): string[] {
     const files: string[] = [];
-    this.walkDir(projectPath, files);
+    for (const modelPath of this.modelPaths) {
+      this.walkDir(path.join(projectPath, modelPath), files);
+    }
     return files;
   }
 

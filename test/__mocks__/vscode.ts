@@ -14,6 +14,8 @@ export const workspace = {
     dispose: () => {},
   }),
   onDidChangeTextDocument: () => ({ dispose: () => {} }),
+  onDidChangeConfiguration: () => ({ dispose: () => {} }),
+  findFiles: async () => [] as unknown[],
   fs: {
     readFile: async () => Buffer.from('{}'),
     writeFile: async () => {},
@@ -262,6 +264,8 @@ export class CancellationTokenSource {
 // ---------------------------------------------------------------------------
 
 export interface MockFileSystemWatcher {
+  /** The glob pattern (RelativePattern) this watcher was created with. */
+  _pattern?: unknown;
   onDidCreate: (handler: (uri: unknown) => void) => { dispose: () => void };
   onDidChange: (handler: (uri: unknown) => void) => { dispose: () => void };
   onDidDelete: (handler: (uri: unknown) => void) => { dispose: () => void };
@@ -315,7 +319,11 @@ export function createMockFileSystemWatcher(): MockFileSystemWatcher {
 }
 
 // Override workspace.createFileSystemWatcher to use the mock factory
-workspace.createFileSystemWatcher = () => createMockFileSystemWatcher() as unknown as ReturnType<typeof workspace.createFileSystemWatcher>;
+workspace.createFileSystemWatcher = ((pattern?: unknown) => {
+  const watcher = createMockFileSystemWatcher();
+  watcher._pattern = pattern;
+  return watcher;
+}) as unknown as typeof workspace.createFileSystemWatcher;
 
 /**
  * RelativePattern mock for file watchers

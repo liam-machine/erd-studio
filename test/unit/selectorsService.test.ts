@@ -185,7 +185,7 @@ describe('SelectorsService', () => {
   it('removes stale `domain_*` selectors from a previous regenerate', () => {
     writeSelectors(
       tmpDir,
-      'selectors:\n  - name: domain_silver_old\n    definition:\n      union:\n        - method: fqn\n          value: ghost_model\n',
+      'selectors:\n  - name: domain_silver_old\n    description: All models in the old domain (silver layer). Managed by ERD Studio.\n    definition:\n      union:\n        - method: fqn\n          value: ghost_model\n',
     );
 
     const svc = new SelectorsService(
@@ -301,6 +301,7 @@ describe('SelectorsService', () => {
       [
         'selectors:',
         '  - name: domain_silver_old',
+        '    description: Old domain. Managed by ERD Studio.',
         '    definition: { union: [{ method: fqn, value: ghost_model }] }',
         '  - name: incremental_critical',
         '    description: Nightly job',
@@ -389,6 +390,7 @@ describe('SelectorsService', () => {
         'selectors:',
         '  # comment for the old generated selector',
         '  - name: domain_silver_old',
+        '    description: Old domain. Managed by ERD Studio.',
         '    definition: { union: [{ method: fqn, value: ghost }] }',
         '  - name: my_user_selector',
         '    definition: { union: [{ method: fqn, value: fct_x }] }',
@@ -686,6 +688,119 @@ describe('SelectorsService', () => {
     svc.regenerate();
     expect(onSkipped).not.toHaveBeenCalled();
     expect(onWritten).toHaveBeenCalledTimes(3);
+  });
+
+  // Collision safety (H31) ------------------------------------------------------
+
+  it('de-duplicates generated names when two domains sanitise to the same selector', () => {
+    const collisions: Array<{ requestedName: string; assignedName: string; domain: string; conflictsWith: string }> = [];
+    const svc = new SelectorsService(
+      fakeDomainService([
+        { domain: 'customer-360', layer: 'silver', filePath: '/x/silver/customer-360.json', models: ['dim_customer'] },
+        { domain: 'customer_360', layer: 'silver', filePath: '/x/silver/customer_360.json', models: ['fct_orders'] },
+      ]),
+      tmpDir,
+      '.erd-studio',
+      { onNameCollision: (info) => collisions.push(info) },
+    );
+    const result = svc.regenerate();
+    expect(result.status).toBe('written');
+
+    const parsed = readSelectors(tmpDir);
+    const names = parsed.selectors.map((s) => s.name);
+    expect(names).toEqual(['domain_silver_customer_360', 'domain_silver_customer_360_2']);
+    // Each selector still references exactly one domain's models — nothing merged or dropped
+    const members = parsed.selectors.map((s) => s.definition.union[0].value).sort();
+    expect(members).toEqual(['dim_customer', 'fct_orders']);
+
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0].requestedName).toBe('domain_silver_customer_360');
+    expect(collisions[0].assignedName).toBe('domain_silver_customer_360_2');
+    expect([collisions[0].domain, collisions[0].conflictsWith].sort()).toEqual([
+      'silver/customer-360',
+      'silver/customer_360',
+    ]);
+  });
+
+  it('keeps suffixed names stable across regenerates (idempotent with a collision)', () => {
+    const svc = new SelectorsService(
+      fakeDomainService([
+        { domain: 'a-b', layer: 'silver', filePath: '/x/silver/a-b.json', models: ['m1'] },
+        { domain: 'a_b', layer: 'silver', filePath: '/x/silver/a_b.json', models: ['m2'] },
+      ]),
+      tmpDir,
+      '.erd-studio',
+    );
+    svc.regenerate();
+    const first = fs.readFileSync(path.join(tmpDir, 'selectors.yml'), 'utf-8');
+    svc.regenerate();
+    const second = fs.readFileSync(path.join(tmpDir, 'selectors.yml'), 'utf-8');
+    expect(second).toBe(first);
+    expect(readSelectors(tmpDir).selectors.map((s) => s.name)).toEqual([
+      'domain_silver_a_b',
+      'domain_silver_a_b_2',
+    ]);
+  });
+
+  it('preserves a user-authored `domain_*` selector that lacks the managed marker', () => {
+    writeSelectors(
+      tmpDir,
+      [
+        'selectors:',
+        '  - name: domain_custom_nightly',
+        '    description: Hand-written by the team',
+        '    definition: { union: [{ method: fqn, value: fct_orders }] }',
+        '',
+      ].join('\n'),
+    );
+
+    const svc = new SelectorsService(
+      fakeDomainService([
+        { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
+      ]),
+      tmpDir,
+      '.erd-studio',
+    );
+    svc.regenerate();
+
+    const parsed = readSelectors(tmpDir);
+    const names = parsed.selectors.map((s) => s.name);
+    expect(names).toContain('domain_silver_d');
+    expect(names).toContain('domain_custom_nightly');
+    const user = parsed.selectors.find((s) => s.name === 'domain_custom_nightly');
+    expect(user!.definition.union[0].value).toBe('fct_orders');
+  });
+
+  it('suffixes a generated name that collides with a preserved user selector', () => {
+    writeSelectors(
+      tmpDir,
+      [
+        'selectors:',
+        '  - name: domain_silver_d',
+        '    description: Mine, not yours',
+        '    definition: { union: [{ method: fqn, value: user_model }] }',
+        '',
+      ].join('\n'),
+    );
+
+    const collisions: Array<{ conflictsWith: string }> = [];
+    const svc = new SelectorsService(
+      fakeDomainService([
+        { domain: 'd', layer: 'silver', filePath: '/x/silver/d.json', models: ['dim_d'] },
+      ]),
+      tmpDir,
+      '.erd-studio',
+      { onNameCollision: (info) => collisions.push(info) },
+    );
+    svc.regenerate();
+
+    const parsed = readSelectors(tmpDir);
+    const names = parsed.selectors.map((s) => s.name);
+    expect(names).toEqual(['domain_silver_d_2', 'domain_silver_d']);
+    const user = parsed.selectors.find((s) => s.name === 'domain_silver_d');
+    expect(user!.definition.union[0].value).toBe('user_model');
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0].conflictsWith).toBe('a user-managed selector');
   });
 
   it('after a skip → fix the file → next regenerate writes (recovers from skip)', () => {
