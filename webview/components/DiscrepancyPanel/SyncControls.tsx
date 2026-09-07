@@ -133,7 +133,7 @@ export const SyncFooter: React.FC<SyncFooterProps> = ({ totalKeys }) => {
         <button
           className="disc-panel__sync-execute-btn"
           onClick={handleLaunchClaude}
-          title="Launch Claude Code to execute the changes"
+          title="Open a terminal and launch Claude Code to execute the changes (you will be asked to confirm the command first)"
         >
           Execute with Claude
         </button>

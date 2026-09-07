@@ -7,6 +7,8 @@ import * as path from 'path';
 export const workspace = {
   getConfiguration: () => ({
     get: (key: string, defaultValue?: unknown) => defaultValue,
+    /** `inspect` returns undefined so getErdStudioSetting falls back to defaults. */
+    inspect: (_key: string) => undefined as unknown,
   }),
   workspaceFolders: [],
   textDocuments: [] as unknown[],
@@ -48,7 +50,46 @@ export const window = {
   registerCustomEditorProvider: () => ({ dispose: () => {} }),
   createTreeView: () => ({ dispose: () => {} }),
   tabGroups: { all: [] as Array<{ tabs: Array<{ input: unknown }> }> },
+  /** Open terminals — createTerminal adds to this list; tests may splice to simulate close. */
+  terminals: [] as MockTerminal[],
+  createTerminal: (options?: { name?: string; cwd?: string }): MockTerminal => {
+    const terminal = createMockTerminal(options?.name ?? 'terminal');
+    window.terminals.push(terminal);
+    return terminal;
+  },
 };
+
+/** Minimal mock of vscode.Terminal for launch-in-terminal handlers. */
+export interface MockTerminal {
+  name: string;
+  exitStatus: { code: number | undefined } | undefined;
+  show: () => void;
+  sendText: (text: string, addNewLine?: boolean) => void;
+  dispose: () => void;
+  /** Test helper: every string passed to sendText, in order. */
+  _sentText: string[];
+}
+
+export function createMockTerminal(name: string): MockTerminal {
+  const terminal: MockTerminal = {
+    name,
+    exitStatus: undefined,
+    show: () => {},
+    sendText: (text: string) => {
+      if (terminal.exitStatus !== undefined || !window.terminals.includes(terminal)) {
+        throw new Error('Terminal has already been disposed');
+      }
+      terminal._sentText.push(text);
+    },
+    dispose: () => {
+      terminal.exitStatus = { code: undefined };
+      const idx = window.terminals.indexOf(terminal);
+      if (idx !== -1) window.terminals.splice(idx, 1);
+    },
+    _sentText: [],
+  };
+  return terminal;
+}
 
 /** Minimal mock of vscode.TabInputCustom for the recovery service. */
 export class TabInputCustom {
@@ -238,6 +279,11 @@ export function createMockWebviewPanel() {
     _simulateViewStateChange: (visible: boolean) => {
       for (const handler of viewStateHandlers) {
         handler({ webviewPanel: { visible } });
+      }
+    },
+    _simulateDispose: () => {
+      for (const handler of disposeHandlers) {
+        handler();
       }
     },
     _postedMessages: postedMessages,

@@ -493,3 +493,39 @@ describe('LogicalModelService', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// modelPath — path traversal guard (H21)
+// ---------------------------------------------------------------------------
+
+describe('LogicalModelService.modelPath', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('resolves a plain name inside logical-models/', () => {
+    const p = service.modelPath('dim_customer');
+    expect(path.dirname(p)).toBe(path.resolve(tempDir, '.erd-studio', 'logical-models'));
+    expect(path.basename(p)).toBe('dim_customer.yml');
+  });
+
+  it.each(['../escaped', '../../outside', 'sub/dir', 'a\\b', '..', '', '  '])(
+    'rejects %j',
+    (name) => {
+      expect(() => service.modelPath(name)).toThrow(/Invalid model name/);
+    },
+  );
+
+  it('refuses to write a model whose name escapes the directory', () => {
+    expect(() => service.saveModel({ name: '../escaped', columns: [] })).toThrow(/Invalid model name/);
+    expect(fs.existsSync(path.join(tempDir, '.erd-studio', 'escaped.yml'))).toBe(false);
+  });
+});

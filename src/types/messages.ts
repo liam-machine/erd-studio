@@ -54,10 +54,15 @@ export interface ErrorMessage {
 /**
  * Sent in response to a switchStage request.
  * Contains the display domain for the requested stage.
+ *
+ * `requestId` echoes the token from the originating `switchStage` message so
+ * the webview can discard a stale reply (a slow load for a stage the user has
+ * since switched away from). Host-initiated switches carry no token.
  */
 export interface StageDataMessage {
   type: 'stageData';
   payload: DisplayDomain;
+  requestId?: number;
 }
 
 /**
@@ -415,10 +420,13 @@ export interface ToggleStubColumnsMessage {
 /**
  * Request to switch the active stage in the editor.
  * The extension resolves the sibling domain data and sends a stageData response.
+ *
+ * `requestId` is a monotonically increasing token (see webview/lib/stageRequest.ts);
+ * the host echoes it on the `stageData` reply so out-of-order replies can be ignored.
  */
 export interface SwitchStageMessage {
   type: 'switchStage';
-  payload: { stage: Stage };
+  payload: { stage: Stage; requestId?: number };
 }
 
 /**
