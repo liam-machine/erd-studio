@@ -532,8 +532,6 @@ export interface ViewFileMessage {
  * so the host can build diagnostics without re-reading the document.
  */
 export interface FeedbackDomainSummary {
-  name: string;
-  layer: string;
   stage: string;
   modelCount: number;
   relationshipCount: number;

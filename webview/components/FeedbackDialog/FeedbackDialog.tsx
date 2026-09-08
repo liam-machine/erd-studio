@@ -251,8 +251,10 @@ export function FeedbackDialog() {
     () =>
       domain
         ? {
-            name: domain.domain,
-            layer: domain.layer,
+            // Neither the domain's name nor its layer travels: they are the
+            // user's own business vocabulary ("gold/commercial"), the
+            // maintainer has no access to the project they name, and the shape
+            // of the graph is the part that is actually diagnostic.
             stage: domain.stage,
             modelCount: domain.models.length,
             relationshipCount: domain.relationships.length,

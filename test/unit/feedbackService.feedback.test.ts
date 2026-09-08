@@ -186,12 +186,26 @@ describe('buildDiagnosticsChips', () => {
     ]);
   });
 
-  it('adds a domain chip when a canvas was open', () => {
+  it('adds a canvas chip describing the graph, never naming it', () => {
+    // The domain's name and layer are the user's own business vocabulary and
+    // point at a project the maintainer cannot open; the size and stage of the
+    // graph are what a bug report actually needs.
     const chips = buildDiagnosticsChips({
       ...diagnostics,
-      domain: { name: 'orders', layer: 'silver', stage: 'logical', modelCount: 4, relationshipCount: 3 },
+      domain: { stage: 'logical', modelCount: 4, relationshipCount: 3 },
     });
-    expect(chips[3]).toEqual({ label: 'silver/orders · 4 models', tone: 'normal' });
+    expect(chips[3]).toEqual({
+      label: 'logical \u00b7 4 models \u00b7 3 relationships',
+      tone: 'normal',
+    });
+  });
+
+  it('says "1 model" rather than "1 models"', () => {
+    const chips = buildDiagnosticsChips({
+      ...diagnostics,
+      domain: { stage: 'physical', modelCount: 1, relationshipCount: 1 },
+    });
+    expect(chips[3].label).toBe('physical \u00b7 1 model \u00b7 1 relationship');
   });
 
   it('adds an error-tone chip counting host and webview errors together', () => {

@@ -41,12 +41,12 @@ describe('feedbackService', () => {
     it('includes domain context and errors when present', () => {
       const text = formatDiagnostics({
         ...baseDiagnostics,
-        domain: { name: 'orders', layer: 'silver', stage: 'logical', modelCount: 4, relationshipCount: 3, schemaVersion: 5 },
+        domain: { stage: 'logical', modelCount: 4, relationshipCount: 3, schemaVersion: 5 },
         hostErrors: ['2026-01-01T00:00:00.000Z [x] boom'],
         webviewErrors: ['2026-01-01T00:00:01.000Z [webview] oops'],
       });
       expect(text).toContain('ERD Studio: 0.6.46');
-      expect(text).toContain('silver/orders (stage=logical, schemaVersion=5)');
+      expect(text).toContain('Canvas:     stage=logical, schemaVersion=5');
       expect(text).toContain('Models:     4   Relationships: 3');
       expect(text).toContain('Recent extension errors:');
       expect(text).toContain('boom');
@@ -54,9 +54,20 @@ describe('feedbackService', () => {
       expect(text).toContain('oops');
     });
 
+    it('never names the domain, whose name is the user\u2019s own vocabulary', () => {
+      // The one guarantee behind dropping name/layer from FeedbackDomainSummary:
+      // there is no path from a canvas to a domain name in the filed issue.
+      const text = formatDiagnostics({
+        ...baseDiagnostics,
+        domain: { stage: 'logical', modelCount: 4, relationshipCount: 3 },
+      });
+      expect(text).not.toMatch(/Domain:/);
+      expect(text).toContain('Models:     4   Relationships: 3');
+    });
+
     it('omits empty sections', () => {
       const text = formatDiagnostics(baseDiagnostics);
-      expect(text).not.toContain('Domain:');
+      expect(text).not.toContain('Canvas:');
       expect(text).not.toContain('Recent');
     });
   });

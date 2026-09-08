@@ -100,13 +100,14 @@ export const FEEDBACK_AI_ASSIST_SETTING = 'feedback.aiAssist';
 export const FEEDBACK_HOSTED_FALLBACK_SETTING = 'feedback.hostedFallback';
 
 /**
- * Which destination the user has pinned. Enum, default `'auto'`.
+ * Which destination the user has pinned. Enum, default `'vscode'`.
  *
- * `auto` is the original precedence — the user's own model first — and is what
- * every existing install has. The other values pin one tier and are the answer
- * to "I have Copilot, but I do not want my feedback going through it": pinning
- * `hosted` sends the analysis to the author's relay even on a machine where a
- * language model is right there.
+ * The picker offers two of the four values — `vscode` and `hosted` — because
+ * those are the two answers to "which model reads this?". `auto` is the
+ * original precedence rule and remains valid for installs that carry it;
+ * `endpoint` is the power-user escape hatch and remains valid for anyone who
+ * has configured one. Every value pins a single tier except `auto`, which is
+ * the only one that falls through.
  *
  * User-scoped like every other analysis setting (see `USER_SCOPED_SETTINGS`):
  * a checked-in `.vscode/settings.json` must not be able to redirect the
@@ -708,10 +709,19 @@ const PROVIDER_FALLBACK_LABELS: Readonly<Record<FeedbackAiProviderChoice, string
   hosted: 'ERD Studio service',
 };
 
-/** The pinned destination, or `'auto'`. An unrecognised value reads as `'auto'`. */
+/**
+ * The chosen destination. Defaults to `'vscode'` — the user's own model — and
+ * an unrecognised value reads as that too.
+ *
+ * The default used to be `'auto'`, which fell through to the hosted relay on a
+ * machine with no language model. `'vscode'` does not: a machine without
+ * Copilot now resolves to `'none'` and the panel says so with the ERD Studio
+ * service one click away, rather than routing the text to a destination the
+ * user was never asked to choose.
+ */
 export function analysisProviderChoice(): FeedbackAiProviderChoice {
-  const raw = getErdStudioSetting<string>(FEEDBACK_PROVIDER_SETTING, 'auto');
-  return isFeedbackAiProviderChoice(raw) ? raw : 'auto';
+  const raw = getErdStudioSetting<string>(FEEDBACK_PROVIDER_SETTING, 'vscode');
+  return isFeedbackAiProviderChoice(raw) ? raw : 'vscode';
 }
 
 /** Whether the user's own endpoint is fully configured (URL + model + key). */
@@ -738,12 +748,15 @@ function hostedReady(): boolean {
  * is off, when the pinned destination is not usable here, or when nothing is
  * configured at all. Performs no network work and never prompts.
  *
- * With `feedback.provider` at its default `'auto'` the order is the one the
- * user's own choices win: their language model, then their endpoint, then the
- * author's hosted proxy. Any other value pins a single tier and does **not**
- * fall through — a pin that cannot be honoured resolves to `'none'` rather than
- * quietly sending the text somewhere the user did not choose. The dialog says
- * so and offers the picker, so this is visible rather than silent.
+ * The default is `'vscode'`, which pins the user's own model: on a machine
+ * with no language model this resolves to `'none'` and the dialog offers the
+ * ERD Studio service rather than routing the text there unasked. `'auto'` is
+ * still honoured where it is stored, and is the only value that falls through
+ * — their language model, then their endpoint, then the author's hosted proxy.
+ * Every other value pins a single tier and does **not** fall through: a pin
+ * that cannot be honoured resolves to `'none'` rather than quietly sending the
+ * text somewhere the user did not choose. The dialog says so and offers the
+ * picker, so this is visible rather than silent.
  */
 export async function resolveAnalysisTier(
   context: vscode.ExtensionContext,
@@ -768,6 +781,25 @@ export async function resolveAnalysisTier(
 }
 
 /**
+ * The destinations the picker advertises: the user's own model, or ours.
+ *
+ * Two rows answer the whole question. `auto` and `endpoint` remain valid
+ * settings and resolve exactly as they always did — {@link
+ * resolveAnalysisTier} is untouched — they are simply no longer offered, being
+ * a precedence rule and a power-user escape hatch rather than answers to
+ * "which model reads this?". Either reappears as a row when it is the current
+ * choice: a picker that hides where the text is *actually* going, and offers no
+ * way off it, is worse than the extra row.
+ */
+const OFFERED_PROVIDER_CHOICES: readonly FeedbackAiProviderChoice[] = ['vscode', 'hosted'];
+
+/** Keep the advertised rows, plus whatever the user is actually pinned to. */
+function offeredRows(rows: FeedbackAiOption[]): FeedbackAiOption[] {
+  const current = analysisProviderChoice();
+  return rows.filter((row) => OFFERED_PROVIDER_CHOICES.includes(row.id) || row.id === current);
+}
+
+/**
  * Every destination the dialog's picker offers, in the order it renders them.
  *
  * Unavailable rows are included with a `note` saying why, because the two
@@ -783,19 +815,21 @@ export async function listAnalysisOptions(
   // while `feedback.aiAssist` is off would give the user a picker where every
   // choice does nothing.
   if (!aiAssistEnabled()) {
-    return FEEDBACK_AI_PROVIDER_CHOICES.map((id) => ({
-      id,
-      label: PROVIDER_FALLBACK_LABELS[id],
-      available: false,
-      note: 'Feedback analysis is turned off (erdStudio.feedback.aiAssist).',
-    }));
+    return offeredRows(
+      FEEDBACK_AI_PROVIDER_CHOICES.map((id) => ({
+        id,
+        label: PROVIDER_FALLBACK_LABELS[id],
+        available: false,
+        note: 'Feedback analysis is turned off (erdStudio.feedback.aiAssist).',
+      })),
+    );
   }
 
   const [lm, endpoint] = await Promise.all([hasLanguageModel(), endpointReady(context)]);
   const hosted = hostedReady();
   const hostedConfigured = Boolean(hostedBaseUrl() && hostedModel() && hostedProvider());
 
-  return [
+  return offeredRows([
     {
       id: 'auto',
       label: 'Automatic',
@@ -831,7 +865,7 @@ export async function listAnalysisOptions(
           ? 'Turned off by erdStudio.feedback.hostedFallback.'
           : 'Not available in this build.',
     },
-  ];
+  ]);
 }
 
 /**

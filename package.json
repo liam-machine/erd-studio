@@ -317,7 +317,7 @@
         "erdStudio.feedback.provider": {
           "scope": "machine",
           "type": "string",
-          "default": "auto",
+          "default": "vscode",
           "enum": [
             "auto",
             "vscode",
@@ -331,12 +331,12 @@
             "ERD Studio service"
           ],
           "markdownEnumDescriptions": [
-            "Your editor's language model first, then `#erdStudio.feedback.endpoint#`, then the ERD Studio service. The original behaviour.",
+            "Your editor's language model first, then `#erdStudio.feedback.endpoint#`, then the ERD Studio service. The old default; still honoured, no longer offered in the dialog.",
             "Only your editor's own language model. Nothing is sent anywhere else; if this editor has none, the Feedback dialog simply shows no analysis.",
-            "Only `#erdStudio.feedback.endpoint#`, with the key you stored via **ERD Studio: Set Feedback API Key**.",
+            "Only `#erdStudio.feedback.endpoint#`, with the key you stored via **ERD Studio: Set Feedback API Key**. Not offered in the dialog unless you have already picked it here.",
             "Only the small relay run by the extension author, which forwards your description to a third-party AI provider under the author's account. Pick this if you have Copilot but would rather not spend it on triaging feedback. Requires `#erdStudio.feedback.hostedFallback#` to be on, and asks before the first request."
           ],
-          "markdownDescription": "Which model triages your feedback. `auto` keeps the original precedence — your own model first. Any other value pins one destination and does **not** fall through: if the one you pick is unavailable here, the dialog says so and offers the picker rather than quietly sending your text somewhere you did not choose."
+          "markdownDescription": "Which model triages your feedback. The Feedback dialog offers two: your editor\u2019s own model, or the ERD Studio service. Each pins one destination and does **not** fall through \u2014 if the one you pick is unavailable here, the dialog says so and offers the other rather than quietly sending your text somewhere you did not choose. `auto` (the old default, your own model first) and `endpoint` still work if you set them here, but the dialog no longer offers them."
         },
         "erdStudio.feedback.hostedFallback": {
           "scope": "machine",

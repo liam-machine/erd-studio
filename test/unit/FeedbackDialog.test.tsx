@@ -237,9 +237,9 @@ describe('FeedbackDialog visibility', () => {
       type: 'requestFeedbackContext',
       payload: {
         webviewErrors: ['2026-09-07T00:00:00.000Z [webview] boom'],
+        // The canvas is described, never named: the domain's own name and
+        // layer stop at the webview.
         domain: {
-          name: 'showcase',
-          layer: 'silver',
           stage: 'logical',
           modelCount: 0,
           relationshipCount: 0,
@@ -562,7 +562,8 @@ describe('choosing which model does the analysis', () => {
 
     const posted = send.mock.calls.map((c) => c[0]).find((m) => m.type === 'setFeedbackProvider');
     expect(posted.payload.provider).toBe('hosted');
-    expect(posted.payload.domain).toMatchObject({ name: 'showcase' });
+    expect(posted.payload.domain).toMatchObject({ stage: 'logical' });
+    expect(posted.payload.domain).not.toHaveProperty('name');
   });
 
   it('drops the previous model\'s verdict rather than attributing it to the new one', () => {
@@ -1249,7 +1250,7 @@ describe('submitting', () => {
       description: 'It vanished.',
       steps: '1. Rename it',
       includeDiagnostics: true,
-      domain: { name: 'showcase', layer: 'silver', modelCount: 0 },
+      domain: { stage: 'logical', modelCount: 0 },
     });
     // Nothing image-shaped rides along any more.
     expect(submitted().attachments).toBeUndefined();

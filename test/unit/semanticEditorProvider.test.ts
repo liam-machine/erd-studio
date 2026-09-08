@@ -625,7 +625,7 @@ const feedbackPayload = (overrides: Record<string, unknown> = {}) => ({
   title: 'Edge vanished after rename',
   description: 'Renamed dim_task and the FK edge disappeared.',
   includeDiagnostics: true,
-  domain: { name: 'showcase', layer: 'silver', stage: 'logical', modelCount: 4, relationshipCount: 3, schemaVersion: 5 },
+  domain: { stage: 'logical', modelCount: 4, relationshipCount: 3, schemaVersion: 5 },
   ...overrides,
 });
 
@@ -648,7 +648,9 @@ describe('feedback (submitFeedback message)', () => {
     const decoded = decodeURIComponent(url.replace(/\+/g, ' '));
     expect(decoded).toContain('title=Edge vanished after rename');
     expect(decoded).toContain('description=Renamed dim_task and the FK edge disappeared.');
-    expect(decoded).toContain('silver/showcase (stage=logical, schemaVersion=5)');
+    expect(decoded).toContain('Canvas:     stage=logical, schemaVersion=5');
+    // Nothing in the filed issue names the user's own domain.
+    expect(decoded).not.toContain('showcase');
     expect(decoded).toContain('ERD Studio: 0.0.0-test');
     await vi.waitFor(() => expect(lastSubmitted(panel)).toEqual({ ok: true }));
     expect(lastError(panel)).toBeUndefined();

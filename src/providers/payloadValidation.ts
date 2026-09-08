@@ -193,6 +193,11 @@ function validateStringList(value: unknown, label: string): string | null {
 /**
  * Validate the optional domain summary carried on the feedback messages. It
  * only ever reaches the diagnostics text, so the checks are shape checks.
+ *
+ * The domain's name and layer are not among them, and not by omission: they
+ * name the user's own project, so they are no longer carried at all (see
+ * `FeedbackDomainSummary`). Nothing here reads a key the diagnostics do not
+ * render, so a payload that carried one anyway could not surface it.
  */
 function validateFeedbackDomainSummary(value: unknown): string | null {
   if (value === undefined) {
@@ -202,17 +207,13 @@ function validateFeedbackDomainSummary(value: unknown): string | null {
     return 'Domain summary must be an object.';
   }
   const domain = value as {
-    name?: unknown;
-    layer?: unknown;
     stage?: unknown;
     modelCount?: unknown;
     relationshipCount?: unknown;
     schemaVersion?: unknown;
   };
-  for (const key of ['name', 'layer', 'stage'] as const) {
-    if (typeof domain[key] !== 'string') {
-      return `Domain summary ${key} must be a string.`;
-    }
+  if (typeof domain.stage !== 'string') {
+    return 'Domain summary stage must be a string.';
   }
   for (const key of ['modelCount', 'relationshipCount'] as const) {
     if (!isFiniteNumber(domain[key])) {
