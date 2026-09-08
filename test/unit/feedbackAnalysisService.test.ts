@@ -18,6 +18,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ANALYSIS_SYSTEM_PROMPT,
+  PROVIDER_SETTING_UNREGISTERED,
+  describeProviderWriteFailure,
   buildAnalysisPrompt,
   parseAnalysisResponse,
   type AnalysisIssueSummary,
@@ -370,5 +372,34 @@ describe('parseAnalysisResponse', () => {
   it('tolerates a missing reasons object entirely', () => {
     const analysis = parseAnalysisResponse(reply({ reasons: undefined }), 'bug', issues);
     expect(analysis?.reasons).toEqual({ desc: null, ctx: null });
+  });
+});
+
+describe('describeProviderWriteFailure', () => {
+  it('translates VS Code\u2019s unregistered-key rejection into the fix', () => {
+    // The window is on the previous version's manifest after an in-place
+    // update. The raw text is accurate and useless: it names a state the user
+    // neither caused nor can act on, while a reload is the entire remedy.
+    const message = describeProviderWriteFailure(
+      new Error(
+        'Unable to write to User Settings because erdStudio.feedback.provider is not a registered configuration.',
+      ),
+    );
+    expect(message).toBe(PROVIDER_SETTING_UNREGISTERED);
+    expect(message).toMatch(/Reload the window/);
+  });
+
+  it('keeps the generic prefix for a failure that is genuinely unexpected', () => {
+    // A stale manifest has a known fix; a disk error does not, and dressing it
+    // up as one would send the user to reload a window for nothing.
+    expect(describeProviderWriteFailure(new Error('EACCES: permission denied'))).toBe(
+      'Failed to switch the analysis provider: EACCES: permission denied',
+    );
+  });
+
+  it('survives a rejection that is not an Error', () => {
+    expect(describeProviderWriteFailure('nope')).toBe(
+      'Failed to switch the analysis provider: nope',
+    );
   });
 });

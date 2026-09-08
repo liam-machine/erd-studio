@@ -84,6 +84,7 @@ import {
   listAnalysisOptions,
   resolveAnalysisTier,
   setAnalysisProviderChoice,
+  describeProviderWriteFailure,
 } from '../services/feedbackAnalysisService';
 import type { ReportTrackingService } from '../services/reportTrackingService';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
@@ -862,9 +863,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               hostErrorLog.record('setFeedbackProvider', err);
               this.post(webviewPanel.webview, {
                 type: 'error',
-                payload: {
-                  message: `Failed to switch the analysis provider: ${err instanceof Error ? err.message : String(err)}`,
-                },
+                payload: { message: describeProviderWriteFailure(err) },
               });
             }
             break;
