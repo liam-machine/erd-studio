@@ -128,3 +128,27 @@ jobs:
             exit 1
           fi
           npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT"
+
+      # Only after a successful publish: a GitHub Release must never advertise a
+      # version the marketplace does not have. `gh release create` also creates the
+      # tag, pointing at the bump commit this job just pushed.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          node scripts/release.mjs notes --version "$NEW_VERSION" > "$NOTES_FILE"
+          {
+            echo
+            echo '---'
+            echo
+            echo "Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio), or from the \`.vsix\` below with **Extensions: Install from VSIX…**."
+          } >> "$NOTES_FILE"
+
+          ASSET="${RUNNER_TEMP}/erd-studio-${NEW_VERSION}.vsix"
+          cp erd-studio.vsix "$ASSET"
+
+          gh release create "v${NEW_VERSION}" "$ASSET" \
+            --title "v${NEW_VERSION}" \
+            --notes-file "$NOTES_FILE" \
+            --target "$(git rev-parse HEAD)"

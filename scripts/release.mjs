@@ -15,6 +15,12 @@
  *     version heading; otherwise a new section is inserted from the PR title (which is
  *     also read from the PR_TITLE / PR_NUMBER environment variables).
  *
+ *   node scripts/release.mjs notes --version <v> [--changelog <file>]
+ *     Prints the CHANGELOG body for that version (everything under the `## <v>` heading,
+ *     up to the next `## ` heading) so deploy.yml can hand it to `gh release create`.
+ *     Exits 0 with a one-line placeholder when the section is missing or empty, because a
+ *     release with thin notes is better than a failed deploy after a successful publish.
+ *
  * Pure functions are exported for unit tests (test/unit/release.test.ts).
  */
 
@@ -116,6 +122,24 @@ export function updateChangelog(content, { version, date, prTitle, prNumber }) {
   return `${content.slice(0, firstHeading)}${section}\n${content.slice(firstHeading)}`;
 }
 
+/**
+ * Return the release-notes body for `version` from changelog `content`.
+ *
+ * Everything under the `## <version>` heading up to the next `## ` heading, trimmed.
+ * `### ` subheadings are kept — only a level-2 heading ends the section. Returns `''`
+ * when there is no section for that version.
+ */
+export function extractReleaseNotes(content, version) {
+  const heading = new RegExp(`^## ${escapeRegExp(String(version ?? '').trim())}(?:\\s|$).*$`, 'm');
+  const start = heading.exec(String(content ?? ''));
+  if (!start) {
+    return '';
+  }
+  const rest = content.slice(start.index + start[0].length);
+  const next = /^## /m.exec(rest);
+  return (next ? rest.slice(0, next.index) : rest).trim();
+}
+
 /** Today's date as YYYY-MM-DD (UTC). */
 export function isoDate(now = new Date()) {
   return now.toISOString().slice(0, 10);
@@ -192,7 +216,25 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     return 0;
   }
 
-  console.error('Usage: release.mjs <next-version|changelog> [options]');
+  if (command === 'notes') {
+    const version = args.version;
+    if (typeof version !== 'string') {
+      console.error('notes: --version is required');
+      return 1;
+    }
+    const changelogPath = args.changelog ?? path.join(cwd, 'CHANGELOG.md');
+    const existing = fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, 'utf8') : '';
+    const notes = extractReleaseNotes(existing, version);
+    if (!notes) {
+      console.error(`warning: no CHANGELOG section found for v${version}`);
+      process.stdout.write(`See [CHANGELOG.md](https://github.com/liam-machine/erd-studio/blob/main/CHANGELOG.md) for details.\n`);
+      return 0;
+    }
+    process.stdout.write(`${notes}\n`);
+    return 0;
+  }
+
+  console.error('Usage: release.mjs <next-version|changelog|notes> [options]');
   return 1;
 }
 

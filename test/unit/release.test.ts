@@ -5,6 +5,7 @@ import {
   latestMarketplaceVersion,
   nextPatchVersion,
   updateChangelog,
+  extractReleaseNotes,
   // @ts-expect-error — plain ESM helper without type declarations (used by deploy.yml)
 } from '../../scripts/release.mjs';
 
@@ -106,5 +107,47 @@ describe('release.mjs — updateChangelog', () => {
 
   it('rejects an invalid version', () => {
     expect(() => updateChangelog('', { ...opts, version: 'latest' })).toThrow(/Invalid release version/);
+  });
+});
+
+describe('release.mjs — extractReleaseNotes', () => {
+  const changelog = [
+    '# Changelog',
+    '',
+    'All notable changes.',
+    '',
+    '## 0.6.50 — 2026-09-08',
+    '',
+    '### Fixed',
+    '',
+    '- Newest thing',
+    '',
+    '## 0.6.49 — 2026-09-07',
+    '',
+    '- Older thing',
+    '',
+  ].join('\n');
+
+  it('returns the body under the matching heading', () => {
+    expect(extractReleaseNotes(changelog, '0.6.50')).toBe('### Fixed\n\n- Newest thing');
+  });
+
+  it('stops at the next level-2 heading but keeps level-3 subheadings', () => {
+    const notes = extractReleaseNotes(changelog, '0.6.50');
+    expect(notes).toContain('### Fixed');
+    expect(notes).not.toContain('Older thing');
+  });
+
+  it('reads a section that is not the first one', () => {
+    expect(extractReleaseNotes(changelog, '0.6.49')).toBe('- Older thing');
+  });
+
+  it('does not treat a longer version as a match (0.6.4 vs 0.6.49)', () => {
+    expect(extractReleaseNotes(changelog, '0.6.4')).toBe('');
+  });
+
+  it('returns an empty string for a missing version or empty content', () => {
+    expect(extractReleaseNotes(changelog, '9.9.9')).toBe('');
+    expect(extractReleaseNotes('', '0.6.50')).toBe('');
   });
 });

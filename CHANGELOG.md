@@ -5,6 +5,16 @@ All notable changes to the ERD Studio extension.
 The `Unreleased` heading below is renamed to the released version by the deploy workflow
 (`scripts/release.mjs changelog`). Add user-facing notes under it as part of each PR.
 
+## Unreleased
+
+### Added
+
+- **Every release now has a GitHub Release, with the `.vsix` attached.** Fifty-one versions have shipped to the marketplace without ever producing a release page, so there was nothing to watch, nothing to link to and no way to install a specific version by hand. The deploy workflow now creates one from that version's changelog section immediately after a successful publish — which also means the repository gets its first tags. Watch the repository to be told when a version ships, or grab the `.vsix` from a release and install it with **Extensions: Install from VSIX…** if you need to pin or roll back.
+
+### Changed
+
+- **The marketplace listing now says what the extension is for.** The description led with the two-stage mechanism and never mentioned that your design is plain YAML your AI assistant can read — the thing that makes it different from every other ERD tool. The tag list has been widened to match, so searching the marketplace for dimensional modelling, Kimball, star schema, medallion architecture, analytics engineering or MCP now finds it. Marketplace **Q&A** now points at GitHub Discussions rather than a separate queue nobody was watching.
+
 ## 0.6.51 — 2026-09-08
 
 ### Changed
