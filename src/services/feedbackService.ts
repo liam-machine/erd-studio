@@ -61,10 +61,16 @@ export interface Diagnostics {
   vscodeVersion: string;
   platform: string;
   arch: string;
-  /** Present when a domain canvas was active when the report was opened. */
+  /**
+   * Present when a domain canvas was active when the report was opened.
+   *
+   * The domain's **name and layer are deliberately absent**. "gold/commercial"
+   * is the user's own business vocabulary, it identifies a project the
+   * maintainer has no access to and cannot act on, and it bought nothing a bug
+   * report needs. What is left is the shape of the thing that broke — which
+   * stage was on screen, how big the graph was — and that is diagnostic.
+   */
   domain?: {
-    name: string;
-    layer: string;
     stage: string;
     modelCount: number;
     relationshipCount: number;
@@ -136,8 +142,8 @@ export function formatDiagnostics(d: Diagnostics): string {
   ];
   if (d.domain) {
     lines.push(
-      `Domain:     ${d.domain.layer}/${d.domain.name} (stage=${d.domain.stage}` +
-        `${d.domain.schemaVersion != null ? `, schemaVersion=${d.domain.schemaVersion}` : ''})`,
+      `Canvas:     stage=${d.domain.stage}` +
+        `${d.domain.schemaVersion != null ? `, schemaVersion=${d.domain.schemaVersion}` : ''}`,
       `Models:     ${d.domain.modelCount}   Relationships: ${d.domain.relationshipCount}`,
     );
   }
@@ -328,8 +334,9 @@ export function composeMarkdownReport(
 
 /**
  * Diagnostics chips for the dialog. Deliberately coarser than
- * {@link formatDiagnostics}: no file paths, and nothing about the project
- * beyond the domain summary the user can already see on the canvas.
+ * {@link formatDiagnostics}: no file paths, and nothing that names the user's
+ * project — the canvas contributes its stage and its size, never its
+ * identity.
  */
 export function buildDiagnosticsChips(d: Diagnostics): FeedbackDiagnosticsChip[] {
   const chips: FeedbackDiagnosticsChip[] = [
@@ -339,7 +346,9 @@ export function buildDiagnosticsChips(d: Diagnostics): FeedbackDiagnosticsChip[]
   ];
   if (d.domain) {
     chips.push({
-      label: `${d.domain.layer}/${d.domain.name} · ${d.domain.modelCount} models`,
+      label:
+        `${d.domain.stage} · ${d.domain.modelCount} model${d.domain.modelCount === 1 ? '' : 's'}` +
+        ` · ${d.domain.relationshipCount} relationship${d.domain.relationshipCount === 1 ? '' : 's'}`,
       tone: 'normal',
     });
   }

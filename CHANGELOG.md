@@ -5,6 +5,14 @@ All notable changes to the ERD Studio extension.
 The `Unreleased` heading below is renamed to the released version by the deploy workflow
 (`scripts/release.mjs changelog`). Add user-facing notes under it as part of each PR.
 
+## Unreleased
+
+### Changed
+
+- **Your domain's name no longer travels with a report.** The diagnostics used to carry a line like `Domain: gold/commercial` — your own business vocabulary, naming a project the maintainer has no access to and cannot act on. It is gone, along with the layer, and not just hidden: the fields were removed from the message the dialog sends, so there is no path from a canvas to a domain name in a filed issue. What a report still says about the canvas is the part that helps: which stage was open, the schema version, and how many models and relationships it had.
+- **Two model destinations instead of four.** The analysis picker now offers your editor's own model (Copilot) or the ERD Studio service, because those are the two answers to "which model reads this?". `auto` and a custom API endpoint still work if you set `erdStudio.feedback.provider` yourself, and either reappears in the picker while it is your current choice, so nobody is stranded on a destination they can no longer see.
+- **The default is now your own model, and it stays put.** Fresh installs use Copilot rather than the old `auto` precedence, which quietly reached the ERD Studio service on a machine with no language model. If your editor offers no model the panel now says so and puts the ERD Studio service one click away, instead of sending your description somewhere you were never asked about.
+
 ## 0.6.50 — 2026-09-08
 
 ### Fixed

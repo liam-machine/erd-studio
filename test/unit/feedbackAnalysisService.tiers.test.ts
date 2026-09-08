@@ -150,6 +150,12 @@ beforeEach(() => {
   // meaning the day the service goes live — which is exactly what happened.
   // A test that wants the tier calls configureHosted().
   setHostedAnalysisTargetForTests({ endpoint: '', model: '', provider: '' });
+  // These are the tier-resolution tests, so they want the precedence rule, not
+  // the shipped default. `feedback.provider` now defaults to `vscode` — a pin,
+  // which by design never falls through — so `auto` has to be asked for
+  // explicitly here. Tests that assert the default's own behaviour set it
+  // themselves.
+  vscode._setMockConfiguration('erdStudio', FEEDBACK_PROVIDER_SETTING, { globalValue: 'auto' });
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -235,14 +241,28 @@ describe('pinning the destination (feedback.provider)', () => {
     expect(await resolveAnalysisTier(makeContext())).toBe('languageModel');
   });
 
-  it('reads an unrecognised value as auto rather than as "no tier"', async () => {
+  it('reads an unrecognised value as the default rather than as "no tier"', async () => {
     // A value from a newer build, or a hand-edited settings file, must not turn
     // the feature off — it is a preference, not a switch.
     enableAiAssist();
     pinProvider('quantum-oracle');
     vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
-    expect(analysisProviderChoice()).toBe('auto');
+    expect(analysisProviderChoice()).toBe('vscode');
     expect(await resolveAnalysisTier(makeContext())).toBe('languageModel');
+  });
+
+  it('defaults to the user\u2019s own model, and does not fall through when it is absent', async () => {
+    // The old default was `auto`, which reached the hosted relay on a machine
+    // with no language model. The text now stays put until the user says where
+    // it should go — the panel shows the ERD Studio service one click away.
+    enableAiAssist();
+    configureHosted();
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_PROVIDER_SETTING, {});
+
+    expect(analysisProviderChoice()).toBe('vscode');
+    expect(await resolveAnalysisTier(makeContext())).toBe('none');
+    const rows = await listAnalysisOptions(makeContext());
+    expect(rows.find((r) => r.id === 'hosted')?.available).toBe(true);
   });
 
   it('sends the analysis to the hosted relay even with a language model right there', async () => {
@@ -303,17 +323,41 @@ describe('pinning the destination (feedback.provider)', () => {
 });
 
 describe('listAnalysisOptions', () => {
-  it('lists all four rows in picker order, whatever resolves', async () => {
+  it('offers two rows — the user\u2019s own model, or ours', async () => {
+    // `auto` and `endpoint` are a precedence rule and an escape hatch, not
+    // answers to "which model reads this?", and every extra row was a decision
+    // standing between the user and writing the report.
     enableAiAssist();
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_PROVIDER_SETTING, {});
     const rows = await listAnalysisOptions(makeContext());
-    expect(rows.map((r) => r.id)).toEqual(['auto', 'vscode', 'endpoint', 'hosted']);
+    expect(rows.map((r) => r.id)).toEqual(['vscode', 'hosted']);
     expect(rows.every((r) => typeof r.note === 'string' && r.note.length > 0)).toBe(true);
+  });
+
+  it('shows the row for a destination the user is actually pinned to', async () => {
+    // Hiding where the text is going, with no way off it, is worse than the
+    // extra row — so a carried-over `auto` (or a configured endpoint) reappears.
+    enableAiAssist();
+    pinProvider('auto');
+    expect((await listAnalysisOptions(makeContext())).map((r) => r.id)).toEqual([
+      'auto',
+      'vscode',
+      'hosted',
+    ]);
+
+    pinProvider('endpoint');
+    expect((await listAnalysisOptions(makeContext())).map((r) => r.id)).toEqual([
+      'vscode',
+      'endpoint',
+      'hosted',
+    ]);
   });
 
   it('marks what can actually run here, and says why the rest cannot', async () => {
     enableAiAssist();
     vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
     configureHosted();
+    pinProvider('endpoint');
 
     const rows = await listAnalysisOptions(makeContext());
     const byId = Object.fromEntries(rows.map((r) => [r.id, r]));

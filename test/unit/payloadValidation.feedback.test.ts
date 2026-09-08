@@ -30,8 +30,6 @@ const submitPayload = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const domainSummary = {
-  name: 'orders',
-  layer: 'silver',
   stage: 'logical',
   modelCount: 4,
   relationshipCount: 3,
@@ -77,7 +75,7 @@ describe('validateRequestFeedbackContextPayload', () => {
     ['a non-object payload', 'nope', /must be an object/],
     ['non-string errors', { webviewErrors: [1] }, /list of strings/],
     ['a non-list errors field', { webviewErrors: 'boom' }, /list of strings/],
-    ['a domain summary missing a name', { domain: { ...domainSummary, name: 5 } }, /name must be a string/],
+    ['a domain summary missing a stage', { domain: { ...domainSummary, stage: 5 } }, /stage must be a string/],
     [
       'a non-numeric model count',
       { domain: { ...domainSummary, modelCount: 'four' } },

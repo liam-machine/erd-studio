@@ -155,7 +155,7 @@ describe('requestFeedbackContext', () => {
       payload: {
         webviewErrors: ['2026-09-07T00:00:00.000Z [webview] boom'],
         domain: {
-          name: 'showcase', layer: 'silver', stage: 'logical',
+          stage: 'logical',
           modelCount: 4, relationshipCount: 3, schemaVersion: 5,
         },
       },
@@ -164,23 +164,23 @@ describe('requestFeedbackContext', () => {
     await vi.waitFor(() => expect(types(panel)).toContain('feedbackContext'));
     const payload = lastOf(panel, 'feedbackContext');
     expect(payload.diagnostics.text.startsWith('ERD Studio: ')).toBe(true);
-    expect(payload.diagnostics.text).toContain('silver/showcase');
+    expect(payload.diagnostics.text).toContain('Canvas:     stage=logical');
+    // The canvas contributes its shape, never its name.
+    expect(payload.diagnostics.text).not.toContain('showcase');
     expect(payload.diagnostics.chips[0]).toEqual({ label: 'ERD Studio 0.0.0-test', tone: 'normal' });
     expect(payload.diagnostics.chips.some((c: { tone: string }) => c.tone === 'error')).toBe(true);
     expect(payload.capabilities).toMatchObject({
       extensionVersion: '0.0.0-test',
       aiAvailable: false,
       aiProviderLabel: null,
-      aiProvider: 'auto',
+      aiProvider: 'vscode',
       aiNeedsPriming: false,
       githubHandle: null,
     });
     // The picker is always listed, whatever resolves — a pinned destination
     // that is unavailable here has to leave a visible way back.
     expect(payload.capabilities.aiOptions.map((o: { id: string }) => o.id)).toEqual([
-      'auto',
       'vscode',
-      'endpoint',
       'hosted',
     ]);
     expect(payload.capabilities.aiOptions.every((o: { available: boolean }) => !o.available)).toBe(
@@ -243,7 +243,7 @@ describe('requestFeedbackContext', () => {
     await vi.waitFor(() => expect(types(panel)).toContain('feedbackContext'));
     expect(lastOf(panel, 'feedbackContext').capabilities).toMatchObject({
       githubHandle: null,
-      aiProvider: 'auto',
+      aiProvider: 'vscode',
     });
     expect(types(panel)).not.toContain('error');
     expect(hostErrorLog.recent().at(-1)).toMatch(/sendFeedbackContext\.getSession/);
