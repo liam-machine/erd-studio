@@ -5,6 +5,12 @@ All notable changes to the ERD Studio extension.
 The `Unreleased` heading below is renamed to the released version by the deploy workflow
 (`scripts/release.mjs changelog`). Add user-facing notes under it as part of each PR.
 
+## Unreleased
+
+### Fixed
+
+- **"…is not a registered configuration" when choosing the analysis destination.** Updating ERD Studio while VS Code is open leaves the window running the new extension code against the previous version's settings, so picking a model provider failed with a raw VS Code error that named neither the cause nor the cure. The dialog now recognises that state and asks you to reload the window, and nothing is written until it can actually be saved. If you hit this, reload the window (**Developer: Reload Window**) and pick again — or set `erdStudio.feedback.provider` in your settings directly.
+
 ## 0.6.49 — 2026-09-07
 
 ### Added

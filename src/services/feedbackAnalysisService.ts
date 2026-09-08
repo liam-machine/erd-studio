@@ -119,11 +119,12 @@ export const FEEDBACK_PROVIDER_SETTING = 'feedback.provider';
  * because it is the extension author's own service rather than something a user
  * or a repository configures.
  *
- * **It ships empty on purpose.** While it is `''` the hosted tier does not
+ * **Empty turns the tier off.** While it is `''` the hosted tier does not
  * exist: `resolveAnalysisTier()` can never return `'hosted'`, no consent modal
  * mentioning it can ever appear, and the extension behaves exactly as it did
- * with three tiers. The client is ready before the service is; filling this in
- * (see `proxy/`) is what turns the tier on, in one place, for one release.
+ * with three tiers. It is now filled in (see `proxy/`), so the tier is live in
+ * published builds and a hosted request reaches a real service — clearing it
+ * back to `''` is the one-line way to take that down again.
  *
  * Only `https:` is accepted, plus `http:` on loopback for a local
  * `wrangler dev`. The proxy holds the API key, so no key is ever sent with a
@@ -141,11 +142,11 @@ export const HOSTED_ANALYSIS_ENDPOINT = 'https://erd-studio.liam-is-an.ai';
  * processor they were never told about, and this is the one tier where the
  * extension, not the user, chose the destination.
  *
- * **Fill this in with the same commit that fills {@link
- * HOSTED_ANALYSIS_ENDPOINT}.** It is not a nicety: `resolveAnalysisTier()`
- * treats the hosted tier as absent while either constant is empty, so an
- * endpoint shipped without a named provider simply resolves to `'none'` rather
- * than sending text under a disclosure that omits the recipient.
+ * **This and {@link HOSTED_ANALYSIS_ENDPOINT} move together, in one commit.**
+ * It is not a nicety: `resolveAnalysisTier()` treats the hosted tier as absent
+ * while either constant is empty, so an endpoint shipped without a named
+ * provider simply resolves to `'none'` rather than sending text under a
+ * disclosure that omits the recipient.
  */
 export const HOSTED_ANALYSIS_PROVIDER = 'DeepSeek';
 
@@ -834,6 +835,39 @@ export async function listAnalysisOptions(
 }
 
 /**
+ * What to say when the destination cannot be saved because this window has
+ * never heard of the setting.
+ *
+ * Updating an extension in place leaves the two halves of it out of step: the
+ * extension host restarts onto the new `dist/extension.js` — which is the only
+ * reason this picker is on screen at all — while the window still holds the
+ * previous version's manifest, and `contributes.configuration` is registered
+ * from the manifest. VS Code then rejects the write with "…is not a registered
+ * configuration", an accurate message about a state the user cannot act on and
+ * did not cause. A reload is the whole fix, so the message says that instead.
+ */
+export const PROVIDER_SETTING_UNREGISTERED =
+  'ERD Studio was updated, but this window is still running the previous version\u2019s ' +
+  'settings, so the analysis destination cannot be saved. Reload the window ' +
+  '(Developer: Reload Window) and choose again.';
+
+/**
+ * Whether this window has `erdStudio.feedback.provider` in its configuration
+ * registry.
+ *
+ * Asked through `defaultValue` rather than by matching the text of the failure:
+ * the setting is contributed with `"default": "auto"`, so a registered key
+ * always inspects to a defined default and an unregistered one never does.
+ * That holds in every locale, which the error string does not.
+ */
+function providerSettingRegistered(): boolean {
+  return (
+    vscode.workspace.getConfiguration('erdStudio').inspect(FEEDBACK_PROVIDER_SETTING)
+      ?.defaultValue !== undefined
+  );
+}
+
+/**
  * Pin (or un-pin) the analysis destination, globally.
  *
  * Written to the **global** target on purpose: the setting is user-scoped, so a
@@ -843,9 +877,29 @@ export async function listAnalysisOptions(
 export async function setAnalysisProviderChoice(
   choice: FeedbackAiProviderChoice,
 ): Promise<void> {
+  if (!providerSettingRegistered()) throw new Error(PROVIDER_SETTING_UNREGISTERED);
   await vscode.workspace
     .getConfiguration('erdStudio')
     .update(FEEDBACK_PROVIDER_SETTING, choice, vscode.ConfigurationTarget.Global);
+}
+
+/**
+ * The message the dialog shows when pinning the destination failed.
+ *
+ * The stale-manifest case gets its own sentence and drops the generic prefix,
+ * because it is the one failure here with a one-click fix and burying it after
+ * "Failed to switch the analysis provider:" is what left the raw VS Code text
+ * on screen with no hint of what to do. Anything else keeps the prefix — an
+ * unexpected failure should still read as one. The raw string is matched too,
+ * so a rejection that gets past {@link providerSettingRegistered} still lands
+ * on the useful advice.
+ */
+export function describeProviderWriteFailure(err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err);
+  if (detail === PROVIDER_SETTING_UNREGISTERED || /not a registered configuration/i.test(detail)) {
+    return PROVIDER_SETTING_UNREGISTERED;
+  }
+  return `Failed to switch the analysis provider: ${detail}`;
 }
 
 /**

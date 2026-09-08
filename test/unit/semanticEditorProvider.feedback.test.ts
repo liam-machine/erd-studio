@@ -33,6 +33,8 @@ import type { ReportTrackingService } from '../../src/services/reportTrackingSer
 import {
   FEEDBACK_AI_ASSIST_SETTING,
   FEEDBACK_LM_PRIMED_KEY,
+  FEEDBACK_PROVIDER_SETTING,
+  PROVIDER_SETTING_UNREGISTERED,
   clearKnownIssueCache,
 } from '../../src/services/feedbackAnalysisService';
 import { hostErrorLog } from '../../src/services/feedbackService';
@@ -395,7 +397,20 @@ describe('submitFeedback', () => {
 });
 
 describe('setFeedbackProvider', () => {
+  /**
+   * What a window that has scanned this version's manifest looks like: the
+   * setting is contributed with `"default": "auto"`, so it inspects to a
+   * defined default. The mock starts blank, which is the *other* state — see
+   * the stale-manifest test at the end of this block.
+   */
+  function registerProviderSetting(): void {
+    vscode._setMockConfiguration('erdStudio', FEEDBACK_PROVIDER_SETTING, {
+      defaultValue: 'auto',
+    });
+  }
+
   it('pins the destination globally and answers with a fresh context', async () => {
+    registerProviderSetting();
     // Someone with Copilot could not previously reach any other destination —
     // the resolver tried theirs first and stopped.
     vscode._setMockConfiguration('erdStudio', FEEDBACK_AI_ASSIST_SETTING, { globalValue: true });
@@ -429,6 +444,7 @@ describe('setFeedbackProvider', () => {
   it('resolves to no tier rather than falling back when the pin is unavailable', async () => {
     // Falling through would send the text to a destination the user pinned
     // away from, which is the whole thing the pin exists to prevent.
+    registerProviderSetting();
     vscode._setMockConfiguration('erdStudio', FEEDBACK_AI_ASSIST_SETTING, { globalValue: true });
     vscode._setMockLanguageModels([{ id: 'gpt-4o', name: 'GPT-4o', reply: '{}' }]);
     const { panel } = await openShowcase(root);
@@ -448,12 +464,32 @@ describe('setFeedbackProvider', () => {
   });
 
   it('refuses an unknown destination rather than coercing it to auto', async () => {
+    registerProviderSetting();
     const { panel } = await openShowcase(root);
 
     panel._simulateMessage({ type: 'setFeedbackProvider', payload: { provider: 'copilot' } });
 
     await vi.waitFor(() => expect(lastError(panel)).toBeDefined());
     expect(lastError(panel)).toMatch(/^Failed to switch the analysis provider: /);
+    expect(
+      vscode.workspace.getConfiguration('erdStudio').inspect('feedback.provider')?.globalValue,
+    ).toBeUndefined();
+  });
+
+  it('asks for a window reload when the update left this window on the old manifest', async () => {
+    // No `registerProviderSetting()`: the extension host is running the new
+    // code — which is the only reason the picker exists — while the window
+    // still holds the previous version's manifest, so VS Code would reject the
+    // write with "is not a registered configuration". That text names neither
+    // the cause nor the fix, and the user did not cause it.
+    const { panel } = await openShowcase(root);
+
+    panel._simulateMessage({ type: 'setFeedbackProvider', payload: { provider: 'vscode' } });
+
+    await vi.waitFor(() => expect(lastError(panel)).toBeDefined());
+    expect(lastError(panel)).toBe(PROVIDER_SETTING_UNREGISTERED);
+    expect(lastError(panel)).toMatch(/Reload the window/);
+    // Nothing is written, so the picker still reflects what is actually stored.
     expect(
       vscode.workspace.getConfiguration('erdStudio').inspect('feedback.provider')?.globalValue,
     ).toBeUndefined();
