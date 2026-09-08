@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt projects. Design your data warehouse across two stages — Logical (columns, types, FK design) and Physical (read-only manifest view) — with cross-stage discrepancy comparison.",
-  "version": "0.6.50",
+  "version": "0.6.51",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -336,7 +336,7 @@
             "Only `#erdStudio.feedback.endpoint#`, with the key you stored via **ERD Studio: Set Feedback API Key**. Not offered in the dialog unless you have already picked it here.",
             "Only the small relay run by the extension author, which forwards your description to a third-party AI provider under the author's account. Pick this if you have Copilot but would rather not spend it on triaging feedback. Requires `#erdStudio.feedback.hostedFallback#` to be on, and asks before the first request."
           ],
-          "markdownDescription": "Which model triages your feedback. The Feedback dialog offers two: your editor\u2019s own model, or the ERD Studio service. Each pins one destination and does **not** fall through \u2014 if the one you pick is unavailable here, the dialog says so and offers the other rather than quietly sending your text somewhere you did not choose. `auto` (the old default, your own model first) and `endpoint` still work if you set them here, but the dialog no longer offers them."
+          "markdownDescription": "Which model triages your feedback. The Feedback dialog offers two: your editor’s own model, or the ERD Studio service. Each pins one destination and does **not** fall through — if the one you pick is unavailable here, the dialog says so and offers the other rather than quietly sending your text somewhere you did not choose. `auto` (the old default, your own model first) and `endpoint` still work if you set them here, but the dialog no longer offers them."
         },
         "erdStudio.feedback.hostedFallback": {
           "scope": "machine",
