@@ -13,6 +13,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 
 ### Changed
 
+- **A bolder ERD Studio identity.** The extension now uses the selected Ember Alloy mark: forward-leaning ERD letterforms in bronze, silver and gold on charcoal, with the same stronger silhouette adapted to a monochrome activity-bar icon.
 - **The marketplace listing now says what the extension is for.** The description led with the two-stage mechanism and never mentioned that your design is plain YAML your AI assistant can read — the thing that makes it different from every other ERD tool. The tag list has been widened to match, so searching the marketplace for dimensional modelling, Kimball, star schema, medallion architecture, analytics engineering or MCP now finds it. Marketplace **Q&A** now points at GitHub Discussions rather than a separate queue nobody was watching.
 
 ## 0.6.51 — 2026-09-08
