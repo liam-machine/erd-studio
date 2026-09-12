@@ -8,6 +8,16 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- **The README diagram now shows the relationship's cardinality.** The line joining
+  `dim_customer` and `fct_order` carried no notation, so a reader could see that the two
+  models were related but not how. It is now labelled **1** at the dimension and **\*** at the
+  fact, the same Power BI-style notation the canvas itself uses, so the picture says one
+  customer to many orders rather than leaving it to be inferred from the key names.
+
 ## 1.0.0 — 2026-09-12
 
 **ERD Studio is 1.0.** The file format has been stable at schema v5 since 0.6.x, every
