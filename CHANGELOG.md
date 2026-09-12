@@ -5,6 +5,12 @@ All notable changes to the ERD Studio extension.
 The `Unreleased` heading below is renamed to the released version by the deploy workflow
 (`scripts/release.mjs changelog`). Add user-facing notes under it as part of each PR.
 
+## Unreleased
+
+### Fixed
+
+- **Marketplace publishing now recovers from request timeouts.** The release job retries a failed publish, recognises when Marketplace accepted a version despite the client timing out, and safely reuses an already-pushed version when the workflow itself is rerun instead of skipping another patch number. GitHub Release creation is idempotent too, so recovery can finish every release artifact.
+
 ## 0.6.52 — 2026-09-12
 
 ### Added
