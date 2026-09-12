@@ -1,0 +1,96 @@
+<!--
+  GitHub social preview card — 1280x640.
+
+  This is the source for the image set under Settings -> Social preview. GitHub
+  stores its own copy on upload, so this file is only needed to regenerate the
+  card; it is not referenced at runtime and never ships (scripts/ is excluded by
+  .vscodeignore).
+
+  Render:
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
+      --window-size=1280,640 --allow-file-access-from-files \
+      --screenshot=social-preview.png scripts/social-preview.html
+
+  Then upload social-preview.png at:
+    https://github.com/liam-machine/erd-studio/settings
+-->
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:640px;overflow:hidden}
+body{
+  background:radial-gradient(1100px 620px at 78% 22%, #23262e 0%, #16181d 62%, #101216 100%);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+  color:#e8eaed; display:flex; align-items:center; position:relative;
+}
+.grid{position:absolute;inset:0;
+  background-image:linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px);
+  background-size:64px 64px; mask-image:radial-gradient(760px 520px at 74% 30%,#000 20%,transparent 78%);}
+.left{position:relative;padding:0 0 0 76px;width:660px}
+.icon{width:88px;height:88px;border-radius:20px;display:block;margin-bottom:30px;
+  box-shadow:0 10px 34px #0009, 0 0 0 1px #ffffff14}
+h1{font-size:78px;line-height:1;letter-spacing:-2.6px;font-weight:700;margin-bottom:20px}
+.tag{font-size:31px;line-height:1.32;font-weight:600;color:#f2f4f7;margin-bottom:14px;letter-spacing:-.4px}
+.tag b{background:linear-gradient(96deg,#cd7f32,#c9ccd1 46%,#d4a800);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700}
+.sub{font-size:22px;line-height:1.5;color:#9aa1ab;max-width:560px}
+.chips{display:flex;gap:12px;margin-top:34px;align-items:center}
+.chip{font-size:16.5px;font-weight:600;padding:8px 17px;border-radius:999px;letter-spacing:.1px}
+.c1{color:#93c5fd;background:#60a5fa1c;border:1px solid #60a5fa4d}
+.c2{color:#86efac;background:#22c55e1a;border:1px solid #22c55e4d}
+.c3{color:#9aa1ab;background:#ffffff0a;border:1px solid #ffffff1f}
+/* --- ERD motif --- */
+.art{position:absolute;right:74px;top:50%;transform:translateY(-50%);width:404px;height:432px}
+.node{position:absolute;width:196px;border-radius:13px;background:#1c1f26;
+  border:1px solid #2f343d;box-shadow:0 16px 40px #0008;overflow:hidden}
+.node .hd{padding:10px 13px;font-size:14.5px;font-weight:700;letter-spacing:.2px;
+  border-bottom:1px solid #2f343d;display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.row{padding:7.5px 13px;font-size:12.5px;color:#8d95a0;display:flex;justify-content:space-between;gap:10px;
+  border-bottom:1px solid #23272e}
+.row:last-child{border-bottom:0}
+.k{color:#e8eaed;font-weight:600}
+.pk{font-size:9.5px;font-weight:800;letter-spacing:.6px;padding:1.5px 5px;border-radius:4px}
+.pkk{color:#fbbf24;background:#fbbf2422}
+.fkk{color:#60a5fa;background:#60a5fa22}
+.n1{left:0;top:8px;border-color:#60a5fa66}
+.n1 .hd{color:#bfdbfe;background:#60a5fa14}
+.n2{right:0;bottom:6px;border-color:#22c55e66}
+.n2 .hd{color:#bbf7d0;background:#22c55e14}
+svg{position:absolute;inset:0;overflow:visible}
+</style></head><body>
+<div class="grid"></div>
+<div class="left">
+  <img class="icon" src="../media/icon.png">
+  <h1>ERD Studio</h1>
+  <div class="tag">Visual ERD designer for <b>dbt</b></div>
+  <div class="sub">Design your warehouse on a canvas &mdash; in your repo, as plain YAML your AI assistant can read.</div>
+  <div class="chips">
+    <span class="chip c1">Logical</span>
+    <span class="chip c2">Physical</span>
+    <span class="chip c3">Free &amp; open source</span>
+  </div>
+</div>
+<div class="art">
+  <svg width="404" height="432">
+    <!-- orthogonal edge: right side of dim_customer -> top of fct_order -->
+    <path d="M196 74 H 286 A 14 14 0 0 1 300 88 V 276"
+          fill="none" stroke="#5b6472" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="196" cy="74" r="4.6" fill="#60a5fa"/>
+    <!-- crow's foot (many side) -->
+    <path d="M288 278 L 300 292 L 312 278 M300 276 V 292"
+          fill="none" stroke="#5b6472" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div class="node n1">
+    <div class="hd"><span class="dot" style="background:#60a5fa"></span>dim_customer</div>
+    <div class="row"><span class="k">customer_key</span><span class="pk pkk">PK</span></div>
+    <div class="row"><span>customer_name</span><span>varchar</span></div>
+    <div class="row"><span>valid_from</span><span>SCD2</span></div>
+  </div>
+  <div class="node n2">
+    <div class="hd"><span class="dot" style="background:#22c55e"></span>fct_order</div>
+    <div class="row"><span class="k">order_key</span><span class="pk pkk">PK</span></div>
+    <div class="row"><span class="k">customer_key</span><span class="pk fkk">FK</span></div>
+    <div class="row"><span>order_total</span><span>numeric</span></div>
+  </div>
+</div>
+</body></html>
