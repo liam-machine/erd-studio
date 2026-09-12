@@ -3,11 +3,20 @@
  * Release helpers used by .github/workflows/deploy.yml.
  *
  *   node scripts/release.mjs next-version [--marketplace-json <file>] [--package-json <file>]
+ *                                          [--changelog <file>]
  *     Prints the version to publish: max(package.json, latest marketplace version) + patch.
  *     The marketplace file is the output of `npx @vscode/vsce show <publisher.name> --json`;
  *     when it is missing or unparsable the local version is used as the base, so a
  *     desynced repo (lost bump commit, rewritten history) never fails with
  *     "version already exists" as long as the marketplace lookup succeeded.
+ *
+ *     A patch bump is the default, not the only option: writing an explicit version in the
+ *     changelog's Unreleased heading — `## Unreleased — 1.0.0` — releases exactly that
+ *     version instead, which is how a minor or major release is declared. The pin lives
+ *     next to the notes it describes, in the file the PR already edits. It may only move
+ *     the version forward; a pin at or below something already published is ignored in
+ *     favour of the patch bump, so it can never resurrect the "version already exists"
+ *     failure this function exists to prevent.
  *
  *   node scripts/release.mjs changelog --version <v> [--date YYYY-MM-DD] [--changelog <file>]
  *                                      [--pr-title <title>] [--pr-number <n>]
@@ -69,17 +78,69 @@ export function latestMarketplaceVersion(showJson) {
 }
 
 /**
- * Version to publish next: the greater of the local package.json version and the
- * latest marketplace version, patch-bumped.
+ * The highest version already accounted for: the greater of the local package.json
+ * version and the latest marketplace version. Nothing may be published at or below it.
  */
-export function nextPatchVersion(localVersion, marketplaceVersion) {
+export function highestKnownVersion(localVersion, marketplaceVersion) {
   const local = parseVersion(localVersion);
   if (!local) {
     throw new Error(`Invalid package.json version: "${localVersion}"`);
   }
   const market = parseVersion(marketplaceVersion);
   const base = market && compareVersions(marketplaceVersion, localVersion) > 0 ? market : local;
+  return `${base[0]}.${base[1]}.${base[2]}`;
+}
+
+/**
+ * Version to publish next: the greater of the local package.json version and the
+ * latest marketplace version, patch-bumped.
+ */
+export function nextPatchVersion(localVersion, marketplaceVersion) {
+  const base = parseVersion(highestKnownVersion(localVersion, marketplaceVersion));
   return `${base[0]}.${base[1]}.${base[2] + 1}`;
+}
+
+/**
+ * Explicit release version pinned in the changelog's Unreleased heading.
+ *
+ * `## Unreleased — 1.0.0` pins 1.0.0; a bare `## Unreleased` pins nothing. Returns null
+ * when there is no Unreleased heading or it carries no valid version.
+ */
+export function pinnedReleaseVersion(content) {
+  const heading = /^## Unreleased([^\n]*)$/m.exec(String(content ?? ''));
+  if (!heading) {
+    return null;
+  }
+  const version = /(\d+\.\d+\.\d+)/.exec(heading[1]);
+  return version && parseVersion(version[1]) ? version[1] : null;
+}
+
+/**
+ * The version to release: the changelog's pin when it moves the version forward,
+ * otherwise a patch bump. `onNote` receives a human-readable explanation whenever a pin
+ * is present, so the deploy log says which rule decided the number.
+ */
+export function resolveReleaseVersion(localVersion, marketplaceVersion, pinnedVersion, onNote) {
+  const patch = nextPatchVersion(localVersion, marketplaceVersion);
+  if (!pinnedVersion) {
+    return patch;
+  }
+  const note = (message) => {
+    if (typeof onNote === 'function') {
+      onNote(message);
+    }
+  };
+  if (!parseVersion(pinnedVersion)) {
+    note(`ignoring malformed changelog pin "${pinnedVersion}"; releasing v${patch}`);
+    return patch;
+  }
+  const floor = highestKnownVersion(localVersion, marketplaceVersion);
+  if (compareVersions(pinnedVersion, floor) <= 0) {
+    note(`changelog pins v${pinnedVersion}, which is not ahead of v${floor}; releasing v${patch} instead`);
+    return patch;
+  }
+  note(`changelog pins v${pinnedVersion}; releasing that instead of v${patch}`);
+  return pinnedVersion;
 }
 
 function escapeRegExp(text) {
@@ -189,7 +250,13 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     if (marketplace === null) {
       console.error('warning: no marketplace version available; bumping from package.json only');
     }
-    process.stdout.write(`${nextPatchVersion(pkg.version, marketplace)}\n`);
+    const changelogPath = args.changelog ?? path.join(cwd, 'CHANGELOG.md');
+    const changelog = fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, 'utf8') : '';
+    const pinned = pinnedReleaseVersion(changelog);
+    const version = resolveReleaseVersion(pkg.version, marketplace, pinned, (message) =>
+      console.error(message),
+    );
+    process.stdout.write(`${version}\n`);
     return 0;
   }
 

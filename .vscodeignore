@@ -36,9 +36,11 @@ mcp-server/**
 proxy/**
 data engineer plugin/**
 
-# Media only referenced from the external assets repo (README uses the
-# raw.githubusercontent.com copy of demo.gif)
+# Media referenced only by README.md. vsce rewrites the README's relative links
+# to absolute github.com URLs when packaging, so a bundled copy is never read —
+# it would just be dead weight in every install.
 media/demo.gif
+media/readme-workflow.png
 
 # Dev/local files
 .claude/**

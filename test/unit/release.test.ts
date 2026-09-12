@@ -4,6 +4,9 @@ import {
   compareVersions,
   latestMarketplaceVersion,
   nextPatchVersion,
+  highestKnownVersion,
+  pinnedReleaseVersion,
+  resolveReleaseVersion,
   updateChangelog,
   extractReleaseNotes,
   // @ts-expect-error — plain ESM helper without type declarations (used by deploy.yml)
@@ -61,6 +64,72 @@ describe('release.mjs — version helpers', () => {
 
   it('throws on an invalid local version', () => {
     expect(() => nextPatchVersion('nope', '0.6.46')).toThrow(/Invalid package.json version/);
+  });
+});
+
+describe('release.mjs — changelog-pinned releases', () => {
+  const pinned = (heading: string) => pinnedReleaseVersion(`# Changelog\n\n${heading}\n\n### Added\n`);
+
+  it('reads an explicit version from the Unreleased heading', () => {
+    expect(pinned('## Unreleased — 1.0.0')).toBe('1.0.0');
+    expect(pinned('## Unreleased - 2.3.4')).toBe('2.3.4');
+    expect(pinned('## Unreleased (1.1.0)')).toBe('1.1.0');
+  });
+
+  it('pins nothing for a bare or absent Unreleased heading', () => {
+    expect(pinned('## Unreleased')).toBeNull();
+    expect(pinned('## Unreleased — first stable release')).toBeNull();
+    expect(pinnedReleaseVersion('# Changelog\n\n## 0.6.53 — 2026-09-12\n')).toBeNull();
+    expect(pinnedReleaseVersion('')).toBeNull();
+    expect(pinnedReleaseVersion(null)).toBeNull();
+  });
+
+  it('reports the highest version already accounted for', () => {
+    expect(highestKnownVersion('0.6.53', '0.6.53')).toBe('0.6.53');
+    expect(highestKnownVersion('0.6.40', '0.6.53')).toBe('0.6.53');
+    expect(highestKnownVersion('0.7.0', '0.6.53')).toBe('0.7.0');
+    expect(highestKnownVersion('0.6.53', null)).toBe('0.6.53');
+  });
+
+  it('releases the pinned version when it moves forward', () => {
+    expect(resolveReleaseVersion('0.6.53', '0.6.53', '1.0.0')).toBe('1.0.0');
+    expect(resolveReleaseVersion('0.6.53', '0.6.53', '0.7.0')).toBe('0.7.0');
+  });
+
+  it('patch-bumps when there is no pin', () => {
+    expect(resolveReleaseVersion('0.6.53', '0.6.53', null)).toBe('0.6.54');
+    expect(resolveReleaseVersion('0.6.53', '0.6.53', undefined)).toBe('0.6.54');
+  });
+
+  it('ignores a pin that would republish an existing version', () => {
+    expect(resolveReleaseVersion('0.6.53', '0.6.53', '0.6.53')).toBe('0.6.54');
+    expect(resolveReleaseVersion('0.6.53', '0.6.53', '0.6.40')).toBe('0.6.54');
+    expect(resolveReleaseVersion('0.6.40', '0.6.53', '0.6.45')).toBe('0.6.54');
+  });
+
+  it('ignores a malformed pin rather than failing the release', () => {
+    expect(resolveReleaseVersion('0.6.53', '0.6.53', '1.0')).toBe('0.6.54');
+    expect(resolveReleaseVersion('0.6.53', '0.6.53', 'stable')).toBe('0.6.54');
+  });
+
+  it('explains which rule chose the version', () => {
+    const notes: string[] = [];
+    resolveReleaseVersion('0.6.53', '0.6.53', '1.0.0', (m: string) => notes.push(m));
+    expect(notes).toEqual(['changelog pins v1.0.0; releasing that instead of v0.6.54']);
+
+    const rejected: string[] = [];
+    resolveReleaseVersion('0.6.53', '0.6.53', '0.6.53', (m: string) => rejected.push(m));
+    expect(rejected[0]).toMatch(/not ahead of v0\.6\.53; releasing v0\.6\.54/);
+  });
+
+  it('renames a pinned Unreleased heading like any other', () => {
+    const content = '# Changelog\n\n## Unreleased — 1.0.0\n\n### Added\n\n- Thing\n';
+    expect(updateChangelog(content, { version: '1.0.0', date: '2026-09-12' })).toContain(
+      '## 1.0.0 — 2026-09-12',
+    );
+    expect(updateChangelog(content, { version: '1.0.0', date: '2026-09-12' })).not.toContain(
+      'Unreleased',
+    );
   });
 });
 

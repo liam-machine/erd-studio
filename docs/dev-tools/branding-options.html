@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>ERD Studio — Icon directions</title>
+  <style>
+    :root { color-scheme: light; --paper:#f5f4f0; --panel:#fffefa; --ink:#252a27; --muted:#646b65; --line:#dcded5; --accent:#405847; --wash:#e9ede5; --preview:#eeeee8; --editor:#fff; --sidebar:#f3f3f3; --editor-ink:#424242; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    body[data-theme="dark"] { color-scheme:dark; --paper:#171a18; --panel:#1e221f; --ink:#eceee7; --muted:#a1aaa1; --line:#363d36; --accent:#bdd0b9; --wash:#2b352c; --preview:#232924; --editor:#1f1f1f; --sidebar:#181818; --editor-ink:#ccc; }
+    button,a,input { -webkit-tap-highlight-color:transparent; }
+    button { font:inherit; color:inherit; cursor:pointer; }
+    button:focus-visible,a:focus-visible { outline:3px solid var(--accent); outline-offset:5px; }
+    a { color:inherit; text-underline-offset:4px; }
+    svg { display:block; flex-shrink:0; }
+    .wrap { width:min(1180px,calc(100% - 80px)); margin:auto; }
+    header { padding:28px 0; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:24px; }
+    .brand { display:flex; align-items:center; gap:12px; font-weight:600; letter-spacing:-.3px; }
+    .brand small { color:var(--muted); font-size:12px; font-weight:400; border-left:1px solid var(--line); padding-left:16px; margin-left:6px; letter-spacing:0; }
+    .edition,.eyebrow,.section-index { font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; text-transform:uppercase; letter-spacing:1.3px; }
+    .edition { color:var(--muted); }
+    .intro { padding:64px 0 42px; display:grid; grid-template-columns:1.2fr 1fr; gap:70px; align-items:end; }
+    .eyebrow { color:var(--accent); margin:0 0 18px; }
+    h1 { font-size:clamp(38px,5vw,64px); line-height:1.04; letter-spacing:-3px; font-weight:500; margin:0; }
+    h1 span { color:var(--muted); }
+    .intro-copy { margin:0; max-width:420px; color:var(--muted); font-size:15px; line-height:1.8; }
+    .controls { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:20px 0; border-top:1px solid var(--line); }
+    .controls p { margin:0; color:var(--muted); font-size:12px; }
+    .control-groups { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+    .segmented { padding:3px; border:1px solid var(--line); border-radius:7px; display:flex; gap:3px; }
+    .segmented button { background:transparent; border:0; padding:6px 12px; border-radius:4px; color:var(--muted); font-size:12px; }
+    .segmented button[aria-pressed="true"] { background:var(--ink); color:var(--paper); }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
+    .option { padding:0; text-align:left; background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; transition:border-color .16s,transform .16s; }
+    .option:hover { transform:translateY(-3px); border-color:var(--muted); }
+    .option[aria-pressed="true"] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+    .art { height:210px; display:flex; align-items:center; justify-content:center; position:relative; background:var(--preview); }
+    .art > svg { width:136px; height:136px; filter:drop-shadow(0 10px 14px #00000010); }
+    .option-number { position:absolute; top:17px; left:18px; font:11px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
+    .choice { position:absolute; top:14px; right:14px; display:grid; place-items:center; width:23px; height:23px; border:1px solid var(--line); border-radius:50%; color:transparent; font-size:12px; }
+    .option[aria-pressed="true"] .choice { background:var(--accent); color:var(--paper); border-color:var(--accent); }
+    .card-copy { padding:18px 20px 17px; }
+    .card-heading { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+    .card-heading h3 { margin:0; font-size:16px; font-weight:550; letter-spacing:-.4px; }
+    .badge { color:var(--accent); font-size:10px; border:1px solid var(--line); padding:2px 7px; border-radius:20px; white-space:nowrap; }
+    .card-copy p { color:var(--muted); font-size:12px; line-height:1.65; margin:8px 0 16px; min-height:40px; }
+    .card-bottom { display:flex; align-items:center; justify-content:space-between; padding-top:13px; border-top:1px solid var(--line); }
+    .mini-icons { display:flex; gap:16px; align-items:center; color:var(--ink); }
+    .mini-label { font:10px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
+    .section-head { display:flex; justify-content:space-between; align-items:end; gap:24px; margin:52px 0 20px; }
+    .section-index { color:var(--muted); margin:0 0 8px; }
+    h2 { font-size:26px; line-height:1.2; letter-spacing:-.8px; font-weight:500; margin:0; }
+    .section-head > p { color:var(--muted); margin:0; font-size:12px; }
+    .detail { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--panel); scroll-margin-top:24px; }
+    .signature { min-height:315px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:23px; padding:32px; background:var(--preview); }
+    #large-icon > svg { width:176px; height:176px; }
+    .wordmark { display:flex; align-items:center; gap:14px; color:var(--ink); }
+    .wordmark .studio { font-size:27px; letter-spacing:-.8px; font-weight:350; }
+    .detail-copy { padding:32px; display:flex; flex-direction:column; justify-content:center; }
+    .detail-copy h3 { margin:0 0 12px; font-size:21px; font-weight:500; letter-spacing:-.5px; }
+    .detail-copy p { margin:0 0 20px; color:var(--muted); line-height:1.8; font-size:13px; }
+    .downloads { display:flex; gap:9px; flex-wrap:wrap; }
+    .download { padding:10px 13px; border:1px solid var(--line); border-radius:6px; background:transparent; font-size:12px; }
+    .download.primary { background:var(--ink); color:var(--paper); border-color:var(--ink); }
+    .download:hover { opacity:.8; }
+    .export-note { margin:13px 0 0!important; font-size:11px!important; }
+    .context-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:18px; }
+    .context { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--panel); }
+    .context-label { font-size:11px; color:var(--muted); padding:13px 18px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; }
+    .extension { padding:32px 24px; display:flex; align-items:center; gap:18px; background:var(--editor); color:var(--editor-ink); min-height:153px; }
+    .extension h4 { margin:0 0 3px; font-size:17px; font-weight:600; }
+    .extension p { margin:3px 0; font-size:12px; }
+    .publisher { opacity:.75; }
+    .activity { display:flex; min-height:153px; background:var(--editor); color:var(--editor-ink); }
+    .activity-bar { width:50px; background:var(--sidebar); border-right:1px solid var(--line); flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:15px; }
+    .activity-active { width:50px; height:43px; border-left:2px solid #60a5fa; display:grid; place-items:center; }
+    .activity-content { padding:23px 20px; flex:1; min-width:0; }
+    .activity-content strong { font-size:10px; letter-spacing:1px; font-weight:500; }
+    .tree-row { font-size:12px; margin-top:15px; white-space:nowrap; }
+    .tree-row.sub { padding-left:15px; margin-top:6px; opacity:.8; }
+    .sizes { display:flex; gap:22px; align-items:end; padding:24px; border-top:1px solid var(--line); background:var(--editor); color:var(--editor-ink); }
+    .size { display:flex; flex-direction:column; align-items:center; gap:10px; }
+    .size span { font:10px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
+    .size-note { color:var(--muted); font-size:11px; margin:0 0 0 auto; max-width:130px; }
+    .starting-point { display:flex; align-items:center; gap:25px; padding:26px 0; margin-top:35px; border-top:1px solid var(--line); }
+    .starting-point img { width:64px; height:64px; flex-shrink:0; }
+    .starting-point h3 { margin:0 0 5px; font-size:13px; font-weight:600; }
+    .starting-point p { margin:0; font-size:12px; line-height:1.8; color:var(--muted); max-width:760px; }
+    footer { padding:22px 0 32px; border-top:1px solid var(--line); display:flex; justify-content:space-between; gap:24px; font-size:11px; color:var(--muted); }
+    #status { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--paper); padding:11px 20px; border-radius:8px; font-size:12px; box-shadow:0 4px 30px #0002; max-width:calc(100% - 32px); }
+    #status:empty { display:none; }
+    .collection-head { display:flex; justify-content:space-between; align-items:end; gap:24px; margin:25px 0 22px; }
+    .collection-head h2 { margin-top:10px; font-size:23px; }
+    .collection-head p { color:var(--muted); font:11px ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .ember-reference { display:flex; align-items:center; gap:18px; padding:20px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin:8px 0 32px; }
+    .ember-reference strong { font-size:13px; font-weight:600; }
+    .ember-reference p { margin:4px 0 0; font-size:12px; color:var(--muted); }
+    .ember-reference a { margin-left:auto; font-size:12px; color:var(--muted); white-space:nowrap; }
+    @media(max-width:600px) { .ember-reference { flex-wrap:wrap; gap:12px; } .ember-reference div { flex:1; } .ember-reference a { flex-basis:calc(100% - 68px); margin-left:68px; } }
+    .new-label { display:inline-block; color:#fff; background:#3159ed; padding:5px 8px; border-radius:4px; font:10px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:1px; }
+    .bold-grid .art { height:238px; background:var(--art-light); }
+    body[data-theme="dark"] .bold-grid .art { background:var(--art-dark); }
+    .bold-grid .art > svg { width:152px; height:152px; filter:drop-shadow(0 15px 18px #00000025); }
+    .bold-grid .option-number { color:var(--art-ink); }
+    body[data-theme="dark"] .bold-grid .option-number { color:#ffffff99; }
+    body[data-theme="dark"][data-tone="mono"] .bold-grid .option-number { color:var(--muted); }
+    .bold-grid .choice { color:transparent; border-color:var(--art-ink); }
+    .bold-grid .option[aria-pressed="true"] .choice { background:var(--art-ink); color:var(--art-light); border-color:var(--art-ink); }
+    .bold-grid .card-heading h3 { font-size:19px; font-weight:650; }
+    .swatches { display:flex; gap:4px; }
+    .swatches i { width:10px; height:10px; border-radius:50%; background:var(--swatch); border:1px solid #80808030; }
+    .bold-grid .card-bottom { gap:10px; }
+    body[data-tone="mono"] .bold-grid .art { background:var(--preview); --art-ink:var(--ink); }
+    body[data-tone="mono"] .bold-grid .swatches { visibility:hidden; }
+    .signature[data-bold="true"] { background:var(--selected-wash); }
+    body[data-theme="dark"] .signature[data-bold="true"] { background:var(--selected-dark); }
+    body[data-tone="mono"] .signature[data-bold="true"] { background:var(--preview); }
+    @media(max-width:600px) { .collection-head { align-items:start; flex-direction:column; gap:4px; } .collection-head h2 { font-size:21px; } .bold-grid .art { height:180px; } .bold-grid .art > svg { width:120px; height:120px; } .bold-grid .card-heading h3 { font-size:17px; } .swatches { gap:3px; } .swatches i { width:7px; height:7px; } }
+    @media(min-width:1500px) { .art { height:240px; } }
+    @media(max-width:900px) { .wrap { width:calc(100% - 44px); } .intro { gap:30px; } h1 { letter-spacing:-2px; } .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .controls { align-items:flex-start; } .detail-copy { padding:24px; } .sizes { gap:14px; } .size-note { display:none; } }
+    @media(max-width:600px) { .wrap { width:calc(100% - 32px); } header { padding:20px 0; } .brand small,.edition { display:none; } .intro { grid-template-columns:1fr; gap:23px; padding:40px 0 28px; } h1 { font-size:45px; } .intro-copy { font-size:14px; } .controls { flex-direction:column; gap:12px; } .grid { gap:12px; } .art { height:155px; } .art > svg { width:104px; height:104px; } .card-copy { padding:14px 12px; } .card-heading { align-items:start; flex-direction:column; gap:5px; } .card-heading h3 { font-size:14px; } .badge { font-size:9px; } .card-copy p { min-height:80px; font-size:11px; } .mini-label { display:none; } .mini-icons { gap:12px; } .section-head { align-items:start; flex-direction:column; gap:10px; margin-top:35px; } .detail,.context-grid { grid-template-columns:1fr; } .signature { min-height:280px; } .starting-point { align-items:start; gap:18px; } footer { flex-direction:column; gap:7px; } }
+    @media(prefers-reduced-motion:reduce) { * { transition:none!important; } }
+    @media print { .controls,.downloads,.export-note,footer,#status { display:none; } .wrap { width:100%; } .option,.detail,.context { break-inside:avoid; } .art { height:160px; } body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+  </style>
+</head>
+<body data-theme="light">
+  <div class="wrap">
+    <header>
+      <div class="brand"><span id="header-mark" aria-hidden="true"></span> ERD Studio <small>Identity explorations</small></div>
+      <span class="edition">03 — Ember colour studies</span>
+    </header>
+    <main>
+      <section class="intro">
+        <div><p class="eyebrow">ERD Studio / Identity explorations</p><h1>Same attitude.<br><span>New colours.</span></h1></div>
+        <p class="intro-copy">Building on 11 / Ember: the same bold, forward-leaning ERD and rounded tile, now including bronze, silver and gold. Explore metallic lettering, bright backgrounds and darker finishes side by side.</p>
+      </section>
+      <div class="controls">
+        <div class="control-groups">
+          <div class="segmented" role="group" aria-label="Preview theme"><button type="button" data-theme="light" aria-pressed="true">Light</button><button type="button" data-theme="dark" aria-pressed="false">Dark</button></div>
+          <div class="segmented" role="group" aria-label="Icon palette"><button type="button" data-tone="signature" aria-pressed="true">Signature colour</button><button type="button" data-tone="mono" aria-pressed="false">Monochrome</button></div>
+        </div>
+        <p>Select a direction · <a href="#selected-preview">View selected preview ↓</a></p>
+      </div>
+      <div class="ember-reference"><span id="ember-reference" aria-hidden="true"></span><div><strong>The direction: 11 / Ember</strong><p>Bold italic lettering. Soft corners. A subtle colour gradient.</p></div><a href="#earlier-bold">See the original ↓</a></div>
+      <div class="collection-head"><div><span class="new-label">EMBER COLLECTION</span><h2>One shape. A spectrum of finishes.</h2></div><p>13–22 / Colour & material explorations</p></div>
+      <section class="grid bold-grid" id="ember-options" aria-label="Ten Ember colour options"></section>
+      <div class="section-head"><div><p class="section-index">Selected direction / In use</p><h2 id="selected-title">01 / Essential</h2></div><p>Full-colour listing icon + single-colour activity bar mark</p></div>
+      <section class="detail" id="selected-preview" aria-labelledby="selected-title">
+        <div class="signature"><div id="large-icon"></div><div class="wordmark"><span id="wordmark"></span><span class="studio">Studio</span></div></div>
+        <div class="detail-copy"><p class="eyebrow" id="direction-label"></p><h3 id="direction-heading"></h3><p id="direction-description"></p>
+          <div class="downloads"><button class="download primary" id="download-png" type="button">Download PNG · 256 px ↓</button><button class="download" id="download-sidebar" type="button">Activity bar SVG ↓</button><button class="download" id="download-svg" type="button">Icon SVG ↓</button></div>
+          <p class="export-note">PNG and icon SVG use the selected palette. The new signature colours stay consistent across themes; monochrome adapts to light and dark. Activity bar SVG is always monochrome, with a transparent background and a 24 × 24 canvas.</p>
+        </div>
+      </section>
+      <div class="context-grid">
+        <section class="context" aria-label="Extension listing preview"><div class="context-label"><span>Extension listing</span><span>64 px</span></div><div class="extension"><div id="listing-icon"></div><div><h4>ERD Studio</h4><p class="publisher">liamwynne</p><p>Visual data modelling for dbt.</p></div></div><div class="sizes" id="listing-sizes"></div></section>
+        <section class="context" aria-label="Activity bar preview"><div class="context-label"><span>VS Code activity bar</span><span>24 px · monochrome</span></div><div class="activity"><div class="activity-bar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M8 3H4v15h12V7H8zM8 3v4h8M8 21h12V7"/></svg><div class="activity-active" id="activity-icon"></div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="4" y="4" width="6" height="6"/><rect x="13" y="4" width="6" height="6"/><rect x="4" y="13" width="6" height="6"/><rect x="13" y="13" width="6" height="6"/></svg></div><div class="activity-content"><strong>ERD STUDIO</strong><div class="tree-row">⌄ &nbsp; DOMAINS</div><div class="tree-row sub">⌄ &nbsp; Silver</div><div class="tree-row sub">&nbsp; &nbsp; ◇ &nbsp; customer-360</div></div></div><div class="sizes" id="activity-sizes"></div></section>
+      </div>
+      <div class="section-head" id="earlier-bold"><div><p class="section-index">07–12 / Previous collection</p><h2>The bolder directions.</h2></div><p>Including the original 11 / Ember</p></div>
+      <section class="grid bold-grid" id="bold-options" aria-label="Six previous bold icon directions"></section>
+      <div class="section-head"><div><p class="section-index">01–06 / Original collection</p><h2>A quieter point of comparison.</h2></div><p>The original six directions</p></div>
+      <section class="grid" id="options" aria-label="Six original icon directions"></section>
+      <aside class="starting-point"><img src="data:image/png;base64,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" id="current-icon" width="64" height="64" alt="Current ERD Studio icon with bronze E, silver R and gold D"><div><h3>The starting point</h3><p>The current mark uses narrow letters, three metallic gradients and a diagonal shine. These directions open up the lettering and simplify the finish. <strong>Essential</strong> is the cleanest evolution; <strong>Quiet alloy</strong> keeps the bronze, silver and gold identity in softer, flat tones.</p></div></aside>
+    </main>
+    <footer><span>ERD Studio / Brand study / September 2026</span><span>Vector marks · Works offline · Preview concepts</span></footer>
+  </div>
+  <div id="status" role="status" aria-live="polite"></div>
+  <noscript>This gallery needs JavaScript enabled to draw and export the icon options.</noscript>
+  <script>
+    // Outlined custom letterforms: no installed fonts or external assets required.
+    const essential = [
+      'M18 44H42V50H25V61H40V67H25V78H42V84H18Z',
+      'M49 84V44H62C72 44 77 49 77 56C77 62 74 66 69 68L79 84H71L62 69H56V84ZM56 50V63H62C68 63 70 60 70 56.5C70 52 68 50 62 50Z',
+      'M85 44H96C108 44 114 51 114 64S108 84 96 84H85ZM92 50V78H96C104 78 107 73 107 64S104 50 96 50Z'
+    ];
+    const options = [
+      { id:'essential', name:'Essential', tag:'Recommended', kind:'Quiet / Geometric', heading:'The clearest evolution.', description:'Wider proportions, open counters and a confident, even weight. An ivory lettermark on graphite keeps the focus on ERD. The most versatile starting point for the extension and its supporting identity.', short:'Balanced geometry. Open spacing. A quiet, confident signature.', colors:['#eceee6'], light:['#303a33'], paths:essential, transform:'translate(-2 0)' },
+      { id:'soft-form', name:'Soft form', tag:'Approachable', kind:'Warm / Rounded', heading:'A softer kind of precision.', description:'Rounded terminals and continuous strokes give the letters a calm, approachable character. A warm chalk palette adds softness without decoration. A friendly direction for a tool used every day.', short:'Rounded strokes and warmer tones. Precise, with a softer edge.', colors:['#dfd5bf'], light:['#655b47'], stroke:6.5, cap:'round', paths:['M40 47H21V81H40M21 64H37','M51 81V47H64C78 47 78 65 64 65H51M64 65L77 81','M88 47V81H96C116 81 116 47 96 47Z'], sidebarStroke:7.5 },
+      { id:'precision', name:'Precision', tag:'Technical', kind:'Ordered / Architectural', heading:'Structure, expressed in type.', description:'Squared strokes and clipped corners echo a diagram built on a grid. The restrained blue-grey palette connects naturally to the logical modelling stage. Deliberately architectural, with less softness than Essential.', short:'Clipped corners and measured strokes. A structured, technical feel.', colors:['#bed0df'], light:['#3f5f77'], stroke:6, cap:'square', join:'miter', paths:['M40 46H20V82H40M20 64H37','M51 82V46H67L74 53V60L67 67H51M64 67L76 82','M87 46V82H100L110 72V56L100 46Z'], sidebarStroke:7 },
+      { id:'editorial', name:'Editorial', tag:'Distinctive', kind:'Considered / Typographic', heading:'A little more studio.', description:'Custom serif letterforms introduce an editorial quality: substantial stems, fine horizontal details and a sweeping R. The most expressive option. Fine details soften at 16 px; the activity bar version strengthens the serifs for clarity.', short:'Sculpted serifs and a sweeping R. The most editorial direction.', colors:['#ded4ba'], light:['#65573e'], paths:[
+        'M16 43H43V53H40L38 46H27V61H37V57H40V69H37V64H27V82H38L41 74H44L43 85H16V82H20V46H16Z',
+        'M49 43H64C75 43 80 47 80 54C80 61 75 64 69 65L78 79Q80 82 84 82V85H76Q72 85 70 80L61 66H59V82H63V85H48V82H52V46H49ZM59 46V63H63C70 63 73 60 73 54C73 48 70 46 63 46Z',
+        'M86 43H99C112 43 119 50 119 64C119 78 112 85 99 85H86V82H90V46H86ZM97 46V82H99C108 82 112 75 112 64S108 46 99 46Z'
+      ], transform:'translate(-3.5 0)', sidebarOutline:.7 },
+      { id:'open-system', name:'Open system', tag:'Progressive', kind:'Modular / Open', heading:'Letters with room to connect.', description:'A modular E, open R and separated D make the mark feel assembled from a small visual system. Muted lavender adds a contemporary accent. More experimental than the solid lettermarks, with generous gaps that remain visible at small sizes.', short:'Open letterforms and modular bars. A more progressive signature.', colors:['#cfcae5'], light:['#635b85'], paths:[
+        'M18 44H42V51H18ZM18 60.5H38V67.5H18ZM18 77H42V84H18Z',
+        'M49 44H56V84H49ZM61 44H65C73 44 78 49 78 56C78 62 75 66 70 68L80 84H72L61 66V62H65C69 62 71 60 71 56C71 53 69 51 65 51H61Z',
+        'M86 44H93V84H86ZM98 44C110 44 116 52 116 64S110 84 98 84V77C105 77 109 72 109 64S105 51 98 51Z'
+      ], transform:'translate(-3 0)' },
+      { id:'quiet-alloy', name:'Quiet alloy', tag:'Brand continuity', kind:'Warm / Familiar', heading:'The original palette, matured.', description:'The Essential geometry with a softened bronze E, silver R and champagne D. Flat colour replaces the shine and shadows while retaining the most recognisable part of the existing identity. The activity bar resolves all three letters into one colour.', short:'Bronze, silver and champagne. Familiar colours, a cleaner finish.', colors:['#c69a73','#c7ccd0','#d7c38e'], light:['#8a5d38','#5d6870','#806828'], paths:essential, transform:'translate(-2 0)' }
+    ];
+    // Solid vector outlines keep the exported marks independent of fonts.
+    const boldLetters = [
+      'M16 42H42V51H26V59H40V68H26V77H42V86H16Z',
+      'M48 86V42H65C76 42 82 48 82 57C82 64 79 68 73 70L84 86H72L62 71H58V86ZM58 51V62H64C69 62 72 60 72 56.5S69 51 64 51Z',
+      'M88 42H101C115 42 122 50 122 64S115 86 101 86H88ZM98 51V77H101C108 77 112 73 112 64S108 51 101 51Z'
+    ];
+    options.push(
+      { id:'electric', name:'Electric', tag:'Top pick', bold:true, kind:'07 / Confident · Cobalt', heading:'Impossible to scroll past.', description:'A vivid cobalt tile and a dense, custom ERD lettermark. Generous counters keep the letters clear while the tight spacing makes them feel like one signature. The strongest direct evolution if ERD should stay front and centre.', short:'Big white letters. Pure cobalt. A clear, confident statement.', colors:['#ffffff'], light:['#ffffff'], paths:boldLetters, transform:'translate(-5 0)', tile:['#3567ff','#163be0'], wash:'#e4ebff', darkWash:'#182448', artInk:'#4662a2', swatches:['#244fff','#ffffff','#102373'] },
+      { id:'signal', name:'Signal', tag:'High contrast', bold:true, kind:'08 / Sharp · Acid lime', heading:'A very different kind of data tool.', description:'An acid-lime tile gives the listing immediate presence. The E is reduced to three solid bars, while a squared R and D bring a precise, engineered rhythm. Flat colour and substantial shapes keep the identity crisp.', short:'Acid lime and near-black. Modular type with serious presence.', colors:['#172014'], light:['#172014'], paths:[
+        'M16 42H42V52H16ZM16 59H39V69H16ZM16 76H42V86H16Z',
+        'M49 86V42H71L80 51V63L73 70L83 86H71L60 70H59V86ZM59 52V61H68L70 59V54L68 52Z',
+        'M89 42H110L121 53V75L110 86H89ZM99 52V76H106L111 71V57L106 52Z'
+      ], transform:'translate(-5 0)', tile:['#d8ff57','#b7ef31'], wash:'#eef4d8', darkWash:'#28331a', artInk:'#64762a', swatches:['#caff46','#172014','#f1f6df'] },
+      { id:'spectrum', name:'Spectrum', tag:'Colour signature', bold:true, kind:'09 / Expressive · Violet to cyan', heading:'Colour with a purpose.', description:'A continuous violet-to-cyan spectrum runs through a substantial ERD mark on midnight ink. The colour suggests a flow from model to model; the geometry stays deliberately simple. In monochrome, the same silhouette carries the identity.', short:'A luminous colour spectrum, held inside a strong ERD silhouette.', colors:['#bc8aff','#768fff','#55e4eb'], light:['#bc8aff','#768fff','#55e4eb'], paths:boldLetters, transform:'translate(-5 0)', gradient:['#ce87ff','#8690ff','#49e8e0'], tile:['#202338','#101320'], wash:'#e9e6f5', darkWash:'#222032', artInk:'#80779e', swatches:['#be88ff','#8297ff','#50e3e1'] },
+      { id:'nexus', name:'Nexus', tag:'Symbol-led', bold:true, symbol:true, kind:'10 / Connected · Mint', heading:'The model becomes the mark.', description:'Three connected entities form a compact E. It is a direct nod to relationships on the canvas, with a silhouette that can become recognisable on its own. Mint on deep green feels fresh and precise; the accompanying ERD wordmark supplies the name.', short:'Connected entities become an E. A distinctive symbol for the canvas.', colors:['#7bf6cc'], light:['#7bf6cc'], paths:[
+        'M34 32H46V96H34ZM46 26H84V38H46ZM46 58H75V70H46ZM46 90H84V102H46Z',
+        'M26 20H54V44H26ZM26 52H54V76H26ZM26 84H54V108H26ZM78 20H102V44H78ZM70 52H94V76H70ZM78 84H102V108H78Z'
+      ], tile:['#124c43','#082e2c'], wash:'#deeee8', darkWash:'#14312b', artInk:'#4b8071', swatches:['#7bf6cc','#124c43','#082e2c'] },
+      { id:'ember', name:'Ember', tag:'Boldest type', bold:true, kind:'11 / Forward · Vermilion', heading:'A little fire. A lot of confidence.', description:'A warm vermilion field and tightly cut, forward-leaning letters give ERD momentum. The near-black lettering is unusually bold for a developer tool, with enough simplicity to work across a listing, a website and a release graphic.', short:'Vermilion meets forward-leaning type. Warm, punchy and decisive.', colors:['#29140e'], light:['#29140e'], paths:boldLetters, transform:'translate(4 0) skewX(-8)', tile:['#ff9466','#ff593b'], wash:'#f9e5dd', darkWash:'#3d261f', artInk:'#a76650', swatches:['#ff6946','#29140e','#ffbc8f'] },
+      { id:'facet', name:'Facet', tag:'Architectural', bold:true, symbol:true, kind:'12 / Dimensional · Iris', heading:'Structure you can recognise.', description:'Three planes build a dimensional E, connecting the identity to the layers of a data model. Lavender faces sit on a saturated iris tile. The gaps between the planes remain in the one-colour activity icon, so the form does not depend on shading.', short:'Three sculpted planes. A dimensional E with an architectural feel.', colors:['#ffffff','#cdc5ff','#a89bff'], light:['#ffffff','#cdc5ff','#a89bff'], paths:[
+        'M28 35L66 15L104 35L66 55Z',
+        'M28 48L66 68L104 48V66L66 86L28 66Z',
+        'M28 79L66 99L104 79V97L66 117L28 97Z'
+      ], transform:'translate(0 -2)', tile:['#825aff','#4b2ce0'], wash:'#ebe5fc', darkWash:'#2a2147', artInk:'#8368b1', swatches:['#6940ed','#cdc5ff','#ffffff'] }
+    );
+    // Colour studies inherit Ember's exact outlines, slant and tile geometry.
+    const ember = options.find(option => option.id === 'ember');
+    const emberPalettes = [
+      { id:'tangerine', name:'Tangerine', tag:'Closest to Ember', ink:'#301b10', tile:['#ffb254','#ff792e'], wash:'#fff0dc', darkWash:'#3b2b1b', artInk:'#9a632b', short:'Hot orange and espresso. The warmth of Ember, turned up.', heading:'The warmest evolution.', description:'A brighter orange field keeps the energy of the original Ember. Deep espresso lettering adds a rich contrast, with a subtle golden highlight across the tile.' },
+      { id:'lava', name:'Lava', tag:'White on red', ink:'#fff8ef', tile:['#ff594a','#e62c38'], wash:'#fce7e4', darkWash:'#3e2325', artInk:'#a95852', short:'Warm white on vivid red. Direct, energetic and unmistakable.', heading:'A sharper hit of colour.', description:'Warm white lettering on a vivid red tile gives the mark a clean, assertive presence. The slight coral-to-crimson shift adds depth while keeping the colour focused.' },
+      { id:'volt', name:'Volt', tag:'Maximum contrast', ink:'#20260f', tile:['#e3ff65','#bdec35'], wash:'#f0f5da', darkWash:'#2c331a', artInk:'#6e7d30', short:'Acid lime and ink. An energetic, graphic signature.', heading:'A bright, graphic edge.', description:'Acid lime brings an almost fluorescent energy to the rounded tile. Dark olive lettering keeps the ERD silhouette clear, with the same weight and slant as Ember.' },
+      { id:'glacier', name:'Glacier', tag:'Cool contrast', ink:'#092b40', tile:['#84edff','#30c6ed'], wash:'#e0f3f7', darkWash:'#19303a', artInk:'#437d8c', short:'Glacial cyan and navy. Bright, clean and precise.', heading:'Cool colour. Confident type.', description:'A luminous cyan tile gives the italic mark a crisp, technical feel. Deep navy lettering provides strong contrast and a little more softness than pure black.' },
+      { id:'ultramarine', name:'Ultramarine', tag:'Classic blue', ink:'#ffffff', tile:['#547cff','#2848e9'], wash:'#e5ebff', darkWash:'#1f2949', artInk:'#536eaa', short:'White on ultramarine. A polished blue with plenty of pace.', heading:'A confident blue signature.', description:'Bright white lettering on ultramarine makes a clear, versatile identity. The forward lean keeps the familiar blue palette energetic, with a smooth shift to deeper blue at the base.' },
+      { id:'iris', name:'Iris', tag:'Rich violet', ink:'#fff8ef', tile:['#a07aff','#7244e5'], wash:'#eee6fb', darkWash:'#302545', artInk:'#8262a7', short:'Warm ivory and vivid violet. Expressive, with a softer finish.', heading:'Violet with a little warmth.', description:'Warm ivory lettering softens the contrast against a rich violet tile. It brings a more expressive studio feel to the same compact, confident letterforms.' },
+      { id:'fuchsia', name:'Fuchsia', tag:'Unexpected', ink:'#42132f', tile:['#ff99d1','#ed58a9'], wash:'#fbe6f0', darkWash:'#3e2434', artInk:'#a75d87', short:'Pink and deep plum. Distinctive colour with substantial type.', heading:'An unexpected colour signature.', description:'Saturated pink gives the icon immediate character. Deep plum lettering grounds the palette, pairing a playful colour with the substantial shape of the original Ember.' },
+      { id:'petrol', name:'Petrol', tag:'Dark & refined', ink:'#96f6d3', tile:['#17665d','#093d3c'], wash:'#e0efea', darkWash:'#16332f', artInk:'#487f71', short:'Fresh mint on deep petrol. Rich colour and quiet confidence.', heading:'A deeper, richer finish.', description:'The colour relationship reverses: fresh mint lettering sits on a deep petrol tile. A gentle teal highlight gives the dark background depth while the lettering stays bright.' },
+      { id:'afterglow', name:'Afterglow', tag:'Ember reversed', ink:'#ff9c68', tile:['#343039','#1d1b23'], wash:'#ede7e5', darkWash:'#29252c', artInk:'#8c7470', short:'Ember orange on charcoal. The original warmth, after dark.', heading:'Ember, after dark.', description:'Warm orange lettering on charcoal retains the original palette in a darker treatment. The slight plum undertone in the tile complements the orange without competing with it.' }
+    ];
+    options.push(...emberPalettes.map((palette,index) => ({
+      ...ember, ...palette, family:'ember', colors:[palette.ink], light:[palette.ink],
+      kind:`${index+13} / Ember · ${palette.name}`, swatches:[palette.tile[0],palette.tile[1],palette.ink]
+    })));
+    options.push({
+      ...ember, id:'ember-alloy', name:'Ember alloy', family:'ember', tag:'Bronze · Silver · Gold',
+      kind:'22 / Ember · Bronze, silver & gold', heading:'Three metals. One bold signature.',
+      short:'Bronze E. Silver R. Gold D. A satin finish on charcoal.',
+      description:'The exact Ember letterforms in three distinct metals: warm bronze, cool silver and champagne gold. Soft highlights give the letters a satin finish, set against a deep charcoal tile so the colour and shape stay clear.',
+      colors:['#d69a68','#d5dce5','#e5c770'], light:['#d69a68','#d5dce5','#e5c770'],
+      metals:[['#b87948','#e4b48b','#f0c7a2','#bb8050'],['#99a7b8','#d7e0e9','#f3f5f8','#a8b4c3'],['#b99643','#e6cc7e','#f5e6ae','#c5a04b']],
+      tile:['#343239','#18191e'], wash:'#eee8df', darkWash:'#2e2a27', artInk:'#897153',
+      swatches:['#d69a68','#d5dce5','#e5c770']
+    });
+    let selected = options[options.length-1];
+    let svgSerial = 0;
+    let theme = 'light';
+    let tone = 'signature';
+    let statusTimer;
+    const byId = id => document.getElementById(id);
+
+    function letters(option, palette, sidebar = false) {
+      return `<g${option.transform ? ` transform="${option.transform}"` : ''}>` + option.paths.map((d, i) => {
+        const color = palette[i] || palette[0];
+        if (option.stroke) return `<path d="${d}" fill="none" stroke="${color}" stroke-width="${sidebar ? option.sidebarStroke || option.stroke : option.stroke}" stroke-linecap="${option.cap || 'butt'}" stroke-linejoin="${option.join || 'round'}"/>`;
+        return `<path d="${d}" fill="${color}" fill-rule="evenodd"${sidebar && option.sidebarOutline ? ` stroke="${color}" stroke-width="${option.sidebarOutline}" stroke-linejoin="round"` : ''}/>`;
+      }).join('') + '</g>';
+    }
+
+    function iconSvg(option, size = 128) {
+      const dark = theme === 'dark';
+      // Light and dark are complete icon variants, including their tile.
+      const bg = dark ? '#242a27' : '#ebece5';
+      if (option.bold && tone !== 'mono') {
+        // Each instance needs its own ids; exports carry their own definitions.
+        const id = `mark-${++svgSerial}`;
+        const stops = option.gradient || option.colors;
+        const ink = option.metals ? option.metals.map((_,i) => `url(#${id}-metal-${i})`) : option.gradient ? [`url(#${id}-ink)`] : option.colors;
+        const metalDefs = (option.metals || []).map((colors,i) => `<linearGradient id="${id}-metal-${i}" gradientUnits="userSpaceOnUse" x1="0" y1="42" x2="0" y2="86">${colors.map((color,j) => `<stop offset="${[0,.38,.57,1][j]}" stop-color="${color}"/>`).join('')}</linearGradient>`).join('');
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 128 128" fill="none" role="img" aria-label="ERD Studio ${option.name} icon"><defs><linearGradient id="${id}-tile" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${option.tile[0]}"/><stop offset="1" stop-color="${option.tile[1]}"/></linearGradient><linearGradient id="${id}-ink" gradientUnits="userSpaceOnUse" x1="16" y1="42" x2="122" y2="74">${stops.map((color,i) => `<stop offset="${i / Math.max(1,stops.length-1)}" stop-color="${color}"/>`).join('')}</linearGradient>${metalDefs}</defs><rect width="128" height="128" rx="28" fill="url(#${id}-tile)"/>${letters(option,ink)}</svg>`;
+      }
+      const palette = tone === 'mono' ? [dark ? '#eef0e8' : '#303a33'] : dark ? option.colors : option.light;
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 128 128" fill="none" role="img" aria-label="ERD Studio ${option.name} icon"><rect x=".5" y=".5" width="127" height="127" rx="27.5" fill="${bg}" stroke="${dark ? '#3b443d' : '#d9ddd1'}"/>${letters(option,palette)}</svg>`;
+    }
+
+    function sidebarSvg(option, size = 24, exportFile = false) {
+      // VS Code masks activity icons to one colour. Transparent, no tile.
+      // The wide mark uses 22 of the available 24 px; optical weights are above.
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"${exportFile ? '' : ` role="img" aria-label="${option.name} monochrome activity bar icon"`}><g transform="translate(-2.08 -2.08) scale(.22)">${letters(option,[exportFile ? '#000000' : 'currentColor'],true)}</g></svg>`;
+    }
+
+    function wordmarkSvg(option) {
+      if (option.symbol) option = options[0];
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="78" height="36" viewBox="12 40 108 48" fill="none" role="img" aria-label="ERD">${letters(option,['currentColor'])}</svg>`;
+    }
+
+    function renderCards() {
+      const card = option => {
+        const number = String(options.indexOf(option)+1).padStart(2,'0');
+        const style = option.bold ? ` style="--art-light:${option.wash};--art-dark:${option.darkWash};--art-ink:${option.artInk}"` : '';
+        const swatches = option.swatches ? `<span class="swatches" aria-hidden="true">${option.swatches.map(color => `<i style="--swatch:${color}"></i>`).join('')}</span>` : '';
+        return `<button class="option" type="button" data-option="${option.id}"${style} aria-pressed="${selected.id === option.id}" aria-controls="selected-preview" aria-label="Select ${option.name}: ${option.short}"><div class="art"><span class="option-number">${number}</span><span class="choice" aria-hidden="true">✓</span>${iconSvg(option,152)}</div><div class="card-copy"><div class="card-heading"><h3>${option.name}</h3><span class="badge">${option.tag}</span></div><p>${option.short}</p><div class="card-bottom"><span class="mini-icons">${sidebarSvg(option,24)}${sidebarSvg(option,16)}</span>${swatches}<span class="mini-label">24 / 16 px</span></div></div></button>`;
+      };
+      byId('ember-options').innerHTML = [options.find(option => option.id === 'ember-alloy'), ...options.filter(option => option.family === 'ember' && option.id !== 'ember-alloy')].map(card).join('');
+      byId('ember-reference').innerHTML = iconSvg(ember,56);
+      byId('bold-options').innerHTML = options.filter(option => option.bold && option.family !== 'ember').map(card).join('');
+      byId('options').innerHTML = options.filter(option => !option.bold).map(card).join('');
+    }
+
+    function renderDetail() {
+      const index = options.indexOf(selected)+1;
+      byId('selected-title').textContent = `${String(index).padStart(2,'0')} / ${selected.name}`;
+      const signature = document.querySelector('.signature');
+      signature.dataset.bold = String(!!selected.bold);
+      signature.style.setProperty('--selected-wash',selected.wash || 'var(--preview)');
+      signature.style.setProperty('--selected-dark',selected.darkWash || 'var(--preview)');
+      byId('large-icon').innerHTML = iconSvg(selected,176);
+      byId('wordmark').innerHTML = wordmarkSvg(selected);
+      byId('header-mark').innerHTML = sidebarSvg(selected,27);
+      byId('direction-label').textContent = selected.kind;
+      byId('direction-heading').textContent = selected.heading;
+      byId('direction-description').textContent = selected.description;
+      byId('listing-icon').innerHTML = iconSvg(selected,64);
+      byId('activity-icon').innerHTML = sidebarSvg(selected,24);
+      byId('listing-sizes').innerHTML = [48,32,24,16].map(size => `<div class="size">${iconSvg(selected,size)}<span>${size} px</span></div>`).join('') + '<p class="size-note">Actual display sizes. Check recognition at the smallest sizes.</p>';
+      byId('activity-sizes').innerHTML = [32,24,20,16].map(size => `<div class="size">${sidebarSvg(selected,size)}<span>${size} px</span></div>`).join('') + '<p class="size-note">One colour. No background. Stronger small-size strokes.</p>';
+    }
+
+    function announce(message) {
+      clearTimeout(statusTimer);
+      byId('status').textContent = message;
+      statusTimer = setTimeout(() => { byId('status').textContent = ''; },3500);
+    }
+
+    document.querySelectorAll('#options, #bold-options, #ember-options').forEach(grid => grid.addEventListener('click',event => {
+      const button = event.target.closest('[data-option]');
+      if (!button) return;
+      selected = options.find(option => option.id === button.dataset.option);
+      document.querySelectorAll('[data-option]').forEach(el => el.setAttribute('aria-pressed',String(el === button)));
+      renderDetail();
+      announce(`${selected.name} selected. Preview and downloads updated in the In use section.`);
+    }));
+
+    document.querySelectorAll('button[data-theme]').forEach(button => button.addEventListener('click',() => {
+      theme = button.dataset.theme;
+      document.body.dataset.theme = theme;
+      document.querySelectorAll('button[data-theme]').forEach(el => el.setAttribute('aria-pressed',String(el === button)));
+      renderCards(); renderDetail();
+    }));
+    document.querySelectorAll('button[data-tone]').forEach(button => button.addEventListener('click',() => {
+      tone = button.dataset.tone;
+      document.body.dataset.tone = tone;
+      document.querySelectorAll('button[data-tone]').forEach(el => el.setAttribute('aria-pressed',String(el === button)));
+      renderCards(); renderDetail();
+    }));
+
+    function download(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url; link.download = filename;
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url),10000);
+    }
+    byId('download-sidebar').addEventListener('click',() => {
+      download(new Blob([sidebarSvg(selected,24,true)],{type:'image/svg+xml'}),`erd-studio-${selected.id}-sidebar.svg`);
+      announce('Activity bar SVG downloaded.');
+    });
+    byId('download-svg').addEventListener('click',() => {
+      download(new Blob([iconSvg(selected,256)],{type:'image/svg+xml'}),`erd-studio-${selected.id}-${theme}-${tone}.svg`);
+      announce('Vector icon downloaded.');
+    });
+    byId('download-png').addEventListener('click',async () => {
+      const filename = `erd-studio-${selected.id}-${theme}-${tone}-256.png`;
+      const url = URL.createObjectURL(new Blob([iconSvg(selected,256)],{type:'image/svg+xml'}));
+      try {
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 256;
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Canvas unavailable');
+        context.drawImage(image,0,0,256,256);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve,'image/png'));
+        if (!blob) throw new Error('PNG export unavailable');
+        download(blob,filename);
+        announce('256 × 256 PNG downloaded.');
+      } catch { announce('PNG export failed in this browser. Download the SVG instead.'); }
+      finally { URL.revokeObjectURL(url); }
+    });
+    renderCards(); renderDetail();
+  </script>
+</body>
+</html>

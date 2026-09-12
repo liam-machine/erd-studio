@@ -5,6 +5,50 @@ All notable changes to the ERD Studio extension.
 The `Unreleased` heading below is renamed to the released version by the deploy workflow
 (`scripts/release.mjs changelog`). Add user-facing notes under it as part of each PR.
 
+Releases are patch bumps by default. To ship a minor or major version, write it into the
+heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
+
+## Unreleased — 1.0.0
+
+**ERD Studio is 1.0.** The file format has been stable at schema v5 since 0.6.x, every
+canvas edit has gone through a single atomic write path for as long, and the extension has
+shipped fifty-three times without a breaking change to anything on disk. The version number
+now says so. A `.erd-studio/` directory written today will keep opening, and any change that
+would break one will come with a migration and a major version.
+
+### Changed
+
+- **A rewritten README.** It led with a slogan and a feature list and never said plainly what
+  the extension is or how it works. It now opens with the idea — design your warehouse where
+  you build it — then shows the whole design in one diagram: one YAML per model, one JSON per
+  diagram, and a canvas that renders them. Editing either side updates the other, models are
+  shared across diagrams, and it all stays in Git with no account, database or server. The
+  reasons to use it are stated as outcomes rather than features, and the comparison with
+  traditional tools such as erwin, which keep models in application-specific files or a
+  separate modelling repository, is now explicit.
+- **The README says how to use ERD Studio without dbt.** Logical modelling never needed a dbt
+  build or a warehouse connection, but nothing said so, and the extension's project detection
+  made it look like a dbt-only tool. The setup for logical-only use is now written down: add a
+  `dbt_project.yml` containing `name: logical_models` to your project root and reload. Physical
+  comparison still requires dbt, and the README points people at the issue tracker to propose
+  support for another stack.
+- **The README's images now come from this repository.** They were served from a separate
+  assets repo last updated in April, so the icon shown on GitHub and on the Marketplace
+  overview was still the pre-rebrand mark while the extension itself shipped the Ember Alloy
+  one. Both now point at `media/` on `main`, the same file that ships inside the package, so
+  the two can no longer disagree. The README-only images are excluded from the `.vsix`, since
+  packaging rewrites those links to absolute URLs and a bundled copy would never be read.
+
+### Added
+
+- **A release can now be a minor or major one.** The deploy workflow always computed the next
+  version as a patch bump, which made 1.0.0 unreachable without publishing by hand. Writing an
+  explicit version in the changelog's Unreleased heading — `## Unreleased — 1.0.0` — releases
+  exactly that version instead. The pin sits next to the notes it describes, in the file every
+  PR already edits, and it may only move the version forward: a pin at or below something
+  already published is ignored in favour of the patch bump, so it cannot reintroduce the
+  "version already exists" failure the version logic exists to prevent.
+
 ## 0.6.53 — 2026-09-12
 
 ### Fixed
