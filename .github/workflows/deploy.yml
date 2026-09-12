@@ -71,6 +71,20 @@ jobs:
       # with "version already exists".
       - name: Determine next version
         run: |
+          # A rerun after the bump was pushed must retry that exact release. A
+          # blind patch bump would skip a version every time Marketplace timed
+          # out after this workflow had already advanced main.
+          HEAD_SUBJECT=$(git log -1 --format=%s)
+          HEAD_PARENT=$(git rev-parse HEAD^)
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          if [[ "$HEAD_SUBJECT" == "chore: bump version to v"*" [deploy]" && "$HEAD_PARENT" == "$MERGE_SHA" ]]; then
+            NEW_VERSION=$(node -p "require('./package.json').version")
+            echo "RECOVER_EXISTING_RELEASE=true" >> "$GITHUB_ENV"
+            echo "Recovering interrupted release v${NEW_VERSION}"
+            echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
           # Write scratch files under RUNNER_TEMP, never the working tree: this
           # step runs before `vsce package`, so anything left in the repo root
           # ships to users (v0.6.47 went out carrying marketplace.json).
@@ -87,6 +101,7 @@ jobs:
           echo "Releasing v${NEW_VERSION}"
 
       - name: Update CHANGELOG
+        if: env.RECOVER_EXISTING_RELEASE != 'true'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -95,6 +110,7 @@ jobs:
       # Commit and push the bump BEFORE publishing so a failed publish never
       # leaves main behind the marketplace.
       - name: Commit version bump
+        if: env.RECOVER_EXISTING_RELEASE != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -127,7 +143,19 @@ jobs:
             echo "::error::vsce would publish ${COUNT} files (limit 60) — check .vscodeignore and this job's scratch files"
             exit 1
           fi
-          npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT"
+          for attempt in 1 2 3; do
+            LOG_FILE="${RUNNER_TEMP}/vsce-publish-${attempt}.log"
+            if npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT" --skip-duplicate 2>&1 | tee "$LOG_FILE"; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Publish attempt ${attempt} failed; retrying in $((attempt * 15)) seconds"
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::Marketplace publish failed after 3 attempts"
+          exit 1
 
       # Only after a successful publish: a GitHub Release must never advertise a
       # version the marketplace does not have. `gh release create` also creates the
@@ -148,7 +176,12 @@ jobs:
           ASSET="${RUNNER_TEMP}/erd-studio-${NEW_VERSION}.vsix"
           cp erd-studio.vsix "$ASSET"
 
-          gh release create "v${NEW_VERSION}" "$ASSET" \
-            --title "v${NEW_VERSION}" \
-            --notes-file "$NOTES_FILE" \
-            --target "$(git rev-parse HEAD)"
+          if gh release view "v${NEW_VERSION}" >/dev/null 2>&1; then
+            echo "GitHub Release v${NEW_VERSION} already exists; refreshing its VSIX"
+            gh release upload "v${NEW_VERSION}" "$ASSET" --clobber
+          else
+            gh release create "v${NEW_VERSION}" "$ASSET" \
+              --title "v${NEW_VERSION}" \
+              --notes-file "$NOTES_FILE" \
+              --target "$(git rev-parse HEAD)"
+          fi
