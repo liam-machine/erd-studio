@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt — design your data warehouse on a canvas, in your repo, as plain YAML your AI assistant can read. Kimball/dimensional modelling, then compare the design against what dbt actually built.",
-  "version": "0.6.53",
+  "version": "1.0.0",
   "publisher": "liamwynne",
   "license": "MIT",
   "icon": "media/icon.png",
