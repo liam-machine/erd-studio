@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1120" height="396" viewBox="0 0 1120 396" fill="none">
   <title>Plain files. One editable canvas.</title>
-  <desc>Model YAML and diagram JSON files in your repository render together as the ERD Studio logical canvas. Canvas edits are saved to the same files.</desc>
+  <desc>Model YAML and diagram JSON files in your repository render together as the ERD Studio logical canvas, where dim_customer and fct_order are joined by a one-to-many relationship. Canvas edits are saved to the same files.</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1120" y2="396" gradientUnits="userSpaceOnUse">
       <stop stop-color="#343239"/>
@@ -60,8 +60,9 @@
     <text x="893" y="232" fill="#D7E0E9" font-size="15">order_id</text>
     <text x="864" y="258" fill="#E6CC7E" font-size="12" font-weight="700">FK</text>
     <text x="893" y="258" fill="#D7E0E9" font-size="15">customer_id</text>
-    <path d="M770 196H798Q810 196 810 208V242Q810 254 822 254H850" stroke="#E6CC7E" stroke-width="2"/>
-    <path d="M779 190V202M848 246L836 254L848 262" stroke="#E6CC7E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M786 196H798Q810 196 810 208V242Q810 254 822 254H833" stroke="#E6CC7E" stroke-width="2"/>
+    <text x="778" y="201" fill="#E6CC7E" font-size="14" font-weight="700" text-anchor="middle">1</text>
+    <text x="842" y="265" fill="#E6CC7E" font-size="22" font-weight="700" text-anchor="middle">*</text>
 
     <path d="M818 328V343Q818 354 807 354H221Q210 354 210 343V329" stroke="#807B72" stroke-width="1.5" stroke-dasharray="4 5"/>
     <path d="M206 334L210 329L214 334" stroke="#807B72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
