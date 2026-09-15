@@ -45,6 +45,7 @@ import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddE
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { Legend } from './components/Legend/Legend';
+import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
@@ -643,9 +644,19 @@ function EditorCanvas() {
   return (
     <div
       className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}`}
-      style={{ width: '100%', height: '100%' }}
+      // Column flex so the physical-source notice is a strip ABOVE the flow
+      // area rather than an overlay on top of the nodes. With the notice
+      // hidden this is a one-child flex container — i.e. unchanged.
+      style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
     >
+      {/* "dbt has not been compiled" strip. Renders nothing on the logical
+          stage or when any dbt artifact was found. */}
+      <PhysicalSourceNotice />
+
       <ReactFlow
+        // flex basis 0 rather than the default height:100%, so the notice's
+        // height comes off the flow area instead of overflowing the editor.
+        style={{ flex: '1 1 0', minHeight: 0 }}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}

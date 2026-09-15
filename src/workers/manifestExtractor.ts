@@ -24,9 +24,20 @@ const TEST_KEY_PREFIX = 'test.';
 export function extractManifestData(
   manifest: Record<string, unknown>,
 ): ManifestWorkerResult {
+  // Extracted before the `nodes` guard: a model dbt refuses to build is
+  // evidence in its own right, and losing it to a malformed manifest would
+  // let a bare .sql file pass for a working model.
+  const disabledModels = extractDisabledModels(manifest.disabled);
+
   const nodes = manifest.nodes as Record<string, unknown> | undefined;
   if (!nodes || typeof nodes !== 'object') {
-    return { models: {}, relationshipTests: [], uniqueColumns: {}, compositeUniqueGroups: {} };
+    return {
+      models: {},
+      relationshipTests: [],
+      uniqueColumns: {},
+      compositeUniqueGroups: {},
+      disabledModels,
+    };
   }
 
   const models: Record<string, ManifestModelInfo> = {};
@@ -63,7 +74,51 @@ export function extractManifestData(
     }
   }
 
-  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups };
+  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels };
+}
+
+/**
+ * Collect the short names of models dbt has disabled.
+ *
+ * `{{ config(enabled=false) }}`, a `+enabled: false` subtree in
+ * `dbt_project.yml` or an excluded package moves a node out of `nodes` and
+ * into the sibling `disabled` dict — keyed by unique_id, with ARRAYS of node
+ * dicts as values (dbt records every candidate definition of the name). The
+ * `.sql` file stays on disk, so this set is the only evidence that `ref()` to
+ * it will not compile.
+ *
+ * Only `model.` keys are collected: seeds, snapshots and tests share the dict
+ * but `ManifestData.models` is a model index, and widening it would change
+ * what the Add-Existing picker and the relationship derivation see.
+ */
+function extractDisabledModels(disabled: unknown): string[] {
+  if (!disabled || typeof disabled !== 'object' || Array.isArray(disabled)) {
+    return [];
+  }
+
+  const names = new Set<string>();
+
+  for (const [nodeKey, value] of Object.entries(disabled as Record<string, unknown>)) {
+    if (!nodeKey.startsWith(MODEL_KEY_PREFIX)) {
+      continue;
+    }
+
+    // Normally an array; tolerate a bare node dict rather than lose the name.
+    const candidates = Array.isArray(value) ? value : [value];
+    let name: string | undefined;
+
+    for (const candidate of candidates) {
+      const entry = candidate as Record<string, unknown> | null;
+      if (entry && typeof entry === 'object' && typeof entry.name === 'string' && entry.name) {
+        name = entry.name;
+        break;
+      }
+    }
+
+    names.add(name ?? resolveModelNameFromNodeId(nodeKey));
+  }
+
+  return [...names];
 }
 
 function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | null {

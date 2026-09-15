@@ -20,7 +20,7 @@ ERD Studio uses a **central model store**. Model definitions are YAML files in `
     reporting.json
 ```
 
-There are two stages. **Logical** is the editable stage stored in the domain file and model YAMLs. **Physical** has no files — it is derived at runtime by resolving each model in `logical.models` against the dbt schema YAMLs under `model-paths` (preferred) or `{target-path}/manifest.json` (fallback), with relationships and cardinality taken from the union of the `relationships` / `unique` / `unique_combination_of_columns` tests declared in either source. Model and column names match case-insensitively. Do not create files for the physical stage; the only writes allowed while a canvas shows it are to the shared `viewConfig` (positions, annotations).
+There are two stages. **Logical** is the editable stage stored in the domain file and model YAMLs. **Physical** has no files — it is derived at runtime from the dbt project (source files, schema YAMLs, `{target-path}/manifest.json`, `{target-path}/catalog.json`); see [Physical Stage](#physical-stage-derived-read-only) below for the full resolution rules. Model and column names match case-insensitively. Do not create files for the physical stage; the only writes allowed while a canvas shows it are to the shared `viewConfig` (positions, annotations).
 
 The base directory name (`.erd-studio`) is configurable via the `erdStudio.semanticDir` setting.
 
@@ -275,6 +275,83 @@ If no template files exist, built-in `dimension`, `fact`, `bridge`, `scd2` and `
 | Reference | `ref_` | `ref_country` | Lookup tables |
 
 **PK naming:** `{entity}_id`. **FK naming:** matches the referenced PK name.
+
+## Physical Stage (Derived, Read-Only)
+
+The physical stage is not stored anywhere. Each name in `logical.models` is resolved
+against the dbt project every time the stage is opened, from up to four sources:
+source files under the configured `model-paths` / `seed-paths` / `snapshot-paths`,
+dbt schema `.yml` files under `model-paths`, `{target-path}/manifest.json`, and
+`{target-path}/catalog.json`. None of the four is required — a project that has
+never been compiled still renders real models.
+
+**Existence.** A model is real (not a ghost) when **any** of these holds:
+
+- a `<name>.sql`, `<name>.py` or `<name>.csv` file sits under a configured
+  `model-paths`, `seed-paths` or `snapshot-paths` directory (so seeds and snapshots
+  count), **and** dbt has not disabled the model;
+- a dbt schema `.yml` under `model-paths` declares it;
+- the compiled manifest carries a node for it;
+- `catalog.json` carries a relation for it.
+
+A model found in none of those is still emitted, as a **ghost** with no columns —
+the design references something the dbt project does not have. A model dbt has
+**disabled** lands in the manifest's `disabled` section and `ref()` to it fails,
+so a bare source file does not make it exist; with no other evidence it ghosts
+with a "disabled" reason instead. Ghosting means "not in your dbt project", never
+"you have not run `dbt compile` lately". Vendored directories (`dbt_packages`,
+`dbt_modules`, virtualenvs) are excluded from the file walk.
+
+A model known **only** by the file that defines it is a real node with **zero**
+columns — nothing has stated its shape, and seeding it from the logical design
+would invent one. Sync comparison skips such a model rather than reporting every
+logical column as missing; that suppression is automatic and separate from
+`stubColumns`, which is the user's own switch for deliberately partial models.
+
+**Columns** come from two *kinds* of source:
+
+| | Source | Role |
+|---|--------|------|
+| Declared | schema `.yml` when present, otherwise the manifest's copy of it | One source — the manifest's column list is a compiled copy of the same yml patch, so where they disagree the manifest is merely stale. |
+| Observed | `catalog.json` | An independent look at the warehouse relation, so where it disagrees with the yml that is information. |
+
+When a catalog relation resolves, the rendered list is their **union**: catalog
+order first, then any declared column the catalog has not seen. With no catalog it
+is the declared list alone. A column present in both keeps the **declared**
+spelling — Snowflake reports UPPERCASE column keys and they never win the label.
+
+The catalog is only as fresh as the last `dbt docs generate`, which is exactly why
+it never *replaces* the declared list: a column added to the SQL and the yml an
+hour ago would otherwise vanish from physical and be proposed for deletion by a
+sync plan. The union's opposite cost is milder — a yml documenting a column the
+warehouse does not have renders a physical column nothing has verified.
+
+**Per-column fields.**
+
+| Field | Precedence |
+|-------|-----------|
+| `dataType` | `catalog.json` → declared `data_type:` → the manifest's copy of it → blank |
+| `description` | `.yml` description → manifest description → catalog column `comment` (`persist_docs` writes the dbt description *into* that comment, so it ranks last) |
+| PK/FK/NK, `scdType`, `additiveType` | Carried forward from the logical model — dbt yml does not carry them |
+
+A column typed on only one stage is reported as **`undeclared`**, not as a type
+mismatch; writing `data_type:` into the schema yml, or running
+`dbt docs generate`, is what fills it in.
+
+**Model-level fields.** `schema` is the manifest's `schema`, then the catalog's
+`metadata.schema`, then blank — it cannot be derived from the filesystem (it needs
+`generate_schema_name` and `profiles.yml`), so with neither artifact the node badge
+falls back to the ERD **layer** abbreviation and says so. Every real physical model
+also carries **provenance**: which sources contributed its columns, and which one
+supplied its types. That is runtime state shown on the node and in the detail
+panel; it is never written to disk.
+
+**Relationships** are derived from **dbt relationship tests** — the union of those
+declared in `.yml` files and those in the manifest, deduped, never copied from
+logical. Cardinality comes from `unique` / `dbt_utils.unique_combination_of_columns`
+tests merged from the same two sources (no `unique` test = "many" side). Only
+relationships between models **within the same domain** appear. `catalog.json`
+holds no constraint or foreign-key information, so it contributes no edges.
 
 ## Validation Rules
 

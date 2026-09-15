@@ -283,6 +283,143 @@ describe('YmlParserService', () => {
     });
   });
 
+  describe('source file index (physical existence without a manifest)', () => {
+    let tmpDir: string;
+
+    const write = (rel: string, content: string) => {
+      const full = path.join(tmpDir, rel);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, content, 'utf-8');
+    };
+
+    const schema = (name: string) =>
+      `version: 2\nmodels:\n  - name: ${name}\n    description: ${name} desc\n`;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yml-sources-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('indexes .sql, .py and .csv files under model, seed and snapshot paths', async () => {
+      write('models/silver/dim_customer.sql', 'select 1');
+      write('models/gold/fct_churn.py', 'def model(dbt, session): ...');
+      write('seeds/seed_status_codes.csv', 'code,label\n1,open\n');
+      write('snapshots/snap_customer.sql', '{% snapshot snap_customer %}{% endsnapshot %}');
+
+      const data = await service.loadYmlData(tmpDir);
+
+      expect(Array.from(data.sourceFiles!.keys()).sort()).toEqual([
+        'dim_customer',
+        'fct_churn',
+        'seed_status_codes',
+        'snap_customer',
+      ]);
+      expect(data.sourceFiles!.get('dim_customer')).toBe('models/silver/dim_customer.sql');
+      expect(data.sourceFiles!.get('seed_status_codes')).toBe('seeds/seed_status_codes.csv');
+      expect(data.sourceFiles!.get('snap_customer')).toBe('snapshots/snap_customer.sql');
+    });
+
+    it('normalises the stem so a case-mismatched name still resolves', async () => {
+      write('models/DIM_Customer.SQL', 'select 1');
+
+      const data = await service.loadYmlData(tmpDir);
+
+      expect(data.sourceFiles!.has('dim_customer')).toBe(true);
+      expect(data.sourceFiles!.get('dim_customer')).toBe('models/DIM_Customer.SQL');
+    });
+
+    it('skips source files under excluded directories', async () => {
+      write('models/silver/dim_customer.sql', 'select 1');
+      write('models/dbt_packages/pkg/models/vendored.sql', 'select 1');
+      write('models/.venv/lib/site-packages/leaked.py', 'x = 1');
+      write('models/target/compiled/dim_customer_compiled.sql', 'select 1');
+
+      const data = await service.loadYmlData(tmpDir);
+
+      expect(Array.from(data.sourceFiles!.keys())).toEqual(['dim_customer']);
+    });
+
+    it('resolves a stem present as both .sql and .py exactly once', async () => {
+      write('models/silver/dim_customer.sql', 'select 1');
+      write('models/silver/dim_customer.py', 'def model(dbt, session): ...');
+
+      const data = await service.loadYmlData(tmpDir);
+
+      expect(Array.from(data.sourceFiles!.keys())).toEqual(['dim_customer']);
+      // First entry wins; which one that is depends on readdir order, which is
+      // not alphabetical on every filesystem — the point is that it is one of
+      // them, once.
+      expect(['models/silver/dim_customer.sql', 'models/silver/dim_customer.py']).toContain(
+        data.sourceFiles!.get('dim_customer'),
+      );
+    });
+
+    it('walks seed and snapshot roots for source files without parsing their schema yml', async () => {
+      write('seeds/seed_status_codes.csv', 'code,label\n1,open\n');
+      write('seeds/schema.yml', schema('seed_status_codes'));
+      write('snapshots/snap_customer.sql', '{% snapshot snap_customer %}{% endsnapshot %}');
+      write('snapshots/schema.yml', schema('snap_customer'));
+
+      const data = await service.loadYmlData(tmpDir);
+
+      expect(data.models.size).toBe(0);
+      expect(Array.from(data.sourceFiles!.keys()).sort()).toEqual([
+        'seed_status_codes',
+        'snap_customer',
+      ]);
+    });
+
+    it('honours configured seed-paths and snapshot-paths', async () => {
+      write('data/legacy_seed.csv', 'a\n1\n');
+      write('history/snap_order.sql', 'select 1');
+      write('seeds/ignored.csv', 'a\n1\n');
+
+      const custom = new YmlParserService({
+        dbtConfig: { modelPaths: ['models'], seedPaths: ['data'], snapshotPaths: ['history'] },
+      });
+      const data = await custom.loadYmlData(tmpDir);
+
+      expect(Array.from(data.sourceFiles!.keys()).sort()).toEqual([
+        'legacy_seed',
+        'snap_order',
+      ]);
+    });
+
+    it('walks a root nested inside another exactly once', async () => {
+      write('models/seeds/seed_status_codes.csv', 'a\n1\n');
+
+      const custom = new YmlParserService({
+        dbtConfig: { modelPaths: ['models'], seedPaths: ['models/seeds'] },
+      });
+      const data = await custom.loadYmlData(tmpDir);
+
+      expect(data.sourceFiles!.get('seed_status_codes')).toBe(
+        'models/seeds/seed_status_codes.csv',
+      );
+    });
+
+    it('filters source files by model folder', async () => {
+      write('models/silver/dim_customer.sql', 'select 1');
+      write('models/gold/fct_churn.sql', 'select 1');
+      write('seeds/seed_status_codes.csv', 'a\n1\n');
+
+      const data = await service.loadYmlData(tmpDir, 'models/silver');
+
+      expect(Array.from(data.sourceFiles!.keys())).toEqual(['dim_customer']);
+    });
+
+    it('indexes a fixture model that has no .yml and no manifest node', async () => {
+      const data = await service.loadYmlData(FIXTURE_PROJECT_PATH);
+
+      expect(data.sourceFiles!.get('dim_region')).toBe('models/silver/dim_region.sql');
+      // ...and it contributes nothing to the schema-derived model list.
+      expect(data.models.has('dim_region')).toBe(false);
+    });
+  });
+
   describe('graceful degradation', () => {
     it('returns empty data for non-existent directory', async () => {
       const data = await service.loadYmlData('/nonexistent/path');
@@ -291,6 +428,7 @@ describe('YmlParserService', () => {
       expect(data.relationshipTests).toHaveLength(0);
       expect(data.uniqueColumns.size).toBe(0);
       expect(data.compositeUniqueGroups.size).toBe(0);
+      expect(data.sourceFiles!.size).toBe(0);
     });
   });
 

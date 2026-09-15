@@ -476,4 +476,30 @@ describe('editorStore transient interaction state', () => {
     expect(after.templates).toHaveLength(1);
     expect(after.existingModels).toHaveLength(1);
   });
+
+  describe('physical-source notice dismissal', () => {
+    const sources = { yml: true, manifest: false, catalog: false };
+
+    it('survives a setDomain that does not change the dbt artifacts', () => {
+      // usePositionPersistence calls setDomain locally ~300ms after a drag to
+      // merge optimistic positions. That must not undo a dismissal.
+      state().setDomain(domain('physical', { physicalSources: sources }));
+      state().dismissPhysicalSourceNotice();
+      expect(state().physicalSourceNoticeDismissed).toBe(true);
+
+      state().setDomain(domain('physical', { physicalSources: { ...sources } }));
+
+      expect(state().physicalSourceNoticeDismissed).toBe(true);
+    });
+
+    it('speaks again once dbt has actually been run', () => {
+      state().setDomain(domain('physical', { physicalSources: sources }));
+      state().dismissPhysicalSourceNotice();
+
+      state().setDomain(domain('physical', { physicalSources: { ...sources, manifest: true } }));
+
+      expect(state().physicalSourceNoticeDismissed).toBe(false);
+    });
+  });
+
 });

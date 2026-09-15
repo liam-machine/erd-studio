@@ -190,6 +190,13 @@ export interface EditorState {
   canvasMode: 'pan' | 'select';
   /** Transient toast message raised from anywhere in the webview (null = none). */
   toastMessage: string | null;
+  /**
+   * Whether the "no compiled dbt artifacts" strip has been dismissed.
+   *
+   * Session state only — deliberately not persisted. If dbt still has not been
+   * compiled after a reload, the notice should come back.
+   */
+  physicalSourceNoticeDismissed: boolean;
 }
 
 export interface EditorActions {
@@ -214,6 +221,8 @@ export interface EditorActions {
   /** Open/close the add existing model dialog. */
   setAddExistingModelDialogOpen: (open: boolean) => void;
   setDomain: (domain: DisplayDomain) => void;
+  /** Hide the physical-source notice for the rest of this session. */
+  dismissPhysicalSourceNotice: () => void;
   setError: (error: string | null) => void;
   setNodes: (nodes: (ModelFlowNode | AnnotationFlowNode)[]) => void;
   setEdges: (edges: (FkFlowEdge | AnnotationFlowEdge)[]) => void;
@@ -318,6 +327,20 @@ export interface EditorActions {
   setToastMessage: (message: string | null) => void;
 }
 
+/**
+ * Do two payloads report the same set of dbt artifacts behind the physical
+ * stage? Absent on both sides (the logical stage, or an older host) counts as
+ * unchanged, so nothing re-shows the notice on a stage the notice never
+ * addresses.
+ */
+function samePhysicalSources(
+  a: DisplayDomain['physicalSources'],
+  b: DisplayDomain['physicalSources'],
+): boolean {
+  if (!a || !b) { return !a && !b; }
+  return a.yml === b.yml && a.manifest === b.manifest && a.catalog === b.catalog;
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -375,6 +398,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   selectedAnnotation: null,
   canvasMode: 'pan',
   toastMessage: null,
+  physicalSourceNoticeDismissed: false,
 
   // Actions
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -393,9 +417,20 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   clearFkDialogEditData: () => set({ fkDialogEditData: null }),
   setPendingDeleteConfirmation: (pending) => set({ pendingDeleteConfirmation: pending }),
   setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
+  dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setDomain: (domain) => set((state) => ({
     domain,
     error: null,
+    // The notice gets to speak again only when the artifacts behind the stage
+    // actually changed. setDomain is NOT only a host payload — usePositionPersistence
+    // calls it locally to merge optimistic positions after a drag — so resetting
+    // unconditionally made "dismiss" survive about 300ms, until the user moved
+    // a node. Comparing the sources means a real dbt run re-shows it and a drag
+    // does not.
+    physicalSourceNoticeDismissed:
+      samePhysicalSources(state.domain?.physicalSources, domain.physicalSources)
+        ? state.physicalSourceNoticeDismissed
+        : false,
     // Clear column selection on domain reload
     selectedColumns: [], lastSelectedColumn: null, editingColumn: null,
     // Clear discrepancy + sync state when switching stages (stage changed)

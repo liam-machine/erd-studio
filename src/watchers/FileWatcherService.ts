@@ -2,9 +2,12 @@
  * FileWatcherService — manages file system watchers for dbt project files.
  *
  * Watches:
- * - {target-path}/manifest.json (dbt compile output) → triggers manifest cache invalidation
+ * - {target-path}/{manifest.json,catalog.json} (dbt artifacts) → manifest and
+ *   catalog cache invalidation, as two separate events off one watcher
  * - {semanticDir}/**\/*.json (semantic domain files, default .erd-studio) → triggers tree and editor refresh
  * - {semanticDir}/layers.json → layer config reload (onLayerConfigChanged)
+ * - {model,seed,snapshot-paths}/**\/*.{yml,yaml,sql,py,csv} (dbt sources) →
+ *   physical stage refresh (onDbtYmlChanged)
  * - dbt_project.yml (project configuration) → reload prompt only when path config changes
  *
  * All change events are debounced by 300ms to prevent rapid-fire triggers
@@ -34,12 +37,20 @@ import { LOGICAL_MODELS_DIR } from '../services/logicalModelService';
 import { LAYERS_CONFIG_FILE } from '../services/layerService';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
 import {
-  modelPathsGlob,
   readDbtProjectConfig,
+  sourcePathsGlob,
   type DbtProjectConfig,
 } from '../services/dbtProjectConfig';
 
 const DEBOUNCE_DELAY_MS = 300;
+
+/**
+ * Top-level dbt_project.yml keys whose value feeds a watcher glob. Includes the
+ * pre-dbt-1.0 aliases (`source-paths` for model-paths, `data-paths` for
+ * seed-paths) that `readDbtProjectConfig()` also honours.
+ */
+const PROJECT_PATH_KEY_RE =
+  /^(target-path|model-paths|source-paths|seed-paths|data-paths|snapshot-paths)\s*:/;
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.
@@ -81,6 +92,7 @@ export class FileWatcherService implements vscode.Disposable {
 
   // Event emitters (private — fire events internally)
   private readonly _onManifestChanged = new vscode.EventEmitter<void>();
+  private readonly _onCatalogChanged = new vscode.EventEmitter<void>();
   private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uris: vscode.Uri[] }>();
   private readonly _onLayerConfigChanged = new vscode.EventEmitter<void>();
@@ -90,6 +102,14 @@ export class FileWatcherService implements vscode.Disposable {
 
   // Public event subscriptions (consumers listen to these)
   readonly onManifestChanged = this._onManifestChanged.event;
+  /**
+   * Fires when {target-path}/catalog.json is written, replaced or removed.
+   * Deliberately separate from onManifestChanged: `dbt docs generate` writes
+   * manifest.json first and catalog.json seconds-to-minutes later, once it has
+   * finished querying the warehouse, so a catalog consumer that listened to the
+   * manifest event would refresh before the file it cares about had landed.
+   */
+  readonly onCatalogChanged = this._onCatalogChanged.event;
   readonly onSemanticFileChanged = this._onSemanticFileChanged.event;
   /**
    * Fires once per burst of domain-file deletions with every deleted
@@ -126,27 +146,39 @@ export class FileWatcherService implements vscode.Disposable {
     this.dbtConfig = dbtConfig ?? readDbtProjectConfig(workspaceRoot);
     this.semanticRoot = path.join(workspaceRoot, semanticDir);
     this.lastProjectPaths = this.readProjectPaths();
-    this.setupManifestWatcher();
+    this.setupArtifactWatcher();
     this.setupSemanticWatcher();
     this.setupProjectConfigWatcher();
     this.setupLogicalModelWatcher();
-    this.setupDbtYmlWatcher();
+    this.setupDbtSourceWatcher();
   }
 
   /**
-   * Watch {target-path}/manifest.json for changes.
-   * Fires when dbt compile generates a new manifest, and when it is removed
-   * (`dbt clean`) so the physical stage stops showing a manifest that no
-   * longer exists.
+   * Watch {target-path}/{manifest.json,catalog.json} for changes.
+   * Fires when dbt writes an artifact, and when one is removed (`dbt clean`)
+   * so the physical stage stops showing an artifact that no longer exists.
+   *
+   * One watcher, two events, two debounce keys. The events are separate
+   * because the artifacts are written minutes apart (see onCatalogChanged);
+   * the keys are separate because `debounce()` is keyed by string and
+   * REPLACES the pending callback, so a shared key would let whichever
+   * artifact was written last swallow the other.
    */
-  private setupManifestWatcher(): void {
+  private setupArtifactWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      `${this.dbtConfig.targetPath}/manifest.json`,
+      `${this.dbtConfig.targetPath}/{manifest.json,catalog.json}`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
-    const handleChange = () => {
+    const handleChange = (uri: vscode.Uri) => {
+      if (path.basename(uri.fsPath) === 'catalog.json') {
+        this.debounce('catalog', () => {
+          console.log('[FileWatcherService] Catalog changed');
+          this.safeFireEvent(() => this._onCatalogChanged.fire());
+        });
+        return;
+      }
       this.debounce('manifest', () => {
         console.log('[FileWatcherService] Manifest changed');
         this.safeFireEvent(() => this._onManifestChanged.fire());
@@ -238,8 +270,8 @@ export class FileWatcherService implements vscode.Disposable {
 
   /**
    * Watch dbt_project.yml for changes to path-related keys.
-   * Only fires onProjectConfigChanged when target-path or model-paths actually change,
-   * ignoring irrelevant edits (name, version, vars, etc.).
+   * Only fires onProjectConfigChanged when a path key the watchers are built
+   * from actually changes, ignoring irrelevant edits (name, version, vars, etc.).
    */
   private setupProjectConfigWatcher(): void {
     const pattern = new vscode.RelativePattern(
@@ -265,7 +297,12 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Read path-related keys (target-path, model-paths) from dbt_project.yml.
+   * Read the path keys from dbt_project.yml — exactly the set
+   * `readDbtProjectConfig()` consumes, so the reload prompt covers every key a
+   * watcher glob is built from. `seed-paths` / `snapshot-paths` are in the set
+   * because the source watcher now derives its glob from them as well; without
+   * them, moving seeds to a custom directory would leave that watcher pointed
+   * at the old one, silently, until the next window reload.
    * Uses simple line matching to avoid a full YAML dependency.
    * Captures both inline values (`model-paths: ["models"]`) and block-sequence
    * continuations (`model-paths:\n  - "models"\n  - "other"`).
@@ -281,7 +318,7 @@ export class FileWatcherService implements vscode.Disposable {
       const pathLines: string[] = [];
       let collecting = false;
       for (const line of lines) {
-        if (/^(target-path|model-paths)\s*:/.test(line)) {
+        if (PROJECT_PATH_KEY_RE.test(line)) {
           pathLines.push(line.trim());
           collecting = true;
         } else if (collecting && /^\s+-/.test(line)) {
@@ -329,27 +366,46 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch {model-paths}/**\/*.{yml,yaml} for changes.
-   * Fires when dbt schema files are created, modified, or deleted.
-   * Used to refresh the physical stage which derives from .yml source files.
+   * Watch {model,seed,snapshot-paths}/**\/*.{yml,yaml,sql,py,csv} for changes.
+   * Used to refresh the physical stage, which derives both what a model
+   * contains (schema .yml) and whether it exists at all (a .sql/.py/.csv file
+   * under one of dbt's source directories) from these files.
+   *
+   * Creates and deletes fire for every matched extension, because those are
+   * the events that move existence: a new dim_x.sql makes the model real on
+   * the physical canvas, deleting it turns the model back into a ghost.
+   * A *change* fires only for .yml/.yaml — nothing this extension reads lives
+   * inside a .sql/.py body or a seed .csv's rows, and firing would re-walk and
+   * re-parse every schema yml on every keystroke-save of a model body.
+   *
+   * The event keeps the name onDbtYmlChanged: its subscriber (yml cache
+   * invalidation + open-canvas refresh) is exactly the right response to a
+   * source file appearing or disappearing too.
    */
-  private setupDbtYmlWatcher(): void {
+  private setupDbtSourceWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      `${modelPathsGlob(this.dbtConfig)}/**/*.{yml,yaml}`,
+      `${sourcePathsGlob(this.dbtConfig)}/**/*.{yml,yaml,sql,py,csv}`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
-    const handleChange = () => {
+    const fire = (reason: string) => {
       this.debounce('dbt-yml', () => {
-        console.log('[FileWatcherService] dbt schema .yml changed');
+        console.log(`[FileWatcherService] dbt source ${reason}`);
         this.safeFireEvent(() => this._onDbtYmlChanged.fire());
       });
     };
 
+    const handleChange = (uri: vscode.Uri) => {
+      if (!/\.ya?ml$/i.test(uri.fsPath)) {
+        return;
+      }
+      fire('schema .yml changed');
+    };
+
     this.subscriptions.push(watcher.onDidChange(handleChange));
-    this.subscriptions.push(watcher.onDidCreate(handleChange));
-    this.subscriptions.push(watcher.onDidDelete(handleChange));
+    this.subscriptions.push(watcher.onDidCreate(() => fire('file created')));
+    this.subscriptions.push(watcher.onDidDelete(() => fire('file deleted')));
 
     this.watchers.push(watcher);
   }
@@ -414,6 +470,7 @@ export class FileWatcherService implements vscode.Disposable {
 
     // Dispose event emitters
     this._onManifestChanged.dispose();
+    this._onCatalogChanged.dispose();
     this._onSemanticFileChanged.dispose();
     this._onSemanticFileDeleted.dispose();
     this._onLayerConfigChanged.dispose();

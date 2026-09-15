@@ -14,8 +14,9 @@ import * as path from 'path';
 
 import type { DomainFormat, DomainSummary, Layer, NodePosition, Relationship, SemanticDomain, SemanticModel, StageData, UnifiedDomain, ViewConfig } from '../types/semantic';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from '../types/semantic';
-import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship } from '../types/display';
+import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
 import type { ManifestData } from '../types/manifest';
+import type { CatalogData, CatalogColumn } from '../types/catalog';
 import type { YmlData } from '../types/ymlData';
 import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
@@ -38,6 +39,16 @@ const DEFAULT_SEMANTIC_DIR = '.erd-studio';
 const VALID_CARDINALITIES: ReadonlySet<Cardinality> = new Set<Cardinality>([
   'many-to-one', 'one-to-one', 'one-to-many', 'many-to-many',
 ]);
+
+/**
+ * Physical column sources, most authoritative first.
+ *
+ * The warehouse catalog observed what was built; a schema .yml `data_type:` is
+ * the author's assertion; the manifest is a compiled copy of that assertion; a
+ * bare source file proves only that the model exists. Used to pick the one
+ * source a model's `provenance.types` names.
+ */
+const SOURCE_AUTHORITY: readonly PhysicalColumnSource[] = ['catalog', 'yml', 'manifest', 'file'];
 
 /**
  * Rewrite the `domain` slug in the raw text of a domain file.
@@ -175,13 +186,56 @@ export class DomainService {
    * stage through what exists in the dbt project.
    *
    * Physical domains are not stored on disk — they are derived at runtime.
-   * For each model in the logical stage, the model is resolved from the dbt
-   * schema .yml files (preferred, always current) OR the compiled manifest
-   * (fallback, per model — not all-or-nothing). Models found in neither are
-   * omitted from the physical stage.
+   * A model EXISTS in the project when ANY of these holds: a `.sql`, `.py` or
+   * `.csv` source file sits under a configured model / seed / snapshot path AND
+   * dbt has not disabled the model; a dbt schema `.yml` declares it; the
+   * compiled manifest carries a node for it; `target/catalog.json` carries a
+   * relation for it. Existence deliberately does not require a compiled
+   * manifest — greying out every node because `dbt compile` has not been run
+   * recently says nothing true about the project.
    *
-   * Columns come from whichever source resolved the model, with data types
-   * and descriptions enriched from the manifest when the yml lacks them.
+   * A yml-only model counts as existing even though it is not unambiguously
+   * part of the project (dbt warns about a schema patch with no matching node,
+   * and `ref()` on it fails to compile). Hiding a documented model is the worse
+   * error, and it is the one users report as a bug.
+   *
+   * A model found in NO source is still EMITTED, with `existsInProject: false`,
+   * a `missingReason` and no columns, so it ghosts on the canvas instead of
+   * silently vanishing. Phantoms never join `physicalModelNames`, so no
+   * relationship is ever derived for one.
+   *
+   * COLUMNS come from two KINDS of source. The DECLARED list is the yml when
+   * present, otherwise the manifest, per model — one source, because the
+   * manifest's column list is a compiled copy of the same yml patch, so where
+   * they disagree the manifest is merely stale. The OBSERVED list is the
+   * catalog, an independent look at the warehouse relation, so where it
+   * disagrees that is information. When a catalog node resolves, the rendered
+   * list is their UNION in catalog order with declared-only columns appended;
+   * with no catalog it is the declared list alone, exactly as before.
+   *
+   * The union is deliberate and asymmetric. `dbt docs generate` runs far less
+   * often than `dbt run`, so letting the catalog replace the list would hide a
+   * column added to the SQL and the yml an hour ago and propose a sync plan
+   * that DELETES it. The union's opposite cost — a yml documenting a column the
+   * warehouse does not have renders a phantom column — is milder: the user
+   * authored it, and a column that is shown is inspectable, while one that is
+   * dropped is invisible.
+   *
+   * DATA TYPE is an n-source fallthrough: catalog, then the declared
+   * `data_type:`, then the manifest's copy of it, then ''. DESCRIPTION runs the
+   * other way — yml, then manifest, then the catalog comment — because
+   * `persist_docs` writes the dbt description INTO the warehouse comment, so a
+   * catalog comment is usually a stale echo of the yml.
+   *
+   * A column present in both sources keeps the DECLARED spelling for display.
+   * Snowflake reports UPPERCASE column keys; letting them win would SHOUT every
+   * label on the canvas and change every React key for no correctness gain,
+   * since comparison keys on `normaliseName` either way.
+   *
+   * A model known only by its source file renders with zero columns: seeding it
+   * with the logical columns would fabricate a shape nothing has verified, and
+   * would make the discrepancy report call every one of them 'matched'.
+   *
    * Relationship tests are the union of yml and manifest tests (deduped), and
    * cardinality uses uniqueness tests merged from both sources.
    *
@@ -195,6 +249,7 @@ export class DomainService {
     unifiedDomain: UnifiedDomain,
     ymlData: YmlData,
     manifest?: ManifestData,
+    catalog?: CatalogData,
   ): DisplayDomain {
     const logicalStage = unifiedDomain.logical;
     const physicalModelNames = new Set<string>();
@@ -202,32 +257,115 @@ export class DomainService {
     const ymlIndex = indexByNormalisedName(ymlData.models);
     const manifestIndex = manifest ? indexByNormalisedName(manifest.models) : undefined;
 
-    const models: DisplayModel[] = logicalStage.models.flatMap(model => {
+    const models: DisplayModel[] = logicalStage.models.map(model => {
         const key = normaliseName(model.name);
         const ymlModel = ymlData.models.get(model.name) ?? ymlIndex.get(key);
         const manifestModel = manifest?.models.get(model.name) ?? manifestIndex?.get(key);
+        // `sourceFiles` is keyed by an already-normalised stem — look it up with
+        // normaliseName(), never through indexByNormalisedName().
+        const sourceFile = ymlData.sourceFiles?.get(key);
+        // A disabled model's .sql is on disk but `ref()` to it fails, so the bare
+        // file must not upgrade it to "exists". The veto applies to THAT branch
+        // only: a disabled model still declared in a yml keeps what the yml says,
+        // because that is a different question.
+        const disabled = manifest?.disabledModels.has(key) ?? false;
+        // unique_id FIRST: catalog keys ARE manifest unique_ids, so when a
+        // manifest resolved the model that join is exact and already knows which
+        // version dbt marks latest. byName is a best-effort index for the
+        // manifest-absent case (highest version wins, first entry on a tie).
+        const catalogNode =
+          (manifestModel ? catalog?.byUniqueId.get(manifestModel.uniqueId) : undefined)
+          ?? catalog?.byName.get(key);
 
-        // Model must exist in at least one physical source
-        if (!ymlModel && !manifestModel) { return []; }
+        if (!ymlModel && !manifestModel && !catalogNode && !(sourceFile && !disabled)) {
+          // Phantom: the design references a model the dbt project does not have.
+          // Emitted (not dropped) so the canvas can say so, but kept out of
+          // physicalModelNames so it pulls in no edges.
+          return {
+            name: model.name,
+            schema: '',
+            description: model.description || '',
+            columns: [],
+            rationale: model.rationale,
+            grain: model.grain,
+            modelRole: model.modelRole,
+            existsInProject: false,
+            missingReason: disabled ? ('disabled' as const) : ('absent' as const),
+          };
+        }
         physicalModelNames.add(model.name);
 
-        // Columns come from yml when present, otherwise from the manifest;
-        // data_type / description enriched from manifest when yml has none.
-        const sourceColumns: { name: string; dataType: string | null; description: string }[] = ymlModel
+        // Columns come from yml when present, otherwise from the manifest. The
+        // two are ONE 'declared' source with yml winning per model: the
+        // manifest's column list is a compiled copy of the same yml patch, so
+        // where they disagree the manifest is simply stale.
+        const declaredSource: PhysicalColumnSource | undefined =
+          ymlModel ? 'yml' : (manifestModel ? 'manifest' : undefined);
+        const declaredColumns: { name: string; dataType: string | null; description: string }[] = ymlModel
           ? (ymlModel.columns ?? []).map(c => ({ name: c.name, dataType: c.dataType, description: c.description }))
           : (manifestModel?.columns ?? []).map(c => ({ name: c.name, dataType: c.data_type, description: c.description }));
 
-        const columns: DisplayColumn[] = sourceColumns.map(col => {
-          const colKey = normaliseName(col.name);
-          const manifestCol = ymlModel
-            ? manifestModel?.columns.find(mc => normaliseName(mc.name) === colKey)
-            : undefined;
-          const dataType = col.dataType ?? manifestCol?.data_type ?? '';
+        const manifestByCol = new Map(
+          (manifestModel?.columns ?? []).map(mc => [normaliseName(mc.name), mc]),
+        );
+        const declaredByCol = new Map(
+          declaredColumns.map(dc => [normaliseName(dc.name), dc]),
+        );
+
+        // The rendered list: catalog order first (the warehouse's own ordinal
+        // positions), then any declared column the catalog has not seen. With no
+        // catalog node it is the declared list, unchanged from before.
+        type ColumnEntry = {
+          key: string;
+          declared?: { name: string; dataType: string | null; description: string };
+          observed?: CatalogColumn;
+        };
+        const entries: ColumnEntry[] = [];
+        const seenColumns = new Set<string>();
+        if (catalogNode) {
+          for (const cc of catalogNode.columns) {
+            const ck = normaliseName(cc.name);
+            if (seenColumns.has(ck)) { continue; }
+            seenColumns.add(ck);
+            entries.push({ key: ck, declared: declaredByCol.get(ck), observed: cc });
+          }
+        }
+        for (const dc of declaredColumns) {
+          const dk = normaliseName(dc.name);
+          if (seenColumns.has(dk)) { continue; }
+          seenColumns.add(dk);
+          entries.push({ key: dk, declared: dc });
+        }
+
+        // Which sources actually supplied a data type, so provenance can name
+        // the most authoritative one rather than guessing from the column list.
+        const typeSources = new Set<PhysicalColumnSource>();
+
+        const columns: DisplayColumn[] = entries.map(entry => {
+          const manifestCol = manifestByCol.get(entry.key);
+
+          // Ordered fallthrough — what the warehouse reports, then the declared
+          // assertion, then the manifest's compiled copy of it, then ''.
+          let dataType = '';
+          if (entry.observed?.dataType) {
+            dataType = entry.observed.dataType;
+            typeSources.add('catalog');
+          } else if (entry.declared?.dataType) {
+            dataType = entry.declared.dataType;
+            if (declaredSource) { typeSources.add(declaredSource); }
+          } else if (manifestCol?.data_type) {
+            dataType = manifestCol.data_type;
+            typeSources.add('manifest');
+          }
 
           return {
-            name: col.name,
+            // The declared spelling wins whenever there is one — see the
+            // UPPERCASE note on this method.
+            name: entry.declared?.name ?? entry.observed?.name ?? '',
             dataType,
-            description: col.description || manifestCol?.description || '',
+            // The human's words beat the warehouse's echo of them: persist_docs
+            // copies the dbt description into the relation comment.
+            description: entry.declared?.description || manifestCol?.description || entry.observed?.comment || '',
             isPrimaryKey: false,
             isForeignKey: false,
             isNaturalKey: false,
@@ -248,17 +386,36 @@ export class DomainService {
           }
         }
 
-        return [{
+        // Provenance: who contributed the column list, and who supplied the
+        // types. `columns` is an array because a model's shape can come from
+        // more than one source; a single label would lie about it.
+        const columnSources: PhysicalColumnSource[] = [];
+        if (catalogNode && catalogNode.columns.length > 0) { columnSources.push('catalog'); }
+        if (declaredSource && declaredColumns.length > 0) { columnSources.push(declaredSource); }
+        if (columnSources.length === 0) {
+          // Nothing contributed a column: a declared or catalogued model with
+          // none documented, or a model known only by the file that defines it.
+          // Name whichever source resolved it, so the chip is never blank.
+          columnSources.push(declaredSource ?? (catalogNode ? 'catalog' : 'file'));
+        }
+        const types = SOURCE_AUTHORITY.find(s => typeSources.has(s)) ?? columnSources[0];
+
+        return {
           name: model.name,
-          // Schema only comes from manifest (resolved from dbt_project.yml + macros)
-          schema: manifestModel?.schema ?? '',
-          description: ymlModel?.description || manifestModel?.description || model.description || '',
+          // MANIFEST FIRST, not catalog first. The two agree on the value and
+          // disagree only on case — no adapter lowercases `metadata.schema`, so
+          // Snowflake's catalog says ANALYTICS where the manifest carries the
+          // lowercase `analytics` the user actually wrote. With neither source
+          // the honest answer is '' and the node badge falls back to the layer.
+          schema: manifestModel?.schema || catalogNode?.schema || '',
+          description: ymlModel?.description || manifestModel?.description || catalogNode?.comment || model.description || '',
           columns,
           rationale: model.rationale,
           grain: model.grain,
           modelRole: model.modelRole,
-          existsInManifest: manifestModel !== undefined,
-        }];
+          existsInProject: true,
+          provenance: { columns: columnSources, types },
+        };
       });
 
     // Relationship tests: union of yml (primary) and manifest, deduped.
@@ -295,6 +452,11 @@ export class DomainService {
       viewConfig: unifiedDomain.viewConfig,
       readOnly: true,
       positionDraggable: true,
+      physicalSources: {
+        yml: ymlData.models.size > 0,
+        manifest: (manifest?.models.size ?? 0) > 0,
+        catalog: (catalog?.byUniqueId.size ?? 0) > 0,
+      },
     };
   }
 

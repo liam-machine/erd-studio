@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="396" viewBox="0 0 1120 396" fill="none">
-  <title>Plain files. One editable canvas.</title>
-  <desc>Model YAML and diagram JSON files in your repository render together as the ERD Studio logical canvas, where dim_customer and fct_order are joined by a one-to-many relationship. Canvas edits are saved to the same files.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="710" viewBox="0 0 1120 710" fill="none">
+  <title>Plain files render as your canvas. With dbt, a second view is derived.</title>
+  <desc>Top: a model YAML file and a diagram JSON file in your repository render together as the ERD Studio logical canvas, where dim_customer and fct_order are joined one to many, and canvas edits save back to the same files. Bottom, inside a dashed box marked optional and only if you use dbt: your dbt project — schema YAMLs always, manifest.json after a dbt run, catalog.json after dbt docs generate — derives a physical view of the same diagram, showing the real columns and data types, with edges and cardinality taken from your dbt tests, rebuilt on every change and never written to disk. The two views can be compared.</desc>
   <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="1120" y2="396" gradientUnits="userSpaceOnUse">
+    <linearGradient id="background" x1="0" y1="0" x2="1120" y2="710" gradientUnits="userSpaceOnUse">
       <stop stop-color="#343239"/>
       <stop offset="1" stop-color="#18191E"/>
     </linearGradient>
@@ -12,61 +12,121 @@
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
       <path d="M1 1L6 4L1 7" stroke="#E6CC7E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
+    <marker id="arrowgreen" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M1 1L6 4L1 7" stroke="#5FD68B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
   </defs>
-  <rect width="1120" height="396" rx="20" fill="url(#background)"/>
-  <rect x=".5" y=".5" width="1119" height="395" rx="19.5" stroke="#4A4850"/>
+  <rect width="1120" height="710" rx="20" fill="url(#background)"/>
+  <rect x=".5" y=".5" width="1119" height="709" rx="19.5" stroke="#4A4850"/>
   <g font-family="Arial, Helvetica, sans-serif">
+
     <text x="32" y="43" fill="#A8B4C3" font-size="14" font-weight="700" letter-spacing="2">FILES IN YOUR REPO</text>
     <text x="540" y="43" fill="#A8B4C3" font-size="14" font-weight="700" letter-spacing="2">YOUR LOGICAL CANVAS</text>
 
-    <rect x="32" y="68" width="356" height="112" rx="12" fill="#2D2C32" stroke="#78604C"/>
+    <rect x="32" y="68" width="356" height="108" rx="12" fill="#2D2C32" stroke="#78604C"/>
     <rect x="48" y="84" width="62" height="27" rx="6" fill="#493C33"/>
     <text x="79" y="103" fill="#F0C7A2" font-size="13" font-weight="700" text-anchor="middle">YAML</text>
     <text x="124" y="104" fill="#F3F5F8" font-size="20" font-weight="700">One file per model</text>
-    <text x="50" y="139" fill="#C3C8D0" font-size="16">Columns, keys and design decisions</text>
-    <text x="50" y="162" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">dim_customer.yml</text>
+    <text x="50" y="136" fill="#C3C8D0" font-size="16">Columns, keys and design decisions</text>
+    <text x="50" y="159" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">dim_customer.yml</text>
 
-    <rect x="32" y="200" width="356" height="112" rx="12" fill="#2D2C32" stroke="#626A76"/>
-    <rect x="48" y="216" width="62" height="27" rx="6" fill="#3A4049"/>
-    <text x="79" y="235" fill="#D7E0E9" font-size="13" font-weight="700" text-anchor="middle">JSON</text>
-    <text x="124" y="236" fill="#F3F5F8" font-size="20" font-weight="700">One file per diagram</text>
-    <text x="50" y="271" fill="#C3C8D0" font-size="16">Model names, relationships and layout</text>
-    <text x="50" y="294" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">orders.json</text>
+    <rect x="32" y="186" width="356" height="108" rx="12" fill="#2D2C32" stroke="#626A76"/>
+    <rect x="48" y="202" width="62" height="27" rx="6" fill="#3A4049"/>
+    <text x="79" y="221" fill="#D7E0E9" font-size="13" font-weight="700" text-anchor="middle">JSON</text>
+    <text x="124" y="222" fill="#F3F5F8" font-size="20" font-weight="700">One file per diagram</text>
+    <text x="50" y="254" fill="#C3C8D0" font-size="16">Model names, relationships and layout</text>
+    <text x="50" y="277" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">orders.json</text>
 
-    <path d="M398 124H432Q448 124 448 140V174Q448 190 464 190H523" stroke="#E6CC7E" stroke-width="2" marker-end="url(#arrow)"/>
-    <path d="M398 256H432Q448 256 448 240V206Q448 190 464 190" stroke="#E6CC7E" stroke-width="2"/>
-    <text x="478" y="172" fill="#C3C8D0" font-size="13" text-anchor="middle">render</text>
+    <path d="M388 122H432Q448 122 448 138V165Q448 181 464 181H523" stroke="#E6CC7E" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M388 240H432Q448 240 448 224V197Q448 181 464 181" stroke="#E6CC7E" stroke-width="2"/>
+    <text x="494" y="172" fill="#C3C8D0" font-size="13" text-anchor="middle">render</text>
 
-    <rect x="540" y="68" width="548" height="244" rx="12" fill="#212126" stroke="#48474F"/>
-    <rect x="541" y="112" width="546" height="187" fill="url(#grid)"/>
+    <rect x="540" y="68" width="548" height="226" rx="12" fill="#212126" stroke="#48474F"/>
+    <rect x="541" y="112" width="546" height="181" fill="url(#grid)"/>
     <path d="M540 112H1088" stroke="#48474F"/>
     <circle cx="559" cy="90" r="4" fill="#E6CC7E"/>
     <text x="574" y="96" fill="#F3F5F8" font-size="16" font-weight="700">Orders</text>
     <rect x="991" y="79" width="80" height="24" rx="12" fill="#443D29"/>
     <text x="1031" y="96" fill="#F5E6AE" font-size="12" font-weight="700" text-anchor="middle">LOGICAL</text>
 
-    <rect x="559" y="136" width="211" height="134" rx="8" fill="#303036" stroke="#877445"/>
-    <path d="M560 176H769" stroke="#48474F"/>
-    <text x="573" y="162" fill="#F3F5F8" font-size="17" font-weight="700">dim_customer</text>
-    <text x="573" y="201" fill="#E6CC7E" font-size="12" font-weight="700">PK</text>
-    <text x="602" y="201" fill="#D7E0E9" font-size="15">customer_id</text>
-    <text x="602" y="226" fill="#A8B4C3" font-size="15">name</text>
-    <text x="602" y="251" fill="#A8B4C3" font-size="15">email</text>
+    <rect x="559" y="134" width="200" height="106" rx="8" fill="#303036" stroke="#877445"/>
+    <path d="M560 174H758" stroke="#48474F"/>
+    <text x="573" y="160" fill="#F3F5F8" font-size="17" font-weight="700">dim_customer</text>
+    <text x="573" y="199" fill="#E6CC7E" font-size="12" font-weight="700">PK</text>
+    <text x="602" y="199" fill="#D7E0E9" font-size="15">customer_id</text>
+    <text x="602" y="225" fill="#A8B4C3" font-size="15">name</text>
 
-    <rect x="850" y="166" width="219" height="118" rx="8" fill="#303036" stroke="#877445"/>
-    <path d="M851 206H1068" stroke="#48474F"/>
-    <text x="864" y="192" fill="#F3F5F8" font-size="17" font-weight="700">fct_order</text>
-    <text x="864" y="232" fill="#E6CC7E" font-size="12" font-weight="700">PK</text>
-    <text x="893" y="232" fill="#D7E0E9" font-size="15">order_id</text>
-    <text x="864" y="258" fill="#E6CC7E" font-size="12" font-weight="700">FK</text>
-    <text x="893" y="258" fill="#D7E0E9" font-size="15">customer_id</text>
-    <path d="M786 196H798Q810 196 810 208V242Q810 254 822 254H833" stroke="#E6CC7E" stroke-width="2"/>
-    <text x="778" y="201" fill="#E6CC7E" font-size="14" font-weight="700" text-anchor="middle">1</text>
-    <text x="842" y="265" fill="#E6CC7E" font-size="22" font-weight="700" text-anchor="middle">*</text>
+    <rect x="860" y="178" width="210" height="106" rx="8" fill="#303036" stroke="#877445"/>
+    <path d="M861 218H1069" stroke="#48474F"/>
+    <text x="874" y="204" fill="#F3F5F8" font-size="17" font-weight="700">fct_order</text>
+    <text x="874" y="243" fill="#E6CC7E" font-size="12" font-weight="700">PK</text>
+    <text x="903" y="243" fill="#D7E0E9" font-size="15">order_id</text>
+    <text x="874" y="269" fill="#E6CC7E" font-size="12" font-weight="700">FK</text>
+    <text x="903" y="269" fill="#D7E0E9" font-size="15">customer_id</text>
+    <path d="M780 187H790Q800 187 800 197V221Q800 231 810 231H839" stroke="#E6CC7E" stroke-width="2"/>
+    <text x="770" y="192" fill="#E6CC7E" font-size="14" font-weight="700" text-anchor="middle">1</text>
+    <text x="849" y="244" fill="#E6CC7E" font-size="22" font-weight="700" text-anchor="middle">*</text>
 
-    <path d="M818 328V343Q818 354 807 354H221Q210 354 210 343V329" stroke="#807B72" stroke-width="1.5" stroke-dasharray="4 5"/>
-    <path d="M206 334L210 329L214 334" stroke="#807B72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <rect x="363" y="339" width="310" height="29" rx="10" fill="#25252B"/>
-    <text x="518" y="359" fill="#C3C8D0" font-size="15" text-anchor="middle">Canvas edits save to the same files</text>
+    <path d="M818 300V315Q818 326 807 326H221Q210 326 210 315V301" stroke="#807B72" stroke-width="1.5" stroke-dasharray="4 5"/>
+    <path d="M206 306L210 301L214 306" stroke="#807B72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="363" y="311" width="310" height="29" rx="10" fill="#25252B"/>
+    <text x="518" y="331" fill="#C3C8D0" font-size="15" text-anchor="middle">Canvas edits save to the same files</text>
+
+    <path d="M960 302V350M960 378V412" stroke="#807B72" stroke-width="1.5" stroke-dasharray="4 5"/>
+    <path d="M956 307L960 302L964 307" stroke="#807B72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M956 407L960 412L964 407" stroke="#807B72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="912" y="350" width="96" height="28" rx="14" fill="#2B2A31" stroke="#4A4850"/>
+    <text x="960" y="369" fill="#C3C8D0" font-size="13" text-anchor="middle">compare</text>
+
+    <rect x="20.5" y="364.5" width="1079" height="324" rx="15.5" stroke="#5A5862" stroke-dasharray="6 6"/>
+    <rect x="36" y="380" width="266" height="28" rx="14" fill="#25412F"/>
+    <text x="169" y="399" fill="#A7F0C0" font-size="12" font-weight="700" letter-spacing="1" text-anchor="middle">OPTIONAL — ONLY IF YOU USE DBT</text>
+
+    <rect x="32" y="456" width="356" height="163" rx="12" fill="#2D2C32" stroke="#4E6B58"/>
+    <rect x="48" y="472" width="52" height="27" rx="6" fill="#2A3D31"/>
+    <text x="74" y="491" fill="#BFE9CE" font-size="13" font-weight="700" text-anchor="middle">DBT</text>
+    <text x="114" y="492" fill="#F3F5F8" font-size="20" font-weight="700">Your dbt project</text>
+    <text x="50" y="524" fill="#C3C8D0" font-size="16">Columns, tests and warehouse types</text>
+    <text x="50" y="549" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">models/schema.yml</text>
+    <text x="372" y="549" fill="#7F8C9D" font-size="11" text-anchor="end">always</text>
+    <text x="50" y="572" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">target/manifest.json</text>
+    <text x="372" y="572" fill="#7F8C9D" font-size="11" text-anchor="end">after dbt run</text>
+    <text x="50" y="595" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">target/catalog.json</text>
+    <text x="372" y="595" fill="#7F8C9D" font-size="11" text-anchor="end">after dbt docs generate</text>
+
+    <path d="M388 537H523" stroke="#5FD68B" stroke-width="2" marker-end="url(#arrowgreen)"/>
+    <text x="455" y="528" fill="#C3C8D0" font-size="13" text-anchor="middle">derive</text>
+
+    <rect x="540" y="424" width="548" height="226" rx="12" fill="#212126" stroke="#48474F"/>
+    <rect x="541" y="468" width="546" height="181" fill="url(#grid)"/>
+    <path d="M540 468H1088" stroke="#48474F"/>
+    <circle cx="559" cy="446" r="4" fill="#5FD68B"/>
+    <text x="574" y="452" fill="#F3F5F8" font-size="16" font-weight="700">Orders</text>
+    <rect x="985" y="435" width="86" height="24" rx="12" fill="#25412F"/>
+    <text x="1028" y="452" fill="#A7F0C0" font-size="12" font-weight="700" text-anchor="middle">PHYSICAL</text>
+
+    <rect x="559" y="486" width="225" height="106" rx="8" fill="#303036" stroke="#45805C"/>
+    <path d="M560 526H783" stroke="#48474F"/>
+    <text x="573" y="512" fill="#F3F5F8" font-size="17" font-weight="700">dim_customer</text>
+    <text x="573" y="551" fill="#5FD68B" font-size="12" font-weight="700">PK</text>
+    <text x="602" y="551" fill="#D7E0E9" font-size="15">customer_id</text>
+    <text x="770" y="551" fill="#7F8C9D" font-size="13" text-anchor="end" font-family="Menlo, Consolas, monospace">varchar</text>
+    <text x="602" y="577" fill="#A8B4C3" font-size="15">name</text>
+    <text x="770" y="577" fill="#7F8C9D" font-size="13" text-anchor="end" font-family="Menlo, Consolas, monospace">varchar</text>
+
+    <rect x="860" y="528" width="210" height="106" rx="8" fill="#303036" stroke="#45805C"/>
+    <path d="M861 568H1069" stroke="#48474F"/>
+    <text x="874" y="554" fill="#F3F5F8" font-size="17" font-weight="700">fct_order</text>
+    <text x="874" y="593" fill="#5FD68B" font-size="12" font-weight="700">PK</text>
+    <text x="903" y="593" fill="#D7E0E9" font-size="15">order_id</text>
+    <text x="1056" y="593" fill="#7F8C9D" font-size="13" text-anchor="end" font-family="Menlo, Consolas, monospace">bigint</text>
+    <text x="874" y="619" fill="#5FD68B" font-size="12" font-weight="700">FK</text>
+    <text x="903" y="619" fill="#D7E0E9" font-size="15">customer_id</text>
+    <text x="1056" y="619" fill="#7F8C9D" font-size="13" text-anchor="end" font-family="Menlo, Consolas, monospace">varchar</text>
+    <path d="M805 539H815Q825 539 825 549V571Q825 581 835 581H839" stroke="#5FD68B" stroke-width="2"/>
+    <text x="795" y="544" fill="#5FD68B" font-size="14" font-weight="700" text-anchor="middle">1</text>
+    <text x="849" y="594" fill="#5FD68B" font-size="22" font-weight="700" text-anchor="middle">*</text>
+
+    <text x="814" y="674" fill="#99A7B8" font-size="14" text-anchor="middle">Edges and cardinality come from your dbt tests · never written to disk</text>
   </g>
 </svg>

@@ -1,9 +1,10 @@
 /**
  * DbtProjectConfig — reads the path-related keys ERD Studio cares about from
- * `dbt_project.yml` (`target-path`, `model-paths`) so that every consumer
- * (manifest parser, schema .yml walker, file watchers, staleness check)
- * honours the same configured locations instead of hard-coding `target/`
- * and `models/`.
+ * `dbt_project.yml` (`target-path`, `model-paths`, `seed-paths`,
+ * `snapshot-paths`) so that every consumer (manifest/catalog readers, schema
+ * .yml walker, file watchers, staleness check) honours the same configured
+ * locations instead of hard-coding `target/`, `models/`, `seeds/` and
+ * `snapshots/`.
  *
  * Read once at activation and passed into services. A change to these keys
  * is detected by FileWatcherService, which prompts for a window reload.
@@ -18,13 +19,24 @@ export interface DbtProjectConfig {
   targetPath: string;
   /** Directories dbt reads models (and their schema .yml files) from. Default `['models']`. */
   modelPaths: string[];
+  /** Directories dbt reads seed .csv files from. Default `['seeds']`. */
+  seedPaths: string[];
+  /** Directories dbt reads snapshots from. Default `['snapshots']`. */
+  snapshotPaths: string[];
 }
 
 export const DEFAULT_TARGET_PATH = 'target';
 export const DEFAULT_MODEL_PATHS: readonly string[] = ['models'];
+export const DEFAULT_SEED_PATHS: readonly string[] = ['seeds'];
+export const DEFAULT_SNAPSHOT_PATHS: readonly string[] = ['snapshots'];
 
 export function defaultDbtProjectConfig(): DbtProjectConfig {
-  return { targetPath: DEFAULT_TARGET_PATH, modelPaths: [...DEFAULT_MODEL_PATHS] };
+  return {
+    targetPath: DEFAULT_TARGET_PATH,
+    modelPaths: [...DEFAULT_MODEL_PATHS],
+    seedPaths: [...DEFAULT_SEED_PATHS],
+    snapshotPaths: [...DEFAULT_SNAPSHOT_PATHS],
+  };
 }
 
 /**
@@ -97,6 +109,17 @@ export function readDbtProjectConfig(projectRoot: string): DbtProjectConfig {
     config.modelPaths = modelPaths;
   }
 
+  // `data-paths` is the pre-dbt-1.0 name for `seed-paths`.
+  const seedPaths = readPathList(map['seed-paths'] ?? map['data-paths']);
+  if (seedPaths.length > 0) {
+    config.seedPaths = seedPaths;
+  }
+
+  const snapshotPaths = readPathList(map['snapshot-paths']);
+  if (snapshotPaths.length > 0) {
+    config.snapshotPaths = snapshotPaths;
+  }
+
   return config;
 }
 
@@ -106,10 +129,45 @@ export function resolveManifestPath(projectRoot: string, config: DbtProjectConfi
 }
 
 /**
+ * Absolute path of `catalog.json` for the given project and config — the
+ * artifact `dbt docs generate` writes beside `manifest.json`. Composed here
+ * rather than at the call site so both artifact spellings (and any custom
+ * `target-path`) stay in one place.
+ */
+export function resolveCatalogPath(projectRoot: string, config: DbtProjectConfig): string {
+  return path.join(projectRoot, config.targetPath, 'catalog.json');
+}
+
+/**
  * Build the glob fragment that matches every configured model directory,
  * e.g. `models` or `{models,extra_models}`.
  */
 export function modelPathsGlob(config: DbtProjectConfig): string {
   const paths = config.modelPaths.length > 0 ? config.modelPaths : [...DEFAULT_MODEL_PATHS];
+  return paths.length === 1 ? paths[0] : `{${paths.join(',')}}`;
+}
+
+/**
+ * Build the glob fragment that matches every directory dbt reads *source*
+ * files from — models, seeds and snapshots — deduped and brace-joined the
+ * same way as `modelPathsGlob`, e.g. `{models,seeds,snapshots}`.
+ *
+ * Separate from `modelPathsGlob` because the two answer different questions:
+ * schema .yml parsing and the staleness check still care only about model
+ * paths, while "does this model exist in the project?" must also see a seed
+ * .csv or a snapshot .sql.
+ */
+export function sourcePathsGlob(config: DbtProjectConfig): string {
+  const defaults = defaultDbtProjectConfig();
+  const paths: string[] = [];
+  for (const p of [
+    ...(config.modelPaths.length > 0 ? config.modelPaths : defaults.modelPaths),
+    ...(config.seedPaths.length > 0 ? config.seedPaths : defaults.seedPaths),
+    ...(config.snapshotPaths.length > 0 ? config.snapshotPaths : defaults.snapshotPaths),
+  ]) {
+    if (!paths.includes(p)) {
+      paths.push(p);
+    }
+  }
   return paths.length === 1 ? paths[0] : `{${paths.join(',')}}`;
 }

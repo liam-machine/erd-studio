@@ -24,6 +24,7 @@ import {
   resolveManifestPath,
   type DbtProjectConfig,
 } from './dbtProjectConfig';
+import { normaliseName } from './nameUtils';
 
 /** Default upper bound for a single worker parse before it is abandoned. */
 export const DEFAULT_PARSE_TIMEOUT_MS = 120_000;
@@ -63,6 +64,9 @@ function deserializeWorkerResult(raw: ManifestWorkerResult): ManifestData {
     relationshipTests: raw.relationshipTests,
     uniqueColumns,
     compositeUniqueGroups,
+    // Normalised here so callers can test membership with the same key they
+    // use for every other manifest lookup.
+    disabledModels: new Set(raw.disabledModels.map(normaliseName)),
   };
 }
 
@@ -80,6 +84,9 @@ export class ManifestService {
   constructor(options: ManifestServiceOptions = {}) {
     const defaults = defaultDbtProjectConfig();
     this.dbtConfig = {
+      // Seed / snapshot paths come straight from the defaults: this service
+      // only ever resolves target-path, but the config type is shared.
+      ...defaults,
       targetPath: options.dbtConfig?.targetPath ?? defaults.targetPath,
       modelPaths: options.dbtConfig?.modelPaths?.length ? options.dbtConfig.modelPaths : defaults.modelPaths,
     };
@@ -365,6 +372,7 @@ export class ManifestService {
       relationshipTests: [],
       uniqueColumns: new Map(),
       compositeUniqueGroups: new Map(),
+      disabledModels: new Set(),
     };
   }
 }

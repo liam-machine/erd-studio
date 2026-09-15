@@ -1,0 +1,49 @@
+/**
+ * PhysicalSourceNotice styles.
+ *
+ * A strip above the flow area, not an overlay — it must never cover a node.
+ * Theme tokens only (webview/styles/theme.css); no literal colours.
+ */
+
+.physical-source-notice {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.physical-source-notice__icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.physical-source-notice__text {
+  flex: 1;
+}
+
+.physical-source-notice__text code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
+
+.physical-source-notice__dismiss {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.physical-source-notice__dismiss:hover {
+  opacity: 1;
+}

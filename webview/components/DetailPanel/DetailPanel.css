@@ -189,6 +189,18 @@
   font-size: 11px;
 }
 
+/* "Columns from" does not fit the 50px reserved for "Schema". */
+.detail-panel__label--wide {
+  min-width: 84px;
+}
+
+/* Provenance is prose, not an identifier — the monospace face of a value makes
+   it read as a schema name. */
+.detail-panel__value--provenance {
+  font-family: inherit;
+  color: var(--dim-fg);
+}
+
 .detail-panel__status-badge {
   padding: 2px 6px;
   border-radius: 3px;

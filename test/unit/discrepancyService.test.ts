@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { compare, normaliseDataType } from '../../src/services/discrepancyService';
+import { deriveColumnAction } from '../../src/types/syncPlan';
 import type { DisplayDomain, DisplayModel, DisplayRelationship } from '../../src/types/display';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,16 @@ function makeRel(
   cardinality: DisplayRelationship['cardinality'] = 'many-to-one',
 ): DisplayRelationship {
   return { fromModel: from[0], fromColumn: from[1], toModel: to[0], toColumn: to[1], cardinality };
+}
+
+/**
+ * Compare one column declared as `sourceType` in the source stage and
+ * `targetType` in the target stage, and return the resulting status.
+ */
+function columnStatus(sourceType: string, targetType: string) {
+  const source = makeDomain({ models: [makeModel('m', [makeColumn('c', sourceType)])] });
+  const target = makeDomain({ models: [makeModel('m', [makeColumn('c', targetType)])] });
+  return compare(source, target).models[0].columns[0].status;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +200,41 @@ describe('DiscrepancyService.compare', () => {
       const report = compare(source, target);
       const model = report.models.find((m) => m.name === 'dim_customer')!;
       expect(model.columns[0].status).toBe('matched');
+    });
+
+    it('reports a type declared on one side only as undeclared, not a mismatch', () => {
+      const source = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', 'bigint')])],
+      });
+      const target = makeDomain({
+        models: [makeModel('dim_customer', [makeColumn('id', '')])],
+      });
+
+      const report = compare(source, target);
+      const col = report.models[0].columns[0];
+      expect(col).toEqual({
+        name: 'id',
+        status: 'undeclared',
+        sourceDataType: 'bigint',
+        targetDataType: '',
+      });
+      expect(report.summary.dataTypeMismatches).toBe(0);
+      expect(report.summary.undeclaredColumns).toBe(1);
+      expect(report.summary.matchedColumns).toBe(0);
+    });
+
+    it('reports undeclared in the other direction too', () => {
+      expect(columnStatus('', 'bigint')).toBe('undeclared');
+    });
+
+    it('matches columns where neither stage declares a type', () => {
+      const source = makeDomain({ models: [makeModel('m', [makeColumn('c', '')])] });
+      const target = makeDomain({ models: [makeModel('m', [makeColumn('c', '  ')])] });
+
+      const report = compare(source, target);
+      expect(report.models[0].columns[0].status).toBe('matched');
+      expect(report.summary.undeclaredColumns).toBe(0);
+      expect(report.summary.matchedColumns).toBe(1);
     });
 
     it('populates columns as missing for missing models', () => {
@@ -387,7 +433,7 @@ describe('DiscrepancyService.compare', () => {
 
     it('still reports type mismatches on case-differing column names', () => {
       const source = makeDomain({ models: [makeModel('m', [makeColumn('amount', 'int')])] });
-      const target = makeDomain({ models: [makeModel('m', [makeColumn('AMOUNT', 'decimal')])] });
+      const target = makeDomain({ models: [makeModel('m', [makeColumn('AMOUNT', 'decimal(15,2)')])] });
 
       const report = compare(source, target);
 
@@ -431,6 +477,111 @@ describe('DiscrepancyService.compare', () => {
     });
   });
 
+  describe('data type tolerance (the spellings adapters emit)', () => {
+    it('tolerates a precision on one side only', () => {
+      expect(columnStatus('decimal(15,2)', 'decimal')).toBe('matched');
+      expect(columnStatus('varchar(255)', 'string')).toBe('matched');
+      expect(columnStatus('character varying(255)', 'varchar')).toBe('matched');
+    });
+
+    it('still reports two different precisions as a mismatch', () => {
+      expect(columnStatus('decimal(15,2)', 'decimal(10,0)')).toBe('type-mismatch');
+    });
+
+    it('treats a scale-zero or unparameterised decimal as an integer', () => {
+      // Snowflake's catalog reports every integer column as a bare NUMBER.
+      expect(columnStatus('NUMBER(38,0)', 'integer')).toBe('matched');
+      expect(columnStatus('NUMBER', 'bigint')).toBe('matched');
+      expect(columnStatus('numeric(10)', 'int')).toBe('matched');
+      expect(columnStatus('integer', 'NUMBER(38,0)')).toBe('matched');
+    });
+
+    it('does not stretch that rule to a genuine decimal or to a width change', () => {
+      expect(columnStatus('decimal(15,2)', 'integer')).toBe('type-mismatch');
+      expect(columnStatus('bigint', 'int')).toBe('type-mismatch');
+    });
+  });
+
+  describe('an undeclared column is still resolvable in a sync plan', () => {
+    it('derives the same update-type action a mismatch would', () => {
+      expect(deriveColumnAction('undeclared', 'logical', 'logical')).toBe('update-type-in-physical');
+      expect(deriveColumnAction('undeclared', 'physical', 'logical')).toBe('update-type-in-logical');
+    });
+  });
+
+  describe('models that do not exist in the dbt project', () => {
+    /** A physical model the dbt project does not have — emitted so it can ghost. */
+    function phantom(name: string): DisplayModel {
+      return { ...makeModel(name), existsInProject: false, missingReason: 'absent' };
+    }
+
+    it('excludes a phantom from both sides, leaving the report as it was before ghosts existed', () => {
+      // Logical → physical: the logical model is still 'extra', because the
+      // physical side's phantom does not count as a match.
+      const logical = makeDomain({ models: [makeModel('dim_customer', [makeColumn('id')])] });
+      const physical = makeDomain({ stage: 'physical', models: [phantom('dim_customer')] });
+
+      const fromLogical = compare(logical, physical);
+      expect(fromLogical.models).toEqual([
+        { name: 'dim_customer', status: 'extra', columns: [{ name: 'id', status: 'extra', sourceDataType: 'VARCHAR' }] },
+      ]);
+
+      // Physical → logical: the phantom is not reported 'extra' from its own
+      // side; the logical model is 'missing'.
+      const fromPhysical = compare(physical, logical);
+      expect(fromPhysical.models.map((m) => ({ name: m.name, status: m.status })))
+        .toEqual([{ name: 'dim_customer', status: 'missing' }]);
+    });
+
+    it('keeps summary.totalModels in step with the rows it emitted', () => {
+      const logical = makeDomain({ models: [makeModel('dim_customer'), makeModel('fct_orders')] });
+      const physical = makeDomain({
+        stage: 'physical',
+        models: [makeModel('dim_customer'), phantom('fct_orders'), phantom('dim_nowhere')],
+      });
+
+      const report = compare(physical, logical);
+      expect(report.models).toHaveLength(2);
+      expect(report.summary.totalModels).toBe(2);
+    });
+  });
+
+  describe('a model with no column evidence', () => {
+    /** A model known only by the .sql file that defines it — its shape is unverified. */
+    function fileOnly(name: string): DisplayModel {
+      return { ...makeModel(name), existsInProject: true, provenance: { columns: ['file'], types: 'file' } };
+    }
+
+    const documented = () => makeDomain({
+      models: [makeModel('dim_customer', [makeColumn('id'), makeColumn('name')])],
+    });
+
+    it('is matched with no columns when it is the target', () => {
+      const report = compare(documented(), makeDomain({ stage: 'physical', models: [fileOnly('dim_customer')] }));
+      expect(report.models[0]).toEqual({ name: 'dim_customer', status: 'matched', columns: [] });
+      expect(report.summary.totalColumns).toBe(0);
+    });
+
+    it('is matched with no columns when it is the source', () => {
+      // Physical is the default comparison SOURCE, so one-directional
+      // suppression would still emit every logical column as 'missing'.
+      const report = compare(makeDomain({ stage: 'physical', models: [fileOnly('dim_customer')] }), documented());
+      expect(report.models[0]).toEqual({ name: 'dim_customer', status: 'matched', columns: [] });
+      expect(report.summary.missingColumns).toBe(0);
+    });
+
+    it('still compares a model whose columns simply are not documented in the yml', () => {
+      // provenance 'yml' with zero columns is a different claim from 'file':
+      // the yml declares the model and documents no columns, which is a real
+      // difference from a logical design that documents two.
+      const undocumented: DisplayModel = {
+        ...makeModel('dim_customer'), existsInProject: true, provenance: { columns: ['yml'], types: 'yml' },
+      };
+      const report = compare(makeDomain({ stage: 'physical', models: [undocumented] }), documented());
+      expect(report.models[0].columns.map((c) => c.status)).toEqual(['missing', 'missing']);
+    });
+  });
+
   describe('empty domains', () => {
     it('returns empty report when both domains have no models', () => {
       const report = compare(makeDomain(), makeDomain());
@@ -470,7 +621,7 @@ describe('normaliseDataType', () => {
     expect(normaliseDataType('float64')).toBe('double');
     expect(normaliseDataType('bool')).toBe('boolean');
     expect(normaliseDataType('timestamp_ntz')).toBe('timestamp');
-    expect(normaliseDataType('timestamp_ltz')).toBe('timestamp');
+    expect(normaliseDataType('timestamp_ltz')).toBe('timestamptz');
     expect(normaliseDataType('datetime')).toBe('timestamp');
     expect(normaliseDataType('datetime2')).toBe('timestamp');
     expect(normaliseDataType('ntext')).toBe('string');
@@ -500,6 +651,37 @@ describe('normaliseDataType', () => {
     expect(normaliseDataType('double')).toBe('double');
     expect(normaliseDataType('boolean')).toBe('boolean');
     expect(normaliseDataType('smallint')).toBe('int');
+  });
+
+  it('normalises the spellings dbt adapters actually emit', () => {
+    // Postgres / Redshift — format_type() gives precision and multi-word names
+    expect(normaliseDataType('character varying(255)')).toBe('string(255)');
+    expect(normaliseDataType('double precision')).toBe('double');
+    expect(normaliseDataType('timestamp without time zone')).toBe('timestamp');
+    expect(normaliseDataType('timestamp with time zone')).toBe('timestamptz');
+    expect(normaliseDataType('int4')).toBe('int');
+    expect(normaliseDataType('int8')).toBe('bigint');
+    // Snowflake — bare types, no precision at all
+    expect(normaliseDataType('TIMESTAMP_NTZ')).toBe('timestamp');
+    expect(normaliseDataType('NUMBER')).toBe('decimal');
+    expect(normaliseDataType('TEXT')).toBe('string');
+    expect(normaliseDataType('VARIANT')).toBe('variant');
+    // BigQuery
+    expect(normaliseDataType('INT64')).toBe('int');
+    expect(normaliseDataType('BIGNUMERIC')).toBe('decimal');
+  });
+
+  it('extracts the base name around a parenthesised parameter', () => {
+    // The old "everything before the first (" split produced a base of
+    // `timestamp` plus an opaque suffix that no alias could ever match.
+    expect(normaliseDataType('timestamp(6) without time zone')).toBe('timestamp(6)');
+    expect(normaliseDataType('TIME(3) WITH TIME ZONE')).toBe('time(3)');
+  });
+
+  it('treats angle-bracket parameters like parentheses', () => {
+    expect(normaliseDataType('ARRAY<STRING>')).toBe('array(string)');
+    expect(normaliseDataType('struct<a int, b string>')).toBe('struct(a int,b string)');
+    expect(normaliseDataType('map<string,array<int>>')).toBe('map(string,array<int>)');
   });
 
   it('handles undefined and empty string', () => {

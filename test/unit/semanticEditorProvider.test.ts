@@ -18,6 +18,7 @@ import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import { ManifestService } from '../../src/services/manifestService';
 import { YmlParserService } from '../../src/services/ymlParserService';
+import { CatalogService } from '../../src/services/catalogService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
@@ -262,6 +263,66 @@ describe('disposed panels (H24)', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(rejecting.postMessage).toHaveBeenCalledTimes(1);
     expect(posted(panel).length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// target/catalog.json reaches the physical stage (and its absence changes nothing)
+// ---------------------------------------------------------------------------
+
+describe('catalog injection', () => {
+  /** Open showcase on the physical stage, optionally with a catalog reader injected. */
+  async function physicalShowcase(opts: { withCatalog: boolean }) {
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    const built = buildProvider(root);
+    if (opts.withCatalog) {
+      built.provider.setCatalogService(new CatalogService());
+    }
+    const doc = makeDoc(file);
+    const panel = vscode.createMockWebviewPanel();
+    await built.provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    return posted(panel).find((m) => m.type === 'stageData')!.payload;
+  }
+
+  it('produces a physical stage with no catalog when none was injected', async () => {
+    // Every other buildProvider() in this suite is in exactly this state, so
+    // "purely additive" is proved by the whole file; this makes it explicit.
+    const payload = await physicalShowcase({ withCatalog: false });
+
+    expect(payload.physicalSources).toEqual({ yml: true, manifest: true, catalog: false });
+    const task = payload.models.find((m: any) => m.name === 'dim_task');
+    // The yml's own `data_type: STRING` stands, unchallenged by the warehouse.
+    expect(task.columns.find((c: any) => c.name === 'status').dataType).toBe('STRING');
+    expect(task.provenance).toEqual({ columns: ['yml'], types: 'yml' });
+    const event = payload.models.find((m: any) => m.name === 'fct_task_event');
+    expect(event.columns.map((c: any) => c.name)).not.toContain('loaded_at');
+  });
+
+  it('reads the fixture catalog once a service is injected', async () => {
+    const payload = await physicalShowcase({ withCatalog: true });
+
+    expect(payload.physicalSources).toEqual({ yml: true, manifest: true, catalog: true });
+
+    const task = payload.models.find((m: any) => m.name === 'dim_task');
+    // The warehouse says TEXT; the yml asserted STRING.
+    expect(task.columns.find((c: any) => c.name === 'status').dataType).toBe('TEXT');
+    expect(task.provenance).toEqual({ columns: ['catalog', 'yml'], types: 'catalog' });
+    // Manifest-first for the schema: the catalog reports SILVER_SCHEMA.
+    expect(task.schema).toBe('silver');
+    // Declared spelling wins for display, not the catalog's UPPERCASE keys.
+    expect(task.columns.map((c: any) => c.name)).toEqual(['task_id', 'project_id', 'name', 'status']);
+
+    // A column the warehouse has and nothing declares is appended, not hidden.
+    const event = payload.models.find((m: any) => m.name === 'fct_task_event');
+    expect(event.columns.map((c: any) => c.name)).toContain('loaded_at');
   });
 });
 

@@ -27,6 +27,19 @@ import './DiscrepancyPanel.css';
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Shown in place of a data type the stage does not declare. */
+const NO_TYPE = '(none)';
+
+/**
+ * Colour for one stage's type in a two-stage detail row: the stage colour when
+ * there is a type, dim when the stage declares none — so an `undeclared` row
+ * reads as "nothing on record here", not as a second competing value.
+ */
+function typeColor(dataType: string | undefined, stage: string): string {
+  if (!dataType) return 'var(--dim-fg)';
+  return STAGE_HEX[stage] ?? 'inherit';
+}
+
 /**
  * Map a discrepancy status to a user-friendly, stage-anchored label.
  *
@@ -38,6 +51,7 @@ function statusLabel(status: string, sourceStage: string, targetStage: string): 
     case 'extra': return `Only in ${stageName(sourceStage)}`;
     case 'missing': return `Only in ${stageName(targetStage)}`;
     case 'type-mismatch': return 'type mismatch';
+    case 'undeclared': return 'type not declared';
     case 'cardinality-mismatch': return 'cardinality mismatch';
     default: return status;
   }
@@ -79,13 +93,15 @@ function ModelEntry({ model, sourceStage, targetStage, onNavigate }: ModelEntryP
             <div key={col.name} className="disc-panel__column">
               <span className={`disc-panel__col-indicator disc-panel__col-indicator--${col.status}`} />
               <span className="disc-panel__col-name">{col.name}</span>
-              {col.status === 'type-mismatch' ? (
-                <span className="disc-panel__col-detail disc-panel__col-detail--mismatch">
-                  <span className="disc-panel__col-stage-type" style={{ color: STAGE_HEX[sourceStage] ?? 'inherit' }}>
-                    {stageName(sourceStage).toLowerCase()}: {col.sourceDataType}
+              {col.status === 'type-mismatch' || col.status === 'undeclared' ? (
+                // `undeclared` uses the same two-stage detail as a mismatch so the
+                // user sees which side has nothing on record, not a bare word.
+                <span className={`disc-panel__col-detail disc-panel__col-detail--${col.status === 'undeclared' ? 'undeclared' : 'mismatch'}`}>
+                  <span className="disc-panel__col-stage-type" style={{ color: typeColor(col.sourceDataType, sourceStage) }}>
+                    {stageName(sourceStage).toLowerCase()}: {col.sourceDataType || NO_TYPE}
                   </span>
-                  <span className="disc-panel__col-stage-type" style={{ color: STAGE_HEX[targetStage] ?? 'inherit' }}>
-                    {stageName(targetStage).toLowerCase()}: {col.targetDataType}
+                  <span className="disc-panel__col-stage-type" style={{ color: typeColor(col.targetDataType, targetStage) }}>
+                    {stageName(targetStage).toLowerCase()}: {col.targetDataType || NO_TYPE}
                   </span>
                 </span>
               ) : (
@@ -207,9 +223,13 @@ export function DiscrepancyPanel() {
 
   const { sourceStage, targetStage } = discrepancyReport;
 
+  // Undeclared columns count as issues: they are listed below and they are
+  // resolvable in sync mode (that is where "write data_type: into the yml"
+  // lives), so leaving them out would show "All matched" over a list of rows
+  // with no route to the sync modal.
   const totalIssues = summary.extraModels + summary.missingModels
     + summary.extraColumns + summary.missingColumns + summary.dataTypeMismatches
-    + relIssueCount;
+    + summary.undeclaredColumns + relIssueCount;
 
   return (
     <Panel position="bottom-right" className="disc-panel">
@@ -273,6 +293,12 @@ export function DiscrepancyPanel() {
             <div className="disc-panel__stat disc-panel__stat--mismatch">
               <span className="disc-panel__stat-value">{summary.dataTypeMismatches}</span>
               <span className="disc-panel__stat-label">type diff{summary.dataTypeMismatches !== 1 ? 's' : ''}</span>
+            </div>
+          )}
+          {summary.undeclaredColumns > 0 && (
+            <div className="disc-panel__stat disc-panel__stat--undeclared">
+              <span className="disc-panel__stat-value">{summary.undeclaredColumns}</span>
+              <span className="disc-panel__stat-label">undeclared</span>
             </div>
           )}
           {(summary.extraColumns > 0 || summary.missingColumns > 0) && (

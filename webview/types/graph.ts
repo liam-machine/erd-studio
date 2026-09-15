@@ -10,6 +10,7 @@ import type { Node, Edge } from '@xyflow/react';
 import type { AnnotationColor, Cardinality, Layer, ModelRole, Stage } from '../../src/types/semantic';
 import type { LayerConfig } from '../../src/types/layer';
 import type { ModelDiscrepancy } from '../../src/types/discrepancy';
+import type { PhysicalProvenance } from '../../src/types/display';
 
 // ---------------------------------------------------------------------------
 // Column display
@@ -68,8 +69,25 @@ export type ModelNodeData = {
   modelRole?: ModelRole;
   /** Whether this stage is read-only (physical). */
   readOnly?: boolean;
-  /** True if model doesn't exist in manifest (physical stage ghost node). */
+  /**
+   * Render this node as a ghost. Set from two unrelated places: a physical
+   * model that does not exist in the dbt project, and a model the active
+   * discrepancy report reports 'missing' (which also fires on the logical
+   * canvas). `ghostReason` is what tells them apart.
+   */
   isGhost?: boolean;
+  /**
+   * Why the node is a ghost — drives the border treatment and the tooltip.
+   * 'not-in-project' / 'disabled' come from the physical stage;
+   * 'missing-in-comparison' from the discrepancy overlay.
+   */
+  ghostReason?: 'not-in-project' | 'disabled' | 'missing-in-comparison';
+  /**
+   * Where the physical model's columns and types came from. Physical stage
+   * only — logical nodes never carry it, which is what keeps the header chip
+   * off the logical canvas without a stage check.
+   */
+  provenance?: PhysicalProvenance;
   /** Whether this model is in stub display mode (PK/NK columns only). */
   isStub: boolean;
   /** Per-model discrepancy data when a cross-stage comparison report is active. */
@@ -78,7 +96,14 @@ export type ModelNodeData = {
   discrepancySourceStage?: Stage;
   /** The stage being compared against (set when discrepancy overlay is active). */
   discrepancyTargetStage?: Stage;
-  /** Index signature required by React Flow's Node generic. */
+  /**
+   * Index signature required by React Flow's Node generic.
+   *
+   * It also means an unknown or misspelled key type-checks, and a field written
+   * here but never destructured in ModelNode ships as dead payload — which is
+   * exactly how `hasRationale` and `modelRole` gained matching dead CSS. Add a
+   * field here only together with the code that reads it.
+   */
   [key: string]: unknown;
 };
 

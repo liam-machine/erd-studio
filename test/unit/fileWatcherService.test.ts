@@ -25,6 +25,7 @@ vi.mock('fs', async () => {
 
 import { FileWatcherService, classifySemanticPath } from '../../src/watchers/FileWatcherService';
 import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import { defaultDbtProjectConfig } from '../../src/services/dbtProjectConfig';
 import {
   _clearMockFileWatchers,
   _mockFileWatchers,
@@ -65,9 +66,9 @@ describe('FileWatcherService', () => {
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
-    it('watches the default target/manifest.json path', () => {
+    it('watches both dbt artifacts under the default target path', () => {
       const pattern = _mockFileWatchers[0]._pattern as vscode.RelativePattern;
-      expect(pattern.pattern).toBe('target/manifest.json');
+      expect(pattern.pattern).toBe('target/{manifest.json,catalog.json}');
     });
 
     it('emits onManifestChanged when manifest.json is deleted (dbt clean)', () => {
@@ -112,6 +113,115 @@ describe('FileWatcherService', () => {
 
       // Should only fire once
       expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not fire onManifestChanged for catalog.json', () => {
+      const listener = vi.fn();
+      service.onManifestChanged(listener);
+
+      _mockFileWatchers[0]._simulateChange(vscode.Uri.file('/test/workspace/target/catalog.json'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('catalog watcher', () => {
+    it('emits onCatalogChanged when catalog.json is written', () => {
+      const listener = vi.fn();
+      service.onCatalogChanged(listener);
+
+      // Same watcher as the manifest — one pattern, two events
+      _mockFileWatchers[0]._simulateCreate(vscode.Uri.file('/test/workspace/target/catalog.json'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits onCatalogChanged when catalog.json is deleted (dbt clean)', () => {
+      const listener = vi.fn();
+      service.onCatalogChanged(listener);
+
+      _mockFileWatchers[0]._simulateDelete(vscode.Uri.file('/test/workspace/target/catalog.json'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not fire onCatalogChanged for manifest.json', () => {
+      const listener = vi.fn();
+      service.onCatalogChanged(listener);
+
+      _mockFileWatchers[0]._simulateChange(vscode.Uri.file('/test/workspace/target/manifest.json'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('debounces the two artifacts separately so neither swallows the other', () => {
+      const manifestListener = vi.fn();
+      const catalogListener = vi.fn();
+      service.onManifestChanged(manifestListener);
+      service.onCatalogChanged(catalogListener);
+
+      // `dbt docs generate` in one burst: both artifacts inside one debounce
+      // window. A shared debounce key would drop whichever fired first.
+      const artifactWatcher = _mockFileWatchers[0];
+      artifactWatcher._simulateChange(vscode.Uri.file('/test/workspace/target/manifest.json'));
+      vi.advanceTimersByTime(100);
+      artifactWatcher._simulateChange(vscode.Uri.file('/test/workspace/target/catalog.json'));
+      vi.advanceTimersByTime(300);
+
+      expect(manifestListener).toHaveBeenCalledTimes(1);
+      expect(catalogListener).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('dbt source watcher', () => {
+    /** The source watcher is the last one created. */
+    const sourceWatcher = () => _mockFileWatchers[_mockFileWatchers.length - 1];
+
+    it('emits onDbtYmlChanged when a schema .yml changes', () => {
+      const listener = vi.fn();
+      service.onDbtYmlChanged(listener);
+
+      sourceWatcher()._simulateChange(vscode.Uri.file('/test/workspace/models/schema.yml'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a change to a .sql body but fires on its creation and deletion', () => {
+      const listener = vi.fn();
+      service.onDbtYmlChanged(listener);
+
+      const uri = vscode.Uri.file('/test/workspace/models/dim_customer.sql');
+
+      // Saving a model body changes nothing the extension reads
+      sourceWatcher()._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+      expect(listener).not.toHaveBeenCalled();
+
+      // Creating and deleting it moves existence on the physical canvas
+      sourceWatcher()._simulateCreate(uri);
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      sourceWatcher()._simulateDelete(uri);
+      vi.advanceTimersByTime(300);
+      expect(listener).toHaveBeenCalledTimes(2);
+    });
+
+    it('fires when a seed .csv or a python model appears', () => {
+      const listener = vi.fn();
+      service.onDbtYmlChanged(listener);
+
+      sourceWatcher()._simulateCreate(vscode.Uri.file('/test/workspace/seeds/status_codes.csv'));
+      vi.advanceTimersByTime(300);
+      sourceWatcher()._simulateCreate(vscode.Uri.file('/test/workspace/models/fct_events.py'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -287,38 +397,50 @@ describe('FileWatcherService', () => {
   });
 
   describe('dbt_project.yml path configuration (H30)', () => {
-    it('builds the manifest watcher from target-path', () => {
+    it('builds the artifact watcher from target-path', () => {
       _clearMockFileWatchers();
       mockDbtProjectContent = 'name: p\ntarget-path: build\n';
       service.dispose();
       service = new FileWatcherService('/test/workspace');
 
       const pattern = _mockFileWatchers[0]._pattern as vscode.RelativePattern;
-      expect(pattern.pattern).toBe('build/manifest.json');
+      expect(pattern.pattern).toBe('build/{manifest.json,catalog.json}');
     });
 
-    it('builds the dbt schema watcher from model-paths', () => {
+    it('builds the dbt source watcher from model-paths', () => {
       _clearMockFileWatchers();
       mockDbtProjectContent = 'name: p\nmodel-paths:\n  - models\n  - transform\n';
       service.dispose();
       service = new FileWatcherService('/test/workspace');
 
-      // dbt yml watcher is the last one created
+      // dbt source watcher is the last one created
       const pattern = _mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern;
-      expect(pattern.pattern).toBe('{models,transform}/**/*.{yml,yaml}');
+      expect(pattern.pattern).toBe('{models,transform,seeds,snapshots}/**/*.{yml,yaml,sql,py,csv}');
+    });
+
+    it('honours seed-paths and snapshot-paths in the source watcher glob', () => {
+      _clearMockFileWatchers();
+      mockDbtProjectContent = 'name: p\nseed-paths: ["data"]\nsnapshot-paths: ["scd"]\n';
+      service.dispose();
+      service = new FileWatcherService('/test/workspace');
+
+      const pattern = _mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern;
+      expect(pattern.pattern).toBe('{models,data,scd}/**/*.{yml,yaml,sql,py,csv}');
     });
 
     it('prefers an explicitly passed DbtProjectConfig over re-reading dbt_project.yml', () => {
       _clearMockFileWatchers();
       service.dispose();
       service = new FileWatcherService('/test/workspace', '.erd-studio', {
+        ...defaultDbtProjectConfig(),
         targetPath: 'dbt_target',
         modelPaths: ['marts'],
       });
 
-      expect((_mockFileWatchers[0]._pattern as vscode.RelativePattern).pattern).toBe('dbt_target/manifest.json');
+      expect((_mockFileWatchers[0]._pattern as vscode.RelativePattern).pattern)
+        .toBe('dbt_target/{manifest.json,catalog.json}');
       expect((_mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern).pattern)
-        .toBe('marts/**/*.{yml,yaml}');
+        .toBe('{marts,seeds,snapshots}/**/*.{yml,yaml,sql,py,csv}');
     });
 
     it('uses dbt defaults for the watchers when dbt_project.yml has no path keys', () => {
@@ -327,9 +449,10 @@ describe('FileWatcherService', () => {
       service.dispose();
       service = new FileWatcherService('/test/workspace');
 
-      expect((_mockFileWatchers[0]._pattern as vscode.RelativePattern).pattern).toBe('target/manifest.json');
+      expect((_mockFileWatchers[0]._pattern as vscode.RelativePattern).pattern)
+        .toBe('target/{manifest.json,catalog.json}');
       expect((_mockFileWatchers[_mockFileWatchers.length - 1]._pattern as vscode.RelativePattern).pattern)
-        .toBe('models/**/*.{yml,yaml}');
+        .toBe('{models,seeds,snapshots}/**/*.{yml,yaml,sql,py,csv}');
     });
   });
 
@@ -415,18 +538,17 @@ describe('FileWatcherService', () => {
       expect(listener).toHaveBeenCalledTimes(2);
     });
 
-    it('does not emit for seed-paths or snapshot-paths changes', () => {
+    it('emits for seed-paths and snapshot-paths changes (they feed the source watcher glob)', () => {
       const listener = vi.fn();
       service.onProjectConfigChanged(listener);
 
       const projectWatcher = _mockFileWatchers[2];
 
-      // Add seed-paths and snapshot-paths — should not trigger since extension doesn't use them
-      mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths: ["models"]\nseed-paths: ["seeds"]\nsnapshot-paths: ["snapshots"]\n';
+      mockDbtProjectContent = 'name: my_project\ntarget-path: target\nmodel-paths: ["models"]\nseed-paths: ["data"]\nsnapshot-paths: ["scd"]\n';
       projectWatcher._simulateChange(vscode.Uri.file('/test/workspace/dbt_project.yml'));
       vi.advanceTimersByTime(300);
 
-      expect(listener).not.toHaveBeenCalled();
+      expect(listener).toHaveBeenCalledTimes(1);
     });
   });
 

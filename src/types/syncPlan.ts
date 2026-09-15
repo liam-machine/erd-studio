@@ -68,13 +68,27 @@ export type ColumnAction =
 export interface ColumnResolution {
   modelName: string;
   columnName: string;
-  discrepancyStatus: 'extra' | 'missing' | 'type-mismatch';
+  discrepancyStatus: 'extra' | 'missing' | 'type-mismatch' | 'undeclared';
   groundTruth: GroundTruth;
   action: ColumnAction;
   /** Data type in the source stage (the stage being viewed). */
   sourceDataType?: string;
   /** Data type in the target stage (the comparison stage). */
   targetDataType?: string;
+  /**
+   * The data type to WRITE, already resolved to the ground-truth side.
+   *
+   * `sourceDataType` / `targetDataType` are stage-RELATIVE — which one holds
+   * the logical value depends on the stage the user happened to be viewing
+   * when they ran the comparison, and "Compare to Logical" from the physical
+   * stage inverts them. An executing agent cannot pick correctly from the two
+   * without also reading `sourceStage`, and picking wrong is silent: with the
+   * `undeclared` status exactly one side is empty by definition, so the wrong
+   * choice writes an empty `data_type`. This field is stage-ABSOLUTE — it is
+   * the type from whichever stage the user chose as ground truth — so the
+   * harness can name one field and always be right.
+   */
+  resolvedDataType?: string;
 }
 
 export type RelationshipAction =
@@ -183,14 +197,40 @@ export function deriveModelAction(
   }
 }
 
+/**
+ * Pick the data type a sync plan should WRITE, from the two stage-relative
+ * values a `ColumnDiscrepancy` carries.
+ *
+ * `sourceDataType` belongs to the stage the user was viewing when they ran the
+ * comparison, so "Compare to Logical" from the physical stage puts the logical
+ * value in `targetDataType` and the physical one in `source` — the opposite of
+ * the same comparison run from the logical stage. The action names, by
+ * contrast, are stage-ABSOLUTE (`update-type-in-physical` always means "write
+ * into dbt"), so an executing agent pairing an action with a fixed field name
+ * is right only half the time. It matters most for the `undeclared` status,
+ * where exactly one of the two values is empty by definition: choosing wrong
+ * there writes an empty `data_type:` rather than a visibly wrong one.
+ */
+export function resolveGroundTruthDataType(
+  groundTruth: GroundTruth,
+  sourceStage: Stage,
+  sourceDataType: string | undefined,
+  targetDataType: string | undefined,
+): string | undefined {
+  return groundTruth === sourceStage ? sourceDataType : targetDataType;
+}
+
 export function deriveColumnAction(
-  status: 'extra' | 'missing' | 'type-mismatch',
+  status: 'extra' | 'missing' | 'type-mismatch' | 'undeclared',
   groundTruth: GroundTruth,
   sourceStage: Stage,
 ): ColumnAction | null {
   const logicalIsSource = sourceStage === 'logical';
 
-  if (status === 'type-mismatch') {
+  // `undeclared` (one side has no type at all) resolves exactly like a
+  // mismatch: copy the declared type onto the side that is missing one. This
+  // is the product's only route to "write `data_type:` into your dbt yml".
+  if (status === 'type-mismatch' || status === 'undeclared') {
     return groundTruth === 'logical' ? 'update-type-in-physical' : 'update-type-in-logical';
   }
 

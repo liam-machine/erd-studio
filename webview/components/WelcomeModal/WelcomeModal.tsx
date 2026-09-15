@@ -78,9 +78,10 @@ export function WelcomeModal() {
                 <div className="welcome-modal__guide-text">
                   <strong>Physical</strong>
                   <span>
-                    Automatically read from your dbt .yml schema files — see
-                    what's actually defined in your dbt project. Enriched with
-                    data types when a compiled manifest is available.
+                    Automatically read from your dbt project — see what's
+                    actually there. Data types come from your .yml files, from a
+                    compiled manifest, or — most accurately — from your warehouse
+                    once <code>dbt docs generate</code> has been run.
                   </span>
                 </div>
               </div>

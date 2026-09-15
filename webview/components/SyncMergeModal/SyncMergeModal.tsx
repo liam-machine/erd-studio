@@ -64,6 +64,7 @@ const ITEM_STATUS_TEXT: Record<string, string> = {
   extra:                  'New',
   missing:                'Missing',
   'type-mismatch':        'Type diff',
+  undeclared:             'Type undeclared',
   'cardinality-mismatch': 'Cardinality diff',
 };
 
@@ -81,11 +82,11 @@ function itemStatusText(status: string): string {
 // Type narrowing helpers — filter out 'matched' with proper type narrowing
 // ---------------------------------------------------------------------------
 
-type ConflictColumnStatus = 'extra' | 'missing' | 'type-mismatch';
+type ConflictColumnStatus = 'extra' | 'missing' | 'type-mismatch' | 'undeclared';
 type ConflictRelStatus = 'extra' | 'missing' | 'cardinality-mismatch';
 
 function isConflictColumnStatus(s: string): s is ConflictColumnStatus {
-  return s === 'extra' || s === 'missing' || s === 'type-mismatch';
+  return s === 'extra' || s === 'missing' || s === 'type-mismatch' || s === 'undeclared';
 }
 
 function isConflictRelStatus(s: string): s is ConflictRelStatus {
@@ -311,7 +312,8 @@ function ColumnRow({ modelName, col, sourceStage, targetStage }: ColumnRowProps)
       : <em className="sync-modal__no-type">no type</em>;
     targetColor = STAGE_HEX[targetStage];
   } else {
-    // type-mismatch — show pills in both cells so the diff is obvious
+    // type-mismatch / undeclared — show pills in both cells so the diff (or the
+    // side with nothing on record) is obvious
     sourceContent = col.sourceDataType
       ? <span className="sync-modal__type-pill" style={{ color: STAGE_HEX[sourceStage], borderColor: STAGE_HEX[sourceStage] }}>{col.sourceDataType}</span>
       : <em className="sync-modal__no-type">no type</em>;

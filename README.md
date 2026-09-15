@@ -25,19 +25,7 @@
   <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio demo — Logical stage, Physical stage, and Discrepancy overlay" />
 </p>
 
-## Design your warehouse where you build it
-
 ERD Studio brings visual data modelling into VS Code. Keep your diagrams and design decisions in your code repo, give your AI assistant the context to build from them, and review design changes alongside the SQL.
-
-## Simple by design
-
-The whole logical model is just two kinds of file: **one YAML per model, one JSON per diagram.** ERD Studio reads them and renders the canvas.
-
-![Model YAML files define columns, keys and design decisions. Diagram JSON files reference those models and define relationships and layout. ERD Studio renders both as an editable logical canvas.](media/readme-workflow.png)
-
-Edit on the canvas and those same files update. Edit them yourself or with AI and the canvas updates. Models are shared across diagrams, and everything stays in Git. No ERD Studio account, database, or server required.
-
-Traditional ERD tools such as [erwin](https://bookshelf.erwin.com/bookshelf/public_html/2019R2/Content/User%20Guides/Navigator%20Edition%20Online%20Help/Open_a_model_or_submodel_from_the_mart.html) store models in application-specific files or a separate modelling repository. ERD Studio's plain files fit directly into your branches, pull requests, and AI workflow. **Less setup, fewer handoffs, and no export step to give your AI the design.**
 
 ## Why use ERD Studio?
 
@@ -47,19 +35,27 @@ Traditional ERD tools such as [erwin](https://bookshelf.erwin.com/bookshelf/publ
 - **Keep design and code in one review.** Commit both in the same pull request, with readable diffs and a shared history.
 - **Run a whole domain together.** Automatically generated dbt selectors let you build the models in a diagram with one command.
 
-Already have dbt models? Add them to a domain and use the **Physical** view to explore the relationships recorded in your existing dbt tests.
+Traditional ERD tools such as [erwin](https://bookshelf.erwin.com/bookshelf/public_html/2019R2/Content/User%20Guides/Navigator%20Edition%20Online%20Help/Open_a_model_or_submodel_from_the_mart.html) store models in application-specific files or a separate modelling repository. ERD Studio's plain files fit directly into your branches, pull requests, and AI workflow. **Less setup, fewer handoffs, and no export step to give your AI the design.**
 
-## Not using dbt?
+## How it works
 
-Use ERD Studio for your **logical models**: design tables, relationships, and business rules without installing or running dbt.
+The whole logical model is just two kinds of file: **one YAML per model, one JSON per diagram.** ERD Studio reads them and renders the canvas.
 
-For now, add a `dbt_project.yml` file containing `name: logical_models` to your project root and reload VS Code. The extension still uses that file to recognise the project; no dbt build or warehouse connection is needed for logical modelling.
+![Top half: a model YAML file and a diagram JSON file in your repo render together as the logical canvas, where dim_customer and fct_order are joined one to many, and canvas edits save back to the same files. Bottom half, in a dashed box marked optional and only if you use dbt: your dbt project derives a physical view of the same diagram with the real columns and data types, its edges and cardinality taken from your dbt tests and never written to disk. The two views can be compared.](media/readme-workflow.png)
 
-Physical comparison currently supports dbt. Want it to read your stack's physical models? [Contribute an integration or propose one on GitHub](https://github.com/liam-machine/erd-studio/issues). The logical model files can stay the same as support grows.
+Edit on the canvas and those same files update. Edit them yourself or with AI and the canvas updates. Models are shared across diagrams, and everything stays in Git. No ERD Studio account, database, or server required.
+
+### Reading your dbt project
+
+The **Physical** view is the lower half of the diagram, and it has no file of its own. It reads three files, and only the first is required: your **schema YAMLs**, always on disk, so the view works before you have ever run dbt; **`manifest.json`** after a `dbt run`; and **`catalog.json`** after `dbt docs generate` — the only one of the three that has seen your warehouse.
+
+Each model shows where its shape came from, so a `varchar` on the canvas is never a guess: types are read from the warehouse when the catalog is there, otherwise from the `data_type:` you wrote, otherwise left blank rather than invented. A greyed-out model means it is genuinely not in your dbt project, not that you have not run dbt lately. And the edges are the tests you already run — `relationships` for the links, `unique` for the cardinality — so the canvas shows what dbt enforces rather than a second copy that can drift. Nothing is ever written to disk.
+
+dbt is the only stack ERD Studio can read today. If you model somewhere else, [contribute an integration or propose one](https://github.com/liam-machine/erd-studio/issues) — your logical model files stay exactly as they are as support grows.
 
 ## Get started
 
-Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logical-only setup](#not-using-dbt)). The Physical view also needs dbt schema YAMLs and/or a compiled `manifest.json`.
+Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logical-only setup](#not-using-dbt)). The Physical view needs nothing beyond your dbt schema YAMLs, and gets richer once `manifest.json` and `catalog.json` exist.
 
 1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) and open your project in VS Code.
 2. Click the **ERD Studio** icon in the Activity Bar, choose **Set Up ERD Studio**, and follow the prompts to create your first domain (a diagram).
@@ -69,6 +65,14 @@ Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logi
 Then try asking your assistant:
 
 > Read my source models and propose a star schema for orders in ERD Studio. Include grain, keys, and design rationale. Let me review the diagram before generating dbt code.
+
+### Not using dbt?
+
+Use ERD Studio for your **logical models**: design tables, relationships, and business rules without installing or running dbt.
+
+For now, add a `dbt_project.yml` file containing `name: logical_models` to your project root and reload VS Code. The extension still uses that file to recognise the project; no dbt build or warehouse connection is needed for logical modelling.
+
+Physical comparison needs dbt, so the canvas stays on the Logical stage — everything else works unchanged.
 
 [File format reference](docs/semantic-domain-json-reference.md) · [Release notes](CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
 

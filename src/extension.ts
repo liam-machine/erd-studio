@@ -19,6 +19,7 @@ import { LogicalModelService } from './services/logicalModelService';
 import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { YmlParserService } from './services/ymlParserService';
+import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
 import { readDbtProjectConfig } from './services/dbtProjectConfig';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
@@ -422,10 +423,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     console.error('[ERD Studio] Legacy erd-studio/ migration failed:', err);
   }
 
-  // Read target-path / model-paths from dbt_project.yml once; every consumer
-  // (manifest parser, schema walker, watchers) shares this. A change to
-  // these keys is picked up by the dbt_project.yml watcher below, which
-  // prompts for a window reload.
+  // Read target-path / model-paths / seed-paths / snapshot-paths from
+  // dbt_project.yml once; every consumer (manifest parser, catalog reader,
+  // schema walker, watchers) shares this. A change to these keys is picked up
+  // by the dbt_project.yml watcher below, which prompts for a window reload.
   const dbtConfig = readDbtProjectConfig(workspaceRoot);
 
   const layerService = new LayerService(workspaceRoot, semanticDir);
@@ -434,6 +435,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   domainService.setLogicalModelService(logicalModelService);
   const manifestService = new ManifestService({ dbtConfig });
   const ymlParserService = new YmlParserService({ dbtConfig });
+  // target/catalog.json — present only after `dbt docs generate`, and the only
+  // source of the types the warehouse actually has. Shares the one dbtConfig
+  // read above; never re-read dbt_project.yml for a second consumer.
+  const catalogService = new CatalogService({ dbtConfig });
   const templateService = new TemplateService();
   // Status bar item shown while selectors.yml is out of sync (skipped writes).
   // Hidden as soon as a regenerate succeeds.
@@ -544,6 +549,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const myReportsProvider = new MyReportsTreeProvider(trackingService);
   trackingServiceForFeedback = trackingService;
   editorProvider.setReportTracking(trackingService);
+  editorProvider.setCatalogService(catalogService);
 
   const decorationProvider = new SemanticFileDecorationProvider(layerService, semanticDir);
   const layerDecorationProvider = new LayerDecorationProvider(layerService);
@@ -603,7 +609,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Definitive (dbt clean / target removed) — no retry, no stale data.
         void vscode.window.showWarningMessage(
           `dbt manifest removed (${dbtConfig.targetPath}/manifest.json). ` +
-            'Physical stage now reflects schema .yml files only. Run dbt compile to regenerate it.',
+            'Models and relationships still come from your schema .yml files. ' +
+            'Run dbt compile for declared types, or dbt docs generate for warehouse types.',
         );
         return;
       }
@@ -638,6 +645,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     },
   );
+
+  // Catalog changed → refresh open editors, SILENTLY. `dbt docs generate`
+  // writes manifest.json and catalog.json minutes apart and the manifest
+  // handler above already announces itself; a second toast for the same command
+  // would say nothing new.
+  const catalogChangedSubscription = fileWatcherService.onCatalogChanged(async () => {
+    catalogService.invalidate();
+    await editorProvider.refreshAllOpenDomains();
+  });
 
   // Semantic file changed externally → refresh tree view + model library
   const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri }) => {
@@ -733,7 +749,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // dbt_project.yml path config changed → suggest window reload
   const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
     void vscode.window.showWarningMessage(
-      'dbt_project.yml path configuration changed (target-path / model-paths). A window reload is needed to pick up the new paths.',
+      'dbt_project.yml path configuration changed (target-path / model-paths / seed-paths / snapshot-paths). A window reload is needed to pick up the new paths.',
       'Reload Window',
     ).then(action => {
       if (action === 'Reload Window') {
@@ -778,6 +794,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     layerDecorationProvider,
     fileWatcherService,
     manifestChangedSubscription,
+    catalogChangedSubscription,
     semanticChangedSubscription,
     editorWroteSubscription,
     semanticDeletedSubscription,
@@ -1091,13 +1108,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         async () => {
           manifestService.invalidate();
           ymlParserService.invalidate();
+          // The catalog caches its "there isn't one" answer too, so a catalog
+          // generated after activation is only ever picked up by an invalidate.
+          catalogService.invalidate();
           await manifestService.loadManifest(workspaceRoot);
           await ymlParserService.loadYmlData(workspaceRoot);
           await editorProvider.refreshAllOpenDomains();
           if (manifestService.isMissing) {
             void vscode.window.showWarningMessage(
               `manifest.json not found at ${dbtConfig.targetPath}/manifest.json. ` +
-                'Physical stage reflects schema .yml files only — run dbt compile to generate the manifest.',
+                'Models and relationships still come from your schema .yml files. ' +
+                'Run dbt compile for declared types, or dbt docs generate for warehouse types.',
             );
           } else if (manifestService.isStale) {
             void vscode.window.showWarningMessage(

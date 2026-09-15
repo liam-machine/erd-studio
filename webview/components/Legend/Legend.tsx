@@ -87,7 +87,7 @@ export function Legend() {
               </div>
               <div className="legend__item-text">
                 <span className="legend__item-label">Ghost</span>
-                <span className="legend__item-desc">Not in dbt</span>
+                <span className="legend__item-desc">Not found in your dbt project</span>
               </div>
             </div>
           </div>

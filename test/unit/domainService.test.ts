@@ -8,6 +8,8 @@ import type { LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
 import type { ManifestData, ManifestRelationshipTest } from '../../src/types/manifest';
 import type { YmlData } from '../../src/types/ymlData';
+import type { CatalogColumn, CatalogData, CatalogNodeInfo } from '../../src/types/catalog';
+import { normaliseName } from '../../src/services/nameUtils';
 import type { UnifiedDomain, StageData } from '../../src/types/semantic';
 
 /** Empty YmlData — forces buildPhysicalDomain to use the manifest-only fallback. */
@@ -277,6 +279,7 @@ describe('DomainService', () => {
         relationshipTests: [],
         uniqueColumns: new Map(),
         compositeUniqueGroups: new Map(),
+        disabledModels: new Set(),
       };
     }
 
@@ -319,6 +322,7 @@ describe('DomainService', () => {
           ['fct_orders', new Set(['order_id'])],
         ]),
         compositeUniqueGroups: new Map(),
+        disabledModels: new Set(),
       };
     }
 
@@ -336,7 +340,7 @@ describe('DomainService', () => {
 
       const customer = result.models.find(m => m.name === 'dim_customer');
       expect(customer).toBeDefined();
-      expect(customer!.existsInManifest).toBe(true);
+      expect(customer!.existsInProject).toBe(true);
       expect(customer!.schema).toBe('silver_schema');
       expect(customer!.columns).toHaveLength(3); // manifest has 3 columns
       expect(customer!.columns[0].dataType).toBe('bigint');
@@ -350,12 +354,18 @@ describe('DomainService', () => {
       expect(pkCol!.isPrimaryKey).toBe(true);
     });
 
-    it('excludes models not found in manifest from physical domain', () => {
+    it('emits a model found in no physical source as a phantom rather than dropping it', () => {
       const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
 
-      const orders = result.models.find(m => m.name === 'fct_orders');
-      expect(orders).toBeUndefined();
-      expect(result.models).toHaveLength(1); // only dim_customer
+      // fct_orders is in the design but nowhere in the dbt project: it renders
+      // as a ghost, with nothing claimed about its shape.
+      const orders = result.models.find(m => m.name === 'fct_orders')!;
+      expect(orders.existsInProject).toBe(false);
+      expect(orders.missingReason).toBe('absent');
+      expect(orders.columns).toEqual([]);
+      expect(orders.schema).toBe('');
+      expect(orders.provenance).toBeUndefined();
+      expect(result.models).toHaveLength(2);
     });
 
     it('excludes relationships when referenced models not in manifest', () => {
@@ -435,7 +445,7 @@ describe('DomainService', () => {
 
       // fct_orders came from the manifest: manifest columns + schema
       const orders = result.models.find(m => m.name === 'fct_orders')!;
-      expect(orders.existsInManifest).toBe(true);
+      expect(orders.existsInProject).toBe(true);
       expect(orders.schema).toBe('silver_schema');
       expect(orders.columns.map(c => c.name)).toEqual(['order_id', 'customer_id']);
       expect(orders.columns[0].dataType).toBe('bigint');
@@ -501,12 +511,364 @@ describe('DomainService', () => {
       ]);
     });
 
-    it('omits models present in neither yml nor manifest', () => {
+    it('emits a model found nowhere with existsInProject false and no columns', () => {
       const result = service.buildPhysicalDomain(createUnifiedDomain(), createPartialYmlData(), undefined);
 
-      expect(result.models.map(m => m.name)).toEqual(['dim_customer']);
-      expect(result.models[0].existsInManifest).toBe(false);
-      expect(result.models[0].schema).toBe('');
+      expect(result.models.map(m => m.name)).toEqual(['dim_customer', 'fct_orders']);
+
+      // dim_customer resolves from the yml alone — no manifest required.
+      const customer = result.models[0];
+      expect(customer.existsInProject).toBe(true);
+      expect(customer.schema).toBe('');
+
+      const orders = result.models[1];
+      expect(orders.existsInProject).toBe(false);
+      expect(orders.missingReason).toBe('absent');
+      expect(orders.columns).toEqual([]);
+      // A phantom joins no relationship, even though the logical design has one.
+      expect(result.relationships).toEqual([]);
+    });
+
+
+    // -----------------------------------------------------------------------
+    // Existence comes from the dbt project, not from the compiled manifest
+    // -----------------------------------------------------------------------
+
+    /** The shape ManifestService really returns when target/manifest.json is absent. */
+    function emptyManifest(): ManifestData {
+      return {
+        models: new Map(),
+        relationshipTests: [],
+        uniqueColumns: new Map(),
+        compositeUniqueGroups: new Map(),
+        disabledModels: new Set(),
+      };
+    }
+
+    it('renders a yml-declared model with an EMPTY manifest and no catalog', () => {
+      // The regression that motivated the whole change: ManifestService returns
+      // an empty ManifestData (never undefined) when dbt has not been compiled,
+      // and every model used to grey out because of it.
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), createPartialYmlData(), emptyManifest(),
+      );
+
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      expect(customer.existsInProject).toBe(true);
+      expect(customer.missingReason).toBeUndefined();
+      expect(customer.columns.map(c => c.name)).toEqual(['customer_id', 'customer_name']);
+      expect(customer.provenance).toEqual({ columns: ['yml'], types: 'yml' });
+    });
+
+    it('renders a model present only as a source file', () => {
+      const yml: YmlData = {
+        ...EMPTY_YML_DATA,
+        models: new Map(),
+        sourceFiles: new Map([['fct_orders', 'models/silver/fct_orders.sql']]),
+      };
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), yml, emptyManifest());
+
+      const orders = result.models.find(m => m.name === 'fct_orders')!;
+      expect(orders.existsInProject).toBe(true);
+      // Nothing has verified its shape — seeding it with the logical columns
+      // would fabricate one and make every column read as 'matched'.
+      expect(orders.columns).toEqual([]);
+      expect(orders.provenance).toEqual({ columns: ['file'], types: 'file' });
+      expect(result.relationships).toEqual([]);
+    });
+
+    it('does not let a source file resurrect a model dbt has disabled', () => {
+      const manifest = emptyManifest();
+      manifest.disabledModels = new Set(['fct_orders']);
+      const yml: YmlData = {
+        ...EMPTY_YML_DATA,
+        models: new Map(),
+        sourceFiles: new Map([['fct_orders', 'models/silver/fct_orders.sql']]),
+      };
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), yml, manifest);
+
+      const orders = result.models.find(m => m.name === 'fct_orders')!;
+      expect(orders.existsInProject).toBe(false);
+      expect(orders.missingReason).toBe('disabled');
+      expect(orders.columns).toEqual([]);
+    });
+
+    it('keeps a disabled model that a schema .yml still declares', () => {
+      // The veto applies to the filesystem branch only: what the yml says about
+      // a disabled model is a different question from whether dbt will build it.
+      const manifest = emptyManifest();
+      manifest.disabledModels = new Set(['dim_customer']);
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), createPartialYmlData(), manifest);
+
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      expect(customer.existsInProject).toBe(true);
+      expect(customer.missingReason).toBeUndefined();
+    });
+
+    it('names the highest-authority source that supplied a data type', () => {
+      // yml resolves the model and declares one type; the manifest fills the
+      // other. The yml is the more authoritative of the two, so it is named.
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), createPartialYmlData(), createManifestWithBothModels(),
+      );
+
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      expect(customer.provenance).toEqual({ columns: ['yml'], types: 'yml' });
+
+      // fct_orders resolves from the manifest alone.
+      const orders = result.models.find(m => m.name === 'fct_orders')!;
+      expect(orders.provenance).toEqual({ columns: ['manifest'], types: 'manifest' });
+    });
+
+    it('falls back to the resolving source when no column declares a type', () => {
+      const yml: YmlData = {
+        ...EMPTY_YML_DATA,
+        models: new Map([
+          ['dim_customer', {
+            name: 'dim_customer', description: '', filePath: '/p/x.yml', tags: [],
+            columns: [{ name: 'customer_id', description: '', dataType: null }],
+          }],
+        ]),
+      };
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), yml, emptyManifest());
+
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      expect(customer.columns[0].dataType).toBe('');
+      expect(customer.provenance).toEqual({ columns: ['yml'], types: 'yml' });
+    });
+
+    it('reports the manifest as the type supplier when the yml declares none', () => {
+      const yml = createPartialYmlData();
+      yml.models.get('dim_customer')!.columns = [
+        { name: 'customer_id', description: '', dataType: null },
+      ];
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), yml, createManifest());
+
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      expect(customer.columns[0].dataType).toBe('bigint');
+      expect(customer.provenance).toEqual({ columns: ['yml'], types: 'manifest' });
+    });
+
+    it('reports which dbt artifacts fed the physical stage', () => {
+      const withoutManifest = service.buildPhysicalDomain(
+        createUnifiedDomain(), createPartialYmlData(), emptyManifest(),
+      );
+      expect(withoutManifest.physicalSources).toEqual({ yml: true, manifest: false, catalog: false });
+
+      const withManifest = service.buildPhysicalDomain(
+        createUnifiedDomain(), EMPTY_YML_DATA, createManifest(),
+      );
+      expect(withManifest.physicalSources).toEqual({ yml: false, manifest: true, catalog: false });
+    });
+
+    // -----------------------------------------------------------------------
+    // target/catalog.json — what the warehouse actually has
+    // -----------------------------------------------------------------------
+
+    function catCol(name: string, index: number, dataType: string | null, comment: string | null = null): CatalogColumn {
+      return { name, index, dataType, comment };
+    }
+
+    function catNode(uniqueId: string, name: string, columns: CatalogColumn[], overrides: Partial<CatalogNodeInfo> = {}): CatalogNodeInfo {
+      return {
+        uniqueId,
+        resourceType: 'model',
+        name,
+        relationName: name.toUpperCase(),
+        schema: 'ANALYTICS',
+        database: 'PROD',
+        comment: null,
+        columns,
+        ...overrides,
+      };
+    }
+
+    /** byUniqueId and byName both built from the same nodes, last one winning per short name. */
+    function createCatalog(nodes: CatalogNodeInfo[]): CatalogData {
+      return {
+        byUniqueId: new Map(nodes.map(n => [n.uniqueId, n])),
+        byName: new Map(nodes.map(n => [normaliseName(n.name), n])),
+        generatedAt: '2026-09-01T00:00:00Z',
+        partial: false,
+      };
+    }
+
+    it('prefers catalog types over the yml, and the yml over the manifest', () => {
+      const yml = createPartialYmlData();
+      yml.models.get('dim_customer')!.columns.push({ name: 'customer_email', description: '', dataType: null });
+      const catalog = createCatalog([
+        catNode('model.my_project.dim_customer', 'dim_customer', [
+          catCol('CUSTOMER_ID', 0, 'NUMBER(38,0)'),
+          catCol('CUSTOMER_NAME', 1, 'TEXT'),
+          // The warehouse reported the column but not a type — the manifest's
+          // compiled copy of the yml is the last resort before ''.
+          catCol('CUSTOMER_EMAIL', 2, null),
+        ]),
+      ]);
+
+      const result = service.buildPhysicalDomain(createUnifiedDomain(), yml, createManifest(), catalog);
+
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      const byName = new Map(customer.columns.map(c => [c.name, c.dataType]));
+      // yml declares no type here; the catalog does, and it beats the manifest's bigint.
+      expect(byName.get('customer_id')).toBe('NUMBER(38,0)');
+      // yml declares STRING; the warehouse says TEXT, and the warehouse wins.
+      expect(byName.get('customer_name')).toBe('TEXT');
+      // Neither the yml nor the catalog has one, so the manifest fills in.
+      expect(byName.get('customer_email')).toBe('text');
+    });
+
+    it('renders the union of catalog and declared columns, in catalog order', () => {
+      const yml = createPartialYmlData();
+      const catalog = createCatalog([
+        catNode('model.my_project.dim_customer', 'dim_customer', [
+          catCol('CUSTOMER_ID', 0, 'NUMBER(38,0)'),
+          // Observed but undeclared — appended to the list, not hidden.
+          catCol('LOADED_AT', 1, 'TIMESTAMP_NTZ'),
+        ]),
+      ]);
+
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), yml, emptyManifest(), catalog,
+      );
+
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      // Catalog order first, then the declared column the catalog has not seen.
+      // customer_name is the stale-catalog rescue: a catalog generated before
+      // the column was built must not delete it from the canvas.
+      expect(customer.columns.map(c => c.name)).toEqual(['customer_id', 'LOADED_AT', 'customer_name']);
+      // The DECLARED spelling wins for display — Snowflake's UPPERCASE keys
+      // would otherwise SHOUT every label on the canvas.
+      expect(customer.columns[0].name).toBe('customer_id');
+      expect(customer.provenance).toEqual({ columns: ['catalog', 'yml'], types: 'catalog' });
+    });
+
+    it('resolves the catalog by manifest unique_id before falling back to the name index', () => {
+      const v1 = catNode('model.my_project.dim_customer', 'dim_customer', [catCol('V1_COL', 0, 'TEXT')]);
+      const v2 = catNode('model.my_project.dim_customer.v2', 'dim_customer', [catCol('V2_COL', 0, 'TEXT')], { version: '2' });
+      const catalog: CatalogData = {
+        byUniqueId: new Map([[v1.uniqueId, v1], [v2.uniqueId, v2]]),
+        // The name index is a best-effort highest-version guess; the manifest knows better.
+        byName: new Map([['dim_customer', v2]]),
+        generatedAt: null,
+        partial: false,
+      };
+
+      const withManifest = service.buildPhysicalDomain(
+        createUnifiedDomain(), EMPTY_YML_DATA, createManifest(), catalog,
+      );
+      expect(withManifest.models.find(m => m.name === 'dim_customer')!.columns.map(c => c.name))
+        .toContain('V1_COL');
+
+      const withoutManifest = service.buildPhysicalDomain(
+        createUnifiedDomain(), EMPTY_YML_DATA, emptyManifest(), catalog,
+      );
+      expect(withoutManifest.models.find(m => m.name === 'dim_customer')!.columns.map(c => c.name))
+        .toEqual(['V2_COL']);
+    });
+
+    it('takes the schema from the manifest first, the catalog second', () => {
+      const catalog = createCatalog([
+        catNode('model.my_project.dim_customer', 'dim_customer', [], { schema: 'ANALYTICS' }),
+        catNode('model.my_project.fct_orders', 'fct_orders', [], { schema: 'ANALYTICS' }),
+      ]);
+
+      // The manifest carries dim_customer only; both spellings name the same
+      // schema and differ only in case, so the one the user wrote wins.
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), EMPTY_YML_DATA, createManifest(), catalog,
+      );
+      expect(result.models.find(m => m.name === 'dim_customer')!.schema).toBe('silver_schema');
+      expect(result.models.find(m => m.name === 'fct_orders')!.schema).toBe('ANALYTICS');
+
+      // Neither source: '' , and the node badge falls back to the layer.
+      const noSources = service.buildPhysicalDomain(
+        createUnifiedDomain(), createPartialYmlData(), emptyManifest(),
+      );
+      expect(noSources.models.find(m => m.name === 'dim_customer')!.schema).toBe('');
+    });
+
+    it('exists on the strength of a catalog relation alone', () => {
+      const catalog = createCatalog([
+        catNode('model.my_project.fct_orders', 'fct_orders', [
+          catCol('ORDER_ID', 0, 'NUMBER(38,0)', 'The order key'),
+        ], { comment: 'Order facts as built' }),
+      ]);
+
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), EMPTY_YML_DATA, emptyManifest(), catalog,
+      );
+
+      const orders = result.models.find(m => m.name === 'fct_orders')!;
+      expect(orders.existsInProject).toBe(true);
+      expect(orders.missingReason).toBeUndefined();
+      expect(orders.columns.map(c => c.name)).toEqual(['ORDER_ID']);
+      expect(orders.provenance).toEqual({ columns: ['catalog'], types: 'catalog' });
+      // The warehouse comment only ever fills a genuine gap — persist_docs makes
+      // it a stale echo of the yml description whenever both exist.
+      expect(orders.description).toBe('Order facts as built');
+      expect(orders.columns[0].description).toBe('The order key');
+    });
+
+    it('names the catalog as the type supplier when it typed even one column', () => {
+      const yml = createPartialYmlData();
+      yml.models.get('dim_customer')!.columns = [
+        { name: 'customer_id', description: '', dataType: 'integer' },
+        { name: 'customer_name', description: '', dataType: 'varchar' },
+      ];
+      const catalog = createCatalog([
+        catNode('model.my_project.dim_customer', 'dim_customer', [
+          catCol('CUSTOMER_ID', 0, 'NUMBER(38,0)'),
+        ]),
+      ]);
+
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), yml, emptyManifest(), catalog,
+      );
+
+      // Highest authority that supplied ANY type, not a majority count: the
+      // warehouse-verified half is the part worth telling the user about.
+      const customer = result.models.find(m => m.name === 'dim_customer')!;
+      expect(customer.provenance).toEqual({ columns: ['catalog', 'yml'], types: 'catalog' });
+    });
+
+    it('derives no relationships from the catalog', () => {
+      // catalog.json carries relation and column metadata and no constraint or
+      // foreign-key information at all, so edges must be byte-identical.
+      const yml: YmlData = {
+        ...createPartialYmlData(),
+        relationshipTests: [{
+          fromModel: 'fct_orders', fromColumn: 'customer_id',
+          toModel: 'dim_customer', toColumn: 'customer_id',
+        }],
+        sourceFiles: new Map([['fct_orders', 'models/silver/fct_orders.sql']]),
+      };
+      const catalog = createCatalog([
+        catNode('model.my_project.dim_customer', 'dim_customer', [catCol('CUSTOMER_ID', 0, 'NUMBER')]),
+        catNode('model.my_project.fct_orders', 'fct_orders', [catCol('CUSTOMER_ID', 0, 'NUMBER')]),
+      ]);
+
+      const without = service.buildPhysicalDomain(createUnifiedDomain(), yml, emptyManifest());
+      const withCatalog = service.buildPhysicalDomain(createUnifiedDomain(), yml, emptyManifest(), catalog);
+
+      expect(without.relationships).toHaveLength(1);
+      expect(withCatalog.relationships).toEqual(without.relationships);
+    });
+
+    it('reports the catalog in physicalSources once one is passed', () => {
+      const catalog = createCatalog([
+        catNode('model.my_project.dim_customer', 'dim_customer', []),
+      ]);
+
+      const result = service.buildPhysicalDomain(
+        createUnifiedDomain(), createPartialYmlData(), emptyManifest(), catalog,
+      );
+      expect(result.physicalSources).toEqual({ yml: true, manifest: false, catalog: true });
     });
 
     // -----------------------------------------------------------------------

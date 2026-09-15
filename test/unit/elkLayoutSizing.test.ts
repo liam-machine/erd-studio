@@ -70,6 +70,27 @@ describe('resolveNodeDimensions', () => {
   });
 });
 
+describe('estimateNodeWidth', () => {
+  it('reserves room for the provenance chip so it cannot crowd the title', () => {
+    // A long name keeps the header, not a column row, as the widest term —
+    // otherwise the extra 30px is absorbed by the clamp and proves nothing.
+    const columns = cols(1);
+    const plain = estimateNodeWidth({ modelName: 'fct_order_line_item_daily_snapshot', columns });
+    const withChip = estimateNodeWidth({
+      modelName: 'fct_order_line_item_daily_snapshot',
+      columns,
+      provenance: { columns: ['catalog'], types: 'catalog' },
+    });
+    expect(withChip).toBeGreaterThan(plain);
+  });
+
+  it('leaves the estimate alone for a logical node, which has no chip', () => {
+    const columns = cols(1);
+    expect(estimateNodeWidth({ modelName: 'dim_customer', columns }))
+      .toBe(estimateNodeWidth({ modelName: 'dim_customer', columns, provenance: undefined }));
+  });
+});
+
 describe('toElkChildren', () => {
   it('uses measured size when present and the collapse-aware estimate otherwise', () => {
     const measured = { ...node(cols(60), {}, { width: 300, height: 180 }), id: 'measured' };

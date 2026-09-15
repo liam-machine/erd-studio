@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   deriveModelAction,
   deriveColumnAction,
+  resolveGroundTruthDataType,
   deriveRelationshipAction,
   modelKey,
   columnKey,
@@ -164,5 +165,28 @@ describe('syncPlan — deriveRelationshipAction', () => {
       expect(deriveRelationshipAction('missing', 'logical', 'physical'))
         .toBe('add-relationship-test-to-physical');
     });
+  });
+});
+
+describe('syncPlan — resolveGroundTruthDataType', () => {
+  // sourceDataType belongs to the stage that was on screen, so the same
+  // comparison run from the other stage swaps the two values.
+  it('takes the source value when the ground truth is the viewed stage', () => {
+    expect(resolveGroundTruthDataType('logical', 'logical', 'bigint', 'varchar')).toBe('bigint');
+    expect(resolveGroundTruthDataType('physical', 'physical', 'varchar', 'bigint')).toBe('varchar');
+  });
+
+  it('takes the target value when the ground truth is the compared stage', () => {
+    expect(resolveGroundTruthDataType('physical', 'logical', 'bigint', 'varchar')).toBe('varchar');
+    expect(resolveGroundTruthDataType('logical', 'physical', 'varchar', 'bigint')).toBe('bigint');
+  });
+
+  it('never resolves to the empty side of an undeclared column', () => {
+    // The case that made this worth a helper: comparing from the physical
+    // stage, physical has no data_type at all, and the user picks logical as
+    // ground truth. Naming sourceDataType would write ''.
+    expect(resolveGroundTruthDataType('logical', 'physical', '', 'bigint')).toBe('bigint');
+    // ...and the mirror, comparing from logical with an untyped physical side.
+    expect(resolveGroundTruthDataType('logical', 'logical', 'bigint', '')).toBe('bigint');
   });
 });

@@ -62,6 +62,8 @@ export interface ManifestWorkerResult {
   relationshipTests: ManifestRelationshipTest[];
   uniqueColumns: Record<string, string[]>;
   compositeUniqueGroups: Record<string, string[][]>;
+  /** Short names of models in `manifest.disabled` (raw spelling, deduped) */
+  disabledModels: string[];
 }
 
 /** Error result from the manifest worker thread. */
@@ -83,4 +85,12 @@ export interface ManifestData {
    * are unique together.
    */
   compositeUniqueGroups: Map<string, string[][]>;
+  /**
+   * Normalised names of models dbt has disabled (`enabled: false` via
+   * `{{ config() }}`, a `dbt_project.yml` subtree, or an excluded package).
+   *
+   * Their `.sql` files stay on disk but `ref()` to them fails to compile, so
+   * a file alone must never be taken as evidence that the model exists.
+   */
+  disabledModels: Set<string>;
 }

@@ -87,6 +87,8 @@ import {
   describeProviderWriteFailure,
 } from '../services/feedbackAnalysisService';
 import type { ReportTrackingService } from '../services/reportTrackingService';
+import type { CatalogService } from '../services/catalogService';
+import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
 import type {
   AnalyzeFeedbackMessage,
@@ -108,6 +110,7 @@ import type { GroundTruth } from '../types/syncPlan';
 import {
   deriveModelAction,
   deriveColumnAction,
+  resolveGroundTruthDataType,
   deriveRelationshipAction,
 } from '../types/syncPlan';
 import type {
@@ -261,6 +264,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** @see reportTracking */
   setReportTracking(tracking: ReportTrackingService | undefined): void {
     this.reportTracking = tracking;
+  }
+
+  /**
+   * The `target/catalog.json` reader, injected after construction for the same
+   * reason as {@link reportTracking}. Undefined is a NORMAL state — a provider
+   * built without it (every test, and any window with no dbt project) simply
+   * derives the physical stage from yml and manifest, exactly as before.
+   */
+  private catalogService: CatalogService | undefined;
+
+  /** @see catalogService */
+  setCatalogService(catalogService: CatalogService | undefined): void {
+    this.catalogService = catalogService;
+  }
+
+  /**
+   * Load the warehouse catalog, if a reader was injected and an artifact exists.
+   *
+   * Always resolves — `CatalogService.loadCatalog()` degrades to undefined on
+   * every failure, and `buildPhysicalDomain()` treats undefined as "no catalog".
+   */
+  private async loadCatalog(): Promise<CatalogData | undefined> {
+    return this.catalogService?.loadCatalog(this.workspaceRoot);
   }
 
   /**
@@ -447,7 +473,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         description: m.description,
         columnCount: m.columns.length,
         source: 'manifest',
-        sourcePath: 'target/manifest.json',
+        // Honours a custom `target-path` — the literal 'target/manifest.json'
+        // this replaced was wrong for any project that sets one.
+        sourcePath: path.relative(this.workspaceRoot, this.manifestService.getManifestPath(this.workspaceRoot)),
       });
     }
 
@@ -1518,6 +1546,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      const catalog = await this.loadCatalog();
       const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
 
       let unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
@@ -1538,7 +1567,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       if (activeStage === 'physical') {
-        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest);
+        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest, catalog);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
         this.post(webview, { type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
@@ -3320,6 +3349,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      const catalog = await this.loadCatalog();
 
       const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
 
@@ -3331,8 +3361,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const reply = requestId !== undefined ? { requestId } : {};
       if (targetStage === 'physical') {
-        // Physical stage is derived from yml source files + optional manifest enrichment
-        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest);
+        // Physical stage is derived from the dbt project itself, enriched by the
+        // manifest and the warehouse catalog when either has been generated.
+        const physicalDomain = this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest, catalog);
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) {
           physicalDomain.layerConfig = layerConfig;
@@ -3377,17 +3408,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      const catalog = await this.loadCatalog();
       const sourceStage = panel.activeStage;
       const targetStage = payload.compareAgainst;
 
       // Build source DisplayDomain
       const sourceDomain = await this.buildStageDisplayDomain(
-        document, sourceStage, manifest, ymlData,
+        document, sourceStage, manifest, ymlData, catalog,
       );
 
       // Build target DisplayDomain
       const targetDomain = await this.buildStageDisplayDomain(
-        document, targetStage, manifest, ymlData,
+        document, targetStage, manifest, ymlData, catalog,
       );
 
       const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
@@ -3420,7 +3452,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Build a DisplayDomain for any stage, given the current document as context.
-   * For physical, derives from the unified file's logical section + manifest.
+   * For physical, derives from the unified file's logical section, the dbt
+   * project's own files, and the manifest / catalog when either is present.
    * For logical, extracts the logical section from the unified file.
    */
   private async buildStageDisplayDomain(
@@ -3428,10 +3461,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: Stage,
     manifest: ManifestData,
     ymlData: YmlData,
+    catalog?: CatalogData,
   ): Promise<DisplayDomain> {
     const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
     if (stage === 'physical') {
-      return this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest);
+      return this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest, catalog);
     }
     const domain = this.domainService.getDomainStage(document.uri.fsPath);
     return this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
@@ -3508,6 +3542,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             action,
             sourceDataType: colDisc.sourceDataType,
             targetDataType: colDisc.targetDataType,
+            // Stage-absolute: the two fields above are named for the comparison
+            // direction, not for a stage, so which one carries the ground-truth
+            // value flips when the user compares from the physical stage.
+            resolvedDataType: resolveGroundTruthDataType(
+              groundTruth,
+              report.sourceStage,
+              colDisc.sourceDataType,
+              colDisc.targetDataType,
+            ),
           });
           referencedModels.add(modelName);
         } else if (kind === 'rel') {

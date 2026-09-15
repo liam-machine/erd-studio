@@ -1,10 +1,15 @@
 /**
  * YmlParserService — parses dbt schema .yml files to extract model and test
- * metadata directly from source code.
+ * metadata directly from source code, and indexes the model / seed / snapshot
+ * SOURCE files (`.sql`, `.py`, `.csv`) that sit alongside them.
  *
  * This replaces the manifest as the primary source of truth for what exists
  * in the dbt project. Unlike ManifestService (which requires `dbt compile`),
  * this service reads source files directly and is always current.
+ *
+ * The source-file index costs no extra IO: the directory walk that finds the
+ * schema .yml files already enumerates every entry and used to throw the rest
+ * away.
  *
  * Uses the `yaml` package (comment-preserving parser).
  */
@@ -20,7 +25,7 @@ import type {
   YmlModelInfo,
   YmlRelationshipTest,
 } from '../types/ymlData';
-import { parseRefModelName } from './nameUtils';
+import { normaliseName, parseRefModelName } from './nameUtils';
 import { defaultDbtProjectConfig, type DbtProjectConfig } from './dbtProjectConfig';
 
 /**
@@ -37,9 +42,23 @@ const EXCLUDED_DIRS = new Set([
   'dbt_packages', 'dbt_modules', 'logs',
 ]);
 
+/**
+ * File extensions dbt builds a node from: SQL and Python models, snapshots
+ * (`.sql`) and seeds (`.csv`). Their stems are what `YmlData.sourceFiles`
+ * indexes.
+ */
+const SOURCE_FILE_EXTENSIONS = new Set(['.sql', '.py', '.csv']);
+
 export interface YmlParserServiceOptions {
-  /** dbt project paths (model-paths). Defaults to dbt's own defaults. */
-  dbtConfig?: Pick<DbtProjectConfig, 'modelPaths'>;
+  /**
+   * dbt project paths. `modelPaths` is walked for schema .yml files *and*
+   * source files; `seedPaths` / `snapshotPaths` are walked for source files
+   * only (they hold no schema this service parses). All default to dbt's own
+   * defaults, and the seed / snapshot keys are optional so callers holding
+   * only `modelPaths` keep compiling.
+   */
+  dbtConfig?: Pick<DbtProjectConfig, 'modelPaths'> &
+    Partial<Pick<DbtProjectConfig, 'seedPaths' | 'snapshotPaths'>>;
 }
 
 /**
@@ -63,9 +82,22 @@ export class YmlParserService {
   /** Model directories (relative to the project root) to scan for schema files. */
   private readonly modelPaths: string[];
 
+  /** Seed directories — walked for source files only, never for schema files. */
+  private readonly seedPaths: string[];
+
+  /** Snapshot directories — walked for source files only, never for schema files. */
+  private readonly snapshotPaths: string[];
+
   constructor(options: YmlParserServiceOptions = {}) {
+    const defaults = defaultDbtProjectConfig();
     const configured = options.dbtConfig?.modelPaths ?? [];
-    this.modelPaths = configured.length > 0 ? [...configured] : defaultDbtProjectConfig().modelPaths;
+    this.modelPaths = configured.length > 0 ? [...configured] : defaults.modelPaths;
+
+    const seeds = options.dbtConfig?.seedPaths ?? [];
+    this.seedPaths = seeds.length > 0 ? [...seeds] : defaults.seedPaths;
+
+    const snapshots = options.dbtConfig?.snapshotPaths ?? [];
+    this.snapshotPaths = snapshots.length > 0 ? [...snapshots] : defaults.snapshotPaths;
   }
 
   /**
@@ -144,8 +176,9 @@ export class YmlParserService {
     const uniqueColumns = new Map<string, Set<string>>();
     const compositeUniqueGroups = new Map<string, string[][]>();
 
-    // Walk filesystem to find all .yml/.yaml files
-    const ymlFiles = this.findYmlFiles(projectPath);
+    // One walk finds both the schema .yml files and the source files that
+    // define models, seeds and snapshots.
+    const { ymlFiles, sourceFilePaths } = this.findProjectFiles(projectPath);
 
     for (const filePath of ymlFiles) {
       try {
@@ -164,23 +197,69 @@ export class YmlParserService {
       }
     }
 
-    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups };
+    const sourceFiles = new Map<string, string>();
+    for (const filePath of sourceFilePaths) {
+      const stem = normaliseName(path.basename(filePath, path.extname(filePath)));
+      if (!stem || sourceFiles.has(stem)) {
+        // First entry wins on a duplicate stem (e.g. a `.sql` and a `.py` of
+        // the same name), matching indexByNormalisedName's convention.
+        continue;
+      }
+      sourceFiles.set(stem, path.relative(projectPath, filePath).replace(/\\/g, '/'));
+    }
+
+    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles };
   }
 
   /**
-   * Recursively walk each configured model directory (dbt_project.yml
-   * `model-paths`, default `models/`) collecting .yml/.yaml files.
-   * Skips excluded directories (packages, venvs, build output).
+   * Recursively walk the configured dbt directories once, collecting both the
+   * schema .yml files and the source files that define nodes.
+   *
+   * `model-paths` (default `models/`) yields both; `seed-paths` and
+   * `snapshot-paths` yield source files only — a schema .yml under `seeds/`
+   * must NOT enter `YmlData.models`, because that map feeds the Add Existing
+   * Model picker and relationship derivation.
+   *
+   * Skips excluded directories (packages, venvs, build output): a model
+   * vendored under `dbt_packages` or a venv is not part of this project and
+   * must not count as existing.
    */
-  private findYmlFiles(projectPath: string): string[] {
-    const files: string[] = [];
-    for (const modelPath of this.modelPaths) {
-      this.walkDir(path.join(projectPath, modelPath), files);
-    }
-    return files;
+  private findProjectFiles(projectPath: string): {
+    ymlFiles: string[];
+    sourceFilePaths: string[];
+  } {
+    const ymlFiles: string[] = [];
+    const sourceFilePaths: string[] = [];
+    // Roots can be duplicated or nested (e.g. `seed-paths: ["models/seeds"]`);
+    // walking a resolved root twice would only cost IO, so guard on it.
+    const walked = new Set<string>();
+
+    const walkRoots = (roots: string[], collectYml: boolean): void => {
+      for (const root of roots) {
+        const dir = path.resolve(projectPath, root);
+        if (walked.has(dir)) {
+          continue;
+        }
+        walked.add(dir);
+        this.walkDir(dir, collectYml ? ymlFiles : null, sourceFilePaths);
+      }
+    };
+
+    walkRoots(this.modelPaths, true);
+    walkRoots(this.seedPaths, false);
+    walkRoots(this.snapshotPaths, false);
+
+    return { ymlFiles, sourceFilePaths };
   }
 
-  private walkDir(dir: string, files: string[]): void {
+  /**
+   * Walk one directory tree. `ymlFiles` is null for roots whose schema files
+   * are out of scope (seeds, snapshots); `sourceFiles` is always collected.
+   *
+   * Never reads a file body — the walk is pure `readdirSync`, which already
+   * enumerates every entry, so indexing the source files is free.
+   */
+  private walkDir(dir: string, ymlFiles: string[] | null, sourceFiles: string[]): void {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -191,12 +270,14 @@ export class YmlParserService {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         if (!EXCLUDED_DIRS.has(entry.name)) {
-          this.walkDir(path.join(dir, entry.name), files);
+          this.walkDir(path.join(dir, entry.name), ymlFiles, sourceFiles);
         }
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
-        if (ext === '.yml' || ext === '.yaml') {
-          files.push(path.join(dir, entry.name));
+        if (ymlFiles && (ext === '.yml' || ext === '.yaml')) {
+          ymlFiles.push(path.join(dir, entry.name));
+        } else if (SOURCE_FILE_EXTENSIONS.has(ext)) {
+          sourceFiles.push(path.join(dir, entry.name));
         }
       }
     }
@@ -519,11 +600,24 @@ export class YmlParserService {
       }
     }
 
+    // Source files carry a project-relative path already, so the same prefix
+    // test applies.
+    let filteredSourceFiles: Map<string, string> | undefined;
+    if (data.sourceFiles) {
+      filteredSourceFiles = new Map<string, string>();
+      for (const [stem, relativePath] of data.sourceFiles) {
+        if (relativePath.startsWith(normalizedPrefix)) {
+          filteredSourceFiles.set(stem, relativePath);
+        }
+      }
+    }
+
     return {
       models: filteredModels,
       relationshipTests: filteredRelTests,
       uniqueColumns: filteredUniqueColumns,
       compositeUniqueGroups: filteredCompositeGroups,
+      sourceFiles: filteredSourceFiles,
     };
   }
 

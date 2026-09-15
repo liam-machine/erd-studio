@@ -194,7 +194,15 @@ export function transformDomain(
         ...(model.grain ? { grain: model.grain } : {}),
         ...(model.modelRole ? { modelRole: model.modelRole } : {}),
         ...(readOnly ? { readOnly: true } : {}),
-        ...(model.existsInManifest === false ? { isGhost: true } : {}),
+        // Strict `=== false`: logical models leave existsInProject undefined,
+        // so `!model.existsInProject` would ghost the entire logical canvas.
+        ...(model.existsInProject === false
+          ? { isGhost: true, ghostReason: model.missingReason === 'disabled' ? ('disabled' as const) : ('not-in-project' as const) }
+          : {}),
+        // Built once per transform, like `columns` above — applyNodeOverlays
+        // spreads `...data` and never recomputes it, so memoised nodes are
+        // untouched. Never derive it inside an overlay pass.
+        ...(model.provenance ? { provenance: model.provenance } : {}),
         ...(disc ? { discrepancy: disc } : {}),
         ...(disc && options?.discrepancyReport ? {
           discrepancySourceStage: options.discrepancyReport.sourceStage,
@@ -212,6 +220,12 @@ export function transformDomain(
     let ghostIndex = 0;
     for (const md of options.discrepancyReport.models) {
       if (md.status === 'missing') {
+        // The physical stage emits models that do not exist in the dbt project,
+        // so the same name can already be on the canvas. Pushing a second node
+        // with the same id gives React Flow duplicate ids and duplicate React
+        // keys, and the positionMap.set below would overwrite the real node's
+        // rect — every edge handle side is then computed against the wrong box.
+        if (positionMap.has(md.name)) { continue; }
         const position = positions[md.name] ?? { x: 50 + ghostIndex * 260, y: -150 };
         ghostIndex++;
         positionMap.set(md.name, position);
@@ -227,6 +241,7 @@ export function transformDomain(
             columns: [],
             isStub: false,
             isGhost: true,
+            ghostReason: 'missing-in-comparison' as const,
             readOnly: true,
             discrepancy: md,
             discrepancySourceStage: options.discrepancyReport.sourceStage,

@@ -17,9 +17,49 @@ import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
-import type { DisplayRelationship } from '../../../src/types/display';
+import type { DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '../../../src/types/display';
 import type { FkEdgeData } from '../../types/graph';
 import './DetailPanel.css';
+
+// ---------------------------------------------------------------------------
+// Physical provenance
+// ---------------------------------------------------------------------------
+
+/**
+ * How each physical column source is named in the metadata row. The canvas chip
+ * has three letters and a tooltip; this is the place someone lands when they
+ * want to know why a data type is blank, so it spells the source out.
+ */
+const SOURCE_NAME: Record<PhysicalColumnSource, string> = {
+  catalog: 'warehouse catalog',
+  yml: 'your dbt .yml',
+  manifest: 'dbt manifest',
+  file: '.sql file only',
+};
+
+/**
+ * One line describing where a physical model's shape came from.
+ *
+ * `provenance.columns` is ordered most-authoritative-first, so its head is the
+ * list's principal supplier; `provenance.types` is named separately only when
+ * it differs, which happens when the principal supplier contributed column
+ * names but no data types.
+ */
+function describeProvenance(provenance: PhysicalProvenance, untyped: number): string {
+  const names = provenance.columns.map((c) => SOURCE_NAME[c]);
+  const parts = [
+    names.length > 1
+      ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+      : names[0] ?? SOURCE_NAME[provenance.types],
+  ];
+  if (provenance.types !== provenance.columns[0]) {
+    parts.push(`types from ${SOURCE_NAME[provenance.types]}`);
+  }
+  if (untyped > 0) {
+    parts.push(`${untyped} untyped`);
+  }
+  return parts.join(' \u00b7 ');
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -270,6 +310,19 @@ export function DetailPanel() {
             <span className="detail-panel__label">Schema</span>
             <span className="detail-panel__value">{model.schema || '—'}</span>
           </div>
+          {/* Physical stage only — logical models never carry provenance, so the
+              logical panel does not sprout an empty row. */}
+          {model.provenance && (
+            <div className="detail-panel__metadata-row">
+              <span className="detail-panel__label detail-panel__label--wide">Columns from</span>
+              <span className="detail-panel__value detail-panel__value--provenance">
+                {describeProvenance(
+                  model.provenance,
+                  model.columns.filter((c) => !c.dataType).length,
+                )}
+              </span>
+            </div>
+          )}
         </div>
         {isReadOnly ? (
           model.description && (

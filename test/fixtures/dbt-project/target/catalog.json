@@ -1,0 +1,288 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/catalog/v1.json",
+    "dbt_version": "1.9.1",
+    "generated_at": "2026-02-11T04:12:57.913204Z",
+    "invocation_id": "7d0c2a1e-45f7-4d31-9d62-2b0b4f3e1a88",
+    "env": {}
+  },
+  "nodes": {
+    "model.my_dbt_project.dim_task": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "SILVER_SCHEMA",
+        "name": "DIM_TASK",
+        "database": "ANALYTICS",
+        "comment": "Task dimension table",
+        "owner": "TRANSFORMER"
+      },
+      "columns": {
+        "TASK_ID": {
+          "type": "NUMBER(38,0)",
+          "index": 1,
+          "name": "TASK_ID",
+          "comment": null
+        },
+        "PROJECT_ID": {
+          "type": "NUMBER",
+          "index": 2,
+          "name": "PROJECT_ID",
+          "comment": null
+        },
+        "NAME": {
+          "type": "TEXT",
+          "index": 3,
+          "name": "NAME",
+          "comment": "Task name as entered by the user"
+        },
+        "STATUS": {
+          "type": "TEXT",
+          "index": 4,
+          "name": "STATUS",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": true,
+          "include": false,
+          "description": "Indicates whether there are statistics for this table"
+        },
+        "row_count": {
+          "id": "row_count",
+          "label": "Row Count",
+          "value": 1420.0,
+          "include": true,
+          "description": "An approximate count of rows in this table"
+        },
+        "bytes": {
+          "id": "bytes",
+          "label": "Approximate Size",
+          "value": 40960.0,
+          "include": true,
+          "description": "Approximate size of the table as reported by the database"
+        }
+      },
+      "unique_id": "model.my_dbt_project.dim_task"
+    },
+    "model.my_dbt_project.dim_project": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "silver",
+        "name": "dim_project",
+        "database": "analytics",
+        "comment": null,
+        "owner": "transformer"
+      },
+      "columns": {
+        "project_id": {
+          "type": "integer",
+          "index": 1,
+          "name": "project_id",
+          "comment": null
+        },
+        "project_name": {
+          "type": "character varying(255)",
+          "index": 2,
+          "name": "project_name",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": false,
+          "include": false,
+          "description": "Indicates whether there are statistics for this table"
+        }
+      },
+      "unique_id": "model.my_dbt_project.dim_project"
+    },
+    "model.my_dbt_project.fct_task_event": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "gold",
+        "name": "fct_task_event",
+        "database": "analytics",
+        "comment": null,
+        "owner": "transformer"
+      },
+      "columns": {
+        "event_id": {
+          "type": "integer",
+          "index": 1,
+          "name": "event_id",
+          "comment": null
+        },
+        "task_id": {
+          "type": "integer",
+          "index": 2,
+          "name": "task_id",
+          "comment": null
+        },
+        "event_date": {
+          "type": "timestamp without time zone",
+          "index": 3,
+          "name": "event_date",
+          "comment": null
+        },
+        "amount": {
+          "type": "numeric(15,2)",
+          "index": 4,
+          "name": "amount",
+          "comment": null
+        },
+        "loaded_at": {
+          "type": "timestamp with time zone",
+          "index": 5,
+          "name": "loaded_at",
+          "comment": "Warehouse load timestamp — not declared in the schema .yml"
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": true,
+          "include": false,
+          "description": "Indicates whether there are statistics for this table"
+        },
+        "row_count": {
+          "id": "row_count",
+          "label": "Row Count",
+          "value": 98214.0,
+          "include": true,
+          "description": "An approximate count of rows in this table"
+        }
+      },
+      "unique_id": "model.my_dbt_project.fct_task_event"
+    },
+    "model.my_dbt_project.stg_raw_payments": {
+      "metadata": {
+        "type": "VIEW",
+        "schema": "STAGING",
+        "name": "STG_RAW_PAYMENTS",
+        "database": "ANALYTICS",
+        "comment": null,
+        "owner": "TRANSFORMER"
+      },
+      "columns": {
+        "PAYMENT_ID": {
+          "type": "NUMBER(38,0)",
+          "index": 1,
+          "name": "PAYMENT_ID",
+          "comment": null
+        },
+        "ORDER_ID": {
+          "type": "NUMBER(38,0)",
+          "index": 2,
+          "name": "ORDER_ID",
+          "comment": null
+        },
+        "AMOUNT": {
+          "type": "FLOAT",
+          "index": 3,
+          "name": "AMOUNT",
+          "comment": null
+        },
+        "PAYMENT_METHOD": {
+          "type": "TEXT",
+          "index": 4,
+          "name": "PAYMENT_METHOD",
+          "comment": null
+        },
+        "LOADED_AT": {
+          "type": "TIMESTAMP_NTZ",
+          "index": 5,
+          "name": "LOADED_AT",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": false,
+          "include": false,
+          "description": "Indicates whether there are statistics for this table"
+        }
+      },
+      "unique_id": "model.my_dbt_project.stg_raw_payments"
+    },
+    "seed.my_dbt_project.seed_status_codes": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "silver",
+        "name": "seed_status_codes",
+        "database": "analytics",
+        "comment": null,
+        "owner": "transformer"
+      },
+      "columns": {
+        "status_code": {
+          "type": "character varying(10)",
+          "index": 1,
+          "name": "status_code",
+          "comment": null
+        },
+        "status_label": {
+          "type": "character varying(50)",
+          "index": 2,
+          "name": "status_label",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": false,
+          "include": false,
+          "description": "Indicates whether there are statistics for this table"
+        }
+      },
+      "unique_id": "seed.my_dbt_project.seed_status_codes"
+    }
+  },
+  "sources": {
+    "source.my_dbt_project.raw.raw_payments": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "raw",
+        "name": "raw_payments",
+        "database": "analytics",
+        "comment": null,
+        "owner": "loader"
+      },
+      "columns": {
+        "id": {
+          "type": "integer",
+          "index": 1,
+          "name": "id",
+          "comment": null
+        },
+        "amount": {
+          "type": "numeric(15,2)",
+          "index": 2,
+          "name": "amount",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": false,
+          "include": false,
+          "description": "Indicates whether there are statistics for this table"
+        }
+      },
+      "unique_id": "source.my_dbt_project.raw.raw_payments"
+    }
+  },
+  "errors": null,
+  "_compile_results": null
+}

@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '16';
+export const HARNESS_VERSION = '17';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -383,13 +383,26 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 
 ## Physical Stage (Read-Only)
 
-The physical stage has **no files on disk**. It is derived at runtime primarily from dbt \`.yml\` schema files, with optional enrichment from \`target/manifest.json\`:
+The physical stage has **no files on disk**. It is derived at runtime from the dbt project itself — source files, schema \`.yml\` files, \`{target-path}/manifest.json\` and \`{target-path}/catalog.json\`. None of those four is required, and in particular a project that has never been compiled still renders real models.
 
-1. **Models**: Logical models that have a corresponding \`.yml\` schema file appear in physical. Columns come from the \`.yml\` file; \`data_type\` is enriched from the manifest when available. PK/FK/NK flags, grain, modelRole, scdType, and additiveType carry forward from logical.
-2. **Relationships**: Derived from **dbt relationship tests declared in \`.yml\` files** — not copied from logical. Each \`relationships\` test becomes an edge.
-3. **Cardinality**: Derived from **uniqueness tests** in \`.yml\` files (and manifest when available) — no \`unique\` test = "many" side.
-4. **Scoping**: Only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
-5. **Fallback**: If no \`.yml\` files are found, the physical stage falls back to deriving entirely from \`target/manifest.json\`.
+1. **Existence**: a model is real (not a ghost) when **any** of these holds:
+   - a \`<name>.sql\`, \`<name>.py\` or \`<name>.csv\` file sits under a configured \`model-paths\`, \`seed-paths\` or \`snapshot-paths\` directory (so seeds and snapshots count), **and** dbt has not disabled the model;
+   - a dbt schema \`.yml\` under \`model-paths\` declares it;
+   - the compiled manifest carries a node for it;
+   - \`catalog.json\` carries a relation for it.
+
+   A model found in **none** of those is still drawn, as a **ghost** with no columns — the design references something the dbt project does not have. A model dbt has **disabled** lands in the manifest's \`disabled\` section and \`ref()\` to it fails, so a bare source file does not make it exist; with no other evidence it ghosts with a "disabled" reason. Ghosting therefore means "not in your dbt project", never "you have not run \`dbt compile\` lately".
+2. **Columns** come from two *kinds* of source. The **declared** list is the schema \`.yml\` when there is one, otherwise the manifest's copy of it — one source, because the manifest's column list is a compiled copy of the same yml patch, so where they disagree the manifest is merely stale. The **observed** list is \`catalog.json\`, an independent look at the warehouse relation. When a catalog relation resolves, the rendered list is their **union**: catalog order first, then any declared column the catalog has not seen. With no catalog it is the declared list alone. The catalog is only as fresh as the last \`dbt docs generate\`, which is exactly why it never *replaces* the declared list: a column added to the SQL and the yml an hour ago would otherwise vanish from physical and be proposed for deletion. A column in both keeps the **declared** spelling (Snowflake reports UPPERCASE keys; they never win the label).
+3. **Data types** are an ordered fallthrough per column: \`catalog.json\`, then the declared \`data_type:\`, then the manifest's copy of it, then blank. A column typed on only one stage is reported as **\`undeclared\`**, not as a type mismatch — writing \`data_type:\` into the schema yml (or running \`dbt docs generate\`) is what fills it in. Comparison understands warehouse spellings (\`NUMBER\`, \`character varying(255)\`, \`timestamp without time zone\`, \`ARRAY<...>\`), and treats a whole-number \`NUMBER\`/\`decimal\` as an integer.
+4. **Descriptions**: the \`.yml\` description, then the manifest's, then the catalog's column \`comment\` — the human's words beat the warehouse's echo of them, since \`persist_docs\` writes the dbt description *into* that comment.
+5. **Schema name**: manifest \`schema\`, then the catalog's \`metadata.schema\`, then blank. It cannot be derived from the filesystem (it needs \`generate_schema_name\` and \`profiles.yml\`), so with neither artifact the node badge falls back to the ERD **layer** abbreviation and says so — "physical works without dbt" does **not** extend to schema names.
+6. **Provenance**: every real physical model records which sources contributed its columns and which one supplied its types, shown as a chip on the node (WH = warehouse catalog, YML = your dbt \`.yml\`, DBT = the dbt manifest, SQL = the source file only) and spelled out in the detail panel. Runtime only — never written to disk.
+7. **Relationships**: derived from **dbt relationship tests** — the union of those declared in \`.yml\` files and those in the manifest, deduped; never copied from logical. \`catalog.json\` holds no constraint or foreign-key information, so it contributes no edges.
+8. **Cardinality**: derived from **uniqueness tests** merged from yml and manifest — no \`unique\` test = "many" side.
+9. **Scoping**: only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
+10. **Carried forward from logical**: PK/FK/NK flags, grain, modelRole, scdType and additiveType — dbt yml does not carry them.
+
+A model known **only** by the file that defines it renders as a real node with **zero columns**: nothing has stated its shape, and seeding it from the logical design would invent one. Sync comparison skips such a model entirely rather than reporting every logical column as missing. That suppression is automatic and distinct from \`stubColumns\`, which is the user's own switch for models they know are deliberately partial.
 
 ### Cardinality Derivation
 
@@ -431,7 +444,7 @@ const SYNC_CONTENT = `# ERD Studio — Sync Reconciliation Guide
 
 This guide is loaded when you need to execute a sync plan generated by ERD Studio.
 The sync plan reconciles differences between the **logical** (user-defined) and
-**physical** (dbt manifest-derived) stages of a domain.
+**physical** (derived from your dbt project) stages of a domain.
 
 ## When to Use
 
@@ -464,7 +477,8 @@ for each difference. Your job is to execute those choices.
       "discrepancyStatus": "extra",
       "groundTruth": "logical",
       "action": "add-column-to-physical",
-      "sourceDataType": "VARCHAR"
+      "sourceDataType": "VARCHAR",
+      "resolvedDataType": "VARCHAR"
     }
   ],
   "relationships": [],
@@ -476,8 +490,17 @@ Key fields:
 - **modelContext**: File paths for every model referenced — use these to locate files to edit
 - **models/columns/relationships**: Arrays of resolved discrepancies with concrete actions
 - **requiresCompile**: If \`true\`, run \`dbt compile\` after making physical-side changes
+- **resolvedDataType**: The type to WRITE. Always use this for the two
+  \`update-type-*\` actions. \`sourceDataType\` / \`targetDataType\` are named for the
+  comparison direction, so which of them holds the ground-truth value flips when
+  the plan was generated from the physical stage — \`resolvedDataType\` never does.
 
 ## Action Reference
+
+A column entry whose \`discrepancyStatus\` is \`undeclared\` means only one stage
+declares a data type at all — most often a dbt schema yml with no \`data_type:\`
+and no \`catalog.json\` to observe the real one. It resolves exactly like
+\`type-mismatch\`: copy the declared type onto the side that has none.
 
 ### Logical-side actions (edit ERD Studio files)
 
@@ -487,7 +510,7 @@ Key fields:
 | \`remove-from-logical\` | Remove model name from domain JSON \`logical.models[]\` + remove related relationships from \`logical.relationships[]\` |
 | \`add-column-to-logical\` | Add column to \`logical-models/{name}.yml\` columns array |
 | \`remove-column-from-logical\` | Remove column from \`logical-models/{name}.yml\` |
-| \`update-type-in-logical\` | Update column \`dataType\` in \`logical-models/{name}.yml\` to the value in \`targetDataType\` |
+| \`update-type-in-logical\` | Update column \`dataType\` in \`logical-models/{name}.yml\` to the value in \`resolvedDataType\` |
 | \`add-relationship-to-logical\` | Add relationship object to domain JSON \`logical.relationships[]\` using the fromModel/fromColumn/toModel/toColumn from the action |
 | \`remove-relationship-from-logical\` | Remove the matching relationship from domain JSON \`logical.relationships[]\` |
 | \`update-cardinality-in-logical\` | Update \`cardinality\` field on matching relationship in domain JSON to \`targetCardinality\` |
@@ -500,7 +523,7 @@ Key fields:
 | \`remove-from-physical\` | Remove dbt SQL file + schema YAML entry (confirm with user first — destructive) |
 | \`add-column-to-physical\` | Add column to the dbt SQL SELECT statement + add column entry to schema YAML |
 | \`remove-column-from-physical\` | Remove column from dbt SQL SELECT + schema YAML (confirm with user first) |
-| \`update-type-in-physical\` | Update column casting in dbt SQL or \`data_type\` in schema YAML to \`sourceDataType\` |
+| \`update-type-in-physical\` | Update column casting in dbt SQL or \`data_type\` in schema YAML to \`resolvedDataType\` |
 | \`add-relationship-test-to-physical\` | Add \`relationships\` test to dbt schema YAML (see format below) |
 | \`remove-relationship-test-from-physical\` | Remove the \`relationships\` test from dbt schema YAML |
 | \`update-cardinality-in-physical\` | Add/remove \`unique\` test on FK column in dbt schema YAML to match target cardinality |

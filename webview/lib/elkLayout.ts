@@ -134,6 +134,15 @@ const HEADER_PADDING = 20;
 const LAYER_BADGE_WIDTH = 36;
 
 /**
+ * Provenance chip approximate width (3 uppercase characters plus padding).
+ *
+ * Under-reserving here only ever shows up on the auto-layout path, for nodes
+ * React Flow has not measured yet — i.e. never on a canvas that is already
+ * open, which is why it has to be reserved rather than discovered.
+ */
+const SOURCE_BADGE_WIDTH = 30;
+
+/**
  * Safety margin added to the raw estimated width before clamping.
  * Absorbs font-rendering variation and ensures ELK reserves slightly
  * more space than the minimum, preventing overlap on wide field names.
@@ -155,12 +164,15 @@ const MAX_NODE_WIDTH = 560;
  * slightly more space than the minimum estimate, preventing overlap
  * when font rendering or badge widths differ from the approximation.
  */
-export function estimateNodeWidth(data: Pick<ModelNodeData, 'modelName' | 'columns'>): number {
-  const { modelName, columns } = data;
+export function estimateNodeWidth(data: Pick<ModelNodeData, 'modelName' | 'columns' | 'provenance'>): number {
+  const { modelName, columns, provenance } = data;
 
-  // Header: name + layer badge + padding
+  // Header: name + layer badge + provenance chip (physical only) + padding
   const headerWidth =
-    HEADER_PADDING + modelName.length * CHAR_WIDTH_BODY + LAYER_BADGE_WIDTH;
+    HEADER_PADDING
+    + modelName.length * CHAR_WIDTH_BODY
+    + LAYER_BADGE_WIDTH
+    + (provenance ? SOURCE_BADGE_WIDTH : 0);
 
   // Find the widest column row
   let maxColWidth = 0;

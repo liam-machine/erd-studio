@@ -36,7 +36,16 @@
 .model-node--ghost {
   border-color: var(--stage-ghost);
   border-style: dashed;
-  opacity: 0.5;
+  /* Was 0.5, which multiplied with the 0.25 of --dimmed down to an invisible
+     0.125 for a ghost that a search misses. Ghosts are now a routine sight on
+     the physical canvas, so both the base and the pairing are tuned below. */
+  opacity: 0.65;
+}
+
+/* Disabled in dbt is not the same claim as "does not exist" — same grey, but a
+   dotted border so the two ghosts are not pixel-identical. */
+.model-node--ghost-disabled {
+  border-style: dotted;
 }
 
 /* Discrepancy: extra model — amber glow (model exists here but not in comparison) */
@@ -69,6 +78,12 @@
   opacity: 0.4;
 }
 
+/* Ghost + dimmed compose multiplicatively; pin the pair so an unmatched ghost
+   stays legible. */
+.model-node--ghost.model-node--dimmed {
+  opacity: 0.3;
+}
+
 /* -----------------------------------------------------------------------
    Header
    ----------------------------------------------------------------------- */
@@ -98,6 +113,34 @@
   letter-spacing: 0.5px;
   background: var(--button-bg);
   color: var(--button-fg);
+}
+
+/* Where the physical shape came from. Neutral by default: the source is
+   information, not a warning. Deliberately built from theme tokens rather than
+   following the hardcoded literals further down this file. */
+.model-node__source {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: var(--dim-fg);
+  color: var(--editor-bg);
+}
+
+/* The one distinction worth a colour: these types were read back from the
+   warehouse, not declared by hand. */
+.model-node__source--catalog {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+/* A layer abbreviation standing in for an unresolved dbt schema — the badge
+   means "schema" everywhere else, so it must not read as one here. */
+.model-node__badge--layer {
+  opacity: 0.7;
+  font-style: italic;
 }
 
 .model-node__discrepancy-badge {

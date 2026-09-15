@@ -63,6 +63,9 @@ describe('transformDomain nodes', () => {
     expect(data.isStub).toBe(false);
     expect(data).not.toHaveProperty('readOnly');
     expect(data).not.toHaveProperty('isGhost');
+    // Guards the `=== false` test in the transformer: a truthiness check here
+    // would ghost every logical node, none of which sets existsInProject.
+    expect(data).not.toHaveProperty('ghostReason');
     expect(data).not.toHaveProperty('discrepancy');
   });
 
@@ -89,7 +92,7 @@ describe('transformDomain nodes', () => {
       stubColumns: ['fact_order'],
       models: [
         model('fact_order', { rationale: { purpose: 'One row per order line' }, grain: 'order line', modelRole: 'transaction-fact' }),
-        model('dim_customer', { rationale: {}, existsInManifest: false }),
+        model('dim_customer', { rationale: {}, existsInProject: false }),
       ],
       relationships: [rel('fact_order', 'dim_customer')],
     }));
@@ -107,8 +110,27 @@ describe('transformDomain nodes', () => {
     expect(dim).not.toHaveProperty('hasRationale');
     expect(dim).not.toHaveProperty('grain');
     expect(dim.isGhost).toBe(true);
+    expect(dim.ghostReason).toBe('not-in-project');
 
     expect(fkEdges(result)[0].data?.readOnly).toBe(true);
+  });
+
+  it('carries physical provenance onto node data, and only when the host set it', () => {
+    const result = transformDomain(domain({
+      stage: 'physical',
+      models: [
+        model('fact_order', { provenance: { columns: ['catalog', 'yml'], types: 'catalog' } }),
+        model('dim_customer'),
+      ],
+    }));
+
+    // The object must ride through by reference: applyNodeOverlays spreads
+    // `...data` and short-circuits on identity, so a per-render copy here would
+    // churn every memoised node on every search keystroke.
+    expect(nodeById(result, 'fact_order').data.provenance).toEqual({ columns: ['catalog', 'yml'], types: 'catalog' });
+    // A logical model (and any physical phantom) leaves it unset rather than
+    // shipping a placeholder the chip would have to special-case.
+    expect(nodeById(result, 'dim_customer').data).not.toHaveProperty('provenance');
   });
 });
 
@@ -245,7 +267,7 @@ describe('transformDomain discrepancy overlay', () => {
     expect(modelNodes(result).map((n) => n.id)).toEqual(['fact_order', 'dim_customer', 'dim_region', 'dim_channel']);
     const region = nodeById(result, 'dim_region');
     expect(region.position).toEqual({ x: 50, y: -150 });
-    expect(region.data).toMatchObject({ isGhost: true, readOnly: true, isStub: false, columns: [], discrepancy: report.models[1] });
+    expect(region.data).toMatchObject({ isGhost: true, ghostReason: 'missing-in-comparison', readOnly: true, isStub: false, columns: [], discrepancy: report.models[1] });
     expect(nodeById(result, 'dim_channel').position).toEqual({ x: 5, y: 6 });
   });
 
@@ -261,6 +283,37 @@ describe('transformDomain discrepancy overlay', () => {
     expect(ghosts.map((e) => e.id)).toEqual(['ghost-fk-fact_order-region_id-dim_region-region_id']);
     expect(ghosts[0]).toMatchObject({ source: 'fact_order', target: 'dim_region' });
     expect(ghosts[0].data).toMatchObject({ discrepancyStatus: 'missing', cardinality: 'one-to-many', stage: 'logical' });
+  });
+
+  it('never emits two nodes with the same id when a phantom is also reported missing', () => {
+    // The physical stage emits models that are not in the dbt project, and the
+    // comparison reports the same name 'missing' from the logical side. Without
+    // the guard in the ghost loop these are two React Flow nodes with one id,
+    // and the second one's position overwrites the first one's rect.
+    const result = transformDomain(domain({
+      stage: 'physical',
+      models: [model('fact_order'), model('dim_region', { existsInProject: false })],
+      viewConfig: { positions: { fact_order: { x: 0, y: 0 }, dim_region: { x: 900, y: 12 } } },
+    }), { discrepancyReport: report });
+
+    const regions = modelNodes(result).filter((n) => n.id === 'dim_region');
+    expect(regions).toHaveLength(1);
+    expect(regions[0].position).toEqual({ x: 900, y: 12 });
+    expect(regions[0].data.ghostReason).toBe('not-in-project');
+    expect(new Set(modelNodes(result).map((n) => n.id)).size).toBe(modelNodes(result).length);
+  });
+
+  it('distinguishes a disabled model from one that is simply absent', () => {
+    const result = transformDomain(domain({
+      stage: 'physical',
+      models: [
+        model('dim_region', { existsInProject: false, missingReason: 'disabled' }),
+        model('dim_channel', { existsInProject: false, missingReason: 'absent' }),
+      ],
+    }));
+
+    expect(nodeById(result, 'dim_region').data).toMatchObject({ isGhost: true, ghostReason: 'disabled' });
+    expect(nodeById(result, 'dim_channel').data).toMatchObject({ isGhost: true, ghostReason: 'not-in-project' });
   });
 
   it('adds no ghosts and no discrepancy keys without a report', () => {

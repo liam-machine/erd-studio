@@ -72,4 +72,26 @@ export interface YmlData {
    * are unique together.
    */
   compositeUniqueGroups: Map<string, string[][]>;
+  /**
+   * Model / seed / snapshot SOURCE files found under the configured
+   * `model-paths`, `seed-paths` and `snapshot-paths`: the file stem mapped to
+   * the project-relative, forward-slashed path of the `.sql`, `.py` or `.csv`
+   * file that defines it. This is what lets the physical stage answer "does
+   * this model exist in the project?" without a compiled manifest.
+   *
+   * The key is ALREADY normalised (`normaliseName(basename without extension)`)
+   * — unlike `models`, which is keyed by the raw name from the .yml — so look
+   * a name up with `normaliseName(name)` and never feed this map to
+   * `indexByNormalisedName`.
+   *
+   * Versioned models are deliberately NOT reachable here: dbt's convention
+   * (and the default `defined_in`) is `<name>_v<N>.sql`, so the stem is
+   * `dim_customer_v2`, not `dim_customer`. Stripping a `_v<N>` suffix would be
+   * a guess; a versioned model is declared by a schema .yml `versions:` block
+   * by construction, so `models` always carries it under its un-versioned name.
+   *
+   * Optional so that hand-built `YmlData` literals (tests, callers that only
+   * care about the schema .yml data) stay valid.
+   */
+  sourceFiles?: Map<string, string>;
 }

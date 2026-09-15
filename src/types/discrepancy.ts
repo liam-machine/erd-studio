@@ -27,6 +27,8 @@ export interface DiscrepancyReport {
     extraColumns: number;
     missingColumns: number;
     dataTypeMismatches: number;
+    /** Columns where exactly one stage declares a data type. */
+    undeclaredColumns: number;
   };
 }
 
@@ -38,7 +40,14 @@ export interface ModelDiscrepancy {
 
 export interface ColumnDiscrepancy {
   name: string;
-  status: 'matched' | 'extra' | 'missing' | 'type-mismatch';
+  /**
+   * `undeclared` means exactly one stage declares a data type: nothing
+   * conflicts, but one side has no type on record (a dbt yml with no
+   * `data_type:`, say). It is kept out of `type-mismatch` so the summary is
+   * not inflated, and still resolvable — `deriveColumnAction` gives it the
+   * same update-type action.
+   */
+  status: 'matched' | 'extra' | 'missing' | 'type-mismatch' | 'undeclared';
   /** Data type in the source stage (the stage being viewed). */
   sourceDataType?: string;
   /** Data type in the target stage (the comparison stage). */

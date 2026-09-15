@@ -157,6 +157,71 @@ describe('manifestExtractor — dbt versioned models (H10)', () => {
   });
 });
 
+describe('manifestExtractor — disabled models', () => {
+  /** dbt keys `disabled` by unique_id with an ARRAY of node dicts as the value. */
+  function disabledManifest(): Record<string, unknown> {
+    return {
+      nodes: {
+        'model.proj.fct_orders': modelNode('model.proj.fct_orders', 'fct_orders', ['order_id']),
+      },
+      disabled: {
+        'model.proj.dim_legacy': [modelNode('model.proj.dim_legacy', 'dim_legacy', ['id'])],
+        // Two candidate definitions of the same name — one entry in the set
+        'model.proj.dim_retired': [
+          modelNode('model.proj.dim_retired', 'dim_retired', ['id']),
+          modelNode('model.proj.dim_retired', 'dim_retired', ['id']),
+        ],
+        'seed.proj.country_codes': [{ unique_id: 'seed.proj.country_codes', name: 'country_codes' }],
+        'test.proj.unique_dim_legacy_id': [{ unique_id: 'test.proj.unique_dim_legacy_id', name: 'unique_dim_legacy_id' }],
+      },
+    };
+  }
+
+  it('extracts disabled model names', () => {
+    const result = extractManifestData(disabledManifest());
+
+    expect(result.disabledModels.sort()).toEqual(['dim_legacy', 'dim_retired']);
+  });
+
+  it('ignores disabled seeds and tests', () => {
+    const result = extractManifestData(disabledManifest());
+
+    expect(result.disabledModels).not.toContain('country_codes');
+    expect(result.disabledModels).not.toContain('unique_dim_legacy_id');
+  });
+
+  it('leaves enabled models out of the disabled list', () => {
+    const result = extractManifestData(disabledManifest());
+
+    expect(Object.keys(result.models)).toEqual(['fct_orders']);
+    expect(result.disabledModels).not.toContain('fct_orders');
+  });
+
+  it('returns an empty list when `disabled` is absent or not a dict', () => {
+    expect(extractManifestData({ nodes: {} }).disabledModels).toEqual([]);
+    expect(extractManifestData({ nodes: {}, disabled: null }).disabledModels).toEqual([]);
+    expect(extractManifestData({ nodes: {}, disabled: [] }).disabledModels).toEqual([]);
+  });
+
+  it('falls back to the node id when the disabled entry carries no name', () => {
+    const result = extractManifestData({
+      nodes: {},
+      disabled: { 'model.proj.dim_nameless.v2': [{ unique_id: 'model.proj.dim_nameless.v2' }] },
+    });
+
+    expect(result.disabledModels).toEqual(['dim_nameless']);
+  });
+
+  it('reports disabled models even when the manifest has no `nodes` section', () => {
+    const result = extractManifestData({
+      disabled: { 'model.proj.dim_legacy': [modelNode('model.proj.dim_legacy', 'dim_legacy', ['id'])] },
+    });
+
+    expect(result.models).toEqual({});
+    expect(result.disabledModels).toEqual(['dim_legacy']);
+  });
+});
+
 describe('nameUtils', () => {
   describe('parseRefModelName', () => {
     it.each([

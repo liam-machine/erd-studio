@@ -16,9 +16,10 @@
 
 import { memo, useCallback, useMemo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import type { ModelFlowNode, ColumnDisplay } from '../../types/graph';
+import type { ModelFlowNode, ModelNodeData, ColumnDisplay } from '../../types/graph';
 import type { Stage } from '../../../src/types/semantic';
 import type { ColumnDiscrepancy } from '../../../src/types/discrepancy';
+import type { PhysicalColumnSource, PhysicalProvenance } from '../../../src/types/display';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
@@ -48,6 +49,60 @@ const SCHEMA_BADGE: Record<string, string> = {
   silver: 'SLV',
   gold: 'GLD',
 };
+
+/**
+ * What a ghosted node is actually telling the user. A ghost used to mean only
+ * "the manifest has not been compiled recently", which was never worth saying;
+ * now it means the model is not in the project at all, or dbt refuses to build
+ * it, and those two are worth telling apart.
+ */
+const GHOST_REASON_TITLE: Record<NonNullable<ModelNodeData['ghostReason']>, string> = {
+  'not-in-project': 'not found in your dbt project (no .sql/.py/.csv file, no schema .yml entry, no manifest node)',
+  'disabled': 'disabled in dbt (enabled: false), so ref() to it does not compile',
+  'missing-in-comparison': 'not present in the stage being compared against',
+};
+
+/**
+ * Header chip text for each physical column source. Three letters, because the
+ * chip shares a fixed-height header row with the name and the schema badge —
+ * the sentence-length explanation lives in the chip's title and in the
+ * DetailPanel's "Columns from" row.
+ */
+const SOURCE_LABEL: Record<PhysicalColumnSource, string> = {
+  catalog: 'WH',
+  yml: 'YML',
+  manifest: 'DBT',
+  file: 'SQL',
+};
+
+/** How each source is named in prose (chip tooltip). */
+const SOURCE_PHRASE: Record<PhysicalColumnSource, string> = {
+  catalog: 'the warehouse catalog',
+  yml: 'your dbt .yml',
+  manifest: 'the dbt manifest',
+  file: 'the source file only',
+};
+
+/** Join a contributor list as prose: "a", "a and b", "a, b and c". */
+function joinPhrases(sources: PhysicalColumnSource[]): string {
+  const phrases = sources.map((s) => SOURCE_PHRASE[s]);
+  if (phrases.length <= 1) { return phrases[0] ?? ''; }
+  return `${phrases.slice(0, -1).join(', ')} and ${phrases[phrases.length - 1]}`;
+}
+
+/**
+ * The chip's full explanation. The untyped count is derived from the columns
+ * already in node data rather than shipped on the wire — "why is this type
+ * blank?" is the one question the chip has to be able to answer, and the
+ * answer is `dataType === ''`.
+ */
+function sourceTitle(provenance: PhysicalProvenance, columns: ColumnDisplay[]): string {
+  const untyped = columns.filter((c) => !c.dataType).length;
+  const base = `Types from ${SOURCE_PHRASE[provenance.types]}; columns from ${joinPhrases(provenance.columns)}`;
+  return untyped > 0
+    ? `${base} \u00b7 ${untyped} column${untyped === 1 ? ' has' : 's have'} no type`
+    : base;
+}
 
 
 /** Unicode circled numbers for SCD type badges. */
@@ -504,7 +559,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, ghostReason, provenance, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const send = useSend();
 
@@ -578,7 +633,7 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
 
   return (
     <div
-      className={`model-node model-node--${stageClass}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}`}
+      className={`model-node model-node--${stageClass}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}`}
       data-model-name={modelName}
       onContextMenu={handleContextMenu}
     >
@@ -594,15 +649,26 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
 
       {/* Header */}
       <div className="model-node__header">
-        <span className="model-node__name" title={modelName}>
+        <span className="model-node__name" title={ghostReason ? `${modelName} — ${GHOST_REASON_TITLE[ghostReason]}` : modelName}>
           {modelName}
         </span>
+        {provenance && (
+          <span
+            className={`model-node__source model-node__source--${provenance.types}`}
+            title={sourceTitle(provenance, columns)}
+          >
+            {SOURCE_LABEL[provenance.types]}
+          </span>
+        )}
         <span
-          className="model-node__badge"
+          className={`model-node__badge${schema ? '' : ' model-node__badge--layer'}`}
           style={layerConfig?.color ? {
             backgroundColor: `${layerConfig.color}33`,
             color: layerConfig.color,
           } : undefined}
+          title={schema
+            ? undefined
+            : `Layer: ${layerConfig?.label ?? layer} — no dbt schema resolved (run dbt compile or dbt docs generate)`}
         >
           {schema
             ? SCHEMA_BADGE[schema.toLowerCase()] ?? schema.substring(0, 3).toUpperCase()

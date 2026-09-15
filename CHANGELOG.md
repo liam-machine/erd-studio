@@ -10,13 +10,80 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Added
+
+- **`target/catalog.json` is read when it exists, so the Physical view finally knows your
+  warehouse.** dbt copies `manifest.json`'s column types straight out of your schema YAML,
+  so the stage named *Physical* has only ever shown you your own documentation reflected
+  back. `catalog.json` — written by `dbt docs generate` — is the one artifact that has
+  actually looked at the warehouse, and ERD Studio never opened it. It does now: real
+  column types, and columns nobody got round to documenting. It is unioned with your
+  declared columns rather than replacing them, because `dbt docs generate` runs far less
+  often than `dbt run` and a catalog-wins rule would hide a column you added an hour ago
+  and propose you delete it. Absent catalog, nothing changes. BigQuery's catalog
+  reports nested `STRUCT` fields as dotted paths (`address.city`); those leaves are
+  folded into their parent rather than rendered as columns no schema YAML could match.
+- **Every physical model says where its shape came from.** A chip on the node and a row in
+  the details panel name the source — warehouse, your YAML, the manifest, or just a file
+  on disk — so a `varchar` on the canvas no longer has to be taken on trust. Types resolve
+  warehouse → your `data_type:` → manifest, and a column nothing declares is left blank
+  rather than invented.
+
 ### Changed
 
-- **The README diagram now shows the relationship's cardinality.** The line joining
-  `dim_customer` and `fct_order` carried no notation, so a reader could see that the two
-  models were related but not how. It is now labelled **1** at the dimension and **\*** at the
-  fact, the same Power BI-style notation the canvas itself uses, so the picture says one
-  customer to many orders rather than leaving it to be inferred from the key names.
+- **The Physical view no longer needs you to have run dbt.** Existence used to mean
+  "present in the compiled manifest", so on a project with no `manifest.json` every single
+  model rendered as a grey ghost — the canvas said *nothing here exists* when what it meant
+  was *you have not run dbt lately*. A model now exists because your dbt project contains
+  it: a `.sql`, `.py` or `.csv` under your model, seed or snapshot paths, or a schema YAML,
+  manifest node or catalog relation naming it. Models dbt has **disabled** are the one
+  exception — `enabled: false` leaves the file on disk but makes `ref()` fail, so a bare
+  file no longer counts as existing for them, and a ghost says which of the two reasons
+  applies: missing entirely, or disabled. (A disabled model your schema YAML still
+  documents keeps what the YAML says — that is a different question.) Seeds and snapshots
+  are covered too; they used to vanish from the stage silently.
+- **A model you have designed but not built now appears as a ghost instead of vanishing.**
+  The stage used to drop anything it could not resolve, so the one thing you most wanted to
+  see — the gap between the design and the warehouse — was the thing it hid.
+- **Type comparison rebuilt on the spellings dbt adapters actually emit.** Postgres reports
+  `character varying(255)` and `timestamp(6) without time zone`; Snowflake reports bare
+  `TEXT` and `NUMBER`; BigQuery uses `ARRAY<…>`. The old parser split at the first `(` and
+  mangled most of them. Notably, a scale-zero or unparameterised `decimal`/`NUMBER` now
+  matches `int`/`bigint`, which is what stops a Snowflake project reporting a mismatch on
+  every integer column it has — while `decimal(15,2)` vs `integer` still mismatches.
+- **Sync plans now carry `resolvedDataType`, the type to actually write.** The existing
+  `sourceDataType` / `targetDataType` are named for the comparison *direction*, so which
+  one held the value you chose as ground truth flipped depending on whether you compared
+  from the logical or the physical stage — and an assistant following the harness table
+  could write the wrong one. With `undeclared` guaranteeing one side is empty, that meant
+  writing an empty `data_type:`. The new field is stage-absolute and the AI harness points
+  at it.
+- **A type declared on only one side is reported as `undeclared`, not a mismatch.** Most
+  projects omit `data_type:` from their YAML, which inflated the mismatch count with rows
+  where nothing actually disagreed. The sync action that writes the type into your YAML is
+  unchanged.
+- **The README diagram now shows both stages in one picture.** It used to stop at the
+  logical canvas, which left the Physical view — the half that reads your dbt project —
+  with no picture at all and no clue that it is the only half dbt is needed for. The
+  diagram now carries both: your two kinds of file rendering as the logical canvas above,
+  and, inside a dashed box labelled **optional — only if you use dbt**, your dbt project
+  deriving the same diagram as a physical view with its real columns and data types. A
+  `compare` link between the two canvases shows where the discrepancy view comes from,
+  and a caption says the thing the picture could not — the edges and cardinality come
+  from your own `relationships` and `unique` tests, and nothing is written to disk. The
+  relationship is labelled **1** at the dimension and **\*** at the fact in both halves,
+  the same Power BI-style notation the canvas itself uses.
+- **The README leads with why rather than how.** The value propositions used to arrive
+  fourth, behind two sections of mechanism. They now come first; the two mechanism
+  sections are merged into one **How it works** wrapped around the single diagram, so the
+  prose follows the picture; and the dbt-less setup is demoted from a top-level section to
+  a subsection of **Get started**, which is the weight it deserves. The README also now
+  says plainly that dbt is the only stack that can be read today, with an invitation to
+  contribute an integration for others.
+- **The AI coding harness is updated to version 17.** Its description of the Physical
+  stage was written when the stage was manifest-derived, so every assistant reading it was
+  being told the old story. If you have installed harness files, ERD Studio will offer to
+  update them on the next launch; nothing is overwritten without asking.
 
 ## 1.0.0 — 2026-09-12
 

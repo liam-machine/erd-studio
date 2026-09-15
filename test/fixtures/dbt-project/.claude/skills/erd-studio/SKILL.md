@@ -284,13 +284,26 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 
 ## Physical Stage (Read-Only)
 
-The physical stage has **no files on disk**. It is derived at runtime primarily from dbt `.yml` schema files, with optional enrichment from `target/manifest.json`:
+The physical stage has **no files on disk**. It is derived at runtime from the dbt project itself — source files, schema `.yml` files, `{target-path}/manifest.json` and `{target-path}/catalog.json`. None of those four is required, and in particular a project that has never been compiled still renders real models.
 
-1. **Models**: Logical models that have a corresponding `.yml` schema file appear in physical. Columns come from the `.yml` file; `data_type` is enriched from the manifest when available. PK/FK/NK flags, grain, modelRole, scdType, and additiveType carry forward from logical.
-2. **Relationships**: Derived from **dbt relationship tests declared in `.yml` files** — not copied from logical. Each `relationships` test becomes an edge.
-3. **Cardinality**: Derived from **uniqueness tests** in `.yml` files (and manifest when available) — no `unique` test = "many" side.
-4. **Scoping**: Only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
-5. **Fallback**: If no `.yml` files are found, the physical stage falls back to deriving entirely from `target/manifest.json`.
+1. **Existence**: a model is real (not a ghost) when **any** of these holds:
+   - a `<name>.sql`, `<name>.py` or `<name>.csv` file sits under a configured `model-paths`, `seed-paths` or `snapshot-paths` directory (so seeds and snapshots count), **and** dbt has not disabled the model;
+   - a dbt schema `.yml` under `model-paths` declares it;
+   - the compiled manifest carries a node for it;
+   - `catalog.json` carries a relation for it.
+
+   A model found in **none** of those is still drawn, as a **ghost** with no columns — the design references something the dbt project does not have. A model dbt has **disabled** lands in the manifest's `disabled` section and `ref()` to it fails, so a bare source file does not make it exist; with no other evidence it ghosts with a "disabled" reason. Ghosting therefore means "not in your dbt project", never "you have not run `dbt compile` lately".
+2. **Columns** come from two *kinds* of source. The **declared** list is the schema `.yml` when there is one, otherwise the manifest's copy of it — one source, because the manifest's column list is a compiled copy of the same yml patch, so where they disagree the manifest is merely stale. The **observed** list is `catalog.json`, an independent look at the warehouse relation. When a catalog relation resolves, the rendered list is their **union**: catalog order first, then any declared column the catalog has not seen. With no catalog it is the declared list alone. The catalog is only as fresh as the last `dbt docs generate`, which is exactly why it never *replaces* the declared list: a column added to the SQL and the yml an hour ago would otherwise vanish from physical and be proposed for deletion. A column in both keeps the **declared** spelling (Snowflake reports UPPERCASE keys; they never win the label).
+3. **Data types** are an ordered fallthrough per column: `catalog.json`, then the declared `data_type:`, then the manifest's copy of it, then blank. A column typed on only one stage is reported as **`undeclared`**, not as a type mismatch — writing `data_type:` into the schema yml (or running `dbt docs generate`) is what fills it in. Comparison understands warehouse spellings (`NUMBER`, `character varying(255)`, `timestamp without time zone`, `ARRAY<...>`), and treats a whole-number `NUMBER`/`decimal` as an integer.
+4. **Descriptions**: the `.yml` description, then the manifest's, then the catalog's column `comment` — the human's words beat the warehouse's echo of them, since `persist_docs` writes the dbt description *into* that comment.
+5. **Schema name**: manifest `schema`, then the catalog's `metadata.schema`, then blank. It cannot be derived from the filesystem (it needs `generate_schema_name` and `profiles.yml`), so with neither artifact the node badge falls back to the ERD **layer** abbreviation and says so — "physical works without dbt" does **not** extend to schema names.
+6. **Provenance**: every real physical model records which sources contributed its columns and which one supplied its types, shown as a chip on the node (WH = warehouse catalog, YML = your dbt `.yml`, DBT = the dbt manifest, SQL = the source file only) and spelled out in the detail panel. Runtime only — never written to disk.
+7. **Relationships**: derived from **dbt relationship tests** — the union of those declared in `.yml` files and those in the manifest, deduped; never copied from logical. `catalog.json` holds no constraint or foreign-key information, so it contributes no edges.
+8. **Cardinality**: derived from **uniqueness tests** merged from yml and manifest — no `unique` test = "many" side.
+9. **Scoping**: only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
+10. **Carried forward from logical**: PK/FK/NK flags, grain, modelRole, scdType and additiveType — dbt yml does not carry them.
+
+A model known **only** by the file that defines it renders as a real node with **zero columns**: nothing has stated its shape, and seeding it from the logical design would invent one. Sync comparison skips such a model entirely rather than reporting every logical column as missing. That suppression is automatic and distinct from `stubColumns`, which is the user's own switch for models they know are deliberately partial.
 
 ### Cardinality Derivation
 
@@ -324,4 +337,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 16 -->
+<!-- erd-studio-harness: 17 -->
