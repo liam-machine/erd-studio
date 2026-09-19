@@ -25,7 +25,7 @@ jobs:
 
       # Guard against .vscodeignore regressions: the marketplace package should
       # only contain package.json, README/CHANGELOG/LICENSE, media icons and
-      # dist/*. Sibling projects (mcp-server, forge-app), planning docs and
+      # dist/*. Sibling projects (mcp-server), planning docs and
       # node_modules must never be swept in. esbuild bundles every runtime
       # dependency into dist/, so vsce's npm dependency walk is skipped.
       - name: Check packaged file list stays lean
