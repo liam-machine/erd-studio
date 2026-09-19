@@ -76,4 +76,4 @@ Physical comparison needs dbt, so the canvas stays on the Logical stage — ever
 
 [File format reference](docs/semantic-domain-json-reference.md) · [Release notes](CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
 
-Free and open source under the [MIT licence](LICENSE).
+Free and open source under the [MIT licence](LICENSE), with one exception: the Atlassian Forge app in [`forge-app/`](forge-app/) is licensed separately under the [PolyForm Noncommercial License 1.0.0](forge-app/LICENSE). It is free for noncommercial use; commercial use needs a licence from the author.

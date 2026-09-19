@@ -1,0 +1,85 @@
+/**
+ * FkEdge styles — Confluence read-only version.
+ */
+
+/* -----------------------------------------------------------------------
+   Edge path
+   ----------------------------------------------------------------------- */
+
+.fk-edge {
+  stroke-width: 2;
+  fill: none;
+}
+
+/* -----------------------------------------------------------------------
+   Stage variants
+   ----------------------------------------------------------------------- */
+
+.fk-edge--logical {
+  stroke: var(--stage-logical);
+}
+
+.fk-edge--physical {
+  stroke: var(--stage-physical);
+}
+
+.fk-edge--ghost {
+  stroke: var(--stage-ghost);
+  stroke-dasharray: 5 3;
+}
+
+/* -----------------------------------------------------------------------
+   Dimming
+   ----------------------------------------------------------------------- */
+
+.fk-edge--dimmed {
+  opacity: 0.25;
+  filter: grayscale(0.4);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.fk-edge--dimmed:hover {
+  opacity: 0.4;
+}
+
+/* -----------------------------------------------------------------------
+   Cardinality labels
+   ----------------------------------------------------------------------- */
+
+.fk-edge__label {
+  position: absolute;
+  pointer-events: none;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.fk-edge__label--many {
+  font-size: 22px;
+}
+
+.fk-edge__label--logical {
+  color: var(--stage-logical);
+}
+
+.fk-edge__label--physical {
+  color: var(--stage-physical);
+}
+
+.fk-edge__label--ghost {
+  color: var(--stage-ghost);
+}
+
+.fk-edge__label--dimmed {
+  opacity: 0.25;
+  filter: grayscale(0.4);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+/* -----------------------------------------------------------------------
+   Hover interaction
+   ----------------------------------------------------------------------- */
+
+.fk-edge:hover {
+  stroke-width: 3;
+}

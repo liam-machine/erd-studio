@@ -1,0 +1,85 @@
+:root {
+  /* Editor */
+  --vscode-editor-background: #ffffff;
+  --vscode-editor-foreground: #172b4d;
+  --vscode-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --vscode-font-size: 13px;
+  --vscode-editor-font-family: 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Surfaces */
+  --vscode-sideBar-background: #f4f5f7;
+  --vscode-panel-border: #dfe1e6;
+  --vscode-editorGroup-border: #dfe1e6;
+
+  /* Buttons */
+  --vscode-button-background: #0052cc;
+  --vscode-button-foreground: #ffffff;
+  --vscode-button-hoverBackground: #0065ff;
+
+  /* Inputs */
+  --vscode-input-background: #fafbfc;
+  --vscode-input-foreground: #172b4d;
+  --vscode-input-border: #dfe1e6;
+  --vscode-focusBorder: #4c9aff;
+
+  /* Selection */
+  --vscode-editor-selectionBackground: #deebff;
+
+  /* Feedback */
+  --vscode-errorForeground: #de350b;
+  --vscode-editorWarning-foreground: #ff8b00;
+  --vscode-descriptionForeground: #6b778c;
+
+  /* Stage colors */
+  --stage-logical: #60a5fa;
+  --stage-physical: #22c55e;
+  --stage-ghost: #9ca3af;
+}
+
+/* Reset — do NOT set overflow:hidden on html/body, the Forge iframe
+   auto-resizer needs to measure scrollHeight to size the iframe. */
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--vscode-font-family);
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+}
+
+#root {
+  margin: 0;
+  padding: 0;
+}
+
+/*
+ * The spacer is a block-level element whose height drives the Forge
+ * iframe size. It participates in normal document flow so the
+ * auto-resizer can measure it via scrollHeight / offsetHeight.
+ */
+.erd-spacer {
+  position: relative;
+  width: 100%;
+  /* height is set inline via style prop */
+}
+
+/*
+ * The React Flow canvas is positioned absolutely inside the spacer
+ * so it fills the space without affecting document flow measurement.
+ */
+.erd-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.erd-center-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 16px;
+  text-align: center;
+  font-size: 14px;
+}

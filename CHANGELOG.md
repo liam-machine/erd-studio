@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+- The Atlassian Forge app in `forge-app/` (a Confluence macro for ERD Studio diagrams) is now
+  licensed separately under the PolyForm Noncommercial License 1.0.0. Nothing in the VS Code
+  extension changes; it stays MIT.
+
 ## 1.0.2 — 2026-09-15
 
 - feat: build the physical stage from the dbt project, not the manifest (#62)
