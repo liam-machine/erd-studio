@@ -1,7 +1,7 @@
 # erd-studio-mcp
 
 [![npm version](https://img.shields.io/npm/v/erd-studio-mcp.svg)](https://www.npmjs.com/package/erd-studio-mcp)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: PolyForm Shield](https://img.shields.io/badge/license-PolyForm%20Shield-blue.svg)](LICENSE)
 
 **MCP server for [ERD Studio](https://github.com/liam-machine/erd-studio)** — gives Claude, Cursor, Continue, Zed, or any [Model Context Protocol](https://modelcontextprotocol.io) client **read-only** access to your dbt project's semantic ERD model.
 
@@ -107,4 +107,4 @@ The MCP server still works on uninitialized projects — `list_manifest_models` 
 
 ## License
 
-MIT — see [LICENSE](https://github.com/liam-machine/erd-studio/blob/main/LICENSE) at the repo root.
+PolyForm Shield License 1.0.0 — see [LICENSE](https://github.com/liam-machine/erd-studio/blob/main/LICENSE) at the repo root. Free to use and modify for any purpose except offering a competing product.

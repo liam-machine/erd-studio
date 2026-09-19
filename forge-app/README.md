@@ -2,14 +2,7 @@
 
 ## Licence
 
-This directory is **not** covered by the MIT licence that applies to the rest of this
-repository. It is licensed under the
-[PolyForm Noncommercial License 1.0.0](LICENSE): you may use, modify and share it freely
-for noncommercial purposes. Commercial use of any kind, including selling it, bundling it
-into a paid product or offering it as a service, needs a separate licence from the
-copyright holder, Liam Wynne, who alone may relicense or open-source it.
-
-Required Notice: Copyright Liam Wynne (https://github.com/liam-machine)
+Licensed with the rest of the repository under the [PolyForm Shield License 1.0.0](../LICENSE).
 
 Forge automation action is currently in EAP, see the [documentation](https://developer.atlassian.com/platform/forge/manifest-reference/modules/automation-action/) for more details.
 

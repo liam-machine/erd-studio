@@ -14,11 +14,11 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/installs-short/liamwynne.erd-studio.svg" alt="Installs" /></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/rating-short/liamwynne.erd-studio.svg" alt="Rating" /></a>
   <a href="https://github.com/liam-machine/erd-studio"><img src="https://img.shields.io/github/stars/liam-machine/erd-studio?style=flat&logo=github&label=Star&color=0078d4" alt="GitHub stars" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0078d4" alt="License: MIT" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Shield-0078d4" alt="License: PolyForm Shield 1.0.0" /></a>
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><strong>Install for VS Code</strong></a> &bull; Free and open source
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><strong>Install for VS Code</strong></a> &bull; Free to use, source available
 </p>
 
 <p align="center">
@@ -76,4 +76,4 @@ Physical comparison needs dbt, so the canvas stays on the Logical stage — ever
 
 [File format reference](docs/semantic-domain-json-reference.md) · [Release notes](CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
 
-Free and open source under the [MIT licence](LICENSE), with one exception: the Atlassian Forge app in [`forge-app/`](forge-app/) is licensed separately under the [PolyForm Noncommercial License 1.0.0](forge-app/LICENSE). It is free for noncommercial use; commercial use needs a licence from the author.
+Free to use under the [PolyForm Shield License 1.0.0](LICENSE): use it, modify it and share it, at home or at work, for any purpose except offering a product that competes with ERD Studio. The source is public; only the author may sell it or relicense it.

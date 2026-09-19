@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Cloudflare Worker behind the ERD Studio feedback-analysis hosted tier. Not part of the extension build.",
   "type": "module",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "test": "node --test test/worker.test.mjs",
     "check": "node --check src/index.js && npx --yes typescript@5 tsc --noEmit -p tsconfig.json",

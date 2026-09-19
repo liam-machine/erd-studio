@@ -10,9 +10,10 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
-- The Atlassian Forge app in `forge-app/` (a Confluence macro for ERD Studio diagrams) is now
-  licensed separately under the PolyForm Noncommercial License 1.0.0. Nothing in the VS Code
-  extension changes; it stays MIT.
+- **Licence change: ERD Studio is now under the PolyForm Shield License 1.0.0** (previously MIT).
+  It stays free to use, modify and share, at home or at work, for any purpose except offering a
+  product that competes with ERD Studio. Versions published before this one remain under MIT.
+  The same licence covers the MCP server and the Atlassian Forge app in `forge-app/`.
 
 ## 1.0.2 — 2026-09-15
 

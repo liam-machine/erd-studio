@@ -247,7 +247,7 @@ export interface AnalysisDependencies {
  * endpoint, so it may not lean on any one vendor's tool or schema syntax.
  */
 export const ANALYSIS_SYSTEM_PROMPT = [
-  'You triage feedback that a user is about to file against an open-source editor extension.',
+  'You triage feedback that a user is about to file against a free, source-available editor extension.',
   'Reply with a single JSON object and nothing else — no prose, no code fence.',
   '',
   'The object has exactly these keys:',
