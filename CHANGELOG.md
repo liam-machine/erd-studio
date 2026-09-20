@@ -33,7 +33,9 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
   is now documented as such.
 - **The marketplace demo GIF showed the mistake.** Every frame displayed `dim_customer`
   with an **NK** badge on `customer_name`. It has been regenerated from the corrected
-  models, and now shows the surrogate/business key split on every dimension.
+  models, and now shows the surrogate/business key split on every dimension. The canvas in
+  each frame is the real webview rendering real data; the VS Code window around it is drawn
+  rather than screen-captured, with a file tree that mirrors the fixture project exactly.
 
 ### Changed
 
