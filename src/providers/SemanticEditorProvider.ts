@@ -59,7 +59,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { DomainService, relationshipReferencesColumn } from '../services/domainService';
+import {
+  DomainFileError,
+  DomainService,
+  isDomainFilePath,
+  relationshipReferencesColumn,
+} from '../services/domainService';
 import { compare as compareStages } from '../services/discrepancyService';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
@@ -93,6 +98,7 @@ import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
 import type {
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
+  ErrorMessage,
   OpenFeedbackLinkMessage,
   SetFeedbackProviderMessage,
   OpenFeedbackMessage,
@@ -120,8 +126,18 @@ import type {
   RelationshipResolution,
   ModelContext,
 } from '../types/syncPlan';
-import type { NodePosition, Relationship } from '../types/semantic';
+import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
+
+/**
+ * Backoff between re-reads of a domain file that read as empty or truncated.
+ * Four attempts across ~1.2s — comfortably longer than the gap between the
+ * create and the write of a file being replaced, and short enough that a file
+ * which really is broken still says so while the user is still looking.
+ */
+const DOMAIN_READ_RETRY_DELAYS_MS = [150, 350, 700];
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * logical-models/*.yml operations to bundle into a domain WorkspaceEdit so the
@@ -229,6 +245,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Keyed by document URI to support concurrent edits to multiple open domains.
    */
   private readonly pendingUpdates = new Map<string, boolean>();
+
+  /**
+   * The last load failure posted to each panel, so an error the user is
+   * already looking at is not re-posted by every refresh that re-reads the
+   * same broken file. Cleared whenever a payload gets through.
+   */
+  private readonly lastLoadError = new Map<string, string>();
 
   /**
    * logical-models/*.yml file paths this provider wrote through a
@@ -625,6 +648,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         switch (message.type) {
           case 'ready':
+            // `ready` is both the first load and the error screen's Retry, and
+            // a Retry always deserves an answer: the webview has already
+            // cleared its error, so a suppressed repeat would leave it showing
+            // "Loading domain…" for ever.
+            this.lastLoadError.delete(panelKey);
             // The initial load is the one refresh path allowed to persist
             // auto-computed positions for models that lack them.
             await this.sendDomainData(document, webviewPanel.webview, panelKey, { persistPositions: true });
@@ -1143,6 +1171,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.disposedWebviews.add(webviewPanel.webview);
       this.openPanels.delete(panelKey);
       this.editedModelPaths.delete(panelKey);
+      this.lastLoadError.delete(panelKey);
     });
   }
 
@@ -1539,6 +1568,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     panelKey?: string,
     options: { persistPositions?: boolean } = {},
   ): Promise<void> {
+    const errorKey = panelKey ?? document.uri.toString();
+
+    // A JSON file under the semantic dir is not automatically a domain. The
+    // custom editor's `**/.erd-studio/*/*.json` selector also matches
+    // `templates/*.json` and the other reserved directories, and a glob cannot
+    // express the exclusion, so the refusal lives here. Rendering a canvas for
+    // one of those can only ever end in a parse error the user cannot act on.
+    if (!isDomainFilePath(document.uri.fsPath)) {
+      this.postLoadError(webview, errorKey, {
+        message:
+          `${path.basename(document.uri.fsPath)} is not an ERD domain file — ` +
+          `domains live in ${path.basename(path.dirname(path.dirname(document.uri.fsPath)))}/{layer}/{domain}.json. ` +
+          `Open it as text to edit it.`,
+        kind: 'not-a-domain',
+      });
+      return;
+    }
+
     try {
       const key = panelKey ?? document.uri.toString();
       const panel = this.openPanels.get(key);
@@ -1549,7 +1596,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const catalog = await this.loadCatalog();
       const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
 
-      let unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+      let unifiedDomain = await this.readDomainTolerantly(document.uri.fsPath);
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
       const computed = this.computeMissingPositions(unifiedDomain);
@@ -1572,16 +1619,75 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
         this.post(webview, { type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
       } else {
-        const domain = this.domainService.getDomainStage(document.uri.fsPath);
+        const domain = DomainService.toLogicalStage(unifiedDomain);
         const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
         this.post(webview, { type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
       }
+      // A payload went out, so the next failure is news again.
+      this.lastLoadError.delete(errorKey);
     } catch (err) {
-      hostErrorLog.record('sendDomainData', err);
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[SemanticEditorProvider] Failed to parse domain: ${message}`);
-      this.post(webview, { type: 'error', payload: { message } });
+      this.postLoadError(webview, errorKey, {
+        message,
+        ...(err instanceof DomainFileError ? { kind: 'domain-file' as const } : {}),
+      }, err);
     }
+  }
+
+  /**
+   * Read a domain file, giving a writer that is replacing it time to finish.
+   *
+   * A domain file is replaced wholesale — by `git checkout`, by a formatter,
+   * by an AI agent following the installed harness — and for a few
+   * milliseconds mid-replacement it is empty or truncated. The watchers and
+   * `onDidChangeTextDocument` fire on the create, so the canvas reads exactly
+   * then. Re-reading a few times over ~1.2s turns what used to be a permanent
+   * error screen into a refresh nobody notices.
+   *
+   * Only `transient` failures are retried: a file that is missing, unreadable
+   * or structurally wrong will read the same way in a second, and making the
+   * user wait to be told so helps nobody.
+   */
+  private async readDomainTolerantly(filePath: string): Promise<UnifiedDomain> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return this.domainService.getDomain(filePath);
+      } catch (err) {
+        const last = attempt >= DOMAIN_READ_RETRY_DELAYS_MS.length;
+        if (last || !(err instanceof DomainFileError) || !err.transient) {
+          throw err;
+        }
+        console.warn(
+          `[SemanticEditorProvider] ${filePath} is ${err.reason} — ` +
+          `re-reading in ${DOMAIN_READ_RETRY_DELAYS_MS[attempt]}ms (likely mid-write)`,
+        );
+        await delay(DOMAIN_READ_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }
+
+  /**
+   * Post a load failure to the canvas, at most once per distinct message.
+   *
+   * Issue #64 arrived with the same parse error fifteen times in six seconds:
+   * an external writer touched fifteen model files, each refresh re-read the
+   * same broken domain, and each one logged and posted afresh. Repeating an
+   * error the user is already looking at tells them nothing and buries the
+   * genuinely new entries in the diagnostics the bug report collects.
+   */
+  private postLoadError(
+    webview: vscode.Webview,
+    errorKey: string,
+    payload: ErrorMessage['payload'],
+    err?: unknown,
+  ): void {
+    if (this.lastLoadError.get(errorKey) === payload.message) {
+      return;
+    }
+    this.lastLoadError.set(errorKey, payload.message);
+    hostErrorLog.record('sendDomainData', err ?? payload.message);
+    console.error(`[SemanticEditorProvider] Failed to load domain: ${payload.message}`);
+    this.post(webview, { type: 'error', payload });
   }
 
   /**

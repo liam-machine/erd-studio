@@ -14,6 +14,7 @@ import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { ModelFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 import type { ModelTemplate, Stage } from '../../src/types/semantic';
 import type { GroundTruth } from '../../src/types/syncPlan';
+import type { ErrorMessage } from '../../src/types/messages';
 import type {
   FeedbackAnalysis,
   FeedbackCapabilities,
@@ -99,6 +100,12 @@ export interface EditorState {
   domain: DisplayDomain | null;
   /** Error message from the extension host, if any. */
   error: string | null;
+  /**
+   * What kind of failure `error` describes, when the host said. Only the
+   * initial-load error screen reads it — it decides which recovery actions
+   * are worth offering (see App.tsx). Null for an unclassified error.
+   */
+  errorKind: ErrorMessage['payload']['kind'] | null;
   /** React Flow nodes (local state for selection/drag). */
   nodes: (ModelFlowNode | AnnotationFlowNode)[];
   /** React Flow edges. */
@@ -223,7 +230,7 @@ export interface EditorActions {
   setDomain: (domain: DisplayDomain) => void;
   /** Hide the physical-source notice for the rest of this session. */
   dismissPhysicalSourceNotice: () => void;
-  setError: (error: string | null) => void;
+  setError: (error: string | null, kind?: ErrorMessage['payload']['kind']) => void;
   setNodes: (nodes: (ModelFlowNode | AnnotationFlowNode)[]) => void;
   setEdges: (edges: (FkFlowEdge | AnnotationFlowEdge)[]) => void;
   /** Set the annotation currently being edited (auto-focus). */
@@ -361,6 +368,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   addExistingModelDialogOpen: false,
   domain: null,
   error: null,
+  errorKind: null,
   nodes: [],
   edges: [],
   templates: [],
@@ -421,6 +429,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setDomain: (domain) => set((state) => ({
     domain,
     error: null,
+    errorKind: null,
     // The notice gets to speak again only when the artifacts behind the stage
     // actually changed. setDomain is NOT only a host payload — usePositionPersistence
     // calls it locally to merge optimistic positions after a drag — so resetting
@@ -444,7 +453,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
         }
       : {}),
   })),
-  setError: (error) => set({ error }),
+  setError: (error, kind) => set({ error, errorKind: error === null ? null : (kind ?? null) }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   setTemplates: (templates) => set({ templates }),

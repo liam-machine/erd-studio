@@ -60,6 +60,18 @@ export interface ErrorMessage {
   type: 'error';
   payload: {
     message: string;
+    /**
+     * What kind of failure this is, for the initial-load error screen. Absent
+     * means an ordinary error — the screen offers Retry and nothing more.
+     *
+     * - `domain-file` — the domain file could not be read or parsed. Retrying
+     *   is worth offering (the file may have been mid-write), and so is
+     *   opening it, since the user is the one who can fix the JSON.
+     * - `not-a-domain` — this JSON lives under the semantic dir but is not a
+     *   domain file (a template, a reserved directory). Retrying can never
+     *   help; opening it as text is the only sensible action.
+     */
+    kind?: 'domain-file' | 'not-a-domain';
   };
 }
 

@@ -34,6 +34,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { LOGICAL_MODELS_DIR } from '../services/logicalModelService';
+import { NON_DOMAIN_DIRS } from '../services/domainService';
 import { LAYERS_CONFIG_FILE } from '../services/layerService';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
 import {
@@ -51,12 +52,6 @@ const DEBOUNCE_DELAY_MS = 300;
  */
 const PROJECT_PATH_KEY_RE =
   /^(target-path|model-paths|source-paths|seed-paths|data-paths|snapshot-paths)\s*:/;
-
-/**
- * Sub-directories of the semantic dir that never contain domain files.
- * Deletes inside these must not surface as "Domain file deleted".
- */
-const NON_DOMAIN_DIRS = new Set(['templates', LOGICAL_MODELS_DIR, 'logical', 'physical']);
 
 /**
  * Classify a path under the semantic directory.

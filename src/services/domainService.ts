@@ -20,6 +20,7 @@ import type { CatalogData, CatalogColumn } from '../types/catalog';
 import type { YmlData } from '../types/ymlData';
 import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
+import { LOGICAL_MODELS_DIR } from './logicalModelService';
 import type { LogicalModelService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
 
@@ -35,6 +36,68 @@ interface RelationshipTest {
 }
 
 const DEFAULT_SEMANTIC_DIR = '.erd-studio';
+
+/**
+ * Sub-directories of the semantic dir that never contain domain files.
+ *
+ * The single source of truth for "is this `{semanticDir}/x/y.json` a domain?".
+ * The watcher classifies delete events through it, and the custom editor
+ * refuses to render a canvas for anything it excludes — a template opened from
+ * the explorer is a JSON file to edit, not a diagram to draw.
+ */
+export const NON_DOMAIN_DIRS: ReadonlySet<string> = new Set([
+  'templates', LOGICAL_MODELS_DIR, 'logical', 'physical',
+]);
+
+/**
+ * Does `fsPath` have the shape of a domain file — `{layer}/{domain}.json`,
+ * where the parent segment is a layer rather than one of the reserved
+ * directories, and neither segment is hidden?
+ *
+ * Shape only: it says nothing about whether the layer is configured or the
+ * file parses. Callers that know the semantic root should prefer
+ * `classifySemanticPath()`, which also proves the path is *under* it; this one
+ * exists for the custom editor, which is handed a document whose path the
+ * `**​/.erd-studio/*​/*.json` selector has already placed.
+ */
+export function isDomainFilePath(fsPath: string): boolean {
+  const file = path.basename(fsPath);
+  const dir = path.basename(path.dirname(fsPath));
+  return (
+    file.endsWith('.json') &&
+    !file.startsWith('.') &&
+    !dir.startsWith('.') &&
+    !NON_DOMAIN_DIRS.has(dir)
+  );
+}
+
+/** Why a domain file could not be turned into a `UnifiedDomain`. */
+export type DomainFileErrorReason = 'missing' | 'unreadable' | 'empty' | 'invalid-json';
+
+/**
+ * A domain file that could not be read or parsed.
+ *
+ * `transient` is the point of the type. A domain file is replaced, not patched
+ * in place — by `git checkout`, by a formatter, by an AI agent following the
+ * installed harness — and for a few milliseconds mid-replacement it is empty
+ * or truncated. Reading it in that window is not an error about the project;
+ * it is an error about the timing of the read, and the fix is to read again.
+ * `ManifestService` already treats a malformed `manifest.json` this way (dbt
+ * mid-write); this is the same courtesy for the file the canvas is built from.
+ */
+export class DomainFileError extends Error {
+  readonly transient: boolean;
+
+  constructor(
+    readonly reason: DomainFileErrorReason,
+    readonly filePath: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'DomainFileError';
+    this.transient = reason === 'empty' || reason === 'invalid-json';
+  }
+}
 
 const VALID_CARDINALITIES: ReadonlySet<Cardinality> = new Set<Cardinality>([
   'many-to-one', 'one-to-one', 'one-to-many', 'many-to-many',
@@ -135,10 +198,15 @@ export class DomainService {
 
   /**
    * Read and parse a domain JSON file, returning a UnifiedDomain.
+   *
+   * Every failure before `validateDomain` is raised as a `DomainFileError` so
+   * callers can tell a file that is momentarily unreadable (empty or truncated
+   * because something is writing it right now) from one that is genuinely
+   * wrong. See `DomainFileError` for why that distinction is load-bearing.
    */
   getDomain(filePath: string): UnifiedDomain {
     if (!fs.existsSync(filePath)) {
-      throw new Error(`Domain file not found: ${filePath}`);
+      throw new DomainFileError('missing', filePath, `Domain file not found: ${filePath}`);
     }
 
     let raw: string;
@@ -146,7 +214,15 @@ export class DomainService {
       raw = fs.readFileSync(filePath, 'utf-8');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to read domain file: ${message}`);
+      throw new DomainFileError('unreadable', filePath, `Failed to read domain file: ${message}`);
+    }
+
+    if (raw.trim() === '') {
+      // Almost always a file mid-creation: the create event lands a zero-byte
+      // file and the content follows milliseconds later. Say what is true of
+      // the file rather than echoing "Unexpected end of JSON input", which
+      // reads as corruption when nothing is corrupt.
+      throw new DomainFileError('empty', filePath, `Domain file is empty: ${filePath}`);
     }
 
     let parsed: unknown;
@@ -154,7 +230,11 @@ export class DomainService {
       parsed = JSON.parse(raw);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`Invalid JSON in domain file ${filePath}: ${message}`);
+      throw new DomainFileError(
+        'invalid-json',
+        filePath,
+        `Invalid JSON in domain file ${filePath}: ${message}`,
+      );
     }
 
     return this.validateDomain(parsed, filePath);
@@ -166,7 +246,17 @@ export class DomainService {
    * Physical stage is not supported here — use buildPhysicalDomain() instead.
    */
   getDomainStage(filePath: string): SemanticDomain {
-    const unified = this.getDomain(filePath);
+    return DomainService.toLogicalStage(this.getDomain(filePath));
+  }
+
+  /**
+   * Project an already-read `UnifiedDomain` onto its logical stage.
+   *
+   * Pure, and separate from `getDomainStage` so a caller holding a
+   * `UnifiedDomain` does not have to read the file a second time — a second
+   * read is a second chance to catch the file mid-replacement.
+   */
+  static toLogicalStage(unified: UnifiedDomain): SemanticDomain {
     const stageData = unified.logical;
 
     return {

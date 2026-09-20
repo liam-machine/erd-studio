@@ -25,7 +25,7 @@ const domain: DisplayDomain = {
 } as DisplayDomain;
 
 beforeEach(() => {
-  useEditorStore.setState({ domain: null, error: null });
+  useEditorStore.setState({ domain: null, error: null, errorKind: null });
 });
 
 describe('editorStore error lifecycle', () => {
@@ -53,6 +53,31 @@ describe('editorStore error lifecycle', () => {
     s.setDomain({ ...domain, description: 'reloaded' });
     expect(useEditorStore.getState().error).toBeNull();
     expect(useEditorStore.getState().domain?.description).toBe('reloaded');
+  });
+
+  // The initial-load error screen decides which recovery actions to offer
+  // from `errorKind`, so it has to travel with the message and clear with it.
+  it('carries the host-supplied kind, and drops it when the error clears', () => {
+    const s = useEditorStore.getState();
+    s.setError('Domain file is empty: /p/.erd-studio/silver/sales.json', 'domain-file');
+    expect(useEditorStore.getState().errorKind).toBe('domain-file');
+
+    s.setError(null);
+    expect(useEditorStore.getState().errorKind).toBeNull();
+  });
+
+  it('forgets a previous kind when an unclassified error replaces it', () => {
+    const s = useEditorStore.getState();
+    s.setError('fact.json is not an ERD domain file', 'not-a-domain');
+    s.setError('Failed to rename model: EACCES');
+    expect(useEditorStore.getState().errorKind).toBeNull();
+  });
+
+  it('a domain payload clears the kind along with the error', () => {
+    const s = useEditorStore.getState();
+    s.setError('Domain file is empty', 'domain-file');
+    s.setDomain(domain);
+    expect(useEditorStore.getState().errorKind).toBeNull();
   });
 
   it('unrelated selection changes do not clear the error', () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { DomainService, derivePhysicalRelationships, relationshipReferencesColumn, renameDomainInRaw } from '../../src/services/domainService';
+import { DomainFileError, DomainService, derivePhysicalRelationships, isDomainFilePath, relationshipReferencesColumn, renameDomainInRaw } from '../../src/services/domainService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import type { LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
@@ -157,6 +157,68 @@ describe('DomainService', () => {
         MALFORMED_PROJECT_PATH, '.erd-studio', 'silver', 'broken.json'
       );
       expect(() => service.getDomain(filePath)).toThrow('Invalid JSON');
+    });
+
+    // A domain file is replaced wholesale, so "empty" and "truncated" are the
+    // two states a reader catches it in mid-write. Both have to be reported as
+    // retryable, or the canvas turns a timing accident into a dead end (#64).
+    it('reports an unparseable file as a transient DomainFileError', () => {
+      const filePath = path.join(
+        MALFORMED_PROJECT_PATH, '.erd-studio', 'silver', 'broken.json'
+      );
+      let thrown: unknown;
+      try { service.getDomain(filePath); } catch (err) { thrown = err; }
+
+      expect(thrown).toBeInstanceOf(DomainFileError);
+      expect((thrown as DomainFileError).reason).toBe('invalid-json');
+      expect((thrown as DomainFileError).transient).toBe(true);
+      expect((thrown as DomainFileError).filePath).toBe(filePath);
+    });
+
+    it('reports an empty file as empty, not as broken JSON', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-empty-'));
+      const filePath = path.join(dir, 'sales.json');
+      fs.writeFileSync(filePath, '   \n');
+      try {
+        let thrown: unknown;
+        try { service.getDomain(filePath); } catch (err) { thrown = err; }
+
+        expect(thrown).toBeInstanceOf(DomainFileError);
+        expect((thrown as DomainFileError).reason).toBe('empty');
+        expect((thrown as DomainFileError).transient).toBe(true);
+        expect((thrown as Error).message).toContain('Domain file is empty');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('reports a missing file as a non-transient DomainFileError', () => {
+      let thrown: unknown;
+      try { service.getDomain('/nonexistent/domain.json'); } catch (err) { thrown = err; }
+
+      expect(thrown).toBeInstanceOf(DomainFileError);
+      expect((thrown as DomainFileError).reason).toBe('missing');
+      expect((thrown as DomainFileError).transient).toBe(false);
+    });
+  });
+
+  describe('isDomainFilePath', () => {
+    it('accepts {layer}/{domain}.json', () => {
+      expect(isDomainFilePath('/p/.erd-studio/silver/sales.json')).toBe(true);
+      expect(isDomainFilePath('/p/.erd-studio/gold/reporting.json')).toBe(true);
+    });
+
+    it('rejects the reserved directories the custom editor glob also matches', () => {
+      expect(isDomainFilePath('/p/.erd-studio/templates/fact.json')).toBe(false);
+      expect(isDomainFilePath('/p/.erd-studio/templates/{id}.json')).toBe(false);
+      expect(isDomainFilePath('/p/.erd-studio/logical-models/dim_customer.json')).toBe(false);
+      expect(isDomainFilePath('/p/.erd-studio/logical/sales.json')).toBe(false);
+      expect(isDomainFilePath('/p/.erd-studio/physical/sales.json')).toBe(false);
+    });
+
+    it('rejects hidden files and hidden layer directories', () => {
+      expect(isDomainFilePath('/p/.erd-studio/silver/.sync-plan.json')).toBe(false);
+      expect(isDomainFilePath('/p/.erd-studio/.trash/sales.json')).toBe(false);
     });
 
     it('throws when schemaVersion is missing', () => {

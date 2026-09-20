@@ -8,6 +8,28 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+
+- **A domain file caught mid-write no longer breaks the canvas** (#64). A domain file is
+  replaced wholesale — by `git checkout`, by a formatter, by an AI agent following the
+  installed harness — and for a few milliseconds it is empty or truncated. The canvas read
+  it exactly then and showed `Invalid JSON in domain file …: Unexpected end of JSON input`
+  as a permanent error. It now re-reads over about a second before giving up, so the write
+  lands and the diagram draws. A file that really is empty now says it is empty instead of
+  quoting the JSON parser.
+- **Template files no longer open as a broken diagram** (#64). Opening
+  `.erd-studio/templates/*.json` (or anything else in a reserved directory) used to launch
+  the ERD canvas, which could only fail. It now says what the file is and offers to open it
+  as text.
+- **The canvas error screen can now do something about the error.** A domain file it cannot
+  parse gets an **Open as Text** button, so the file you have to fix is one click away.
+- **One error instead of fifteen.** A burst of refreshes over the same broken file posted
+  the identical error every time, flooding the canvas and the diagnostics attached to bug
+  reports. Repeats are now suppressed until something changes — pressing **Retry** always
+  gets a fresh answer.
+
 ## 1.0.3 — 2026-09-19
 
 - **Licence change: ERD Studio is now under the PolyForm Shield License 1.0.0** (previously MIT).

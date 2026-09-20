@@ -93,6 +93,7 @@ const edgeTypes: EdgeTypes = { fk: FkEdge, annotationLink: AnnotationEdge };
 function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
   const error = useEditorStore((s) => s.error);
+  const errorKind = useEditorStore((s) => s.errorKind);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const setError = useEditorStore((s) => s.setError);
@@ -234,7 +235,7 @@ function EditorCanvas() {
           break;
         case 'error':
           useEditorStore.getState().recordError('extension', msg.payload.message);
-          setError(msg.payload.message);
+          setError(msg.payload.message, msg.payload.kind);
           break;
         case 'openFeedback':
           useEditorStore.getState().setFeedbackDialogOpen(true, msg.payload ?? null);
@@ -276,6 +277,12 @@ function EditorCanvas() {
     setError(null);
     vscode.postMessage({ type: 'ready' });
   }, [setError, vscode]);
+
+  // Open the underlying JSON in VS Code's text editor — the only way to repair
+  // a domain file the canvas cannot parse, and the right home for a template.
+  const handleOpenFile = useCallback(() => {
+    vscode.postMessage({ type: 'viewFile' });
+  }, [vscode]);
 
   // Host error toast dismissal (canvas stays mounted; see render below)
   const dismissError = useCallback(() => setError(null), [setError]);
@@ -603,16 +610,36 @@ function EditorCanvas() {
   // automatically by the next domainLoaded / domainUpdated / stageData.
 
   if (error && !domain) {
+    // `not-a-domain` is settled: this JSON is a template or lives in a
+    // reserved directory, and no amount of retrying turns it into a domain.
+    // Offering Retry there would be an invitation to press a button that
+    // cannot work. Opening it as text is the action that does.
+    const canRetry = errorKind !== 'not-a-domain';
+    // The user is the only one who can repair a domain file, so give them a
+    // way to see it. Issue #64 dead-ended precisely here: an unparseable file,
+    // named in the message, with no route to it.
+    const canOpenFile = errorKind === 'domain-file' || errorKind === 'not-a-domain';
     return (
       <div className="editor-message editor-message--error" role="alert">
         <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
-        <button
-          type="button"
-          className="editor-message__retry"
-          onClick={handleRetryLoad}
-        >
-          Retry
-        </button>
+        {canRetry && (
+          <button
+            type="button"
+            className="editor-message__retry"
+            onClick={handleRetryLoad}
+          >
+            Retry
+          </button>
+        )}
+        {canOpenFile && (
+          <button
+            type="button"
+            className="editor-message__button"
+            onClick={handleOpenFile}
+          >
+            Open as Text
+          </button>
+        )}
         <button
           type="button"
           className="editor-message__button"
