@@ -255,8 +255,8 @@ describe('CatalogService', () => {
     const dimTask = data!.byUniqueId.get('model.my_dbt_project.dim_task')!;
     expect(dimTask.schema).toBe('SILVER_SCHEMA');
     expect(dimTask.columns.map((c) => c.name)).toEqual([
-      'TASK_ID',
-      'PROJECT_ID',
+      'TASK_KEY',
+      'PROJECT_KEY',
       'NAME',
       'STATUS',
     ]);

@@ -318,7 +318,7 @@ describe('catalog injection', () => {
     // Manifest-first for the schema: the catalog reports SILVER_SCHEMA.
     expect(task.schema).toBe('silver');
     // Declared spelling wins for display, not the catalog's UPPERCASE keys.
-    expect(task.columns.map((c: any) => c.name)).toEqual(['task_id', 'project_id', 'name', 'status']);
+    expect(task.columns.map((c: any) => c.name)).toEqual(['task_key', 'project_key', 'name', 'status']);
 
     // A column the warehouse has and nothing declares is appended, not hidden.
     const event = payload.models.find((m: any) => m.name === 'fct_task_event');

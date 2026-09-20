@@ -17,16 +17,16 @@
         "owner": "TRANSFORMER"
       },
       "columns": {
-        "TASK_ID": {
+        "TASK_KEY": {
           "type": "NUMBER(38,0)",
           "index": 1,
-          "name": "TASK_ID",
+          "name": "TASK_KEY",
           "comment": null
         },
-        "PROJECT_ID": {
+        "PROJECT_KEY": {
           "type": "NUMBER",
           "index": 2,
-          "name": "PROJECT_ID",
+          "name": "PROJECT_KEY",
           "comment": null
         },
         "NAME": {
@@ -77,10 +77,10 @@
         "owner": "transformer"
       },
       "columns": {
-        "project_id": {
+        "project_key": {
           "type": "integer",
           "index": 1,
-          "name": "project_id",
+          "name": "project_key",
           "comment": null
         },
         "project_name": {
@@ -117,10 +117,10 @@
           "name": "event_id",
           "comment": null
         },
-        "task_id": {
+        "task_key": {
           "type": "integer",
           "index": 2,
-          "name": "task_id",
+          "name": "task_key",
           "comment": null
         },
         "event_date": {
@@ -139,7 +139,7 @@
           "type": "timestamp with time zone",
           "index": 5,
           "name": "loaded_at",
-          "comment": "Warehouse load timestamp — not declared in the schema .yml"
+          "comment": "Warehouse load timestamp \u2014 not declared in the schema .yml"
         }
       },
       "stats": {

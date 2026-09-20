@@ -3,16 +3,21 @@ description: Order transaction fact table
 columns:
   - name: order_id
     dataType: INT
-    description: Surrogate key for order
-  - name: customer_id
+    description: Order id from the source system — a degenerate dimension, and this fact's own key
+    isPrimaryKey: true
+    isNaturalKey: true
+  - name: customer_key
     dataType: INT
     description: FK to dim_customer
+    isForeignKey: true
   - name: order_date
     dataType: DATE
     description: Date the order was placed
-  - name: project_id
+  - name: project_key
     dataType: INT
     description: FK to dim_project
+    isForeignKey: true
   - name: amount
     dataType: DECIMAL
     description: Order total amount
+    additiveType: additive

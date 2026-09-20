@@ -46,7 +46,7 @@ describe('ManifestService', () => {
       expect(names).toContain('dim_project');
       expect(names).toContain('fct_task_event');
       // Should NOT contain test or seed nodes
-      expect(names).not.toContain('not_null_dim_task_task_id');
+      expect(names).not.toContain('not_null_dim_task_task_key');
       expect(names).not.toContain('seed_status_codes');
     });
 
@@ -97,8 +97,8 @@ describe('ManifestService', () => {
       expect(columns).toHaveLength(4);
 
       const colNames = columns.map((c) => c.name);
-      expect(colNames).toContain('task_id');
-      expect(colNames).toContain('project_id');
+      expect(colNames).toContain('task_key');
+      expect(colNames).toContain('project_key');
       expect(colNames).toContain('name');
       expect(colNames).toContain('status');
     });
@@ -107,7 +107,7 @@ describe('ManifestService', () => {
       await service.loadManifest(FIXTURE_PROJECT_PATH);
       const columns = service.getModelColumns('dim_task');
 
-      const pkCol = columns.find((c) => c.name === 'task_id');
+      const pkCol = columns.find((c) => c.name === 'task_key');
       expect(pkCol).toBeDefined();
       expect(pkCol!.data_type).toBe('INT');
       expect(pkCol!.description).toBe('Surrogate key for task');
@@ -142,7 +142,7 @@ describe('ManifestService', () => {
     it('returns false for non-model nodes (tests, seeds)', async () => {
       await service.loadManifest(FIXTURE_PROJECT_PATH);
 
-      expect(service.hasModel('not_null_dim_task_task_id')).toBe(false);
+      expect(service.hasModel('not_null_dim_task_task_key')).toBe(false);
       expect(service.hasModel('seed_status_codes')).toBe(false);
     });
 
@@ -315,8 +315,8 @@ describe('ManifestService', () => {
       );
 
       expect(relTest).toBeDefined();
-      expect(relTest!.fromColumn).toBe('project_id');
-      expect(relTest!.toColumn).toBe('project_id');
+      expect(relTest!.fromColumn).toBe('project_key');
+      expect(relTest!.toColumn).toBe('project_key');
     });
 
     it('extracts fromModel from attached_node when available', async () => {
@@ -366,17 +366,17 @@ describe('ManifestService', () => {
       const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
 
       expect(data.uniqueColumns).toBeInstanceOf(Map);
-      // dim_task.task_id, dim_project.project_id, fct_task_event.event_id
-      expect(data.uniqueColumns.get('dim_task')?.has('task_id')).toBe(true);
-      expect(data.uniqueColumns.get('dim_project')?.has('project_id')).toBe(true);
+      // dim_task.task_key, dim_project.project_key, fct_task_event.event_id
+      expect(data.uniqueColumns.get('dim_task')?.has('task_key')).toBe(true);
+      expect(data.uniqueColumns.get('dim_project')?.has('project_key')).toBe(true);
       expect(data.uniqueColumns.get('fct_task_event')?.has('event_id')).toBe(true);
     });
 
     it('does not include non-unique columns', async () => {
       const data = await service.loadManifest(FIXTURE_PROJECT_PATH);
 
-      // project_id on dim_task has a not_null test but not a unique test
-      expect(data.uniqueColumns.get('dim_task')?.has('project_id')).toBeFalsy();
+      // project_key on dim_task has a not_null test but not a unique test
+      expect(data.uniqueColumns.get('dim_task')?.has('project_key')).toBeFalsy();
     });
 
     it('returns empty maps when no unique tests exist', async () => {

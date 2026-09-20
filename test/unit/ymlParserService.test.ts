@@ -50,7 +50,7 @@ describe('YmlParserService', () => {
 
       expect(model!.columns).toHaveLength(4);
 
-      const taskId = model!.columns.find((c) => c.name === 'task_id');
+      const taskId = model!.columns.find((c) => c.name === 'task_key');
       expect(taskId).toBeDefined();
       expect(taskId!.description).toBe('Surrogate key for task');
       expect(taskId!.dataType).toBeNull(); // No data_type declared
@@ -77,11 +77,11 @@ describe('YmlParserService', () => {
       const data = await service.loadYmlData(FIXTURE_PROJECT_PATH);
 
       // dim_task.task_id -> fct_sale.amount
-      // fct_sale.sale_id -> dim_project.project_id
+      // fct_sale.sale_id -> dim_project.project_key
       expect(data.relationshipTests.length).toBeGreaterThanOrEqual(2);
 
       const taskRel = data.relationshipTests.find(
-        (t) => t.fromModel === 'dim_task' && t.fromColumn === 'task_id',
+        (t) => t.fromModel === 'dim_task' && t.fromColumn === 'task_key',
       );
       expect(taskRel).toBeDefined();
       expect(taskRel!.toModel).toBe('fct_sale');
@@ -92,7 +92,7 @@ describe('YmlParserService', () => {
       );
       expect(saleRel).toBeDefined();
       expect(saleRel!.toModel).toBe('dim_project');
-      expect(saleRel!.toColumn).toBe('project_id');
+      expect(saleRel!.toColumn).toBe('project_key');
     });
 
     it('extracts tags from config block', async () => {

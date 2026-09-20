@@ -2,70 +2,94 @@
   "schemaVersion": 5,
   "domain": "showcase",
   "layer": "silver",
-  "description": "Project task management — tracks projects, tasks, events, and customers",
+  "description": "Project task management \u2014 tracks projects, tasks, events, and customers",
   "modelFolder": "models/silver",
   "logical": {
     "models": [
       "fct_task_event",
-      "dim_project",
       "dim_task",
+      "dim_project",
+      "dim_customer",
+      "dim_date",
       "fct_order"
     ],
     "relationships": [
       {
         "fromModel": "fct_task_event",
-        "fromColumn": "task_id",
+        "fromColumn": "task_key",
         "toModel": "dim_task",
-        "toColumn": "task_id",
+        "toColumn": "task_key",
         "cardinality": "many-to-one"
       },
       {
         "fromModel": "dim_task",
-        "fromColumn": "project_id",
+        "fromColumn": "project_key",
         "toModel": "dim_project",
-        "toColumn": "project_id",
+        "toColumn": "project_key",
         "cardinality": "many-to-one"
       },
       {
         "fromModel": "fct_task_event",
-        "fromColumn": "project_id",
+        "fromColumn": "project_key",
         "toModel": "dim_project",
-        "toColumn": "project_id",
+        "toColumn": "project_key",
         "cardinality": "many-to-one"
       },
       {
         "fromModel": "dim_project",
-        "fromColumn": "parent_project_id",
+        "fromColumn": "parent_project_key",
         "toModel": "dim_project",
-        "toColumn": "project_id",
+        "toColumn": "project_key",
         "cardinality": "many-to-one"
       },
       {
         "fromModel": "fct_order",
-        "fromColumn": "project_id",
+        "fromColumn": "project_key",
         "toModel": "dim_project",
-        "toColumn": "project_id",
+        "toColumn": "project_key",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_task_event",
+        "fromColumn": "customer_key",
+        "toModel": "dim_customer",
+        "toColumn": "customer_key",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "fct_order",
+        "fromColumn": "customer_key",
+        "toModel": "dim_customer",
+        "toColumn": "customer_key",
         "cardinality": "many-to-one"
       }
     ]
   },
   "viewConfig": {
     "positions": {
-      "fct_task_event": {
-        "x": 390,
-        "y": 378
+      "dim_customer": {
+        "x": 40,
+        "y": 60
       },
       "dim_project": {
-        "x": 976,
-        "y": 72
-      },
-      "dim_task": {
-        "x": 1017,
-        "y": 465
+        "x": 980,
+        "y": 60
       },
       "fct_order": {
-        "x": 396,
-        "y": -16
+        "x": 500,
+        "y": 250
+      },
+      "dim_date": {
+        "x": 40,
+        "y": 520
+      },
+      "dim_task": {
+        "x": 980,
+        "y": 470
+      },
+      "fct_task_event": {
+        "x": 500,
+        "y": 640
       }
     },
     "annotations": []

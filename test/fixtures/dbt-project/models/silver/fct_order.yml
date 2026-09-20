@@ -12,20 +12,20 @@ models:
         tests:
           - unique
           - not_null
-      - name: customer_id
+      - name: customer_key
         description: FK to dim_customer
         data_type: INT
         tests:
           - relationships:
               to: ref('dim_customer')
-              field: customer_id
-      - name: project_id
+              field: customer_key
+      - name: project_key
         description: FK to dim_project
         data_type: INT
         tests:
           - relationships:
               to: ref('dim_project')
-              field: project_id
+              field: project_key
       - name: order_date
         description: Date the order was placed
         data_type: DATE

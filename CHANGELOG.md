@@ -8,6 +8,39 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+
+- **The built-in templates no longer conflate the surrogate key with the business key.**
+  Every dimension template started `{name}_id`, described it as a "Surrogate key" and made
+  it the primary key. That is two mistakes at once: a surrogate named like a business key,
+  and — in the SCD Type 2 template especially — a primary key that is not unique, because
+  under SCD2 one entity owns a row per version and its business key repeats by design.
+  Dimensions now start with `{name}_key` (the surrogate, one per row, the column facts
+  point at) *and* `{name}_id` (the business key, flagged `isNaturalKey`), and the SCD2
+  template marks its tracked attributes `scdType: 2` so it demonstrates the feature it is
+  named after. The Type 1 dimension no longer ships Type 2 effective dating; SCD2 no longer
+  ships two competing sets of it; and the bridge template actually flags its two sides as
+  foreign keys instead of only saying so in prose.
+- **The sample models no longer flag a name as the natural key.** `dim_customer` marked
+  `customer_name` as the business key, and `dim_location` marked `site_name` — a uniqueness
+  claim neither column can honour, since people and sites share names. Both now carry a
+  proper identifier as the natural key, and the name is an ordinary tracked attribute. The
+  sample dimensions, facts and dbt fixtures are updated throughout so facts join to
+  dimension surrogates (`customer_key`, `project_key`, `task_key`). `dim_date` is
+  deliberately unchanged: a `YYYYMMDD` date key is the one conventional exception, and it
+  is now documented as such.
+- **The marketplace demo GIF showed the mistake.** Every frame displayed `dim_customer`
+  with an **NK** badge on `customer_name`. It has been regenerated from the corrected
+  models, and now shows the surrogate/business key split on every dimension.
+
+### Changed
+
+- **The showcase domain includes `dim_customer` and `dim_date`.** Both sat in the model
+  library referenced by nothing, so the dimension that best demonstrates the key split was
+  never actually on the canvas.
+
 ## 1.0.4 — 2026-09-20
 
 ### Fixed

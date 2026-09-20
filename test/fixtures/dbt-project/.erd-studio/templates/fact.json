@@ -4,9 +4,10 @@
   "prefix": "fct_",
   "description": "Transactional fact table with event tracking",
   "columns": [
-    { "name": "{name}_id", "dataType": "INTEGER", "description": "Surrogate key", "isPrimaryKey": true },
+    { "name": "{name}_id", "dataType": "INTEGER", "description": "Transaction id from the source system (degenerate dimension)", "isPrimaryKey": true, "isNaturalKey": true },
+    { "name": "date_key", "dataType": "INTEGER", "description": "FK to dim_date", "isForeignKey": true },
     { "name": "event_date", "dataType": "DATE", "description": "Business event date" },
-    { "name": "amount", "dataType": "DECIMAL(18,2)", "description": "Monetary amount" },
+    { "name": "amount", "dataType": "DECIMAL(18,2)", "description": "Monetary amount", "additiveType": "additive" },
     { "name": "dwh_inserted_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse insert timestamp" },
     { "name": "dwh_updated_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse update timestamp" }
   ]

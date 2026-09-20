@@ -7,7 +7,7 @@ models:
         - silver
         - domain:showcase
     columns:
-      - name: customer_id
+      - name: customer_key
         description: Surrogate key for customer
         data_type: INT
         tests:

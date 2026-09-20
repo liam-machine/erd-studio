@@ -6,9 +6,9 @@
   "requiresLeftEntity": true,
   "requiresRightEntity": true,
   "columns": [
-    { "name": "{name}_id", "dataType": "INTEGER", "description": "Surrogate key", "isPrimaryKey": true },
-    { "name": "{left}_id", "dataType": "INTEGER", "description": "FK to {left}" },
-    { "name": "{right}_id", "dataType": "INTEGER", "description": "FK to {right}" },
+    { "name": "{name}_key", "dataType": "INTEGER", "description": "Surrogate key — one per link row", "isPrimaryKey": true },
+    { "name": "{left}_key", "dataType": "INTEGER", "description": "FK to {left}", "isForeignKey": true },
+    { "name": "{right}_key", "dataType": "INTEGER", "description": "FK to {right}", "isForeignKey": true },
     { "name": "dwh_inserted_at", "dataType": "TIMESTAMP_NTZ", "description": "Warehouse insert timestamp" }
   ]
 }

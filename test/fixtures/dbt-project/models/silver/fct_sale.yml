@@ -13,8 +13,8 @@ models:
         tests:
           - relationships:
               to: ref('dim_project')
-              field: project_id
-      - name: project_id
+              field: project_key
+      - name: project_key
         description: FK to dim_project
         data_type: INT
       - name: amount

@@ -4,16 +4,22 @@ description: Location dimension — exists only in logical (missing from concept
 grain: One row per location
 modelRole: domain-dim
 rationale:
-  purpose: k
+  purpose: Site reference for location-scoped reporting
 columns:
-  - name: location_idn
+  - name: location_key
     dataType: INT
-    description: Location surrogate key
+    description: Surrogate key — warehouse-generated, one per row
     isPrimaryKey: true
+    scdType: 0
+  - name: location_code
+    dataType: VARCHAR
+    description: Business location code from the source system
+    isNaturalKey: true
+    scdType: 0
   - name: site_name
     dataType: VARCHAR
-    description: Site name
-    isNaturalKey: true
+    description: Site name — not unique, so never a key
+    scdType: 1
   - name: latitude
     dataType: JSON
     description: GPS latitude

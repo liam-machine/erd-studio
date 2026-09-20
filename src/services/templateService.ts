@@ -18,6 +18,20 @@ const TEMPLATES_DIR = 'templates';
 /**
  * Built-in templates used as fallback when no template files exist.
  * Provide a starting point for common dimensional modeling patterns.
+ *
+ * Every dimension here separates two different keys, because conflating them
+ * is the mistake these templates used to teach:
+ *
+ *   `{name}_key` — the SURROGATE key. Warehouse-generated, meaningless, unique
+ *                  per ROW, and the column facts point at.
+ *   `{name}_id`  — the BUSINESS (natural) key, as the source system spells it.
+ *                  Unique per ENTITY, which is not the same thing: under SCD2
+ *                  one entity owns several rows, so the business key repeats
+ *                  and cannot be the primary key.
+ *
+ * That is also why `isNaturalKey` belongs on an identifier and never on a
+ * label. A person's name is not unique, so a name marked as the natural key
+ * is a claim the data cannot honour.
  */
 const FALLBACK_TEMPLATES: ModelTemplate[] = [
   {
@@ -26,12 +40,11 @@ const FALLBACK_TEMPLATES: ModelTemplate[] = [
     prefix: 'dim_',
     description: 'Standard dimension table with SCD Type 1 tracking',
     columns: [
-      { name: '{name}_id', dataType: 'INTEGER', description: 'Surrogate key', isPrimaryKey: true },
-      { name: 'name', dataType: 'VARCHAR', description: 'Display name' },
-      { name: 'description', dataType: 'VARCHAR', description: 'Long description' },
-      { name: 'is_active', dataType: 'BOOLEAN', description: 'Active flag' },
-      { name: 'valid_from', dataType: 'TIMESTAMP_NTZ', description: 'Effective start' },
-      { name: 'valid_to', dataType: 'TIMESTAMP_NTZ', description: 'Effective end' },
+      { name: '{name}_key', dataType: 'INTEGER', description: 'Surrogate key — warehouse-generated, one per row', isPrimaryKey: true, scdType: 0 },
+      { name: '{name}_id', dataType: 'VARCHAR', description: 'Business key from the source system', isNaturalKey: true, scdType: 0 },
+      { name: 'name', dataType: 'VARCHAR', description: 'Display name', scdType: 1 },
+      { name: 'description', dataType: 'VARCHAR', description: 'Long description', scdType: 1 },
+      { name: 'is_active', dataType: 'BOOLEAN', description: 'Active flag', scdType: 1 },
       { name: 'dwh_inserted_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse insert timestamp' },
       { name: 'dwh_updated_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse update timestamp' },
     ],
@@ -42,9 +55,14 @@ const FALLBACK_TEMPLATES: ModelTemplate[] = [
     prefix: 'fct_',
     description: 'Transactional fact table with event tracking',
     columns: [
-      { name: '{name}_id', dataType: 'INTEGER', description: 'Surrogate key', isPrimaryKey: true },
+      // A transaction fact's own identifier is the source system's transaction
+      // id — a degenerate dimension. It is both the primary key and the
+      // business key, so it carries both flags rather than being shadowed by a
+      // surrogate that would buy nothing.
+      { name: '{name}_id', dataType: 'INTEGER', description: 'Transaction id from the source system (degenerate dimension)', isPrimaryKey: true, isNaturalKey: true },
+      { name: 'date_key', dataType: 'INTEGER', description: 'FK to dim_date', isForeignKey: true },
       { name: 'event_date', dataType: 'DATE', description: 'Business event date' },
-      { name: 'amount', dataType: 'DECIMAL(18,2)', description: 'Monetary amount' },
+      { name: 'amount', dataType: 'DECIMAL(18,2)', description: 'Monetary amount', additiveType: 'additive' },
       { name: 'dwh_inserted_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse insert timestamp' },
       { name: 'dwh_updated_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse update timestamp' },
     ],
@@ -57,9 +75,9 @@ const FALLBACK_TEMPLATES: ModelTemplate[] = [
     requiresLeftEntity: true,
     requiresRightEntity: true,
     columns: [
-      { name: '{name}_id', dataType: 'INTEGER', description: 'Surrogate key', isPrimaryKey: true },
-      { name: '{left}_id', dataType: 'INTEGER', description: 'FK to {left}' },
-      { name: '{right}_id', dataType: 'INTEGER', description: 'FK to {right}' },
+      { name: '{name}_key', dataType: 'INTEGER', description: 'Surrogate key — one per link row', isPrimaryKey: true },
+      { name: '{left}_key', dataType: 'INTEGER', description: 'FK to {left}', isForeignKey: true },
+      { name: '{right}_key', dataType: 'INTEGER', description: 'FK to {right}', isForeignKey: true },
       { name: 'dwh_inserted_at', dataType: 'TIMESTAMP_NTZ', description: 'Warehouse insert timestamp' },
     ],
   },
@@ -69,12 +87,13 @@ const FALLBACK_TEMPLATES: ModelTemplate[] = [
     prefix: 'dim_',
     description: 'Slowly Changing Dimension Type 2 with full history tracking',
     columns: [
-      { name: '{name}_id', dataType: 'INTEGER', description: 'Surrogate key', isPrimaryKey: true },
-      { name: 'name', dataType: 'VARCHAR', description: 'Display name' },
-      { name: 'description', dataType: 'VARCHAR', description: 'Long description' },
-      { name: 'is_active', dataType: 'BOOLEAN', description: 'Active flag' },
-      { name: 'valid_from', dataType: 'TIMESTAMP_NTZ', description: 'Effective start' },
-      { name: 'valid_to', dataType: 'TIMESTAMP_NTZ', description: 'Effective end' },
+      // The surrogate key is what makes SCD2 work: one row per version, so the
+      // business key below deliberately repeats and must NOT be the PK.
+      { name: '{name}_key', dataType: 'INTEGER', description: 'Surrogate key — one per row, so one per version of the entity', isPrimaryKey: true, scdType: 0 },
+      { name: '{name}_id', dataType: 'VARCHAR', description: 'Business key — repeats across the versions of one entity', isNaturalKey: true, scdType: 0 },
+      { name: 'name', dataType: 'VARCHAR', description: 'Display name', scdType: 2 },
+      { name: 'description', dataType: 'VARCHAR', description: 'Long description', scdType: 2 },
+      { name: 'is_active', dataType: 'BOOLEAN', description: 'Active flag', scdType: 2 },
       { name: 'scd_valid_from', dataType: 'TIMESTAMP_NTZ', description: 'SCD effective start' },
       { name: 'scd_valid_to', dataType: 'TIMESTAMP_NTZ', description: 'SCD effective end' },
       { name: 'scd_is_current', dataType: 'BOOLEAN', description: 'Current version flag' },

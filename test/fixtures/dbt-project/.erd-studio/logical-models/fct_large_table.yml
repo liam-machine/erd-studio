@@ -6,32 +6,33 @@ modelRole: fact
 columns:
   - name: transaction_id
     dataType: INT
-    description: Surrogate key
+    description: Transaction id from the source system — a degenerate dimension, and this fact's own key
     isPrimaryKey: true
+    isNaturalKey: true
   - name: event_date
     dataType: DATE
     description: Date of the event
-  - name: warehouse_id
+  - name: warehouse_key
     dataType: INT
     description: Originating warehouse
-  - name: customer_id
+  - name: customer_key
     dataType: INT
-    description: FK to customer dimension
+    description: FK to dim_customer
     isForeignKey: true
   - name: delivery_date
     dataType: DATE
     description: Date order was delivered
-  - name: project_id
+  - name: project_key
     dataType: INT
-    description: FK to project dimension
+    description: FK to dim_project
     isForeignKey: true
-  - name: product_id
+  - name: product_key
     dataType: INT
-    description: FK to product dimension
+    description: FK to dim_product
     isForeignKey: true
-  - name: channel_id
+  - name: channel_key
     dataType: INT
-    description: FK to channel dimension
+    description: FK to dim_channel
     isForeignKey: true
   - name: region_code
     dataType: VARCHAR

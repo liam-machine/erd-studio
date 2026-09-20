@@ -6,15 +6,23 @@ modelRole: conformed-dim
 rationale:
   purpose: Central customer reference shared across domains
   design: Conformed dimension for consistent customer attributes
+  scdStrategy: customer_key is the surrogate facts join to; customer_id is the source system's business key
 columns:
-  - name: customer_id
+  - name: customer_key
     dataType: INT
-    description: Surrogate key for customer
+    description: Surrogate key — warehouse-generated, one per row
     isPrimaryKey: true
+    scdType: 0
+  - name: customer_id
+    dataType: VARCHAR
+    description: Business key from the source CRM
+    isNaturalKey: true
+    scdType: 0
   - name: customer_name
     dataType: VARCHAR
-    description: Full customer name
-    isNaturalKey: true
+    description: Full customer name — not unique, so never a key
+    scdType: 2
   - name: email
     dataType: VARCHAR
     description: Customer email address
+    scdType: 1

@@ -8,7 +8,7 @@ models:
         - domain:tasks
         - domain:showcase
     columns:
-      - name: project_id
+      - name: project_key
         description: Surrogate key for project
       - name: project_name
         description: Project name

@@ -17,13 +17,13 @@
       "description": "Task dimension table",
       "original_file_path": "models/silver/dim_task.sql",
       "columns": {
-        "task_id": {
-          "name": "task_id",
+        "task_key": {
+          "name": "task_key",
           "data_type": "INT",
           "description": "Surrogate key for task"
         },
-        "project_id": {
-          "name": "project_id",
+        "project_key": {
+          "name": "project_key",
           "data_type": "INT",
           "description": "FK to dim_project"
         },
@@ -38,8 +38,12 @@
           "description": "Current status"
         }
       },
-      "depends_on": { "nodes": [] },
-      "config": { "materialized": "table" }
+      "depends_on": {
+        "nodes": []
+      },
+      "config": {
+        "materialized": "table"
+      }
     },
     "model.my_dbt_project.dim_project": {
       "unique_id": "model.my_dbt_project.dim_project",
@@ -49,8 +53,8 @@
       "description": "Project dimension table",
       "original_file_path": "models/silver/dim_project.sql",
       "columns": {
-        "project_id": {
-          "name": "project_id",
+        "project_key": {
+          "name": "project_key",
           "data_type": "INT",
           "description": "Surrogate key for project"
         },
@@ -60,8 +64,12 @@
           "description": "Project name"
         }
       },
-      "depends_on": { "nodes": [] },
-      "config": { "materialized": "table" }
+      "depends_on": {
+        "nodes": []
+      },
+      "config": {
+        "materialized": "table"
+      }
     },
     "model.my_dbt_project.fct_task_event": {
       "unique_id": "model.my_dbt_project.fct_task_event",
@@ -76,8 +84,8 @@
           "data_type": "INT",
           "description": "Event surrogate key"
         },
-        "task_id": {
-          "name": "task_id",
+        "task_key": {
+          "name": "task_key",
           "data_type": "INT",
           "description": "FK to dim_task"
         },
@@ -92,8 +100,14 @@
           "description": "Event amount"
         }
       },
-      "depends_on": { "nodes": ["model.my_dbt_project.dim_task"] },
-      "config": { "materialized": "table" }
+      "depends_on": {
+        "nodes": [
+          "model.my_dbt_project.dim_task"
+        ]
+      },
+      "config": {
+        "materialized": "table"
+      }
     },
     "model.my_dbt_project.stg_raw_payments": {
       "unique_id": "model.my_dbt_project.stg_raw_payments",
@@ -124,54 +138,12 @@
           "description": "Payment method (credit_card, bank_transfer, etc.)"
         }
       },
-      "depends_on": { "nodes": [] },
-      "config": { "materialized": "ephemeral" }
-    },
-    "test.my_dbt_project.not_null_dim_task_task_id": {
-      "unique_id": "test.my_dbt_project.not_null_dim_task_task_id",
-      "name": "not_null_dim_task_task_id",
-      "resource_type": "test",
-      "schema": "silver",
-      "description": "",
-      "columns": {},
-      "depends_on": { "nodes": ["model.my_dbt_project.dim_task"] },
-      "config": {}
-    },
-    "test.my_dbt_project.unique_dim_task_task_id": {
-      "unique_id": "test.my_dbt_project.unique_dim_task_task_id",
-      "name": "unique_dim_task_task_id",
-      "resource_type": "test",
-      "schema": "silver",
-      "description": "",
-      "test_metadata": {
-        "name": "unique",
-        "kwargs": {
-          "column_name": "task_id",
-          "model": "ref('dim_task')"
-        }
+      "depends_on": {
+        "nodes": []
       },
-      "attached_node": "model.my_dbt_project.dim_task",
-      "depends_on": { "nodes": ["model.my_dbt_project.dim_task"] },
-      "columns": {},
-      "config": {}
-    },
-    "test.my_dbt_project.unique_dim_project_project_id": {
-      "unique_id": "test.my_dbt_project.unique_dim_project_project_id",
-      "name": "unique_dim_project_project_id",
-      "resource_type": "test",
-      "schema": "silver",
-      "description": "",
-      "test_metadata": {
-        "name": "unique",
-        "kwargs": {
-          "column_name": "project_id",
-          "model": "ref('dim_project')"
-        }
-      },
-      "attached_node": "model.my_dbt_project.dim_project",
-      "depends_on": { "nodes": ["model.my_dbt_project.dim_project"] },
-      "columns": {},
-      "config": {}
+      "config": {
+        "materialized": "ephemeral"
+      }
     },
     "test.my_dbt_project.unique_fct_task_event_event_id": {
       "unique_id": "test.my_dbt_project.unique_fct_task_event_event_id",
@@ -187,21 +159,95 @@
         }
       },
       "attached_node": "model.my_dbt_project.fct_task_event",
-      "depends_on": { "nodes": ["model.my_dbt_project.fct_task_event"] },
+      "depends_on": {
+        "nodes": [
+          "model.my_dbt_project.fct_task_event"
+        ]
+      },
       "columns": {},
       "config": {}
     },
-    "test.my_dbt_project.relationships_dim_task_project_id__project_id__ref_dim_project_": {
-      "unique_id": "test.my_dbt_project.relationships_dim_task_project_id__project_id__ref_dim_project_",
-      "name": "relationships_dim_task_project_id__project_id__ref_dim_project_",
+    "seed.my_dbt_project.seed_status_codes": {
+      "unique_id": "seed.my_dbt_project.seed_status_codes",
+      "name": "seed_status_codes",
+      "resource_type": "seed",
+      "schema": "silver",
+      "description": "Seed for status codes",
+      "columns": {},
+      "depends_on": {
+        "nodes": []
+      },
+      "config": {}
+    },
+    "test.my_dbt_project.not_null_dim_task_task_key": {
+      "unique_id": "test.my_dbt_project.not_null_dim_task_task_key",
+      "name": "not_null_dim_task_task_key",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "columns": {},
+      "depends_on": {
+        "nodes": [
+          "model.my_dbt_project.dim_task"
+        ]
+      },
+      "config": {}
+    },
+    "test.my_dbt_project.unique_dim_task_task_key": {
+      "unique_id": "test.my_dbt_project.unique_dim_task_task_key",
+      "name": "unique_dim_task_task_key",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "task_key",
+          "model": "ref('dim_task')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.dim_task",
+      "depends_on": {
+        "nodes": [
+          "model.my_dbt_project.dim_task"
+        ]
+      },
+      "columns": {},
+      "config": {}
+    },
+    "test.my_dbt_project.unique_dim_project_project_key": {
+      "unique_id": "test.my_dbt_project.unique_dim_project_project_key",
+      "name": "unique_dim_project_project_key",
+      "resource_type": "test",
+      "schema": "silver",
+      "description": "",
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "project_key",
+          "model": "ref('dim_project')"
+        }
+      },
+      "attached_node": "model.my_dbt_project.dim_project",
+      "depends_on": {
+        "nodes": [
+          "model.my_dbt_project.dim_project"
+        ]
+      },
+      "columns": {},
+      "config": {}
+    },
+    "test.my_dbt_project.relationships_dim_task_project_key__project_key__ref_dim_project_": {
+      "unique_id": "test.my_dbt_project.relationships_dim_task_project_key__project_key__ref_dim_project_",
+      "name": "relationships_dim_task_project_key__project_key__ref_dim_project_",
       "resource_type": "test",
       "schema": "silver",
       "description": "",
       "test_metadata": {
         "name": "relationships",
         "kwargs": {
-          "column_name": "project_id",
-          "field": "project_id",
+          "column_name": "project_key",
+          "field": "project_key",
           "to": "ref('dim_project')"
         }
       },
@@ -215,17 +261,17 @@
       "columns": {},
       "config": {}
     },
-    "test.my_dbt_project.relationships_fct_task_event_task_id__task_id__ref_dim_task_": {
-      "unique_id": "test.my_dbt_project.relationships_fct_task_event_task_id__task_id__ref_dim_task_",
-      "name": "relationships_fct_task_event_task_id__task_id__ref_dim_task_",
+    "test.my_dbt_project.relationships_fct_task_event_task_key__task_key__ref_dim_task_": {
+      "unique_id": "test.my_dbt_project.relationships_fct_task_event_task_key__task_key__ref_dim_task_",
+      "name": "relationships_fct_task_event_task_key__task_key__ref_dim_task_",
       "resource_type": "test",
       "schema": "silver",
       "description": "",
       "test_metadata": {
         "name": "relationships",
         "kwargs": {
-          "column_name": "task_id",
-          "field": "task_id",
+          "column_name": "task_key",
+          "field": "task_key",
           "to": "ref('dim_task')"
         }
       },
@@ -237,16 +283,6 @@
         ]
       },
       "columns": {},
-      "config": {}
-    },
-    "seed.my_dbt_project.seed_status_codes": {
-      "unique_id": "seed.my_dbt_project.seed_status_codes",
-      "name": "seed_status_codes",
-      "resource_type": "seed",
-      "schema": "silver",
-      "description": "Seed for status codes",
-      "columns": {},
-      "depends_on": { "nodes": [] },
       "config": {}
     }
   },

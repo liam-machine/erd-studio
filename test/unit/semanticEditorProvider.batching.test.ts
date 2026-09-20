@@ -142,9 +142,9 @@ function counters(panel: MockPanel, doc: MockDoc) {
   };
 }
 
-const REL_A = { fromModel: 'fct_task_event', fromColumn: 'task_id', toModel: 'dim_task', toColumn: 'task_id' };
-const REL_B = { fromModel: 'dim_task', fromColumn: 'project_id', toModel: 'dim_project', toColumn: 'project_id' };
-const REL_MISSING = { fromModel: 'nope', fromColumn: 'x', toModel: 'dim_project', toColumn: 'project_id' };
+const REL_A = { fromModel: 'fct_task_event', fromColumn: 'task_key', toModel: 'dim_task', toColumn: 'task_key' };
+const REL_B = { fromModel: 'dim_task', fromColumn: 'project_key', toModel: 'dim_project', toColumn: 'project_key' };
+const REL_MISSING = { fromModel: 'nope', fromColumn: 'x', toModel: 'dim_project', toColumn: 'project_key' };
 
 async function addAnnotations(panel: MockPanel, ids: string[]) {
   for (const id of ids) {
