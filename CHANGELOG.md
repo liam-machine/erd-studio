@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- **Bug reports no longer include your file paths.** Before, a report's diagnostics carried the full paths from recent error messages, which could include your username, folder names and project names, and a filed issue is public. Every local path is now cut down to the kind of file it points at, e.g. `{project}/.erd-studio/{layer}/{domain}.json`. This applies to the diagnostics block, the description prefilled from the canvas error screen, the title, description and steps you type, the **Copy report** Markdown and the text sent for AI analysis. The dialog shows exactly the redacted text that will be sent. File names that identify nothing, like `manifest.json` or `dbt_project.yml`, are kept.
+
 ## 1.0.8 — 2026-09-21
 
 ### Changed

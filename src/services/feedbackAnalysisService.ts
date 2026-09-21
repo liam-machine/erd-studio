@@ -57,6 +57,7 @@ import {
   type FeedbackAnalysisReasons,
   type FeedbackKind,
   type DuplicateCandidate,
+  redactPaths,
 } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -289,7 +290,9 @@ export const ANALYSIS_SYSTEM_PROMPT = [
  *
  * Only the description, the context field and the public issue list reach the
  * model. There is no `Diagnostics` parameter by design — versions, file paths
- * and model names from a possibly private dbt project are never sent.
+ * and model names from a possibly private dbt project are never sent. The two
+ * free-text fields go through {@link redactPaths} as well, because a pasted
+ * error message brings its absolute path with it.
  */
 export function buildAnalysisPrompt(input: {
   kind: FeedbackKind;
@@ -317,10 +320,10 @@ export function buildAnalysisPrompt(input: {
       : 'The user has not said which kind this is. Decide from what they wrote.',
     '',
     '--- what they wrote ---',
-    input.description.trim(),
+    redactPaths(input.description.trim()),
   ];
 
-  const context = input.context?.trim();
+  const context = redactPaths(input.context?.trim() ?? '');
   if (context) {
     // Labelled by the user's own choice where there is one; a neutral heading
     // otherwise, because "steps they gave" over a feature request's rationale

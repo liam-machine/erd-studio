@@ -670,3 +670,144 @@ export function readinessScore(input: ReadinessInput): ReadinessResult {
 
   return { score: Math.round((points / READINESS_MAX) * 100), checks };
 }
+
+// ---------------------------------------------------------------------------
+// Path redaction (shared by host and webview)
+// ---------------------------------------------------------------------------
+
+/**
+ * File names that say what broke without saying whose project it was — dbt's
+ * own artifacts and ERD Studio's fixed files. Everything else loses its name.
+ */
+const KEPT_FILE_NAMES = new Set([
+  'manifest.json',
+  'catalog.json',
+  'run_results.json',
+  'dbt_project.yml',
+  'selectors.yml',
+  'packages.yml',
+  'profiles.yml',
+  'layers.json',
+  '.sync-plan.json',
+]);
+
+/** The extension's own install folder, e.g. `liamwynne.erd-studio-1.0.7`. */
+const EXTENSION_DIR_PATTERN = /^liamwynne\.erd-studio-/i;
+
+/**
+ * One path segment: no separators, whitespace, quotes, brackets or `:`.
+ * Braces are allowed — `templates/{id}.json` is a real file name.
+ */
+const SEGMENT = String.raw`[^\s\\/:*?"'\x60<>|()\[\]^$,;]+`;
+/** A segment that may contain single spaces between words (`My Documents`). */
+const SPACED_SEGMENT = String.raw`${SEGMENT}(?: +${SEGMENT})*`;
+/**
+ * The last segment. Spaces are allowed only when the run ends in an
+ * extension, so `sales report.json` is one file name but `/a/b was missing`
+ * stops at `b`. Over-reach only ever swallows prose into a placeholder.
+ */
+const LAST_SEGMENT = String.raw`(?:${SPACED_SEGMENT}\.[A-Za-z0-9]{1,8}(?![\w\\/])|${SEGMENT})`;
+/**
+ * A path may not start mid-word, mid-URL or straight after a placeholder —
+ * the last is what makes {@link redactPaths} idempotent.
+ */
+const NOT_AFTER = String.raw`(?<![\w.~:/\\}-])`;
+
+const LOCAL_PATH_PATTERN = new RegExp(
+  [
+    // POSIX: /Users/…, /home/…, /var/… — at least one directory deep.
+    String.raw`${NOT_AFTER}/(?:${SPACED_SEGMENT}/)+(?:${LAST_SEGMENT})?`,
+    // Home-relative: ~/…
+    String.raw`${NOT_AFTER}~[\\/](?:${SPACED_SEGMENT}[\\/])*(?:${LAST_SEGMENT})?`,
+    // Windows drive: C:\… or C:/…
+    String.raw`(?<![\w:\\/}])[A-Za-z]:[\\/](?:${SPACED_SEGMENT}[\\/])*(?:${LAST_SEGMENT})?`,
+    // UNC: \\server\share\…
+    String.raw`(?<![\w\\}])\\\\${SEGMENT}(?:\\${SPACED_SEGMENT}(?=\\))*(?:\\${LAST_SEGMENT})?`,
+  ].join('|'),
+  'g',
+);
+
+/**
+ * URLs that are really local paths: `file://` URIs, and the webview's
+ * `vscode-resource` / `vscode-cdn.net` URLs, whose path part is the file's
+ * absolute path on disk. Other URLs (GitHub, an endpoint) are left alone.
+ */
+const LOCAL_URL_PATTERN =
+  /\b(?:file:\/\/[^\s/"'<>]*|https?:\/\/[^\s/"'<>]*vscode-(?:resource|cdn)[^\s/"'<>]*)(\/[^\s"'<>)]*)/gi;
+
+function extensionOf(name: string): string {
+  const match = /\.([A-Za-z0-9]{1,8})$/.exec(name);
+  return match ? `.${match[1]}` : '';
+}
+
+/** Describe what sits under the ERD data directory by its role, not its name. */
+function describeSemanticPath(rest: string[]): string {
+  if (rest.length === 0) return '';
+  const last = rest[rest.length - 1];
+  const ext = extensionOf(last);
+  if (rest.length === 1) return KEPT_FILE_NAMES.has(last.toLowerCase()) ? last : `{file}${ext}`;
+  if (rest[0] === 'templates') return `templates/{template}${ext}`;
+  if (rest[0] === 'logical-models') return `logical-models/{model}${ext}`;
+  if (rest.length === 2) return `{layer}/{domain}${ext}`;
+  return `{path}/{file}${ext}`;
+}
+
+/** Reduce one absolute path to the shape of what it points at. */
+function redactPath(path: string): string {
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  if (segments.length === 0) return '{path}';
+
+  const extensionDir = segments.findIndex((s) => EXTENSION_DIR_PATTERN.test(s));
+  if (extensionDir >= 0) return ['{extension}', ...segments.slice(extensionDir + 1)].join('/');
+
+  // The configured data directory defaults to `.erd-studio`; the pre-0.6.44
+  // `erd-studio` counts only when what follows looks like a domain file, so a
+  // checkout of this very repo is not mistaken for one.
+  let semantic = segments.lastIndexOf('.erd-studio');
+  if (semantic < 0) {
+    const legacy = segments.lastIndexOf('erd-studio');
+    if (legacy >= 0 && segments.length - legacy - 1 <= 2) semantic = legacy;
+  }
+  if (semantic >= 0) {
+    const inner = describeSemanticPath(segments.slice(semantic + 1));
+    return `{project}/${segments[semantic]}${inner ? `/${inner}` : ''}`;
+  }
+
+  const last = segments[segments.length - 1];
+  if (KEPT_FILE_NAMES.has(last.toLowerCase())) return `{path}/${last}`;
+  const ext = extensionOf(last);
+  return ext ? `{path}/{file}${ext}` : '{path}';
+}
+
+/**
+ * Replace every local file path in `text` with the shape of what it points at:
+ *
+ *   /Users/jo/medical/.erd-studio/silver/sales.json → {project}/.erd-studio/{layer}/{domain}.json
+ *   C:\work\acme\target\manifest.json               → {path}/manifest.json
+ *   /Users/jo/.vscode/extensions/liamwynne.erd-studio-1.0.7/dist/extension.js
+ *                                                   → {extension}/dist/extension.js
+ *
+ * A path names the user, their machine and their project; none of that helps
+ * place a bug, and a report is public the moment it is filed. What survives is
+ * the part that does help: which *kind* of file was involved. Recognition is
+ * by shape alone — no home directory or workspace root is needed — so the
+ * webview can run it on the error screen's prefill as well as the host on the
+ * diagnostics, and it holds for error messages written after this function.
+ *
+ * Idempotent, and never throws. Placeholders use `{…}` rather than `<…>`
+ * because GitHub strips unknown HTML tags from an issue body.
+ */
+export function redactPaths(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(LOCAL_URL_PATTERN, (_match, path: string) => {
+      let decoded = path;
+      try {
+        decoded = decodeURIComponent(path);
+      } catch {
+        // Malformed escapes: redact the raw form.
+      }
+      return redactPath(decoded);
+    })
+    .replace(LOCAL_PATH_PATTERN, (match) => redactPath(match));
+}
