@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- Repository housekeeping only. No change to the extension, the MCP server or the feedback proxy.
+
 ## 1.0.6 — 2026-09-21
 
 ### Added
@@ -123,7 +129,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - **Licence change: ERD Studio is now under the PolyForm Shield License 1.0.0** (previously MIT).
   It stays free to use, modify and share, at home or at work, for any purpose except offering a
   product that competes with ERD Studio. Versions published before this one remain under MIT.
-  The same licence covers the MCP server and the Atlassian Forge app in `forge-app/`.
+  The same licence covers the MCP server.
 
 ## 1.0.2 — 2026-09-15
 
