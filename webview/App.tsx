@@ -57,6 +57,7 @@ import { stageNodeColor } from './lib/stageColors';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from './types/graph';
 import type { DisplayDomain } from '../src/types/display';
+import { redactPaths } from '../src/types/feedback';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -643,7 +644,7 @@ function EditorCanvas() {
         <button
           type="button"
           className="editor-message__button"
-          onClick={() => setFeedbackDialogOpen(true, { kind: 'bug', description: `Error shown on canvas: ${error}` })}
+          onClick={() => setFeedbackDialogOpen(true, { kind: 'bug', description: `Error shown on canvas: ${redactPaths(error)}` })}
         >
           Report a Bug
         </button>

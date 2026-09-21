@@ -29,6 +29,7 @@ import {
   type FeedbackDiagnosticsView,
   type FeedbackDraft,
   type FeedbackKind,
+  redactPaths,
 } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -218,16 +219,20 @@ export function buildIssueUrl(
   return url;
 }
 
-/** Compose the form field values for a draft + diagnostics. */
+/**
+ * Compose the form field values for a draft + diagnostics. Local file paths in
+ * what the user typed are reduced by {@link redactPaths} too — pasting the
+ * canvas toast is the ordinary way to describe an error, and it carries one.
+ */
 export function composeIssueFields(
   draft: BugReportDraft,
   diagnostics: Diagnostics | null,
 ): Record<string, string> {
   const fields: Record<string, string> = {
-    title: draft.title.trim() || 'Bug report',
-    description: draft.description.trim(),
+    title: redactPaths(draft.title.trim()) || 'Bug report',
+    description: redactPaths(draft.description.trim()),
   };
-  if (draft.steps?.trim()) fields.steps = draft.steps.trim();
+  if (draft.steps?.trim()) fields.steps = redactPaths(draft.steps.trim());
   if (diagnostics && draft.includeDiagnostics) fields.diagnostics = formatDiagnostics(diagnostics);
   return fields;
 }
@@ -269,7 +274,7 @@ const CONTEXT_HEADING: Readonly<Record<FeedbackKind, string>> = {
 
 /** The title as it will be filed: trimmed, defaulted, and regression-prefixed. */
 function resolveFeedbackTitle(draft: FeedbackDraft): string {
-  const title = draft.title.trim() || defaultTitleForKind(draft.kind);
+  const title = redactPaths(draft.title.trim()) || defaultTitleForKind(draft.kind);
   return draft.regressionOf != null ? applyRegressionPrefix(title) : title;
 }
 
@@ -315,12 +320,12 @@ export function composeMarkdownReport(
     );
   }
 
-  const description = draft.description.trim();
+  const description = redactPaths(draft.description.trim());
   if (description) {
     sections.push(`## ${DESCRIPTION_HEADING[draft.kind]}`, description);
   }
 
-  const context = draft.steps?.trim();
+  const context = redactPaths(draft.steps?.trim() ?? '');
   if (context) {
     sections.push(`## ${CONTEXT_HEADING[draft.kind]}`, context);
   }
@@ -368,7 +373,13 @@ export function buildDiagnosticsView(d: Diagnostics): FeedbackDiagnosticsView {
 // VS Code-facing helpers
 // ---------------------------------------------------------------------------
 
-/** Collect environment diagnostics. `domain` is optional context from the active canvas. */
+/**
+ * Collect environment diagnostics. `domain` is optional context from the active canvas.
+ *
+ * Both error lists go through {@link redactPaths} here, once, so every consumer
+ * — the dialog's verbatim view, the issue form and the copied report — shows
+ * and sends the same path-free text. The logs themselves keep the raw message.
+ */
 export function collectDiagnostics(
   context: vscode.ExtensionContext,
   domain?: Diagnostics['domain'],
@@ -380,8 +391,8 @@ export function collectDiagnostics(
     platform: process.platform,
     arch: process.arch,
     domain,
-    hostErrors: hostErrorLog.recent(),
-    webviewErrors: webviewErrors.slice(-ERROR_LOG_CAPACITY),
+    hostErrors: hostErrorLog.recent().map(redactPaths),
+    webviewErrors: webviewErrors.slice(-ERROR_LOG_CAPACITY).map(redactPaths),
   };
 }
 
