@@ -390,7 +390,7 @@ The old `liamwynne.dbt-semantic-designer` extension has been unpublished and rem
 
 ### Publish a New Version
 
-Releases normally happen automatically: `.github/workflows/deploy.yml` runs when a PR is merged to `main` (docs-only, `test/fixtures/**` and `.planning/**` PRs are skipped via `paths-ignore`, because every release triggers a save-all + window reload for users with a canvas open). It type-checks, builds and tests, computes the next version via `scripts/release.mjs next-version` — max(`package.json`, latest marketplace version) + patch by default, or the exact version pinned in the `## Unreleased` heading when that heading names one (`## Unreleased — 1.0.0`) and it is ahead of everything published; falls back to `package.json` if `vsce show` fails, stamps the `## Unreleased` section of `CHANGELOG.md` with that version, **commits and pushes the bump before publishing** (with rebase retries), then runs `vsce package --no-dependencies` + `vsce publish`. Claude PR approval is checked but only soft-enforced (a warning). Put user-facing release notes under `## Unreleased` in `CHANGELOG.md` as part of your PR.
+Releases normally happen automatically: `.github/workflows/deploy.yml` runs when a PR is merged to `main` (docs-only, `test/fixtures/**` and `.planning/**` PRs are skipped via `paths-ignore`, because every release triggers a save-all + window reload for users with a canvas open). It type-checks, builds and tests, computes the next version via `scripts/release.mjs next-version` — max(`package.json`, latest marketplace version) + patch by default, or the exact version pinned in the `## Unreleased` heading when that heading names one (`## Unreleased — 1.0.0`) and it is ahead of everything published; falls back to `package.json` if `vsce show` fails, stamps the `## Unreleased` section of `CHANGELOG.md` with that version, **commits and pushes the bump before publishing** (with rebase retries), then runs `vsce package --no-dependencies` + `vsce publish`, and publishes the **same** VSIX to [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) (`ovsx publish`, namespace `liamwynne`, secret `OVSX_PAT`). The Open VSX step is `continue-on-error`: the Marketplace is the primary registry and an Open VSX failure must never block the release or the GitHub Release. Claude PR approval is checked but only soft-enforced (a warning). Put user-facing release notes under `## Unreleased` in `CHANGELOG.md` as part of your PR.
 
 Manual publishing (rare) must follow the same order so `main` never falls behind the marketplace:
 
@@ -400,12 +400,12 @@ Manual publishing (rare) must follow the same order so `main` never falls behind
 2. Commit the version bump and push
 3. Package and publish (two-step is more reliable than single-step; `--no-dependencies` because esbuild bundles every runtime dependency into `dist/`):
    ```bash
-   source .env && npx @vscode/vsce package --no-dependencies -o erd-studio.vsix && npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT" && rm erd-studio.vsix
+   source .env && npx @vscode/vsce package --no-dependencies -o erd-studio.vsix && npx @vscode/vsce publish --packagePath erd-studio.vsix --pat "$AZURE_PAT" && npx ovsx publish --packagePath erd-studio.vsix --pat "$OVSX_PAT" && rm erd-studio.vsix
    ```
 
 `npx @vscode/vsce ls --no-dependencies` shows exactly what will ship; CI fails if it lists more than 60 files. `.vscodeignore` excludes everything except `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, `media/` icons and `dist/`.
 
-PAT is stored in `.env` as `AZURE_PAT`. The PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org.
+PATs are stored in `.env` as `AZURE_PAT` (Marketplace) and `OVSX_PAT` (Open VSX, also a GitHub Actions secret). The Azure PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org.
 
 ### Unpublish an Extension
 
