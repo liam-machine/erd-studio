@@ -41,13 +41,13 @@ Traditional ERD tools such as [erwin](https://bookshelf.erwin.com/bookshelf/publ
 
 The whole logical model is just two kinds of file: **one YAML per model, one JSON per diagram.** ERD Studio reads them and renders the canvas.
 
-![Top half: a model YAML file and a diagram JSON file in your repo render together as the logical canvas, where dim_customer and fct_order are joined one to many, and canvas edits save back to the same files. Bottom half, in a dashed box marked optional and only if you use dbt: your dbt project derives a physical view of the same diagram with the real columns and data types, its edges and cardinality taken from your dbt tests and never written to disk. The two views can be compared.](media/readme-workflow.png)
+![Your data model lives in the repo; the canvas is a view over it. Left: the VS Code Explorer for a dbt project. Its .erd-studio folder, marked design, holds one YAML per logical model and one JSON per diagram, next to the models and target folders, marked code and warehouse, where fct_order.sql is modified. The design files render and save as the ERD Studio Logical canvas, in blue: dim_customer joined one to many to fct_order, which has order_total. The dbt project derives the read-only Physical canvas, in green, never written to disk. Comparing the two finds two differences: order_amt is highlighted as only in the warehouse and order_total struck through as logical only, because the column was renamed in the SQL but not the design. The fix is a one-line change to fct_order.yml in the same pull request.](media/readme-workflow.png)
 
 Edit on the canvas and those same files update. Edit them yourself or with AI and the canvas updates. Models are shared across diagrams, and everything stays in Git. No ERD Studio account, database, or server required.
 
 ### Reading your dbt project
 
-The **Physical** view is the lower half of the diagram, and it has no file of its own. It reads three files, and only the first is required: your **schema YAMLs**, always on disk, so the view works before you have ever run dbt; **`manifest.json`** after a `dbt run`; and **`catalog.json`** after `dbt docs generate` — the only one of the three that has seen your warehouse.
+The **Physical** view, the green canvas above, has no file of its own. It reads three files, and only the first is required: your **schema YAMLs**, always on disk, so the view works before you have ever run dbt; **`manifest.json`** after a `dbt run`; and **`catalog.json`** after `dbt docs generate` — the only one of the three that has seen your warehouse.
 
 Each model shows where its shape came from, so a `varchar` on the canvas is never a guess: types are read from the warehouse when the catalog is there, otherwise from the `data_type:` you wrote, otherwise left blank rather than invented. A greyed-out model means it is genuinely not in your dbt project, not that you have not run dbt lately. And the edges are the tests you already run — `relationships` for the links, `unique` for the cardinality — so the canvas shows what dbt enforces rather than a second copy that can drift. Nothing is ever written to disk.
 
@@ -77,3 +77,13 @@ Physical comparison needs dbt, so the canvas stays on the Logical stage — ever
 [File format reference](docs/semantic-domain-json-reference.md) · [Release notes](CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
 
 Free to use under the [PolyForm Shield License 1.0.0](LICENSE): use it, modify it and share it, at home or at work, for any purpose except offering a product that competes with ERD Studio. The source is public; only the author may sell it or relicense it.
+
+## Star history
+
+<a href="https://star-history.com/#liam-machine/erd-studio&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date" />
+    <img alt="Star history chart for liam-machine/erd-studio" src="https://api.star-history.com/svg?repos=liam-machine/erd-studio&type=Date" />
+  </picture>
+</a>

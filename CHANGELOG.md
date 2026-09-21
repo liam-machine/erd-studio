@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- New "How it works" diagram in the README, drawn from the real Explorer and canvas, showing how the Logical and Physical stages relate and how a rename in the SQL shows up as a highlight. The README also gains a star history chart. No change to the extension itself.
+
 ## 1.0.7 — 2026-09-21
 
 ### Changed

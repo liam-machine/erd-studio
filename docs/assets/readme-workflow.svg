@@ -1,132 +1,351 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="710" viewBox="0 0 1120 710" fill="none">
-  <title>Plain files render as your canvas. With dbt, a second view is derived.</title>
-  <desc>Top: a model YAML file and a diagram JSON file in your repository render together as the ERD Studio logical canvas, where dim_customer and fct_order are joined one to many, and canvas edits save back to the same files. Bottom, inside a dashed box marked optional and only if you use dbt: your dbt project — schema YAMLs always, manifest.json after a dbt run, catalog.json after dbt docs generate — derives a physical view of the same diagram, showing the real columns and data types, with edges and cardinality taken from your dbt tests, rebuilt on every change and never written to disk. The two views can be compared.</desc>
-  <defs>
-    <linearGradient id="background" x1="0" y1="0" x2="1120" y2="710" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#343239"/>
-      <stop offset="1" stop-color="#18191E"/>
-    </linearGradient>
-    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="1" fill="#3A393F"/>
-    </pattern>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-      <path d="M1 1L6 4L1 7" stroke="#E6CC7E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <marker id="arrowgreen" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-      <path d="M1 1L6 4L1 7" stroke="#5FD68B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-  </defs>
-  <rect width="1120" height="710" rx="20" fill="url(#background)"/>
-  <rect x=".5" y=".5" width="1119" height="709" rx="19.5" stroke="#4A4850"/>
-  <g font-family="Arial, Helvetica, sans-serif">
-
-    <text x="32" y="43" fill="#A8B4C3" font-size="14" font-weight="700" letter-spacing="2">FILES IN YOUR REPO</text>
-    <text x="540" y="43" fill="#A8B4C3" font-size="14" font-weight="700" letter-spacing="2">YOUR LOGICAL CANVAS</text>
-
-    <rect x="32" y="68" width="356" height="108" rx="12" fill="#2D2C32" stroke="#78604C"/>
-    <rect x="48" y="84" width="62" height="27" rx="6" fill="#493C33"/>
-    <text x="79" y="103" fill="#F0C7A2" font-size="13" font-weight="700" text-anchor="middle">YAML</text>
-    <text x="124" y="104" fill="#F3F5F8" font-size="20" font-weight="700">One file per model</text>
-    <text x="50" y="136" fill="#C3C8D0" font-size="16">Columns, keys and design decisions</text>
-    <text x="50" y="159" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">dim_customer.yml</text>
-
-    <rect x="32" y="186" width="356" height="108" rx="12" fill="#2D2C32" stroke="#626A76"/>
-    <rect x="48" y="202" width="62" height="27" rx="6" fill="#3A4049"/>
-    <text x="79" y="221" fill="#D7E0E9" font-size="13" font-weight="700" text-anchor="middle">JSON</text>
-    <text x="124" y="222" fill="#F3F5F8" font-size="20" font-weight="700">One file per diagram</text>
-    <text x="50" y="254" fill="#C3C8D0" font-size="16">Model names, relationships and layout</text>
-    <text x="50" y="277" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">orders.json</text>
-
-    <path d="M388 122H432Q448 122 448 138V165Q448 181 464 181H523" stroke="#E6CC7E" stroke-width="2" marker-end="url(#arrow)"/>
-    <path d="M388 240H432Q448 240 448 224V197Q448 181 464 181" stroke="#E6CC7E" stroke-width="2"/>
-    <text x="494" y="172" fill="#C3C8D0" font-size="13" text-anchor="middle">render</text>
-
-    <rect x="540" y="68" width="548" height="226" rx="12" fill="#212126" stroke="#48474F"/>
-    <rect x="541" y="112" width="546" height="181" fill="url(#grid)"/>
-    <path d="M540 112H1088" stroke="#48474F"/>
-    <circle cx="559" cy="90" r="4" fill="#E6CC7E"/>
-    <text x="574" y="96" fill="#F3F5F8" font-size="16" font-weight="700">Orders</text>
-    <rect x="991" y="79" width="80" height="24" rx="12" fill="#443D29"/>
-    <text x="1031" y="96" fill="#F5E6AE" font-size="12" font-weight="700" text-anchor="middle">LOGICAL</text>
-
-    <rect x="559" y="134" width="200" height="106" rx="8" fill="#303036" stroke="#877445"/>
-    <path d="M560 174H758" stroke="#48474F"/>
-    <text x="573" y="160" fill="#F3F5F8" font-size="17" font-weight="700">dim_customer</text>
-    <text x="573" y="199" fill="#E6CC7E" font-size="12" font-weight="700">PK</text>
-    <text x="602" y="199" fill="#D7E0E9" font-size="15">customer_id</text>
-    <text x="602" y="225" fill="#A8B4C3" font-size="15">name</text>
-
-    <rect x="860" y="178" width="210" height="106" rx="8" fill="#303036" stroke="#877445"/>
-    <path d="M861 218H1069" stroke="#48474F"/>
-    <text x="874" y="204" fill="#F3F5F8" font-size="17" font-weight="700">fct_order</text>
-    <text x="874" y="243" fill="#E6CC7E" font-size="12" font-weight="700">PK</text>
-    <text x="903" y="243" fill="#D7E0E9" font-size="15">order_id</text>
-    <text x="874" y="269" fill="#E6CC7E" font-size="12" font-weight="700">FK</text>
-    <text x="903" y="269" fill="#D7E0E9" font-size="15">customer_id</text>
-    <path d="M780 187H790Q800 187 800 197V221Q800 231 810 231H839" stroke="#E6CC7E" stroke-width="2"/>
-    <text x="770" y="192" fill="#E6CC7E" font-size="14" font-weight="700" text-anchor="middle">1</text>
-    <text x="849" y="244" fill="#E6CC7E" font-size="22" font-weight="700" text-anchor="middle">*</text>
-
-    <path d="M818 300V315Q818 326 807 326H221Q210 326 210 315V301" stroke="#807B72" stroke-width="1.5" stroke-dasharray="4 5"/>
-    <path d="M206 306L210 301L214 306" stroke="#807B72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <rect x="363" y="311" width="310" height="29" rx="10" fill="#25252B"/>
-    <text x="518" y="331" fill="#C3C8D0" font-size="15" text-anchor="middle">Canvas edits save to the same files</text>
-
-    <path d="M960 302V350M960 378V412" stroke="#807B72" stroke-width="1.5" stroke-dasharray="4 5"/>
-    <path d="M956 307L960 302L964 307" stroke="#807B72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M956 407L960 412L964 407" stroke="#807B72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <rect x="912" y="350" width="96" height="28" rx="14" fill="#2B2A31" stroke="#4A4850"/>
-    <text x="960" y="369" fill="#C3C8D0" font-size="13" text-anchor="middle">compare</text>
-
-    <rect x="20.5" y="364.5" width="1079" height="324" rx="15.5" stroke="#5A5862" stroke-dasharray="6 6"/>
-    <rect x="36" y="380" width="266" height="28" rx="14" fill="#25412F"/>
-    <text x="169" y="399" fill="#A7F0C0" font-size="12" font-weight="700" letter-spacing="1" text-anchor="middle">OPTIONAL — ONLY IF YOU USE DBT</text>
-
-    <rect x="32" y="456" width="356" height="163" rx="12" fill="#2D2C32" stroke="#4E6B58"/>
-    <rect x="48" y="472" width="52" height="27" rx="6" fill="#2A3D31"/>
-    <text x="74" y="491" fill="#BFE9CE" font-size="13" font-weight="700" text-anchor="middle">DBT</text>
-    <text x="114" y="492" fill="#F3F5F8" font-size="20" font-weight="700">Your dbt project</text>
-    <text x="50" y="524" fill="#C3C8D0" font-size="16">Columns, tests and warehouse types</text>
-    <text x="50" y="549" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">models/schema.yml</text>
-    <text x="372" y="549" fill="#7F8C9D" font-size="11" text-anchor="end">always</text>
-    <text x="50" y="572" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">target/manifest.json</text>
-    <text x="372" y="572" fill="#7F8C9D" font-size="11" text-anchor="end">after dbt run</text>
-    <text x="50" y="595" fill="#99A7B8" font-size="14" font-family="Menlo, Consolas, monospace">target/catalog.json</text>
-    <text x="372" y="595" fill="#7F8C9D" font-size="11" text-anchor="end">after dbt docs generate</text>
-
-    <path d="M388 537H523" stroke="#5FD68B" stroke-width="2" marker-end="url(#arrowgreen)"/>
-    <text x="455" y="528" fill="#C3C8D0" font-size="13" text-anchor="middle">derive</text>
-
-    <rect x="540" y="424" width="548" height="226" rx="12" fill="#212126" stroke="#48474F"/>
-    <rect x="541" y="468" width="546" height="181" fill="url(#grid)"/>
-    <path d="M540 468H1088" stroke="#48474F"/>
-    <circle cx="559" cy="446" r="4" fill="#5FD68B"/>
-    <text x="574" y="452" fill="#F3F5F8" font-size="16" font-weight="700">Orders</text>
-    <rect x="985" y="435" width="86" height="24" rx="12" fill="#25412F"/>
-    <text x="1028" y="452" fill="#A7F0C0" font-size="12" font-weight="700" text-anchor="middle">PHYSICAL</text>
-
-    <rect x="559" y="486" width="225" height="106" rx="8" fill="#303036" stroke="#45805C"/>
-    <path d="M560 526H783" stroke="#48474F"/>
-    <text x="573" y="512" fill="#F3F5F8" font-size="17" font-weight="700">dim_customer</text>
-    <text x="573" y="551" fill="#5FD68B" font-size="12" font-weight="700">PK</text>
-    <text x="602" y="551" fill="#D7E0E9" font-size="15">customer_id</text>
-    <text x="770" y="551" fill="#7F8C9D" font-size="13" text-anchor="end" font-family="Menlo, Consolas, monospace">varchar</text>
-    <text x="602" y="577" fill="#A8B4C3" font-size="15">name</text>
-    <text x="770" y="577" fill="#7F8C9D" font-size="13" text-anchor="end" font-family="Menlo, Consolas, monospace">varchar</text>
-
-    <rect x="860" y="528" width="210" height="106" rx="8" fill="#303036" stroke="#45805C"/>
-    <path d="M861 568H1069" stroke="#48474F"/>
-    <text x="874" y="554" fill="#F3F5F8" font-size="17" font-weight="700">fct_order</text>
-    <text x="874" y="593" fill="#5FD68B" font-size="12" font-weight="700">PK</text>
-    <text x="903" y="593" fill="#D7E0E9" font-size="15">order_id</text>
-    <text x="1056" y="593" fill="#7F8C9D" font-size="13" text-anchor="end" font-family="Menlo, Consolas, monospace">bigint</text>
-    <text x="874" y="619" fill="#5FD68B" font-size="12" font-weight="700">FK</text>
-    <text x="903" y="619" fill="#D7E0E9" font-size="15">customer_id</text>
-    <text x="1056" y="619" fill="#7F8C9D" font-size="13" text-anchor="end" font-family="Menlo, Consolas, monospace">varchar</text>
-    <path d="M805 539H815Q825 539 825 549V571Q825 581 835 581H839" stroke="#5FD68B" stroke-width="2"/>
-    <text x="795" y="544" fill="#5FD68B" font-size="14" font-weight="700" text-anchor="middle">1</text>
-    <text x="849" y="594" fill="#5FD68B" font-size="22" font-weight="700" text-anchor="middle">*</text>
-
-    <text x="814" y="674" fill="#99A7B8" font-size="14" text-anchor="middle">Edges and cardinality come from your dbt tests · never written to disk</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1000" viewBox="0 0 1440 1000" fill="none">
+<title>Your data model lives in the repo. The canvas is a view over it.</title>
+<desc>Left: the VS Code Explorer for a dbt project. The .erd-studio folder (design) holds one YAML per logical model and one JSON per diagram; the models and target folders (code and warehouse) hold the dbt SQL, schema.yml, catalog.json and manifest.json. The design files render as the ERD Studio Logical canvas — dim_customer joined one to many to fct_order, with order_total — and canvas edits save back to them. The dbt project derives the read-only Physical canvas, never written to disk. Comparing the two finds two differences: order_amt is only in the warehouse and order_total only in the design, because the column was renamed in the SQL. The fix is a one-line change to fct_order.yml in the same pull request.</desc>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1440" y2="1000" gradientUnits="userSpaceOnUse"><stop stop-color="#1B1D24"/><stop offset="1" stop-color="#0F1014"/></linearGradient>
+<radialGradient id="glowb" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(960 320) scale(620 280)"><stop stop-color="#60A5FA" stop-opacity=".11"/><stop offset="1" stop-color="#60A5FA" stop-opacity="0"/></radialGradient>
+<radialGradient id="glowg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(960 760) scale(620 300)"><stop stop-color="#22C55E" stop-opacity=".09"/><stop offset="1" stop-color="#22C55E" stop-opacity="0"/></radialGradient>
+<filter id="winShadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000" flood-opacity=".5"/></filter>
+<filter id="nodeShadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity=".35"/></filter>
+<pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".9" fill="#343434"/></pattern>
+<marker id="ab" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M2 1.5L7 5L2 8.5" stroke="#60A5FA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="ag" markerWidth="10" markerHeight="10" refX="7" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M2 1.5L7 5L2 8.5" stroke="#22C55E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect width="1440" height="1000" rx="22" fill="url(#bg)"/>
+<rect width="1440" height="1000" rx="22" fill="url(#glowb)"/>
+<rect width="1440" height="1000" rx="22" fill="url(#glowg)"/>
+<rect x=".5" y=".5" width="1439" height="999" rx="21.5" stroke="#2A2C34"/>
+<text x="48" y="58" fill="#6F7786" font-size="12" font-weight="700" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="2.2">ERD STUDIO  ·  HOW IT WORKS</text>
+<text x="48" y="98" font-size="31" font-weight="700" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="-.4" fill="#EEF1F6">Your data model lives in the repo. <tspan fill="#A9B1BF" font-weight="500">The canvas is a view over it.</tspan></text>
+<circle cx="53" cy="145" r="5" fill="#A9B1BF"/>
+<text x="66" y="150" fill="#EEF1F6" font-size="16" font-weight="700" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Your dbt repo</text>
+<text x="200.8" y="150" fill="#6F7786" font-size="14" font-weight="400" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >one source of truth</text>
+<g filter="url(#winShadow)"><rect x="48" y="164" width="364" height="776" rx="10" fill="#1F1F1F"/></g>
+<clipPath id="w16448"><rect x="48" y="164" width="364" height="776" rx="10"/></clipPath>
+<g clip-path="url(#w16448)">
+<rect x="48" y="164" width="364" height="776" fill="#181818"/>
+<text x="68" y="188" fill="#9D9D9D" font-size="11" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing=".4">EXPLORER</text>
+<circle cx="380" cy="184" r="1.2" fill="#9D9D9D"/>
+<circle cx="385" cy="184" r="1.2" fill="#9D9D9D"/>
+<circle cx="390" cy="184" r="1.2" fill="#9D9D9D"/>
+<path d="M56 208l4 4 4-4" stroke="#CCCCCC" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="70" y="214" fill="#CCCCCC" font-size="11" font-weight="700" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >MY_DBT_PROJECT</text>
+<rect x="56" y="231" width="348" height="180" rx="8" fill="#60A5FA" fill-opacity=".08" stroke="#60A5FA" stroke-opacity=".45"/>
+<rect x="56" y="413" width="348" height="206" rx="8" fill="#22C55E" fill-opacity=".06" stroke="#22C55E" stroke-opacity=".45"/>
+<path d="M65 241.0l4 4 4-4" stroke="#9D9D9D" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="80" y="247.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >.erd-studio</text>
+<path d="M69 256v26" stroke="#34373E"/>
+<path d="M77 267.0l4 4 4-4" stroke="#9D9D9D" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="92" y="273.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >logical-models</text>
+<path d="M69 282v26" stroke="#34373E"/>
+<path d="M81 282v26" stroke="#34373E"/>
+<path d="M98 290.0h9M98 294.0h9M98 298.0h6" stroke="#A074C4" stroke-width="1.8" stroke-linecap="round"/>
+<text x="114" y="299.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >dim_customer.yml</text>
+<path d="M69 308v26" stroke="#34373E"/>
+<path d="M81 308v26" stroke="#34373E"/>
+<path d="M98 316.0h9M98 320.0h9M98 324.0h6" stroke="#A074C4" stroke-width="1.8" stroke-linecap="round"/>
+<text x="114" y="325.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >fct_order.yml</text>
+<path d="M69 334v26" stroke="#34373E"/>
+<path d="M77 345.0l4 4 4-4" stroke="#9D9D9D" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="92" y="351.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >silver</text>
+<rect x="57" y="360" width="346" height="26" fill="#04395E" fill-opacity=".9"/>
+<path d="M69 360v26" stroke="#34373E"/>
+<path d="M81 360v26" stroke="#34373E"/>
+<text x="102.5" y="376.5" fill="#CBCB41" font-size="10.5" font-weight="700" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, monospace" >{}</text>
+<text x="114" y="377.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >orders.json</text>
+<path d="M69 386v26" stroke="#34373E"/>
+<text x="90.5" y="402.5" fill="#CBCB41" font-size="10.5" font-weight="700" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, monospace" >{}</text>
+<text x="102" y="403.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >layers.json</text>
+<path d="M65 423.0l4 4 4-4" stroke="#9D9D9D" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="80" y="429.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >models</text>
+<path d="M69 438v26" stroke="#34373E"/>
+<path d="M77 449.0l4 4 4-4" stroke="#9D9D9D" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="92" y="455.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >silver</text>
+<path d="M69 464v26" stroke="#34373E"/>
+<path d="M81 464v26" stroke="#34373E"/>
+<ellipse cx="102.5" cy="473.0" rx="4.5" ry="1.8" stroke="#F55385" stroke-width="1.3"/><path d="M98 473.0v7c0 1 2 1.8 4.5 1.8s4.5-.8 4.5-1.8v-7" stroke="#F55385" stroke-width="1.3"/>
+<text x="114" y="481.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >dim_customer.sql</text>
+<path d="M69 490v26" stroke="#34373E"/>
+<path d="M81 490v26" stroke="#34373E"/>
+<ellipse cx="102.5" cy="499.0" rx="4.5" ry="1.8" stroke="#F55385" stroke-width="1.3"/><path d="M98 499.0v7c0 1 2 1.8 4.5 1.8s4.5-.8 4.5-1.8v-7" stroke="#F55385" stroke-width="1.3"/>
+<text x="114" y="507.5" fill="#E2C08D" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >fct_order.sql</text>
+<text x="392" y="507.5" fill="#E2C08D" font-size="12" font-weight="400" text-anchor="end" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >M</text>
+<path d="M69 516v26" stroke="#34373E"/>
+<path d="M81 516v26" stroke="#34373E"/>
+<path d="M98 524.0h9M98 528.0h9M98 532.0h6" stroke="#A074C4" stroke-width="1.8" stroke-linecap="round"/>
+<text x="114" y="533.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >schema.yml</text>
+<path d="M65 553.0l4 4 4-4" stroke="#9D9D9D" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="80" y="559.5" fill="#8C8C8C" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >target</text>
+<path d="M69 568v26" stroke="#34373E"/>
+<text x="90.5" y="584.5" fill="#CBCB41" font-size="10.5" font-weight="700" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, monospace" >{}</text>
+<text x="102" y="585.5" fill="#8C8C8C" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >catalog.json</text>
+<path d="M69 594v26" stroke="#34373E"/>
+<text x="90.5" y="610.5" fill="#CBCB41" font-size="10.5" font-weight="700" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, monospace" >{}</text>
+<text x="102" y="611.5" fill="#8C8C8C" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >manifest.json</text>
+<path d="M74 628.0h9M74 632.0h9M74 636.0h6" stroke="#A074C4" stroke-width="1.8" stroke-linecap="round"/>
+<text x="90" y="637.5" fill="#CCCCCC" font-size="13" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >dbt_project.yml</text>
+<text x="392" y="249" fill="#60A5FA" font-size="10" font-weight="700" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="1.4">DESIGN</text>
+<text x="392" y="431" fill="#4ADE80" font-size="10" font-weight="700" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="1.4">CODE + WAREHOUSE</text>
+<path d="M48 660h364" stroke="#2B2B2B"/>
+<g stroke="#A78BFA" stroke-width="1.6" fill="none" stroke-linecap="round"><circle cx="68" cy="680" r="2.3"/><circle cx="68" cy="693" r="2.3"/><circle cx="78" cy="693" r="2.3"/><path d="M68 682.3v8.4M78 690.7v-6q0-4-4-4h-3"/></g>
+<text x="88" y="691" fill="#EEF1F6" font-size="13.5" font-weight="600" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >The fix lands in the same pull request</text>
+<rect x="56" y="710" width="348" height="183" rx="6" fill="#0D1117" stroke="#30363D"/>
+<path d="M56 736h348" stroke="#30363D"/>
+<path d="M68 718.5h9M68 722.5h9M68 726.5h6" stroke="#A074C4" stroke-width="1.8" stroke-linecap="round"/>
+<text x="84" y="727.5" fill="#C9D1D9" font-size="11.5" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" >logical-models/fct_order.yml</text>
+<text x="394" y="727.5" fill="#8B949E" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >+1 −1</text>
+<text x="68" y="755" fill="#8B949E" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" > </text>
+<text x="82" y="755" fill="#C9D1D9" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" xml:space="preserve">  - name: customer_id</text>
+<text x="68" y="776" fill="#8B949E" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" > </text>
+<text x="82" y="776" fill="#C9D1D9" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" xml:space="preserve">    dataType: INT</text>
+<text x="68" y="797" fill="#8B949E" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" > </text>
+<text x="82" y="797" fill="#C9D1D9" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" xml:space="preserve">    isForeignKey: true</text>
+<rect x="57" y="803" width="346" height="21" fill="#F85149" fill-opacity=".15"/>
+<text x="68" y="818" fill="#FFA198" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" >-</text>
+<text x="82" y="818" fill="#FFA198" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" xml:space="preserve">  - name: order_total</text>
+<rect x="57" y="824" width="346" height="21" fill="#2EA043" fill-opacity=".18"/>
+<text x="68" y="839" fill="#7EE787" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" >+</text>
+<text x="82" y="839" fill="#7EE787" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" xml:space="preserve">  - name: order_amt</text>
+<text x="68" y="860" fill="#8B949E" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" > </text>
+<text x="82" y="860" fill="#C9D1D9" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" xml:space="preserve">    dataType: DECIMAL(12,2)</text>
+<text x="68" y="881" fill="#8B949E" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" > </text>
+<text x="82" y="881" fill="#C9D1D9" font-size="12" font-weight="400" text-anchor="start" font-family="'SF Mono', Menlo, Consolas, monospace" xml:space="preserve">    additiveType: additive</text>
+</g>
+<rect x="48.5" y="164.5" width="363" height="775" rx="9.5" stroke="#383838"/>
+<circle cx="525" cy="145" r="5" fill="#60A5FA"/>
+<text x="538" y="150" fill="#EEF1F6" font-size="16" font-weight="700" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Logical</text>
+<text x="615.2" y="150" fill="#6F7786" font-size="14" font-weight="400" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >your design · edit on the canvas or in the YAML</text>
+<g filter="url(#winShadow)"><rect x="520" y="164" width="872" height="306" rx="10" fill="#1F1F1F"/></g>
+<clipPath id="w164520"><rect x="520" y="164" width="872" height="306" rx="10"/></clipPath>
+<g clip-path="url(#w164520)">
+<rect x="520" y="164" width="872" height="32" fill="#181818"/>
+<path d="M520 196h872" stroke="#2B2B2B"/>
+<rect x="520" y="164" width="150" height="33" fill="#1F1F1F"/>
+<rect x="520" y="164" width="150" height="1.5" fill="#0078D4"/>
+<path d="M670 164v32" stroke="#2B2B2B"/>
+<text x="538.5" y="184.0" fill="#CBCB41" font-size="10.5" font-weight="700" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, monospace" >{}</text>
+<text x="552" y="185" fill="#FFFFFF" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >orders.json</text>
+<path d="M650 177l6 6M656 177l-6 6" stroke="#9D9D9D" stroke-width="1.2" stroke-linecap="round"/>
+<text x="1376" y="185" fill="#6E7681" font-size="11.5" font-weight="400" text-anchor="end" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >.erd-studio › silver › orders.json</text>
+<rect x="520" y="197" width="872" height="273" fill="url(#dots)"/>
+<rect x="721.0" y="209" width="470" height="36" rx="6" fill="#252526" stroke="#3C3C3C"/>
+<text x="735.0" y="232" fill="#CCCCCC" font-size="13" font-weight="500" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >orders</text>
+<rect x="785.0" y="220" width="29.4" height="15" rx="3" fill="#3A3A3A"/>
+<text x="799.69" y="230.92" fill="#CCCCCC" font-size="9.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">SLV</text>
+<path d="M827.0 217v20" stroke="#3C3C3C"/>
+<text x="845.0" y="232" fill="#CCCCCC" font-size="14" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >−</text>
+<text x="879.0" y="232" fill="#9D9D9D" font-size="12" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >100%</text>
+<text x="913.0" y="232" fill="#CCCCCC" font-size="14" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >+</text>
+<text x="943.0" y="232" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Fit</text>
+<path d="M967.0 217v20" stroke="#3C3C3C"/>
+<rect x="977.0" y="215" width="84" height="24" rx="3" fill="#0E639C"/>
+<rect x="987.0" y="222" width="9" height="9" stroke="#fff" stroke-width="1.2"/><path d="M991.5 222v9M987.0 226.5h9" stroke="#fff" stroke-width="1"/>
+<text x="1001.0" y="231.5" fill="#FFFFFF" font-size="12.5" font-weight="500" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Layout</text>
+<path d="M1077.0 221a6.5 6.5 0 1 0 5 2.5" stroke="#CCCCCC" stroke-width="1.3" stroke-linecap="round"/><path d="M1082.0 219v4.5h-4.5" stroke="#CCCCCC" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1099.0 217v20" stroke="#3C3C3C"/>
+<rect x="1109.0" y="215" width="70" height="24" rx="3" stroke="#4A4A4A"/>
+<circle cx="1122.0" cy="227" r="5" stroke="#CCCCCC" stroke-width="1.4"/><path d="M1118.5 230.5l7-7" stroke="#CCCCCC" stroke-width="1.4"/>
+<text x="1133.0" y="231.5" fill="#CCCCCC" font-size="12.5" font-weight="600" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Diff</text>
+<rect x="884.0" y="251" width="144" height="28" rx="5" fill="#252526" stroke="#3C3C3C"/>
+<rect x="888.0" y="254" width="64" height="22" rx="3" fill="#0E639C"/>
+<text x="920.0" y="269.5" fill="#FFFFFF" font-size="12" font-weight="500" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Logical</text>
+<text x="992.0" y="269.5" fill="#9D9D9D" font-size="12" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Physical</text>
+<g filter="url(#nodeShadow)"><rect x="564" y="299" width="236" height="151" rx="6" fill="#1F1F1F"/></g>
+<clipPath id="cdim_customer299"><rect x="564" y="299" width="236" height="151" rx="6"/></clipPath>
+<g clip-path="url(#cdim_customer299)">
+<rect x="564" y="299" width="236" height="31" fill="#181818"/>
+<path d="M564 330h236M564 350h236" stroke="#2B2B2B"/>
+<text x="575" y="319.5" fill="#CCCCCC" font-size="13" font-weight="600" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >dim_customer</text>
+<rect x="760.6" y="307" width="29.4" height="15" rx="3" fill="#0E639C"/>
+<text x="775.3100000000001" y="317.92" fill="#FFFFFF" font-size="9.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">SLV</text>
+<text x="575" y="344" fill="#8A8A8A" font-size="10.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >One row per customer</text>
+<g>
+<rect x="575.0" y="359" width="22.2" height="13" rx="3" fill="rgba(234,179,8,.2)"/>
+<text x="586.12" y="368.74" fill="#CA8A04" font-size="9" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">PK</text>
+<text x="603.24" y="369.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >customer_id</text>
+<text x="789" y="369.8" fill="#4EC9B0" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >INT</text>
+</g>
+<g>
+<text x="601" y="392.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >customer_name</text>
+<text x="789" y="392.8" fill="#9CDCFE" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >VARCHAR</text>
+</g>
+<g>
+<text x="601" y="415.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >email</text>
+<text x="789" y="415.8" fill="#9CDCFE" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >VARCHAR</text>
+</g>
+<rect x="564" y="427" width="236" height="23" fill="#181818"/>
+<path d="M564 427h236" stroke="#2B2B2B"/>
+<text x="682.0" y="442.5" fill="#9D9D9D" font-size="11" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >3 columns</text>
+</g>
+<rect x="565" y="300" width="234" height="149" rx="5.5" stroke="#60A5FA" stroke-width="2"/>
+<g filter="url(#nodeShadow)"><rect x="1018" y="299" width="330" height="151" rx="6" fill="#1F1F1F"/></g>
+<clipPath id="cfct_order299"><rect x="1018" y="299" width="330" height="151" rx="6"/></clipPath>
+<g clip-path="url(#cfct_order299)">
+<rect x="1018" y="299" width="330" height="31" fill="#181818"/>
+<path d="M1018 330h330M1018 350h330" stroke="#2B2B2B"/>
+<text x="1029" y="319.5" fill="#CCCCCC" font-size="13" font-weight="600" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >fct_order</text>
+<rect x="1308.6" y="307" width="29.4" height="15" rx="3" fill="#0E639C"/>
+<text x="1323.31" y="317.92" fill="#FFFFFF" font-size="9.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">SLV</text>
+<text x="1029" y="344" fill="#8A8A8A" font-size="10.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >One row per order</text>
+<g>
+<rect x="1029.0" y="359" width="22.2" height="13" rx="3" fill="rgba(234,179,8,.2)"/>
+<text x="1040.12" y="368.74" fill="#CA8A04" font-size="9" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">PK</text>
+<text x="1057.24" y="369.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >order_id</text>
+<text x="1337" y="369.8" fill="#4EC9B0" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >INT</text>
+</g>
+<g>
+<rect x="1029.0" y="382" width="22.2" height="13" rx="3" fill="rgba(59,130,246,.22)"/>
+<text x="1040.12" y="391.74" fill="#3B82F6" font-size="9" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">FK</text>
+<text x="1057.24" y="392.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >customer_id</text>
+<text x="1337" y="392.8" fill="#4EC9B0" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >INT</text>
+</g>
+<g>
+<text x="1055" y="415.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >order_total</text>
+<text x="1337" y="415.8" fill="#D7BA7D" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >DECIMAL(12,2)</text>
+</g>
+<rect x="1018" y="427" width="330" height="23" fill="#181818"/>
+<path d="M1018 427h330" stroke="#2B2B2B"/>
+<text x="1183.0" y="442.5" fill="#9D9D9D" font-size="11" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >3 columns</text>
+</g>
+<rect x="1019" y="300" width="328" height="149" rx="5.5" stroke="#60A5FA" stroke-width="2"/>
+<path d="M800 365.5H903q6 0 6 6V382.5q0 6 6 6H1018" stroke="#60A5FA" stroke-width="1.5"/>
+<text x="809" y="359.5" fill="#60A5FA" font-size="11" font-weight="600" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >1</text>
+<text x="1009" y="385.5" fill="#60A5FA" font-size="14" font-weight="600" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >*</text>
+</g>
+<rect x="520.5" y="164.5" width="871" height="305" rx="9.5" stroke="#383838"/>
+<circle cx="525" cy="543" r="5" fill="#22C55E"/>
+<text x="538" y="548" fill="#EEF1F6" font-size="16" font-weight="700" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Physical</text>
+<text x="624.8" y="548" fill="#6F7786" font-size="14" font-weight="400" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >what dbt and the warehouse say · read-only, never written to disk</text>
+<g filter="url(#winShadow)"><rect x="520" y="562" width="872" height="378" rx="10" fill="#1F1F1F"/></g>
+<clipPath id="w562520"><rect x="520" y="562" width="872" height="378" rx="10"/></clipPath>
+<g clip-path="url(#w562520)">
+<rect x="520" y="562" width="872" height="32" fill="#181818"/>
+<path d="M520 594h872" stroke="#2B2B2B"/>
+<rect x="520" y="562" width="150" height="33" fill="#1F1F1F"/>
+<rect x="520" y="562" width="150" height="1.5" fill="#0078D4"/>
+<path d="M670 562v32" stroke="#2B2B2B"/>
+<text x="538.5" y="582.0" fill="#CBCB41" font-size="10.5" font-weight="700" text-anchor="middle" font-family="'SF Mono', Menlo, Consolas, monospace" >{}</text>
+<text x="552" y="583" fill="#FFFFFF" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >orders.json</text>
+<path d="M650 575l6 6M656 575l-6 6" stroke="#9D9D9D" stroke-width="1.2" stroke-linecap="round"/>
+<text x="1376" y="583" fill="#6E7681" font-size="11.5" font-weight="400" text-anchor="end" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >.erd-studio › silver › orders.json</text>
+<rect x="520" y="595" width="872" height="345" fill="url(#dots)"/>
+<rect x="721.0" y="607" width="470" height="36" rx="6" fill="#252526" stroke="#3C3C3C"/>
+<text x="735.0" y="630" fill="#CCCCCC" font-size="13" font-weight="500" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >orders</text>
+<rect x="785.0" y="618" width="29.4" height="15" rx="3" fill="#3A3A3A"/>
+<text x="799.69" y="628.92" fill="#CCCCCC" font-size="9.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">SLV</text>
+<path d="M827.0 615v20" stroke="#3C3C3C"/>
+<text x="845.0" y="630" fill="#CCCCCC" font-size="14" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >−</text>
+<text x="879.0" y="630" fill="#9D9D9D" font-size="12" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >100%</text>
+<text x="913.0" y="630" fill="#CCCCCC" font-size="14" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >+</text>
+<text x="943.0" y="630" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Fit</text>
+<path d="M967.0 615v20" stroke="#3C3C3C"/>
+<rect x="977.0" y="613" width="84" height="24" rx="3" fill="#0E639C"/>
+<rect x="987.0" y="620" width="9" height="9" stroke="#fff" stroke-width="1.2"/><path d="M991.5 620v9M987.0 624.5h9" stroke="#fff" stroke-width="1"/>
+<text x="1001.0" y="629.5" fill="#FFFFFF" font-size="12.5" font-weight="500" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Layout</text>
+<path d="M1077.0 619a6.5 6.5 0 1 0 5 2.5" stroke="#CCCCCC" stroke-width="1.3" stroke-linecap="round"/><path d="M1082.0 617v4.5h-4.5" stroke="#CCCCCC" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1099.0 615v20" stroke="#3C3C3C"/>
+<rect x="1109.0" y="613" width="70" height="24" rx="3" fill="#CCA700" fill-opacity=".85"/>
+<circle cx="1122.0" cy="625" r="5" stroke="#1F1F1F" stroke-width="1.4"/><path d="M1118.5 628.5l7-7" stroke="#1F1F1F" stroke-width="1.4"/>
+<text x="1133.0" y="629.5" fill="#1F1F1F" font-size="12.5" font-weight="600" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Diff</text>
+<rect x="884.0" y="649" width="144" height="28" rx="5" fill="#252526" stroke="#3C3C3C"/>
+<text x="918.0" y="667.5" fill="#9D9D9D" font-size="12" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Logical</text>
+<rect x="957.0" y="652" width="67" height="22" rx="3" fill="#0E639C"/>
+<rect x="965.0" y="661" width="7" height="6" rx="1" fill="#fff"/><path d="M966.5 661v-2a2 2 0 0 1 4 0v2" stroke="#fff" stroke-width="1.1"/>
+<text x="976.0" y="667.5" fill="#FFFFFF" font-size="12" font-weight="500" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Physical</text>
+<g filter="url(#nodeShadow)"><rect x="564" y="693" width="236" height="151" rx="6" fill="#1F1F1F"/></g>
+<clipPath id="cdim_customer693"><rect x="564" y="693" width="236" height="151" rx="6"/></clipPath>
+<g clip-path="url(#cdim_customer693)">
+<rect x="564" y="693" width="236" height="31" fill="#181818"/>
+<path d="M564 724h236M564 744h236" stroke="#2B2B2B"/>
+<text x="575" y="713.5" fill="#CCCCCC" font-size="13" font-weight="600" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >dim_customer</text>
+<rect x="760.6" y="701" width="29.4" height="15" rx="3" fill="#0E639C"/>
+<text x="775.3100000000001" y="711.92" fill="#FFFFFF" font-size="9.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">SLV</text>
+<rect x="732.7" y="701" width="22.9" height="15" rx="3" fill="#14532D"/>
+<text x="744.1600000000001" y="711.92" fill="#86EFAC" font-size="9.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">WH</text>
+<text x="575" y="738" fill="#8A8A8A" font-size="10.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >One row per customer</text>
+<g>
+<rect x="575.0" y="753" width="22.2" height="13" rx="3" fill="rgba(234,179,8,.2)"/>
+<text x="586.12" y="762.74" fill="#CA8A04" font-size="9" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">PK</text>
+<text x="603.24" y="763.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >customer_id</text>
+<text x="789" y="763.8" fill="#4EC9B0" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >INT</text>
+</g>
+<g>
+<text x="601" y="786.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >customer_name</text>
+<text x="789" y="786.8" fill="#9CDCFE" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >VARCHAR</text>
+</g>
+<g>
+<text x="601" y="809.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >email</text>
+<text x="789" y="809.8" fill="#9CDCFE" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >VARCHAR</text>
+</g>
+<rect x="564" y="821" width="236" height="23" fill="#181818"/>
+<path d="M564 821h236" stroke="#2B2B2B"/>
+<text x="682.0" y="836.5" fill="#9D9D9D" font-size="11" font-weight="400" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >3 columns</text>
+</g>
+<rect x="565" y="694" width="234" height="149" rx="5.5" stroke="#22C55E" stroke-width="2"/>
+<g filter="url(#nodeShadow)"><rect x="1018" y="693" width="330" height="195" rx="6" fill="#1F1F1F"/></g>
+<clipPath id="cfct_order693"><rect x="1018" y="693" width="330" height="195" rx="6"/></clipPath>
+<g clip-path="url(#cfct_order693)">
+<rect x="1018" y="693" width="330" height="31" fill="#181818"/>
+<path d="M1018 724h330M1018 744h330" stroke="#2B2B2B"/>
+<text x="1029" y="713.5" fill="#CCCCCC" font-size="13" font-weight="600" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >fct_order</text>
+<rect x="1308.6" y="701" width="29.4" height="15" rx="3" fill="#0E639C"/>
+<text x="1323.31" y="711.92" fill="#FFFFFF" font-size="9.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">SLV</text>
+<rect x="1280.7" y="701" width="22.9" height="15" rx="3" fill="#14532D"/>
+<text x="1292.1599999999999" y="711.92" fill="#86EFAC" font-size="9.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">WH</text>
+<text x="1029" y="738" fill="#8A8A8A" font-size="10.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >One row per order</text>
+<g>
+<rect x="1029.0" y="753" width="22.2" height="13" rx="3" fill="rgba(234,179,8,.2)"/>
+<text x="1040.12" y="762.74" fill="#CA8A04" font-size="9" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">PK</text>
+<text x="1057.24" y="763.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >order_id</text>
+<text x="1337" y="763.8" fill="#4EC9B0" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >INT</text>
+</g>
+<g>
+<rect x="1029.0" y="776" width="22.2" height="13" rx="3" fill="rgba(59,130,246,.22)"/>
+<text x="1040.12" y="785.74" fill="#3B82F6" font-size="9" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">FK</text>
+<text x="1057.24" y="786.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >customer_id</text>
+<text x="1337" y="786.8" fill="#4EC9B0" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >INT</text>
+</g>
+<rect x="1018" y="794" width="330" height="23" fill="#F59E0B" fill-opacity=".12"/>
+<rect x="1018" y="794" width="2.5" height="23" fill="#F59E0B"/>
+<g>
+<text x="1055" y="809.8" fill="#CCCCCC" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >order_amt</text>
+<rect x="1275.0" y="798.5" width="62.0" height="14" rx="3" fill="rgba(245,158,11,.2)"/>
+<text x="1305.99" y="808.56" fill="#F59E0B" font-size="8.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">ONLY HERE</text>
+<text x="1267.98" y="809.8" fill="#D7BA7D" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >DECIMAL(12,2)</text>
+</g>
+<rect x="1018" y="819" width="330" height="17" fill="#9CA3AF" fill-opacity=".06"/>
+<path d="M1018 819.5h330M1018 835.5h330" stroke="#9CA3AF" stroke-opacity=".7" stroke-dasharray="3 2"/>
+<text x="1029" y="831" fill="#9CA3AF" font-size="9" font-weight="600" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing=".6">ONLY IN LOGICAL</text>
+<g opacity=".5">
+<text x="1055" y="853.8" fill="#9CA3AF" font-size="12.5" font-weight="400" text-anchor="start" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-style="italic">order_total</text>
+<path d="M1055 849.5h64" stroke="#9CA3AF" stroke-width="1"/>
+<rect x="1257.6" y="842.5" width="79.4" height="14" rx="3" fill="rgba(156,163,175,.2)"/>
+<text x="1297.3200000000002" y="852.56" fill="#9CA3AF" font-size="8.5" font-weight="700" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" letter-spacing="0.4">LOGICAL ONLY</text>
+<text x="1250.64" y="853.8" fill="#9D9D9D" font-size="11.5" font-weight="400" text-anchor="end" font-family="'SF Mono', Menlo, Consolas, monospace" >DECIMAL(12,2)</text>
+</g>
+<rect x="1018" y="865" width="330" height="23" fill="#181818"/>
+<path d="M1018 865h330" stroke="#2B2B2B"/>
+<text x="1183.0" y="880.5" font-size="11" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" text-anchor="middle" fill="#9D9D9D">3 columns · <tspan fill="#F59E0B" font-weight="500">2 diffs</tspan></text>
+</g>
+<rect x="1019" y="694" width="328" height="193" rx="5.5" stroke="#22C55E" stroke-width="2"/>
+<path d="M800 759.5H903q6 0 6 6V776.5q0 6 6 6H1018" stroke="#22C55E" stroke-width="1.5"/>
+<text x="809" y="753.5" fill="#22C55E" font-size="11" font-weight="600" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >1</text>
+<text x="1009" y="779.5" fill="#22C55E" font-size="14" font-weight="600" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >*</text>
+<rect x="564" y="858" width="300" height="58" rx="8" fill="#2A2418" stroke="#F59E0B" stroke-opacity=".6"/>
+<path d="M584 871L592.5 886H575.5Z" fill="#F59E0B"/>
+<path d="M584 877v4" stroke="#2A2418" stroke-width="1.8" stroke-linecap="round"/><circle cx="584" cy="883.6" r="1" fill="#2A2418"/>
+<text x="602" y="883" fill="#FDE68A" font-size="13.5" font-weight="700" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >Renamed in the SQL, not the design</text>
+<text x="602" y="903" fill="#A9B1BF" font-size="13" font-weight="400" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >You get a highlight, not a meeting.</text>
+<path d="M864 880C914 880 958 805.5 1010 805.5" stroke="#F59E0B" stroke-width="1.6" stroke-dasharray="4 4"/>
+</g>
+<rect x="520.5" y="562.5" width="871" height="377" rx="9.5" stroke="#383838"/>
+<path d="M1183.0 474V484.0M1183.0 514.0V528" stroke="#6F7786" stroke-width="1.5" stroke-dasharray="3 4"/>
+<rect x="1065.0" y="484.0" width="236" height="30" rx="15" fill="#23262F" stroke="#3A3E4A"/>
+<text x="1183.0" y="504.0" font-size="13.5" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" text-anchor="middle" fill="#A9B1BF" font-weight="600">compare  <tspan fill="#6F7786">·</tspan>  <tspan fill="#FCD34D">2 differences</tspan></text>
+<path d="M418 321.0C476.0 321.0 456.0 317.0 514 317.0" stroke="#60A5FA" stroke-width="2" marker-start="url(#ab)" marker-end="url(#ab)"/>
+<text x="466.0" y="287.0" fill="#BFDBFE" font-size="12.5" font-weight="600" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >render</text>
+<text x="466.0" y="303.0" fill="#BFDBFE" font-size="12.5" font-weight="600" text-anchor="middle" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >&amp; save</text>
+<path d="M418 516.0C496.0 516.0 436.0 751.0 514 751.0" stroke="#22C55E" stroke-width="2" marker-end="url(#ag)"/>
+<text x="478.0" y="629.5" fill="#BBF7D0" font-size="12.5" font-weight="600" text-anchor="start" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >derive</text>
+<text x="1392" y="974" fill="#6F7786" font-size="12.5" font-weight="400" text-anchor="end" font-family="Inter, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" >No server, no account, no export step. Everything stays in Git.</text>
 </svg>
