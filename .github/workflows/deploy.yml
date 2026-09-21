@@ -1,4 +1,4 @@
-name: Deploy to VS Code Marketplace
+name: Deploy to VS Code Marketplace and Open VSX
 
 on:
   pull_request:
@@ -157,6 +157,33 @@ jobs:
           echo "::error::Marketplace publish failed after 3 attempts"
           exit 1
 
+      # Open VSX serves VS Code forks (VSCodium, Cursor, Windsurf, Gitpod…) that
+      # cannot use the Microsoft Marketplace. It ships the exact VSIX published
+      # above, so there is no second build. The Marketplace is the primary
+      # registry: an Open VSX outage must not fail the release or block the
+      # GitHub Release below, hence continue-on-error. --skip-duplicate makes a
+      # rerun of an interrupted release a no-op here too.
+      - name: Publish to Open VSX
+        continue-on-error: true
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::warning::OVSX_PAT secret is not set; skipping Open VSX"
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if npx --yes ovsx@1 publish --packagePath erd-studio.vsix --pat "$OVSX_PAT" --skip-duplicate; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Open VSX attempt ${attempt} failed; retrying in $((attempt * 15)) seconds"
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::warning::Open VSX publish failed after 3 attempts; the Marketplace release is unaffected"
+          exit 1
+
       # Only after a successful publish: a GitHub Release must never advertise a
       # version the marketplace does not have. `gh release create` also creates the
       # tag, pointing at the bump commit this job just pushed.
@@ -170,7 +197,7 @@ jobs:
             echo
             echo '---'
             echo
-            echo "Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio), or from the \`.vsix\` below with **Extensions: Install from VSIX…**."
+            echo "Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio), [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) (VSCodium, Cursor, Windsurf), or from the \`.vsix\` below with **Extensions: Install from VSIX…**."
           } >> "$NOTES_FILE"
 
           ASSET="${RUNNER_TEMP}/erd-studio-${NEW_VERSION}.vsix"

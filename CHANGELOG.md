@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+
+- ERD Studio is now published to [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) as well as the VS Code Marketplace, so it installs directly in VSCodium, Cursor, Windsurf and other VS Code-compatible editors (#71).
+
 ## 1.0.9 — 2026-09-21
 
 ### Changed
