@@ -31,9 +31,9 @@ features.json
 # named here, and CI fails if `vsce ls --no-dependencies` lists more than 60
 # files. `proxy/` is the hand-deployed Cloudflare Worker behind the feedback
 # analysis hosted tier (see proxy/README.md); it must never reach the VSIX.
-forge-app/**
 mcp-server/**
 proxy/**
+.linkedin/**
 data engineer plugin/**
 
 # Media referenced only by README.md. vsce rewrites the README's relative links

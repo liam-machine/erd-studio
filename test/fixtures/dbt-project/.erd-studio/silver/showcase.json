@@ -2,7 +2,7 @@
   "schemaVersion": 5,
   "domain": "showcase",
   "layer": "silver",
-  "description": "Project task management \u2014 tracks projects, tasks, events, and customers",
+  "description": "Project task management — tracks projects, tasks, events, and customers",
   "modelFolder": "models/silver",
   "logical": {
     "models": [
@@ -84,12 +84,12 @@
         "y": 520
       },
       "dim_task": {
-        "x": 980,
-        "y": 470
+        "x": 1026,
+        "y": 586
       },
       "fct_task_event": {
-        "x": 500,
-        "y": 640
+        "x": 438,
+        "y": 544
       }
     },
     "annotations": []

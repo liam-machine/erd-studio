@@ -16,3 +16,6 @@ dev-preview.html
 
 # Git worktrees (per-branch checkouts, not for tracking)
 .worktrees/
+
+# LinkedIn post/comment archive (personal, not for the repo)
+.linkedin/
