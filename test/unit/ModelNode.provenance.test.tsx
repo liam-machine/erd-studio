@@ -90,8 +90,8 @@ describe('ModelNode provenance chip', () => {
     expect(el).not.toBeNull();
     expect(el.textContent).toBe('WH');
     expect(el.className).toContain('model-node__source--catalog');
-    expect(el.getAttribute('title')).toBe(
-      'Types from the warehouse catalog; columns from the warehouse catalog and your dbt .yml',
+    expect(el.getAttribute('aria-label')).toBe(
+      'WH — types from the warehouse catalog; columns from the warehouse catalog and your dbt .yml',
     );
   });
 
@@ -111,8 +111,8 @@ describe('ModelNode provenance chip', () => {
       provenance: { columns: ['yml'], types: 'yml' },
     });
 
-    expect(chip(container)!.getAttribute('title')).toBe(
-      'Types from your dbt .yml; columns from your dbt .yml · 2 columns have no type',
+    expect(chip(container)!.getAttribute('aria-label')).toBe(
+      'YML — types from your dbt .yml; columns from your dbt .yml · 2 columns have no type',
     );
   });
 
@@ -122,7 +122,7 @@ describe('ModelNode provenance chip', () => {
       provenance: { columns: ['yml'], types: 'yml' },
     });
 
-    expect(chip(container)!.getAttribute('title')).toContain('· 1 column has no type');
+    expect(chip(container)!.getAttribute('aria-label')).toContain('· 1 column has no type');
   });
 
   it('renders no chip on a logical node, which carries no provenance', () => {

@@ -27,6 +27,7 @@ import {
 import type { FkFlowEdge } from '../../types/graph';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { swapCardinality } from '../../lib/cardinalityUtils';
+import { edgeHoverText } from '../../lib/badgeLabels';
 import {
   calculateEdgeOffsetInGroup,
   getEdgesOnSide,
@@ -168,7 +169,7 @@ function FkEdgeComponent({
   );
 
   if (!data) return null;
-  const { cardinality, stage, discrepancyStatus, dimmed, readOnly, isSelfLoop } = data;
+  const { cardinality, stage, discrepancyStatus, dimmed, readOnly, isSelfLoop, fromColumn, toColumn } = data;
 
   // For cardinality mismatch edges, pull the mismatch details from the report
   // The edge data only has status — we need to find the original relationship discrepancy
@@ -232,6 +233,10 @@ function FkEdgeComponent({
   const statusClass = discrepancyStatus
     ? `fk-edge--discrepancy-${discrepancyStatus}`
     : `fk-edge--${stage ?? 'logical'}`;
+
+  const edgeTitle = edgeHoverText({
+    fromModel, fromColumn, toModel, toColumn, cardinality, discrepancyStatus,
+  });
   // Cardinality labels at each end:
   // - many-to-one: * at source, 1 at target
   // - one-to-one: 1 at both ends
@@ -292,14 +297,18 @@ function FkEdgeComponent({
         d={edgePath}
         className={`fk-edge ${statusClass}${dimmed ? ' fk-edge--dimmed' : ''}`}
       />
-      {/* Invisible wider path for easier hover/click targeting */}
+      {/* Invisible wider path for easier hover/click targeting. It also carries
+          the edge's only hover text: the `*`/`1` glyphs are pointer-events:none
+          so the line is the one part of an edge that can hold a <title>. */}
       <path
         d={edgePath}
         fill="none"
         stroke="transparent"
         strokeWidth={16}
         style={{ pointerEvents: 'stroke' }}
-      />
+      >
+        <title>{edgeTitle}</title>
+      </path>
       <EdgeLabelRenderer>
         <span
           className={`fk-edge__label ${labelColorClass}${srcLabelClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}

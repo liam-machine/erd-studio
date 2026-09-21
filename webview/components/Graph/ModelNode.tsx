@@ -28,8 +28,17 @@ import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { KeyBadge } from '../common/KeyBadge';
 import { DataTypeSelect } from '../common/DataTypeSelect';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
+import { useHoverTip } from './HoverTip';
 import { STAGE_HEX } from '../../lib/stageColors';
 import { getDataTypeColor } from '../../lib/dataTypeColors';
+import {
+  SOURCE_LABEL,
+  SOURCE_PHRASE,
+  SCD_BADGE,
+  SCD_TITLE,
+  ADDITIVE_BADGE,
+  ADDITIVE_TITLE,
+} from '../../lib/badgeLabels';
 import './ModelNode.css';
 
 // ---------------------------------------------------------------------------
@@ -62,27 +71,6 @@ const GHOST_REASON_TITLE: Record<NonNullable<ModelNodeData['ghostReason']>, stri
   'missing-in-comparison': 'not present in the stage being compared against',
 };
 
-/**
- * Header chip text for each physical column source. Three letters, because the
- * chip shares a fixed-height header row with the name and the schema badge —
- * the sentence-length explanation lives in the chip's title and in the
- * DetailPanel's "Columns from" row.
- */
-const SOURCE_LABEL: Record<PhysicalColumnSource, string> = {
-  catalog: 'WH',
-  yml: 'YML',
-  manifest: 'DBT',
-  file: 'SQL',
-};
-
-/** How each source is named in prose (chip tooltip). */
-const SOURCE_PHRASE: Record<PhysicalColumnSource, string> = {
-  catalog: 'the warehouse catalog',
-  yml: 'your dbt .yml',
-  manifest: 'the dbt manifest',
-  file: 'the source file only',
-};
-
 /** Join a contributor list as prose: "a", "a and b", "a, b and c". */
 function joinPhrases(sources: PhysicalColumnSource[]): string {
   const phrases = sources.map((s) => SOURCE_PHRASE[s]);
@@ -98,26 +86,12 @@ function joinPhrases(sources: PhysicalColumnSource[]): string {
  */
 function sourceTitle(provenance: PhysicalProvenance, columns: ColumnDisplay[]): string {
   const untyped = columns.filter((c) => !c.dataType).length;
-  const base = `Types from ${SOURCE_PHRASE[provenance.types]}; columns from ${joinPhrases(provenance.columns)}`;
+  const base = `${SOURCE_LABEL[provenance.types]} \u2014 types from ${SOURCE_PHRASE[provenance.types]}; columns from ${joinPhrases(provenance.columns)}`;
   return untyped > 0
     ? `${base} \u00b7 ${untyped} column${untyped === 1 ? ' has' : 's have'} no type`
     : base;
 }
 
-
-/** Unicode circled numbers for SCD type badges. */
-const SCD_BADGE: Record<number, string> = {
-  0: '\u24EA', // ⓪
-  1: '\u2460', // ①
-  2: '\u2461', // ②
-};
-
-/** Symbols for additive type badges. */
-const ADDITIVE_BADGE: Record<string, string> = {
-  'additive': '\u03A3',      // Σ
-  'semi-additive': '~',
-  'non-additive': '\u00F7',  // ÷
-};
 
 /**
  * Node-level handles — invisible connection points on each side of the card.
@@ -524,7 +498,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
       {column.scdType != null && SCD_BADGE[column.scdType] && (
         <span
           className="model-node__col-badge model-node__col-badge--scd"
-          title={`SCD Type ${column.scdType}`}
+          title={SCD_TITLE[column.scdType] ?? `SCD Type ${column.scdType}`}
         >
           {SCD_BADGE[column.scdType]}
         </span>
@@ -532,7 +506,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
       {column.additiveType && ADDITIVE_BADGE[column.additiveType] && (
         <span
           className="model-node__col-badge model-node__col-badge--additive"
-          title={column.additiveType}
+          title={ADDITIVE_TITLE[column.additiveType] ?? column.additiveType}
         >
           {ADDITIVE_BADGE[column.additiveType]}
         </span>
@@ -631,6 +605,25 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
   const isDiscExtra = discrepancy?.status === 'extra';
   const stageClass = isGhost ? 'ghost' : stage;
 
+  // Header hover tips. `title` is not a usable tooltip on a React Flow node —
+  // the node is a drag surface and the browser shows the grab cursor instead —
+  // so the header uses the same portal hover card the column rows use.
+  const nameTip = useHoverTip<HTMLSpanElement>(
+    ghostReason
+      ? `${modelName} \u2014 ${GHOST_REASON_TITLE[ghostReason]}`
+      : isDiscExtra
+        ? `${modelName} \u2014 only in ${discrepancySourceStage ?? 'this stage'}, not in ${discrepancyTargetStage ?? 'the stage being compared'}`
+        : modelName,
+  );
+  const sourceTip = useHoverTip<HTMLSpanElement>(
+    provenance ? sourceTitle(provenance, columns) : '',
+  );
+  const badgeTip = useHoverTip<HTMLSpanElement>(
+    schema
+      ? `Database schema: ${schema}`
+      : `Layer: ${layerConfig?.label ?? layer} \u2014 no dbt schema resolved (run dbt compile or dbt docs generate)`,
+  );
+
   return (
     <div
       className={`model-node model-node--${stageClass}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}`}
@@ -649,31 +642,32 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
 
       {/* Header */}
       <div className="model-node__header">
-        <span className="model-node__name" title={ghostReason ? `${modelName} — ${GHOST_REASON_TITLE[ghostReason]}` : modelName}>
+        <span className="model-node__name" {...nameTip.anchorProps}>
           {modelName}
         </span>
+        {nameTip.tip}
         {provenance && (
           <span
             className={`model-node__source model-node__source--${provenance.types}`}
-            title={sourceTitle(provenance, columns)}
+            {...sourceTip.anchorProps}
           >
             {SOURCE_LABEL[provenance.types]}
           </span>
         )}
+        {sourceTip.tip}
         <span
           className={`model-node__badge${schema ? '' : ' model-node__badge--layer'}`}
           style={layerConfig?.color ? {
             backgroundColor: `${layerConfig.color}33`,
             color: layerConfig.color,
           } : undefined}
-          title={schema
-            ? undefined
-            : `Layer: ${layerConfig?.label ?? layer} — no dbt schema resolved (run dbt compile or dbt docs generate)`}
+          {...badgeTip.anchorProps}
         >
           {schema
             ? SCHEMA_BADGE[schema.toLowerCase()] ?? schema.substring(0, 3).toUpperCase()
             : layerConfig?.abbreviation ?? LAYER_BADGE_FALLBACK[layer] ?? layer.substring(0, 3).toUpperCase()}
         </span>
+        {badgeTip.tip}
       </div>
 
       {/* Grain subtitle */}
@@ -726,11 +720,18 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
         {/* Ghost rows for missing columns (discrepancy overlay) */}
         {missingColumns.length > 0 && (
           <>
-            <div className="model-node__separator model-node__separator--disc">
+            <div
+              className="model-node__separator model-node__separator--disc"
+              title={`Below this line: columns ${discrepancyTargetStage ?? 'the compared stage'} has and ${discrepancySourceStage ?? 'this stage'} does not`}
+            >
               <span className="model-node__separator-label model-node__separator-label--missing">only in {discrepancyTargetStage ?? 'comparison'}</span>
             </div>
             {missingColumns.map((cd) => (
-              <div key={`ghost-${cd.name}`} className="model-node__column model-node__column--disc-missing nodrag">
+              <div
+                key={`ghost-${cd.name}`}
+                className="model-node__column model-node__column--disc-missing nodrag"
+                title={`${cd.name} is in ${discrepancyTargetStage ?? 'the compared stage'} but not in ${discrepancySourceStage ?? 'this stage'}`}
+              >
                 <span className="model-node__col-name">{cd.name}</span>
                 <span className="model-node__col-type" style={{ color: cd.targetDataType ? getDataTypeColor(cd.targetDataType) : undefined }}>{cd.targetDataType ?? ''}</span>
                 <span className="model-node__col-disc-badge model-node__col-disc-badge--missing">{discrepancyTargetStage ?? 'target'} only</span>
