@@ -93,6 +93,11 @@
 
 .legend__content {
   padding: 8px 0;
+  /* Two more sections than this panel was designed for. On a short editor it
+     has to scroll rather than grow past the top of the canvas. */
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* ---------------------------------------------------------------------------
@@ -131,9 +136,13 @@
   gap: 6px;
 }
 
+/* Three badge+label pairs on one line only fit while the labels are short and
+   the panel has no scrollbar eating its width. Both stopped being true, so the
+   row wraps rather than clipping "Natural key" against the panel edge. */
 .legend__items--badges {
   flex-direction: row;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
 }
 
 .legend__item {
@@ -155,6 +164,7 @@
 }
 
 .legend__item-desc {
+  min-width: 0;
   font-size: 10px;
   color: var(--editor-fg);
   opacity: 0.6;
@@ -186,7 +196,12 @@
 .legend__model-card--ghost {
   border-color: var(--stage-ghost);
   border-style: dashed;
-  opacity: 0.5;
+  /* Matches .model-node--ghost, which moved to 0.65 when ghosts became routine. */
+  opacity: 0.65;
+}
+
+.legend__model-card--ghost-disabled {
+  border-style: dotted;
 }
 
 .legend__model-header {
@@ -225,6 +240,20 @@
 
 .legend__edge--physical {
   stroke: var(--stage-physical);
+}
+
+.legend__edge--disc-extra {
+  stroke: var(--discrepancy-extra);
+  stroke-dasharray: 5 3;
+}
+
+.legend__edge--disc-missing {
+  stroke: var(--stage-ghost);
+  stroke-dasharray: 5 3;
+}
+
+.legend__edge--disc-mismatch {
+  stroke: var(--discrepancy-mismatch);
 }
 
 .legend__edge--annotation {
@@ -294,17 +323,143 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .legend__annotation-card {
   text-transform: uppercase;
 }
 
+/* These three must track .key-badge--{pk,fk,nk}.key-badge--active in
+   KeyBadge.css. A legend swatch in a different yellow from the badge it claims
+   to explain is worse than no swatch. */
 .legend__badge--pk {
-  background: rgba(250, 204, 21, 0.2);
-  color: #facc15;
+  background: rgba(234, 179, 8, 0.2);
+  color: #ca8a04;
 }
 
 .legend__badge--fk {
-  background: rgba(96, 165, 250, 0.2);
-  color: var(--stage-logical);
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
 }
 
 .legend__badge--nk {
   background: rgba(168, 85, 247, 0.2);
   color: #a855f7;
+}
+
+/* ---------------------------------------------------------------------------
+   Subsection heading (a qualifier inside a section, e.g. Physical-only chips)
+   --------------------------------------------------------------------------- */
+
+.legend__subsection-title {
+  margin: 10px 0 6px 0;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------------------
+   Header badges — schema abbreviation and provenance source chips
+   --------------------------------------------------------------------------- */
+
+.legend__items--sources,
+.legend__items--disc-edges,
+.legend__items--symbols {
+  gap: 6px;
+}
+
+.legend__items--symbols {
+  margin-top: 10px;
+}
+
+/* The badge sample is fixed-width so the descriptions beside it line up, and
+   the three-letter chips (WH/YML/DBT/SQL) differ in width. */
+.legend__badge--schema,
+.legend__badge--source {
+  flex-shrink: 0;
+  min-width: 26px;
+}
+
+.legend__badge--schema {
+  background: rgba(96, 165, 250, 0.2);
+  color: var(--stage-logical);
+}
+
+/* These two rules mirror .model-node__source / --catalog in ModelNode.css. If
+   the chip's colours move there, they move here. */
+.legend__badge--source {
+  background: var(--dim-fg);
+  color: var(--editor-bg);
+}
+
+/* The one chip whose types were read back from the warehouse, rather than
+   declared by hand, is the one that gets a colour. */
+.legend__badge--source-catalog {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.legend__item-desc code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 9px;
+}
+
+/* ---------------------------------------------------------------------------
+   Symbol rows (SCD types, additivity)
+   --------------------------------------------------------------------------- */
+
+.legend__symbols {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 4px;
+  min-width: 42px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--editor-fg);
+  opacity: 0.8;
+}
+
+/* Each symbol carries its own title, so it needs to be its own hover target. */
+.legend__symbols > span {
+  cursor: help;
+}
+
+/* ---------------------------------------------------------------------------
+   Notes and comparison swatches
+   --------------------------------------------------------------------------- */
+
+.legend__note {
+  margin: 8px 0 0 0;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--editor-fg);
+  opacity: 0.5;
+}
+
+.legend__note--lead {
+  margin: -2px 0 8px 0;
+}
+
+/* A short colour bar, because the discrepancy colours arrive as a left border
+   on a row rather than as a chip with text in it. */
+.legend__swatch {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  border-left-width: 4px;
+  border-left-style: solid;
+  background: var(--panel-bg);
+}
+
+.legend__swatch--extra {
+  border-left-color: var(--discrepancy-extra);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.legend__swatch--mismatch {
+  border-left-color: var(--discrepancy-mismatch);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.legend__swatch--missing {
+  border-left-color: var(--stage-ghost);
+  background: rgba(156, 163, 175, 0.12);
 }

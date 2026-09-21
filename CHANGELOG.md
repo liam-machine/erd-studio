@@ -8,6 +8,59 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+
+- **The legend now explains the badges the canvas was stamping on nodes without
+  saying what they meant.** `WH`, `YML`, `DBT` and `SQL` in a physical model's
+  header name where that model's shape was read from — the warehouse catalog,
+  your dbt `.yml`, the compiled manifest, or a bare source file — and the
+  legend now lists all four, colouring `WH` the way the node does. The `SLV` /
+  `GLD` / `BRZ` chip beside them is explained too, including the case where it
+  is standing in for a dbt schema that has not been resolved yet.
+- **A "Comparing Stages" section**, covering the entire vocabulary a comparison
+  draws and the legend previously said nothing about: amber for "only in the
+  stage you are viewing", red for "declared differently in each stage", grey and
+  struck through for "only in the stage being compared against", plus the three
+  relationship-line treatments that mean the same three things.
+- **The SCD (⓪ ① ②) and additivity (Σ ~ ÷) column symbols** are in the legend, each
+  one hoverable for the full sentence.
+- **One-to-many cardinality**, which the canvas has always drawn but the legend
+  never listed — it showed only many-to-one, one-to-one and many-to-many. The
+  section also samples the relationship-line colour for both stages, since it
+  previously only ever drew the logical blue.
+- **Ghost models are split in two**, matching the canvas: a dashed border means
+  the model is not in your dbt project, a dotted one means it is disabled in dbt
+  and `ref()` to it will not compile.
+
+### Changed
+
+- **The node header's badges now use a real hover card, not the browser's
+  `title`.** A React Flow node is a drag surface: hovering its header gave you
+  the grab cursor and nothing else, so the explanations behind `WH`, `YML`,
+  `SLV` and the model name were written but unreachable. They now use the same
+  portal hover card the column rows have always used — 450 ms, themed, and
+  never clipped by the node — and each badge carries an `aria-label` with the
+  same text, so the explanation also reaches a screen reader.
+- **More of the canvas answers "what is this?" on hover.** Relationship lines
+  now carry hover text naming both endpoints, the cardinality in words, and —
+  during a comparison — what their colour is claiming, so the diff is readable
+  without being able to tell amber from red. The schema badge names its schema
+  instead of having no tooltip at all; the SCD and additivity badges give the
+  full sentence rather than repeating the number or the raw enum value; the
+  provenance chip leads with its own abbreviation; and the amber "only in this
+  stage" ring, the struck-through ghost column rows and the separator above them
+  all say what they mean.
+
+### Fixed
+
+- **The legend's own swatches no longer disagree with the canvas.** Its primary-
+  key sample was a different yellow and its foreign-key sample a different blue
+  from the badges they claim to explain, and its ghost sample used an opacity the
+  node left behind. The `PK` / `FK` / `NK` row also wraps instead of clipping
+  "Natural key" against the edge of the panel.
+
 ## 1.0.5 — 2026-09-20
 
 ### Fixed

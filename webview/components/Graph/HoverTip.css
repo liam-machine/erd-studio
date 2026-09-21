@@ -1,0 +1,30 @@
+/**
+ * HoverTip styles — the plain-text sibling of ColumnTooltip.
+ *
+ * Portalled into document.body, so positioned fixed against the viewport.
+ * pointer-events: none keeps it out of the way of node drags and the
+ * long-press relationship drag.
+ */
+
+.hover-tip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 320px;
+  padding: 6px 10px;
+  background: var(--vscode-editorHoverWidget-background, var(--panel-bg, #252526));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+  border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--vscode-editorHoverWidget-foreground, var(--editor-fg, #d4d4d4));
+  pointer-events: none;
+  opacity: 0;
+  white-space: normal;
+  word-wrap: break-word;
+  transition: opacity 0.12s ease;
+}
+
+.hover-tip--visible {
+  opacity: 1;
+}
