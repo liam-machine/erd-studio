@@ -1,4 +1,4 @@
-name: Deploy to VS Code Marketplace
+name: Deploy to VS Code Marketplace and Open VSX
 
 on:
   pull_request:
@@ -46,6 +46,24 @@ jobs:
 
       - name: Run tests
         run: npm run test
+
+      # Open VSX (open-vsx.org) is the registry that Cursor, VSCodium, Theia,
+      # Positron, Windsurf and other VS Code forks install from. Publishing there
+      # needs its own access token (an Eclipse account + the `liamwynne`
+      # namespace, see CLAUDE.md "Publishing to Open VSX"). Until the OVSX_PAT
+      # secret exists the step is skipped with a warning rather than failing the
+      # Marketplace release, and the release notes do not advertise a listing
+      # that was never made.
+      - name: Check Open VSX credentials
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -n "$OVSX_PAT" ]; then
+            echo "OVSX_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::OVSX_PAT secret is not set; skipping the Open VSX publish (VS Code Marketplace only)"
+            echo "OVSX_ENABLED=false" >> "$GITHUB_ENV"
+          fi
 
       - name: Check Claude approval
         id: claude_check
@@ -157,8 +175,38 @@ jobs:
           echo "::error::Marketplace publish failed after 3 attempts"
           exit 1
 
-      # Only after a successful publish: a GitHub Release must never advertise a
-      # version the marketplace does not have. `gh release create` also creates the
+      # Same VSIX, second registry. The Marketplace is published first so an
+      # Open VSX outage never blocks the primary listing; a rerun after a
+      # failure here takes the recovery path above, where --skip-duplicate on
+      # both registries makes every publish idempotent. `ovsx` is pinned to
+      # its major the way `@vscode/vsce` is used above (npx, not a
+      # devDependency), so a breaking CLI release cannot take a deploy down.
+      - name: Publish to Open VSX
+        if: env.OVSX_ENABLED == 'true'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          # The namespace must exist before the first publish; creating it is a
+          # one-time step that fails harmlessly with "already exists" after that.
+          # An auth failure is not swallowed — the publish right after reports it.
+          npx ovsx@1 create-namespace liamwynne --pat "$OVSX_PAT" \
+            || echo "Namespace liamwynne already exists (or could not be created); continuing to publish"
+          for attempt in 1 2 3; do
+            LOG_FILE="${RUNNER_TEMP}/ovsx-publish-${attempt}.log"
+            if npx ovsx@1 publish erd-studio.vsix --pat "$OVSX_PAT" --skip-duplicate 2>&1 | tee "$LOG_FILE"; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Open VSX publish attempt ${attempt} failed; retrying in $((attempt * 15)) seconds"
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::Open VSX publish failed after 3 attempts"
+          exit 1
+
+      # Only after every publish succeeded: a GitHub Release must never advertise a
+      # version a registry does not have. `gh release create` also creates the
       # tag, pointing at the bump commit this job just pushed.
       - name: Create GitHub Release
         env:
@@ -170,7 +218,11 @@ jobs:
             echo
             echo '---'
             echo
-            echo "Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio), or from the \`.vsix\` below with **Extensions: Install from VSIX…**."
+            if [ "$OVSX_ENABLED" = "true" ]; then
+              echo "Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio), from [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) (Cursor, VSCodium, Theia, Positron, Windsurf and other VS Code forks), or from the \`.vsix\` below with **Extensions: Install from VSIX…**."
+            else
+              echo "Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio), or from the \`.vsix\` below with **Extensions: Install from VSIX…**."
+            fi
           } >> "$NOTES_FILE"
 
           ASSET="${RUNNER_TEMP}/erd-studio-${NEW_VERSION}.vsix"

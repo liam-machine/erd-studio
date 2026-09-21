@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+
+- **ERD Studio is published to [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) as well as the VS Code Marketplace.** Cursor, VSCodium, Eclipse Theia, Positron, Windsurf, Kiro and other VS Code forks install extensions from Open VSX rather than the Microsoft Marketplace, so ERD Studio now shows up in their Extensions view too. Every release ships the same package to both registries. (#71)
+
 ## 1.0.9 — 2026-09-21
 
 ### Changed

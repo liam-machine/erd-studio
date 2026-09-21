@@ -382,15 +382,16 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
 - Remember to `npm run build` after any code changes before refreshing the preview
 - Clean up mock data and `dev-preview.html` before committing (`dev-preview.html` is also excluded from the package by `.vscodeignore`)
 
-## Publishing to VS Code Marketplace
+## Publishing to VS Code Marketplace and Open VSX
 
 **Marketplace:** https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio
+**Open VSX:** https://open-vsx.org/extension/liamwynne/erd-studio — the registry Cursor, VSCodium, Theia, Positron, Windsurf and other VS Code forks install from. Same VSIX, second registry; see "Publishing to Open VSX" below.
 
 The old `liamwynne.dbt-semantic-designer` extension has been unpublished and removed from the marketplace. Only `liamwynne.erd-studio` exists now.
 
 ### Publish a New Version
 
-Releases normally happen automatically: `.github/workflows/deploy.yml` runs when a PR is merged to `main` (docs-only, `test/fixtures/**` and `.planning/**` PRs are skipped via `paths-ignore`, because every release triggers a save-all + window reload for users with a canvas open). It type-checks, builds and tests, computes the next version via `scripts/release.mjs next-version` — max(`package.json`, latest marketplace version) + patch by default, or the exact version pinned in the `## Unreleased` heading when that heading names one (`## Unreleased — 1.0.0`) and it is ahead of everything published; falls back to `package.json` if `vsce show` fails, stamps the `## Unreleased` section of `CHANGELOG.md` with that version, **commits and pushes the bump before publishing** (with rebase retries), then runs `vsce package --no-dependencies` + `vsce publish`. Claude PR approval is checked but only soft-enforced (a warning). Put user-facing release notes under `## Unreleased` in `CHANGELOG.md` as part of your PR.
+Releases normally happen automatically: `.github/workflows/deploy.yml` runs when a PR is merged to `main` (docs-only, `test/fixtures/**` and `.planning/**` PRs are skipped via `paths-ignore`, because every release triggers a save-all + window reload for users with a canvas open). It type-checks, builds and tests, computes the next version via `scripts/release.mjs next-version` — max(`package.json`, latest marketplace version) + patch by default, or the exact version pinned in the `## Unreleased` heading when that heading names one (`## Unreleased — 1.0.0`) and it is ahead of everything published; falls back to `package.json` if `vsce show` fails, stamps the `## Unreleased` section of `CHANGELOG.md` with that version, **commits and pushes the bump before publishing** (with rebase retries), then runs `vsce package --no-dependencies` + `vsce publish`, publishes the **same VSIX to Open VSX** with `ovsx publish` (skipped with a warning when the `OVSX_PAT` repository secret is missing, so a lost token never blocks the Marketplace release), and only then creates the GitHub Release. Both publishes pass `--skip-duplicate`, so a rerun after a failure on either registry is safe. Claude PR approval is checked but only soft-enforced (a warning). Put user-facing release notes under `## Unreleased` in `CHANGELOG.md` as part of your PR.
 
 Manual publishing (rare) must follow the same order so `main` never falls behind the marketplace:
 
@@ -406,6 +407,23 @@ Manual publishing (rare) must follow the same order so `main` never falls behind
 `npx @vscode/vsce ls --no-dependencies` shows exactly what will ship; CI fails if it lists more than 60 files. `.vscodeignore` excludes everything except `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, `media/` icons and `dist/`.
 
 PAT is stored in `.env` as `AZURE_PAT`. The PAT **must** be scoped to "All accessible organizations" (not a single org) — the marketplace sits outside any specific Azure DevOps org.
+
+### Publishing to Open VSX
+
+Open VSX (https://open-vsx.org) is run by the Eclipse Foundation and is where Cursor, VSCodium, Theia, Positron, Windsurf, Kiro and other VS Code forks look for extensions — they cannot install from the Microsoft Marketplace. The deploy workflow publishes there automatically once the **`OVSX_PAT`** repository secret exists. One-time setup (all done by hand, none of it is in the repo):
+
+1. Create an account at https://open-vsx.org (it signs in with a GitHub account) and sign the **Eclipse Publisher Agreement** from the profile page — an Eclipse Foundation account is created for you if you do not have one. Publishing is refused until the agreement is signed.
+2. Generate an access token under **Settings → Access Tokens** on open-vsx.org.
+3. Add it to the GitHub repository as the `OVSX_PAT` secret (**Settings → Secrets and variables → Actions**). Locally it can live in `.env` as `OVSX_PAT` next to `AZURE_PAT`.
+4. The `liamwynne` namespace must exist before the first publish. The workflow runs `npx ovsx create-namespace liamwynne` on every deploy and tolerates "already exists", so nothing needs doing by hand; run it yourself with `source .env && npx ovsx@1 create-namespace liamwynne --pat "$OVSX_PAT"` if you want the namespace claimed before the first release. Optionally file a request in https://github.com/EclipseFdn/open-vsx.org/issues to become the *verified* owner of the namespace, which replaces the "unverified" badge on the listing.
+
+Manual publish, after the Marketplace steps above and using the same `.vsix`:
+
+```bash
+source .env && npx ovsx@1 publish erd-studio.vsix --pat "$OVSX_PAT" --skip-duplicate
+```
+
+Open VSX reads the same `package.json` (`publisher`, `version`, `license`) and the bundled `LICENSE`, so nothing in the package changes between the two registries. Version numbers are decided by the Marketplace lookup in `scripts/release.mjs next-version`; Open VSX is never consulted, and a version already on Open VSX is skipped by `--skip-duplicate` rather than failing.
 
 ### Unpublish an Extension
 
