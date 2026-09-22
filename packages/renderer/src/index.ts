@@ -1,5 +1,10 @@
 // Entry point `@erd-studio/renderer`: the viewer API — rendering a
 // `DisplayDomain` as an entity-relationship diagram, and the graph types.
+//
+//   import { ErdCanvas } from '@erd-studio/renderer';
+//   import '@erd-studio/renderer/styles.css';
+
+export { ErdCanvas, type ErdCanvasProps, type ErdCanvasHandle } from './ErdCanvas';
 
 export {
   transformDomain,
@@ -9,6 +14,7 @@ export {
   type NodeRect,
   type NodeDimensions,
 } from './lib/graphTransformer';
+export { repickHandleSides, nodeRect } from './lib/dragHandleSides';
 
 export type {
   DisplayDomain,

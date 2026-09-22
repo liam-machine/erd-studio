@@ -8,7 +8,7 @@ Peer dependencies: `react` and `react-dom` 18.3+, `@xyflow/react` 12.4+.
 
 | Import | What it is for |
 |---|---|
-| `@erd-studio/renderer` | Rendering a domain: `transformDomain` (a `DisplayDomain` to React Flow nodes and edges), `pickHandleSides`, and the display, domain and graph types (`DisplayDomain`, `ModelFlowNode`, `FkFlowEdge`, …). |
+| `@erd-studio/renderer` | Showing a domain: the `ErdCanvas` viewer component (below), plus `transformDomain` (a `DisplayDomain` to React Flow nodes and edges), `pickHandleSides`, `repickHandleSides` / `nodeRect`, and the display, domain and graph types (`DisplayDomain`, `ModelFlowNode`, `FkFlowEdge`, …). |
 | `@erd-studio/renderer/editor` | Everything above plus what a host needs to build a full editor around the canvas, as the extension's webview does: the store (below), the host adapter, `useCanvasGraph`, `CanvasBackdrop`, `canvasNodeTypes` / `canvasEdgeTypes`, the components (`ModelNode`, `FkEdge`, `AnnotationNode`, `AnnotationEdge`, `DetailPanel`, `Legend`, `KeyBadge`, `KeyBadgeGroup`, `DataTypeSelect`, `ColumnRowEditor`), the canvas hooks and the pure helpers. |
 | `@erd-studio/renderer/store` | The canvas store on its own, with no React Flow runtime: `createCanvasSlice`, `createCanvasStore`, `CanvasStoreProvider`, `useEditorStore`, `useEditorStoreApi` and their types. |
 | `@erd-studio/renderer/sizing` | Model node size estimation (`NODE_WIDTH`, `estimateNodeWidth`, `estimateNodeHeight`, `countVisibleColumnRows`, `resolveNodeDimensions`), for layout code that needs node sizes before React Flow has measured them. No components. |
@@ -16,7 +16,40 @@ Peer dependencies: `react` and `react-dom` 18.3+, `@xyflow/react` 12.4+.
 
 All four JavaScript entry points share their modules, so a store or context created through one is the same one the others see.
 
-### Store and host
+## Viewer: `ErdCanvas`
+
+`ErdCanvas` renders a `DisplayDomain` read-only, the way the extension shows a read-only domain: model nodes with their columns and key badges, FK edges, annotations, the minimap, the legend, and the detail panel a click on a model opens. It presents no editing affordances and posts nothing anywhere.
+
+```tsx
+import { useRef, useState } from 'react';
+import { ErdCanvas, type ErdCanvasHandle, type DisplayDomain } from '@erd-studio/renderer';
+import '@erd-studio/renderer/styles.css';
+
+function Diagram({ domain }: { domain: DisplayDomain }) {
+  const canvas = useRef<ErdCanvasHandle>(null);
+  const [moved, setMoved] = useState(false);
+  return (
+    <div style={{ height: 600, position: 'relative' }}>
+      <ErdCanvas ref={canvas} domain={domain} nodesDraggable onLayoutModifiedChange={setMoved} />
+      {moved && <button onClick={() => canvas.current?.resetLayout()}>Reset layout</button>}
+    </div>
+  );
+}
+```
+
+| Prop | |
+|---|---|
+| `domain` | The domain to show. It is rendered read-only whatever its `readOnly` flag says. Missing `layer`, `stage`, `relationships`, `viewConfig`, model `columns` and column `dataType` are filled with defaults. Pass a new object to show a new domain; re-rendering with the same object keeps the reader's view. |
+| `nodesDraggable` | Let readers move model and annotation nodes (default `false`). Moves are never saved; the edges on a moved node re-pick their sides as it moves. |
+| `onLayoutModifiedChange(modified)` | Called when the layout starts or stops differing from the domain's positions (a node moved; `resetLayout()`, a new domain, or a node moved back). |
+| `onReady()` | Called once, after the first nodes are measured and fitted into view (straight away for an empty domain). |
+| `className`, `style` | Applied to the canvas's wrapper element, which fills its parent. |
+
+The ref exposes `resetLayout()`, which puts every node back at its position in the domain with its original edge sides.
+
+Each `ErdCanvas` has its own store, so several can share a page.
+
+## Editor: store and host
 
 The canvas components read their state from the store supplied by the nearest `CanvasStoreProvider`, and post the edits a user makes on the canvas (renaming a column, moving an annotation, changing a cardinality, …) as `CanvasEditMessage`s to the `CanvasHost` supplied by `CanvasEnvironmentProvider`.
 
@@ -41,12 +74,13 @@ const host: CanvasHost = { postMessage: (edit) => applyEdit(edit) };
 ```
 
 - Without a `CanvasEnvironmentProvider`, edits go to a no-op host.
+- `CanvasEnvironmentProvider`'s `viewer` flag switches the components to the read-only presentation `ErdCanvas` uses. It is separate from a domain's `readOnly` flag, which the extension sets for the physical stage and which still offers menus such as the key-type picker.
 - A host with more state of its own can build its store from `createCanvasSlice(set)` and pass that to `CanvasStoreProvider`, which is what the extension does.
 - Components used outside a `CanvasStoreProvider` throw.
 
 ## CSS variables
 
-The styles are written against VS Code's theme variables. A page that is not a VS Code webview must define these on `:root` (or any ancestor of the canvas). Most have fallbacks, but the canvas only matches your theme when they are set.
+The styles are written against VS Code's theme variables. A page that is not a VS Code webview must define these 31 on `:root` (or any ancestor of the canvas). Most have fallbacks, but the canvas only matches your theme when they are set.
 
 ```
 --vscode-button-background                 --vscode-font-family
@@ -70,7 +104,7 @@ The styles are written against VS Code's theme variables. A page that is not a V
 --vscode-focusBorder
 ```
 
-These four are read only by the data-type picker, which appears only while editing a column:
+These four more are read only by the data-type picker, which appears only while editing a column (never in `ErdCanvas`):
 
 ```
 --vscode-dropdown-background   --vscode-dropdown-border

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { BulkColumnActions } from './BulkColumnActions';
-import { useSend } from '../../host/canvasEnvironment';
+import { useIsViewer, useSend } from '../../host/canvasEnvironment';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { useEditorStore } from '../../store/editorStore';
 import type { DisplayColumn } from '@erd-studio/core';
@@ -37,6 +37,7 @@ export interface ColumnEditorProps {
 
 export function ColumnEditor({ modelName, columns, readOnly, modelRole }: ColumnEditorProps) {
   const send = useSend();
+  const viewer = useIsViewer();
 
   // Column selection state from store
   const selectedColumns = useEditorStore((s) => s.selectedColumns);
@@ -288,9 +289,9 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             onDelete={isEditable ? () => handleColumnDelete(col.name) : undefined}
             showIndicators={true}
             showDelete={isEditable}
-            onTogglePK={() => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
-            onToggleFK={() => handleToggleKey(col.name, 'FK', col.isForeignKey)}
-            onToggleNK={() => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
+            onTogglePK={viewer ? undefined : () => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
+            onToggleFK={viewer ? undefined : () => handleToggleKey(col.name, 'FK', col.isForeignKey)}
+            onToggleNK={viewer ? undefined : () => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             modelRole={modelRole}
             expanded={expandedColumns.has(col.name)}

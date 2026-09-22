@@ -18,6 +18,20 @@
 import { useMemo, useState } from 'react';
 import type { Rationale, ModelRole } from '@erd-studio/core';
 import { RationaleField } from './RationaleField';
+import { useIsViewer } from '../../host/canvasEnvironment';
+
+/** Whether any rationale field has text. */
+export function hasRationaleContent(rationale: Rationale | undefined): boolean {
+  if (!rationale) return false;
+  return [
+    rationale.purpose,
+    rationale.design,
+    rationale.roleChoice,
+    rationale.grainChoice,
+    rationale.scdStrategy,
+    rationale.measures,
+  ].some(Boolean);
+}
 
 interface ModelRationaleProps {
   modelName: string;
@@ -27,6 +41,7 @@ interface ModelRationaleProps {
 }
 
 export function ModelRationale({ modelName, rationale, modelRole, grain }: ModelRationaleProps) {
+  const viewer = useIsViewer();
   const [open, setOpen] = useState(false);
   // Track whether user has clicked "Add Rationale" to force-show and auto-edit
   const [forceShow, setForceShow] = useState(false);
@@ -47,6 +62,12 @@ export function ModelRationale({ modelName, rationale, modelRole, grain }: Model
 
   // Show section if there's content, conditional fields apply, or user forced it open
   const showSection = hasAnyContent || forceShow || !!modelRole || !!grain;
+
+  // Viewer: nothing to add, so the section exists only when a field has text,
+  // and no field opens for editing.
+  if (viewer && !hasAnyContent) {
+    return null;
+  }
 
   if (!showSection) {
     return (
@@ -91,7 +112,7 @@ export function ModelRationale({ modelName, rationale, modelRole, grain }: Model
             fieldKey="purpose"
             label="Purpose"
             placeholder="What requirements does this model meet?"
-            autoEdit={forceShow && !rationale?.purpose}
+            autoEdit={!viewer && forceShow && !rationale?.purpose}
           />
 
           <RationaleField

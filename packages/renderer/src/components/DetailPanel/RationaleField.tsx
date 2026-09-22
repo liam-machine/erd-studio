@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { useCanvasHost } from '../../host/canvasEnvironment';
+import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import type { Rationale } from '@erd-studio/core';
 
 type RationaleKey = 'purpose' | 'design' | 'grainChoice' | 'roleChoice' | 'scdStrategy' | 'measures';
@@ -32,6 +32,7 @@ interface RationaleFieldProps {
 
 export function RationaleField({ modelName, rationale, fieldKey, label, placeholder, autoEdit }: RationaleFieldProps) {
   const host = useCanvasHost();
+  const viewer = useIsViewer();
   const [editing, setEditing] = useState(autoEdit === true);
   const [value, setValue] = useState(rationale?.[fieldKey] ?? '');
 
@@ -76,6 +77,23 @@ export function RationaleField({ modelName, rationale, fieldKey, label, placehol
     },
     [handleCancel],
   );
+
+  // --- Viewer: read state only, nothing when empty ---
+  if (viewer) {
+    if (!hasContent) return null;
+    return (
+      <div className="detail-panel__rationale-section">
+        <div className="detail-panel__rationale-header">
+          <h4 className="detail-panel__section-title" style={{ margin: 0 }}>
+            {label}
+          </h4>
+        </div>
+        <div className="detail-panel__rationale-field">
+          <p className="detail-panel__rationale-text">{rationale?.[fieldKey]}</p>
+        </div>
+      </div>
+    );
+  }
 
   // --- Empty state ---
   if (!hasContent && !editing) {

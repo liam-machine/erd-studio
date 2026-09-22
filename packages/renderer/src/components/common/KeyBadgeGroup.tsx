@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { KeyBadge, type KeyType } from './KeyBadge';
+import { useIsViewer } from '../../host/canvasEnvironment';
 import './KeyBadgeGroup.css';
 
 export interface KeyBadgeGroupProps {
@@ -49,6 +50,7 @@ export function KeyBadgeGroup({
   onToggleNK,
   showMultiplePKWarning = false,
 }: KeyBadgeGroupProps) {
+  const viewer = useIsViewer();
   const [isOpen, setIsOpen] = useState(false);
   const [dropdownPos, setDropdownPos] = useState<DropdownPosition>({ top: 0, left: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -175,7 +177,12 @@ export function KeyBadgeGroup({
         ) : (
           <span className="key-badge-group__empty">—</span>
         )}
-        {isEditable && <span className="key-badge-group__arrow">▾</span>}
+        {isEditable ? (
+          <span className="key-badge-group__arrow">▾</span>
+        ) : viewer ? (
+          // Viewer: keep the arrow's space so rows line up with the editor.
+          <span className="key-badge-group__arrow" aria-hidden={true} style={{ visibility: 'hidden' }}>▾</span>
+        ) : null}
         {warningIcon}
       </button>
 

@@ -23,7 +23,7 @@ import type { PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core'
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
-import { useSend } from '../../host/canvasEnvironment';
+import { useIsViewer, useSend } from '../../host/canvasEnvironment';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { KeyBadge } from '../common/KeyBadge';
 import { DataTypeSelect } from '../common/DataTypeSelect';
@@ -133,6 +133,7 @@ interface ColumnRowProps {
 
 function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepancy, dragHandleProps, isReorderDragging, isReorderTarget, discrepancySourceStage, discrepancyTargetStage }: ColumnRowProps) {
   const send = useSend();
+  const viewer = useIsViewer();
 
   // Highlight when this column is involved in a selected edge
   const isHighlighted = useEditorStore(
@@ -397,7 +398,8 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
       className={`model-node__column ${pressClass} ${dragClass} ${dropTargetClass} ${highlightClass} ${reorderDragClass} ${reorderTargetClass} ${discrepancyClass} nodrag`.trim()}
       data-column-name={column.name}
       onMouseEnter={handleMouseEnter}
-      {...handlers}
+      // Viewer: no long-press drag-to-relate.
+      {...(viewer ? {} : handlers)}
       onMouseLeave={handleMouseLeave}
     >
       {dragHandleProps && (
@@ -536,6 +538,7 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
   const { modelName, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, ghostReason, provenance, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const send = useSend();
+  const viewer = useIsViewer();
 
   // Show reorder handles when this node is selected and editable
   const showReorderHandles = !!selected && !readOnly;
@@ -628,7 +631,8 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
     <div
       className={`model-node model-node--${stageClass}${ghostReason ? ` model-node--ghost-${ghostReason}` : ''}${dimmed ? ' model-node--dimmed' : ''}${readOnly ? ' model-node--readonly' : ''}${isDiscExtra ? ' model-node--disc-extra' : ''}${selected ? ' model-node--selected' : ''}`}
       data-model-name={modelName}
-      onContextMenu={handleContextMenu}
+      // Viewer: no context menu, so leave right-click to the browser.
+      onContextMenu={viewer ? undefined : handleContextMenu}
     >
       {/* Node-level handles — one source + one target per side */}
       <Handle type="source" position={Position.Top} id="node-top-src" style={NODE_HANDLE_STYLE} />

@@ -10,13 +10,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
 
-import { ModelRationale } from './ModelRationale';
+import { ModelRationale, hasRationaleContent } from './ModelRationale';
 import { DescriptionEditor } from './DescriptionEditor';
 import { GrainEditor } from './GrainEditor';
 import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
-import { useCanvasHost } from '../../host/canvasEnvironment';
+import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import type { DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
 import type { FkEdgeData } from '../../types/graph';
 import './DetailPanel.css';
@@ -67,6 +67,7 @@ function describeProvenance(provenance: PhysicalProvenance, untyped: number): st
 
 export function DetailPanel() {
   const host = useCanvasHost();
+  const viewer = useIsViewer();
   const domain = useEditorStore((s) => s.domain);
   const existingModels = useEditorStore((s) => s.existingModels);
   const selectedNode = useEditorStore((s) => s.selectedNode);
@@ -347,15 +348,17 @@ export function DetailPanel() {
         </div>
       )}
 
-      {/* Design Rationale */}
-      <div className="detail-panel__section">
-        <ModelRationale
-          modelName={model.name}
-          rationale={model.rationale}
-          modelRole={model.modelRole}
-          grain={model.grain}
-        />
-      </div>
+      {/* Design Rationale (the viewer shows the section only when there is some) */}
+      {(!viewer || hasRationaleContent(model.rationale)) && (
+        <div className="detail-panel__section">
+          <ModelRationale
+            modelName={model.name}
+            rationale={model.rationale}
+            modelRole={model.modelRole}
+            grain={model.grain}
+          />
+        </div>
+      )}
 
       {/* Remove from Domain button */}
       {!isReadOnly && (
@@ -412,22 +415,23 @@ export function DetailPanel() {
             Relationships ({totalRelationships})
           </h4>
           <div className="detail-panel__relationships">
+            {/* The viewer can't edit cardinality, so its rows are plain (not clickable). */}
             {/* Outgoing: this model references others */}
             {outgoing.map((rel) => (
               <div
                 key={`out-${rel.fromColumn}-${rel.toModel}-${rel.toColumn}`}
-                className="detail-panel__relationship detail-panel__relationship--clickable"
-                onClick={(e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
+                className={viewer ? 'detail-panel__relationship' : 'detail-panel__relationship detail-panel__relationship--clickable'}
+                onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
+                role={viewer ? undefined : 'button'}
+                tabIndex={viewer ? undefined : 0}
+                onKeyDown={viewer ? undefined : (e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     const rect = e.currentTarget.getBoundingClientRect();
                     handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
                   }
                 }}
-                title="Click to edit cardinality"
+                title={viewer ? undefined : 'Click to edit cardinality'}
               >
                 <span className="detail-panel__rel-direction" title="Outgoing FK">
                   →
@@ -463,18 +467,18 @@ export function DetailPanel() {
             {incoming.map((rel) => (
               <div
                 key={`in-${rel.fromModel}-${rel.fromColumn}-${rel.toColumn}`}
-                className="detail-panel__relationship detail-panel__relationship--clickable"
-                onClick={(e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
+                className={viewer ? 'detail-panel__relationship' : 'detail-panel__relationship detail-panel__relationship--clickable'}
+                onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
+                role={viewer ? undefined : 'button'}
+                tabIndex={viewer ? undefined : 0}
+                onKeyDown={viewer ? undefined : (e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     const rect = e.currentTarget.getBoundingClientRect();
                     handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
                   }
                 }}
-                title="Click to edit cardinality"
+                title={viewer ? undefined : 'Click to edit cardinality'}
               >
                 <span className="detail-panel__rel-direction" title="Incoming FK">
                   ←

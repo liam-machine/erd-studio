@@ -15,7 +15,7 @@ import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, typ
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { AnnotationFlowNode } from '../../types/graph';
 import { useEditorStore } from '../../store/editorStore';
-import { useCanvasHost } from '../../host/canvasEnvironment';
+import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import { ANNOTATION_COLORS } from '../../lib/annotationColors';
 import type { AnnotationColor } from '@erd-studio/core';
 import './AnnotationNode.css';
@@ -40,6 +40,7 @@ const HANDLE_STYLE: CSSProperties = {
 
 function AnnotationNodeInner({ data }: NodeProps<AnnotationFlowNode>) {
   const host = useCanvasHost();
+  const viewer = useIsViewer();
   const editingAnnotationId = useEditorStore((s) => s.editingAnnotationId);
   const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
   const domain = useEditorStore((s) => s.domain);
@@ -235,7 +236,8 @@ function AnnotationNodeInner({ data }: NodeProps<AnnotationFlowNode>) {
       ref={containerRef}
       className={`annotation-node ${colorClass}${data.readOnly ? ' annotation-node--readonly' : ''}${isSelected ? ' annotation-node--selected' : ''}`}
       style={style}
-      onDoubleClick={handleDoubleClick}
+      // Viewer: nothing to edit, so the double-click is left to propagate.
+      onDoubleClick={viewer ? undefined : handleDoubleClick}
     >
       {/* Inline toolbar — visible on hover */}
       {!data.readOnly && (
