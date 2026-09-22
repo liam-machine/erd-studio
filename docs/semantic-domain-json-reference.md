@@ -58,7 +58,7 @@ The base directory name (`.erd-studio`) is configurable via the `erdStudio.seman
 
 ### Format detection and supported versions
 
-The extension decides how to read a file with a single detector (`detectDomainFormat` in `src/types/semantic.ts`). Every reader and writer uses the same rules:
+The extension decides how to read a file with a single detector (`detectDomainFormat` in `packages/core/src/types/semantic.ts`). Every reader and writer uses the same rules:
 
 | Format | Shape | Behaviour |
 |--------|-------|-----------|

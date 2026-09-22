@@ -162,7 +162,7 @@ jobs:
             - All domain file mutations must go through WorkspaceEdit for undo/redo — never write directly via fs (exception: generated output files like .sync-plan.json)
             - Physical stage is read-only and derived at runtime — reject any code that persists physical data to disk or allows mutation messages in physical stage
             - Relationships in physical stage come entirely from manifest relationship tests, not from logical stage
-            - Schema changes (fields in src/types/semantic.ts, file layout, naming conventions) must update SCHEMA_CONTENT in src/services/harnessService.ts and bump HARNESS_VERSION
+            - Schema changes (fields in packages/core/src/types/semantic.ts, file layout, naming conventions) must update SCHEMA_CONTENT in src/services/harnessService.ts and bump HARNESS_VERSION
             - Message protocol changes must update the discriminated unions in src/types/messages.ts for both directions
             - React Flow custom node/edge types must be defined as module-level constants, not inside component render functions
 

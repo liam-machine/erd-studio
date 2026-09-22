@@ -1,0 +1,72 @@
+{
+  "name": "@erd-studio/renderer",
+  "version": "0.1.0",
+  "description": "ERD Studio's React Flow canvas: the entity-relationship diagram renderer shared by the VS Code extension, with a read-only viewer mode.",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liam-machine/erd-studio",
+    "directory": "packages/renderer"
+  },
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./editor": {
+      "types": "./dist/types/editor.d.ts",
+      "default": "./dist/editor.js"
+    },
+    "./store": {
+      "types": "./dist/types/store.d.ts",
+      "default": "./dist/store.js"
+    },
+    "./sizing": {
+      "types": "./dist/types/sizing.d.ts",
+      "default": "./dist/sizing.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@erd-studio/core": "0.1.0",
+    "zustand": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@xyflow/react": "^12.4.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@xyflow/react": "^12.4.0",
+    "esbuild": "^0.24.0",
+    "jsdom": "^25.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

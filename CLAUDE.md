@@ -26,7 +26,7 @@ The base directory is configurable via the `erdStudio.semanticDir` setting (defa
     └── reporting.json
 ```
 
-File format detection is centralised in `detectDomainFormat()` (`src/types/semantic.ts`) → `v5` | `v4` (inline models, loads but prompts for `erdStudio.migrateToV5`) | `hybrid` / `legacy` (rejected with an error naming the migration command; `MigrationService` repairs both). Never add a second detector. The full on-disk contract is in `docs/semantic-domain-json-reference.md`; the copy shipped to AI assistants is `SCHEMA_CONTENT` in `src/services/harnessService.ts`.
+File format detection is centralised in `detectDomainFormat()` (`packages/core/src/types/semantic.ts`) → `v5` | `v4` (inline models, loads but prompts for `erdStudio.migrateToV5`) | `hybrid` / `legacy` (rejected with an error naming the migration command; `MigrationService` repairs both). Never add a second detector. The full on-disk contract is in `docs/semantic-domain-json-reference.md`; the copy shipped to AI assistants is `SCHEMA_CONTENT` in `src/services/harnessService.ts`.
 
 ### Internal Identifiers
 
@@ -192,7 +192,7 @@ Own writes are recorded in `ownWrites` (`src/services/ownWriteTracker.ts`, path 
 
 ## Key Conventions
 
-- **Schema changes must update harness content AND bump `HARNESS_VERSION`** — the domain JSON schema (model structure, column fields, relationships, viewConfig, naming conventions) is embedded as a string constant in `src/services/harnessService.ts` (`SCHEMA_CONTENT`). When you change the domain file schema (e.g. add/remove/rename fields in `src/types/semantic.ts`, change file layout, update naming conventions), you **must**: (1) update the `SCHEMA_CONTENT` constant, (2) update the format-specific generators if needed (`generateClaudeSkill`, `generateCopilotInstructions`, `generateGeminiStyleguide`, `generateCodexAgents`), (3) **bump the `HARNESS_VERSION` constant** in the same file, and (4) keep `docs/semantic-domain-json-reference.md` in sync. See "Harness Versioning" below.
+- **Schema changes must update harness content AND bump `HARNESS_VERSION`** — the domain JSON schema (model structure, column fields, relationships, viewConfig, naming conventions) is embedded as a string constant in `src/services/harnessService.ts` (`SCHEMA_CONTENT`). When you change the domain file schema (e.g. add/remove/rename fields in `packages/core/src/types/semantic.ts`, change file layout, update naming conventions), you **must**: (1) update the `SCHEMA_CONTENT` constant, (2) update the format-specific generators if needed (`generateClaudeSkill`, `generateCopilotInstructions`, `generateGeminiStyleguide`, `generateCodexAgents`), (3) **bump the `HARNESS_VERSION` constant** in the same file, and (4) keep `docs/semantic-domain-json-reference.md` in sync. See "Harness Versioning" below.
 - Shared types live in `src/types/` and are included in both tsconfigs; `src/services/nameUtils.ts` and `src/workers/manifestExtractor.ts` must stay free of `vscode` imports (bundled into the worker and `mcp-server`)
 - Webview components use BEM CSS class naming
 - All colours use CSS custom properties from `webview/styles/theme.css`

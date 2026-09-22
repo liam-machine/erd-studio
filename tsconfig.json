@@ -5,7 +5,6 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "outDir": "./out",
-    "rootDir": "./src",
     "sourceMap": true,
     "strict": true,
     "skipLibCheck": true,
@@ -15,7 +14,14 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@erd-studio/core": ["./packages/core/src/index.ts"],
+      "@erd-studio/renderer": ["./packages/renderer/src/index.ts"],
+      "@erd-studio/renderer/editor": ["./packages/renderer/src/editor.ts"],
+      "@erd-studio/renderer/store": ["./packages/renderer/src/store.ts"],
+      "@erd-studio/renderer/sizing": ["./packages/renderer/src/sizing.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", ".vscode-test"]

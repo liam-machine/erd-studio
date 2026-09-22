@@ -10,7 +10,10 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "isolatedModules": true,
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "paths": {
+      "@erd-studio/core": ["../packages/core/src/index.ts"]
+    }
   },
   "include": ["src/**/*", "../src/services/**/*", "../src/types/**/*"],
   "exclude": ["node_modules", "dist"]
