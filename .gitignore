@@ -19,3 +19,9 @@ dev-preview.html
 
 # LinkedIn post/comment archive (personal, not for the repo)
 .linkedin/
+
+# GitHub traffic + install history (personal, see .traffic/log.mjs)
+.traffic/
+
+# Local-only Claude skill that reports on .traffic/ (not for the public repo)
+.claude/skills/erd-traffic/
