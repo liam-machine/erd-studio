@@ -24,7 +24,7 @@ import {
   altStageShortcut,
   resolveSingleDeleteTarget,
 } from '../lib/keyboardShortcuts';
-import type { ModelFlowNode, AnnotationFlowNode } from '../types/graph';
+import type { ModelFlowNode, AnnotationFlowNode } from '@erd-studio/renderer/editor';
 import type { WebviewMessage, RelationshipKey } from '../../src/types/messages';
 import type { AnnotationColor } from '../../src/types/semantic';
 

@@ -1,2 +1,26 @@
-/* Published as dist/styles.css. Component stylesheets are added here, in cascade order. */
+/*
+ * The package stylesheet, published as dist/styles.css
+ * (`import '@erd-studio/renderer/styles.css'`).
+ *
+ * The component stylesheets in cascade order — the order the extension's own
+ * bundle has them in — followed by the theme tokens. React Flow's base
+ * stylesheet stays an @import for the consumer's bundler to resolve.
+ *
+ * The host page must define the --vscode-* custom properties listed in the
+ * README, and size the element the canvas is mounted in.
+ */
 @import '@xyflow/react/dist/style.css';
+@import './components/common/KeyBadge.css';
+@import './components/common/DataTypeSelect.css';
+@import './components/Graph/ColumnTooltip.css';
+@import './components/Graph/HoverTip.css';
+@import './components/Graph/ModelNode.css';
+@import './components/Graph/FkEdge.css';
+@import './components/Graph/AnnotationNode.css';
+@import './components/common/KeyBadgeGroup.css';
+@import './components/common/ColumnRowEditor.css';
+@import './components/DetailPanel/BulkColumnActions.css';
+@import './components/DetailPanel/ColumnEditor.css';
+@import './components/DetailPanel/DetailPanel.css';
+@import './components/Legend/Legend.css';
+@import './styles/theme.css';

@@ -60,9 +60,10 @@ npm run compile        # Type-check only (both tsconfigs, no emit)
 npm run test           # Run unit tests (vitest)
 npm run test:watch     # Run tests in watch mode
 npm run package        # Production build (minified, no sourcemaps)
+npm run build:packages # Build the publishable dist/ of @erd-studio/core and @erd-studio/renderer
 ```
 
-Single test file: `npx vitest run test/unit/domainService.test.ts`
+Single test file: `npx vitest run test/unit/domainService.test.ts` (package tests live in `packages/*/test/unit/` and run as part of the root `npm test`)
 
 Tests use vitest with `vscode` module aliased to `test/__mocks__/vscode.ts` (a stateful mock: `inspect()`-backed configuration via `_setMockConfiguration`, in-memory `WorkspaceEdit`/`applyEdit`, command registry that throws on duplicate ids, `_simulateMessage` for webview messages). `test/globalSetup.ts` builds `dist/manifestWorker.js` before the run so manifest tests pass on a fresh clone. Fixture dbt projects live in `test/fixtures/` (`dbt-project` is the main one; `dbt-project-modern-tests` covers `data_tests:` / `arguments:` / versioned refs; the `-empty-manifest`, `-malformed`, `-sparse`, `-zero-byte` variants cover manifest edge cases).
 
@@ -77,6 +78,10 @@ VS Code extension with three esbuild targets (`esbuild.js`):
 
 Two TypeScript configs: `tsconfig.json` (Node.js) and `tsconfig.webview.json` (DOM). The webview tsconfig includes `src/types/**/*` so types are shared. `@types/vscode` is pinned to `1.85.0` to match `engines.vscode` — do not use newer APIs.
 
+**npm workspaces (`packages/*`).** Two packages are published to npm (0.1.0, not yet released) and are built into the extension **from source**: tsconfig `paths` (root, webview, mcp-server) and exact-match vitest aliases point `@erd-studio/core` / `@erd-studio/renderer[/editor|/store|/sizing]` at `packages/*/src`, while each package's `exports` point only at its `dist/` (`npm run build:packages`). `.vscodeignore` excludes `packages/**`; nothing there ships in the VSIX except what esbuild bundles.
+- **`@erd-studio/core`** (`packages/core`) — the domain model types (`semantic`, `layer`, `display`, `discrepancy`, and the canvas edit messages in `canvasMessages.ts`). `src/types/{semantic,layer,display,discrepancy}.ts` are named re-export shims. Core may not import Node built-ins, `vscode`, React or React Flow.
+- **`@erd-studio/renderer`** (`packages/renderer`) — the diagram canvas: `ModelNode`, `FkEdge`, `AnnotationNode`/`AnnotationEdge`, `DetailPanel` (with its editors), `Legend`, the `common/` key-badge and column-row components, the canvas hooks (`useColumnExpansion`, `useColumnReorder`, `useFocusWithinRow`, `useLongPressDrag`), the pure `lib/` helpers (`graphTransformer`, `nodeOverlays`, `edgeDistribution`, `nodeSizing`, `stageColors`, …), the canvas store slice and `styles/theme.css`. Components get their store from `CanvasStoreProvider` (React context) and post edits through the `CanvasHost` from `CanvasEnvironmentProvider` — never `acquireVsCodeApi()` directly. Entry points: `.` (viewer API and types), `/editor` (everything the webview uses), `/store` (store slice + context, no React Flow runtime) and `/sizing` (node size estimation for the ELK runner). `test/unit/packagesBoundary.test.ts` guards these rules.
+
 `proxy/` is a **fourth thing that is not part of the extension**: the Cloudflare Worker behind the feedback analysis fallback tier (`HOSTED_ANALYSIS_ENDPOINT`). It is deployed by hand from [`proxy/README.md`](proxy/README.md) — which is also where the operator's obligations are spelled out, since running it means processing other people's bug descriptions through a publicly reachable URL — it is listed in `.vscodeignore` so it never ships in the VSIX (CI fails above 60 files), and nothing in `esbuild.js`, the tsconfigs or the npm scripts may come to depend on it — `npm run build` and `npm test` must stay green in a clone that has never touched it. It has no dependencies and no build step: `proxy/src/index.js` is plain JavaScript that deploys as written, checked in place with `node --check` and the local `proxy/tsconfig.json` (`checkJs`), which the root build does not reference.
 
 ### Two-Stage Architecture
@@ -88,7 +93,7 @@ The extension uses two design stages, each with a distinct purpose:
 | **Logical** | Blue (`#60a5fa`) | Detailed data model — full columns, data types, PK/FK/NK, SCD types, grain, rationale | `logical-models/*.yml` (model bodies) + `logical` section of the domain file (model names, relationships) |
 | **Physical** | Green (`#22c55e`) | What exists in the dbt **project** — a model exists when a source file under `model-paths`/`seed-paths`/`snapshot-paths` (and not disabled by dbt), a schema `.yml`, a manifest node **or** a `catalog.json` relation carries it; columns are the union of the catalog's observed list and the declared (yml, else manifest) one; types fall through catalog → yml `data_type:` → manifest; relationships & cardinality derived from the union of yml and manifest test declarations; every model carries `provenance` naming its sources; read-only | Derived at runtime, no file on disk |
 
-Stage colors are defined in `webview/lib/stageColors.ts`.
+Stage colors are defined in `packages/renderer/src/lib/stageColors.ts`.
 
 ### Data Flow
 
@@ -125,13 +130,16 @@ catalog.json               ─→ CatalogService   ─┘                       
 
 ### Webview (`webview/`)
 
+The canvas itself lives in `@erd-studio/renderer` (above); `webview/` is the editor built around it. `App.tsx` wraps everything in `CanvasStoreProvider` (the singleton store below) and `CanvasEnvironmentProvider` (`host/vscodeCanvasHost.ts`, which forwards canvas edits to `acquireVsCodeApi().postMessage`), and gets its nodes, edges and click handlers from the renderer's `useCanvasGraph`.
+
 | Directory | Purpose |
 |-----------|---------|
-| `components/` | React components — `Graph/` (ModelNode, FkEdge), `DetailPanel/`, `DiscrepancyPanel/`, `WelcomeModal/`, `Toolbar/` (StageTabs; the top-right corner actions collapse to an overflow `⋯` menu only when `measureCorner()` finds they would overlap the top-centre toolbar — measured from the live layout, because the toolbar's width depends on the domain name, the search box and the stage-specific controls, and a CSS breakpoint could only approximate it; where nothing can be measured the labels stay), `FeedbackDialog/` (dialog incl. the header `KindSwitch`, `AnalysisPanel` incl. the destination picker, `DuplicateTakeover`, `DiagnosticsChips`, `FeedbackFooter`), `Toast/`, dialogs |
-| `store/` | Zustand store (`editorStore.ts`) — UI state, selection, dialogs, active stage, discrepancy, toast/error, feedback dialog (diagnostics, capabilities, analysis) |
-| `hooks/` | `useMessageBus` (extension comms; `useSend()` for a stable sender), `useVsCodeApi`, `useCanvasShortcuts` (global keydown — reads store via `getState()`, registered once), position/state persistence (flushed on `visibilitychange`/`pagehide`) |
-| `lib/` | Pure functions — `graphTransformer`, `nodeOverlays`, `elkLayout`, `edgeDistribution`, `stageColors`, `keyboardShortcuts`, `stageRequest` |
-| `styles/` | `theme.css` — CSS custom properties mapping VS Code theme vars |
+| `components/` | React components — `Graph/DragLine`, `DiscrepancyPanel/`, `WelcomeModal/`, `Toolbar/` (StageTabs; the top-right corner actions collapse to an overflow `⋯` menu only when `measureCorner()` finds they would overlap the top-centre toolbar — measured from the live layout, because the toolbar's width depends on the domain name, the search box and the stage-specific controls, and a CSS breakpoint could only approximate it; where nothing can be measured the labels stay), `FeedbackDialog/` (dialog incl. the header `KindSwitch`, `AnalysisPanel` incl. the destination picker, `DuplicateTakeover`, `DiagnosticsChips`, `FeedbackFooter`), `Toast/`, dialogs |
+| `store/` | Zustand singleton (`editorStore.ts`) — the renderer's `createCanvasSlice(set)` (selection, nodes/edges, expansion, context menus, column selection) plus the editor's own state: dialogs, active stage, discrepancy, toast/error, feedback dialog (diagnostics, capabilities, analysis). Its `setDomain` overrides the slice's with the full reset (error, physical-source notice, discrepancy/sync, canvas mode) and must stay last in the initialiser |
+| `hooks/` | `useMessageBus` (extension comms; `useSend()` for a stable sender), `useVsCodeApi` (+ `getVsCodeApi()`), `useCanvasShortcuts` (global keydown — reads store via `getState()`, registered once), position/state persistence (flushed on `visibilitychange`/`pagehide`) |
+| `host/` | `vscodeCanvasHost.ts` — the `CanvasHost` the renderer's components post edits to |
+| `lib/` | `elkLayout` (the ELK runner; node sizing comes from `@erd-studio/renderer/sizing` and is re-exported), `keyboardShortcuts`, `stageRequest`, `stageUtils`, `validation` |
+| `styles/` | `host.css` — the webview's `html, body, #root` sizing, loaded after the renderer's `theme.css` (CSS custom properties mapping VS Code theme vars) |
 
 ### Message Protocol (`src/types/messages.ts`)
 
@@ -195,7 +203,7 @@ Own writes are recorded in `ownWrites` (`src/services/ownWriteTracker.ts`, path 
 - **Schema changes must update harness content AND bump `HARNESS_VERSION`** — the domain JSON schema (model structure, column fields, relationships, viewConfig, naming conventions) is embedded as a string constant in `src/services/harnessService.ts` (`SCHEMA_CONTENT`). When you change the domain file schema (e.g. add/remove/rename fields in `packages/core/src/types/semantic.ts`, change file layout, update naming conventions), you **must**: (1) update the `SCHEMA_CONTENT` constant, (2) update the format-specific generators if needed (`generateClaudeSkill`, `generateCopilotInstructions`, `generateGeminiStyleguide`, `generateCodexAgents`), (3) **bump the `HARNESS_VERSION` constant** in the same file, and (4) keep `docs/semantic-domain-json-reference.md` in sync. See "Harness Versioning" below.
 - Shared types live in `src/types/` and are included in both tsconfigs; `src/services/nameUtils.ts` and `src/workers/manifestExtractor.ts` must stay free of `vscode` imports (bundled into the worker and `mcp-server`)
 - Webview components use BEM CSS class naming
-- All colours use CSS custom properties from `webview/styles/theme.css`
+- All colours use CSS custom properties from `packages/renderer/src/styles/theme.css`
 - React Flow custom node/edge types must be defined as stable references (module-level constants, not inside components)
 - **Every canvas edit to a domain file or a `logical-models/*.yml` goes through `applyDomainEdit`'s single `WorkspaceEdit`** — one undo step, and nothing reaches disk unless `applyEdit` succeeds. Direct `fs` writes still exist elsewhere (`LogicalModelService.saveModel` for non-editor callers, `LayerService.saveConfig`, `HarnessService`, `MigrationService`, `LegacyTagCleanupService`, sync-plan and bug-report output, and `createDomain`'s `wx` create); the rule is about the editor path, not a repo-wide ban. Writers whose file is watched (domain JSON, `layers.json`, `logical-models/*.yml`) must record `ownWrites` so the watcher does not bounce the write back as a refresh
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`

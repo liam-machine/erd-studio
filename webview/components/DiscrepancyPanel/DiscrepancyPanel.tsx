@@ -16,7 +16,7 @@ import { useCallback, useMemo } from 'react';
 import { Panel, useReactFlow } from '@xyflow/react';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
-import { STAGE_HEX } from '../../lib/stageColors';
+import { STAGE_HEX } from '@erd-studio/renderer/editor';
 import { stageName } from '../../lib/stageUtils';
 import { StalenessWarning } from './SyncControls';
 import type { ModelDiscrepancy, RelationshipDiscrepancy } from '../../../src/types/discrepancy';

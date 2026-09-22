@@ -16,7 +16,7 @@ import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useSend } from '../../hooks/useMessageBus';
-import { KeyBadgeGroup } from '../common/KeyBadgeGroup';
+import { KeyBadgeGroup } from '@erd-studio/renderer/editor';
 import type { ColumnDef, DesignModel, ModelRole, ModelTemplate } from '../../../src/types/semantic';
 import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, findDuplicateNames } from '../../../src/types/naming';
 import './NewModelDialog.css';

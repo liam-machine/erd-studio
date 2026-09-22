@@ -10,7 +10,7 @@ import { useEditorStore } from '../../webview/store/editorStore';
 import type { DisplayDomain } from '../../src/types/display';
 import type { DiscrepancyReport } from '../../src/types/discrepancy';
 import type { FeedbackAnalysis } from '../../src/types/feedback';
-import type { FkEdgeData } from '../../webview/types/graph';
+import type { FkEdgeData } from '@erd-studio/renderer/editor';
 
 function domain(stage: 'logical' | 'physical', extra: Partial<DisplayDomain> = {}): DisplayDomain {
   return {

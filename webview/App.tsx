@@ -12,14 +12,8 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
-  Background,
-  BackgroundVariant,
-  MiniMap,
   SelectionMode,
   type Viewport,
-  type NodeTypes,
-  type EdgeTypes,
-  type OnSelectionChangeFunc,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import './App.css';
@@ -28,34 +22,40 @@ import { useMessageBus, type ExtensionMessage } from './hooks/useMessageBus';
 import { usePositionPersistence } from './hooks/usePositionPersistence';
 import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
-import { useColumnExpansion, NODE_THRESHOLD } from './hooks/useColumnExpansion';
+import {
+  useColumnExpansion,
+  NODE_THRESHOLD,
+  useCanvasGraph,
+  CanvasBackdrop,
+  canvasNodeTypes,
+  canvasEdgeTypes,
+  CanvasStoreProvider,
+  CanvasEnvironmentProvider,
+  DetailPanel,
+  Legend,
+  type ModelFlowNode,
+  type FkFlowEdge,
+  type AnnotationFlowNode,
+  type AnnotationFlowEdge,
+} from '@erd-studio/renderer/editor';
 import { isStaleStageReply } from './lib/stageRequest';
-import { useEditorStore } from './store/editorStore';
-import { ModelNode } from './components/Graph/ModelNode';
-import { FkEdge } from './components/Graph/FkEdge';
-import { AnnotationNode } from './components/Graph/AnnotationNode';
-import { AnnotationEdge } from './components/Graph/AnnotationEdge';
+import { useEditorStore, editorStoreApi } from './store/editorStore';
+import { vscodeCanvasHost } from './host/vscodeCanvasHost';
 import { DragLine } from './components/Graph/DragLine';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { StatusBar } from './components/Toolbar/StatusBar';
-import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { NewModelDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
-import { Legend } from './components/Legend/Legend';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
-import { transformDomain } from './lib/graphTransformer';
-import { applyNodeOverlays } from './lib/nodeOverlays';
-import { stageNodeColor } from './lib/stageColors';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
-import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from './types/graph';
 import type { DisplayDomain } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
 
@@ -85,12 +85,6 @@ function applyDomainPayload(payload: DisplayDomain): void {
 // Inner component (must be inside ReactFlowProvider)
 // ---------------------------------------------------------------------------
 
-/** Custom node types for React Flow — must be memoised or stable. */
-const nodeTypes: NodeTypes = { model: ModelNode, annotation: AnnotationNode };
-
-/** Custom edge types for React Flow — must be memoised or stable. */
-const edgeTypes: EdgeTypes = { fk: FkEdge, annotationLink: AnnotationEdge };
-
 function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
   const error = useEditorStore((s) => s.error);
@@ -99,16 +93,8 @@ function EditorCanvas() {
   const edges = useEditorStore((s) => s.edges);
   const setError = useEditorStore((s) => s.setError);
   const setViewport = useEditorStore((s) => s.setViewport);
-  const setNodes = useEditorStore((s) => s.setNodes);
-  const setEdges = useEditorStore((s) => s.setEdges);
-  const selectNode = useEditorStore((s) => s.selectNode);
-  const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const setFeedbackDialogOpen = useEditorStore((s) => s.setFeedbackDialogOpen);
   const openFkDialogWithPrefill = useEditorStore((s) => s.openFkDialogWithPrefill);
-  const setSelectedEdges = useEditorStore((s) => s.setSelectedEdges);
-  const setHighlightedColumns = useEditorStore((s) => s.setHighlightedColumns);
-  const selectedEdge = useEditorStore((s) => s.selectedEdge);
-  const setSelectedEdge = useEditorStore((s) => s.setSelectedEdge);
   // Context menu state
   const openEdgeContextMenu = useEditorStore((s) => s.openEdgeContextMenu);
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
@@ -116,13 +102,10 @@ function EditorCanvas() {
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const contextMenu = useEditorStore((s) => s.contextMenu);
   const setEditingAnnotationId = useEditorStore((s) => s.setEditingAnnotationId);
-  const selectAnnotation = useEditorStore((s) => s.selectAnnotation);
   const canvasMode = useEditorStore((s) => s.canvasMode);
   const annotationLinkDrag = useEditorStore((s) => s.annotationLinkDrag);
   const updateAnnotationLinkDrag = useEditorStore((s) => s.updateAnnotationLinkDrag);
   const endAnnotationLinkDrag = useEditorStore((s) => s.endAnnotationLinkDrag);
-  // Search state (F402)
-  const searchQuery = useEditorStore((s) => s.searchQuery);
 
   // VS Code API for sending messages directly (edge deletion)
   const vscode = useVsCodeApi();
@@ -147,7 +130,7 @@ function EditorCanvas() {
   }, []);
 
   // F405: Column expansion state (persisted in Zustand store via useStatePersistence)
-  const { isExpanded, toggleExpansion, collapseAll, expandAll, allExpanded } = useColumnExpansion();
+  const { collapseAll, expandAll, allExpanded } = useColumnExpansion();
   // Check synchronously on mount if we have persisted expansion state.
   // Used to distinguish "first ever load" from "returning after tab switch".
   const [hadPersistedExpansion] = useState(() => {
@@ -293,106 +276,9 @@ function EditorCanvas() {
   // reads store state via getState() rather than closing over selectors.
   useCanvasShortcuts();
 
-  // Get current selectedNode from store to preserve selection across domain updates
-  const currentSelectedNode = useEditorStore((s) => s.selectedNode);
-
-  // Initialize nodes and edges when the domain (or discrepancy overlay) changes.
-  // Preserve visual selection if the selected node still exists.
-  // Clear stale edge selections that no longer exist.
-  //
-  // Selection / search / expansion are NOT dependencies here — they are
-  // applied by the lightweight overlay effect below. Re-running the full
-  // transform on every click used to rebuild every node/edge object (defeating
-  // memo) and drop `measured`, forcing React Flow to re-measure all nodes.
-  useEffect(() => {
-    if (domain) {
-      const state = useEditorStore.getState();
-      const prevById = new Map(state.nodes.map((n) => [n.id, n]));
-
-      // Measured sizes from the current React Flow state — used both for
-      // centre-based handle side selection and to carry `measured` across
-      // the rebuild so React Flow does not re-measure unchanged nodes.
-      const nodeDimensions = new Map<string, { width: number; height: number }>();
-      for (const n of state.nodes) {
-        if (n.measured?.width != null && n.measured?.height != null) {
-          nodeDimensions.set(n.id, { width: n.measured.width, height: n.measured.height });
-        }
-      }
-      const isExpandedNow = (id: string) => state.allExpanded || state.expandedNodes.has(id);
-
-      const transformOptions = {
-        ...(discrepancyVisible && discrepancyReport ? { discrepancyReport } : {}),
-        nodeDimensions,
-        isExpanded: isExpandedNow,
-      };
-      let { nodes: newNodes, edges: newEdges } = transformDomain(domain, transformOptions);
-
-      // Carry measured dimensions over from the previous nodes.
-      newNodes = newNodes.map((n) => {
-        const prev = prevById.get(n.id);
-        return prev?.measured?.width != null && prev.measured.height != null
-          ? { ...n, measured: prev.measured }
-          : n;
-      });
-
-      // F402 search dimming, selection dimming, F405 column expansion.
-      ({ nodes: newNodes, edges: newEdges } = applyNodeOverlays(newNodes, newEdges, {
-        selectedNode: state.selectedNode,
-        selectedEdge: state.selectedEdge,
-        searchQuery: state.searchQuery,
-        isExpanded: isExpandedNow,
-        toggleExpansion,
-      }));
-
-      // Preserve React Flow's current selection across this rebuild.
-      // Without this, any store change that re-triggers this effect wipes the
-      // multi-selection React Flow just applied via applyNodeChanges. Read store
-      // state directly to avoid adding `nodes` to the dep array (which would
-      // cause an infinite loop since we call setNodes below).
-      const preserveSelected = new Set<string>();
-      if (state.selectedNode) preserveSelected.add(state.selectedNode);
-      for (const n of state.nodes) {
-        if (n.selected) preserveSelected.add(n.id);
-      }
-      if (preserveSelected.size > 0) {
-        newNodes = newNodes.map((n) => preserveSelected.has(n.id) ? { ...n, selected: true } : n);
-      }
-
-      // Clear stale edge selections (edges that no longer exist after domain update)
-      const newEdgeIds = new Set(newEdges.map((e) => e.id));
-      const currentSelectedEdges = state.selectedEdges;
-      if (currentSelectedEdges.length > 0) {
-        const validEdges = currentSelectedEdges.filter((id) => newEdgeIds.has(id));
-        if (validEdges.length !== currentSelectedEdges.length) {
-          setSelectedEdges(validEdges);
-        }
-      }
-      if (state.selectedEdge && !newEdgeIds.has(state.selectedEdge)) {
-        setSelectedEdge(null);
-      }
-
-      setNodes(newNodes);
-      setEdges(newEdges);
-    }
-  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, toggleExpansion, discrepancyVisible, discrepancyReport]);
-
-  // Lightweight overlay pass: update only the `dimmed` / `isExpanded` flags on
-  // the nodes and edges already in the store when selection, search or column
-  // expansion changes. Unchanged nodes keep their object identity so memoised
-  // components skip re-rendering and React Flow keeps its measurements.
-  useEffect(() => {
-    const { nodes: currentNodes, edges: currentEdges } = useEditorStore.getState();
-    if (currentNodes.length === 0) return;
-    const result = applyNodeOverlays(currentNodes, currentEdges, {
-      selectedNode: currentSelectedNode,
-      selectedEdge,
-      searchQuery,
-      isExpanded,
-      toggleExpansion,
-    });
-    if (result.nodes !== currentNodes) setNodes(result.nodes);
-    if (result.edges !== currentEdges) setEdges(result.edges);
-  }, [currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, setNodes, setEdges]);
+  // Nodes/edges from the domain (transform + overlay effects) and the
+  // click/selection handlers — the shared canvas core in @erd-studio/renderer.
+  const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ discrepancyVisible, discrepancyReport });
 
   // Apply persisted viewport after nodes are loaded (React Flow needs nodes first)
   const hasAppliedViewportRef = useRef(false);
@@ -414,74 +300,6 @@ function EditorCanvas() {
       setViewport(viewport);
     },
     [setViewport],
-  );
-
-  // Handle node clicks to open the detail panel (model nodes) or select (annotations).
-  const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: ModelFlowNode | AnnotationFlowNode) => {
-      if (node.type === 'annotation') {
-        const annData = (node as AnnotationFlowNode).data;
-        selectAnnotation(annData.annotationId);
-        return;
-      }
-      selectNode(node.id);
-      setDetailPanelOpen(true);
-      setHighlightedColumns(new Set());
-      setSelectedEdge(null);
-    },
-    [selectNode, selectAnnotation, setDetailPanelOpen, setHighlightedColumns, setSelectedEdge],
-  );
-
-  // Handle edge clicks to highlight the FK columns involved and dim unrelated nodes/edges.
-  const onEdgeClick = useCallback(
-    (_event: React.MouseEvent, edge: FkFlowEdge | AnnotationFlowEdge) => {
-      if (edge.type !== 'fk') return; // Annotation link edges are not interactive
-      if (edge.data) {
-        const cols = new Set<string>();
-        cols.add(`${edge.data.fromModel}:${edge.data.fromColumn}`);
-        cols.add(`${edge.data.toModel}:${edge.data.toColumn}`);
-        setHighlightedColumns(cols);
-        // Clear node selection and activate edge dimming
-        selectNode(null);
-        setDetailPanelOpen(false);
-        setSelectedEdge(edge.id);
-      }
-    },
-    [setHighlightedColumns, selectNode, setDetailPanelOpen, setSelectedEdge],
-  );
-
-  // Handle clicks on blank canvas to close the detail panel and clear selection.
-  const onPaneClick = useCallback(() => {
-    setDetailPanelOpen(false);
-    selectNode(null);
-    selectAnnotation(null);
-    setHighlightedColumns(new Set());
-    setSelectedEdge(null);
-  }, [setDetailPanelOpen, selectNode, selectAnnotation, setHighlightedColumns, setSelectedEdge]);
-
-  // Close detail panel when multi-selecting (selection mismatch with single-node panel).
-  // But don't close if the selection reset was caused by a domain update (nodes recreated).
-  // Also track edge selection for keyboard shortcuts.
-  const onSelectionChange: OnSelectionChangeFunc = useCallback(
-    ({ nodes: selectedNodes, edges: selectedEdgesInFlow }) => {
-      // Track edge selection in store for keyboard shortcuts
-      setSelectedEdges(selectedEdgesInFlow.map((e) => e.id));
-
-      if (selectedNodes.length !== 1) {
-        // Don't interfere if an edge dimming selection is active (onEdgeClick handles state)
-        if (selectedEdge !== null) return;
-
-        // Check if our stored selection still exists in the domain
-        // If so, this is likely a domain update, not a user deselection
-        if (currentSelectedNode && domain?.models.some((m) => m.name === currentSelectedNode)) {
-          // Keep the panel open - the node still exists, selection was just reset by React Flow
-          return;
-        }
-        setDetailPanelOpen(false);
-        selectNode(null);
-      }
-    },
-    [selectNode, setDetailPanelOpen, setSelectedEdges, currentSelectedNode, selectedEdge, domain],
   );
 
   // Handle long-press column drag to create relationships.
@@ -687,8 +505,8 @@ function EditorCanvas() {
         style={{ flex: '1 1 0', minHeight: 0 }}
         nodes={nodes}
         edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
+        nodeTypes={canvasNodeTypes}
+        edgeTypes={canvasEdgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
@@ -710,29 +528,7 @@ function EditorCanvas() {
         deleteKeyCode={null}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-        <MiniMap
-          position="bottom-right"
-          pannable
-          zoomable
-          nodeColor={(node) => {
-            if (node.type === 'annotation') {
-              const colorMap: Record<string, string> = {
-                yellow: '#f59e0b', blue: '#3b82f6', green: '#22c55e',
-                pink: '#ec4899', orange: '#f97316',
-              };
-              return colorMap[(node as AnnotationFlowNode).data.color] ?? '#f59e0b';
-            }
-            const d = (node as ModelFlowNode).data;
-            return stageNodeColor(d.stage, d.isGhost);
-          }}
-          maskColor="rgba(0, 0, 0, 0.2)"
-          style={{
-            background: 'var(--panel-bg)',
-            border: '1px solid var(--panel-border)',
-            borderRadius: '4px',
-          }}
-        />
+        <CanvasBackdrop />
         <Toolbar
           nodes={nodes}
           edges={edges}
@@ -801,8 +597,12 @@ export function App() {
   }, []);
 
   return (
-    <ReactFlowProvider>
-      <EditorCanvas />
-    </ReactFlowProvider>
+    <CanvasStoreProvider store={editorStoreApi}>
+      <CanvasEnvironmentProvider host={vscodeCanvasHost}>
+        <ReactFlowProvider>
+          <EditorCanvas />
+        </ReactFlowProvider>
+      </CanvasEnvironmentProvider>
+    </CanvasStoreProvider>
   );
 }

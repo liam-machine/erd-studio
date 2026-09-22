@@ -35,7 +35,7 @@ vi.mock('@xyflow/react', () => ({
 
 import { useCanvasShortcuts } from '../../webview/hooks/useCanvasShortcuts';
 import { useEditorStore } from '../../webview/store/editorStore';
-import type { ModelFlowNode, AnnotationFlowNode } from '../../webview/types/graph';
+import type { ModelFlowNode, AnnotationFlowNode } from '@erd-studio/renderer/editor';
 import type { DisplayDomain } from '../../src/types/display';
 
 const initialStoreState = useEditorStore.getState();
