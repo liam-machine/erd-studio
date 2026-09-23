@@ -1,0 +1,5 @@
+name: broken
+columns:
+  - name: customer_key
+    dataType: [INT
+  - name: other

@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "Domain file <root>/.erd-studio/silver/hybrid.json mixes inline model objects with model name references (or declares schemaVersion 5 with inline models). Run \"ERD Studio: Migrate Domains to Central Model Store\" to repair it, or edit the file so every entry in \"logical.models\" is a model name string."
+  }
+}

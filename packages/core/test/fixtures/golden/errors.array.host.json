@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "Domain file <root>/.erd-studio/silver/array.json does not contain a JSON object"
+  }
+}

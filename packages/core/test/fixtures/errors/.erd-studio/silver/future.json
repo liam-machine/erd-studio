@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 6,
+  "domain": "future",
+  "layer": "silver",
+  "logical": { "models": [], "relationships": [] }
+}

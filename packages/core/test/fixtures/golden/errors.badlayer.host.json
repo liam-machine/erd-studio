@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "Domain file <root>/.erd-studio/platinum/badlayer.json has invalid layer \"diamond\". Expected one of: silver, gold"
+  }
+}

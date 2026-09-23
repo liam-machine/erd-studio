@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 4,
+  "domain": "orders",
+  "layer": "bronze",
+  "description": "Raw order capture, still in the inline v4 format",
+  "logical": {
+    "models": [
+      {
+        "name": "raw_orders",
+        "schema": "bronze",
+        "description": "Orders as they land from the shop API",
+        "grain": "One row per order line",
+        "modelRole": "fact",
+        "rationale": {
+          "purpose": "Keeps the shop feed untouched for replay",
+          "measures": "line_amount is additive"
+        },
+        "columns": [
+          {
+            "name": "order_line_id",
+            "dataType": "BIGINT",
+            "description": "Line identifier from the shop",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "customer_ref",
+            "dataType": "VARCHAR",
+            "description": "Customer reference, joined without a declared key"
+          },
+          {
+            "name": "shop_payload"
+          },
+          {
+            "name": "line_amount",
+            "dataType": "DECIMAL(12,2)",
+            "description": "Line total",
+            "additiveType": "additive"
+          },
+          {
+            "name": "order_number",
+            "dataType": "VARCHAR",
+            "description": "Business order number",
+            "isNaturalKey": true
+          }
+        ]
+      },
+      {
+        "name": "raw_customers",
+        "columns": [
+          {
+            "name": "customer_ref",
+            "dataType": "VARCHAR",
+            "description": "Customer reference",
+            "isPrimaryKey": true,
+            "scdType": 2
+          },
+          {
+            "name": "email",
+            "dataType": "VARCHAR",
+            "description": "Contact address",
+            "isForeignKey": false
+          }
+        ]
+      },
+      {
+        "name": "raw_refunds"
+      },
+      {
+        "description": "An inline entry with no name is skipped"
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "raw_orders",
+        "fromColumn": "customer_ref",
+        "toModel": "raw_customers",
+        "toColumn": "customer_ref",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "raw_refunds",
+        "fromColumn": "order_line_id",
+        "toModel": "raw_orders",
+        "toColumn": "order_line_id",
+        "cardinality": "sometimes"
+      },
+      {
+        "fromModel": "raw_refunds",
+        "fromColumn": "order_line_id",
+        "toModel": "raw_orders"
+      },
+      "not-a-relationship"
+    ]
+  },
+  "stubColumns": ["raw_refunds", 7],
+  "viewConfig": {
+    "showFkEdges": true,
+    "layoutOptions": {
+      "elk.direction": "RIGHT"
+    },
+    "positions": {
+      "raw_orders": { "x": 100, "y": 80 },
+      "raw_customers": { "x": "left", "y": 80 }
+    },
+    "annotations": [
+      {
+        "id": "note-1",
+        "x": 400,
+        "y": 20,
+        "text": "Replay source",
+        "color": "yellow"
+      },
+      {
+        "id": "note-2",
+        "text": "Dropped: no coordinates"
+      }
+    ]
+  }
+}

@@ -1,0 +1,458 @@
+{
+  "posted": {
+    "type": "domainLoaded",
+    "payload": {
+      "schemaVersion": 5,
+      "domain": "showcase",
+      "layer": "silver",
+      "stage": "logical",
+      "description": "Project task management — tracks projects, tasks, events, and customers",
+      "modelFolder": "models/silver",
+      "models": [
+        {
+          "name": "fct_task_event",
+          "schema": "silver",
+          "description": "Records every task event across all projects and tasks",
+          "columns": [
+            {
+              "name": "event_id",
+              "dataType": "INT",
+              "description": "Event id from the source system — a degenerate dimension, and this fact's own key",
+              "isPrimaryKey": true,
+              "isForeignKey": false,
+              "isNaturalKey": true
+            },
+            {
+              "name": "task_key",
+              "dataType": "INT",
+              "description": "FK to dim_task",
+              "isPrimaryKey": false,
+              "isForeignKey": true,
+              "isNaturalKey": false
+            },
+            {
+              "name": "project_key",
+              "dataType": "INT",
+              "description": "FK to dim_project",
+              "isPrimaryKey": false,
+              "isForeignKey": true,
+              "isNaturalKey": false
+            },
+            {
+              "name": "customer_key",
+              "dataType": "INT",
+              "description": "FK to dim_customer",
+              "isPrimaryKey": false,
+              "isForeignKey": true,
+              "isNaturalKey": false
+            },
+            {
+              "name": "event_date",
+              "dataType": "DATE",
+              "description": "Date the event occurred",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false
+            },
+            {
+              "name": "event_type",
+              "dataType": "VARCHAR",
+              "description": "Type of task event (started, completed, blocked)",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false
+            },
+            {
+              "name": "amount",
+              "dataType": "DECIMAL",
+              "description": "Cost or value of the event",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "additiveType": "additive"
+            },
+            {
+              "name": "duration_hours",
+              "dataType": "DECIMAL",
+              "description": "Hours spent on this event",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "additiveType": "additive"
+            }
+          ],
+          "rationale": {
+            "purpose": "Central fact table tracking all task activity for reporting and analysis",
+            "design": "Transaction grain with surrogate foreign keys to all relevant dimensions",
+            "measures": "duration_hours (additive), amount (additive)"
+          },
+          "grain": "One row per task event",
+          "modelRole": "transaction-fact"
+        },
+        {
+          "name": "dim_task",
+          "schema": "silver",
+          "description": "Task dimension tracking individual project tasks",
+          "columns": [
+            {
+              "name": "task_key",
+              "dataType": "INT",
+              "description": "Surrogate key — one per row, so one per version of the task",
+              "isPrimaryKey": true,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "scdType": 0
+            },
+            {
+              "name": "task_id",
+              "dataType": "VARCHAR",
+              "description": "Business key — repeats across the versions of one task",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": true,
+              "scdType": 0
+            },
+            {
+              "name": "project_key",
+              "dataType": "INT",
+              "description": "FK to dim_project",
+              "isPrimaryKey": false,
+              "isForeignKey": true,
+              "isNaturalKey": false
+            },
+            {
+              "name": "name",
+              "dataType": "VARCHAR",
+              "description": "Task name",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "scdType": 1
+            },
+            {
+              "name": "status",
+              "dataType": "STRING",
+              "description": "Current lifecycle status",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "scdType": 2
+            }
+          ],
+          "rationale": {
+            "purpose": "Tracks individual tasks and their lifecycle",
+            "design": "SCD Type 2 on status to track historical state changes",
+            "scdStrategy": "task_key is unique per row; task_id repeats across the versions of one task, which is why it cannot be the primary key"
+          },
+          "grain": "One row per task version",
+          "modelRole": "domain-dim"
+        },
+        {
+          "name": "dim_project",
+          "schema": "silver",
+          "description": "Project dimension table",
+          "columns": [
+            {
+              "name": "project_key",
+              "dataType": "INT",
+              "description": "Surrogate key — warehouse-generated, one per row",
+              "isPrimaryKey": true,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "scdType": 0
+            },
+            {
+              "name": "project_code",
+              "dataType": "VARCHAR",
+              "description": "Business project code from the source system",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": true,
+              "scdType": 0
+            },
+            {
+              "name": "project_name",
+              "dataType": "VARCHAR",
+              "description": "Project name — not unique, so never a key",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "scdType": 1
+            },
+            {
+              "name": "parent_project_key",
+              "dataType": "INT",
+              "description": "Parent project for hierarchical rollups (self-reference to project_key)",
+              "isPrimaryKey": false,
+              "isForeignKey": true,
+              "isNaturalKey": false
+            }
+          ],
+          "rationale": {
+            "purpose": "Central project reference shared across domains",
+            "design": "Conformed dimension for consistent project attributes",
+            "scdStrategy": "project_key is the surrogate facts join to; project_code is the business key"
+          },
+          "grain": "One row per project",
+          "modelRole": "conformed-dim"
+        },
+        {
+          "name": "dim_customer",
+          "schema": "silver",
+          "description": "Customer dimension with demographics and segmentation",
+          "columns": [
+            {
+              "name": "customer_key",
+              "dataType": "INT",
+              "description": "Surrogate key — warehouse-generated, one per row",
+              "isPrimaryKey": true,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "scdType": 0
+            },
+            {
+              "name": "customer_id",
+              "dataType": "VARCHAR",
+              "description": "Business key from the source CRM",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": true,
+              "scdType": 0
+            },
+            {
+              "name": "customer_name",
+              "dataType": "VARCHAR",
+              "description": "Full customer name — not unique, so never a key",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "scdType": 2
+            },
+            {
+              "name": "email",
+              "dataType": "VARCHAR",
+              "description": "Customer email address",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "scdType": 1
+            }
+          ],
+          "rationale": {
+            "purpose": "Central customer reference shared across domains",
+            "design": "Conformed dimension for consistent customer attributes",
+            "scdStrategy": "customer_key is the surrogate facts join to; customer_id is the source system's business key"
+          },
+          "grain": "One row per customer",
+          "modelRole": "conformed-dim"
+        },
+        {
+          "name": "dim_date",
+          "schema": "silver",
+          "description": "Date dimension with fiscal calendar attributes",
+          "columns": [
+            {
+              "name": "date_key",
+              "dataType": "INT",
+              "description": "Date key in YYYYMMDD form — meaningful by convention, unlike every other surrogate",
+              "isPrimaryKey": true,
+              "isForeignKey": false,
+              "isNaturalKey": false
+            },
+            {
+              "name": "calendar_date",
+              "dataType": "DATE",
+              "description": "The calendar date — the business key this dimension is identified by",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": true
+            },
+            {
+              "name": "fiscal_year",
+              "dataType": "INT",
+              "description": "Fiscal year number",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false
+            },
+            {
+              "name": "fiscal_quarter",
+              "dataType": "VARCHAR",
+              "description": "Fiscal quarter (Q1-Q4)",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false
+            }
+          ],
+          "rationale": {
+            "purpose": "Shared date reference for consistent time-based analysis",
+            "design": "The one dimension where a meaningful key is conventional — date_key is YYYYMMDD rather than a meaningless sequence"
+          },
+          "grain": "One row per calendar date",
+          "modelRole": "conformed-dim"
+        },
+        {
+          "name": "fct_order",
+          "schema": "",
+          "description": "Order transaction fact table",
+          "columns": [
+            {
+              "name": "order_id",
+              "dataType": "INT",
+              "description": "Order id from the source system — a degenerate dimension, and this fact's own key",
+              "isPrimaryKey": true,
+              "isForeignKey": false,
+              "isNaturalKey": true
+            },
+            {
+              "name": "customer_key",
+              "dataType": "INT",
+              "description": "FK to dim_customer",
+              "isPrimaryKey": false,
+              "isForeignKey": true,
+              "isNaturalKey": false
+            },
+            {
+              "name": "order_date",
+              "dataType": "DATE",
+              "description": "Date the order was placed",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false
+            },
+            {
+              "name": "project_key",
+              "dataType": "INT",
+              "description": "FK to dim_project",
+              "isPrimaryKey": false,
+              "isForeignKey": true,
+              "isNaturalKey": false
+            },
+            {
+              "name": "amount",
+              "dataType": "DECIMAL",
+              "description": "Order total amount",
+              "isPrimaryKey": false,
+              "isForeignKey": false,
+              "isNaturalKey": false,
+              "additiveType": "additive"
+            }
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "fromModel": "fct_task_event",
+          "fromColumn": "task_key",
+          "toModel": "dim_task",
+          "toColumn": "task_key",
+          "cardinality": "many-to-one"
+        },
+        {
+          "fromModel": "dim_task",
+          "fromColumn": "project_key",
+          "toModel": "dim_project",
+          "toColumn": "project_key",
+          "cardinality": "many-to-one"
+        },
+        {
+          "fromModel": "fct_task_event",
+          "fromColumn": "project_key",
+          "toModel": "dim_project",
+          "toColumn": "project_key",
+          "cardinality": "many-to-one"
+        },
+        {
+          "fromModel": "dim_project",
+          "fromColumn": "parent_project_key",
+          "toModel": "dim_project",
+          "toColumn": "project_key",
+          "cardinality": "many-to-one"
+        },
+        {
+          "fromModel": "fct_order",
+          "fromColumn": "project_key",
+          "toModel": "dim_project",
+          "toColumn": "project_key",
+          "cardinality": "many-to-one"
+        },
+        {
+          "fromModel": "fct_task_event",
+          "fromColumn": "customer_key",
+          "toModel": "dim_customer",
+          "toColumn": "customer_key",
+          "cardinality": "many-to-one"
+        },
+        {
+          "fromModel": "fct_order",
+          "fromColumn": "customer_key",
+          "toModel": "dim_customer",
+          "toColumn": "customer_key",
+          "cardinality": "many-to-one"
+        }
+      ],
+      "viewConfig": {
+        "positions": {
+          "dim_customer": {
+            "x": 40,
+            "y": 60
+          },
+          "dim_project": {
+            "x": 980,
+            "y": 60
+          },
+          "dim_task": {
+            "x": 1026,
+            "y": 586
+          },
+          "fct_task_event": {
+            "x": 438,
+            "y": 544
+          },
+          "fct_order": {
+            "x": 100,
+            "y": 340
+          },
+          "dim_date": {
+            "x": 420,
+            "y": 100
+          }
+        },
+        "annotations": []
+      },
+      "templates": [],
+      "manifestModels": [],
+      "existingModels": [],
+      "layerConfig": {
+        "id": "silver",
+        "label": "Silver",
+        "abbreviation": "SLV",
+        "color": "#a0a0a0",
+        "creatable": true,
+        "order": 0
+      },
+      "readOnly": false,
+      "positionDraggable": true
+    },
+    "welcomeDismissed": false
+  },
+  "applyEdit": [
+    [
+      {
+        "kind": "replace",
+        "uri": "<root>/.erd-studio/silver/showcase.json",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 89,
+            "character": 0
+          }
+        },
+        "newText": "{\n  \"schemaVersion\": 5,\n  \"domain\": \"showcase\",\n  \"layer\": \"silver\",\n  \"description\": \"Project task management — tracks projects, tasks, events, and customers\",\n  \"modelFolder\": \"models/silver\",\n  \"logical\": {\n    \"models\": [\n      \"fct_task_event\",\n      \"dim_task\",\n      \"dim_project\",\n      \"dim_customer\",\n      \"dim_date\",\n      \"fct_order\"\n    ],\n    \"relationships\": [\n      {\n        \"fromModel\": \"fct_task_event\",\n        \"fromColumn\": \"task_key\",\n        \"toModel\": \"dim_task\",\n        \"toColumn\": \"task_key\",\n        \"cardinality\": \"many-to-one\"\n      },\n      {\n        \"fromModel\": \"dim_task\",\n        \"fromColumn\": \"project_key\",\n        \"toModel\": \"dim_project\",\n        \"toColumn\": \"project_key\",\n        \"cardinality\": \"many-to-one\"\n      },\n      {\n        \"fromModel\": \"fct_task_event\",\n        \"fromColumn\": \"project_key\",\n        \"toModel\": \"dim_project\",\n        \"toColumn\": \"project_key\",\n        \"cardinality\": \"many-to-one\"\n      },\n      {\n        \"fromModel\": \"dim_project\",\n        \"fromColumn\": \"parent_project_key\",\n        \"toModel\": \"dim_project\",\n        \"toColumn\": \"project_key\",\n        \"cardinality\": \"many-to-one\"\n      },\n      {\n        \"fromModel\": \"fct_order\",\n        \"fromColumn\": \"project_key\",\n        \"toModel\": \"dim_project\",\n        \"toColumn\": \"project_key\",\n        \"cardinality\": \"many-to-one\"\n      },\n      {\n        \"fromModel\": \"fct_task_event\",\n        \"fromColumn\": \"customer_key\",\n        \"toModel\": \"dim_customer\",\n        \"toColumn\": \"customer_key\",\n        \"cardinality\": \"many-to-one\"\n      },\n      {\n        \"fromModel\": \"fct_order\",\n        \"fromColumn\": \"customer_key\",\n        \"toModel\": \"dim_customer\",\n        \"toColumn\": \"customer_key\",\n        \"cardinality\": \"many-to-one\"\n      }\n    ]\n  },\n  \"viewConfig\": {\n    \"positions\": {\n      \"dim_customer\": {\n        \"x\": 40,\n        \"y\": 60\n      },\n      \"dim_project\": {\n        \"x\": 980,\n        \"y\": 60\n      },\n      \"dim_task\": {\n        \"x\": 1026,\n        \"y\": 586\n      },\n      \"fct_task_event\": {\n        \"x\": 438,\n        \"y\": 544\n      },\n      \"fct_order\": {\n        \"x\": 100,\n        \"y\": 340\n      },\n      \"dim_date\": {\n        \"x\": 420,\n        \"y\": 100\n      }\n    },\n    \"annotations\": []\n  }\n}\n"
+      }
+    ]
+  ]
+}

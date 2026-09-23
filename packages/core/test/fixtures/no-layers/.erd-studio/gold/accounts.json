@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 5,
+  "layer": "gold",
+  "modelFolder": "models/gold",
+  "logical": {
+    "models": [
+      "fct_txn",
+      "dim_account",
+      "fct_txn"
+    ],
+    "relationships": [
+      {
+        "fromModel": "fct_txn",
+        "fromColumn": "account_key",
+        "toModel": "dim_account",
+        "toColumn": "account_key",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_account",
+        "fromColumn": "account_key",
+        "toModel": "fct_txn",
+        "toColumn": "account_key",
+        "cardinality": "one-to-many"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "fct_txn": { "x": 520, "y": 40 },
+        "dim_account": { "x": 20, "y": 40 }
+      },
+      "annotations": [
+        {
+          "id": "a1",
+          "text": "Linked note",
+          "x": 20,
+          "y": 400,
+          "color": "blue",
+          "width": 200,
+          "height": 80,
+          "linkedModel": "dim_account"
+        }
+      ]
+    }
+  }
+}

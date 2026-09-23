@@ -1,0 +1,11 @@
+name: dim_customer
+schema: silver
+description: Customers
+columns:
+  - name: customer_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: true
+  - name: customer_name
+    dataType: VARCHAR
+    description: Display name

@@ -1,0 +1,156 @@
+{
+  "type": "domainLoaded",
+  "payload": {
+    "schemaVersion": 4,
+    "domain": "orders",
+    "layer": "bronze",
+    "stage": "logical",
+    "description": "Raw order capture, still in the inline v4 format",
+    "models": [
+      {
+        "name": "raw_orders",
+        "schema": "bronze",
+        "description": "Orders as they land from the shop API",
+        "columns": [
+          {
+            "name": "order_line_id",
+            "dataType": "BIGINT",
+            "description": "Line identifier from the shop",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_ref",
+            "dataType": "VARCHAR",
+            "description": "Customer reference, joined without a declared key",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "shop_payload",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "line_amount",
+            "dataType": "DECIMAL(12,2)",
+            "description": "Line total",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false,
+            "additiveType": "additive"
+          },
+          {
+            "name": "order_number",
+            "dataType": "VARCHAR",
+            "description": "Business order number",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": true
+          }
+        ],
+        "rationale": {
+          "purpose": "Keeps the shop feed untouched for replay",
+          "measures": "line_amount is additive"
+        },
+        "grain": "One row per order line",
+        "modelRole": "fact"
+      },
+      {
+        "name": "raw_customers",
+        "schema": "",
+        "description": "",
+        "columns": [
+          {
+            "name": "customer_ref",
+            "dataType": "VARCHAR",
+            "description": "Customer reference",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false,
+            "scdType": 2
+          },
+          {
+            "name": "email",
+            "dataType": "VARCHAR",
+            "description": "Contact address",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "raw_refunds",
+        "schema": "",
+        "description": "",
+        "columns": []
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "raw_orders",
+        "fromColumn": "customer_ref",
+        "toModel": "raw_customers",
+        "toColumn": "customer_ref",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "raw_refunds",
+        "fromColumn": "order_line_id",
+        "toModel": "raw_orders",
+        "toColumn": "order_line_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "showFkEdges": true,
+      "layoutOptions": {
+        "elk.direction": "RIGHT"
+      },
+      "positions": {
+        "raw_orders": {
+          "x": 100,
+          "y": 80
+        },
+        "raw_customers": {
+          "x": 420,
+          "y": 100
+        },
+        "raw_refunds": {
+          "x": 100,
+          "y": 340
+        }
+      },
+      "annotations": [
+        {
+          "id": "note-1",
+          "x": 400,
+          "y": 20,
+          "text": "Replay source",
+          "color": "yellow"
+        }
+      ]
+    },
+    "templates": [],
+    "manifestModels": [],
+    "existingModels": [],
+    "layerConfig": {
+      "id": "bronze",
+      "label": "Bronze",
+      "abbreviation": "BRZ",
+      "color": "#cd7f32",
+      "creatable": true,
+      "order": 0
+    },
+    "readOnly": false,
+    "positionDraggable": true,
+    "stubColumns": [
+      "raw_refunds"
+    ]
+  },
+  "welcomeDismissed": false
+}

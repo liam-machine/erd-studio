@@ -1,0 +1,20 @@
+name: fct_txn
+description: Transactions
+modelRole: fact
+columns:
+  - name: txn_id
+    dataType: BIGINT
+    description: Transaction id
+    isPrimaryKey: true
+  - name: account_key
+    dataType: INT
+    description: Account
+    isForeignKey: On
+  - name: amount
+    dataType: DECIMAL(18,2)
+    description: Signed amount
+    additiveType: additive
+  - name: balance_after
+    dataType: DECIMAL(18,2)
+    description: Running balance
+    additiveType: semi-additive
