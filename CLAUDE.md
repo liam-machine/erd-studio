@@ -398,6 +398,41 @@ The built `dist/webview.js` is a self-contained IIFE bundle (React, React Flow, 
 
 The old `liamwynne.dbt-semantic-designer` extension has been unpublished and removed from the marketplace. Only `liamwynne.erd-studio` exists now.
 
+### Versioning (Semantic Versioning)
+
+Every released artifact follows [SemVer 2.0](https://semver.org), `MAJOR.MINOR.PATCH`, and each has its own version:
+
+| Artifact | Version lives in | Who bumps it | Released by |
+|---|---|---|---|
+| VS Code extension | root `package.json` `version` | `deploy.yml` on merge (you choose the level in `CHANGELOG.md`) | `deploy.yml` (Marketplace + Open VSX + GitHub Release) |
+| `@erd-studio/core` | `packages/core/package.json` | you, in the PR that changes the package | `npm publish`, by hand, after merge |
+| `@erd-studio/renderer` | `packages/renderer/package.json` | you, in the PR that changes the package | `npm publish`, by hand, after merge |
+| Harness files | `HARNESS_VERSION` | you (see "Harness Versioning") | the extension |
+| Domain file format | `schemaVersion` / `CURRENT_SCHEMA_VERSION` | you, with a migration | the extension |
+
+**Extension: pick the level by what users experience, not by how much code changed.**
+- **PATCH** (the default, nothing to do): bug fixes, performance, internal refactors, dependency bumps and anything users can't see. Moving code into the packages was a patch: v1.0.11 carried the renderer/core extraction.
+- **MINOR**: a new backwards-compatible capability, such as a new command, setting, canvas feature, MCP tool or supported dbt feature. Pin it in the changelog heading, e.g. `## Unreleased — 1.1.0`.
+- **MAJOR**: anything that breaks existing users, for example:
+  - dropping support for a domain `schemaVersion` or requiring a migration;
+  - removing or renaming commands or settings;
+  - raising `engines.vscode`;
+  - changing the on-disk file layout.
+  Pin it (`## Unreleased — 2.0.0`) and explain the upgrade path in the notes.
+- Never edit the root `version` by hand in a PR; the workflow owns it. A pin only moves the version forward, and resets to patch bumps after it ships.
+- Group user-facing notes under `### Added` / `### Changed` / `### Fixed` / `### Removed` ([Keep a Changelog](https://keepachangelog.com)). A PR with nothing user-visible may leave `## Unreleased` empty; the workflow then records the PR title.
+
+**Packages: pick the level by their public API**, meaning every export of each entry point, `ErdCanvas` props, exported types and the `DisplayDomain` shape.
+- **While `0.x`** (now): a breaking change bumps **MINOR** (`0.1.x → 0.2.0`), and everything else bumps PATCH. Go to `1.0.0` once the API is stable and has an outside consumer. After that, use normal SemVer (breaking = MAJOR).
+- Bump the version in the same PR as the change. `@erd-studio/renderer` pins `@erd-studio/core` **exactly**, so a core release that the renderer needs also bumps the renderer's dependency (and the root `package.json` dependency) and the renderer's own version.
+- A PR that changes only extension code doesn't bump the packages. A package change that ships in the extension still gets an extension release through `deploy.yml`, because the extension bundles the packages from source.
+- **Publishing is manual and separate from `deploy.yml`.** After the PR merges, work from a clean `main`:
+  1. `npm ci && npm run build:packages && npm test`.
+  2. Publish in dependency order: `npm publish -w @erd-studio/core`, then `npm publish -w @erd-studio/renderer`. `prepack` rebuilds `dist`, and `publishConfig.access` is `public`.
+  3. Tag each published version: `git tag @erd-studio/core@<v> && git tag @erd-studio/renderer@<v> && git push --tags`.
+- Never unpublish or overwrite a published version. Fix forward with a new PATCH, and `npm deprecate` a bad release.
+- Consumers pin exact versions and bump them deliberately.
+
 ### Publish a New Version
 
 Releases normally happen automatically: `.github/workflows/deploy.yml` runs when a PR is merged to `main` (docs-only, `test/fixtures/**` and `.planning/**` PRs are skipped via `paths-ignore`, because every release triggers a save-all + window reload for users with a canvas open). It type-checks, builds and tests, computes the next version via `scripts/release.mjs next-version` — max(`package.json`, latest marketplace version) + patch by default, or the exact version pinned in the `## Unreleased` heading when that heading names one (`## Unreleased — 1.0.0`) and it is ahead of everything published; falls back to `package.json` if `vsce show` fails, stamps the `## Unreleased` section of `CHANGELOG.md` with that version, **commits and pushes the bump before publishing** (with rebase retries), then runs `vsce package --no-dependencies` + `vsce publish`, and publishes the **same** VSIX to [Open VSX](https://open-vsx.org/extension/liamwynne/erd-studio) (`ovsx publish`, namespace `liamwynne`, secret `OVSX_PAT`). The Open VSX step is `continue-on-error`: the Marketplace is the primary registry and an Open VSX failure must never block the release or the GitHub Release. Claude PR approval is checked but only soft-enforced (a warning). Put user-facing release notes under `## Unreleased` in `CHANGELOG.md` as part of your PR.
