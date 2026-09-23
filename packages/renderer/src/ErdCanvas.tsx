@@ -116,7 +116,7 @@ export function toRenderableDomain(domain: DisplayDomain): DisplayDomain {
 
   return {
     ...domain,
-    layer: domain.layer ?? 'silver',
+    layer: domain.layer ?? '',
     stage: domain.stage ?? 'logical',
     models: modelsChanged || domain.models == null ? models : domain.models,
     relationships: domain.relationships ?? [],

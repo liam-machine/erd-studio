@@ -198,6 +198,27 @@ describe('ErdCanvas onReady', () => {
   });
 });
 
+describe('ErdCanvas with a domain that has no layer', () => {
+  it('leaves the layer badge of a model without a schema empty', async () => {
+    const { layer: _omitted, ...rest } = makeDomain(true);
+    const domain = {
+      ...rest,
+      models: [{ ...rest.models[0], schema: '' }],
+      relationships: [],
+      viewConfig: { positions: { orders: { x: 0, y: 0 } } },
+    } as unknown as DisplayDomain;
+    const { container } = render(
+      <div style={{ width: 1200, height: 800 }}>
+        <ErdCanvas domain={domain} />
+      </div>,
+    );
+    await flush();
+    const badge = modelNode(container, 'orders').querySelector('.model-node__badge--layer');
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toBe('');
+  });
+});
+
 describe('toRenderableDomain', () => {
   it('forces readOnly and fills in what a partial domain leaves out', () => {
     const partial = {
@@ -211,7 +232,7 @@ describe('toRenderableDomain', () => {
 
     expect(toRenderableDomain(partial)).toEqual({
       ...partial,
-      layer: 'silver',
+      layer: '',
       stage: 'logical',
       models: [{ name: 'm', schema: '', description: '', columns: [] }],
       relationships: [],
