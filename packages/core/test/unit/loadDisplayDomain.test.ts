@@ -358,6 +358,67 @@ describe('loadDisplayDomain', () => {
     expect(JSON.stringify(domain).length).toBeLessThan(yml.length);
   });
 
+  describe('a model listed many times', () => {
+    // 16,000 columns in under 300 KB: within every per-file budget below.
+    const wideYml = ['name: m', 'columns:', ...Array.from({ length: 16_000 }, (_, i) => `  - {name: c${i}}`), ''].join('\n');
+    const LIMITS = { maxModels: 500, maxYamlNodes: 50_000, maxDomainChars: 1_048_576, maxYamlChars: 1_048_576 };
+
+    it('charges every listing to the file\'s node budget, so repeats cannot amplify the result', async () => {
+      const warn = vi.fn();
+      const domain = await load(
+        { [DOMAIN]: v5(Array(500).fill('m')), '.erd-studio/logical-models/m.yml': wideYml },
+        { ...LIMITS, warn },
+      ).result;
+      expect(domain.models).toHaveLength(500);
+      // The file is 48,005 nodes, so one listing fits the 50k budget and the rest are placeholders.
+      expect(domain.models.map((m) => m.columns.length).filter((n) => n > 0)).toEqual([16_000]);
+      expect(domain.models[1].columns).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        'Model "m" is listed more times than its file\'s budget allows; only the first 1 are read',
+      );
+      expect(warn.mock.calls.filter(([m]) => String(m).includes('listed more times'))).toHaveLength(1);
+      expect(() => JSON.stringify(domain)).not.toThrow();
+    });
+
+    it('still gives every listing a copy when the repeats fit the budget', async () => {
+      const domain = await load(
+        { [DOMAIN]: v5(Array(500).fill('dim_a')), '.erd-studio/logical-models/dim_a.yml': modelYml('dim_a') },
+        LIMITS,
+      ).result;
+      expect(domain.models.every((m) => m.columns.length === 1)).toBe(true);
+    });
+
+    it('gives the listings that fit a copy and the rest placeholders, keeping their order', async () => {
+      // 10 nodes: the root map, its 2 keys and 2 values (one a list), and
+      // the one column map with its 2 keys and 2 values.
+      const yml = 'name: a\ncolumns:\n  - {name: id, dataType: INT}\n';
+      const nodes = 10;
+      const domain = await load(
+        { [DOMAIN]: v5(['a', 'b', 'a', 'a', 'a']), '.erd-studio/logical-models/a.yml': yml },
+        { maxYamlNodes: nodes * 3 },
+      ).result;
+      expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([
+        ['a', 1], ['b', 0], ['a', 1], ['a', 1], ['a', 0],
+      ]);
+    });
+
+    it('charges every listing to the file\'s character budget too', async () => {
+      const yml = `name: a\ndescription: ${'d'.repeat(1_000)}\n`;
+      const domain = await load(
+        { [DOMAIN]: v5(Array(10).fill('a')), '.erd-studio/logical-models/a.yml': yml },
+        { maxYamlChars: 3_100 },
+      ).result;
+      expect(domain.models.map((m) => m.description?.length ?? 0)).toEqual([1_000, 1_000, 1_000, 0, 0, 0, 0, 0, 0, 0]);
+    });
+
+    it('is not limited with the budgets unlimited, as in the extension', async () => {
+      const domain = await load(
+        { [DOMAIN]: v5(Array(3).fill('m')), '.erd-studio/logical-models/m.yml': wideYml },
+      ).result;
+      expect(domain.models.map((m) => m.columns.length)).toEqual([16_000, 16_000, 16_000]);
+    });
+  });
+
   it('copies each occurrence of a model without structuredClone, which would copy every string too', async () => {
     const description = 'd'.repeat(10_000);
     const clone = vi.spyOn(globalThis, 'structuredClone');
@@ -470,6 +531,41 @@ describe('loadDisplayDomain', () => {
         b: { x: 100, y: 100 },
       });
     });
+
+    it('is on by default when any limit is set, and can be turned off', async () => {
+      for (const limit of ['maxModels', 'maxYamlNodes', 'maxDomainChars', 'maxYamlChars'] as const) {
+        const on = await load({ [DOMAIN]: strayAtOrigin }, { [limit]: 1_000_000 }).result;
+        expect(on.viewConfig.positions?.b, limit).toEqual({ x: 100, y: 100 });
+        const off = await load({ [DOMAIN]: strayAtOrigin }, { [limit]: 1_000_000, ignoreStrayPositions: false }).result;
+        expect(off.viewConfig.positions?.b, limit).toEqual({ x: 420, y: 100 });
+      }
+    });
+
+    it('keeps placement bounded for a file at every limit, full of stray entries', async () => {
+      // 500 models with no position, and the rest of a 1 MiB file spent on
+      // positions that name no model: the extension's placement would check
+      // every entry for every cell it tries for every model.
+      const names = Array.from({ length: 500 }, (_, i) => `m${i}`);
+      const positions: Record<string, { x: number; y: number }> = {};
+      const files: Record<string, string> = {};
+      for (const name of names) files[`.erd-studio/logical-models/${name}.yml`] = `name: ${name}\n`;
+      let text = '';
+      for (let i = 0; ; i++) {
+        positions[`z${i}`] = { x: 10_000 + i, y: 10_000 };
+        if (i % 1_000 === 0) {
+          const next = v5(names, { viewConfig: { positions } });
+          if (next.length > 1_000_000) break;
+          text = next;
+        }
+      }
+      files[DOMAIN] = text;
+      const limits = { maxModels: 500, maxYamlNodes: 50_000, maxDomainChars: 1_048_576, maxYamlChars: 1_048_576 };
+      const started = Date.now();
+      const domain = await load(files, limits).result;
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(Object.keys(JSON.parse(text).viewConfig.positions).length).toBeGreaterThan(25_000);
+      expect(names.every((n) => domain.viewConfig.positions?.[n])).toBe(true);
+    }, 30_000);
 
     it('keeps placement fast however many stray entries a file lists', async () => {
       const positions: Record<string, { x: number; y: number }> = {};

@@ -9,7 +9,9 @@ import {
   YamlNodeLimitError,
   isSafeModelName,
   parseLogicalModelText,
+  parseLogicalModelTextWithUsage,
 } from '../../src/logicalModel';
+import * as core from '../../src/index';
 
 /** A classic exponential alias expansion: 10 levels of 10x, about 10^10 nodes. */
 function billionLaughs(): string {
@@ -359,5 +361,32 @@ describe('isSafeModelName', () => {
       expect(isSafeModelName(name)).toBe(false);
     }
     expect(isSafeModelName('caf\u00e9')).toBe(true);
+  });
+});
+
+describe('parseLogicalModelTextWithUsage', () => {
+  const yml = 'name: a\ndescription: &d hello\nnote: *d\ncolumns:\n  - {name: id, dataType: INT}\n';
+
+  it('reports the nodes and scalar characters counted against finite budgets', () => {
+    const { model, nodes, chars } = parseLogicalModelTextWithUsage(yml, 'x', { maxNodes: 1_000, maxChars: 1_000 });
+    expect(model).toEqual(parseLogicalModelText(yml, 'x'));
+    // Root map; 4 keys and 4 values (the alias counted as it is followed, and
+    // again as its target); the column map with 2 keys and 2 values.
+    expect(nodes).toBe(15);
+    // Keys and values, the aliased 'hello' counted twice.
+    expect(chars).toBe('name'.length + 1 + 'description'.length + 5 + 'note'.length + 5 + 'columns'.length +
+      'name'.length + 'id'.length + 'dataType'.length + 'INT'.length);
+  });
+
+  it('reports 0 for a budget left unlimited, and the usage of a document that is not a model', () => {
+    expect(parseLogicalModelTextWithUsage(yml, 'x')).toMatchObject({ nodes: 0, chars: 0 });
+    expect(parseLogicalModelTextWithUsage('description: no name\n', 'x', { maxNodes: 100 }))
+      .toEqual({ model: null, nodes: 3, chars: 0 });
+  });
+
+  it('is not part of the package API', () => {
+    expect(core).not.toHaveProperty('parseLogicalModelTextWithUsage');
+    expect(core).toHaveProperty('parseLogicalModelText');
+    expect(core).toHaveProperty('YamlCharLimitError');
   });
 });

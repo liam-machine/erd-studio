@@ -16,7 +16,15 @@ export * from './types/canvasMessages.js';
 
 export * from './positions.js';
 export * from './domain.js';
-export * from './logicalModel.js';
+export {
+  LOGICAL_MODELS_DIR,
+  RATIONALE_KEYS,
+  YamlNodeLimitError,
+  YamlCharLimitError,
+  parseLogicalModelText,
+  isSafeModelName,
+  type ParseLogicalModelOptions,
+} from './logicalModel.js';
 export * from './layers.js';
 export * from './displayDomain.js';
 export * from './loadDisplayDomain.js';

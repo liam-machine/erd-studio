@@ -138,14 +138,38 @@ export function parseLogicalModelText(
   fallbackName: string,
   opts: ParseLogicalModelOptions = {},
 ): SemanticModel | null {
+  return parseLogicalModelTextWithUsage(text, fallbackName, opts).model;
+}
+
+/** What a parse of a model file used of its budgets; see {@link parseLogicalModelTextWithUsage}. */
+export interface LogicalModelParse {
+  model: SemanticModel | null;
+  /** YAML nodes the document expanded to, or 0 when `maxNodes` was unlimited (nothing is counted then). */
+  nodes: number;
+  /** Characters of scalar text it expanded to, or 0 when `maxChars` was unlimited. */
+  chars: number;
+}
+
+/**
+ * `parseLogicalModelText`, also reporting how much of each finite budget the
+ * document used, so a caller that repeats the model can charge every repeat.
+ * Not part of the package's public API.
+ */
+export function parseLogicalModelTextWithUsage(
+  text: string,
+  fallbackName: string,
+  opts: ParseLogicalModelOptions = {},
+): LogicalModelParse {
   const { maxNodes = Infinity, maxChars = Infinity } = opts;
   checkLimit('parseLogicalModelText', 'maxNodes', maxNodes);
   checkLimit('parseLogicalModelText', 'maxChars', maxChars);
-  const raw = parseModelFile(text, maxNodes, maxChars);
+  const { raw, state } = parseModelFile(text, maxNodes, maxChars);
+  const nodes = maxNodes === Infinity ? 0 : maxNodes - state.remaining;
+  const chars = maxChars === Infinity ? 0 : maxChars - state.remainingChars;
   if (!raw || raw.name === undefined || raw.name === null || raw.name === '') {
-    return null;
+    return { model: null, nodes, chars };
   }
-  return yamlToModel(raw, fallbackName);
+  return { model: yamlToModel(raw, fallbackName), nodes, chars };
 }
 
 /** A C0 control character (NUL included) or DEL. */
@@ -174,10 +198,14 @@ export function isSafeModelName(name: unknown): name is string {
  * directive) `2024-01-01` to a Date. Model fields are strings by contract,
  * so every non-string scalar is read back from its original source text
  * instead of its resolved value. Booleans and nulls are kept as-is.
- * Returns null for an empty file or a file whose root is not a mapping.
- * Throws on YAML syntax errors.
+ * `raw` is null for an empty file or a file whose root is not a mapping;
+ * `state` holds what is left of the budgets. Throws on YAML syntax errors.
  */
-function parseModelFile(content: string, maxNodes: number, maxChars: number): YamlModel | null {
+function parseModelFile(
+  content: string,
+  maxNodes: number,
+  maxChars: number,
+): { raw: YamlModel | null; state: ToPlainState } {
   const doc = parseDocument(content);
   if (doc.errors.length > 0) {
     throw doc.errors[0];
@@ -191,9 +219,9 @@ function parseModelFile(content: string, maxNodes: number, maxChars: number): Ya
   };
   const raw = toPlain(doc, doc.contents, state);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return null;
+    return { raw: null, state };
   }
-  return raw as YamlModel;
+  return { raw: raw as YamlModel, state };
 }
 
 /** Convert a node tree to plain JS, preserving scalar source text for non-string values. */

@@ -28,7 +28,7 @@ import {
   type LayerLookup,
 } from './domain.js';
 import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
-import { LOGICAL_MODELS_DIR, isSafeModelName, parseLogicalModelText } from './logicalModel.js';
+import { LOGICAL_MODELS_DIR, isSafeModelName, parseLogicalModelTextWithUsage } from './logicalModel.js';
 import { computeMissingPositions, toDisplayDomain } from './displayDomain.js';
 import { checkLimit } from './limits.js';
 
@@ -107,7 +107,12 @@ export interface LoadDisplayDomainOptions {
   modelNameFilter?: (name: string) => boolean;
   /** Most entries `logical.models` may have (v4 and v5, counted before any filtering). Default unlimited. */
   maxModels?: number;
-  /** Most YAML nodes one model file may expand to; a file over it renders as a placeholder. Default unlimited. */
+  /**
+   * Most YAML nodes one model file may expand to; a file over it renders as a
+   * placeholder. A model the domain lists more than once is charged once for
+   * each time it is listed, as an alias's repeats are: the listings past the
+   * budget render as placeholders. Default unlimited.
+   */
   maxYamlNodes?: number;
   /**
    * Longest domain file and `layers.json`, in characters. A longer domain file
@@ -118,7 +123,9 @@ export interface LoadDisplayDomainOptions {
   /**
    * Longest model file, in characters, both as written and once its aliases
    * are expanded (the scalar text it parses to, counting each repeat). A model
-   * over either renders as a placeholder. Default unlimited.
+   * over either renders as a placeholder. Like `maxYamlNodes`, the expanded
+   * text is charged once for each time the domain lists the model. Default
+   * unlimited.
    */
   maxYamlChars?: number;
   /**
@@ -127,8 +134,11 @@ export interface LoadDisplayDomainOptions {
    * model. Those entries draw nothing, but the extension's placement checks
    * every entry for every cell it tries, so a file listing many of them makes
    * placement slow; with this set, its cost depends on the model count alone.
-   * The entries are still kept in the result. Default false: models are
-   * placed exactly as the extension places them.
+   * The entries are still kept in the result. Default: on when any of
+   * `maxModels`, `maxYamlNodes`, `maxDomainChars` or `maxYamlChars` is finite
+   * (a host reading files it does not control), off otherwise, so models are
+   * placed exactly as the extension places them. Placement cost is bounded
+   * only when this is on and `maxModels` is finite.
    */
   ignoreStrayPositions?: boolean;
   /** Receives repair warnings. Default console.warn. */
@@ -169,6 +179,15 @@ function stripJsonExtension(fileName: string): string {
  * placeholder instead. A `readFile` rejection, and anything the caller's
  * `warn` throws, is passed through unchanged.
  *
+ * That contract holds for input within the limits. With the limits left
+ * unlimited, input big enough to exhaust the JavaScript engine can instead
+ * fail with the engine's own error: a domain that lists on the order of
+ * 100,000 positions or more, and has a model with no position, overflows the
+ * call stack (a RangeError) in the extension's placement code, which is kept
+ * exactly as the extension runs it. Hosts that read files they do not
+ * control should set every limit; with them set, stray positions are ignored
+ * and a 1 MiB domain file cannot list that many.
+ *
  * The result is a fresh object; `undefined` values are left in place (a JSON
  * round-trip drops them, as `postMessage` does).
  */
@@ -183,7 +202,6 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
     maxYamlNodes = Infinity,
     maxDomainChars = Infinity,
     maxYamlChars = Infinity,
-    ignoreStrayPositions = false,
   } = options;
   const warn = options.warn ?? ((message: string) => console.warn(message));
 
@@ -193,6 +211,9 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
   checkLimit('loadDisplayDomain', 'maxYamlNodes', maxYamlNodes);
   checkLimit('loadDisplayDomain', 'maxDomainChars', maxDomainChars);
   checkLimit('loadDisplayDomain', 'maxYamlChars', maxYamlChars);
+  const ignoreStrayPositions =
+    options.ignoreStrayPositions ??
+    [maxModels, maxYamlNodes, maxDomainChars, maxYamlChars].some((limit) => limit !== Infinity);
 
   // 1-3. The domain file itself.
   const domainText = await readFile(domainPath);
@@ -231,7 +252,7 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
   }
 
   // 7. v5 model files: each unique, allowed name read and parsed once.
-  const parsed = new Map<string, SemanticModel | null>();
+  const parsed = new Map<string, ParsedModel>();
   if (format === 'v5' && rawModels) {
     const names = [...new Set(rawModels.filter((m): m is string => typeof m === 'string'))]
       .filter((name) => modelNameFilter(name));
@@ -290,7 +311,7 @@ function buildDisplayDomain(
     parentDirName: string;
     layers: LayerConfig[];
     layerLookup: LayerLookup;
-    parsed: ReadonlyMap<string, SemanticModel | null>;
+    parsed: ReadonlyMap<string, ParsedModel>;
     readOnly: boolean;
     ignoreStrayPositions: boolean;
     warn: (message: string) => void;
@@ -299,15 +320,29 @@ function buildDisplayDomain(
   const { domainPath, fileName, parentDirName, layers, layerLookup, parsed, readOnly, ignoreStrayPositions, warn } = ctx;
 
   // 8. The UnifiedDomain, each occurrence of a model its own copy (sharing
-  // the parsed strings, which are immutable, so repeats cost no text).
+  // the parsed strings, which are immutable, so repeats cost no text). Each
+  // copy is charged to the file's budgets, so listing one model many times
+  // cannot expand the result past what the budgets allow one file.
+  const listed = new Map<string, number>();
   const unified = buildUnifiedDomain(obj, format, {
     filePath: domainPath,
     domainNameFallback: stripJsonExtension(fileName),
     parentDirName,
     layers: layerLookup,
     getModel: (name) => {
-      const model = parsed.get(name);
-      return model ? copyPlain(model) : null;
+      const entry = parsed.get(name);
+      if (!entry?.model) {
+        return null;
+      }
+      const occurrence = (listed.get(name) ?? 0) + 1;
+      listed.set(name, occurrence);
+      if (occurrence > entry.copies) {
+        if (occurrence === entry.copies + 1) {
+          warn(`Model "${name}" is listed more times than its file's budget allows; only the first ${entry.copies} are read`);
+        }
+        return null;
+      }
+      return copyPlain(entry.model);
     },
     warn,
   });
@@ -367,25 +402,38 @@ function copyPlain<T>(value: T): T {
   return value;
 }
 
-/** Parse one model file's text, or null (a placeholder) when it is absent, too large or unusable. */
+/** A parsed model file, and how many times the domain may list it within the file's budgets. */
+interface ParsedModel {
+  /** The model, or null (a placeholder) when the file is absent, too large or unusable. */
+  model: SemanticModel | null;
+  /** How many listings of the model get a copy; the rest are placeholders. */
+  copies: number;
+}
+
+const NO_MODEL: ParsedModel = { model: null, copies: 0 };
+
+/** Parse one model file's text, charging it to the budgets. */
 function parseModel(
   name: string,
   text: string | null | undefined,
   maxChars: number,
   maxNodes: number,
   warn: (message: string) => void,
-): SemanticModel | null {
+): ParsedModel {
   if (text === null || text === undefined) {
-    return null;
+    return NO_MODEL;
   }
   if (text.length > maxChars) {
     warn(`Model "${name}" is ${text.length} characters long; at most ${maxChars} are read`);
-    return null;
+    return NO_MODEL;
   }
   try {
-    return parseLogicalModelText(text, name, { maxNodes, maxChars });
+    const { model, nodes, chars } = parseLogicalModelTextWithUsage(text, name, { maxNodes, maxChars });
+    // A budget that was not counted (unlimited) or not used allows any number of copies.
+    const fits = (max: number, used: number): number => (used > 0 ? Math.floor(max / used) : Infinity);
+    return { model, copies: Math.min(fits(maxNodes, nodes), fits(maxChars, chars)) };
   } catch (err) {
     warn(`Failed to read model "${name}": ${err instanceof Error ? err.message : String(err)}`);
-    return null;
+    return NO_MODEL;
   }
 }
