@@ -10,7 +10,7 @@
 import { parseDocument, isAlias, isMap, isScalar, isSeq, visit } from 'yaml';
 import type { Alias, Document } from 'yaml';
 
-import type { ColumnDef, SemanticModel } from './types/semantic';
+import type { ColumnDef, SemanticModel } from './types/semantic.js';
 
 /** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
 export const LOGICAL_MODELS_DIR = 'logical-models';

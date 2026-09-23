@@ -125,6 +125,8 @@ npm run typecheck -w @erd-studio/renderer
 npm test -w @erd-studio/renderer
 ```
 
+The sources import each other without file extensions, as bundlers expect. The build's last step (`scripts/dts-extensions.mjs`) adds `.js` to the relative imports in the emitted declarations, so the types also work for consumers on `moduleResolution: node16` or `nodenext`.
+
 ## License
 
 [PolyForm Shield 1.0.0](./LICENSE), the same licence as the rest of the repository.

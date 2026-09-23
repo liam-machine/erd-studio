@@ -6,8 +6,8 @@
  * every host resolves the same layers from the same file.
  */
 
-import type { LayerConfig, LayersConfigFile } from './types/layer';
-import { DEFAULT_LAYERS, LAYERS_SCHEMA_VERSION } from './types/layer';
+import type { LayerConfig, LayersConfigFile } from './types/layer.js';
+import { DEFAULT_LAYERS, LAYERS_SCHEMA_VERSION } from './types/layer.js';
 
 /** Name of the layer configuration file under the semantic dir. */
 export const LAYERS_CONFIG_FILE = 'layers.json';

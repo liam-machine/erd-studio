@@ -40,7 +40,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node build.mjs && tsc -p tsconfig.build.json",
+    "build": "node build.mjs && tsc -p tsconfig.build.json && node scripts/dts-extensions.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "prepack": "npm run build"

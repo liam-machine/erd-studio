@@ -8,15 +8,15 @@
  * React or React Flow.
  */
 
-export * from './types/semantic';
-export * from './types/layer';
-export * from './types/display';
-export * from './types/discrepancy';
-export * from './types/canvasMessages';
+export * from './types/semantic.js';
+export * from './types/layer.js';
+export * from './types/display.js';
+export * from './types/discrepancy.js';
+export * from './types/canvasMessages.js';
 
-export * from './positions';
-export * from './domain';
-export * from './logicalModel';
-export * from './layers';
-export * from './displayDomain';
-export * from './loadDisplayDomain';
+export * from './positions.js';
+export * from './domain.js';
+export * from './logicalModel.js';
+export * from './layers.js';
+export * from './displayDomain.js';
+export * from './loadDisplayDomain.js';

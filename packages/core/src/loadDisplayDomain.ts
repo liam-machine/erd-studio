@@ -14,8 +14,8 @@
  * read files they do not control; all of them are off by default.
  */
 
-import type { DisplayDomain } from './types/display';
-import type { SemanticModel } from './types/semantic';
+import type { DisplayDomain } from './types/display.js';
+import type { SemanticModel } from './types/semantic.js';
 import {
   DomainFileError,
   buildUnifiedDomain,
@@ -24,10 +24,10 @@ import {
   toLogicalStage,
   validateDomainDocument,
   type LayerLookup,
-} from './domain';
-import { LAYERS_CONFIG_FILE, parseLayersText } from './layers';
-import { LOGICAL_MODELS_DIR, isSafeModelName, parseLogicalModelText } from './logicalModel';
-import { computeMissingPositions, toDisplayDomain } from './displayDomain';
+} from './domain.js';
+import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
+import { LOGICAL_MODELS_DIR, isSafeModelName, parseLogicalModelText } from './logicalModel.js';
+import { computeMissingPositions, toDisplayDomain } from './displayDomain.js';
 
 /**
  * Run `worker` over `items` with at most `limit` calls in flight, keeping the

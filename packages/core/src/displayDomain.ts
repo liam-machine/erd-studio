@@ -2,10 +2,10 @@
  * Logical stage -> DisplayDomain: the shape the canvas renders.
  */
 
-import type { ModelTemplate, NodePosition, Relationship, SemanticDomain, ViewConfig } from './types/semantic';
-import type { DisplayDomain, ExistingModelPreview, ManifestModelPreview } from './types/display';
-import type { LayerConfig } from './types/layer';
-import { computeNewModelPositions } from './positions';
+import type { ModelTemplate, NodePosition, Relationship, SemanticDomain, ViewConfig } from './types/semantic.js';
+import type { DisplayDomain, ExistingModelPreview, ManifestModelPreview } from './types/display.js';
+import type { LayerConfig } from './types/layer.js';
+import { computeNewModelPositions } from './positions.js';
 
 /**
  * Detect models in logical.models that lack entries in viewConfig.positions

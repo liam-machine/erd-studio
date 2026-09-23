@@ -7,8 +7,8 @@
  * directly from its data source.
  */
 
-import type { Cardinality, Layer, ModelRole, ModelTemplate, Rationale, Stage, ViewConfig } from './semantic';
-import type { LayerConfig } from './layer';
+import type { Cardinality, Layer, ModelRole, ModelTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
+import type { LayerConfig } from './layer.js';
 
 // ---------------------------------------------------------------------------
 // Existing model preview (for Add Existing Model dialog)

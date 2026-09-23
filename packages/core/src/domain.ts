@@ -20,9 +20,9 @@ import type {
   UnifiedDomain,
   ViewConfig,
   Annotation,
-} from './types/semantic';
-import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic';
-import { LOGICAL_MODELS_DIR } from './logicalModel';
+} from './types/semantic.js';
+import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
+import { LOGICAL_MODELS_DIR } from './logicalModel.js';
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.

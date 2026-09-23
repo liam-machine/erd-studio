@@ -6,7 +6,7 @@
  * extra/missing columns, data type mismatches, and cardinality differences.
  */
 
-import type { Cardinality, Stage } from './semantic';
+import type { Cardinality, Stage } from './semantic.js';
 
 export interface DiscrepancyReport {
   domain: string;

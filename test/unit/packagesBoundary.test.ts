@@ -122,6 +122,7 @@ describe('workspace package boundaries', () => {
       path.join(ROOT, 'test/unit/elkLayoutSizing.test.ts'),
       path.join(ROOT, 'test/unit/displayDomainGolden.test.ts'),
       path.join(ROOT, 'test/unit/domainFormatPalette.test.ts'),
+      path.join(ROOT, 'test/unit/packagesNodeNext.test.ts'),
       path.join(ROOT, 'src/services/positionService.ts'),
       path.join(ROOT, 'webview/host/vscodeCanvasHost.ts'),
       path.join(ROOT, 'webview/styles/host.css'),

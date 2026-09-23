@@ -7,7 +7,7 @@
  *   2. Orphan models → grid-scanned into the first open cell
  */
 
-import type { NodePosition, Relationship } from './types/semantic';
+import type { NodePosition, Relationship } from './types/semantic.js';
 
 // ---------------------------------------------------------------------------
 // Constants (match existing layout dimensions)
