@@ -37,6 +37,9 @@ proxy/**
 # them from source into dist/, so nothing under packages/ is needed at runtime.
 packages/**
 .linkedin/**
+# Local-only folders (gitignored, but vsce does not read .gitignore).
+.traffic/**
+.claude/**
 data engineer plugin/**
 
 # Media referenced only by README.md. vsce rewrites the README's relative links
