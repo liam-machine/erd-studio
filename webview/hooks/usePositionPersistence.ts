@@ -23,7 +23,7 @@ import {
 import { useVsCodeApi } from './useVsCodeApi';
 import { useEditorStore } from '../store/editorStore';
 import type { WebviewMessage } from './useMessageBus';
-import type { ModelFlowNode, AnnotationFlowNode } from '../types/graph';
+import type { ModelFlowNode, AnnotationFlowNode } from '@erd-studio/renderer/editor';
 
 // ---------------------------------------------------------------------------
 // Constants

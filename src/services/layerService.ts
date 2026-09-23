@@ -21,10 +21,13 @@ import {
   KNOWN_LAYER_DEFAULTS,
   LAYERS_SCHEMA_VERSION,
 } from '../types/layer';
+import { LAYERS_CONFIG_FILE, validateLayersConfig } from '@erd-studio/core';
 import { LOGICAL_MODELS_DIR } from './logicalModelService';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
 
-export const LAYERS_CONFIG_FILE = 'layers.json';
+// Validation of layers.json lives in @erd-studio/core; the file name is
+// re-exported so existing imports of this module keep working.
+export { LAYERS_CONFIG_FILE } from '@erd-studio/core';
 
 /** Reserved stage names that must never be detected as user-defined layers. */
 const STAGE_DIR_NAMES = new Set(['logical', 'physical']);
@@ -181,94 +184,8 @@ export class LayerService {
    * Returns valid config or falls back to defaults on error.
    */
   private validateConfig(data: unknown): LayersConfigFile {
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      return this.fallbackToDefaults('Layers config must be a JSON object');
-    }
-
-    const obj = data as Record<string, unknown>;
-
-    // Schema version check
-    if (typeof obj.schemaVersion !== 'number') {
-      return this.fallbackToDefaults('Layers config missing schemaVersion field');
-    }
-
-    if (obj.schemaVersion > LAYERS_SCHEMA_VERSION) {
-      return this.fallbackToDefaults(
-        `Layers config has schemaVersion ${obj.schemaVersion} ` +
-        `but this extension only supports up to version ${LAYERS_SCHEMA_VERSION}`,
-      );
-    }
-
-    // Validate layers array
-    if (!Array.isArray(obj.layers)) {
-      return this.fallbackToDefaults('Layers config must have a "layers" array');
-    }
-
-    const layers: LayerConfig[] = [];
-    const seenIds = new Set<string>();
-
-    for (const [index, item] of obj.layers.entries()) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        console.warn(`[LayerService] Layer at index ${index} must be an object, skipping`);
-        continue;
-      }
-
-      const layer = item as Record<string, unknown>;
-
-      // Validate required fields
-      if (typeof layer.id !== 'string' || !layer.id.trim()) {
-        console.warn(`[LayerService] Layer at index ${index} missing valid id, skipping`);
-        continue;
-      }
-
-      const id = layer.id.trim();
-
-      // Check for duplicate IDs
-      if (seenIds.has(id)) {
-        console.warn(`[LayerService] Duplicate layer ID "${id}" at index ${index}, skipping`);
-        continue;
-      }
-      seenIds.add(id);
-
-      // Validate ID format (lowercase alphanumeric + hyphens/underscores)
-      if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
-        console.warn(`[LayerService] Layer ID "${id}" has invalid format, skipping`);
-        continue;
-      }
-
-      if (typeof layer.label !== 'string' || !layer.label.trim()) {
-        console.warn(`[LayerService] Layer "${id}" missing valid label, using id as label`);
-      }
-
-      // Validate color (basic hex format check)
-      let color = '#808080'; // default grey
-      if (typeof layer.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(layer.color)) {
-        color = layer.color;
-      } else {
-        console.warn(`[LayerService] Layer "${id}" has invalid color, using default`);
-      }
-
-      layers.push({
-        id,
-        label: typeof layer.label === 'string' ? layer.label.trim() : this.capitalize(id),
-        abbreviation: typeof layer.abbreviation === 'string'
-          ? layer.abbreviation.trim()
-          : id.substring(0, 3).toUpperCase(),
-        color,
-        creatable: layer.creatable === true,
-        order: typeof layer.order === 'number' ? layer.order : index,
-      });
-    }
-
-    // Ensure at least one layer exists
-    if (layers.length === 0) {
-      return this.fallbackToDefaults('No valid layers found, using defaults');
-    }
-
-    // Sort by order
-    layers.sort((a, b) => a.order - b.order);
-
-    return { schemaVersion: obj.schemaVersion, layers };
+    const r = validateLayersConfig(data, (m) => console.warn(`[LayerService] ${m}`));
+    return r.ok ? r.config : this.fallbackToDefaults(r.reason);
   }
 
   /**

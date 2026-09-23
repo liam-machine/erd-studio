@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "Domain file <root>/.erd-studio/silver/future.json has schemaVersion 6 but this extension only supports up to version 5. Please update the extension."
+  }
+}

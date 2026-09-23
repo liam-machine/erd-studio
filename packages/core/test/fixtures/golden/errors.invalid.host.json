@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "Invalid JSON in domain file <root>/.erd-studio/silver/invalid.json: Expected ',' or '}' after property value in JSON at position 69",
+    "kind": "domain-file"
+  }
+}

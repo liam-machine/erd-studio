@@ -1,0 +1,16 @@
+/*
+ * Page sizing for the VS Code webview: the canvas fills the whole webview and
+ * the page itself never scrolls. Kept out of the shared renderer stylesheet
+ * (@erd-studio/renderer's theme.css) because it sizes the host page, which is
+ * the embedding page's business. Loaded last, after theme.css.
+ */
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}

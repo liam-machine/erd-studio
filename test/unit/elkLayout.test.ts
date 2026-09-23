@@ -8,7 +8,7 @@ import {
   DEFAULT_ELK_OPTIONS,
 } from '../../webview/lib/elkLayout';
 import type { ModelRole } from '../../src/types/semantic';
-import type { ModelFlowNode, FkFlowEdge } from '../../webview/types/graph';
+import type { ModelFlowNode, FkFlowEdge } from '@erd-studio/renderer/editor';
 
 // ---------------------------------------------------------------------------
 // Fixtures

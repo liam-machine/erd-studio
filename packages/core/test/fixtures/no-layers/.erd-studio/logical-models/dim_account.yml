@@ -1,0 +1,32 @@
+# Uses anchors and aliases, numeric-looking scalars and truthy strings.
+name: dim_account
+schema: 007
+description: Accounts, one row per account
+grain: One row per account
+modelRole: dimension
+rationale:
+  purpose: &why Shared account reference
+  design: *why
+  roleChoice: Type 2 dimension
+  notARationaleKey: dropped
+columns:
+  - &key
+    name: account_key
+    dataType: INT
+    description: Surrogate key
+    isPrimaryKey: yes
+    scdType: "0"
+  - name: account_number
+    dataType: VARCHAR(20)
+    description: Business key
+    isNaturalKey: "true"
+    scdType: 1
+  - name: opened_on
+    dataType: DATE
+    description:
+    scdType: 2
+  - just a string, not a column
+  - name: balance
+    dataType: 12.50
+    description: 1e3
+    scdType: nope

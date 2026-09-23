@@ -33,7 +33,7 @@ const fakes = vi.hoisted(() => {
 vi.mock('elkjs/lib/elk-api', () => ({ default: fakes.FakeELK }));
 
 import { runElkLayout, LAYOUT_TIMEOUT_MS } from '../../webview/lib/elkLayout';
-import type { ModelFlowNode } from '../../webview/types/graph';
+import type { ModelFlowNode } from '@erd-studio/renderer/editor';
 
 const node: ModelFlowNode = {
   id: 'a',

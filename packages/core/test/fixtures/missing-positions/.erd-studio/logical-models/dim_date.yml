@@ -1,0 +1,23 @@
+name: dim_date
+schema: silver
+description: Date dimension with fiscal calendar attributes
+grain: One row per calendar date
+modelRole: conformed-dim
+rationale:
+  purpose: Shared date reference for consistent time-based analysis
+  design: The one dimension where a meaningful key is conventional — date_key is YYYYMMDD rather than a meaningless sequence
+columns:
+  - name: date_key
+    dataType: INT
+    description: Date key in YYYYMMDD form — meaningful by convention, unlike every other surrogate
+    isPrimaryKey: true
+  - name: calendar_date
+    dataType: DATE
+    description: The calendar date — the business key this dimension is identified by
+    isNaturalKey: true
+  - name: fiscal_year
+    dataType: INT
+    description: Fiscal year number
+  - name: fiscal_quarter
+    dataType: VARCHAR
+    description: Fiscal quarter (Q1-Q4)

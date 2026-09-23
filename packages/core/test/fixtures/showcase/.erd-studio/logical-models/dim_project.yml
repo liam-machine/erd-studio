@@ -1,0 +1,28 @@
+name: dim_project
+schema: silver
+description: Project dimension table
+grain: One row per project
+modelRole: conformed-dim
+rationale:
+  purpose: Central project reference shared across domains
+  design: Conformed dimension for consistent project attributes
+  scdStrategy: project_key is the surrogate facts join to; project_code is the business key
+columns:
+  - name: project_key
+    dataType: INT
+    description: Surrogate key — warehouse-generated, one per row
+    isPrimaryKey: true
+    scdType: 0
+  - name: project_code
+    dataType: VARCHAR
+    description: Business project code from the source system
+    isNaturalKey: true
+    scdType: 0
+  - name: project_name
+    dataType: VARCHAR
+    description: Project name — not unique, so never a key
+    scdType: 1
+  - name: parent_project_key
+    dataType: INT
+    description: Parent project for hierarchical rollups (self-reference to project_key)
+    isForeignKey: true

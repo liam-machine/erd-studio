@@ -20,6 +20,9 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run compile
       - run: npm run build
+      # The extension builds the workspace packages from source; this checks
+      # their own publishable builds (esbuild + declarations) still succeed.
+      - run: npm run build:packages
       - run: npm run test
       - run: npm run package
 

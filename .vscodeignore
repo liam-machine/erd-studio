@@ -33,7 +33,13 @@ features.json
 # analysis hosted tier (see proxy/README.md); it must never reach the VSIX.
 mcp-server/**
 proxy/**
+# npm workspaces (@erd-studio/core, @erd-studio/renderer). The extension bundles
+# them from source into dist/, so nothing under packages/ is needed at runtime.
+packages/**
 .linkedin/**
+# Local-only folders (gitignored, but vsce does not read .gitignore).
+.traffic/**
+.claude/**
 data engineer plugin/**
 
 # Media referenced only by README.md. vsce rewrites the README's relative links

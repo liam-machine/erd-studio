@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 5,
+  "domain": "partial",
+  "layer": "silver",
+  "description": "A domain whose model references do not all resolve",
+  "logical": {
+    "models": [
+      "dim_customer",
+      "dim_missing",
+      "broken",
+      "nameless"
+    ],
+    "relationships": [
+      {
+        "fromModel": "dim_missing",
+        "fromColumn": "customer_key",
+        "toModel": "dim_customer",
+        "toColumn": "customer_key",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "broken",
+        "fromColumn": "customer_key",
+        "toModel": "dim_customer",
+        "toColumn": "customer_key",
+        "cardinality": "one-to-one"
+      }
+    ]
+  },
+  "viewConfig": {
+    "positions": {
+      "dim_customer": { "x": 0, "y": 0 },
+      "dim_missing": { "x": 400, "y": 0 },
+      "broken": { "x": 0, "y": 300 },
+      "nameless": { "x": 400, "y": 300 }
+    }
+  }
+}

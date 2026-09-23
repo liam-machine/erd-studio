@@ -1,0 +1,200 @@
+{
+  "type": "domainLoaded",
+  "payload": {
+    "schemaVersion": 5,
+    "domain": "accounts",
+    "layer": "gold",
+    "stage": "logical",
+    "description": "",
+    "modelFolder": "models/gold",
+    "models": [
+      {
+        "name": "fct_txn",
+        "schema": "",
+        "description": "Transactions",
+        "columns": [
+          {
+            "name": "txn_id",
+            "dataType": "BIGINT",
+            "description": "Transaction id",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "account_key",
+            "dataType": "INT",
+            "description": "Account",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "amount",
+            "dataType": "DECIMAL(18,2)",
+            "description": "Signed amount",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false,
+            "additiveType": "additive"
+          },
+          {
+            "name": "balance_after",
+            "dataType": "DECIMAL(18,2)",
+            "description": "Running balance",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false,
+            "additiveType": "semi-additive"
+          }
+        ],
+        "modelRole": "fact"
+      },
+      {
+        "name": "dim_account",
+        "schema": "007",
+        "description": "Accounts, one row per account",
+        "columns": [
+          {
+            "name": "account_key",
+            "dataType": "INT",
+            "description": "Surrogate key",
+            "isPrimaryKey": true,
+            "isForeignKey": true,
+            "isNaturalKey": false,
+            "scdType": 0
+          },
+          {
+            "name": "account_number",
+            "dataType": "VARCHAR(20)",
+            "description": "Business key",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": true,
+            "scdType": 1
+          },
+          {
+            "name": "opened_on",
+            "dataType": "DATE",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false,
+            "scdType": 2
+          },
+          {
+            "name": "balance",
+            "dataType": "12.50",
+            "description": "1e3",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ],
+        "rationale": {
+          "purpose": "Shared account reference",
+          "design": "Shared account reference",
+          "roleChoice": "Type 2 dimension"
+        },
+        "grain": "One row per account",
+        "modelRole": "dimension"
+      },
+      {
+        "name": "fct_txn",
+        "schema": "",
+        "description": "Transactions",
+        "columns": [
+          {
+            "name": "txn_id",
+            "dataType": "BIGINT",
+            "description": "Transaction id",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "account_key",
+            "dataType": "INT",
+            "description": "Account",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "amount",
+            "dataType": "DECIMAL(18,2)",
+            "description": "Signed amount",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false,
+            "additiveType": "additive"
+          },
+          {
+            "name": "balance_after",
+            "dataType": "DECIMAL(18,2)",
+            "description": "Running balance",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false,
+            "additiveType": "semi-additive"
+          }
+        ],
+        "modelRole": "fact"
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "fct_txn",
+        "fromColumn": "account_key",
+        "toModel": "dim_account",
+        "toColumn": "account_key",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_account",
+        "fromColumn": "account_key",
+        "toModel": "fct_txn",
+        "toColumn": "account_key",
+        "cardinality": "one-to-many"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "fct_txn": {
+          "x": 520,
+          "y": 40
+        },
+        "dim_account": {
+          "x": 20,
+          "y": 40
+        }
+      },
+      "annotations": [
+        {
+          "id": "a1",
+          "text": "Linked note",
+          "x": 20,
+          "y": 400,
+          "color": "blue",
+          "width": 200,
+          "height": 80,
+          "linkedModel": "dim_account"
+        }
+      ]
+    },
+    "templates": [],
+    "manifestModels": [],
+    "existingModels": [],
+    "layerConfig": {
+      "id": "gold",
+      "label": "Gold",
+      "abbreviation": "GLD",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 2
+    },
+    "readOnly": false,
+    "positionDraggable": true
+  },
+  "welcomeDismissed": false
+}
