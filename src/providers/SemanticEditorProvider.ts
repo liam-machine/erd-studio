@@ -72,6 +72,7 @@ import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
+import { computeMissingPositions, toDisplayDomain } from '@erd-studio/core';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import {
@@ -1482,74 +1483,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     viewConfig: import('../types/semantic').ViewConfig,
     stubColumns?: string[],
   ): DisplayDomain {
-    // Build FK column set for isForeignKey computation
-    const fkColumnsByModel = new Map<string, Set<string>>();
-    for (const rel of domain.relationships) {
-      if (!fkColumnsByModel.has(rel.fromModel)) {
-        fkColumnsByModel.set(rel.fromModel, new Set());
-      }
-      fkColumnsByModel.get(rel.fromModel)!.add(rel.fromColumn);
-    }
+    const editorPayload = this.buildWebviewPayload(domain, manifest, ymlData, domain.modelFolder);
 
-    const models = domain.models.map((model) => {
-      const fkCols = fkColumnsByModel.get(model.name) ?? new Set<string>();
-      const columns = (model.columns ?? []).map((col) => ({
-        name: col.name,
-        dataType: col.dataType,
-        description: col.description,
-        isPrimaryKey: col.isPrimaryKey === true,
-        isForeignKey: col.isForeignKey === true || fkCols.has(col.name),
-        isNaturalKey: col.isNaturalKey === true,
-        ...(col.scdType != null ? { scdType: col.scdType } : {}),
-        ...(col.additiveType ? { additiveType: col.additiveType } : {}),
-      }));
-
-      return {
-        name: model.name,
-        schema: model.schema ?? '',
-        description: model.description ?? '',
-        columns,
-        ...(model.rationale ? { rationale: model.rationale } : {}),
-        ...(model.grain ? { grain: model.grain } : {}),
-        ...(model.modelRole ? { modelRole: model.modelRole } : {}),
-      };
-    });
-
-    const relationships = domain.relationships.map((rel) => ({
-      fromModel: rel.fromModel,
-      fromColumn: rel.fromColumn,
-      toModel: rel.toModel,
-      toColumn: rel.toColumn,
-      cardinality: rel.cardinality,
-    }));
-
-    const { templates, manifestModels, existingModels } = this.buildWebviewPayload(
-      { models },
-      manifest,
-      ymlData,
-      domain.modelFolder,
-    );
-
-    const layerConfig = this.layerService.getLayer(domain.layer);
-
-    return {
-      schemaVersion: domain.schemaVersion,
-      domain: domain.domain,
-      layer: domain.layer,
-      stage: domain.stage,
-      description: domain.description,
-      modelFolder: domain.modelFolder,
-      models,
-      relationships,
+    return toDisplayDomain(domain, {
       viewConfig,
-      templates,
-      manifestModels,
-      existingModels,
-      layerConfig,
+      stubColumns,
+      layerConfig: this.layerService.getLayer(domain.layer),
       readOnly: domain.stage === 'physical',
-      positionDraggable: true,
-      ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
-    };
+      editorPayload,
+    });
   }
 
   /**
@@ -1698,19 +1640,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private computeMissingPositions(
     unifiedDomain: { logical: { models: Array<{ name: string }>; relationships: Relationship[] }; viewConfig: { positions?: Record<string, NodePosition> } },
   ): Record<string, NodePosition> | null {
-    const positions = unifiedDomain.viewConfig.positions ?? {};
-    const modelNames = unifiedDomain.logical.models.map((m) => m.name);
-    const newModels = modelNames.filter((name) => !positions[name]);
-
-    if (newModels.length === 0) return null;
-
-    const computed = computeNewModelPositions({
-      newModels,
-      relationships: unifiedDomain.logical.relationships ?? [],
-      existingPositions: positions,
-    });
-
-    return Object.keys(computed).length === 0 ? null : computed;
+    return computeMissingPositions(unifiedDomain);
   }
 
   /**

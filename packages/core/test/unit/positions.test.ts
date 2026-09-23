@@ -5,7 +5,7 @@ import {
   NODE_WIDTH,
   NODE_HEIGHT,
   PADDING,
-} from '../../src/services/positionService';
+} from '../../src/positions';
 import type { Relationship, NodePosition } from '../../src/types/semantic';
 
 const CELL_WIDTH = NODE_WIDTH + PADDING;
