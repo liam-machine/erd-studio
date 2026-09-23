@@ -92,6 +92,29 @@ describe('mapWithLimit', () => {
   });
 });
 
+describe('mapWithLimit limits', () => {
+  it('rejects a limit that is not a number of at least 1 with a TypeError, and runs nothing', async () => {
+    for (const bad of [NaN, 0, 0.5, -1, -Infinity, '4', null, undefined]) {
+      const worker = vi.fn(async (n: number) => n);
+      const err = await rejection(mapWithLimit([1, 2, 3], bad as number, worker));
+      expect(err, String(bad)).toBeInstanceOf(TypeError);
+      expect(worker).not.toHaveBeenCalled();
+    }
+  });
+
+  it('runs everything at once for Infinity', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    await mapWithLimit(Array.from({ length: 20 }, (_, i) => i), Infinity, async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+    });
+    expect(peak).toBe(20);
+  });
+});
+
 describe('loadDisplayDomain', () => {
   it('reads the domain, then layers.json, then each model once, all inside the semantic dir', async () => {
     const { reads, result } = load({
@@ -284,6 +307,79 @@ describe('loadDisplayDomain', () => {
     expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([['bomb', 0], ['broken', 0], ['fine', 1]]);
   });
 
+  it('shows a model whose aliases expand past maxYamlChars as a placeholder, keeping the result small', async () => {
+    const long = 'x'.repeat(100_000);
+    const lines = ['name: wide', `description: &s ${long}`, 'columns:'];
+    for (let i = 0; i < 3_000; i++) lines.push(`  - {name: c${i}, dataType: t, description: *s}`);
+    const yml = lines.join('\n');
+    const warn = vi.fn();
+    const started = Date.now();
+    const domain = await load(
+      {
+        [DOMAIN]: v5(Array(500).fill('wide')),
+        '.erd-studio/logical-models/wide.yml': yml,
+      },
+      { maxModels: 500, maxYamlNodes: 50_000, maxYamlChars: 1_048_576, maxDomainChars: 1_048_576, warn },
+    ).result;
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(domain.models).toHaveLength(500);
+    expect(domain.models[0].columns).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(
+      'Failed to read model "wide": YAML document expands to more than 1048576 characters of text',
+    );
+    expect(JSON.stringify(domain).length).toBeLessThan(yml.length);
+  });
+
+  it('copies each occurrence of a model without structuredClone, which would copy every string too', async () => {
+    const description = 'd'.repeat(10_000);
+    const clone = vi.spyOn(globalThis, 'structuredClone');
+    let domain;
+    try {
+      domain = await load({
+        [DOMAIN]: v5(['dim_a', 'dim_a']),
+        '.erd-studio/logical-models/dim_a.yml': `name: dim_a\ndescription: ${description}\ncolumns:\n  - {name: id, dataType: INT}\n`,
+      }).result;
+      expect(clone).not.toHaveBeenCalled();
+    } finally {
+      clone.mockRestore();
+    }
+    const [a, b] = domain.models;
+    expect(a).toEqual(b);
+    expect(a).not.toBe(b);
+    expect(a.columns[0]).not.toBe(b.columns[0]);
+    expect(a.description).toBe(description);
+  });
+
+  it('does not parse a layers.json longer than maxDomainChars, and uses the default layers', async () => {
+    const layers = JSON.stringify({
+      schemaVersion: 1,
+      layers: [{ id: 'platinum', label: 'Platinum', abbreviation: 'PLT', color: '#e5e4e2', creatable: true, order: 0 }],
+    });
+    const files = {
+      '.erd-studio/platinum/p.json': JSON.stringify({ schemaVersion: 5, logical: { models: [] } }),
+      '.erd-studio/silver/s.json': v5([]),
+      '.erd-studio/layers.json': layers,
+    };
+    const warn = vi.fn();
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const err = await rejection(
+        load(files, { domainPath: '.erd-studio/platinum/p.json', maxDomainChars: layers.length - 1, warn }).result,
+      );
+      expect(err).toBeInstanceOf(DomainValidationError);
+      expect(parse.mock.calls.some(([text]) => text === layers)).toBe(false);
+    } finally {
+      parse.mockRestore();
+    }
+    expect(warn).toHaveBeenCalledWith(
+      `.erd-studio/layers.json is ${layers.length} characters long; at most ${layers.length - 1} are read. Using the default layers`,
+    );
+    const silver = await load(files, { domainPath: '.erd-studio/silver/s.json', maxDomainChars: layers.length - 1 }).result;
+    expect(silver.layerConfig?.id).toBe('silver');
+    const platinum = await load(files, { domainPath: '.erd-studio/platinum/p.json', maxDomainChars: layers.length }).result;
+    expect(platinum.layerConfig?.id).toBe('platinum');
+  });
+
   it('reads layers.json from the semantic dir the domain sits in, with any separator', async () => {
     const layers = JSON.stringify({
       schemaVersion: 1,
@@ -326,6 +422,69 @@ describe('loadDisplayDomain', () => {
     }).result;
     expect(domain.viewConfig.positions?.a).toEqual({ x: 10, y: 20 });
     expect(domain.viewConfig.positions?.b).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
+  });
+
+  describe('ignoreStrayPositions', () => {
+    const strayAtOrigin = v5(['a', 'b'], {
+      viewConfig: { positions: { a: { x: 740, y: 100 }, gone: { x: 100, y: 100 } } },
+    });
+
+    it('is off by default: models are placed around every entry, as the extension places them', async () => {
+      const domain = await load({ [DOMAIN]: strayAtOrigin }).result;
+      expect(domain.viewConfig.positions?.b).toEqual({ x: 420, y: 100 });
+    });
+
+    it('places models around the positions of models only, keeping the other entries', async () => {
+      const domain = await load({ [DOMAIN]: strayAtOrigin }, { ignoreStrayPositions: true }).result;
+      expect(domain.viewConfig.positions).toEqual({
+        a: { x: 740, y: 100 },
+        gone: { x: 100, y: 100 },
+        b: { x: 100, y: 100 },
+      });
+    });
+
+    it('keeps placement fast however many stray entries a file lists', async () => {
+      const positions: Record<string, { x: number; y: number }> = {};
+      for (let i = 0; i < 25_000; i++) positions[`z${i}`] = { x: 10_000_000 + i * 1_000, y: 10_000_000 };
+      for (let r = 0; r < 20; r++) for (let c = 0; c < 10; c++) positions[`g${r}_${c}`] = { x: c * 320 + 100, y: r * 240 + 100 };
+      const models = Array.from({ length: 100 }, (_, i) => ({ name: `m${i}`, columns: [] }));
+      const text = JSON.stringify({ schemaVersion: 4, layer: 'silver', logical: { models, relationships: [] }, viewConfig: { positions } });
+      const started = Date.now();
+      const domain = await load({ [DOMAIN]: text }, { ignoreStrayPositions: true }).result;
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(Object.keys(domain.viewConfig.positions ?? {})).toHaveLength(25_000 + 200 + 100);
+    });
+  });
+
+  describe('limit options', () => {
+    const NUMERIC = ['maxModels', 'maxYamlNodes', 'maxDomainChars', 'maxYamlChars'] as const;
+
+    it('rejects a limit that is not a number of at least 0 with a TypeError, before reading anything', async () => {
+      for (const name of NUMERIC) {
+        for (const bad of [NaN, -1, -Infinity, '4', null]) {
+          const { reads, result } = load({ [DOMAIN]: v5([]) }, { [name]: bad as number });
+          const err = await rejection(result);
+          expect(err, `${name}: ${String(bad)}`).toBeInstanceOf(TypeError);
+          expect((err as Error).message).toContain(name);
+          expect(reads).toEqual([]);
+        }
+      }
+    });
+
+    it('rejects a maxParallelReads that is not a whole number of at least 1', async () => {
+      for (const bad of [NaN, 0, 2.5, -1, -Infinity, '4', null]) {
+        const { reads, result } = load({ [DOMAIN]: v5([]) }, { maxParallelReads: bad as number });
+        expect(await rejection(result), String(bad)).toBeInstanceOf(TypeError);
+        expect(reads).toEqual([]);
+      }
+    });
+
+    it('accepts Infinity for every limit, and 0 for the caps', async () => {
+      const all = Object.fromEntries([...NUMERIC, 'maxParallelReads'].map((n) => [n, Infinity]));
+      await expect(load({ [DOMAIN]: v5(['a']) }, all).result).resolves.toBeTruthy();
+      const domain = await load({ [DOMAIN]: v5([]) }, { maxModels: 0 }).result;
+      expect(domain.models).toEqual([]);
+    });
   });
 
   describe('bad input only ever rejects with the four error classes', () => {

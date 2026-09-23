@@ -39,7 +39,16 @@ Bad input rejects with one of four classes, so a host can map them to its own er
 | `TooManyModelsError` | `logical.models` has more than `maxModels` entries (checked before any model file is read) |
 | `FileTooLargeError` | the domain file is longer than `maxDomainChars` |
 
-A `readFile` rejection is passed through unchanged. For files you do not control, the options also take `modelNameFilter` (default `isSafeModelName`: no path separators or `..`), `maxYamlChars` and `maxYamlNodes` (a model file over either renders as a placeholder; the node budget stops anchor/alias expansion bombs). Every limit is off by default. The result keeps `undefined` values; serialise it (for example `JSON.parse(JSON.stringify(domain))`) if you need them dropped.
+A `readFile` rejection is passed through unchanged. For files you do not control, the options also take:
+
+- `modelNameFilter` (default `isSafeModelName`: no path separators or `..`); a rejected name is never read.
+- `maxDomainChars`, which also applies to `layers.json`: a longer `layers.json` is not parsed, and the default layers are used instead.
+- `maxYamlChars` and `maxYamlNodes`. A model file renders as a placeholder when it is longer than `maxYamlChars`, when its scalar text (counting every repeat through an alias) adds up to more than `maxYamlChars`, or when it expands to more than `maxYamlNodes` nodes. Between them they stop anchor/alias expansion bombs, whether they repeat many nodes or one long string.
+- `ignoreStrayPositions`, which places models that have no position using only the positions of the domain's own models. The extension's placement checks every `viewConfig.positions` entry for every grid cell it tries, so a file listing many entries that name no model makes it slow; with this set, its cost depends only on the model count. The entries are still kept in the result.
+
+Every limit is off by default. A numeric limit must be a number of at least 0, or `Infinity` for none (`maxParallelReads`: a whole number of at least 1); anything else, `NaN` included, rejects with a `TypeError` before any file is read.
+
+Each occurrence of a model is its own object, but occurrences share the parsed strings. The result keeps `undefined` values; serialise it (for example `JSON.parse(JSON.stringify(domain))`) if you need them dropped. Serialising writes out every occurrence's text, so the serialised size grows with the number of times the domain lists a model.
 
 ## Development
 

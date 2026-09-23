@@ -15,7 +15,7 @@
  */
 
 import type { DisplayDomain } from './types/display.js';
-import type { SemanticModel } from './types/semantic.js';
+import type { NodePosition, SemanticModel } from './types/semantic.js';
 import {
   DomainFileError,
   buildUnifiedDomain,
@@ -28,19 +28,23 @@ import {
 import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
 import { LOGICAL_MODELS_DIR, isSafeModelName, parseLogicalModelText } from './logicalModel.js';
 import { computeMissingPositions, toDisplayDomain } from './displayDomain.js';
+import { checkLimit } from './limits.js';
 
 /**
  * Run `worker` over `items` with at most `limit` calls in flight, keeping the
  * results in input order. The first rejection rejects the whole call, and no
- * further items are started after it.
+ * further items are started after it. `limit` must be a number of at least 1
+ * (a fraction is rounded down; `Infinity` runs everything at once); anything
+ * else rejects with a TypeError.
  */
 export async function mapWithLimit<T, R>(
   items: readonly T[],
   limit: number,
   worker: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
+  checkLimit('mapWithLimit', 'limit', limit, { min: 1 });
   const results = new Array<R>(items.length);
-  const lanes = Math.min(items.length, Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : items.length);
+  const lanes = Math.min(items.length, limit === Infinity ? items.length : Math.floor(limit));
   let next = 0;
   let failed = false;
 
@@ -76,6 +80,12 @@ export class FileTooLargeError extends Error {
   }
 }
 
+/**
+ * Options for {@link loadDisplayDomain}. Each numeric limit must be a number
+ * of at least 0, or `Infinity` for none (`maxParallelReads`: a whole number of
+ * at least 1, or `Infinity`); any other value, NaN included, makes
+ * `loadDisplayDomain` reject with a TypeError before it reads anything.
+ */
 export interface LoadDisplayDomainOptions {
   /** Path of the domain file, `{semanticDir}/{layer}/{domain}.json`; `/` or `\` separated. */
   domainPath: string;
@@ -86,7 +96,7 @@ export interface LoadDisplayDomainOptions {
   readFile(path: string): Promise<string | null | undefined>;
   /** The DisplayDomain's `readOnly` flag. */
   readOnly: boolean;
-  /** Most model files read at once. Default 8. */
+  /** Most files read at once. Default 8. */
   maxParallelReads?: number;
   /**
    * Which v5 model names may be read. A rejected name is never read and
@@ -97,10 +107,28 @@ export interface LoadDisplayDomainOptions {
   maxModels?: number;
   /** Most YAML nodes one model file may expand to; a file over it renders as a placeholder. Default unlimited. */
   maxYamlNodes?: number;
-  /** Longest domain file, in characters; longer throws `FileTooLargeError`. Default unlimited. */
+  /**
+   * Longest domain file and `layers.json`, in characters. A longer domain file
+   * throws `FileTooLargeError`; a longer `layers.json` is not parsed, and the
+   * default layers are used instead (with a warning). Default unlimited.
+   */
   maxDomainChars?: number;
-  /** Longest model file, in characters; a longer one renders as a placeholder. Default unlimited. */
+  /**
+   * Longest model file, in characters, both as written and once its aliases
+   * are expanded (the scalar text it parses to, counting each repeat). A model
+   * over either renders as a placeholder. Default unlimited.
+   */
   maxYamlChars?: number;
+  /**
+   * Place models that have no position using only the positions of the
+   * domain's own models, ignoring `viewConfig.positions` entries that name no
+   * model. Those entries draw nothing, but the extension's placement checks
+   * every entry for every cell it tries, so a file listing many of them makes
+   * placement slow; with this set, its cost depends on the model count alone.
+   * The entries are still kept in the result. Default false: models are
+   * placed exactly as the extension places them.
+   */
+  ignoreStrayPositions?: boolean;
   /** Receives repair warnings. Default console.warn. */
   warn?: (message: string) => void;
 }
@@ -151,8 +179,16 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
     maxYamlNodes = Infinity,
     maxDomainChars = Infinity,
     maxYamlChars = Infinity,
+    ignoreStrayPositions = false,
   } = options;
   const warn = options.warn ?? ((message: string) => console.warn(message));
+
+  // 0. Limits that are not numbers would silently switch themselves off.
+  checkLimit('loadDisplayDomain', 'maxParallelReads', maxParallelReads, { min: 1, integer: true });
+  checkLimit('loadDisplayDomain', 'maxModels', maxModels);
+  checkLimit('loadDisplayDomain', 'maxYamlNodes', maxYamlNodes);
+  checkLimit('loadDisplayDomain', 'maxDomainChars', maxDomainChars);
+  checkLimit('loadDisplayDomain', 'maxYamlChars', maxYamlChars);
 
   // 1-3. The domain file itself.
   const domainText = await readFile(domainPath);
@@ -166,7 +202,13 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
 
   // 4-5. Layers, from the semantic dir the domain sits in.
   const { prefix, parentDirName, fileName } = splitDomainPath(domainPath);
-  const layers = parseLayersText(await readFile(`${prefix}${LAYERS_CONFIG_FILE}`), warn);
+  const layersPath = `${prefix}${LAYERS_CONFIG_FILE}`;
+  let layersText = await readFile(layersPath);
+  if (layersText !== null && layersText !== undefined && layersText.length > maxDomainChars) {
+    warn(`${layersPath} is ${layersText.length} characters long; at most ${maxDomainChars} are read. Using the default layers`);
+    layersText = null;
+  }
+  const layers = parseLayersText(layersText, warn);
   const layerLookup: LayerLookup = {
     hasLayer: (id) => layers.some((l) => l.id === id),
     getValidLayerIds: () => layers.map((l) => l.id),
@@ -195,7 +237,8 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
     });
   }
 
-  // 8. The UnifiedDomain, each occurrence of a model its own copy.
+  // 8. The UnifiedDomain, each occurrence of a model its own copy (sharing
+  // the parsed strings, which are immutable, so repeats cost no text).
   const unified = buildUnifiedDomain(obj, format, {
     filePath: domainPath,
     domainNameFallback: stripJsonExtension(fileName),
@@ -203,13 +246,17 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
     layers: layerLookup,
     getModel: (name) => {
       const model = parsed.get(name);
-      return model ? structuredClone(model) : null;
+      return model ? copyPlain(model) : null;
     },
     warn,
   });
 
   // 9. Positions for models that have none.
-  const computed = computeMissingPositions(unified);
+  const computed = computeMissingPositions(
+    ignoreStrayPositions
+      ? { ...unified, viewConfig: { positions: modelPositions(unified.viewConfig.positions, unified.logical.models) } }
+      : unified,
+  );
   if (computed) {
     unified.viewConfig.positions = { ...(unified.viewConfig.positions ?? {}), ...computed };
   }
@@ -221,6 +268,42 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
     layerConfig: layers.find((l) => l.id === unified.layer),
     readOnly,
   });
+}
+
+/** The entries of `positions` that name one of `models`. */
+function modelPositions(
+  positions: Record<string, NodePosition> | undefined,
+  models: ReadonlyArray<{ name: string }>,
+): Record<string, NodePosition> | undefined {
+  if (!positions) {
+    return positions;
+  }
+  const kept: Record<string, NodePosition> = {};
+  for (const { name } of models) {
+    if (Object.prototype.hasOwnProperty.call(positions, name)) {
+      kept[name] = positions[name];
+    }
+  }
+  return kept;
+}
+
+/**
+ * A deep copy of plain JSON-shaped data (objects, arrays, primitives), as
+ * `structuredClone` would make it, except that strings are shared rather than
+ * copied. A parsed model's strings can be long, and repeated through aliases.
+ */
+function copyPlain<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map(copyPlain) as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const copy: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      copy[key] = copyPlain(item);
+    }
+    return copy as T;
+  }
+  return value;
 }
 
 /** Parse one model file's text, or null (a placeholder) when it is absent, too large or unusable. */
@@ -239,7 +322,7 @@ function parseModel(
     return null;
   }
   try {
-    return parseLogicalModelText(text, name, { maxNodes });
+    return parseLogicalModelText(text, name, { maxNodes, maxChars });
   } catch (err) {
     warn(`Failed to read model "${name}": ${err instanceof Error ? err.message : String(err)}`);
     return null;

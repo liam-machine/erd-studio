@@ -5,6 +5,7 @@ import type { Document } from 'yaml';
 import {
   LOGICAL_MODELS_DIR,
   RATIONALE_KEYS,
+  YamlCharLimitError,
   YamlNodeLimitError,
   isSafeModelName,
   parseLogicalModelText,
@@ -210,6 +211,61 @@ describe('parseLogicalModelText', () => {
     // the alias itself and the node it resolves to both count
     expect(() => parseLogicalModelText('name: &n a\nschema: *n\n', 'x', { maxNodes: 5 })).toThrow(YamlNodeLimitError);
     expect(parseLogicalModelText('name: &n a\nschema: *n\n', 'x', { maxNodes: 6 })).toEqual({ name: 'a', schema: 'a' });
+  });
+
+  it('counts scalar text, keys included and repeats through aliases, against maxChars', () => {
+    // 'name' + 'a' + 'schema' + 'b' = 12 characters
+    expect(parseLogicalModelText('name: a\nschema: b\n', 'x', { maxChars: 12 })).toEqual({ name: 'a', schema: 'b' });
+    expect(() => parseLogicalModelText('name: a\nschema: b\n', 'x', { maxChars: 11 })).toThrow(YamlCharLimitError);
+    // the alias repeats 'abc': 'name' + 'abc' + 'schema' + 'abc' = 16
+    expect(parseLogicalModelText('name: &n abc\nschema: *n\n', 'x', { maxChars: 16 })).toEqual({ name: 'abc', schema: 'abc' });
+    expect(() => parseLogicalModelText('name: &n abc\nschema: *n\n', 'x', { maxChars: 15 })).toThrow(YamlCharLimitError);
+  });
+
+  it('never needs a maxChars larger than the file when there are no aliases', () => {
+    const text = [
+      'name: "dim_\\u0063ustomer"',
+      'schema: 007',
+      "description: 'It''s a >'",
+      'grain: >',
+      '  one row',
+      '  per customer',
+      'rationale:',
+      '  purpose: |',
+      '    keeps',
+      '    lines',
+      'columns:',
+      '  - {name: id, dataType: INT, isPrimaryKey: yes, scdType: 2}',
+      '  - name: name',
+      '    dataType: !!str 12',
+      '',
+    ].join('\n');
+    expect(parseLogicalModelText(text, 'x', { maxChars: text.length })).toEqual(parseLogicalModelText(text, 'x'));
+  });
+
+  it('stops one long scalar repeated through aliases at maxChars, quickly', () => {
+    const long = 'x'.repeat(100_000);
+    const lines = ['name: m', `description: &s ${long}`, 'columns:'];
+    for (let i = 0; i < 3_000; i++) lines.push(`  - {name: c${i}, dataType: t, description: *s}`);
+    const text = lines.join('\n');
+    const started = Date.now();
+    let caught: unknown;
+    try {
+      parseLogicalModelText(text, 'm', { maxNodes: 50_000, maxChars: 1_048_576 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(YamlCharLimitError);
+    expect((caught as YamlCharLimitError).maxChars).toBe(1_048_576);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('rejects limits that are not numbers of at least 0 with a TypeError', () => {
+    for (const bad of [NaN, -1, -Infinity, '4', null]) {
+      expect(() => parseLogicalModelText('name: a\n', 'x', { maxNodes: bad as number })).toThrow(TypeError);
+      expect(() => parseLogicalModelText('name: a\n', 'x', { maxChars: bad as number })).toThrow(TypeError);
+    }
+    expect(parseLogicalModelText('name: a\n', 'x', { maxNodes: Infinity, maxChars: Infinity })).toEqual({ name: 'a' });
   });
 
   it('parses 20,000 aliases in under 2s', () => {

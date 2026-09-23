@@ -37,6 +37,7 @@ import {
   TooManyModelsError,
   FileTooLargeError,
   YamlNodeLimitError,
+  YamlCharLimitError,
   type DisplayDomain,
   type LoadDisplayDomainOptions,
 } from '@erd-studio/core';
@@ -47,7 +48,7 @@ import { CanvasEnvironmentProvider, ModelNode, useCanvasGraph, type CanvasHost }
 
 const options: LoadDisplayDomainOptions = { domainPath: 'a/b/c.json', readFile: async () => null, readOnly: true };
 export const loaded: Promise<DisplayDomain> = loadDisplayDomain(options);
-export const errors = [DomainValidationError, TooManyModelsError, FileTooLargeError, YamlNodeLimitError];
+export const errors = [DomainValidationError, TooManyModelsError, FileTooLargeError, YamlNodeLimitError, YamlCharLimitError];
 export const model = parseLogicalModelText('name: a', 'a')?.name;
 export const store = createCanvasStore();
 export const selected: CanvasStore['selectedNode'] = store.getState().selectedNode;

@@ -11,6 +11,7 @@ import { parseDocument, isAlias, isMap, isScalar, isSeq, visit } from 'yaml';
 import type { Alias, Document } from 'yaml';
 
 import type { ColumnDef, SemanticModel } from './types/semantic.js';
+import { checkLimit } from './limits.js';
 
 /** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
 export const LOGICAL_MODELS_DIR = 'logical-models';
@@ -33,12 +34,32 @@ export class YamlNodeLimitError extends Error {
   }
 }
 
+/**
+ * A model file's text expands to more characters than the caller allows.
+ *
+ * Aliases let one long scalar appear many times in the parsed model at the
+ * cost of a few bytes each, so a small file can expand to a very large one
+ * while staying well inside a node budget. `maxChars` bounds that.
+ */
+export class YamlCharLimitError extends Error {
+  constructor(readonly maxChars: number) {
+    super(`YAML document expands to more than ${maxChars} characters of text`);
+    this.name = 'YamlCharLimitError';
+  }
+}
+
 export interface ParseLogicalModelOptions {
   /**
    * Most YAML nodes (map keys and values, sequence items, scalars, aliases
    * followed) the document may expand to. Unlimited by default.
    */
   maxNodes?: number;
+  /**
+   * Most characters of scalar text (keys and values, counted again each time
+   * an alias repeats them) the document may expand to. Without aliases this
+   * is never more than the length of the file. Unlimited by default.
+   */
+  maxChars?: number;
 }
 
 /**
@@ -72,6 +93,9 @@ interface ToPlainState {
   readonly aliases: ReadonlyMap<Alias, unknown>;
   remaining: number;
   readonly maxNodes: number;
+  /** Characters of scalar text still allowed; see `ParseLogicalModelOptions.maxChars`. */
+  remainingChars: number;
+  readonly maxChars: number;
 }
 
 /**
@@ -104,7 +128,9 @@ function aliasTargets(doc: Document): Map<Alias, unknown> {
  *
  * Returns null for an empty file, a file whose root is not a mapping, or a
  * model with no `name`. Throws on YAML syntax errors (the first error yaml
- * reports) and, when `maxNodes` is set, `YamlNodeLimitError`.
+ * reports), `YamlNodeLimitError` when `maxNodes` is set and exceeded, and
+ * `YamlCharLimitError` when `maxChars` is. A limit that is not a number of at
+ * least 0 (or Infinity) throws a TypeError.
  * `fallbackName` names the model when its `name` is not a usable string.
  */
 export function parseLogicalModelText(
@@ -112,7 +138,10 @@ export function parseLogicalModelText(
   fallbackName: string,
   opts: ParseLogicalModelOptions = {},
 ): SemanticModel | null {
-  const raw = parseModelFile(text, opts.maxNodes ?? Infinity);
+  const { maxNodes = Infinity, maxChars = Infinity } = opts;
+  checkLimit('parseLogicalModelText', 'maxNodes', maxNodes);
+  checkLimit('parseLogicalModelText', 'maxChars', maxChars);
+  const raw = parseModelFile(text, maxNodes, maxChars);
   if (!raw || raw.name === undefined || raw.name === null || raw.name === '') {
     return null;
   }
@@ -143,12 +172,18 @@ export function isSafeModelName(name: unknown): name is string {
  * Returns null for an empty file or a file whose root is not a mapping.
  * Throws on YAML syntax errors.
  */
-function parseModelFile(content: string, maxNodes: number): YamlModel | null {
+function parseModelFile(content: string, maxNodes: number, maxChars: number): YamlModel | null {
   const doc = parseDocument(content);
   if (doc.errors.length > 0) {
     throw doc.errors[0];
   }
-  const state: ToPlainState = { aliases: aliasTargets(doc), remaining: maxNodes, maxNodes };
+  const state: ToPlainState = {
+    aliases: aliasTargets(doc),
+    remaining: maxNodes,
+    maxNodes,
+    remainingChars: maxChars,
+    maxChars,
+  };
   const raw = toPlain(doc, doc.contents, state);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return null;
@@ -176,7 +211,11 @@ function toPlain(doc: Document, node: unknown, state: ToPlainState): unknown {
     return node.items.map((item) => toPlain(doc, item, state));
   }
   if (isScalar(node)) {
-    return scalarValue(node);
+    const value = scalarValue(node);
+    if (typeof value === 'string' && (state.remainingChars -= value.length) < 0) {
+      throw new YamlCharLimitError(state.maxChars);
+    }
+    return value;
   }
   return node ?? null;
 }
