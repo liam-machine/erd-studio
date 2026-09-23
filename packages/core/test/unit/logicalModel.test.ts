@@ -260,6 +260,63 @@ describe('parseLogicalModelText', () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
+  it('reads !!pairs and !!omap entries back as their JSON text, with or without limits', () => {
+    const text = [
+      'name: m',
+      'description: !!pairs',
+      '  - a: 1',
+      '  - b: two',
+      'grain: !!omap',
+      '  - k: v',
+      'columns:',
+      '  - name: c',
+      '',
+    ].join('\n');
+    const unlimited = parseLogicalModelText(text, 'm');
+    expect(unlimited).toEqual({
+      name: 'm',
+      description: '{"a":1},{"b":"two"}',
+      grain: '{"k":"v"}',
+      columns: [{ name: 'c', dataType: 'unknown', description: '' }],
+    });
+    expect(parseLogicalModelText(text, 'm', { maxNodes: 50_000, maxChars: 1_048_576 })).toEqual(unlimited);
+  });
+
+  it('charges a !!pairs subtree to maxChars each time an alias reaches it, quickly', () => {
+    const big = Array.from({ length: 2_000 }, (_, i) => `      k${i}: ${'v'.repeat(40)}`);
+    const lines = ['name: m', 'x: &a !!pairs', '  - big:', ...big, 'columns:'];
+    for (let i = 0; i < 1_000; i++) lines.push(`  - {name: c${i}, description: *a}`);
+    const text = lines.join('\n');
+    expect(text.length).toBeLessThan(200_000);
+    const started = Date.now();
+    let caught: unknown;
+    try {
+      parseLogicalModelText(text, 'm', { maxChars: 1_048_576 });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(YamlCharLimitError);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('charges the aliases inside a !!pairs subtree as the text they print, not what they point to', () => {
+    // `String()` prints an alias inside a pair as {"source":"<anchor>"}, so a
+    // long anchor name is repeated, not the one-character value it names.
+    const anchor = 'n'.repeat(10_000);
+    const lines = ['name: m', `v: &${anchor} x`, 'x: &a !!pairs', `  - k: *${anchor}`, 'columns:'];
+    for (let i = 0; i < 200; i++) lines.push(`  - {name: c${i}, description: *a}`);
+    const text = lines.join('\n');
+    expect(() => parseLogicalModelText(text, 'm', { maxChars: 1_000_000 })).toThrow(YamlCharLimitError);
+  });
+
+  it('counts every node under a !!omap entry against maxNodes each time an alias reaches it', () => {
+    const lines = ['name: m', 'x: &a !!omap', '  - k:', ...Array.from({ length: 100 }, (_, i) => `      - ${i}`), 'columns:'];
+    for (let i = 0; i < 1_000; i++) lines.push(`  - {name: c${i}, description: *a}`);
+    const text = lines.join('\n');
+    expect(() => parseLogicalModelText(text, 'm', { maxNodes: 50_000 })).toThrow(YamlNodeLimitError);
+    expect(parseLogicalModelText(text, 'm', { maxNodes: 200_000 })).toEqual(parseLogicalModelText(text, 'm'));
+  });
+
   it('rejects limits that are not numbers of at least 0 with a TypeError', () => {
     for (const bad of [NaN, -1, -Infinity, '4', null]) {
       expect(() => parseLogicalModelText('name: a\n', 'x', { maxNodes: bad as number })).toThrow(TypeError);
@@ -295,5 +352,12 @@ describe('isSafeModelName', () => {
     for (const name of ['', '   ', 'a/b', '/abs', 'a\\b', '..', 'a..b', '../up', 7, null, undefined, {}]) {
       expect(isSafeModelName(name)).toBe(false);
     }
+  });
+
+  it('rejects control characters, NUL included', () => {
+    for (const name of ['evil\u0000name', 'a\nb', 'tab\tname', 'bell\u0007', 'del\u007f', '\u001f']) {
+      expect(isSafeModelName(name)).toBe(false);
+    }
+    expect(isSafeModelName('caf\u00e9')).toBe(true);
   });
 });

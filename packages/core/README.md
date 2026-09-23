@@ -35,15 +35,15 @@ Bad input rejects with one of four classes, so a host can map them to its own er
 | Class | When |
 |---|---|
 | `DomainFileError` | the domain file is missing (`reason: 'missing'`), empty or not JSON |
-| `DomainValidationError` | not a loadable domain: not an object, no or a newer `schemaVersion`, a legacy or hybrid layout, an unconfigured layer |
+| `DomainValidationError` | not a loadable domain: not an object, no or a newer `schemaVersion`, a legacy or hybrid layout, an unconfigured layer, a malformed v4 inline model (say, `columns` that is not a list) |
 | `TooManyModelsError` | `logical.models` has more than `maxModels` entries (checked before any model file is read) |
 | `FileTooLargeError` | the domain file is longer than `maxDomainChars` |
 
 A `readFile` rejection is passed through unchanged. For files you do not control, the options also take:
 
-- `modelNameFilter` (default `isSafeModelName`: no path separators or `..`); a rejected name is never read.
+- `modelNameFilter` (default `isSafeModelName`: no path separators, `..` or control characters); a rejected name is never read.
 - `maxDomainChars`, which also applies to `layers.json`: a longer `layers.json` is not parsed, and the default layers are used instead.
-- `maxYamlChars` and `maxYamlNodes`. A model file renders as a placeholder when it is longer than `maxYamlChars`, when its scalar text (counting every repeat through an alias) adds up to more than `maxYamlChars`, or when it expands to more than `maxYamlNodes` nodes. Between them they stop anchor/alias expansion bombs, whether they repeat many nodes or one long string.
+- `maxYamlChars` and `maxYamlNodes`. A model file renders as a placeholder when it is longer than `maxYamlChars`, when its scalar text (counting every repeat through an alias) adds up to more than `maxYamlChars`, or when it expands to more than `maxYamlNodes` nodes. Between them they stop anchor/alias expansion bombs, whether they repeat many nodes or one long string (the entries of a `!!pairs` or `!!omap` sequence count as the nodes under them and the text they are read back as).
 - `ignoreStrayPositions`, which places models that have no position using only the positions of the domain's own models. The extension's placement checks every `viewConfig.positions` entry for every grid cell it tries, so a file listing many entries that name no model makes it slow; with this set, its cost depends only on the model count. The entries are still kept in the result.
 
 Every limit is off by default. A numeric limit must be a number of at least 0, or `Infinity` for none (`maxParallelReads`: a whole number of at least 1); anything else, `NaN` included, rejects with a `TypeError` before any file is read.

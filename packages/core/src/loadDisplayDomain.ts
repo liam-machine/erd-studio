@@ -15,9 +15,11 @@
  */
 
 import type { DisplayDomain } from './types/display.js';
-import type { NodePosition, SemanticModel } from './types/semantic.js';
+import type { DomainFormat, NodePosition, SemanticModel } from './types/semantic.js';
+import type { LayerConfig } from './types/layer.js';
 import {
   DomainFileError,
+  DomainValidationError,
   buildUnifiedDomain,
   parseDomainJson,
   resolveDomainLayer,
@@ -161,9 +163,11 @@ function stripJsonExtension(fileName: string): string {
  *
  * Bad input rejects with one of four classes: `DomainFileError` (missing,
  * empty or non-JSON domain file), `DomainValidationError` (not a loadable
- * domain, or an unconfigured layer), `TooManyModelsError` and
- * `FileTooLargeError`. A model that is missing, unreadable, unsafe, too large
- * or over the node budget renders as a placeholder instead.
+ * domain, an unconfigured layer, or a malformed v4 inline model),
+ * `TooManyModelsError` and `FileTooLargeError`. A model that is missing,
+ * unreadable, unsafe, too large or over the node budget renders as a
+ * placeholder instead. A `readFile` rejection, and anything the caller's
+ * `warn` throws, is passed through unchanged.
  *
  * The result is a fresh object; `undefined` values are left in place (a JSON
  * round-trip drops them, as `postMessage` does).
@@ -236,6 +240,63 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
       parsed.set(name, parseModel(name, text, maxYamlChars, maxYamlNodes, warn));
     });
   }
+
+  // 8-10 build what the file describes. The inline models of a v4 domain
+  // reach them as written, and a malformed one (`columns` that is not a list,
+  // a column that is null) throws a TypeError partway through, exactly as it
+  // does in the extension. Here that is reported as the invalid domain it is.
+  // A TypeError thrown by the caller's `warn` is passed through as it is.
+  const callerErrors = new WeakSet<object>();
+  const callerWarn = (message: string): void => {
+    try {
+      warn(message);
+    } catch (err) {
+      if (err !== null && typeof err === 'object') {
+        callerErrors.add(err);
+      }
+      throw err;
+    }
+  };
+  try {
+    return buildDisplayDomain(obj, format, {
+      domainPath,
+      fileName,
+      parentDirName,
+      layers,
+      layerLookup,
+      parsed,
+      readOnly,
+      ignoreStrayPositions,
+      warn: callerWarn,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && !callerErrors.has(err)) {
+      const invalid = new DomainValidationError(`${domainPath} is not a loadable domain: ${err.message}`);
+      // As `new Error(message, { cause })` sets it (that form needs ES2022 lib typings).
+      Object.defineProperty(invalid, 'cause', { value: err, writable: true, configurable: true });
+      throw invalid;
+    }
+    throw err;
+  }
+}
+
+/** Steps 8-10 of {@link loadDisplayDomain}: the parsed files -> the DisplayDomain. */
+function buildDisplayDomain(
+  obj: Record<string, unknown>,
+  format: DomainFormat,
+  ctx: {
+    domainPath: string;
+    fileName: string;
+    parentDirName: string;
+    layers: LayerConfig[];
+    layerLookup: LayerLookup;
+    parsed: ReadonlyMap<string, SemanticModel | null>;
+    readOnly: boolean;
+    ignoreStrayPositions: boolean;
+    warn: (message: string) => void;
+  },
+): DisplayDomain {
+  const { domainPath, fileName, parentDirName, layers, layerLookup, parsed, readOnly, ignoreStrayPositions, warn } = ctx;
 
   // 8. The UnifiedDomain, each occurrence of a model its own copy (sharing
   // the parsed strings, which are immutable, so repeats cost no text).

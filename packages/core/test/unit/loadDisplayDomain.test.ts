@@ -159,6 +159,34 @@ describe('loadDisplayDomain', () => {
     ]);
   });
 
+  it('never reads a model whose name holds a control character, and shows it as a placeholder', async () => {
+    const names = ['evil\u0000name', 'line\nbreak', 'ok'];
+    const { reads, result } = load({
+      [DOMAIN]: v5(names),
+      '.erd-studio/logical-models/ok.yml': modelYml('ok'),
+    });
+    const domain = await result;
+    expect(reads).toEqual([DOMAIN, '.erd-studio/layers.json', '.erd-studio/logical-models/ok.yml']);
+    expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([
+      ['evil\u0000name', 0], ['line\nbreak', 0], ['ok', 1],
+    ]);
+  });
+
+  it('shows a model whose !!pairs alias fan-out passes maxYamlChars as a placeholder', async () => {
+    const big = Array.from({ length: 2_000 }, (_, i) => `      k${i}: ${'v'.repeat(40)}`);
+    const lines = ['name: m', 'x: &a !!pairs', '  - big:', ...big, 'columns:'];
+    for (let i = 0; i < 1_000; i++) lines.push(`  - {name: c${i}, description: *a}`);
+    const text = lines.join('\n');
+    const warnings: string[] = [];
+    const domain = await load(
+      { [DOMAIN]: v5(['m']), '.erd-studio/logical-models/m.yml': text },
+      { maxYamlChars: 1_048_576, maxYamlNodes: 50_000, warn: (m) => warnings.push(m) },
+    ).result;
+    expect(text.length).toBeLessThan(1_048_576);
+    expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([['m', 0]]);
+    expect(warnings.some((w) => w.includes('characters of text'))).toBe(true);
+  });
+
   it('lets modelNameFilter narrow which names are read', async () => {
     const { reads, result } = load(
       {
@@ -522,6 +550,28 @@ describe('loadDisplayDomain', () => {
       expectKnown(await rejection(load({}).result));
       expectKnown(await rejection(load({ [DOMAIN]: v5(['a', 'b']) }, { maxModels: 1 }).result));
       expectKnown(await rejection(load({ [DOMAIN]: v5([]) }, { maxDomainChars: 3 }).result));
+    });
+
+    it('for malformed v4 inline models', async () => {
+      const v4 = (models: unknown[]) =>
+        JSON.stringify({ schemaVersion: 4, domain: 'sales', layer: 'silver', logical: { models, relationships: [] } });
+      for (const models of [
+        [{ name: 'a', columns: 'xyz' }],
+        [{ name: 'a', columns: {} }],
+        [{ name: 'a', columns: [null] }],
+      ]) {
+        const err = await rejection(load({ [DOMAIN]: v4(models) }).result);
+        expectKnown(err);
+        expect(err).toBeInstanceOf(DomainValidationError);
+        expect((err as Error).message).toContain(DOMAIN);
+        expect((err as { cause?: unknown }).cause).toBeInstanceOf(TypeError);
+      }
+    });
+
+    it('but passes a TypeError thrown by the caller\'s warn through as it is', async () => {
+      const own = new TypeError('from warn');
+      const err = await rejection(load({ [DOMAIN]: v5(['missing']) }, { warn: () => { throw own; } }).result);
+      expect(err).toBe(own);
     });
 
     it('but never for bad model or layers files, which degrade instead', async () => {

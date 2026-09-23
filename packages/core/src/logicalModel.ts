@@ -7,8 +7,8 @@
  * same file the same way.
  */
 
-import { parseDocument, isAlias, isMap, isScalar, isSeq, visit } from 'yaml';
-import type { Alias, Document } from 'yaml';
+import { parseDocument, isAlias, isMap, isPair, isScalar, isSeq, visit } from 'yaml';
+import type { Alias, Document, Node, Pair } from 'yaml';
 
 import type { ColumnDef, SemanticModel } from './types/semantic.js';
 import { checkLimit } from './limits.js';
@@ -148,9 +148,13 @@ export function parseLogicalModelText(
   return yamlToModel(raw, fallbackName);
 }
 
+/** A C0 control character (NUL included) or DEL. */
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+
 /**
  * Whether a model name can be used as a file name under `logical-models/`:
- * a non-blank string with no path separators and no `..`.
+ * a non-blank string with no path separators, no `..` and no control
+ * characters (a NUL makes most file APIs throw rather than miss).
  */
 export function isSafeModelName(name: unknown): name is string {
   return (
@@ -158,7 +162,8 @@ export function isSafeModelName(name: unknown): name is string {
     name.trim() !== '' &&
     !name.includes('/') &&
     !name.includes('\\') &&
-    !name.includes('..')
+    !name.includes('..') &&
+    !CONTROL_CHARACTER.test(name)
   );
 }
 
@@ -217,7 +222,39 @@ function toPlain(doc: Document, node: unknown, state: ToPlainState): unknown {
     }
     return value;
   }
+  if (isPair(node)) {
+    chargePair(node, state);
+    return node;
+  }
   return node ?? null;
+}
+
+/**
+ * Charge a raw pair to the budgets each time it is reached.
+ *
+ * `!!pairs` and `!!omap` sequences hold raw `Pair`s rather than nodes. They
+ * are kept as they are, as the extension always has kept them, and the model
+ * reads one back through `String()`, which is `JSON.stringify` of the pair's
+ * whole subtree. An alias to such a sequence would otherwise cost one node
+ * however large that text is, so a small file could expand without bound.
+ * With a budget set, every node under the pair counts against `maxNodes`
+ * (first, so the text below is only made for a subtree that fits), and the
+ * text `String()` makes of it against `maxChars`. With no budget nothing is
+ * counted or made, and the result is the same either way.
+ */
+function chargePair(pair: Pair, state: ToPlainState): void {
+  if (state.maxNodes !== Infinity) {
+    const count = (): void => {
+      if (--state.remaining < 0) {
+        throw new YamlNodeLimitError(state.maxNodes);
+      }
+    };
+    visit(pair.key as Node | null, { Node: count });
+    visit(pair.value as Node | null, { Node: count });
+  }
+  if (state.maxChars !== Infinity && (state.remainingChars -= String(pair).length) < 0) {
+    throw new YamlCharLimitError(state.maxChars);
+  }
 }
 
 /** Resolved value for strings/booleans/null; original source text for anything else. */
