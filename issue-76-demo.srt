@@ -1,0 +1,63 @@
+1
+00:00:00,300 --> 00:00:06,165
+This is a demo of the fix for ERD Studio issue seventy-six: grouping logical models by layer.
+
+2
+00:00:07,167 --> 00:00:10,462
+First, the problem, on the current release.
+
+3
+00:00:11,467 --> 00:00:19,592
+Every logical model lives in one flat logical-models folder. The reporter's SAP bronze tables are mixed in with the silver and gold models.
+
+4
+00:00:20,967 --> 00:00:23,597
+The Model Library shows the same flat list.
+
+5
+00:00:27,467 --> 00:00:35,471
+Now open the gold finance domain, and add a new dbt model, fct_revenue, from the Add Existing Model dialog.
+
+6
+00:00:40,702 --> 00:00:47,398
+Its YAML file lands in the same flat folder, right next to the SAP tables. That is the issue.
+
+7
+00:00:49,202 --> 00:00:51,797
+Now the same project, with the fix.
+
+8
+00:00:52,802 --> 00:00:56,872
+The Model Library has a new button: Organise Model Library by Layer.
+
+9
+00:01:02,102 --> 00:01:13,384
+It works out which layer's domains use each model, and asks before moving anything. dim_project is used by both silver and gold, so it stays shared at the top level. An unused model stays too.
+
+10
+00:01:13,984 --> 00:01:18,440
+One click, and the library is grouped into Bronze, Silver and Gold.
+
+11
+00:01:21,384 --> 00:01:29,799
+On disk, each layer now has its own folder under logical-models. Domain files did not change: they still reference models by name.
+
+12
+00:01:31,884 --> 00:01:35,383
+Now add the same new model to the gold finance domain.
+
+13
+00:01:46,328 --> 00:01:52,218
+This time the file is created in logical-models/gold/, the layer of the domain it was added to.
+
+14
+00:01:54,328 --> 00:01:56,790
+And the Model Library lists it under Gold.
+
+15
+00:02:01,828 --> 00:02:11,656
+The bronze SAP canvas still loads every model from its new folder. Existing flat libraries keep working unchanged, and model names stay unique across folders.
+
+16
+00:02:12,257 --> 00:02:20,469
+That's the fix. New models go into their layer's folder, the library is grouped by layer, and one command organises an existing library.
