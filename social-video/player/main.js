@@ -6,7 +6,7 @@
 // content inside FRAME.stage: `render(localT, ctx) -> string`, ctx = { beats, dur, t, scene }.
 import { seg, easeOut, lerp, mix, ACCENT, FRAME } from './lib.js';
 
-const MODULES = ['hook', 'problem', 'ai', 'flip', 'yaml', 'canvas', 'physical', 'diff', 'pr', 'business', 'noDbt', 'endCard'];
+const MODULES = ['hook', 'problem', 'ai', 'flip', 'yaml', 'canvas', 'physical', 'diff', 'pr', 'business', 'noDbt', 'stars', 'endCard'];
 const scenesByName = Object.fromEntries(
   await Promise.all(MODULES.map(async (m) => [m, (await import(`./scenes/${m}.js`)).default])),
 );
