@@ -146,7 +146,7 @@ def from_supplied(src: pathlib.Path, total: float) -> None:
     subprocess.run([
         'ffmpeg', '-v', 'error', '-y', '-i', str(src), '-t', f'{total:.3f}',
         '-af', f'afade=t=in:d=0.5,afade=t=out:st={max(0.0, total - fade_out):.3f}:d={fade_out}',
-        '-ac', '1', '-ar', str(SR), str(raw),
+        '-ac', '2', '-ar', str(SR), str(raw),
     ], check=True)
     # Measure, then apply one exact gain (one-pass loudnorm undershoots on dense tracks and
     # would also reshape the track's own dynamics).

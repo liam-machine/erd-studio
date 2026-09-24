@@ -13,7 +13,8 @@
 #            from scene start, taken from the REAL audio duration)
 #   caption  what the viewer reads (burned-in captions) — Australian spelling.
 #            `{word}` in a caption is drawn in the scene's accent colour (braces are stripped
-#            for the voice and the .srt).
+#            for the voice and the .srt). ` | ` marks a burned-in caption break (the
+#            player shows one chunk at a time); unmarked lines are split automatically.
 #   say      optional: what the voice reads, when it must differ from the caption
 #   pause    optional: silence before this line instead of timing.gap
 #
@@ -48,7 +49,7 @@ scenes:
     lines:
       - id: h_backwards
         beat: backwards
-        caption: For decades, we've built the data model {backwards}.
+        caption: For decades, we've built | the data model {backwards}.
       - id: h_loop
         beat: loop
         caption: Here's the fix, and why your {AI} needs it.
@@ -68,7 +69,7 @@ scenes:
         caption: Developers work backwards from the picture,
       - id: p_drift
         beat: drift
-        caption: so the design {drifts} from the warehouse, and nobody trusts the diagram.
+        caption: so the design {drifts} | from the warehouse, | and nobody trusts the diagram.
 
   - id: ai
     module: ai
@@ -79,13 +80,13 @@ scenes:
     lines:
       - id: a_vibe
         beat: vibe
-        caption: Then I tried to {vibe code} data engineering.
+        caption: Then I tried to {vibe code} | data engineering.
       - id: a_blind
         beat: blind
-        caption: My AI could read every line of SQL, but it couldn't see the {design}.
+        caption: My AI could read | every line of SQL, | but it couldn't see the {design}.
       - id: a_guess
         beat: guess
-        caption: What's the grain? Which keys? It had to {guess}.
+        caption: What's the grain? | Which keys? | It had to {guess}.
 
   - id: flip
     module: flip
@@ -96,7 +97,7 @@ scenes:
     lines:
       - id: f_flip
         beat: flip
-        caption: So flip it. Build the logical model for {developers first},
+        caption: So flip it. | Build the logical model | for {developers first},
       - id: f_repo
         beat: repo
         caption: and save it {in the repo}, right next to the SQL.
@@ -110,13 +111,13 @@ scenes:
     lines:
       - id: y_file
         beat: file
-        caption: Each table is one small {YAML} file,
+        caption: Each table is | one small {YAML} file,
       - id: y_fields
         beat: fields
-        caption: with its {grain}, columns, types and {keys}.
+        caption: with its {grain}, columns, | types and {keys}.
       - id: y_domain
         beat: domain
-        caption: A {domain} file groups the tables and says how they join.
+        caption: A {domain} file groups the tables | and says how they join.
 
   - id: canvas
     module: canvas
@@ -144,7 +145,7 @@ scenes:
         caption: "{Logical} is the design: what you mean."
       - id: ph_physical
         beat: physical
-        caption: "{Physical} is what dbt actually builds, read straight from your project."
+        caption: "{Physical} is what dbt | actually builds, | read straight from your project."
 
   - id: diff
     module: diff
@@ -163,7 +164,7 @@ scenes:
       - id: d_lights
         beat: lights
         pause: 0.3
-        caption: A renamed column, a wrong type, a missing relationship. Every mismatch {lights up} before it ships.
+        caption: A renamed column, | a wrong type, | a missing relationship. | Every mismatch {lights up} | before it ships.
 
   - id: pr
     module: pr
@@ -174,14 +175,14 @@ scenes:
     lines:
       - id: pr_same
         beat: same
-        caption: The design change and the SQL change ship in the {same pull request}.
+        caption: The design change | and the SQL change | ship in the {same pull request}.
       - id: pr_review
         beat: review
         caption: Reviewed together. Tracked {together}.
       - id: pr_ai
         beat: ai
         pause: 0.3
-        caption: And your {AI} reads the model before it writes a single line.
+        caption: And your {AI} reads the model | before it writes a single line.
 
   - id: business
     module: business
@@ -195,7 +196,7 @@ scenes:
         caption: And the business doesn't lose a thing.
       - id: b_conf
         beat: conf
-        caption: ERD Studio for {Confluence} renders the same files on a page. No GitHub account needed.
+        caption: ERD Studio for {Confluence} | renders the same files | on a page. | No GitHub account needed.
 
   - id: no-dbt
     module: noDbt
@@ -206,10 +207,10 @@ scenes:
     lines:
       - id: n_dbt
         beat: dbt
-        caption: Not on dbt? Use it for your {logical model} today.
+        caption: Not on dbt? | Use it for your {logical model} today.
       - id: n_more
         beat: more
-        caption: Support for more tools is on the way.
+        caption: Support for more tools | is on the way.
 
   - id: end
     module: endCard
@@ -220,8 +221,8 @@ scenes:
     lines:
       - id: e_name
         beat: name
-        caption: ERD Studio. {Free} and {open source}.
+        caption: ERD Studio. | {Free} and {open source}.
         say: ERD Studio. Free, and open source.
       - id: e_cta
         beat: cta
-        caption: Search ERD Studio in VS Code. Link in the comments.
+        caption: Search ERD Studio in VS Code. | Link in the comments.

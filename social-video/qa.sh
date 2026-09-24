@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Review aids for a finished render (writes to build/qa/, never to the shipped media):
-#   contact.png      one frame from the middle of every scene, 4x3
+#   contact.png      one frame from late in every scene, 7 across
 #   scene-NN.png     the same frames at full size, for checking clipping / overflow / spacing
 #   A/V check        speech onsets measured in the MIXED narration (silencedetect) against the
 #                    line start times every visual beat is keyed to — catches a mix that drifted
 #                    from the timeline the player was rendered with.
 set -euo pipefail
 cd "$(dirname "$0")"
-MP4=../media/onboarding/getting-started.mp4
+MP4=out/erd-studio-explainer.mp4
 QA=build/qa
 mkdir -p "$QA"
 rm -f "$QA"/scene-*.png
@@ -24,8 +24,8 @@ for T in $TIMES; do
   INPUTS+=(-i "$F"); i=$((i+1))
 done
 N=$i
-LAYOUT=$(node -e "const n=$N,w=480,h=270;console.log(Array.from({length:n},(_,k)=>(k%4*w)+'_'+(Math.floor(k/4)*h)).join('|'))")
-FILTER=$(node -e "const n=$N;console.log(Array.from({length:n},(_,k)=>'['+k+':v]scale=480:270[s'+k+']').join(';')+';'+Array.from({length:n},(_,k)=>'[s'+k+']').join('')+'xstack=inputs='+n+':layout=$LAYOUT:fill=black')")
+LAYOUT=$(node -e "const n=$N,w=270,h=338;console.log(Array.from({length:n},(_,k)=>(k%7*w)+'_'+(Math.floor(k/7)*h)).join('|'))")
+FILTER=$(node -e "const n=$N;console.log(Array.from({length:n},(_,k)=>'['+k+':v]scale=270:338[s'+k+']').join(';')+';'+Array.from({length:n},(_,k)=>'[s'+k+']').join('')+'xstack=inputs='+n+':layout=$LAYOUT:fill=black')")
 ffmpeg -v error -y "${INPUTS[@]}" -filter_complex "$FILTER" -frames:v 1 "$QA/contact.png"
 echo "contact sheet: $QA/contact.png ($N frames)"
 

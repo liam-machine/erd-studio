@@ -63,7 +63,7 @@ def load_lines(script_path: str) -> tuple[dict, list[dict]]:
     lines = []
     for scene in script["scenes"]:
         for line in scene.get("lines", []):
-            lines.append({"id": line["id"], "say": line.get("say") or re.sub(r"[{}]", "", line["caption"])})
+            lines.append({"id": line["id"], "say": line.get("say") or re.sub(r"\s+", " ", re.sub(r"[{}|]", "", line["caption"])).strip()})
     return script, lines
 
 
