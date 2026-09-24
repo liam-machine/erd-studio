@@ -7,7 +7,8 @@ export const list_models = {
   config: {
     title: 'List logical models',
     description:
-      'List all logical model definitions in .erd-studio/logical-models/. ' +
+      'List all logical model definitions in .erd-studio/logical-models/ — files at the top level ' +
+      'and one folder down (per-layer folders such as logical-models/gold/). Names are unique across folders. ' +
       'Each model is one table (dimension, fact, bridge, etc.) reusable across domains. ' +
       'Returns model names + light metadata. Call read_model for full column-level detail.',
     inputSchema: {

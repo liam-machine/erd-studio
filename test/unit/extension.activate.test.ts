@@ -332,6 +332,111 @@ describe('activate() with a dbt project', () => {
   });
 });
 
+describe('erdStudio.organizeModelLibrary (issue #76)', () => {
+  const lib = () => path.join(root, '.erd-studio', 'logical-models');
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  it('is a post-rename command: contributed, registered once, with no dbtSemantic alias', async () => {
+    expect(NO_LEGACY_ALIAS.has('erdStudio.organizeModelLibrary')).toBe(true);
+    expect(CONTRIBUTED).toContain('erdStudio.organizeModelLibrary');
+    await activate(context);
+    expect(count('erdStudio.organizeModelLibrary')).toBe(1);
+    expect(count('dbtSemantic.organizeModelLibrary')).toBe(0);
+  });
+
+  it('moves single-layer models into their layer folder after confirmation, leaving shared and unused ones', async () => {
+    // A v5 gold domain that shares dim_date with showcase (silver) and alone uses fct_sale.
+    fs.writeFileSync(path.join(root, '.erd-studio', 'gold', 'reporting.json'), JSON.stringify({
+      schemaVersion: 5,
+      domain: 'reporting',
+      layer: 'gold',
+      description: '',
+      logical: { models: ['dim_date', 'fct_sale'], relationships: [] },
+      viewConfig: { positions: {} },
+    }));
+    const showcaseBefore = fs.readFileSync(path.join(root, '.erd-studio', 'silver', 'showcase.json'), 'utf-8');
+    await activate(context);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (message: string) => (message === 'Organise Model Library by Layer?' ? 'Move Files' : undefined)) as never);
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    // The modal lists the plan.
+    const confirm = info.mock.calls.find((c) => c[0] === 'Organise Model Library by Layer?')!;
+    expect(confirm[1]).toMatchObject({ modal: true });
+    const detail = (confirm[1] as { detail: string }).detail;
+    expect(detail).toContain('Move 7 models into layer folders (1 → gold/, 6 → silver/).');
+    expect(detail).toContain('1 model used by more than one layer');
+    expect(detail).toContain('1 unused model');
+
+    const silver = fs.readdirSync(path.join(lib(), 'silver')).sort();
+    expect(silver).toEqual([
+      'dim_customer.yml', 'dim_project.yml', 'dim_task.yml', 'fct_large_table.yml', 'fct_order.yml', 'fct_task_event.yml',
+    ]);
+    expect(fs.readdirSync(path.join(lib(), 'gold'))).toEqual(['fct_sale.yml']);
+    const topLevel = fs.readdirSync(lib()).filter((f) => f.endsWith('.yml')).sort();
+    expect(topLevel).toEqual(['dim_date.yml', 'dim_location.yml']);
+    // Domain files are untouched — they reference models by name.
+    expect(fs.readFileSync(path.join(root, '.erd-studio', 'silver', 'showcase.json'), 'utf-8')).toBe(showcaseBefore);
+    expect(info).toHaveBeenCalledWith('Moved 7 model files into layer folders.');
+  });
+
+  it('moves nothing when the confirmation is dismissed', async () => {
+    await activate(context);
+    const before = fs.readdirSync(lib()).sort();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(fs.readdirSync(lib()).sort()).toEqual(before);
+    expect(fs.existsSync(path.join(lib(), 'silver'))).toBe(false);
+  });
+
+  it('says there is nothing to move, without a modal, when every model is shared, unused or already filed', async () => {
+    await activate(context);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (message: string) => (message === 'Organise Model Library by Layer?' ? 'Move Files' : undefined)) as never);
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    info.mockClear();
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(String(info.mock.calls[0][0])).toMatch(/^Organise Model Library: nothing to move\. /);
+    expect(String(info.mock.calls[0][0])).not.toContain('\n');
+  });
+
+  it('reports a rejected WorkspaceEdit and leaves the files where they were', async () => {
+    await activate(context);
+    const before = fs.readdirSync(lib()).sort();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Move Files' as never);
+    vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(false);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('rejected the file moves'));
+    expect(fs.readdirSync(lib()).filter((f) => f.endsWith('.yml')).sort())
+      .toEqual(before.filter((f) => f.endsWith('.yml')));
+    // No empty layer folders are left behind for the move that did not happen.
+    expect(fs.readdirSync(lib()).sort()).toEqual(before);
+  });
+
+  it('explains when there is no logical-models/ folder yet', async () => {
+    fs.rmSync(lib(), { recursive: true, force: true });
+    await activate(context);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(info).toHaveBeenCalledWith('Organise Model Library: there is no logical-models/ folder yet.');
+  });
+});
+
 describe('activate() project-root resolution', () => {
   it('reads projectPath through getErdStudioSetting, so a legacy dbtSemantic.projectPath still wins over auto-detection', async () => {
     // Two candidate projects: auto-detection would pick "a" (shallowest, sorted first);

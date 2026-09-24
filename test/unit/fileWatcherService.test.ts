@@ -589,6 +589,49 @@ describe('FileWatcherService', () => {
       expect(listener.mock.calls[0][0].modelName).toBe('dim_x');
     });
 
+    it('watches the logical-models/ top level and its layer folders (issue #76)', () => {
+      const pattern = _mockFileWatchers[3]._pattern as vscode.RelativePattern;
+      expect(pattern.pattern).toBe('.erd-studio/logical-models/**/*.yml');
+    });
+
+    it('reports a change to a model file in a layer folder by model name', () => {
+      const listener = vi.fn();
+      service.onLogicalModelChanged(listener);
+
+      const modelWatcher = _mockFileWatchers[3];
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/logical-models/gold/rpt_sales.yml');
+      modelWatcher._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener.mock.calls[0][0].modelName).toBe('rpt_sales');
+    });
+
+    it('folds a move between folders (delete + create of the same name) into one event', () => {
+      const listener = vi.fn();
+      service.onLogicalModelChanged(listener);
+
+      const modelWatcher = _mockFileWatchers[3];
+      modelWatcher._simulateDelete(vscode.Uri.file('/test/workspace/.erd-studio/logical-models/dim_customer.yml'));
+      modelWatcher._simulateCreate(vscode.Uri.file('/test/workspace/.erd-studio/logical-models/silver/dim_customer.yml'));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener.mock.calls[0][0].modelName).toBe('dim_customer');
+    });
+
+    it('swallows an own write to a model file in a layer folder', () => {
+      const listener = vi.fn();
+      service.onLogicalModelChanged(listener);
+
+      const modelPath = '/test/workspace/.erd-studio/logical-models/silver/dim_customer.yml';
+      tracker.recordWrite(modelPath);
+      _mockFileWatchers[3]._simulateCreate(vscode.Uri.file(modelPath));
+      vi.advanceTimersByTime(300);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
     it('consumes the record so the next event for the same file is reported', () => {
       const listener = vi.fn();
       service.onLogicalModelChanged(listener);

@@ -269,7 +269,11 @@ export class MigrationService {
    * Migrate all v4 domain files to v5 format.
    *
    * 1. For each domain file with inline models:
-   *    - Extract each model to logical-models/{name}.yml (if not already there)
+   *    - Extract each model to logical-models/{layer}/{name}.yml (if not
+   *      already there), where {layer} is the directory of the domain it came
+   *      from. A model inlined in domains of more than one layer goes to the
+   *      top level, logical-models/{name}.yml — the same rule the
+   *      "Organise Model Library by Layer" command applies.
    *    - Convert models array from objects to string names
    *    - Bump schemaVersion to 5
    *    - Write updated domain file
@@ -326,9 +330,12 @@ export class MigrationService {
     }
 
     // Phase 2: Write model files (skip if already exists from a prior partial migration)
-    for (const [name, { model }] of allModels) {
+    for (const [name, { model, sources }] of allModels) {
       if (!this.logicalModelService.modelExists(name)) {
-        this.logicalModelService.saveModel(model);
+        // The domain's layer is its parent directory name.
+        const layers = new Set(sources.map((source) => path.basename(path.dirname(source))));
+        const folder = layers.size === 1 ? [...layers][0] : undefined;
+        this.logicalModelService.saveModel(model, folder);
         result.modelsCreated++;
       }
     }

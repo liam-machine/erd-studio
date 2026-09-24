@@ -6,8 +6,18 @@
  * The folder layout is the extension's:
  *
  *   {semanticDir}/layers.json
- *   {semanticDir}/logical-models/{model}.yml
- *   {semanticDir}/{layer}/{domain}.json      <- domainPath
+ *   {semanticDir}/logical-models/{model}.yml           <- a flat library, or
+ *   {semanticDir}/logical-models/{layer}/{model}.yml   <- grouped by layer
+ *   {semanticDir}/{layer}/{domain}.json                <- domainPath
+ *
+ * A model file may sit at the top of `logical-models/` or one folder down;
+ * the folder is organisational only and names are unique across the library.
+ * With no directory listing to go on, a v5 model is found by probing, in
+ * order: `logical-models/{model}.yml`, then the folder of every layer in
+ * `layers.json` (and the domain's own), alphabetically — the extension's
+ * order — and the first file that exists is used. A flat library therefore costs exactly one
+ * read per model, as before. Folders not named after a layer are invisible
+ * here: only hosts that can list directories (the extension) see them.
  *
  * Everything the files say is validated and repaired by the same functions
  * the extension host uses. The limits in the options exist for hosts that
@@ -238,7 +248,7 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
     hasLayer: (id) => layers.some((l) => l.id === id),
     getValidLayerIds: () => layers.map((l) => l.id),
   };
-  resolveDomainLayer(obj.layer, domainPath, parentDirName, layerLookup);
+  const domainLayer = resolveDomainLayer(obj.layer, domainPath, parentDirName, layerLookup);
 
   // 6. The model cap, on the raw list, before anything is read.
   const logical = obj.logical;
@@ -256,8 +266,16 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
   if (format === 'v5' && rawModels) {
     const names = [...new Set(rawModels.filter((m): m is string => typeof m === 'string'))]
       .filter((name) => modelNameFilter(name));
+    const modelsDir = `${prefix}${LOGICAL_MODELS_DIR}/`;
+    // Alphabetical, like the extension's LogicalModelService, so a name that
+    // (wrongly) exists in two folders resolves to the same file in both hosts.
+    const folders = [...new Set([domainLayer, ...layers.map((l) => l.id)])].sort((a, b) => a.localeCompare(b));
     await mapWithLimit(names, maxParallelReads, async (name) => {
-      const text = await readFile(`${prefix}${LOGICAL_MODELS_DIR}/${name}.yml`);
+      // One lane probes one candidate at a time, so maxParallelReads holds.
+      let text = await readFile(`${modelsDir}${name}.yml`);
+      for (let i = 0; (text === null || text === undefined) && i < folders.length; i++) {
+        text = await readFile(`${modelsDir}${folders[i]}/${name}.yml`);
+      }
       parsed.set(name, parseModel(name, text, maxYamlChars, maxYamlNodes, warn));
     });
   }

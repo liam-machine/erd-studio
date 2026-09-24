@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 import {
   HarnessService,
   HARNESS_TARGETS,
@@ -105,6 +106,16 @@ describe('HarnessService', () => {
         expect(content).toContain('viewConfig');
         expect(content).toContain('logical');
         expect(content).toContain('.erd-studio/{layer}/{domain}.json');
+      }
+    });
+
+    it('all formats explain per-layer model folders', () => {
+      for (const target of HARNESS_TARGETS) {
+        const content = service.generateContent(target.id);
+        expect(content).toContain('logical-models/{folder}/{name}.yml');
+        expect(content).toContain('unique across all folders');
+        expect(content).toContain('logical-models/gold/fct_sale.yml');
+        expect(content).toContain('logical-models/*/{name}.yml');
       }
     });
 
@@ -326,6 +337,21 @@ describe('HarnessService', () => {
       expect(content).toContain('#!/usr/bin/env bash');
       expect(content).toContain('permissionDecision');
       expect(content).toContain('session_id');
+    });
+
+    it('enforce-skill.sh gates model files in a layer folder too', () => {
+      const target = HARNESS_TARGETS.find(t => t.id === 'claude')!;
+      service.install(tmpDir, target);
+      const hookPath = path.join(tmpDir, '.claude', 'skills', 'erd-studio', 'enforce-skill.sh');
+      const session = `vitest-${process.pid}-${Date.now()}`;
+      const flag = `/tmp/.erd-studio-skill-${session}`;
+      try {
+        const input = JSON.stringify({ session_id: session, tool_input: { file_path: '/repo/.erd-studio/logical-models/gold/fct_sale.yml' } });
+        const out = execFileSync('bash', [hookPath], { input, encoding: 'utf-8' });
+        expect(out).toContain('"permissionDecision":"deny"');
+      } finally {
+        fs.rmSync(flag, { force: true });
+      }
     });
 
     it('creates settings.local.json with PreToolUse hook on first install', () => {

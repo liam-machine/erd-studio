@@ -19,7 +19,7 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '17';
+export const HARNESS_VERSION = '18';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -114,16 +114,18 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
 
 const SCHEMA_CONTENT = `# ERD Studio — AI Data Modeling Guide
 
-ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`.erd-studio/logical-models/\`. Domain JSON files reference models by name and define relationships and layout.
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and define relationships and layout.
 
 ## Architecture Overview
 
 \`\`\`
 .erd-studio/
 ├── logical-models/           ← Central model definitions (YAML, one per model)
-│   ├── dim_customer.yml
-│   ├── dim_project.yml
-│   └── fct_sale.yml
+│   ├── dim_project.yml       ← top level (flat libraries keep working)
+│   ├── silver/               ← optional per-layer folders
+│   │   └── dim_customer.yml
+│   └── gold/
+│       └── fct_sale.yml
 ├── silver/
 │   ├── customer-360.json     ← Domain file (model references + relationships + layout)
 │   └── orders.json
@@ -133,9 +135,16 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 
 **Key principle:** Models are defined ONCE in \`logical-models/\` and referenced from multiple domain files. Editing a model from any domain updates the shared definition.
 
+### Model file location (layer folders)
+
+- A model file lives at \`logical-models/{name}.yml\` **or** exactly one folder down at \`logical-models/{folder}/{name}.yml\`. By convention the folder is a layer id (\`bronze\`, \`silver\`, \`gold\`). Deeper nesting and dot-folders are ignored.
+- The folder is organisational only. Domain files reference models **by name**, never by path, and model names are **unique across all folders** (as dbt model names are across a project). Never create a second file with a name that already exists in another folder.
+- **To find a model**, look at \`logical-models/{name}.yml\` first, then in each folder (\`logical-models/*/{name}.yml\`). If the same name exists twice, the top-level file wins, then folders in alphabetical order; the others are ignored.
+- **To create a new model**, put it in the folder of the layer of the domain you are adding it to: adding \`fct_sale\` to \`gold/reporting.json\` creates \`logical-models/gold/fct_sale.yml\`. When editing or renaming an existing model, keep its file in the folder it is already in.
+
 ### Model Library (Sidebar)
 
-The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`logical-models/\`. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
+The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`logical-models/\`, grouped by folder. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
 
 - **Referenced models** show how many domains use them (e.g. "2 domains")
 - **Orphaned models** show a warning icon and "(unused)" — these exist as \`.yml\` files but are not in any domain's \`logical.models[]\` array
@@ -170,7 +179,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`
 | \`description\` | No | Human-readable domain description |
 | \`modelFolder\` | No | Filter for "Add Existing Model" dialog (e.g. \`models/silver\`) |
 | \`stubColumns\` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
-| \`logical.models\` | Yes | Array of model name strings (references to \`logical-models/*.yml\`) |
+| \`logical.models\` | Yes | Array of model name strings (references to \`logical-models/*.yml\` or \`logical-models/{folder}/*.yml\`) |
 | \`logical.relationships\` | Yes | Array of relationship objects |
 | \`viewConfig\` | Yes | Root-level view settings. The extension auto-assigns positions for new models |
 
@@ -197,10 +206,10 @@ Annotations are temporary build notes — visible on the canvas while constructi
 
 | User asks to... | Edit this file |
 |-----------------|---------------|
-| Add/remove/rename a column | \`logical-models/{name}.yml\` |
-| Change column type, PK/FK/NK flags, SCD type | \`logical-models/{name}.yml\` |
-| Change grain, modelRole, description, rationale | \`logical-models/{name}.yml\` |
-| Add a model to a domain diagram | Domain \`.json\` → add name to \`logical.models[]\` AND create \`logical-models/{name}.yml\` if it doesn't exist |
+| Add/remove/rename a column | the model's \`.yml\` (\`logical-models/{name}.yml\` or \`logical-models/{folder}/{name}.yml\`) |
+| Change column type, PK/FK/NK flags, SCD type | the model's \`.yml\` |
+| Change grain, modelRole, description, rationale | the model's \`.yml\` |
+| Add a model to a domain diagram | Domain \`.json\` → add name to \`logical.models[]\` AND, if no file for that name exists in any folder, create \`logical-models/{layer}/{name}.yml\` (the domain's layer) |
 | Remove a model from a domain | Domain \`.json\` → remove name from \`logical.models[]\` AND remove its relationships from \`logical.relationships[]\` |
 | Add/remove/edit a relationship | Domain \`.json\` → \`logical.relationships[]\` |
 | Change layout positions | Domain \`.json\` → \`viewConfig.positions\` |
@@ -211,9 +220,9 @@ Annotations are temporary build notes — visible on the canvas while constructi
 
 ## Models
 
-Model definitions live in \`.erd-studio/logical-models/{model_name}.yml\`. Create/edit these YAML files to define models. Then reference them by name in domain files.
+Model definitions live in \`.erd-studio/logical-models/{model_name}.yml\` or \`.erd-studio/logical-models/{layer}/{model_name}.yml\` (see "Model file location" above). Create/edit these YAML files to define models. Then reference them by name in domain files.
 
-**File:** \`.erd-studio/logical-models/dim_customer.yml\`
+**File:** \`.erd-studio/logical-models/silver/dim_customer.yml\`
 
 \`\`\`yaml
 name: dim_customer
@@ -310,7 +319,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the \`.erd-studio/logical-models/{name}.yml\` file.
+Write the model's YAML file — the existing file if the model already exists (in whichever folder it is in), otherwise \`.erd-studio/logical-models/{layer}/{name}.yml\` for the layer of the target domain.
 
 ### Step 4 — Reconcile via set-difference
 Re-read the YAML file you just wrote. Compute the set-difference between source columns and YAML columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -464,7 +473,7 @@ for each difference. Your job is to execute those choices.
   "modelContext": {
     "dim_customer": {
       "modelName": "dim_customer",
-      "logicalModelPath": ".erd-studio/logical-models/dim_customer.yml",
+      "logicalModelPath": ".erd-studio/logical-models/silver/dim_customer.yml",
       "dbtSqlPath": "models/silver/dim_customer.sql",
       "dbtSchemaPath": "models/silver/dim_customer.yml"
     }
@@ -506,11 +515,11 @@ and no \`catalog.json\` to observe the real one. It resolves exactly like
 
 | Action | What to do |
 |--------|-----------|
-| \`add-to-logical\` | Add model name to domain JSON \`logical.models[]\` + create \`logical-models/{name}.yml\` from manifest data |
+| \`add-to-logical\` | Add model name to domain JSON \`logical.models[]\` + create \`logical-models/{layer}/{name}.yml\` (the plan's \`layer\`) from manifest data, unless a file for that name already exists in any folder |
 | \`remove-from-logical\` | Remove model name from domain JSON \`logical.models[]\` + remove related relationships from \`logical.relationships[]\` |
-| \`add-column-to-logical\` | Add column to \`logical-models/{name}.yml\` columns array |
-| \`remove-column-from-logical\` | Remove column from \`logical-models/{name}.yml\` |
-| \`update-type-in-logical\` | Update column \`dataType\` in \`logical-models/{name}.yml\` to the value in \`resolvedDataType\` |
+| \`add-column-to-logical\` | Add column to the model's yml (\`modelContext[name].logicalModelPath\`) columns array |
+| \`remove-column-from-logical\` | Remove column from the model's yml (\`logicalModelPath\`) |
+| \`update-type-in-logical\` | Update column \`dataType\` in the model's yml (\`logicalModelPath\`) to the value in \`resolvedDataType\` |
 | \`add-relationship-to-logical\` | Add relationship object to domain JSON \`logical.relationships[]\` using the fromModel/fromColumn/toModel/toColumn from the action |
 | \`remove-relationship-from-logical\` | Remove the matching relationship from domain JSON \`logical.relationships[]\` |
 | \`update-cardinality-in-logical\` | Update \`cardinality\` field on matching relationship in domain JSON to \`targetCardinality\` |

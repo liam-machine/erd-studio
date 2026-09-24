@@ -12,7 +12,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE } from '../../src/providers/SemanticEditorProvider';
+import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE, modelFolderForDomain } from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
@@ -437,16 +437,18 @@ describe('payload validation (H21)', () => {
     expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'dim_dupe.yml'))).toBe(false);
   });
 
-  it('accepts a valid addModel and writes the model file', async () => {
+  it('accepts a valid addModel and writes the model file into the domain\'s layer folder', async () => {
     const { panel } = await openShowcase(root);
     panel._simulateMessage({
       type: 'addModel',
       payload: { name: 'dim_fresh', columns: [{ name: 'fresh_id', dataType: 'int', description: '' }], modelRole: 'domain-dim' },
     });
+    // showcase is a silver domain, so the new model lands in logical-models/silver/.
     await vi.waitFor(
-      () => expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'dim_fresh.yml'))).toBe(true),
+      () => expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'silver', 'dim_fresh.yml'))).toBe(true),
       { timeout: 4000 },
     );
+    expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'dim_fresh.yml'))).toBe(false);
     expect(lastError(panel)).toBeUndefined();
   });
 
@@ -827,5 +829,199 @@ describe('requestFeedbackDialog', () => {
     expect(provider.requestFeedbackDialog()).toBe(false);
 
     expect(posted(panel).length).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Layer folders — logical-models/{layer}/{name}.yml (issue #76)
+// ---------------------------------------------------------------------------
+
+describe('modelFolderForDomain', () => {
+  it('is the layer directory of the domain file', () => {
+    expect(modelFolderForDomain('/p/.erd-studio/silver/showcase.json')).toBe('silver');
+    expect(modelFolderForDomain('/p/.erd-studio/gold/finance.json')).toBe('gold');
+    expect(modelFolderForDomain(path.join('C:', 'p', '.erd-studio', 'bronze', 'x.json'))).toBe('bronze');
+  });
+
+  it('returns whatever the parent directory is called (LogicalModelService rejects non-layer names)', () => {
+    expect(modelFolderForDomain('/tmp/Some Folder/domain.json')).toBe('Some Folder');
+  });
+});
+
+describe('layer folders in the edit pipeline (issue #76)', () => {
+  const lib = () => path.join(root, '.erd-studio', 'logical-models');
+
+  /** Move a fixture model file from the top level into logical-models/{folder}/. */
+  function moveIntoFolder(name: string, folder: string, prependComment?: string): string {
+    const from = path.join(lib(), `${name}.yml`);
+    const to = path.join(lib(), folder, `${name}.yml`);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    const text = fs.readFileSync(from, 'utf-8');
+    fs.writeFileSync(to, prependComment ? `${prependComment}\n${text}` : text);
+    fs.unlinkSync(from);
+    return to;
+  }
+
+  /** Write an empty v5 domain at {layer}/{domain}.json, open it in a fresh provider and wait for the first load. */
+  async function openNewDomain(layer: string, domain: string) {
+    const file = path.join(root, '.erd-studio', layer, `${domain}.json`);
+    fs.writeFileSync(file, JSON.stringify({
+      schemaVersion: 5,
+      domain,
+      layer,
+      description: '',
+      logical: { models: [], relationships: [] },
+      viewConfig: { positions: {} },
+    }, null, 2) + '\n');
+    const built = buildProvider(root);
+    const doc = makeDoc(file);
+    const panel = vscode.createMockWebviewPanel();
+    await built.provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    return { ...built, doc, panel, file };
+  }
+
+  it('renaming a model that lives in silver/ writes the new file in silver/ and deletes the old one', async () => {
+    moveIntoFolder('dim_task', 'silver', '# hand-written note');
+    const { panel, doc } = await openShowcase(root);
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+
+    panel._simulateMessage({ type: 'renameModel', payload: { oldName: 'dim_task', newName: 'dim_work_item' } });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    const renamed = path.join(lib(), 'silver', 'dim_work_item.yml');
+    expect(fs.existsSync(renamed)).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_task.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(lib(), 'dim_work_item.yml'))).toBe(false);
+    const text = fs.readFileSync(renamed, 'utf-8');
+    expect(text).toContain('# hand-written note');
+    expect(text).toContain('name: dim_work_item');
+    expect(JSON.parse(doc.getText()).logical.models).toContain('dim_work_item');
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('renaming a top-level model keeps it at the top level, even from a silver domain', async () => {
+    const { panel } = await openShowcase(root);
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+
+    panel._simulateMessage({ type: 'renameModel', payload: { oldName: 'dim_task', newName: 'dim_work_item' } });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    expect(fs.existsSync(path.join(lib(), 'dim_work_item.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_work_item.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(lib(), 'dim_task.yml'))).toBe(false);
+  });
+
+  it('an edit to a model in silver/ edits that file in place and creates no top-level file', async () => {
+    const inFolder = moveIntoFolder('dim_task', 'silver', '# keep this comment');
+    const { panel } = await openShowcase(root);
+
+    panel._simulateMessage({
+      type: 'updateModelDescription',
+      payload: { modelName: 'dim_task', description: 'Edited in its layer folder' },
+    });
+    await vi.waitFor(
+      () => expect(fs.readFileSync(inFolder, 'utf-8')).toContain('description: Edited in its layer folder'),
+      { timeout: 4000 },
+    );
+    expect(fs.readFileSync(inFolder, 'utf-8')).toContain('# keep this comment');
+    expect(fs.existsSync(path.join(lib(), 'dim_task.yml'))).toBe(false);
+
+    panel._simulateMessage({
+      type: 'addColumn',
+      payload: { modelName: 'dim_task', column: { name: 'extra_col', dataType: 'int', description: '' } },
+    });
+    await vi.waitFor(
+      () => expect(fs.readFileSync(inFolder, 'utf-8')).toContain('extra_col'),
+      { timeout: 4000 },
+    );
+    expect(fs.existsSync(path.join(lib(), 'dim_task.yml'))).toBe(false);
+    expect(fs.readdirSync(path.join(lib(), 'silver'))).toEqual(['dim_task.yml']);
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('a model at the top level stays there when edited from a silver domain (no migration on edit)', async () => {
+    const topLevel = path.join(lib(), 'dim_customer.yml');
+    const { panel } = await openShowcase(root);
+
+    panel._simulateMessage({
+      type: 'updateModelDescription',
+      payload: { modelName: 'dim_customer', description: 'Still at the top' },
+    });
+    await vi.waitFor(
+      () => expect(fs.readFileSync(topLevel, 'utf-8')).toContain('description: Still at the top'),
+      { timeout: 4000 },
+    );
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_customer.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(lib(), 'silver'))).toBe(false);
+  });
+
+  it('addExistingModel seeds a new library file from the dbt yml into the domain\'s layer folder', async () => {
+    // fct_sale is in the dbt project yml but not in showcase; drop its library file so it gets seeded.
+    fs.unlinkSync(path.join(lib(), 'fct_sale.yml'));
+    const { panel, doc } = await openShowcase(root);
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+
+    panel._simulateMessage({ type: 'addExistingModel', payload: { modelName: 'fct_sale' } });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    const seeded = path.join(lib(), 'silver', 'fct_sale.yml');
+    expect(fs.existsSync(seeded)).toBe(true);
+    expect(fs.readFileSync(seeded, 'utf-8')).toContain('name: fct_sale');
+    expect(fs.existsSync(path.join(lib(), 'fct_sale.yml'))).toBe(false);
+    expect(JSON.parse(doc.getText()).logical.models).toContain('fct_sale');
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('addExistingModel from a gold domain seeds into gold/', async () => {
+    fs.unlinkSync(path.join(lib(), 'fct_sale.yml'));
+    const { panel } = await openNewDomain('gold', 'reporting');
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+
+    panel._simulateMessage({ type: 'addExistingModel', payload: { modelName: 'fct_sale' } });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    expect(fs.existsSync(path.join(lib(), 'gold', 'fct_sale.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'silver', 'fct_sale.yml'))).toBe(false);
+  });
+
+  it('addExistingModel of a model already in another layer folder references it without moving or copying', async () => {
+    const inSilver = moveIntoFolder('fct_sale', 'silver');
+    const { panel, doc } = await openNewDomain('gold', 'reporting');
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+
+    panel._simulateMessage({ type: 'addExistingModel', payload: { modelName: 'fct_sale' } });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    expect(fs.existsSync(inSilver)).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'gold', 'fct_sale.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(lib(), 'fct_sale.yml'))).toBe(false);
+    expect(JSON.parse(doc.getText()).logical.models).toContain('fct_sale');
+  });
+
+  it('names the real folder when addModel collides with a model in a layer folder', async () => {
+    moveIntoFolder('fct_sale', 'gold');
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({
+      type: 'addModel',
+      payload: { name: 'fct_sale', columns: [{ name: 'sale_id', dataType: 'int', description: '' }] },
+    });
+    await waitForError(panel, /already exists in the model library/);
+    expect(lastError(panel)).toContain('(logical-models/gold/fct_sale.yml)');
+    expect(fs.existsSync(path.join(lib(), 'silver', 'fct_sale.yml'))).toBe(false);
+  });
+
+  it('names the real folder when a rename collides with a model in a layer folder', async () => {
+    moveIntoFolder('fct_sale', 'gold');
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({ type: 'renameModel', payload: { oldName: 'dim_task', newName: 'fct_sale' } });
+    await waitForError(panel, /already exists in the model library/);
+    expect(lastError(panel)).toContain('(logical-models/gold/fct_sale.yml)');
+    expect(fs.existsSync(path.join(lib(), 'dim_task.yml'))).toBe(true);
   });
 });

@@ -557,3 +557,370 @@ describe('LogicalModelService.modelPath', () => {
     expect(service.resolveModelPath('dim_customer')).toBe(service.modelPath('dim_customer'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Layer folders — logical-models/{folder}/{name}.yml (issue #76)
+// ---------------------------------------------------------------------------
+
+describe('LogicalModelService layer folders', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  let modelsDir: string;
+
+  /** Write a raw model file at logical-models/[folder/]name.yml. */
+  function writeRaw(folder: string, name: string, content = `name: ${name}\ncolumns: []\n`): string {
+    const dir = folder ? path.join(modelsDir, folder) : modelsDir;
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${name}.yml`);
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return filePath;
+  }
+
+  beforeEach(() => {
+    tempDir = fs.realpathSync(createTempWorkspace());
+    service = new LogicalModelService(tempDir);
+    modelsDir = path.join(tempDir, '.erd-studio', 'logical-models');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  describe('lookup', () => {
+    it('finds a model one folder down', () => {
+      const filePath = writeRaw('gold', 'rpt_sales', 'name: rpt_sales\ndescription: Sales\ncolumns: []\n');
+      expect(service.findModelFile('rpt_sales')).toBe(filePath);
+      expect(service.modelPath('rpt_sales')).toBe(filePath);
+      expect(service.modelExists('rpt_sales')).toBe(true);
+      expect(service.getModel('rpt_sales')!.description).toBe('Sales');
+    });
+
+    it('prefers the top level over any folder, then folders alphabetically', () => {
+      const silver = writeRaw('silver', 'dim_a', 'name: dim_a\ndescription: silver\n');
+      const gold = writeRaw('gold', 'dim_a', 'name: dim_a\ndescription: gold\n');
+      // gold < silver alphabetically
+      expect(service.findModelFile('dim_a')).toBe(gold);
+      expect(service.getModel('dim_a')!.description).toBe('gold');
+
+      const top = writeRaw('', 'dim_a', 'name: dim_a\ndescription: top\n');
+      expect(service.findModelFile('dim_a')).toBe(top);
+      expect(service.getModel('dim_a')!.description).toBe('top');
+      expect(silver).not.toBe(top);
+    });
+
+    it('returns null from findModelFile when no file holds the name, and throws on an unsafe name', () => {
+      expect(service.findModelFile('nope')).toBeNull();
+      writeRaw('gold', 'other');
+      expect(service.findModelFile('nope')).toBeNull();
+      expect(() => service.findModelFile('../x')).toThrow(/Invalid model name/);
+    });
+
+    it('modelFolder reports "" for the top level, the folder name one level down, null when missing', () => {
+      writeRaw('', 'top_model');
+      writeRaw('gold', 'gold_model');
+      expect(service.modelFolder('top_model')).toBe('');
+      expect(service.modelFolder('gold_model')).toBe('gold');
+      expect(service.modelFolder('missing')).toBeNull();
+    });
+
+    it('ignores dot-folders and files nested two levels deep', () => {
+      writeRaw('.git', 'hidden_model');
+      writeRaw(path.join('gold', 'archive'), 'deep_model');
+      writeRaw('gold', 'real_model');
+
+      expect(service.listFolders()).toEqual(['gold']);
+      expect(service.findModelFile('hidden_model')).toBeNull();
+      expect(service.findModelFile('deep_model')).toBeNull();
+      expect(service.modelExists('deep_model')).toBe(false);
+      expect(service.listModelNames()).toEqual(['real_model']);
+    });
+
+    it('does not scan a symlinked folder', () => {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-outside-'));
+      try {
+        fs.writeFileSync(path.join(outside, 'linked_model.yml'), 'name: linked_model\n', 'utf-8');
+        fs.mkdirSync(modelsDir, { recursive: true });
+        fs.symlinkSync(outside, path.join(modelsDir, 'linked'), 'dir');
+        expect(service.listFolders()).toEqual([]);
+        expect(service.findModelFile('linked_model')).toBeNull();
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    it('lists folders alphabetically and returns [] when the library does not exist', () => {
+      expect(service.listFolders()).toEqual([]);
+      expect(service.listModelFiles()).toEqual([]);
+      writeRaw('silver', 'a');
+      writeRaw('gold', 'b');
+      writeRaw('bronze', 'c');
+      expect(service.listFolders()).toEqual(['bronze', 'gold', 'silver']);
+    });
+  });
+
+  describe('listModelFiles / listModelNames / listModels', () => {
+    it('lists the top level first, then each folder alphabetically, files sorted inside each', () => {
+      writeRaw('silver', 'fct_b');
+      writeRaw('silver', 'dim_a');
+      writeRaw('', 'zz_top');
+      writeRaw('', 'aa_top');
+      writeRaw('gold', 'rpt_x');
+
+      expect(service.listModelFiles().map((e) => `${e.folder}/${e.name}`)).toEqual([
+        '/aa_top', '/zz_top', 'gold/rpt_x', 'silver/dim_a', 'silver/fct_b',
+      ]);
+      const entry = service.listModelFiles().find((e) => e.name === 'rpt_x')!;
+      expect(entry.filePath).toBe(path.join(modelsDir, 'gold', 'rpt_x.yml'));
+      expect(entry.shadowedBy).toBeUndefined();
+    });
+
+    it('flags every copy of a duplicated name but the one lookup resolves to', () => {
+      const top = writeRaw('', 'dim_dupe', 'name: dim_dupe\ndescription: top\n');
+      writeRaw('gold', 'dim_dupe', 'name: dim_dupe\ndescription: gold\n');
+      writeRaw('silver', 'dim_dupe', 'name: dim_dupe\ndescription: silver\n');
+      const goldOnly = writeRaw('gold', 'dim_gold');
+      writeRaw('silver', 'dim_gold');
+
+      const entries = service.listModelFiles();
+      const dupes = entries.filter((e) => e.name === 'dim_dupe');
+      expect(dupes.map((e) => [e.folder, e.shadowedBy])).toEqual([
+        ['', undefined],
+        ['gold', top],
+        ['silver', top],
+      ]);
+      const golds = entries.filter((e) => e.name === 'dim_gold');
+      expect(golds.map((e) => [e.folder, e.shadowedBy])).toEqual([
+        ['gold', undefined],
+        ['silver', goldOnly],
+      ]);
+      // The winner of each name is what findModelFile resolves to.
+      expect(service.findModelFile('dim_dupe')).toBe(top);
+      expect(service.findModelFile('dim_gold')).toBe(goldOnly);
+    });
+
+    it('listModelNames and listModels return each name once (the winning copy)', () => {
+      writeRaw('', 'dim_dupe', 'name: dim_dupe\ndescription: top\n');
+      writeRaw('gold', 'dim_dupe', 'name: dim_dupe\ndescription: gold\n');
+      writeRaw('gold', 'rpt_x');
+
+      expect(service.listModelNames()).toEqual(['dim_dupe', 'rpt_x']);
+      const models = service.listModels();
+      expect(models.map((m) => m.name)).toEqual(['dim_dupe', 'rpt_x']);
+      expect(models[0].description).toBe('top');
+    });
+  });
+
+  describe('modelPath for a new file', () => {
+    it('uses the top level when no folder is given', () => {
+      expect(service.modelPath('dim_new')).toBe(path.join(modelsDir, 'dim_new.yml'));
+    });
+
+    it('uses logical-models/{folder}/ for a layer-shaped folder', () => {
+      expect(service.modelPath('dim_new', 'gold')).toBe(path.join(modelsDir, 'gold', 'dim_new.yml'));
+      expect(service.modelPath('dim_new', 'raw-data_2')).toBe(path.join(modelsDir, 'raw-data_2', 'dim_new.yml'));
+    });
+
+    it.each(['../x', 'Gold', '.hidden', 'a/b', '..', '_x', '1st', 'gold\\sub', ''])(
+      'falls back to the top level for the unsafe folder %j',
+      (folder) => {
+        expect(service.modelPath('dim_new', folder)).toBe(path.join(modelsDir, 'dim_new.yml'));
+      },
+    );
+
+    it('isModelFolderName accepts only layer-id shaped names', () => {
+      expect(LogicalModelService.isModelFolderName('silver')).toBe(true);
+      expect(LogicalModelService.isModelFolderName('my-layer_2')).toBe(true);
+      for (const bad of ['Gold', '../x', '.hidden', '', 'a/b', '9lives']) {
+        expect(LogicalModelService.isModelFolderName(bad), bad).toBe(false);
+      }
+    });
+
+    it('returns the existing file wherever it is, whatever folder is asked for', () => {
+      const gold = writeRaw('gold', 'dim_existing');
+      expect(service.modelPath('dim_existing', 'silver')).toBe(gold);
+      expect(service.modelPath('dim_existing')).toBe(gold);
+    });
+  });
+
+  describe('ensureDir', () => {
+    it('creates the folder of a model path inside the library', () => {
+      service.ensureDir(service.modelPath('dim_x', 'gold'));
+      expect(fs.statSync(path.join(modelsDir, 'gold')).isDirectory()).toBe(true);
+    });
+
+    it('creates just the library for a top-level path', () => {
+      service.ensureDir(service.modelPath('dim_x'));
+      expect(fs.readdirSync(modelsDir)).toEqual([]);
+    });
+
+    it.each([
+      ['a sibling of the library', (t: string) => path.join(t, '.erd-studio', 'silver', 'x.yml')],
+      ['a folder at the workspace root', (t: string) => path.join(t, 'newdir', 'x.yml')],
+      ['a relative escape', (t: string) => path.join(t, '.erd-studio', 'logical-models', '..', '..', 'evil', 'x.yml')],
+      ['an unrelated absolute path', () => path.join(os.tmpdir(), 'erd-nowhere', 'x.yml')],
+    ])('refuses %s', (_label, make) => {
+      const target = make(tempDir);
+      expect(() => service.ensureDir(target)).toThrow(/outside the logical-models directory/);
+      expect(fs.existsSync(path.dirname(target))).toBe(false);
+    });
+  });
+
+  describe('writes', () => {
+    it('saveModel(model, "gold") creates the folder and writes the file there', () => {
+      service.saveModel({ name: 'rpt_new', description: 'New', columns: [] }, 'gold');
+      const expected = path.join(modelsDir, 'gold', 'rpt_new.yml');
+      expect(fs.existsSync(expected)).toBe(true);
+      expect(fs.existsSync(path.join(modelsDir, 'rpt_new.yml'))).toBe(false);
+      expect(service.modelFolder('rpt_new')).toBe('gold');
+      expect(service.getModel('rpt_new')!.description).toBe('New');
+    });
+
+    it('saveModel with an unsafe folder writes at the top level', () => {
+      service.saveModel({ name: 'rpt_new', columns: [] }, '../escape');
+      expect(fs.existsSync(path.join(modelsDir, 'rpt_new.yml'))).toBe(true);
+      expect(fs.existsSync(path.join(tempDir, '.erd-studio', 'escape'))).toBe(false);
+    });
+
+    it('edits an existing file in gold/ in place, keeping its comments, with no top-level copy', () => {
+      const gold = writeRaw('gold', 'rpt_sales', [
+        '# owned by finance',
+        'name: rpt_sales',
+        'description: Old',
+        'owner: finance',
+        '',
+      ].join('\n'));
+
+      const model = service.getModel('rpt_sales')!;
+      model.description = 'New';
+      // Even an explicit different folder does not move an existing file.
+      service.saveModel(model, 'silver');
+
+      const text = fs.readFileSync(gold, 'utf-8');
+      expect(text).toContain('# owned by finance');
+      expect(text).toContain('owner: finance');
+      expect(text).toContain('description: New');
+      expect(fs.existsSync(path.join(modelsDir, 'rpt_sales.yml'))).toBe(false);
+      expect(fs.existsSync(path.join(modelsDir, 'silver'))).toBe(false);
+      expect(fs.readdirSync(path.join(modelsDir, 'gold'))).toEqual(['rpt_sales.yml']);
+    });
+
+    it('serializeModel edits the document of a file in a folder', () => {
+      writeRaw('gold', 'rpt_sales', '# keep\nname: rpt_sales\ndescription: Old\n');
+      const text = service.serializeModel({ name: 'rpt_sales', description: 'New', columns: [] });
+      expect(text).toContain('# keep');
+      expect(text).toContain('description: New');
+    });
+
+    it('records own writes for a file saved into a folder', () => {
+      const tracker = new OwnWriteTracker();
+      const tracked = new LogicalModelService(tempDir, '.erd-studio', tracker);
+      tracked.saveModel({ name: 'rpt_tracked', columns: [] }, 'gold');
+      expect(tracker.consume(path.join(modelsDir, 'gold', 'rpt_tracked.yml'))).toBe(true);
+    });
+
+    it('renameModel keeps the folder and carries comments across', () => {
+      writeRaw('gold', 'rpt_old', '# keep me\nname: rpt_old\ndescription: Test\n');
+
+      service.renameModel('rpt_old', 'rpt_new');
+
+      const renamed = path.join(modelsDir, 'gold', 'rpt_new.yml');
+      expect(fs.existsSync(renamed)).toBe(true);
+      expect(fs.existsSync(path.join(modelsDir, 'gold', 'rpt_old.yml'))).toBe(false);
+      expect(fs.existsSync(path.join(modelsDir, 'rpt_new.yml'))).toBe(false);
+      const text = fs.readFileSync(renamed, 'utf-8');
+      expect(text).toContain('# keep me');
+      expect(text).toContain('name: rpt_new');
+      expect(service.modelFolder('rpt_new')).toBe('gold');
+    });
+
+    it('renameModel keeps a hand-made folder whose name is not layer-shaped', () => {
+      // Reading indexes any one-level folder, so a rename must not drop the
+      // file to the top level just because `Staging` could not be *created*.
+      writeRaw('Staging', 'rpt_old', '# mine\nname: rpt_old\n');
+
+      service.renameModel('rpt_old', 'rpt_new');
+
+      expect(fs.existsSync(path.join(modelsDir, 'Staging', 'rpt_new.yml'))).toBe(true);
+      expect(fs.existsSync(path.join(modelsDir, 'rpt_new.yml'))).toBe(false);
+      expect(service.modelFolder('rpt_new')).toBe('Staging');
+    });
+
+    it('modelPath writes into an existing non-layer-shaped folder but never creates one', () => {
+      writeRaw('Staging', 'rpt_any');
+      expect(service.modelPath('rpt_x', 'Staging')).toBe(path.join(modelsDir, 'Staging', 'rpt_x.yml'));
+      expect(service.modelPath('rpt_x', 'Nope')).toBe(path.join(modelsDir, 'rpt_x.yml'));
+    });
+
+    it('renameModel of an unparseable-document file still lands in the same folder', () => {
+      // A non-mapping root cannot be edited in place, so the model is regenerated.
+      writeRaw('gold', 'rpt_old', 'name: rpt_old\ncolumns: []\n');
+      const spy = service as unknown as { loadEditableDocument: (p: string) => unknown };
+      const original = spy.loadEditableDocument.bind(service);
+      spy.loadEditableDocument = () => null;
+      try {
+        service.renameModel('rpt_old', 'rpt_new');
+      } finally {
+        spy.loadEditableDocument = original;
+      }
+      expect(fs.existsSync(path.join(modelsDir, 'gold', 'rpt_new.yml'))).toBe(true);
+      expect(fs.existsSync(path.join(modelsDir, 'rpt_new.yml'))).toBe(false);
+      expect(fs.existsSync(path.join(modelsDir, 'gold', 'rpt_old.yml'))).toBe(false);
+    });
+
+    it('renameModel refuses a target name that exists in another folder', () => {
+      writeRaw('gold', 'rpt_old');
+      writeRaw('silver', 'rpt_taken');
+      expect(() => service.renameModel('rpt_old', 'rpt_taken')).toThrow(/already exists/);
+      expect(fs.existsSync(path.join(modelsDir, 'gold', 'rpt_old.yml'))).toBe(true);
+    });
+
+    it('deleteModel deletes the file in its folder', () => {
+      const gold = writeRaw('gold', 'rpt_gone');
+      service.deleteModel('rpt_gone');
+      expect(fs.existsSync(gold)).toBe(false);
+      expect(service.modelExists('rpt_gone')).toBe(false);
+      // The folder itself is left alone.
+      expect(fs.existsSync(path.join(modelsDir, 'gold'))).toBe(true);
+    });
+
+    it('deleteModel removes only the winning copy of a duplicated name', () => {
+      const top = writeRaw('', 'dim_dupe');
+      const gold = writeRaw('gold', 'dim_dupe');
+      service.deleteModel('dim_dupe');
+      expect(fs.existsSync(top)).toBe(false);
+      expect(fs.existsSync(gold)).toBe(true);
+      // The gold copy now wins the lookup.
+      expect(service.findModelFile('dim_dupe')).toBe(gold);
+    });
+
+    it('createFromManifest and createFromYml seed into the given folder', () => {
+      const manifest = createManifestData([{
+        name: 'rpt_manifest',
+        schema: 'gold',
+        description: '',
+        columns: [],
+      } as unknown as ManifestModelInfo]);
+      service.createFromManifest('rpt_manifest', manifest, 'gold');
+      expect(fs.existsSync(path.join(modelsDir, 'gold', 'rpt_manifest.yml'))).toBe(true);
+
+      service.createFromYml('stg_yml', { name: 'stg_yml', description: '', columns: [] } as never, 'silver');
+      expect(fs.existsSync(path.join(modelsDir, 'silver', 'stg_yml.yml'))).toBe(true);
+
+      // Neither overwrites nor moves an existing file.
+      service.createFromYml('rpt_manifest', { name: 'rpt_manifest', description: 'x', columns: [] } as never, 'silver');
+      expect(fs.existsSync(path.join(modelsDir, 'silver', 'rpt_manifest.yml'))).toBe(false);
+    });
+
+    it('invalidateCache(name) drops the cached parse of a file in a folder', () => {
+      const gold = writeRaw('gold', 'rpt_cache', 'name: rpt_cache\ndescription: aaa\n');
+      const pinned = new Date('2024-01-01T00:00:00Z');
+      fs.utimesSync(gold, pinned, pinned);
+      expect(service.getModel('rpt_cache')!.description).toBe('aaa');
+      fs.writeFileSync(gold, 'name: rpt_cache\ndescription: bbb\n', 'utf-8');
+      fs.utimesSync(gold, pinned, pinned);
+      expect(service.getModel('rpt_cache')!.description).toBe('aaa');
+      service.invalidateCache('rpt_cache');
+      expect(service.getModel('rpt_cache')!.description).toBe('bbb');
+    });
+  });
+});

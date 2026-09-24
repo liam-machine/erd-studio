@@ -2,10 +2,13 @@
  * LogicalModelService — reads and writes canonical model definitions
  * stored as YAML files in .erd-studio/logical-models/.
  *
- * Each model is a single YAML file: logical-models/{model_name}.yml.
- * Domain JSON files reference models by name (string[]) instead of
- * embedding full model objects. This ensures a single source of truth
- * for model definitions across all domains.
+ * Each model is a single YAML file, either at the top of the library
+ * (logical-models/{model_name}.yml) or one folder down
+ * (logical-models/{folder}/{model_name}.yml). The folder is purely
+ * organisational — by convention the layer id of the domain the model was
+ * created in — and never part of the model's identity: domain JSON files
+ * reference models by name (string[]), so names stay unique across the whole
+ * library, exactly as dbt requires of model names across a project.
  */
 
 import * as fs from 'fs';
@@ -35,6 +38,31 @@ interface CachedModel {
  * fields that actually changed.
  */
 const STRINGIFY_OPTIONS = { lineWidth: 0 } as const;
+
+/**
+ * Folders the extension itself may create under logical-models/: the layer id
+ * format (`LayerService` / core `validateLayersConfig` use the same pattern).
+ * Reading is more tolerant — any one-level, non-dot folder a user made by hand
+ * is indexed — but a new file only ever lands in a folder with a layer-shaped
+ * name, so nothing a domain file says can make the extension write elsewhere.
+ */
+const MODEL_FOLDER_PATTERN = /^[a-z][a-z0-9_-]*$/;
+
+/** One model file found in the library. */
+export interface ModelFileEntry {
+  /** Model name (the file stem). */
+  readonly name: string;
+  /** Sub-folder under logical-models/ (`''` for a file at the top level). */
+  readonly folder: string;
+  /** Absolute path to the yml file. */
+  readonly filePath: string;
+  /**
+   * Set when another file with the same name wins the lookup (top level
+   * first, then folders alphabetically): the path of the file that is used.
+   * A shadowed file is never read for a domain.
+   */
+  readonly shadowedBy?: string;
+}
 
 /** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
 const MODEL_KEYS = ['name', 'schema', 'description', 'grain', 'modelRole', 'rationale', 'columns'] as const;
@@ -133,10 +161,18 @@ export class LogicalModelService {
 
   /**
    * Ensure the logical-models directory exists, creating it if necessary.
+   * Pass a model file path (from {@link modelPath}) to create its layer
+   * folder as well; a path outside the library is refused.
    */
-  ensureDir(): void {
-    if (!fs.existsSync(this.modelsDir)) {
-      fs.mkdirSync(this.modelsDir, { recursive: true });
+  ensureDir(forFile?: string): void {
+    const root = path.resolve(this.modelsDir);
+    const dir = forFile === undefined ? root : path.dirname(path.resolve(forFile));
+    const rel = path.relative(root, dir);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(`Refusing to create ${dir}: outside the logical-models directory.`);
+    }
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
   }
 
@@ -185,18 +221,73 @@ export class LogicalModelService {
   }
 
   /**
-   * Read all model files from the logical-models directory.
-   * Skips files that fail to parse.
+   * Every model file in the library: the top level first, then each
+   * one-level sub-folder in alphabetical order, files sorted by name inside
+   * each. A name that appears more than once is flagged `shadowedBy` on every
+   * copy but the first (the one {@link findModelFile} resolves to).
+   * Dot-folders, deeper nesting and symlinked folders are not scanned.
    */
-  listModels(): SemanticModel[] {
+  listModelFiles(): ModelFileEntry[] {
     if (!fs.existsSync(this.modelsDir)) {
       return [];
     }
-    const files = fs.readdirSync(this.modelsDir).filter((f) => f.endsWith('.yml'));
-    const models: SemanticModel[] = [];
-    for (const file of files) {
+    const entries: ModelFileEntry[] = [];
+    const winners = new Map<string, string>();
+    const add = (dir: string, folder: string): void => {
+      let files: string[];
       try {
-        const model = this.readModelFile(path.join(this.modelsDir, file), file.replace(/\.yml$/, ''));
+        files = fs.readdirSync(dir, { withFileTypes: true })
+          .filter((d) => d.isFile() && d.name.endsWith('.yml'))
+          .map((d) => d.name)
+          .sort((a, b) => a.localeCompare(b));
+      } catch {
+        return;
+      }
+      for (const file of files) {
+        const name = file.replace(/\.yml$/, '');
+        const filePath = path.join(dir, file);
+        const winner = winners.get(name);
+        if (winner === undefined) {
+          winners.set(name, filePath);
+          entries.push({ name, folder, filePath });
+        } else {
+          entries.push({ name, folder, filePath, shadowedBy: winner });
+        }
+      }
+    };
+    add(this.modelsDir, '');
+    for (const folder of this.listFolders()) {
+      add(path.join(this.modelsDir, folder), folder);
+    }
+    return entries;
+  }
+
+  /**
+   * One-level sub-folders of logical-models/ that are scanned for models,
+   * sorted alphabetically. Dot-folders (`.git`, editor state) are skipped.
+   */
+  listFolders(): string[] {
+    try {
+      return fs.readdirSync(this.modelsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+        .map((d) => d.name)
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Read all model files from the logical-models directory (top level and
+   * one folder down). A shadowed duplicate is skipped, and so are files that
+   * fail to parse.
+   */
+  listModels(): SemanticModel[] {
+    const models: SemanticModel[] = [];
+    for (const entry of this.listModelFiles()) {
+      if (entry.shadowedBy) continue;
+      try {
+        const model = this.readModelFile(entry.filePath, entry.name);
         if (model) {
           models.push(model);
         }
@@ -208,16 +299,22 @@ export class LogicalModelService {
   }
 
   /**
-   * List model names (without reading full content).
+   * List model names (without reading full content), each once even when a
+   * name is present in more than one folder.
    */
   listModelNames(): string[] {
-    if (!fs.existsSync(this.modelsDir)) {
-      return [];
-    }
-    return fs
-      .readdirSync(this.modelsDir)
-      .filter((f) => f.endsWith('.yml'))
-      .map((f) => f.replace(/\.yml$/, ''));
+    return this.listModelFiles().filter((e) => !e.shadowedBy).map((e) => e.name);
+  }
+
+  /**
+   * The folder a model's file lives in: `''` for the top level, the folder
+   * name for a file one level down, or null when there is no file.
+   */
+  modelFolder(name: string): string | null {
+    const filePath = this.findModelFile(name);
+    if (filePath === null) return null;
+    const dir = path.dirname(filePath);
+    return dir === path.resolve(this.modelsDir) ? '' : path.basename(dir);
   }
 
   // -------------------------------------------------------------------------
@@ -242,9 +339,9 @@ export class LogicalModelService {
    * uses `serializeModel()`), so the yml change is undoable together with the
    * domain change. Use this for non-editor callers (migration, seeding, CLI).
    */
-  saveModel(model: SemanticModel): void {
-    this.ensureDir();
-    const filePath = this.modelPath(model.name);
+  saveModel(model: SemanticModel, folder?: string): void {
+    const filePath = this.modelPath(model.name, folder);
+    this.ensureDir(filePath);
     this.writeAtomic(filePath, this.renderModel(model, filePath));
   }
 
@@ -313,7 +410,8 @@ export class LogicalModelService {
    * Rename a model file and update the name field inside the YAML, carrying
    * the existing document (comments, key order, extra keys) across.
    * Throws if the target name already exists — a model file may be shared by
-   * several domains, so it must never be silently overwritten.
+   * several domains, so it must never be silently overwritten. The renamed
+   * file stays in the old file's folder.
    *
    * Like `saveModel`, this bypasses VS Code's undo stack, so it is for
    * non-editor callers. The editor renames through a WorkspaceEdit and gets
@@ -329,14 +427,17 @@ export class LogicalModelService {
     }
     // Carry the existing document (comments, key order, extra keys) across
     // to the new file rather than regenerating it from the parsed model.
+    // The renamed file stays in the folder the old one was in.
+    const folder = this.modelFolder(oldName) ?? '';
     const doc = this.loadEditableDocument(this.modelPath(oldName));
     if (doc) {
-      this.ensureDir();
+      const target = this.modelPath(newName, folder);
+      this.ensureDir(target);
       doc.set('name', newName);
-      this.writeAtomic(this.modelPath(newName), doc.toString(STRINGIFY_OPTIONS));
+      this.writeAtomic(target, doc.toString(STRINGIFY_OPTIONS));
     } else {
       model.name = newName;
-      this.saveModel(model);
+      this.saveModel(model, folder);
     }
     this.deleteModel(oldName);
   }
@@ -350,7 +451,7 @@ export class LogicalModelService {
    * Returns the created SemanticModel.
    * If the model file already exists, returns the existing model without overwriting.
    */
-  createFromManifest(name: string, manifest: ManifestData): SemanticModel | null {
+  createFromManifest(name: string, manifest: ManifestData, folder?: string): SemanticModel | null {
     if (this.modelExists(name)) {
       return this.getModel(name);
     }
@@ -361,7 +462,7 @@ export class LogicalModelService {
     }
 
     const model = this.manifestToSemanticModel(manifestModel);
-    this.saveModel(model);
+    this.saveModel(model, folder);
     return model;
   }
 
@@ -370,12 +471,12 @@ export class LogicalModelService {
    * Returns true if the model was created, false if the yml model was not found.
    * If the model file already exists, returns true without overwriting.
    */
-  createFromYml(name: string, ymlModel: YmlModelInfo): boolean {
+  createFromYml(name: string, ymlModel: YmlModelInfo, folder?: string): boolean {
     if (this.modelExists(name)) {
       return true;
     }
 
-    this.saveModel(this.ymlToSemanticModel(ymlModel));
+    this.saveModel(this.ymlToSemanticModel(ymlModel), folder);
     return true;
   }
 
@@ -423,13 +524,44 @@ export class LogicalModelService {
   }
 
   /**
-   * Get the file path for a model.
+   * Get the file path for a model: the file that already holds it (top level
+   * first, then each folder alphabetically — see {@link findModelFile}), or,
+   * when there is none, where a new one would be created — in
+   * `logical-models/{folder}/` when `folder` is given and layer-shaped,
+   * otherwise at the top level.
    *
    * The name is used verbatim as a file name, so anything that would resolve
    * outside `logical-models/` (path separators, `..`, absolute paths) is
    * rejected rather than silently written elsewhere in the workspace.
    */
-  modelPath(name: string): string {
+  modelPath(name: string, folder?: string): string {
+    return this.findModelFile(name) ?? this.newModelPath(name, folder);
+  }
+
+  /**
+   * The path of the file that holds `name`, or null when no file does.
+   * Throws on a name that is not path-safe (like {@link modelPath}).
+   */
+  findModelFile(name: string): string | null {
+    const topLevel = this.newModelPath(name);
+    if (fs.existsSync(topLevel)) {
+      return topLevel;
+    }
+    for (const folder of this.listFolders()) {
+      const candidate = path.join(path.resolve(this.modelsDir), folder, `${name}.yml`);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Where a new file for `name` goes. A `folder` that is neither layer-shaped
+   * (see MODEL_FOLDER_PATTERN) nor an existing library folder is ignored and
+   * the top level used instead.
+   */
+  private newModelPath(name: string, folder?: string): string {
     if (typeof name !== 'string' || !name.trim() || name.includes('/') || name.includes('\\') || name.includes('..')) {
       throw new Error(`Invalid model name "${String(name)}": must not contain path separators.`);
     }
@@ -438,7 +570,18 @@ export class LogicalModelService {
     if (path.dirname(resolved) !== modelsDir) {
       throw new Error(`Invalid model name "${name}": resolves outside the logical-models directory.`);
     }
+    // A layer-shaped name may be created; any folder already in the library
+    // (listed by readdir, so it cannot hold a separator) may be written into —
+    // that is what keeps a renamed file in a hand-made `Staging/` folder.
+    if (folder && (LogicalModelService.isModelFolderName(folder) || this.listFolders().includes(folder))) {
+      return path.join(modelsDir, folder, `${name}.yml`);
+    }
     return resolved;
+  }
+
+  /** Whether `folder` may be created under logical-models/ (the layer id format). */
+  static isModelFolderName(folder: string): boolean {
+    return MODEL_FOLDER_PATTERN.test(folder);
   }
 
   // -------------------------------------------------------------------------

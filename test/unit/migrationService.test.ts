@@ -216,7 +216,7 @@ describe('MigrationService.findV4Domains honours semanticDir', () => {
     const result = svc.migrate();
     expect(result.domainsConverted).toBe(1);
     expect(result.modelsCreated).toBe(1);
-    expect(fs.existsSync(path.join(workspaceRoot, 'custom/models', 'logical-models', 'dim_customer.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(workspaceRoot, 'custom/models', 'logical-models', 'silver', 'dim_customer.yml'))).toBe(true);
     const migrated = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
     expect(migrated.schemaVersion).toBe(5);
     expect(migrated.logical.models).toEqual(['dim_customer']);
@@ -316,6 +316,30 @@ describe('MigrationService (domain format → v5)', () => {
     expect(after.schemaVersion).toBe(5);
     expect((after.logical as { models: unknown[] }).models).toEqual(['dim_a']);
     expect(lms.getModel('dim_a')?.columns?.[0].name).toBe('a_id');
+    // Extracted into the folder of the domain's layer
+    expect(lms.modelFolder('dim_a')).toBe('silver');
+    expect(fs.existsSync(path.join(workspaceRoot, '.erd-studio', 'logical-models', 'silver', 'dim_a.yml'))).toBe(true);
+  });
+
+  it('extracts a model inlined in domains of two layers to the top level', () => {
+    const inline = (domain: string, layer: string, models: string[]) => {
+      const dir = path.join(workspaceRoot, '.erd-studio', layer);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${domain}.json`), JSON.stringify({
+        schemaVersion: 4, domain, layer,
+        logical: { models: models.map((name) => ({ name, columns: [] })), relationships: [] },
+        viewConfig: {},
+      }));
+    };
+    inline('sales', 'silver', ['dim_shared', 'fct_sale']);
+    inline('reporting', 'gold', ['dim_shared', 'rpt_sales']);
+
+    const result = migration.migrate();
+    expect(result.domainsConverted).toBe(2);
+    expect(result.modelsCreated).toBe(3);
+    expect(lms.modelFolder('dim_shared')).toBe('');
+    expect(lms.modelFolder('fct_sale')).toBe('silver');
+    expect(lms.modelFolder('rpt_sales')).toBe('gold');
   });
 
   it('repairs a hybrid file (schemaVersion 5 + inline objects) without clobbering existing yml', () => {

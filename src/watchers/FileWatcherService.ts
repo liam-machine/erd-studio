@@ -114,7 +114,7 @@ export class FileWatcherService implements vscode.Disposable {
   readonly onSemanticFileDeleted = this._onSemanticFileDeleted.event;
   /** Fires when {semanticDir}/layers.json is created, modified or deleted externally. */
   readonly onLayerConfigChanged = this._onLayerConfigChanged.event;
-  /** Fires when a YAML model file in {semanticDir}/logical-models/ changes. */
+  /** Fires when a YAML model file in {semanticDir}/logical-models/ (or one of its layer folders) changes. */
   readonly onLogicalModelChanged = this._onLogicalModelChanged.event;
   /** Fires when any dbt schema .yml/.yaml file under models/ changes. */
   readonly onDbtYmlChanged = this._onDbtYmlChanged.event;
@@ -330,14 +330,17 @@ export class FileWatcherService implements vscode.Disposable {
   }
 
   /**
-   * Watch {semanticDir}/logical-models/*.yml for changes.
+   * Watch {semanticDir}/logical-models/**\/*.yml for changes — the top level
+   * and the layer folders (logical-models/{layer}/{name}.yml) alike.
    * Fires when model definition files are created, modified, or deleted.
    * Used to refresh open domain editors that reference the changed model.
+   * Moving a file between folders arrives as a delete + create of the same
+   * model name, which the per-name debounce folds into one event.
    */
   private setupLogicalModelWatcher(): void {
     const pattern = new vscode.RelativePattern(
       this.workspaceRoot,
-      `${this.semanticDir}/${LOGICAL_MODELS_DIR}/*.yml`,
+      `${this.semanticDir}/${LOGICAL_MODELS_DIR}/**/*.yml`,
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 

@@ -4,14 +4,17 @@
 
 ## File Layout
 
-ERD Studio uses a **central model store**. Model definitions are YAML files in `.erd-studio/logical-models/`; domain JSON files reference models **by name** and hold relationships and layout.
+ERD Studio uses a **central model store**. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level or one folder down); domain JSON files reference models **by name** and hold relationships and layout.
 
 ```
 .erd-studio/
   layers.json                 ← layer definitions
   logical-models/             ← one YAML per model, shared across domains
-    dim_customer.yml
-    fct_order_line.yml
+    dim_customer.yml          ← top level (flat libraries keep working)
+    bronze/                   ← optional per-layer folders
+      sap__mara.yml
+    silver/
+      fct_order_line.yml
   templates/                  ← optional model templates
     dimension.json
   silver/                     ← one directory per layer id
@@ -21,6 +24,14 @@ ERD Studio uses a **central model store**. Model definitions are YAML files in `
 ```
 
 There are two stages. **Logical** is the editable stage stored in the domain file and model YAMLs. **Physical** has no files — it is derived at runtime from the dbt project (source files, schema YAMLs, `{target-path}/manifest.json`, `{target-path}/catalog.json`); see [Physical Stage](#physical-stage-derived-read-only) below for the full resolution rules. Model and column names match case-insensitively. Do not create files for the physical stage; the only writes allowed while a canvas shows it are to the shared `viewConfig` (positions, annotations).
+
+### Model file location
+
+- A model file lives at `logical-models/{name}.yml` **or** exactly one folder down at `logical-models/{folder}/{name}.yml`. By convention the folder is a layer id (`bronze`, `silver`, `gold`). Deeper nesting and dot-folders are not scanned.
+- The folder is organisational only: domain files reference models by **name**, and names are **unique across the whole library**, as dbt model names are across a project.
+- **Lookup:** the top-level file first, then each folder in alphabetical order. A second file with the same name elsewhere is *shadowed* — ignored, and flagged in the Model Library view.
+- **New models** created from a canvas are written to the folder of the layer of the domain they are added to (`gold/reporting.json` → `logical-models/gold/`). A rename keeps the file in its folder. **ERD Studio: Organise Model Library by Layer** moves top-level files into the folder of the one layer whose domains reference them; a model used by several layers, or by none, stays at the top level.
+- Hosts that cannot list directories (the `@erd-studio/core` `loadDisplayDomain` viewer) probe the top level, then every layer folder alphabetically (the extension's order), so they see only folders named after a layer.
 
 The base directory name (`.erd-studio`) is configurable via the `erdStudio.semanticDir` setting.
 
@@ -37,7 +48,7 @@ The base directory name (`.erd-studio`) is configurable via the `erdStudio.seman
   "modelFolder": "models/silver",        // Optional. Filters the "Add Existing Model" dialog.
   "stubColumns": ["dim_date"],           // Optional. Models whose physical-only columns are ignored in sync comparison.
   "logical": {
-    "models": ["dim_customer", "fct_order_line"],   // REQUIRED. Model NAME STRINGS (refs to logical-models/*.yml).
+    "models": ["dim_customer", "fct_order_line"],   // REQUIRED. Model NAME STRINGS (refs to logical-models/[folder/]*.yml).
     "relationships": []                             // REQUIRED. Array of Relationship objects.
   },
   "viewConfig": {}                       // REQUIRED. Root-level UI state (positions, annotations, layout options).
@@ -52,7 +63,7 @@ The base directory name (`.erd-studio`) is configurable via the `erdStudio.seman
 | `description` | string | No | Human-readable domain description. |
 | `modelFolder` | string | No | Path prefix filter for the "Add Existing Model" dialog (e.g. `"models/silver"`). |
 | `stubColumns` | string[] | No | Model names (typically conformed dimensions / reference tables) that define only key columns. Missing-column discrepancies for these models are hidden; extra and type-mismatch discrepancies still surface. |
-| `logical.models` | string[] | Yes | Model **name strings**. Each must correspond to `.erd-studio/logical-models/{name}.yml`. |
+| `logical.models` | string[] | Yes | Model **name strings**. Each must correspond to `.erd-studio/logical-models/{name}.yml` or `.erd-studio/logical-models/{folder}/{name}.yml`. |
 | `logical.relationships` | array | Yes | Array of `Relationship` objects. |
 | `viewConfig` | object | Yes | Persisted UI layout. Must be at the root, not inside `logical`. |
 
@@ -63,13 +74,13 @@ The extension decides how to read a file with a single detector (`detectDomainFo
 | Format | Shape | Behaviour |
 |--------|-------|-----------|
 | `v5` | `schemaVersion: 5`, `logical.models` is all strings (or empty) | Current format. Fully supported. |
-| `v4` | `schemaVersion: 4`, `logical.models` is all inline model objects | Deprecated but still loads. On activation the extension prompts to run **ERD Studio: Migrate Domains to Central Model Store**, which extracts each object to `logical-models/{name}.yml` and replaces it with its name. |
+| `v4` | `schemaVersion: 4`, `logical.models` is all inline model objects | Deprecated but still loads. On activation the extension prompts to run **ERD Studio: Migrate Domains to Central Model Store**, which extracts each object to `logical-models/{layer}/{name}.yml` (the domain's layer folder) and replaces it with its name. |
 | `hybrid` | `schemaVersion: 5` with inline objects, a mix of strings and objects, or entries that are neither | **Rejected** with an error pointing at the migration command. Migration repairs it (inline objects are extracted — existing YAML files are never overwritten). |
 | `legacy` | `schemaVersion` below 4, and/or a top-level `models` array instead of `logical` | **Rejected** with an error. Migration lifts `models`/`relationships` under `logical`, drops `stage`, and converts to v5. |
 
 Never produce hybrid or legacy files. When adding a model to a domain, add its **name string** to `logical.models` and create the YAML file if it does not exist.
 
-## Model Files (`.erd-studio/logical-models/{name}.yml`)
+## Model Files (`.erd-studio/logical-models/[{folder}/]{name}.yml`)
 
 ```yaml
 name: dim_customer
@@ -209,9 +220,9 @@ Persisted UI layout state. Safe to leave as `{}` — the extension auto-position
 
 | To... | Edit |
 |-------|------|
-| Add/remove/rename a column, change type or PK/FK/NK/SCD flags | `logical-models/{name}.yml` |
-| Change grain, modelRole, description, rationale | `logical-models/{name}.yml` |
-| Add a model to a domain diagram | Domain `.json` → append the name to `logical.models` **and** create `logical-models/{name}.yml` if missing |
+| Add/remove/rename a column, change type or PK/FK/NK/SCD flags | the model's yml (`logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`) |
+| Change grain, modelRole, description, rationale | the model's yml |
+| Add a model to a domain diagram | Domain `.json` → append the name to `logical.models` **and**, if no file for the name exists in any folder, create `logical-models/{layer}/{name}.yml` for the domain's layer |
 | Remove a model from a domain | Domain `.json` → remove the name from `logical.models` and its relationships from `logical.relationships` |
 | Add/remove/edit a relationship | Domain `.json` → `logical.relationships` |
 | Rename a domain | Rewrite `domain` in the raw JSON and rename the file; never re-serialise a resolved domain (that inlines model bodies and produces a hybrid file) |
@@ -358,7 +369,7 @@ holds no constraint or foreign-key information, so it contributes no edges.
 1. `schemaVersion` must be `5`. Versions below 4 and top-level `models` arrays are rejected; version 4 is accepted only until migrated.
 2. `layer` must match an `id` in `layers.json`.
 3. Every entry in `logical.models` must be a string. Mixed string/object arrays are rejected.
-4. Each referenced model should have a `logical-models/{name}.yml`; a missing file renders as a placeholder with a warning.
+4. Each referenced model should have a `logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`; a missing file renders as a placeholder with a warning.
 5. Relationship identity `(fromModel, fromColumn, toModel, toColumn)` must be unique, and both models should be in `logical.models`.
 6. `viewConfig` must be at the root of the document.
 
@@ -384,7 +395,7 @@ File: `.erd-studio/silver/sales.json`
 }
 ```
 
-File: `.erd-studio/logical-models/fct_order_line.yml`
+File: `.erd-studio/logical-models/silver/fct_order_line.yml`
 
 ```yaml
 name: fct_order_line

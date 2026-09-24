@@ -8,6 +8,17 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased — 1.1.0
+
+### Added
+
+- **Group the Model Library by layer** (closes #76). Model files no longer have to sit side by side in one flat `logical-models/` folder, with SAP bronze tables mixed in among your gold facts: a model can live one folder down, in a folder named after its layer, such as `logical-models/bronze/sap__mara.yml` or `logical-models/gold/fct_order.yml`.
+  - A new model created from a canvas (**Add Model**, or adding an existing dbt model) is written to the folder of the layer of the domain you added it to. Renaming a model keeps its file where it is.
+  - The **Model Library** view groups models by folder.
+  - The new **ERD Studio: Organise Model Library by Layer** command moves each top-level model file into the folder of the one layer whose domains use it. Models used by more than one layer, or by none, stay at the top level.
+  - Existing flat libraries keep working exactly as before, and nothing is moved unless you run the command. Folders are for organising only: domain files still refer to models by name, so model names stay unique across all folders, as dbt model names are across a project.
+  - The AI coding harness, the domain file reference and the v4 migration all know about the folders; run **Update All** when the harness prompt appears.
+
 ## 1.0.11 — 2026-09-23
 
 - feat: shared @erd-studio/renderer and @erd-studio/core packages (#74)
