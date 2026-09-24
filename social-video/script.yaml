@@ -1,0 +1,227 @@
+# LinkedIn explainer: "the logical model, built backwards". Single source of truth.
+#
+# Same pipeline as the getting-started video (voice, music, render), re-laid out for a 4:5
+# portrait feed video (1080x1350) with burned-in captions, because most LinkedIn viewers watch
+# muted.
+#
+# Each scene has a headline (two lines; `{word}` is highlighted in the scene's accent colour),
+# the player module that draws it (player/scenes/<module>.js) and narration lines.
+#
+# A line is:
+#   id       stable file name for its voice clip (build/voice/<id>.wav)
+#   beat     name the scene module keys its animation off (beats.<name>.t / .end, seconds
+#            from scene start, taken from the REAL audio duration)
+#   caption  what the viewer reads (burned-in captions) — Australian spelling.
+#            `{word}` in a caption is drawn in the scene's accent colour (braces are stripped
+#            for the voice and the .srt).
+#   say      optional: what the voice reads, when it must differ from the caption
+#   pause    optional: silence before this line instead of timing.gap
+#
+# Headline lines must fit 952px at 64px Inter 800 (about 26 characters); the player shrinks
+# any line that does not, but keep them short: they are the hook a muted scroller reads.
+
+title: ERD Studio — the logical model, built backwards
+maxDuration: 100
+
+voice:
+  engine: kokoro        # kokoro | say
+  kokoro: af_heart      # same voice as the getting-started video
+  speed: 1.06          # a touch brisker than the getting-started video: social pacing
+  say: Karen
+  sayRate: 175
+
+timing:
+  lead: 0.35
+  gap: 0.2
+  tail: 0.45
+  fade: 0.25
+
+chapters: ["WHY", "FLIP", "HOW", "DIFF", "SHIP"]
+
+scenes:
+  - id: hook
+    module: hook
+    chapter: 0
+    minDur: 4.5
+    accent: amber
+    headline: ["We've built data models", "{backwards} for decades."]
+    lines:
+      - id: h_backwards
+        beat: backwards
+        caption: For decades, we've built the data model {backwards}.
+      - id: h_loop
+        beat: loop
+        caption: Here's the fix, and why your {AI} needs it.
+
+  - id: problem
+    module: problem
+    chapter: 1
+    minDur: 9
+    accent: amber
+    headline: ["Drawn for the business.", "{Invisible} to the code."]
+    lines:
+      - id: p_drawn
+        beat: drawn
+        caption: We draw the logical model for {business users}, in a separate tool.
+      - id: p_back
+        beat: back
+        caption: Developers work backwards from the picture,
+      - id: p_drift
+        beat: drift
+        caption: so the design {drifts} from the warehouse, and nobody trusts the diagram.
+
+  - id: ai
+    module: ai
+    chapter: 1
+    minDur: 8
+    accent: blue
+    headline: ["I wanted to vibe code", "{data engineering}."]
+    lines:
+      - id: a_vibe
+        beat: vibe
+        caption: Then I tried to {vibe code} data engineering.
+      - id: a_blind
+        beat: blind
+        caption: My AI could read every line of SQL, but it couldn't see the {design}.
+      - id: a_guess
+        beat: guess
+        caption: What's the grain? Which keys? It had to {guess}.
+
+  - id: flip
+    module: flip
+    chapter: 2
+    minDur: 7
+    accent: green
+    headline: ["So flip it.", "Put the model {in the repo}."]
+    lines:
+      - id: f_flip
+        beat: flip
+        caption: So flip it. Build the logical model for {developers first},
+      - id: f_repo
+        beat: repo
+        caption: and save it {in the repo}, right next to the SQL.
+
+  - id: yaml
+    module: yaml
+    chapter: 3
+    minDur: 8.5
+    accent: blue
+    headline: ["One table,", "{one YAML file}."]
+    lines:
+      - id: y_file
+        beat: file
+        caption: Each table is one small {YAML} file,
+      - id: y_fields
+        beat: fields
+        caption: with its {grain}, columns, types and {keys}.
+      - id: y_domain
+        beat: domain
+        caption: A {domain} file groups the tables and says how they join.
+
+  - id: canvas
+    module: canvas
+    chapter: 3
+    minDur: 7
+    accent: blue
+    headline: ["The files become", "a {diagram}."]
+    lines:
+      - id: c_draw
+        beat: draw
+        caption: ERD Studio draws those files as a {diagram}, inside VS Code.
+      - id: c_sync
+        beat: sync
+        caption: Edit either one, and the other {updates}.
+
+  - id: physical
+    module: physical
+    chapter: 3
+    minDur: 6.5
+    accent: green
+    headline: ["Logical is what you mean.", "Physical is {what you built}."]
+    lines:
+      - id: ph_logical
+        beat: logical
+        caption: "{Logical} is the design: what you mean."
+      - id: ph_physical
+        beat: physical
+        caption: "{Physical} is what dbt actually builds, read straight from your project."
+
+  - id: diff
+    module: diff
+    chapter: 4
+    minDur: 9
+    accent: amber
+    headline: ["Press Diff.", "Watch the {drift} light up."]
+    lines:
+      - id: d_best
+        beat: best
+        caption: Now the best part.
+      - id: d_press
+        beat: press
+        pause: 0.15
+        caption: Press {Diff}.
+      - id: d_lights
+        beat: lights
+        pause: 0.3
+        caption: A renamed column, a wrong type, a missing relationship. Every mismatch {lights up} before it ships.
+
+  - id: pr
+    module: pr
+    chapter: 5
+    minDur: 8.5
+    accent: green
+    headline: ["Design and SQL.", "{One pull request}."]
+    lines:
+      - id: pr_same
+        beat: same
+        caption: The design change and the SQL change ship in the {same pull request}.
+      - id: pr_review
+        beat: review
+        caption: Reviewed together. Tracked {together}.
+      - id: pr_ai
+        beat: ai
+        pause: 0.3
+        caption: And your {AI} reads the model before it writes a single line.
+
+  - id: business
+    module: business
+    chapter: 5
+    minDur: 8
+    accent: blue
+    headline: ["The business still", "gets {its diagram}."]
+    lines:
+      - id: b_lose
+        beat: lose
+        caption: And the business doesn't lose a thing.
+      - id: b_conf
+        beat: conf
+        caption: ERD Studio for {Confluence} renders the same files on a page. No GitHub account needed.
+
+  - id: no-dbt
+    module: noDbt
+    chapter: 5
+    minDur: 5.5
+    accent: green
+    headline: ["Not on dbt?", "{Start with logical}."]
+    lines:
+      - id: n_dbt
+        beat: dbt
+        caption: Not on dbt? Use it for your {logical model} today.
+      - id: n_more
+        beat: more
+        caption: Support for more tools is on the way.
+
+  - id: end
+    module: endCard
+    chapter: 0
+    minDur: 6
+    accent: green
+    headline: null
+    lines:
+      - id: e_name
+        beat: name
+        caption: ERD Studio. {Free} and {open source}.
+        say: ERD Studio. Free, and open source.
+      - id: e_cta
+        beat: cta
+        caption: Search ERD Studio in VS Code. Link in the comments.

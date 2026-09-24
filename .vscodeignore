@@ -74,3 +74,6 @@ selectors.yml
 # Re-include dist (but maps already excluded above)
 !dist/*.js
 !dist/*.css
+
+# LinkedIn explainer video pipeline (not part of the extension)
+social-video/**
