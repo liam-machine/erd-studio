@@ -102,6 +102,13 @@ Narration and beats: `script.yaml`; real timings: `build/timeline.json` (`scenes
    nodes stacked with the edge drawing in. On `sync`: a two-way demo, e.g. a small YAML strip
    gains `- name: order_status` and the node grows the row in the same beat (both highlighted),
    with a ⇄ indicator "files ⇄ diagram".
+6b. **view** (`view.js`, blue). *click → "Click View File, and there's the JSON underneath." / format →
+   "ERD Studio just renders that file, in one simple, documented format." / back → "Reopen it with
+   ERD Studio, and it's a diagram again."* The real corner action `{ } View File` (Toolbar.tsx →
+   `viewFile` → `vscode.openWith(uri, 'default')`) turns the same tab into the text editor on
+   `orders.json`; tags map `models` → the tables and `relationships` → the join; VS Code's own
+   "Reopen Editor With…" picker lists the custom editor by its real displayName, "Semantic Domain
+   Editor", and flips back. Same canvas geometry as physical/diff.
 7. **physical** (`physical.js`, green). *logical → "Logical is the design: what you mean." /
    physical → "Physical is what dbt actually builds, read straight from your project."* The
    same canvas; the toolbar flips from Logical (blue) to Physical (green, lock icon, read-only

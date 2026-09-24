@@ -22,7 +22,7 @@
 # any line that does not, but keep them short: they are the hook a muted scroller reads.
 
 title: ERD Studio — the logical model, built backwards
-maxDuration: 110
+maxDuration: 120
 
 voice:
   engine: kokoro        # kokoro | say
@@ -132,6 +132,24 @@ scenes:
       - id: c_sync
         beat: sync
         caption: Edit either one, and the other {updates}.
+
+  - id: view
+    module: view
+    chapter: 3
+    minDur: 9
+    accent: blue
+    headline: ["No magic.", "{It's just a file}."]
+    lines:
+      - id: v_click
+        beat: click
+        caption: Click {View File}, | and there's the JSON underneath.
+      - id: v_format
+        beat: format
+        caption: ERD Studio just {renders} that file, | in one simple, documented format.
+      - id: v_back
+        beat: back
+        pause: 0.3
+        caption: Reopen it with ERD Studio, | and it's a {diagram} again.
 
   - id: physical
     module: physical
