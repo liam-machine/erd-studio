@@ -1,6 +1,6 @@
 // 12 · End card (held last frame, likely thumbnail, the call to action). No headline: main.js
 // fades the kicker and chapter bar out, so this scene owns y 60..1090.
-// name: icon, "ERD Studio", sub-line, then the three pills on "Free and open source".
+// name: icon, "ERD Studio", sub-line, then the three pills on "Free, with the source on GitHub".
 // cta:  the brand block eases up, a VS Code-style Extensions search types "ERD Studio" and the
 //       result row appears, then "Link in the comments" with a down chevron. All landed by cta+1.5.
 import { appear, appIcon, caret, easeInOut, ICON, lerp, seg, typed } from '../lib.js';
@@ -27,11 +27,11 @@ export default {
     html += `<div class="abs" style="left:0;right:0;top:${g(326)}px;text-align:center;font-size:116px;line-height:1;font-weight:800;letter-spacing:-.04em;white-space:nowrap;${appear(t, name, { dy: 16, dur: 0.45 })}">ERD Studio</div>`;
     html += `<div class="abs" style="left:0;right:0;top:${g(466)}px;text-align:center;font-size:40px;line-height:1.2;font-weight:700;letter-spacing:-.01em;white-space:nowrap;${appear(t, name + 0.35)}">The logical model, <span style="color:var(--green)">in your repo.</span></div>`;
 
-    // "Free" ≈ name+0.95, "open source" ≈ name+1.5 (narration), VS Code closes the row.
+    // "Free" ≈ name+1.25, "source on GitHub" ≈ name+2.2 (measured in e_name.wav), VS Code closes the row.
     html += `<div class="abs" style="left:0;right:0;top:${g(560)}px;display:flex;justify-content:center;gap:16px">
-      ${pill('Free', name + 0.9, { green: true, icon: ICON.check({ size: 24 }) })}
-      ${pill('Open source (MIT)', name + 1.4, { green: true, icon: ICON.check({ size: 24 }) })}
-      ${pill('VS Code extension', name + 1.8)}</div>`;
+      ${pill('Free', name + 1.25, { green: true, icon: ICON.check({ size: 24 }) })}
+      ${pill('Source on GitHub', name + 2.2, { green: true, icon: ICON.check({ size: 24 }) })}
+      ${pill('VS Code extension', name + 2.75)}</div>`;
 
     // ---- CTA: Extensions search ----
     const cardAt = cta + 0.3;             // once the brand block has mostly lifted

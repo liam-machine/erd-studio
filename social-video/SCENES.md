@@ -134,9 +134,9 @@ Narration and beats: `script.yaml`; real timings: `build/timeline.json` (`scenes
    more → "Support for more tools is on the way."* Two compact rows/cards: "With dbt:
    Logical · Physical · Diff" (all ticked) vs "Without dbt: Logical ✓" with Physical/Diff dimmed
    "coming". On `more`: a dashed "+ more tools" chip. Do **not** name specific future tools.
-12. **endCard** (`endCard.js`, green). *name → "ERD Studio. Free and open source." / cta →
+12. **endCard** (`endCard.js`, green). *name → "ERD Studio. Free, with the source on GitHub." / cta →
    "Search ERD Studio in VS Code. Link in the comments."* No headline (main.js hides chrome here).
    Centred: `appIcon(200)`, "ERD Studio" (big), "The logical model, in your repo." sub-line,
-   pills "Free", "Open source (MIT)", "VS Code", then on `cta`: a search-box mock
+   pills "Free", "Source on GitHub", "VS Code" (the licence is PolyForm Shield 1.0.0: source-available, not OSI open source — never say "open source" or "MIT"), then on `cta`: a search-box mock
    (`Extensions: ERD Studio`) and "Link in the comments" with a down chevron. Everything should
    have landed by `cta` + 1.5 s: the last frame is held and can be the thumbnail.

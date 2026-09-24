@@ -221,8 +221,8 @@ scenes:
     lines:
       - id: e_name
         beat: name
-        caption: ERD Studio. | {Free} and {open source}.
-        say: ERD Studio. Free, and open source.
+        caption: ERD Studio. | {Free}, with the {source on GitHub}.
+        say: ERD Studio. Free, with the source on GitHub.
       - id: e_cta
         beat: cta
         caption: Search ERD Studio in VS Code. | Link in the comments.
