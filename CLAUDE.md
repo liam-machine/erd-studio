@@ -478,15 +478,10 @@ Every released artifact follows [SemVer 2.0](https://semver.org), `MAJOR.MINOR.P
 | Harness files | `HARNESS_VERSION` | you (see "Harness Versioning") | the extension |
 | Domain file format | `schemaVersion` / `CURRENT_SCHEMA_VERSION` | you, with a migration | the extension |
 
-**Extension: pick the level by what users experience, not by how much code changed.**
-- **PATCH** (the default, nothing to do): bug fixes, performance, internal refactors, dependency bumps and anything users can't see. Moving code into the packages was a patch: v1.0.11 carried the renderer/core extraction.
-- **MINOR**: a new backwards-compatible capability, such as a new command, setting, canvas feature, MCP tool or supported dbt feature. Pin it in the changelog heading, e.g. `## Unreleased — 1.1.0`.
-- **MAJOR**: anything that breaks existing users, for example:
-  - dropping support for a domain `schemaVersion` or requiring a migration;
-  - removing or renaming commands or settings;
-  - raising `engines.vscode`;
-  - changing the on-disk file layout.
-  Pin it (`## Unreleased — 2.0.0`) and explain the upgrade path in the notes.
+**Extension: every release is a PATCH bump unless Liam explicitly asks for a minor or major one.**
+- **PATCH is the default for everything, new features included.** Leave the heading as a bare `## Unreleased` and the workflow bumps the third number. Do **not** pin a version in the heading on your own judgement, however large or user-visible the change is.
+- **MINOR / MAJOR only on an explicit request** ("make this 1.6.0", "this is a minor release", "bump the major"). Then pin it in the changelog heading (`## Unreleased — 1.6.0`), and for a major explain the upgrade path in the notes.
+- If a change looks like it *could* warrant more than a patch (a breaking change: dropping a domain `schemaVersion` or requiring a migration, removing or renaming commands or settings, raising `engines.vscode`, changing the on-disk file layout), say so in your reply and let Liam decide. Still ship it as a patch unless he says otherwise.
 - Never edit the root `version` by hand in a PR; the workflow owns it. A pin only moves the version forward, and resets to patch bumps after it ships.
 - Group user-facing notes under `### Added` / `### Changed` / `### Fixed` / `### Removed` ([Keep a Changelog](https://keepachangelog.com)). A PR with nothing user-visible may leave `## Unreleased` empty; the workflow then records the PR title.
 
