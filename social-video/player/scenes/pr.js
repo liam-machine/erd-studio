@@ -1,6 +1,7 @@
 // 9 · pr — one pull request carries the design change (fct_order.yml) and the SQL change
 // (fct_order.sql). "same pull request" wraps both files in one green outline; "Reviewed
-// together" flips Open to Approved; "Tracked together" adds the "1 PR · design + code" pill.
+// together" flips Open to Approved; "Tracked together" adds the "1 PR · design + code" pill;
+// "Shipped together" merges it (then "It's just common sense…" plays over the merged PR).
 // On the AI line the PR slides up and a compact Claude Code strip reads the model file (the
 // yml block lights blue as it is read) before it writes the SQL.
 import { appear, card, COLORS, easeInOut, easeOut, esc, ICON, lerp, seg, spinner, STORY, tick, yamlLine } from '../lib.js';
@@ -47,7 +48,8 @@ export default {
     const sqlAt = S + 1.15;         // clip 1.23 s → "and the SQL change"
     const one = S + 2.55;           // "…in the same pull request"
     const approved = R + 0.05;      // "Reviewed together."
-    const tracked = R + 1.0;        // clip 1.00 s → "Tracked together."
+    const tracked = R + 1.0;        // clip 0.96 s → "Tracked together."
+    const shipped = R + 1.8;        // clip 1.80 s → "Shipped together."
     const read = A + 1.05;          // clip 1.10 s → "reads the model"
     const readDone = A + 1.55;
     const write = A + 2.45;         // "…before it writes a single line"
@@ -62,7 +64,10 @@ export default {
     const by = CY + 64;
     pr += `<div class="abs" style="left:${CX + 28}px;top:${by + 18}px;font-size:34px;font-weight:700;letter-spacing:-.01em;white-space:nowrap"><span style="color:var(--text-3)">#${PR.number}</span> ${PR.title}</div>`;
     const ap = seg(t, approved, approved + 0.3);
-    const status = isApproved
+    const mergeIcon = `<svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="6" cy="5" r="2.4"/><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="12" r="2.4"/><path d="M6 7.4v9.2M6 9c0 3 3 3 9.6 3"/></svg>`;
+    const status = t >= shipped
+      ? `<span class="pill" style="font-size:24px;padding:7px 18px;background:#8957e5;color:#fff;transform:scale(${(1 + 0.1 * hump(t, shipped, 0.12, 0.3)).toFixed(3)})">${mergeIcon}Merged</span>`
+      : isApproved
       ? `<span class="pill" style="font-size:24px;padding:7px 18px;background:var(--green);color:#06210f;transform:scale(${(1 + 0.08 * hump(t, approved, 0.12, 0.3)).toFixed(3)});opacity:${lerp(0.4, 1, ap).toFixed(3)}">${ICON.check({ size: 20 })}Approved</span>`
       : `<span class="pill" style="font-size:24px;padding:6px 18px;border:2px solid var(--green);color:var(--green)">Open</span>`;
     const nFiles = t >= sqlAt ? 2 : 1;

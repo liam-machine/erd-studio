@@ -22,7 +22,7 @@
 # any line that does not, but keep them short: they are the hook a muted scroller reads.
 
 title: ERD Studio — the logical model, built backwards
-maxDuration: 120
+maxDuration: 125
 
 voice:
   engine: kokoro        # kokoro | say
@@ -193,10 +193,14 @@ scenes:
     lines:
       - id: pr_same
         beat: same
-        caption: The design change | and the SQL change | ship in the {same pull request}.
+        caption: The design change | and the SQL change | go in the {same pull request}.
       - id: pr_review
         beat: review
-        caption: Reviewed together. Tracked {together}.
+        caption: Reviewed together. | Tracked together. | {Shipped} together.
+      - id: pr_sense
+        beat: sense
+        pause: 0.4
+        caption: It's just common sense. | So why did it take us {decades}?
       - id: pr_ai
         beat: ai
         pause: 0.3
