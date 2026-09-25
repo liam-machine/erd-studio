@@ -28,8 +28,14 @@ jobs:
 
       - run: npm ci
 
+      # Bundled with esbuild rather than run with tsx: the harness imports the setup skill's
+      # markdown as text (esbuild's `.md` loader, as in esbuild.js), which tsx cannot load.
       - name: Regenerate fixture harness files
-        run: npx tsx scripts/regen-fixtures.ts
+        run: |
+          npx esbuild scripts/regen-fixtures.ts --bundle --platform=node --format=cjs \
+            --loader:.md=text --outfile=scripts/.regen-fixtures.cjs --log-level=warning
+          node scripts/.regen-fixtures.cjs
+          rm scripts/.regen-fixtures.cjs
 
       - name: Check for changes
         id: diff
