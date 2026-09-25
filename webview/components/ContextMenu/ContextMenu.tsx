@@ -9,11 +9,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
-import type { FkEdgeData } from '../../types/graph';
+import type { FkEdgeData } from '@erd-studio/renderer/editor';
 import type { AnnotationColor, Cardinality } from '../../../src/types/semantic';
 import type { FkDialogEditData } from '../../store/editorStore';
-import { swapCardinality } from '../../lib/cardinalityUtils';
-import { ANNOTATION_COLORS } from '../../lib/annotationColors';
+import { swapCardinality } from '@erd-studio/renderer/editor';
+import { ANNOTATION_COLORS } from '@erd-studio/renderer/editor';
 import './ContextMenu.css';
 
 // ---------------------------------------------------------------------------

@@ -28,7 +28,7 @@
 
 import type { DisplayDomain } from './display';
 import type { DiscrepancyReport } from './discrepancy';
-import type { AnnotationColor, Rationale, Cardinality, ColumnDef, DesignModel, ModelRole, Stage } from './semantic';
+import type { AnnotationColor, Cardinality, DesignModel, Stage } from './semantic';
 import type { GroundTruth } from './syncPlan';
 import type {
   FeedbackAiProviderChoice,
@@ -37,6 +37,49 @@ import type {
   FeedbackDiagnosticsView,
   FeedbackKind,
 } from './feedback';
+import type {
+  AddColumnMessage,
+  RemoveColumnMessage,
+  UpdateColumnMessage,
+  RenameModelMessage,
+  RemoveModelMessage,
+  RelationshipKey,
+  RemoveRelationshipMessage,
+  UpdateRelationshipMessage,
+  ToggleColumnKeyMessage,
+  UpdateModelRationaleMessage,
+  UpdateModelDescriptionMessage,
+  UpdateModelGrainMessage,
+  UpdateModelRoleMessage,
+  ReorderColumnsMessage,
+  UpdateAnnotationMessage,
+  RemoveAnnotationMessage,
+} from '@erd-studio/core';
+
+// The edit messages the shared canvas components post live in
+// `@erd-studio/core` (packages/core/src/types/canvasMessages.ts). They are
+// re-exported here and stay members of `WebviewMessage` below.
+export type {
+  AddColumnMessage,
+  RemoveColumnMessage,
+  UpdateColumnPayloadColumn,
+  UpdateColumnMessage,
+  RenameModelMessage,
+  RemoveModelMessage,
+  RelationshipKey,
+  RemoveRelationshipMessage,
+  UpdateRelationshipMessage,
+  ColumnKeyType,
+  ToggleColumnKeyMessage,
+  UpdateModelRationaleMessage,
+  UpdateModelDescriptionMessage,
+  UpdateModelGrainMessage,
+  UpdateModelRoleMessage,
+  ReorderColumnsMessage,
+  UpdateAnnotationMessage,
+  RemoveAnnotationMessage,
+  CanvasEditMessage,
+} from '@erd-studio/core';
 
 // ---------------------------------------------------------------------------
 // Extension → Webview messages
@@ -221,55 +264,6 @@ export interface AddModelMessage {
 }
 
 /**
- * Request to add a column to an existing model.
- */
-export interface AddColumnMessage {
-  type: 'addColumn';
-  payload: {
-    modelName: string;
-    column: ColumnDef;
-  };
-}
-
-/**
- * Request to remove a column from an existing model.
- */
-export interface RemoveColumnMessage {
-  type: 'removeColumn';
-  payload: {
-    modelName: string;
-    columnName: string;
-  };
-}
-
-/**
- * Column shape accepted by `updateColumn`.
- *
- * `scdType` / `additiveType` are three-state so that edit surfaces which only
- * know part of a column (e.g. canvas inline rename) don't erase attributes they
- * never displayed:
- *   - `undefined` (omitted) — keep the existing value on disk
- *   - `null`                — explicitly clear the value
- *   - a value               — set it
- */
-export type UpdateColumnPayloadColumn = Omit<ColumnDef, 'scdType' | 'additiveType'> & {
-  scdType?: ColumnDef['scdType'] | null;
-  additiveType?: ColumnDef['additiveType'] | null;
-};
-
-/**
- * Request to update an existing column in a model.
- */
-export interface UpdateColumnMessage {
-  type: 'updateColumn';
-  payload: {
-    modelName: string;
-    oldColumnName: string;
-    column: UpdateColumnPayloadColumn;
-  };
-}
-
-/**
  * Request to add an FK relationship between two models.
  */
 export interface AddRelationshipMessage {
@@ -280,29 +274,6 @@ export interface AddRelationshipMessage {
     toModel: string;
     toColumn: string;
     cardinality: Cardinality;
-  };
-}
-
-/**
- * Request to rename a model.
- * Cascades to update all relationship references and viewConfig positions.
- */
-export interface RenameModelMessage {
-  type: 'renameModel';
-  payload: {
-    oldName: string;
-    newName: string;
-  };
-}
-
-/**
- * Request to remove a model from the domain.
- * Also cascades to remove relationships involving this model.
- */
-export interface RemoveModelMessage {
-  type: 'removeModel';
-  payload: {
-    modelName: string;
   };
 }
 
@@ -318,23 +289,6 @@ export interface RemoveModelsMessage {
   };
 }
 
-/** Composite identity of an FK relationship: (fromModel, fromColumn, toModel, toColumn). */
-export interface RelationshipKey {
-  fromModel: string;
-  fromColumn: string;
-  toModel: string;
-  toColumn: string;
-}
-
-/**
- * Request to remove an FK relationship.
- * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
- */
-export interface RemoveRelationshipMessage {
-  type: 'removeRelationship';
-  payload: RelationshipKey;
-}
-
 /**
  * Request to remove several FK relationships in a single edit (multi-select
  * delete). Keys that no longer exist are skipped; an error is reported only
@@ -344,21 +298,6 @@ export interface RemoveRelationshipsMessage {
   type: 'removeRelationships';
   payload: {
     relationships: RelationshipKey[];
-  };
-}
-
-/**
- * Request to update a relationship's cardinality.
- * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
- */
-export interface UpdateRelationshipMessage {
-  type: 'updateRelationship';
-  payload: {
-    fromModel: string;
-    fromColumn: string;
-    toModel: string;
-    toColumn: string;
-    cardinality: Cardinality;
   };
 }
 
@@ -431,74 +370,6 @@ export interface RedoMessage {
   type: 'redo';
 }
 
-/** Key type for column key toggles. */
-export type ColumnKeyType = 'PK' | 'FK' | 'NK';
-
-/**
- * Request to toggle a column's key type (PK, FK, or NK).
- * Each key type is independent — a column can be any combination.
- */
-export interface ToggleColumnKeyMessage {
-  type: 'toggleColumnKey';
-  payload: {
-    modelName: string;
-    columnName: string;
-    keyType: ColumnKeyType;
-    value: boolean;
-  };
-}
-
-/**
- * Request to update design rationale fields on a model.
- *
- * Uses a field-patch pattern: each message carries one or more field updates
- * that are merged into the existing on-disk `rationale` object by the extension host.
- */
-export interface UpdateModelRationaleMessage {
-  type: 'updateModelRationale';
-  payload: {
-    modelName: string;
-    /** Partial patch — only the fields being updated need to be present. */
-    rationale: Partial<Rationale>;
-  };
-}
-
-/**
- * Request to update the description for a model.
- * If the description is empty/cleared, the `description` key is removed from the JSON entirely.
- */
-export interface UpdateModelDescriptionMessage {
-  type: 'updateModelDescription';
-  payload: {
-    modelName: string;
-    description: string;
-  };
-}
-
-/**
- * Request to update the grain statement for a model.
- * If the grain is empty/cleared, the `grain` key is removed from the JSON entirely.
- */
-export interface UpdateModelGrainMessage {
-  type: 'updateModelGrain';
-  payload: {
-    modelName: string;
-    grain: string;
-  };
-}
-
-/**
- * Request to update the model role for a model.
- * If the role is null/empty, the `modelRole` key is removed from the JSON entirely.
- */
-export interface UpdateModelRoleMessage {
-  type: 'updateModelRole';
-  payload: {
-    modelName: string;
-    modelRole: ModelRole | null;
-  };
-}
-
 /**
  * Request to switch the active stage in the editor.
  * The extension resolves the sibling domain data and sends a stageData response.
@@ -527,19 +398,6 @@ export interface ToggleDiscrepancyMessage {
  */
 export interface DismissWelcomeMessage {
   type: 'dismissWelcome';
-}
-
-/**
- * Request to reorder columns within a model.
- * The orderedNames array defines the new column order.
- * All existing column names must be present (validated by the extension host).
- */
-export interface ReorderColumnsMessage {
-  type: 'reorderColumns';
-  payload: {
-    modelName: string;
-    orderedNames: string[];
-  };
 }
 
 /**
@@ -751,32 +609,6 @@ export interface AddAnnotationMessage {
     width?: number;
     height?: number;
     linkedModel?: string;
-  };
-}
-
-/**
- * Request to update an existing annotation's content or style.
- * Partial patch — only fields being changed need to be present.
- */
-export interface UpdateAnnotationMessage {
-  type: 'updateAnnotation';
-  payload: {
-    id: string;
-    text?: string;
-    color?: AnnotationColor;
-    linkedModel?: string | null;
-    width?: number;
-    height?: number;
-  };
-}
-
-/**
- * Request to remove a canvas annotation.
- */
-export interface RemoveAnnotationMessage {
-  type: 'removeAnnotation';
-  payload: {
-    id: string;
   };
 }
 

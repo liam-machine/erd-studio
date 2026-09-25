@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 5,
+  "domain": "badlayer",
+  "layer": "diamond",
+  "logical": { "models": [], "relationships": [] }
+}

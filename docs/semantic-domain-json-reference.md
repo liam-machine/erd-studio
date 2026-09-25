@@ -65,7 +65,7 @@ It is guidance for AI assistants only. **The extension never parses it**: it is 
 
 ### Format detection and supported versions
 
-The extension decides how to read a file with a single detector (`detectDomainFormat` in `src/types/semantic.ts`). Every reader and writer uses the same rules:
+The extension decides how to read a file with a single detector (`detectDomainFormat` in `packages/core/src/types/semantic.ts`). Every reader and writer uses the same rules:
 
 | Format | Shape | Behaviour |
 |--------|-------|-----------|

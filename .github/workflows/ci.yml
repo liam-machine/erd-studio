@@ -27,6 +27,9 @@ jobs:
         run: |
           node dist/cli.js doctor --project test/fixtures/dbt-project --json --no-dbt > /dev/null
           rc=0; node dist/cli.js diff --project test/fixtures/dbt-project --all --json > /dev/null || rc=$?; test "$rc" -le 1
+      # The extension builds the workspace packages from source; this checks
+      # their own publishable builds (esbuild + declarations) still succeed.
+      - run: npm run build:packages
       - run: npm run test
       - run: npm run package
 

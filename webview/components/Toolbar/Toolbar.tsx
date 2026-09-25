@@ -29,7 +29,7 @@ import {
   type LayoutDirection,
 } from '../../lib/elkLayout';
 import { StageTabs } from './StageTabs';
-import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '../../types/graph';
+import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
 import './Toolbar.css';
@@ -430,8 +430,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     try {
       const sp = SPACING_PRESETS[spacingPreset];
       // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
-      const modelNodes = nodes.filter((n): n is import('../../types/graph').ModelFlowNode => n.type === 'model');
-      const fkEdges = edges.filter((e): e is import('../../types/graph').FkFlowEdge => e.type === 'fk');
+      const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').ModelFlowNode => n.type === 'model');
+      const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
       const effectiveBound = partitionStrategy === 'auto'
         ? detectLayerBound(modelNodes.length)
         : layerBound;

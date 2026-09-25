@@ -19,4 +19,9 @@ export function useVsCodeApi(): VsCodeApi {
   return vscodeApi;
 }
 
+/** The same singleton, for non-hook callers (see `host/vscodeCanvasHost.ts`). */
+export function getVsCodeApi(): VsCodeApi {
+  return vscodeApi;
+}
+
 export type { VsCodeApi };

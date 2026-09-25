@@ -76,6 +76,7 @@ import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
+import { computeMissingPositions, toDisplayDomain } from '@erd-studio/core';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import {
@@ -1493,24 +1494,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     viewConfig: import('../types/semantic').ViewConfig,
     stubColumns?: string[],
   ): DisplayDomain {
-    const core = buildLogicalDisplayDomain(domain, viewConfig, stubColumns);
+    const editorPayload = this.buildWebviewPayload(domain, manifest, ymlData, domain.modelFolder);
 
-    const { templates, manifestModels, existingModels } = this.buildWebviewPayload(
-      { models: core.models },
-      manifest,
-      ymlData,
-      domain.modelFolder,
-    );
-
-    const layerConfig = this.layerService.getLayer(domain.layer);
-
-    return {
-      ...core,
-      templates,
-      manifestModels,
-      existingModels,
-      layerConfig,
-    };
+    return toDisplayDomain(domain, {
+      viewConfig,
+      stubColumns,
+      layerConfig: this.layerService.getLayer(domain.layer),
+      readOnly: domain.stage === 'physical',
+      editorPayload,
+    });
   }
 
   /**
@@ -1672,19 +1664,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private computeMissingPositions(
     unifiedDomain: { logical: { models: Array<{ name: string }>; relationships: Relationship[] }; viewConfig: { positions?: Record<string, NodePosition> } },
   ): Record<string, NodePosition> | null {
-    const positions = unifiedDomain.viewConfig.positions ?? {};
-    const modelNames = unifiedDomain.logical.models.map((m) => m.name);
-    const newModels = modelNames.filter((name) => !positions[name]);
-
-    if (newModels.length === 0) return null;
-
-    const computed = computeNewModelPositions({
-      newModels,
-      relationships: unifiedDomain.logical.relationships ?? [],
-      existingPositions: positions,
-    });
-
-    return Object.keys(computed).length === 0 ? null : computed;
+    return computeMissingPositions(unifiedDomain);
   }
 
   /**

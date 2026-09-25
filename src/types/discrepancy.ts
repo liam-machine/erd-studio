@@ -1,65 +1,11 @@
 /**
- * Types for cross-stage discrepancy reports.
- *
- * A discrepancy report compares two stages of the same domain (e.g.,
- * physical vs logical) and highlights differences: extra/missing models,
- * extra/missing columns, data type mismatches, and cardinality differences.
+ * Moved to `@erd-studio/core` (packages/core/src/types/discrepancy.ts). This module
+ * re-exports every symbol so existing imports of this path keep working.
  */
 
-import type { Cardinality, Stage } from './semantic';
-
-export interface DiscrepancyReport {
-  domain: string;
-  layer: string;
-  /** The stage currently being viewed. */
-  sourceStage: Stage;
-  /** The stage being compared against. */
-  targetStage: Stage;
-  models: ModelDiscrepancy[];
-  relationships: RelationshipDiscrepancy[];
-  summary: {
-    totalModels: number;
-    matchedModels: number;
-    extraModels: number;
-    missingModels: number;
-    totalColumns: number;
-    matchedColumns: number;
-    extraColumns: number;
-    missingColumns: number;
-    dataTypeMismatches: number;
-    /** Columns where exactly one stage declares a data type. */
-    undeclaredColumns: number;
-  };
-}
-
-export interface ModelDiscrepancy {
-  name: string;
-  status: 'matched' | 'extra' | 'missing';
-  columns: ColumnDiscrepancy[];
-}
-
-export interface ColumnDiscrepancy {
-  name: string;
-  /**
-   * `undeclared` means exactly one stage declares a data type: nothing
-   * conflicts, but one side has no type on record (a dbt yml with no
-   * `data_type:`, say). It is kept out of `type-mismatch` so the summary is
-   * not inflated, and still resolvable — `deriveColumnAction` gives it the
-   * same update-type action.
-   */
-  status: 'matched' | 'extra' | 'missing' | 'type-mismatch' | 'undeclared';
-  /** Data type in the source stage (the stage being viewed). */
-  sourceDataType?: string;
-  /** Data type in the target stage (the comparison stage). */
-  targetDataType?: string;
-}
-
-export interface RelationshipDiscrepancy {
-  fromModel: string;
-  fromColumn: string;
-  toModel: string;
-  toColumn: string;
-  status: 'matched' | 'extra' | 'missing' | 'cardinality-mismatch';
-  sourceCardinality?: Cardinality;
-  targetCardinality?: Cardinality;
-}
+export type {
+  DiscrepancyReport,
+  ModelDiscrepancy,
+  ColumnDiscrepancy,
+  RelationshipDiscrepancy,
+} from '@erd-studio/core';

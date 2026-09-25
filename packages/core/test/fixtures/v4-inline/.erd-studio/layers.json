@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "id": "bronze",
+      "label": "Bronze",
+      "abbreviation": "BRZ",
+      "color": "#cd7f32",
+      "creatable": true,
+      "order": 0
+    },
+    {
+      "id": "silver",
+      "label": "Silver",
+      "abbreviation": "SLV",
+      "color": "#a0a0a0",
+      "creatable": true,
+      "order": 1
+    },
+    {
+      "id": "gold",
+      "color": "not-a-colour",
+      "order": 2
+    }
+  ]
+}

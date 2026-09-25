@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 5,
+  "domain": "invalid",
+  "layer": "silver"
+  "logical": { "models": [] }
+}

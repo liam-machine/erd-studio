@@ -1,0 +1,32 @@
+name: dim_task
+schema: silver
+description: Task dimension tracking individual project tasks
+grain: One row per task version
+modelRole: domain-dim
+rationale:
+  purpose: Tracks individual tasks and their lifecycle
+  design: SCD Type 2 on status to track historical state changes
+  scdStrategy: task_key is unique per row; task_id repeats across the versions of one task, which is why it cannot be the primary key
+columns:
+  - name: task_key
+    dataType: INT
+    description: Surrogate key — one per row, so one per version of the task
+    isPrimaryKey: true
+    scdType: 0
+  - name: task_id
+    dataType: VARCHAR
+    description: Business key — repeats across the versions of one task
+    isNaturalKey: true
+    scdType: 0
+  - name: project_key
+    dataType: INT
+    description: FK to dim_project
+    isForeignKey: true
+  - name: name
+    dataType: VARCHAR
+    description: Task name
+    scdType: 1
+  - name: status
+    dataType: STRING
+    description: Current lifecycle status
+    scdType: 2

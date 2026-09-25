@@ -22,7 +22,7 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
 
 import { usePositionPersistence } from '../../webview/hooks/usePositionPersistence';
 import { useEditorStore } from '../../webview/store/editorStore';
-import type { ModelFlowNode } from '../../webview/types/graph';
+import type { ModelFlowNode } from '@erd-studio/renderer/editor';
 import type { DisplayDomain } from '../../src/types/display';
 
 const initialStoreState = useEditorStore.getState();

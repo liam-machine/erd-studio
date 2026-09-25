@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 3,
+  "domain": "legacy",
+  "layer": "silver",
+  "models": [
+    { "name": "dim_old", "columns": [] }
+  ],
+  "relationships": []
+}

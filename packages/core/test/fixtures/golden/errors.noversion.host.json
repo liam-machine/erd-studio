@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "Domain file <root>/.erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field"
+  }
+}

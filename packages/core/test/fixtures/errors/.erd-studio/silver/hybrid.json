@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 5,
+  "domain": "hybrid",
+  "layer": "silver",
+  "logical": {
+    "models": [
+      "dim_customer",
+      { "name": "dim_inline", "columns": [] }
+    ],
+    "relationships": []
+  }
+}

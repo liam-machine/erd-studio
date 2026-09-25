@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt — design your data warehouse on a canvas, in your repo, as plain YAML your AI assistant can read. Kimball/dimensional modelling, then compare the design against what dbt actually built.",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -49,6 +49,9 @@
     "workspaceContains:**/dbt_project.yml"
   ],
   "main": "./dist/extension.js",
+  "workspaces": [
+    "packages/*"
+  ],
   "contributes": {
     "commands": [
       {
@@ -422,7 +425,8 @@
     "watch": "node esbuild.js --watch",
     "package": "node esbuild.js --production",
     "vscode:prepublish": "npm run package",
-    "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json",
+    "build:packages": "npm run build -w @erd-studio/core && npm run build -w @erd-studio/renderer",
+    "compile": "tsc --noEmit && tsc --noEmit -p tsconfig.webview.json && npm run typecheck --workspaces",
     "test": "vitest run",
     "test:watch": "vitest",
     "regen-fixtures": "tsx scripts/regen-fixtures.ts"
@@ -440,6 +444,8 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
+    "@erd-studio/core": "0.1.0",
+    "@erd-studio/renderer": "0.1.0",
     "@xyflow/react": "^12.4.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",

@@ -36,7 +36,13 @@ proxy/**
 # Getting-started video pipeline (see video/README.md). Its outputs that ship
 # are media/onboarding/getting-started.mp4 and getting-started-poster.jpg.
 video/**
+# npm workspaces (@erd-studio/core, @erd-studio/renderer). The extension bundles
+# them from source into dist/, so nothing under packages/ is needed at runtime.
+packages/**
 .linkedin/**
+# Local-only folders (gitignored, but vsce does not read .gitignore).
+.traffic/**
+.claude/**
 data engineer plugin/**
 
 # Media referenced only by README.md. vsce rewrites the README's relative links

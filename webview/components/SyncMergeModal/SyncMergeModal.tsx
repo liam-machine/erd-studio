@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
-import { STAGE_HEX } from '../../lib/stageColors';
+import { STAGE_HEX } from '@erd-studio/renderer/editor';
 import { stageName } from '../../lib/stageUtils';
 import { SyncFooter, StalenessWarning } from '../DiscrepancyPanel/SyncControls';
 import {

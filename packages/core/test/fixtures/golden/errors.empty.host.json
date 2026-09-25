@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "payload": {
+    "message": "Domain file is empty: <root>/.erd-studio/silver/empty.json",
+    "kind": "domain-file"
+  }
+}

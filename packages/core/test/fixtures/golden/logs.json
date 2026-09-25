@@ -1,0 +1,72 @@
+{
+  "dbt-project.physical.host": [],
+  "dbt-project.stage-physical": [],
+  "errors.array.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/array.json does not contain a JSON object"
+  ],
+  "errors.badlayer.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/platinum/badlayer.json has invalid layer \"diamond\". Expected one of: silver, gold"
+  ],
+  "errors.empty.host": [
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 150ms (likely mid-write)",
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 350ms (likely mid-write)",
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 700ms (likely mid-write)",
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file is empty: <root>/.erd-studio/silver/empty.json"
+  ],
+  "errors.future.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/future.json has schemaVersion 6 but this extension only supports up to version 5. Please update the extension."
+  ],
+  "errors.hybrid.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/hybrid.json mixes inline model objects with model name references (or declares schemaVersion 5 with inline models). Run \"ERD Studio: Migrate Domains to Central Model Store\" to repair it, or edit the file so every entry in \"logical.models\" is a model name string."
+  ],
+  "errors.invalid.host": [
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/invalid.json is invalid-json — re-reading in 150ms (likely mid-write)",
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/invalid.json is invalid-json — re-reading in 350ms (likely mid-write)",
+    "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/invalid.json is invalid-json — re-reading in 700ms (likely mid-write)",
+    "error: [SemanticEditorProvider] Failed to load domain: Invalid JSON in domain file <root>/.erd-studio/silver/invalid.json: Expected ',' or '}' after property value in JSON at position 69"
+  ],
+  "errors.legacy.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/legacy.json uses a pre-v4 layout (schemaVersion < 4 or a top-level \"models\" array) that is no longer supported. Run \"ERD Studio: Migrate Domains to Central Model Store\" to convert it, or move \"models\"/\"relationships\" under a \"logical\" section and set \"schemaVersion\" to 5."
+  ],
+  "errors.noversion.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field"
+  ],
+  "missing-model.host": [
+    "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
+    "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
+    "warn: [DomainService] Model \"broken\" not found in logical-models/",
+    "warn: [DomainService] Model \"nameless\" not found in logical-models/"
+  ],
+  "missing-model.unified": [
+    "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
+    "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
+    "warn: [DomainService] Model \"broken\" not found in logical-models/",
+    "warn: [DomainService] Model \"nameless\" not found in logical-models/"
+  ],
+  "missing-positions.host": [],
+  "missing-positions.persist": [],
+  "missing-positions.unified": [],
+  "no-layers.host": [],
+  "no-layers.unified": [],
+  "showcase.host": [],
+  "showcase.stage-logical": [],
+  "showcase.unified": [],
+  "v4-inline.host": [
+    "warn: [LayerService] Layer \"gold\" missing valid label, using id as label",
+    "warn: [LayerService] Layer \"gold\" has invalid color, using default",
+    "warn: [DomainService] Ignoring malformed viewConfig.positions entry for \"raw_customers\"",
+    "warn: [DomainService] Relationship raw_refunds.order_line_id → raw_orders.order_line_id in <root>/.erd-studio/bronze/orders.json has invalid cardinality \"sometimes\"; defaulting to many-to-one",
+    "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: {\"fromModel\":\"raw_refunds\",\"fromColumn\":\"order_line_id\",\"toModel\":\"raw_orders\"}",
+    "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: \"not-a-relationship\"",
+    "warn: [DomainService] Skipping inline model without a string \"name\" in <root>/.erd-studio/bronze/orders.json"
+  ],
+  "v4-inline.unified": [
+    "warn: [LayerService] Layer \"gold\" missing valid label, using id as label",
+    "warn: [LayerService] Layer \"gold\" has invalid color, using default",
+    "warn: [DomainService] Ignoring malformed viewConfig.positions entry for \"raw_customers\"",
+    "warn: [DomainService] Relationship raw_refunds.order_line_id → raw_orders.order_line_id in <root>/.erd-studio/bronze/orders.json has invalid cardinality \"sometimes\"; defaulting to many-to-one",
+    "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: {\"fromModel\":\"raw_refunds\",\"fromColumn\":\"order_line_id\",\"toModel\":\"raw_orders\"}",
+    "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: \"not-a-relationship\"",
+    "warn: [DomainService] Skipping inline model without a string \"name\" in <root>/.erd-studio/bronze/orders.json"
+  ]
+}

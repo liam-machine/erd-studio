@@ -10,16 +10,18 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Document, parseDocument, isAlias, isMap, isScalar, isSeq } from 'yaml';
+import { Document, parseDocument, isMap, isScalar, isSeq } from 'yaml';
 import type { YAMLMap, YAMLSeq } from 'yaml';
 
+import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, parseLogicalModelText } from '@erd-studio/core';
 import type { ColumnDef, SemanticModel } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
 
-/** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
-export const LOGICAL_MODELS_DIR = 'logical-models';
+// The directory name and the YAML -> SemanticModel parsing live in
+// @erd-studio/core; re-exported so existing imports of this module keep working.
+export { LOGICAL_MODELS_DIR } from '@erd-studio/core';
 
 /** Parsed model cached against the file's mtime + size. */
 interface CachedModel {
@@ -36,41 +38,11 @@ const STRINGIFY_OPTIONS = { lineWidth: 0 } as const;
 
 /** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
 const MODEL_KEYS = ['name', 'schema', 'description', 'grain', 'modelRole', 'rationale', 'columns'] as const;
-const RATIONALE_KEYS = ['purpose', 'design', 'grainChoice', 'roleChoice', 'scdStrategy', 'measures'] as const;
 const COLUMN_KEYS = [
   'name', 'dataType', 'description',
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
   'scdType', 'additiveType',
 ] as const;
-
-// ---------------------------------------------------------------------------
-// YAML schema for model files
-// ---------------------------------------------------------------------------
-
-/**
- * Shape of a model as stored in YAML.
- * Matches SemanticModel but with explicit field types for YAML serialization.
- */
-interface YamlModel {
-  name: string;
-  schema?: string;
-  description?: string;
-  grain?: string;
-  modelRole?: string;
-  rationale?: Record<string, string>;
-  columns?: YamlColumn[];
-}
-
-interface YamlColumn {
-  name: string;
-  dataType: string;
-  description?: string;
-  isPrimaryKey?: boolean;
-  isForeignKey?: boolean;
-  isNaturalKey?: boolean;
-  scdType?: number;
-  additiveType?: string;
-}
 
 // ---------------------------------------------------------------------------
 // Service
@@ -132,12 +104,11 @@ export class LogicalModelService {
       return structuredClone(cached.model);
     }
     const content = fs.readFileSync(filePath, 'utf-8');
-    const raw = this.parseModelFile(content);
-    if (!raw || raw.name === undefined || raw.name === null || raw.name === '') {
+    const model = parseLogicalModelText(content, fallbackName);
+    if (!model) {
       this.cache.delete(filePath);
       return null;
     }
-    const model = this.yamlToModel(raw, fallbackName);
     this.cache.set(filePath, { signature, model: structuredClone(model) });
     return model;
   }
@@ -474,49 +445,6 @@ export class LogicalModelService {
   // YAML ↔ SemanticModel conversion
   // -------------------------------------------------------------------------
 
-  /**
-   * Parse a model file into a plain object without scalar coercion.
-   *
-   * The `yaml` package resolves `007` to `7` and (under a `%YAML 1.1`
-   * directive) `2024-01-01` to a Date. Model fields are strings by contract,
-   * so every non-string scalar is read back from its original source text
-   * instead of its resolved value. Booleans and nulls are kept as-is.
-   * Returns null for an empty file or a file whose root is not a mapping.
-   * Throws on YAML syntax errors.
-   */
-  private parseModelFile(content: string): YamlModel | null {
-    const doc = parseDocument(content);
-    if (doc.errors.length > 0) {
-      throw doc.errors[0];
-    }
-    const raw = this.toPlain(doc, doc.contents);
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      return null;
-    }
-    return raw as YamlModel;
-  }
-
-  /** Convert a node tree to plain JS, preserving scalar source text for non-string values. */
-  private toPlain(doc: Document, node: unknown): unknown {
-    if (isAlias(node)) {
-      return this.toPlain(doc, node.resolve(doc));
-    }
-    if (isMap(node)) {
-      const obj: Record<string, unknown> = {};
-      for (const pair of node.items) {
-        obj[String(this.toPlain(doc, pair.key))] = this.toPlain(doc, pair.value);
-      }
-      return obj;
-    }
-    if (isSeq(node)) {
-      return node.items.map((item) => this.toPlain(doc, item));
-    }
-    if (isScalar(node)) {
-      return this.scalarValue(node);
-    }
-    return node ?? null;
-  }
-
   /** Resolved value for strings/booleans/null; original source text for anything else. */
   private scalarValue(node: { value: unknown; source?: string }): unknown {
     const v = node.value;
@@ -524,57 +452,6 @@ export class LogicalModelService {
       return v ?? null;
     }
     return node.source ?? String(v);
-  }
-
-  private yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
-    const str = (v: unknown): string | undefined =>
-      v === undefined || v === null ? undefined : String(v);
-    const bool = (v: unknown): boolean =>
-      v === true || (typeof v === 'string' && /^(true|yes|on)$/i.test(v.trim()));
-
-    const model: SemanticModel = {
-      name: str(raw.name) || fallbackName,
-    };
-
-    const schema = str(raw.schema);
-    const description = str(raw.description);
-    const grain = str(raw.grain);
-    const modelRole = str(raw.modelRole);
-    if (schema) model.schema = schema;
-    if (description) model.description = description;
-    if (grain) model.grain = grain;
-    if (modelRole) model.modelRole = modelRole as SemanticModel['modelRole'];
-    if (raw.rationale && typeof raw.rationale === 'object') {
-      model.rationale = {};
-      for (const key of RATIONALE_KEYS) {
-        const value = str((raw.rationale as Record<string, unknown>)[key]);
-        if (value) model.rationale[key] = value;
-      }
-    }
-
-    if (raw.columns && Array.isArray(raw.columns)) {
-      model.columns = raw.columns
-        .filter((col): col is YamlColumn => !!col && typeof col === 'object')
-        .map((col) => {
-          const column: ColumnDef = {
-            name: str(col.name) ?? '',
-            dataType: str(col.dataType) ?? 'unknown',
-            description: str(col.description) ?? '',
-          };
-          if (bool(col.isPrimaryKey)) column.isPrimaryKey = true;
-          if (bool(col.isForeignKey)) column.isForeignKey = true;
-          if (bool(col.isNaturalKey)) column.isNaturalKey = true;
-          if (col.scdType !== undefined && col.scdType !== null) {
-            const scdType = Number(col.scdType);
-            if (Number.isFinite(scdType)) column.scdType = scdType as ColumnDef['scdType'];
-          }
-          const additiveType = str(col.additiveType);
-          if (additiveType) column.additiveType = additiveType as ColumnDef['additiveType'];
-          return column;
-        });
-    }
-
-    return model;
   }
 
   /**

@@ -38,6 +38,10 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 - **Seeds and snapshots show their descriptions in the Physical view.** Descriptions written in a `seeds:` or `snapshots:` block of a dbt properties file, at table and column level, now appear on those tables, read from the file or from `manifest.json`. Before, they showed blank. Nothing else about them changes: they gain no columns and no relationships.
 
+## 1.0.11 — 2026-09-23
+
+- feat: shared @erd-studio/renderer and @erd-studio/core packages (#74)
+
 ## 1.0.10 — 2026-09-21
 
 ### Added

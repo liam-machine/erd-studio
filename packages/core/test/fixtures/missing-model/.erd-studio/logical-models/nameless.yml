@@ -1,0 +1,5 @@
+schema: silver
+description: This file has no name key, so it does not count as a model
+columns:
+  - name: id
+    dataType: INT
