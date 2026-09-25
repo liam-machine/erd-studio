@@ -1,0 +1,59 @@
+1
+00:00:00,300 --> 00:00:07,721
+This is the second half of ERD Studio issue seventy-six: a silver Date table and a gold Date table, side by side.
+
+2
+00:00:08,733 --> 00:00:12,028
+First, the problem, on the current release.
+
+3
+00:00:13,033 --> 00:00:24,151
+The library has a date model in the silver folder and another in the gold folder. A model's name is its identity, so only one can be used. The silver copy is flagged as a duplicate and ignored.
+
+4
+00:00:24,767 --> 00:00:34,136
+Open the silver timesheets canvas. Its date table carries a gold badge and fiscal columns: it is quietly showing the gold table, not the silver one.
+
+5
+00:00:39,867 --> 00:00:51,010
+In dbt, the project builds silver_date and gold_date, both as a table called date. On the gold canvas's Physical tab, ERD Studio cannot find the gold date table at all.
+
+6
+00:00:55,033 --> 00:01:03,933
+Now the same project, with the fix. It follows dbt's own pattern: every model keeps a unique name, and an alias sets the table name.
+
+7
+00:01:04,933 --> 00:01:06,1000
+Open the silver canvas again.
+
+8
+00:01:13,467 --> 00:01:19,868
+This time a warning names both files, and says which one the canvas is really using. It offers a fix.
+
+9
+00:01:20,468 --> 00:01:26,813
+The fix suggests a unique model name, silver_date, the usual dbt convention.
+
+10
+00:01:27,414 --> 00:01:38,568
+It shows the plan before changing anything: the file is renamed, its alias keeps the table name date, and only the silver domain is repointed. The gold domain keeps the gold file.
+
+11
+00:01:39,180 --> 00:01:48,498
+The canvas now shows the silver table, with its own columns. The node reads date, the table name, with the model name, silver_date, beside it.
+
+12
+00:01:51,280 --> 00:01:56,802
+The detail panel has a new Table name row, so an alias can also be set by hand.
+
+13
+00:01:57,620 --> 00:02:03,911
+In the library, the duplicate is gone. There is one date table per layer, each with its own model name.
+
+14
+00:02:04,520 --> 00:02:15,376
+And on the gold canvas's Physical tab, the date table is found: when the name does not match, ERD Studio looks for the schema and table name together, never the table name alone.
+
+15
+00:02:17,420 --> 00:02:27,386
+That's the fix. Model names stay unique, the alias carries the table name, duplicate files are flagged with a one-step fix, and domain files don't change.
