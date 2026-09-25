@@ -200,7 +200,7 @@ scenes:
       - id: pr_sense
         beat: sense
         pause: 0.4
-        caption: It's just common sense. | So why did it take us {decades}?
+        caption: It's just common sense. | Why did this take us {decades} | to figure out?
       - id: pr_ai
         beat: ai
         pause: 0.3
