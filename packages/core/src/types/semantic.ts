@@ -102,6 +102,14 @@ export interface SemanticModel {
   name: string;
   /** Schema the model will be materialised in. */
   schema?: string;
+  /**
+   * Name of the table or view in the warehouse, when it differs from the model
+   * name — dbt's `alias` config. The model name stays the unique identity
+   * (domain files, relationships and positions all use it); the alias is what
+   * lets `silver_date` and `gold_date` both build a table called `date`, and
+   * what the canvas shows as the model's label.
+   */
+  alias?: string;
   /** Model description. */
   description?: string;
   /** Column definitions. */

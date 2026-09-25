@@ -523,6 +523,111 @@ describe('erdStudio.organizeModelLibrary (issue #76)', () => {
   });
 });
 
+describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two layers)', () => {
+  const erd = () => path.join(root, '.erd-studio');
+  const lib = () => path.join(erd(), 'logical-models');
+  const writeJson = (p: string, v: unknown) => fs.writeFileSync(p, JSON.stringify(v, null, 2) + '\n');
+  const readJson = (p: string) => JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, any>;
+  const ignored = () => path.join(lib(), 'silver', 'date.yml');
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.mkdirSync(path.join(lib(), 'silver'));
+    fs.mkdirSync(path.join(lib(), 'gold'));
+    // Two files called date. Folders are looked up alphabetically, so gold/
+    // wins and the silver domain silently rendered the gold table's columns.
+    fs.writeFileSync(path.join(lib(), 'gold', 'date.yml'), 'name: date\nschema: gold\ncolumns:\n  - name: date_key\n    dataType: int\n  - name: fiscal_year\n    dataType: int\n');
+    fs.writeFileSync(ignored(), '# silver calendar\nname: date\nschema: silver\ncolumns:\n  - name: date_key\n    dataType: int\n');
+    writeJson(path.join(erd(), 'silver', 'calendar.json'), {
+      schemaVersion: 5, domain: 'calendar', layer: 'silver', description: '',
+      logical: { models: ['fct_order', 'date'], relationships: [{ fromModel: 'fct_order', fromColumn: 'order_date_key', toModel: 'date', toColumn: 'date_key', cardinality: 'many-to-one' }] },
+      viewConfig: { positions: { date: { x: 10, y: 20 } } },
+    });
+    writeJson(path.join(erd(), 'gold', 'reporting.json'), {
+      schemaVersion: 5, domain: 'reporting', layer: 'gold', description: '',
+      logical: { models: ['date'], relationships: [] }, viewConfig: {},
+    });
+    openWorkspace(root);
+  });
+
+  const answer = (modalChoice: string | undefined) => {
+    vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (opts?: { value?: string }) => opts?.value) as never);
+    return vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (message: string) => (message.startsWith('Rename the duplicate') ? modalChoice : undefined)) as never);
+  };
+
+  it('is a post-rename command: contributed, registered once, with no dbtSemantic alias', async () => {
+    expect(NO_LEGACY_ALIAS.has('erdStudio.resolveDuplicateModel')).toBe(true);
+    expect(CONTRIBUTED).toContain('erdStudio.resolveDuplicateModel');
+    await activate(context);
+    expect(count('erdStudio.resolveDuplicateModel')).toBe(1);
+    expect(count('dbtSemantic.resolveDuplicateModel')).toBe(0);
+  });
+
+  it('renames the ignored silver copy to silver_date with alias date, and repoints only the silver domain', async () => {
+    const goldDomainBefore = fs.readFileSync(path.join(erd(), 'gold', 'reporting.json'), 'utf-8');
+    await activate(context);
+    const info = answer('Rename');
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    const modal = info.mock.calls.find((c) => String(c[0]).startsWith('Rename the duplicate'))!;
+    const detail = (modal[1] as { detail: string }).detail;
+    expect(detail).toContain('logical-models/silver/date.yml → logical-models/silver/silver_date.yml');
+    expect(detail).toContain('silver/calendar');
+    expect(detail).toContain('gold/reporting');
+
+    expect(fs.existsSync(ignored())).toBe(false);
+    // The hand-written document is carried over: comment, columns, and the new keys.
+    expect(fs.readFileSync(path.join(lib(), 'silver', 'silver_date.yml'), 'utf-8')).toBe(
+      '# silver calendar\nname: silver_date\nschema: silver\ncolumns:\n  - name: date_key\n    dataType: int\nalias: date\n',
+    );
+    const silver = readJson(path.join(erd(), 'silver', 'calendar.json'));
+    expect(silver.logical.models).toEqual(['fct_order', 'silver_date']);
+    expect(silver.logical.relationships[0].toModel).toBe('silver_date');
+    expect(silver.viewConfig.positions).toEqual({ silver_date: { x: 10, y: 20 } });
+    // The gold domain keeps the gold file, byte for byte.
+    expect(fs.readFileSync(path.join(erd(), 'gold', 'reporting.json'), 'utf-8')).toBe(goldDomainBefore);
+    expect(fs.existsSync(path.join(lib(), 'gold', 'date.yml'))).toBe(true);
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/"silver_date" \(table: date\)\. Repointed 1 domain\.$/));
+  });
+
+  it('changes nothing when the confirmation is dismissed', async () => {
+    const silverBefore = fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8');
+    await activate(context);
+    answer(undefined);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(fs.existsSync(ignored())).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'silver', 'silver_date.yml'))).toBe(false);
+    expect(fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8')).toBe(silverBefore);
+  });
+
+  it('changes nothing when VS Code rejects the edit', async () => {
+    await activate(context);
+    answer('Rename');
+    vscode._mockWorkspaceState.applyEditResult = false;
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(error).toHaveBeenCalledWith('VS Code rejected the rename; nothing was changed.');
+    expect(fs.existsSync(ignored())).toBe(true);
+    expect(readJson(path.join(erd(), 'silver', 'calendar.json')).logical.models).toContain('date');
+  });
+
+  it('says so when there is no duplicate to fix', async () => {
+    fs.rmSync(ignored());
+    await activate(context);
+    const info = answer('Rename');
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel');
+
+    expect(info).toHaveBeenCalledWith('Every model file in the library has its own name.');
+  });
+});
+
 describe('activate() project-root resolution', () => {
   it('reads projectPath through getErdStudioSetting, so a legacy dbtSemantic.projectPath still wins over auto-detection', async () => {
     // Two candidate projects: auto-detection would pick "a" (shallowest, sorted first);

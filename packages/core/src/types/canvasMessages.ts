@@ -170,6 +170,18 @@ export interface UpdateModelGrainMessage {
 }
 
 /**
+ * Request to set or clear a model's alias — the table name dbt builds it as.
+ * An empty alias removes the `alias` key from the model file.
+ */
+export interface UpdateModelAliasMessage {
+  type: 'updateModelAlias';
+  payload: {
+    modelName: string;
+    alias: string;
+  };
+}
+
+/**
  * Request to update the model role for a model.
  * If the role is null/empty, the `modelRole` key is removed from the JSON entirely.
  */
@@ -233,6 +245,7 @@ export type CanvasEditMessage =
   | UpdateModelRationaleMessage
   | UpdateModelDescriptionMessage
   | UpdateModelGrainMessage
+  | UpdateModelAliasMessage
   | UpdateModelRoleMessage
   | ReorderColumnsMessage
   | UpdateAnnotationMessage

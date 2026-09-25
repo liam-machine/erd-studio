@@ -29,6 +29,7 @@ import {
   type LayoutDirection,
 } from '../../lib/elkLayout';
 import { StageTabs } from './StageTabs';
+import { matchesModelSearch } from '@erd-studio/renderer/editor';
 import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
@@ -152,7 +153,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toLowerCase();
     return nodes
-      .filter((node) => node.type === 'model' && (node.data as ModelFlowNode['data']).modelName.toLowerCase().includes(query))
+      .filter((node) => node.type === 'model' && matchesModelSearch(node.data as ModelFlowNode['data'], query))
       .map((node) => node.id);
   }, [searchQuery, nodes]);
 

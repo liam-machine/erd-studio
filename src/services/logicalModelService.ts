@@ -65,7 +65,7 @@ export interface ModelFileEntry {
 }
 
 /** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
-const MODEL_KEYS = ['name', 'schema', 'description', 'grain', 'modelRole', 'rationale', 'columns'] as const;
+const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'columns'] as const;
 const COLUMN_KEYS = [
   'name', 'dataType', 'description',
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
@@ -378,6 +378,16 @@ export class LogicalModelService {
    */
   serializeModel(model: SemanticModel, fromName?: string): string {
     return this.renderModel(model, this.modelPath(fromName ?? model.name));
+  }
+
+  /**
+   * Like {@link serializeModel}, but the document that supplies comments, key
+   * order and unknown keys is the file at `sourcePath`. Name lookups resolve to
+   * the file that WINS a duplicated name, so the copy that is ignored can only
+   * be addressed by its path.
+   */
+  serializeModelAt(model: SemanticModel, sourcePath: string): string {
+    return this.renderModel(model, sourcePath);
   }
 
   /**
@@ -749,6 +759,7 @@ export class LogicalModelService {
     const obj: Record<string, unknown> = { name: model.name };
 
     if (model.schema) obj.schema = model.schema;
+    if (model.alias) obj.alias = model.alias;
     if (model.description) obj.description = model.description;
     if (model.grain) obj.grain = model.grain;
     if (model.modelRole) obj.modelRole = model.modelRole;

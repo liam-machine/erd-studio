@@ -778,8 +778,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 19 (layer folders for logical model files, issue #76)', () => {
-      expect(HARNESS_VERSION).toBe('19');
+    it('is 20 (model alias: the same table name in two layers, issue #76 follow-up)', () => {
+      expect(HARNESS_VERSION).toBe('20');
     });
   });
 

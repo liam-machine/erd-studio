@@ -85,7 +85,8 @@ export class ModelLibraryTreeProvider implements vscode.TreeDataProvider<ModelLi
       item.iconPath = new vscode.ThemeIcon('error');
       item.description = '(duplicate — ignored)';
       item.tooltip = `Another file already defines "${element.name}" and is the one domains use:\n${element.shadowedBy}\n\n` +
-        'Model names must be unique across all folders. Rename or delete one of the two files.';
+        'Model names are unique across all folders, as in dbt. Use "Give Duplicate Model Its Own Name" ' +
+        `to make this copy "${element.folder ? `${element.folder}_` : ''}${element.name}" with the table name (alias) "${element.name}".`;
       item.resourceUri = vscode.Uri.file(element.filePath);
       item.command = { command: 'vscode.open', title: 'Open Model', arguments: [item.resourceUri] };
       return item;

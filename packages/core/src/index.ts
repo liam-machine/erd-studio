@@ -23,6 +23,9 @@ export {
   YamlCharLimitError,
   parseLogicalModelText,
   isSafeModelName,
+  isValidModelAlias,
+  MODEL_ALIAS_MAX_LENGTH,
+  MODEL_ALIAS_RULE,
   type ParseLogicalModelOptions,
 } from './logicalModel.js';
 export * from './layers.js';

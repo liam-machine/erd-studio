@@ -142,6 +142,12 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "erdStudio.resolveDuplicateModel",
+        "title": "Give Duplicate Model Its Own Name…",
+        "category": "ERD Studio",
+        "icon": "$(wand)"
+      },
+      {
         "command": "erdStudio.reportBug",
         "title": "Send Feedback",
         "category": "ERD Studio",
@@ -329,6 +335,16 @@
           "command": "erdStudio.deleteLogicalModel",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
           "group": "7_modification@1"
+        },
+        {
+          "command": "erdStudio.resolveDuplicateModel",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModelDuplicate",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.resolveDuplicateModel",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModelDuplicate",
+          "group": "7_modification@0"
         }
       ],
       "view/title": [

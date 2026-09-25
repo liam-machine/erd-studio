@@ -40,6 +40,12 @@ export interface ManifestModelInfo {
   projectName: string;
   /** Schema the model is materialised in */
   schema: string;
+  /**
+   * Relation name dbt builds the model as, when it differs from `name` (the
+   * `alias` config). dbt fills `alias` in on every node — equal to the name
+   * when none is configured — so it is recorded here only when it differs.
+   */
+  alias?: string;
   /** Model description from dbt */
   description: string;
   /** Column definitions from dbt */
