@@ -133,6 +133,12 @@ function describeProjectLocation(projectRoot: string): string {
   return folder.name === path.basename(projectRoot) ? 'workspace folder' : `workspace folder ${folder.name}`;
 }
 
+/** "In repo/analytics." plus a blank line for a nested project; nothing for a root folder, whose name is already in the title. */
+function nestedLocation(projectRoot: string): string {
+  const where = describeProjectLocation(projectRoot);
+  return where.startsWith('workspace folder') ? '' : `In ${where}.\n\n`;
+}
+
 /**
  * **Select dbt Project…** — choose which dbt project ERD Studio opens when the
  * workspace holds more than one (multi-root workspaces, monorepos; #82).
@@ -221,7 +227,7 @@ async function selectDbtProject(
     `Switch ERD Studio to “${path.basename(chosen)}”?`,
     {
       modal: true,
-      detail: `${describeProjectLocation(chosen)}\n\nThe window reloads to open it. ` +
+      detail: `${nestedLocation(chosen)}The window reloads to open it. ` +
         'The choice is saved for this workspace on this machine only.',
     },
     'Switch and Reload',

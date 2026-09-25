@@ -625,27 +625,40 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? null : undefined;
   }
 
-  /** Static page (no scripts) plus a notification offering to open the file's own project. */
+  /**
+   * Explain why a foreign domain file is not drawn, with a **Switch** button,
+   * plus a notification offering the same. The page is not the canvas: its
+   * only script posts `switchProject`, handled here, and it speaks none of
+   * the canvas message protocol. (A `command:` link is not used — VS Code
+   * blocks it in a custom editor webview.)
+   */
   private showForeignProject(webviewPanel: vscode.WebviewPanel, filePath: string, owner: string | undefined): void {
     const esc = (v: string): string =>
       v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const current = path.basename(this.workspaceRoot);
-    const switchUri = owner
-      ? `command:erdStudio.selectDbtProject?${encodeURIComponent(JSON.stringify([owner]))}`
-      : '';
-    webviewPanel.webview.options = { enableScripts: false, enableCommandUris: owner ? ['erdStudio.selectDbtProject'] : false };
-    webviewPanel.webview.html =
-      '<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\';"></head>' +
-      '<body style="font-family:var(--vscode-font-family);color:var(--vscode-foreground);padding:2em;max-width:44em;line-height:1.5">' +
-      `<h2>This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>` +
-      `<p>ERD Studio has <code>${esc(current)}</code> open in this window, and a window shows one dbt project at a time. ` +
-      'Opening this file here would mix its models with the wrong project\u2019s dbt data.</p>' +
-      (owner
-        ? `<p><a href="${esc(switchUri)}" style="display:inline-block;padding:6px 14px;border-radius:2px;text-decoration:none;` +
-          'background:var(--vscode-button-background);color:var(--vscode-button-foreground)">' +
-          `Switch ERD Studio to ${esc(path.basename(owner))}</a></p>`
-        : '') +
-      '</body></html>';
+    const webview = webviewPanel.webview;
+    const nonce = crypto.randomBytes(16).toString('base64');
+    webview.options = { enableScripts: Boolean(owner), localResourceRoots: [] };
+    webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ERD Studio</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+</head>
+<body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); max-width: 44em; line-height: 1.5;">
+  <h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window, and a window shows one dbt project at a time.
+  Drawing this file here would mix its models with the wrong project\u2019s dbt data.</p>
+  ${owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground);">Switch ERD Studio to ${esc(path.basename(owner))}</button></p>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    document.getElementById('switch').addEventListener('click', () => vscode.postMessage({ type: 'switchProject' }));
+  </script>` : ''}
+</body>
+</html>`;
+
     const name = path.basename(filePath);
     if (!owner) {
       void vscode.window.showWarningMessage(
@@ -653,13 +666,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       return;
     }
+    const switchProject = (): void => {
+      void vscode.commands.executeCommand('erdStudio.selectDbtProject', owner);
+    };
+    const messages = webview.onDidReceiveMessage((message: unknown) => {
+      if (isTypedMessage(message) && message.type === 'switchProject') { switchProject(); }
+    });
+    webviewPanel.onDidDispose(() => messages.dispose());
     void vscode.window.showWarningMessage(
       `ERD Studio: ${name} belongs to the ${path.basename(owner)} dbt project, but ${current} is open.`,
       'Switch Project',
     ).then(choice => {
-      if (choice === 'Switch Project') {
-        void vscode.commands.executeCommand('erdStudio.selectDbtProject', owner);
-      }
+      if (choice === 'Switch Project') { switchProject(); }
     });
   }
 

@@ -77,13 +77,16 @@ afterEach(() => {
 });
 
 describe('opening a domain file from another dbt project', () => {
-  it('shows a scriptless page with a switch link instead of the canvas', async () => {
+  it('shows an explanation with a switch button instead of the canvas', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
     const panel = await openIn(buildProvider(active), path.join(other, '.erd-studio', 'silver', 'showcase.json'));
 
-    expect(panel.webview.options).toMatchObject({ enableScripts: false, enableCommandUris: ['erdStudio.selectDbtProject'] });
     expect(panel.webview.html).toContain('belongs to the <code>datamodels</code> dbt project');
-    expect(panel.webview.html).toContain(`command:erdStudio.selectDbtProject?${encodeURIComponent(JSON.stringify([other]))}`);
-    expect(panel.webview.html).not.toContain('<script');
+    expect(panel.webview.html).toContain('Switch ERD Studio to datamodels');
+    expect(panel.webview.html).not.toContain('webview.js');
+    expect(panel._postedMessages).toEqual([]);
+    await panel._simulateMessage({ type: 'switchProject' });
+    expect(exec).toHaveBeenCalledWith('erdStudio.selectDbtProject', other);
     expect(warn).toHaveBeenCalledWith(
       'ERD Studio: showcase.json belongs to the datamodels dbt project, but finance-dbt is open.',
       'Switch Project',
