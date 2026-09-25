@@ -116,6 +116,42 @@ For now, add a `dbt_project.yml` file containing `name: logical_models` to your 
 
 Physical comparison needs dbt, so the canvas stays on the Logical stage — everything else works unchanged.
 
+## Telemetry
+
+ERD Studio sends one small, anonymous usage report a day, so the author can see which features get used and which errors people hit. It never contains model, column, domain or project names, file paths, file contents, error messages or anything you typed.
+
+**What is sent.** For the previous UTC day, if you used ERD Studio that day:
+
+| Field | What it holds |
+|---|---|
+| `v` | The report format version (`1`) |
+| `installId` | A random ID, made up by ERD Studio and replaced every 30 days. It is not VS Code's machine ID and is not derived from anything about you |
+| `day` | The UTC date the counts describe |
+| `extVersion`, `vscodeMajor`, `os` | ERD Studio version, VS Code version (major.minor only), and `darwin` / `win32` / `linux` / `other` |
+| `tenure` | Days since ERD Studio first ran, as a range: `0`, `1-7`, `8-30`, `31-90`, `90+` |
+| `activation` | Whether a dbt project was found (`project_found` / `no_project`) |
+| `hasSemanticDir` | Whether the project has an `.erd-studio` folder |
+| `domainCount` | Number of diagrams, as a range: `0`, `1-3`, `4-10`, `10+` |
+| `activations`, `canvasOpens` | How many times ERD Studio started and a diagram was opened (capped at 50 and 200) |
+| `stages`, `schemaFormats` | Which stages were viewed (`logical`, `physical`) and which diagram file formats were opened (`v5`, `v4`) |
+| `modelCount` | The largest diagram opened, as a range: `none`, `1-10`, `11-50`, `51+` |
+| `manifest`, `catalog` | Whether dbt's `manifest.json` was `ok`, `missing` or `stale`, and whether a `catalog.json` was present |
+| `features` | How often each of a fixed list of features was used (capped at 100 each): the physical stage, compare, sync plan, Execute with Claude, dbt compile, notes, auto layout, adding a model, adding a relationship, installing each AI harness, migrating to v5, and opening Send Feedback |
+| `errors` | How often each of a fixed list of error kinds happened (capped at 100 each): manifest missing / malformed / timed out, catalog unreadable, diagram failed to load, model file failed to parse, invalid `layers.json`, edit rejected by VS Code, migration failed, other |
+
+The full list of properties is also in [`telemetry.json`](telemetry.json).
+
+**Where it goes.** An HTTPS request to `erd-studio-telemetry.liam-is-an.ai`, a Cloudflare Worker run by the extension author. The Worker checks every field against the lists above and stores only those fields. It does not store your IP address, user agent or any other request header. Individual reports are deleted after 90 days; after that only daily totals are kept, with no install IDs.
+
+**Turning it off.** Either setting stops it completely:
+
+- VS Code's own `telemetry.telemetryLevel` set to `off` (ERD Studio also respects `error` and `crash`, which send no usage data), or
+- `erdStudio.telemetry.enabled` set to `false`. This setting can only turn telemetry off, never on, and only your user settings count — a repository's `.vscode/settings.json` cannot change it.
+
+Turning telemetry off also throws away anything already counted for that day. A failed send is dropped, never retried.
+
+**Seeing what is sent.** Reports go through VS Code's own telemetry logger. Run **Developer: Set Log Level…**, set the telemetry log to **Trace**, then open the **Output** panel and choose **Extension Telemetry**: each report appears there as it is sent. VS Code's `--telemetry` command-line flag also lists every event ERD Studio declares.
+
 [File format reference](docs/semantic-domain-json-reference.md) · [Release notes](CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
 
 Free to use under the [PolyForm Shield License 1.0.0](LICENSE): use it, modify it and share it, at home or at work, for any purpose except offering a product that competes with ERD Studio. The source is public; only the author may sell it or relicense it.

@@ -456,6 +456,16 @@
           "default": true,
           "markdownDescription": "Show a **My Reports** view listing issues you filed from ERD Studio, refreshed from GitHub every few hours. Requires you to be signed in to GitHub in VS Code; the view is hidden otherwise and you are never prompted to sign in."
         },
+        "erdStudio.telemetry.enabled": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": true,
+          "tags": [
+            "telemetry",
+            "usesOnlineServices"
+          ],
+          "markdownDescription": "Send one anonymous usage heartbeat a day: which ERD Studio features were used and how often, bucketed project sizes and error counts — never names, paths, file contents or error messages. This setting can only turn telemetry **off**: VS Code's `#telemetry.telemetryLevel#` must also allow it, and nothing is sent when that is `off`. See [Telemetry](https://github.com/liam-machine/erd-studio#telemetry) for every field sent and how long it is kept."
+        },
         "dbtSemantic.projectPath": {
           "type": "string",
           "markdownDeprecationMessage": "Deprecated: use `#erdStudio.projectPath#` instead. Legacy values are still honoured.",

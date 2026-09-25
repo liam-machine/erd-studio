@@ -8,6 +8,14 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased — 1.5.0
+
+### Added
+
+- **Anonymous usage telemetry.** ERD Studio now sends one small report a day about the previous day's use: which features were used and how often, project sizes as ranges (for example "1-10 models"), whether dbt's manifest and catalog were there, and counts of a fixed list of error kinds. It never contains model, column, domain or project names, file paths, file contents, error messages or anything you typed, and the ID it carries is random and replaced every 30 days. Individual reports are deleted after 90 days. The [Telemetry](README.md#telemetry) section of the README lists every field.
+  - It follows VS Code's `telemetry.telemetryLevel`: set that to `off` and nothing is sent. To turn off only ERD Studio's, set the new **`erdStudio.telemetry.enabled`** to `false`. Only your user settings count, so a repository cannot switch it for you.
+  - To see exactly what is sent, set the telemetry log level to Trace and open **Output → Extension Telemetry**.
+
 ## 1.4.0 — 2026-09-25
 
 ### Added

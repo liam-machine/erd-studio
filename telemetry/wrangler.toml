@@ -1,0 +1,53 @@
+# ERD Studio — usage telemetry collector.
+#
+# Deployed by hand (see README.md). This directory is not part of the extension
+# build and is excluded from the VSIX by the repo's .vscodeignore.
+
+name = "erd-studio-telemetry"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# OFF deliberately. A workers.dev hostname is a second public door to the same
+# Worker and embeds the account subdomain, which is derived from the operator's
+# email. The custom domain below is the only entrance, and it is the URL the
+# extension's telemetry endpoint constant points at.
+workers_dev = false
+
+[[routes]]
+pattern = "erd-studio-telemetry.liam-is-an.ai"
+custom_domain = true
+
+# Keeps the counts-only log lines (see `log()` in src/index.js) visible in the
+# dashboard and in `wrangler tail`. No heartbeat body is ever logged.
+[observability]
+enabled = true
+
+# Retention sweep: deletes rows received more than 90 days ago. Daily at 03:17
+# UTC — off the hour so it does not queue behind everyone else's midnight crons.
+[triggers]
+crons = ["17 3 * * *"]
+
+# ---------------------------------------------------------------------------
+# Bindings
+# ---------------------------------------------------------------------------
+
+# Create with `npx wrangler d1 create erd-studio-telemetry`, paste the printed
+# database_id below, then apply schema.sql (see README.md).
+[[d1_databases]]
+binding = "DB"
+database_name = "erd-studio-telemetry"
+database_id = "58f599b8-709f-47bf-9164-057cfdd06050"
+
+# ---------------------------------------------------------------------------
+# Variables
+# ---------------------------------------------------------------------------
+
+[vars]
+# Kill switch. "off" (or "0"/"false"/"no"/empty, and the boolean `false` or the
+# number 0) serves; ANY other value makes every request 503 immediately, with no
+# D1 access. The extension drops a failed heartbeat silently, so flipping this
+# costs users nothing.
+#
+# THIS FILE IS THE SOURCE OF TRUTH. Every `wrangler deploy` re-applies the value
+# below over whatever the dashboard says.
+KILL_SWITCH = "off"

@@ -224,6 +224,38 @@ export const env = {
     writeText: async (_text: string): Promise<void> => {},
     readText: async (): Promise<string> => '',
   },
+  /** Flip with `_setMockTelemetryEnabled`, which also fires the change event. */
+  isTelemetryEnabled: true,
+  onDidChangeTelemetryEnabled: (listener: (enabled: boolean) => void) =>
+    telemetryEnabledEmitter.event(listener as (...args: unknown[]) => void),
+  /**
+   * Mirrors VS Code's logger closely enough for the telemetry service: usage
+   * events reach the sender only while telemetry is enabled, with the event
+   * name prefixed by the extension id and the data cloned. Errors are passed
+   * to `sendErrorData` the same way.
+   */
+  createTelemetryLogger: (
+    sender: {
+      sendEventData: (eventName: string, data?: Record<string, unknown>) => void;
+      sendErrorData: (error: Error, data?: Record<string, unknown>) => void;
+    },
+    _options?: { ignoreBuiltInCommonProperties?: boolean },
+  ) => ({
+    get isUsageEnabled() { return env.isTelemetryEnabled; },
+    get isErrorsEnabled() { return env.isTelemetryEnabled; },
+    onDidChangeEnableStates: () => ({ dispose: () => {} }),
+    logUsage: (eventName: string, data?: Record<string, unknown>) => {
+      if (env.isTelemetryEnabled) {
+        sender.sendEventData(`liamwynne.erd-studio/${eventName}`, JSON.parse(JSON.stringify(data ?? {})));
+      }
+    },
+    logError: (error: Error | string, data?: Record<string, unknown>) => {
+      if (env.isTelemetryEnabled) {
+        sender.sendErrorData(error instanceof Error ? error : new Error(error), data);
+      }
+    },
+    dispose: () => {},
+  }),
 };
 
 /** Minimal mock of vscode.Terminal for launch-in-terminal handlers. */
@@ -380,6 +412,15 @@ export class EventEmitter {
   dispose() {
     this.listeners = [];
   }
+}
+
+const telemetryEnabledEmitter = new EventEmitter();
+
+/** Set `env.isTelemetryEnabled` and fire `onDidChangeTelemetryEnabled` when it changes. */
+export function _setMockTelemetryEnabled(enabled: boolean): void {
+  if (env.isTelemetryEnabled === enabled) return;
+  env.isTelemetryEnabled = enabled;
+  telemetryEnabledEmitter.fire(enabled);
 }
 
 export class Disposable {

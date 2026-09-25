@@ -47,6 +47,7 @@ import {
   type SkillHarnessTarget,
 } from '../types/aiAssistants';
 import type { CliLauncherInstallResult, CliLauncherOptions } from '../services/cliLauncherService';
+import { telemetry } from '../services/telemetryService';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
 export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
@@ -462,6 +463,7 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
       };
     }
     filesWritten.push(...result.filesWritten);
+    if (result.status !== 'unchanged' && result.targets.includes('claude')) telemetry.feature('harnessInstallClaude');
 
     const launched = await deps.launcher.install(deps.launcherOptions);
     filesWritten.push(...launched.filesWritten.map((p) => displayLauncherPath(p, deps.launcherOptions.homeDir)));

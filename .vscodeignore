@@ -30,9 +30,12 @@ features.json
 # .vscodeignore is a DENYLIST — a new top-level directory ships unless it is
 # named here, and CI fails if `vsce ls --no-dependencies` lists more than 60
 # files. `proxy/` is the hand-deployed Cloudflare Worker behind the feedback
-# analysis hosted tier (see proxy/README.md); it must never reach the VSIX.
+# analysis hosted tier (see proxy/README.md); `telemetry/` is the hand-deployed
+# Worker that collects the anonymous usage heartbeat (see telemetry/README.md).
+# Neither may ever reach the VSIX.
 mcp-server/**
 proxy/**
+telemetry/**
 # Getting-started video pipeline (see video/README.md). Its outputs that ship
 # are media/onboarding/getting-started.mp4 and getting-started-poster.jpg.
 video/**
@@ -77,3 +80,4 @@ selectors.yml
 # Re-include dist (but maps already excluded above)
 !dist/*.js
 !dist/*.css
+telemetry.json

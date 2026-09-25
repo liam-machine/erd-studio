@@ -42,6 +42,17 @@ export class ManifestMissingError extends Error {
   }
 }
 
+/** A worker parse ran past {@link ManifestServiceOptions.parseTimeoutMs} and was abandoned. */
+export class ManifestParseTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Manifest parse timed out after ${timeoutMs}ms`);
+    this.name = 'ManifestParseTimeoutError';
+  }
+}
+
+/** Why a fresh (uncached) manifest load failed. */
+export type ManifestLoadFailure = 'missing' | 'malformed' | 'timeout';
+
 export interface ManifestServiceOptions {
   /** dbt project paths (target-path, model-paths). Defaults to dbt's own defaults. */
   dbtConfig?: Partial<DbtProjectConfig>;
@@ -54,6 +65,11 @@ export interface ManifestServiceOptions {
    * self-contained file. The extension host always uses the worker.
    */
   parseInProcess?: boolean;
+  /**
+   * Told once per failed parse (never for a cached answer). The extension
+   * host counts these for usage telemetry; other callers leave it unset.
+   */
+  onLoadFailure?: (failure: ManifestLoadFailure) => void;
 }
 
 /** Reconstruct Maps and Sets from the worker's plain-object result. */
@@ -92,6 +108,7 @@ export class ManifestService {
   private readonly dbtConfig: DbtProjectConfig;
   private readonly parseTimeoutMs: number;
   private readonly parseInProcess: boolean;
+  private readonly onLoadFailure?: (failure: ManifestLoadFailure) => void;
 
   constructor(options: ManifestServiceOptions = {}) {
     const defaults = defaultDbtProjectConfig();
@@ -104,6 +121,7 @@ export class ManifestService {
     };
     this.parseTimeoutMs = options.parseTimeoutMs ?? DEFAULT_PARSE_TIMEOUT_MS;
     this.parseInProcess = options.parseInProcess === true;
+    this.onLoadFailure = options.onLoadFailure;
   }
 
   /**
@@ -191,6 +209,7 @@ export class ManifestService {
         console.warn(`[ManifestService] ${err.message}`);
         const empty = this.emptyManifest();
         if (currentLoadId === this.loadId) {
+          this.onLoadFailure?.('missing');
           this.lastKnownGood = null;
           this.cache = empty;
           this._isStale = false;
@@ -208,6 +227,7 @@ export class ManifestService {
       );
       const fallback = this.lastKnownGood ?? this.emptyManifest();
       if (currentLoadId === this.loadId) {
+        this.onLoadFailure?.(err instanceof ManifestParseTimeoutError ? 'timeout' : 'malformed');
         this.cache = fallback;
         this._isStale = true;
       }
@@ -343,7 +363,7 @@ export class ManifestService {
         timedOut = true;
         settle();
         void worker.terminate();
-        reject(new Error(`Manifest parse timed out after ${this.parseTimeoutMs}ms`));
+        reject(new ManifestParseTimeoutError(this.parseTimeoutMs));
       }, this.parseTimeoutMs);
 
       worker.once('message', (msg: ManifestWorkerResult | ManifestWorkerError) => {
