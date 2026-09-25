@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.1.1 — 2026-09-25
 
 ### Changed
 - The empty ERD Studio sidebar is now one short line and a **Get started** button that opens the Welcome tab. The video, the sample project, the AI helper setup and the manual setup all live on that tab.
