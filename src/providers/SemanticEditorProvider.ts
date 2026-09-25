@@ -66,7 +66,6 @@ import {
   isDomainFilePath,
   relationshipReferencesColumn,
 } from '../services/domainService';
-import { buildLogicalDisplayDomain } from '../services/stageDisplay';
 import { computeDomainDiff } from '../services/stageDiff';
 import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
 import { findVenvActivate } from '../services/dbtEnv';
