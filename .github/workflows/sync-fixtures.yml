@@ -10,6 +10,9 @@ on:
     branches: [main]
     paths:
       - 'src/services/harnessService.ts'
+  # Manual run — the path filter keeps this quiet for weeks, so a broken
+  # workflow looks identical to an idle one until the next harness bump.
+  workflow_dispatch:
 
 permissions:
   contents: write
