@@ -8,6 +8,13 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased — 1.3.0
+
+### Added
+
+- **Multi-root workspaces open the right dbt project** (closes #82). ERD Studio used to open the first dbt project it found, so in a workspace whose first folder was a different dbt project, the sidebar showed **No diagrams yet** even though another folder had a full `.erd-studio/`. Auto-detection now prefers the dbt project that already has ERD Studio data, and only falls back to the first project when none has any. Setting `erdStudio.projectPath` still overrides the choice.
+- **ERD Studio: Select dbt Project…** picks the project yourself when the workspace holds more than one, whether that is several root folders or a monorepo. The picker marks the current project and the ones that already have diagrams. Your choice is saved to the workspace's `erdStudio.projectPath` and applies after a window reload, which ERD Studio offers straight away. The command appears as a button on the ERD Studio sidebar only when there is more than one project to choose from.
+
 ## 1.2.0 — 2026-09-25
 
 ### Added
