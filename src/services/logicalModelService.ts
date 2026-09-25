@@ -87,6 +87,14 @@ export class LogicalModelService {
    */
   private readonly cache = new Map<string, CachedModel>();
 
+  /**
+   * Told when a model file exists but cannot be read or parsed, once per file
+   * until it reads cleanly again. The extension host counts these for usage
+   * telemetry; other callers (the MCP server, the CLI) leave it unset.
+   */
+  onParseFailure?: () => void;
+  private readonly failedPaths = new Set<string>();
+
   constructor(
     workspaceRoot: string,
     semanticDir = '.erd-studio',
@@ -213,9 +221,16 @@ export class LogicalModelService {
       return null;
     }
     try {
-      return this.readModelFile(filePath, name);
+      const model = this.readModelFile(filePath, name);
+      this.failedPaths.delete(filePath);
+      return model;
     } catch (err) {
       console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
+      // Once per broken file, not once per canvas refresh that re-reads it.
+      if (!this.failedPaths.has(filePath)) {
+        this.failedPaths.add(filePath);
+        this.onParseFailure?.();
+      }
       return null;
     }
   }

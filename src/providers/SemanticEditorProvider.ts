@@ -120,6 +120,7 @@ import type { UpdateColumnPayloadColumn } from '../types/messages';
 import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
+import { telemetry } from '../services/telemetryService';
 
 /**
  * Backoff between re-reads of a domain file that read as empty or truncated.
@@ -812,6 +813,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'addModel': {
             const payload = (message as { payload?: DesignModel }).payload;
             if (payload) {
+              telemetry.feature('addModel');
               await this.queueEdit(panelKey, () =>
                 this.handleAddModel(document, webviewPanel.webview, payload, activeStage));
             }
@@ -860,6 +862,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: unknown cardinality "${String(payload.cardinality)}".` } });
                 break;
               }
+              telemetry.feature('addRelationship');
               await this.queueEdit(panelKey, () =>
                 this.handleAddRelationship(document, webviewPanel.webview, payload, activeStage));
             }
@@ -932,6 +935,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'addExistingModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
+              telemetry.feature('addModel');
               await this.queueEdit(panelKey, () =>
                 this.handleAddExistingModel(document, webviewPanel.webview, payload, activeStage));
             }
@@ -961,6 +965,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               });
               break;
             }
+            telemetry.feature('feedbackOpened');
             try {
               await this.sendFeedbackContext(webviewPanel.webview, payload);
             } catch (err) {
@@ -1196,6 +1201,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               const requestId = typeof payload.requestId === 'number' && Number.isFinite(payload.requestId)
                 ? payload.requestId
                 : undefined;
+              if (payload.stage === 'physical') { telemetry.feature('physicalStage'); telemetry.stage('physical'); }
               await this.handleSwitchStage(panelKey, document, webviewPanel.webview, payload.stage, requestId);
             }
             break;
@@ -1203,6 +1209,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'toggleDiscrepancy': {
             const payload = (message as { payload?: { enabled: boolean; compareAgainst?: Stage } }).payload;
             if (payload) {
+              if (payload.enabled) telemetry.feature('compare');
               await this.handleToggleDiscrepancy(panelKey, document, webviewPanel.webview, payload);
             }
             break;
@@ -1210,15 +1217,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'generateSyncPlan': {
             const payload = (message as { payload?: { selections: Record<string, GroundTruth> } }).payload;
             if (payload) {
+              telemetry.feature('syncPlan');
               await this.handleGenerateSyncPlan(panelKey, document, webviewPanel.webview, payload.selections);
             }
             break;
           }
           case 'runDbtCompile': {
+            telemetry.feature('dbtCompile');
             await this.handleRunDbtCompile();
             break;
           }
           case 'launchClaudeSync': {
+            telemetry.feature('launchClaude');
             await this.handleLaunchClaudeSync();
             break;
           }
@@ -1238,6 +1248,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add annotation: ${pointError}` } });
                 break;
               }
+              telemetry.feature('annotation');
               await this.queueEdit(panelKey, () =>
                 this.handleAddAnnotation(document, webviewPanel.webview, payload));
             }
@@ -1573,6 +1584,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const success = await vscode.workspace.applyEdit(edit);
       if (!success) {
+        telemetry.error('editRejected');
         if (errorLabel && webview) {
           webview.postMessage({ type: 'error', payload: { message: errorLabel } });
         }
@@ -1757,6 +1769,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
         this.post(webview, { type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
+        if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
       } else {
         const domain = DomainService.toLogicalStage(unifiedDomain);
         const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
@@ -1766,6 +1779,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           welcomeDismissed,
           ...(autoLayout ? { autoLayout: true } : {}),
         });
+        if (options.persistPositions) this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
+        if (autoLayout) telemetry.feature('autoLayout');
       }
       // A payload went out, so the next failure is news again.
       this.lastLoadError.delete(errorKey);
@@ -1776,6 +1791,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         ...(err instanceof DomainFileError ? { kind: 'domain-file' as const } : {}),
       }, err);
     }
+  }
+
+  /** Usage telemetry for a canvas's first load: only the stage, format and counts. */
+  private recordCanvasOpen(document: vscode.TextDocument, stage: Stage, modelCount: number, hasCatalog: boolean): void {
+    let format: 'v4' | 'v5' = 'v5';
+    try {
+      if (detectDomainFormat(JSON.parse(document.getText()) as Record<string, unknown>) === 'v4') format = 'v4';
+    } catch {
+      // Loaded a moment ago, so this cannot really fail; v5 is the only other loadable format.
+    }
+    telemetry.canvasOpened(stage, format, modelCount);
+    telemetry.manifest(this.manifestService.isMissing ? 'missing' : this.manifestService.isStale ? 'stale' : 'ok');
+    telemetry.catalog(hasCatalog);
   }
 
   /**
@@ -1829,6 +1857,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return;
     }
     this.lastLoadError.set(errorKey, payload.message);
+    telemetry.error('domainLoad');
     hostErrorLog.record('sendDomainData', err ?? payload.message);
     console.error(`[SemanticEditorProvider] Failed to load domain: ${payload.message}`);
     this.post(webview, { type: 'error', payload });

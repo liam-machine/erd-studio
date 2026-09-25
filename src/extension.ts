@@ -6,14 +6,14 @@ import * as vscode from 'vscode';
 import { DomainService, renameDomainInRaw } from './services/domainService';
 import { LayerService } from './services/layerService';
 import { CURRENT_SCHEMA_VERSION, getRawDomainModelNames, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
-import { ManifestService } from './services/manifestService';
+import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
 import { TemplateService } from './services/templateService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
-import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion } from './services/harnessService';
+import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
@@ -33,6 +33,8 @@ import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from '
 import { submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
+import { TelemetryService, telemetry } from './services/telemetryService';
+import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
 import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
 import type { FeedbackKind } from './types/feedback';
 import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
@@ -238,6 +240,27 @@ async function selectDbtProject(
   if (confirm !== 'Switch and Reload') { return; }
   await context.workspaceState.update(SELECTED_PROJECT_KEY, fromAuto ? undefined : chosen);
   await vscode.commands.executeCommand('workbench.action.reloadWindow');
+}
+
+const MANIFEST_FAILURE_CODES: Record<ManifestLoadFailure, TelemetryErrorCode> = {
+  missing: 'manifestMissing',
+  malformed: 'manifestMalformed',
+  timeout: 'manifestTimeout',
+};
+
+/** The generic Agent Skills target has no feature key of its own and is not counted. */
+const HARNESS_INSTALL_FEATURES: Partial<Record<HarnessTarget['id'], TelemetryFeature>> = {
+  claude: 'harnessInstallClaude',
+  copilot: 'harnessInstallCopilot',
+  gemini: 'harnessInstallGemini',
+  codex: 'harnessInstallCodex',
+};
+
+function recordHarnessInstalls(results: HarnessInstallResult[]): void {
+  for (const r of results) {
+    const feature = r.success ? HARNESS_INSTALL_FEATURES[r.target.id] : undefined;
+    if (feature) telemetry.feature(feature);
+  }
 }
 
 const NO_PROJECT_MESSAGE =
@@ -527,6 +550,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   }
 
+  // Usage telemetry: one anonymous heartbeat per UTC day, never while VS Code's
+  // telemetry or erdStudio.telemetry.enabled is off. Constructed before the
+  // project check so a no-project activation is counted too.
+  const telemetryService = new TelemetryService(context);
+  context.subscriptions.push(telemetryService);
+  telemetryService.start();
+
   // "Send Feedback" is registered before any early return so it is always
   // reachable from the command palette, even when no dbt project is open.
   // When a canvas is active the report is routed through its webview so it can
@@ -538,6 +568,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'erdStudio.reportBug',
       async (prefill?: { kind?: FeedbackKind; title?: string; description?: string }) => {
         if (editorProviderForFeedback?.requestFeedbackDialog(prefill)) return;
+        telemetry.feature('feedbackOpened');
         await sendFeedbackWithoutCanvas(context, prefill, trackingServiceForFeedback);
       },
     ),
@@ -564,6 +595,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Picks which sidebar welcome text shows (package.json viewsWelcome).
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', Boolean(workspaceRoot));
   if (!workspaceRoot) {
+    telemetry.activation('no_project', false, 0);
     // Register stub commands / editor so palette entries and the sidebar
     // welcome buttons explain the problem instead of "command not found".
     registerFallbackCommands(context);
@@ -634,13 +666,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
   const logicalModelService = new LogicalModelService(workspaceRoot, semanticDir);
+  logicalModelService.onParseFailure = () => telemetry.error('modelFileParse');
   domainService.setLogicalModelService(logicalModelService);
-  const manifestService = new ManifestService({ dbtConfig });
+  const manifestService = new ManifestService({ dbtConfig, onLoadFailure: f => telemetry.error(MANIFEST_FAILURE_CODES[f]) });
   const ymlParserService = new YmlParserService({ dbtConfig });
   // target/catalog.json — present only after `dbt docs generate`, and the only
   // source of the types the warehouse actually has. Shares the one dbtConfig
   // read above; never re-read dbt_project.yml for a second consumer.
-  const catalogService = new CatalogService({ dbtConfig });
+  const catalogService = new CatalogService({ dbtConfig, onReadFailure: () => telemetry.error('catalogUnreadable') });
   const templateService = new TemplateService();
   // Status bar item shown while selectors.yml is out of sync (skipped writes).
   // Hidden as soon as a regenerate succeeds.
@@ -772,6 +805,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
   };
   refreshContextKeys();
+  telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), domainService.listDomains(workspaceRoot, semanticDir).length);
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the
@@ -784,6 +818,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
     lastLayerLoadErrorShown = loadError;
+    telemetry.error('layersInvalid');
     void vscode.window.showWarningMessage(
       `ERD Studio: ${semanticDir}/layers.json could not be loaded (${loadError}). ` +
       'Default layers are shown until the file is fixed; layer changes are disabled to avoid overwriting it.',
@@ -1634,7 +1669,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       if (confirm !== 'Migrate Now') return;
 
-      const result = migrationService.migrate();
+      let result: ReturnType<typeof migrationService.migrate>;
+      try {
+        result = migrationService.migrate();
+      } catch (err) {
+        telemetry.error('migrationFailed');
+        throw err;
+      }
+      telemetry.feature('migrateV5');
       const details: string[] = [];
       if (result.domainsConverted > 0) details.push(`${result.domainsConverted} domain(s) converted`);
       if (result.modelsCreated > 0) details.push(`${result.modelsCreated} model file(s) created in logical-models/`);
@@ -1992,6 +2034,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const results = selected.map(s =>
           harnessService.install(workspaceRoot, s.target, true),
         );
+        recordHarnessInstalls(results);
 
         const succeeded = results.filter(r => r.success);
         const failed = results.filter(r => !r.success);
@@ -2209,6 +2252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ).then(choice => {
         if (choice === 'Update All') {
           const results = staleTargets.map(target => harnessService.install(workspaceRoot, target, true));
+          recordHarnessInstalls(results);
           const failed = results.filter(r => !r.success);
           if (failed.length > 0) {
             const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
