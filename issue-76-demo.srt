@@ -27,37 +27,57 @@ Its YAML file lands in the same flat folder, right next to the SAP tables. That 
 Now the same project, with the fix.
 
 8
-00:00:52,802 --> 00:00:56,872
-The Model Library has a new button: Organise Model Library by Layer.
+00:00:52,802 --> 00:01:03,292
+The Model Library is still flat, and it has a new button: Organise Model Library by Layer. First, without organising anything, add fct_margin to the gold domain.
 
 9
-00:01:02,102 --> 00:01:13,384
-It works out which layer's domains use each model, and asks before moving anything. dim_project is used by both silver and gold, so it stays shared at the top level. An unused model stays too.
+00:01:03,902 --> 00:01:07,099
+Adding it from the dbt project, as before.
 
 10
-00:01:13,984 --> 00:01:18,440
-One click, and the library is grouped into Bronze, Silver and Gold.
+00:01:11,902 --> 00:01:21,778
+Because this library is still flat, the new file stays at the top level. Folders are opt-in, so nothing changes for a team until someone decides to organise.
 
 11
-00:01:21,384 --> 00:01:29,799
-On disk, each layer now has its own folder under logical-models. Domain files did not change: they still reference models by name.
+00:01:22,378 --> 00:01:24,118
+Opting in is one command.
 
 12
-00:01:31,884 --> 00:01:35,383
-Now add the same new model to the gold finance domain.
+00:01:29,678 --> 00:01:39,672
+It works out which layer's domains use each model, and asks first. dim_project is shared by silver and gold, so it stays at the top level, and so does the unused model.
 
 13
-00:01:46,328 --> 00:01:52,218
-This time the file is created in logical-models/gold/, the layer of the domain it was added to.
+00:01:40,278 --> 00:01:43,930
+The library is now grouped into Bronze, Silver and Gold.
 
 14
-00:01:54,328 --> 00:01:56,790
-And the Model Library lists it under Gold.
+00:01:47,378 --> 00:01:53,123
+On disk, each layer has its own folder. Domain files and layers.json did not change.
 
 15
-00:02:01,828 --> 00:02:11,656
-The bronze SAP canvas still loads every model from its new folder. Existing flat libraries keep working unchanged, and model names stay unique across folders.
+00:01:58,678 --> 00:02:04,011
+Now that the project uses layer folders, add fct_revenue to the gold domain.
 
 16
-00:02:12,257 --> 00:02:20,469
-That's the fix. New models go into their layer's folder, the library is grouped by layer, and one command organises an existing library.
+00:02:11,078 --> 00:02:14,533
+It is created straight into logical-models/gold/.
+
+17
+00:02:18,978 --> 00:02:26,471
+Later, a teammate moves dim_location out of the gold domain and into a silver one. Its file is now in the wrong layer folder.
+
+18
+00:02:28,478 --> 00:02:34,786
+Running Organise again spots it: dim_location, gold to silver. Re-running is always safe.
+
+19
+00:02:42,378 --> 00:02:44,425
+And the file moves into silver.
+
+20
+00:02:52,744 --> 00:02:57,409
+Every canvas still resolves its models by name, whichever folder they are in.
+
+21
+00:03:03,244 --> 00:03:11,422
+That's the fix. Layer folders are opt-in, one command organises the library and keeps it tidy, and domain files never change.
