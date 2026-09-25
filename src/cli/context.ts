@@ -133,12 +133,23 @@ function mtimeMs(file: string): number | null {
  * `metadata` block first, so a 40 MB manifest need not be read again just for this.
  */
 export function readInvocationId(file: string): string | null {
+  return readMetadataField(file, 'invocation_id');
+}
+
+/** The `metadata.generated_at` of a dbt artifact (epoch ms), read the same cheap way; null when absent. */
+export function readGeneratedAt(file: string): number | null {
+  const raw = readMetadataField(file, 'generated_at');
+  const ms = raw === null ? NaN : Date.parse(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function readMetadataField(file: string, field: string): string | null {
   let fd: number | undefined;
   try {
     fd = fs.openSync(file, 'r');
     const buf = Buffer.alloc(16 * 1024);
     const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    const m = /"invocation_id"\s*:\s*"([^"]+)"/.exec(buf.subarray(0, n).toString('utf8'));
+    const m = new RegExp(`"${field}"\\s*:\\s*"([^"]+)"`).exec(buf.subarray(0, n).toString('utf8'));
     return m ? m[1] : null;
   } catch {
     return null;
@@ -151,6 +162,24 @@ export function readInvocationId(file: string): string | null {
 export function sameDbtInvocation(a: string, b: string): boolean {
   const idA = readInvocationId(a);
   return idA !== null && idA === readInvocationId(b);
+}
+
+/**
+ * Is the catalog older than the manifest? Decided from what dbt recorded inside the files —
+ * `metadata.generated_at` — because file times are not evidence: a fresh `git clone` (CI, or a
+ * repo that commits its artifacts, like the sample project) stamps both files with whatever order
+ * the checkout wrote them in. Artifacts from one dbt run are always current together (`dbt docs
+ * generate` writes the catalog and then rewrites the manifest). File times are only the fallback
+ * when either file records no time.
+ */
+export function catalogOlderThanManifest(
+  catalogPath: string, manifestPath: string, catalogMtime: number, manifestMtime: number,
+): boolean {
+  if (sameDbtInvocation(catalogPath, manifestPath)) { return false; }
+  const catalogAt = readGeneratedAt(catalogPath);
+  const manifestAt = readGeneratedAt(manifestPath);
+  if (catalogAt !== null && manifestAt !== null) { return catalogAt < manifestAt; }
+  return catalogMtime < manifestMtime;
 }
 
 function iso(ms: number | null): string | null {
@@ -202,10 +231,8 @@ export async function buildCliContext(opts: { project?: string; semanticDir: str
     catalogStatus = 'missing';
   } else if (!catalog) {
     catalogStatus = 'unreadable';
-  } else if (manifestMtime !== null && catalogMtime < manifestMtime
-    && !sameDbtInvocation(catalogPath, manifestPath)) {
-    // `dbt docs generate` writes catalog.json and then rewrites manifest.json a moment later,
-    // so file times alone would call a fresh catalog stale; one run shares one invocation_id.
+  } else if (manifestMtime !== null
+    && catalogOlderThanManifest(catalogPath, manifestPath, catalogMtime, manifestMtime)) {
     catalogStatus = 'older-than-manifest';
   } else {
     catalogStatus = 'ok';

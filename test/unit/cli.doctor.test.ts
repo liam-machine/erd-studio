@@ -170,8 +170,11 @@ describe('doctor', () => {
 
   it('flags a catalog older than the manifest, and a missing manifest', async () => {
     const root = copyFixture('dbt-project');
-    const old = new Date('2020-01-01T00:00:00Z');
-    fs.utimesSync(path.join(root, 'target', 'catalog.json'), old, old);
+    // dbt generated this catalog before the manifest (recorded in metadata.generated_at) — file
+    // times are deliberately not the evidence, since a git checkout scrambles them.
+    const catalogFile = path.join(root, 'target', 'catalog.json');
+    fs.writeFileSync(catalogFile, fs.readFileSync(catalogFile, 'utf8')
+      .replace(/"generated_at":\s*"[^"]*"/, '"generated_at": "2020-01-01T00:00:00Z"'));
     const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
     expect(r.artifacts.catalog.status).toBe('older-than-manifest');
     expect(r.nextSteps.map((s) => s.id)).toContain('run-catalog');
