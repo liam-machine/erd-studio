@@ -59,7 +59,7 @@ dbt is the only stack ERD Studio can read today. If you model somewhere else, [c
 
 Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logical-only setup](#not-using-dbt)). The Physical view needs nothing beyond your dbt schema YAMLs, and gets richer once `manifest.json` and `catalog.json` exist.
 
-<a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/onboarding/getting-started-poster.jpg" width="640" alt="Getting-started video: a short tour from a dbt project to a checked ERD with your AI assistant. Click to watch." /></a>
+<a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="640" alt="Getting-started video: a short tour from a dbt project to a checked ERD with your AI assistant. Click to watch." /></a>
 
 **New to ERD Studio?** [Watch the short getting-started video](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4). After you install, ERD Studio opens a **Welcome** tab the first time you use it, with the same video and a short setup checklist. Open it again any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
 
