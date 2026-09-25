@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.5.1 — 2026-09-25
 
 ### Changed
 - The optional AI feedback analysis service and the anonymous usage heartbeat now go to
