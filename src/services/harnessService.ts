@@ -2,7 +2,10 @@
  * HarnessService — generates AI coding assistant configuration files.
  *
  * Supports installing ERD Studio schema reference into:
- *   - Claude Code (.claude/skills/erd-studio/SKILL.md)
+ *   - Claude Code (.claude/skills/erd-studio/SKILL.md, plus the
+ *     /erd-studio-setup onboarding skill in .claude/skills/erd-studio-setup/)
+ *   - Agent Skills (.agents/skills/erd-studio/SKILL.md + .agents/skills/erd-studio-setup/),
+ *     the open-standard folder GitHub Copilot, Codex, Gemini CLI and Cursor read
  *   - GitHub Copilot (.github/instructions/erd-studio.instructions.md)
  *   - Google Gemini (.gemini/styleguide.md)
  *   - OpenAI Codex (AGENTS.md)
@@ -13,13 +16,18 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import type { FileState, HarnessStatus, RecommendedInstallResult } from '../types/harness';
+import { recommendedSkillTargets, type AiAssistantId, type SkillHarnessTarget } from '../types/aiAssistants';
+import { SETUP_SKILL_DIRS, SETUP_SKILL_FILES, skillForTarget } from './harnessAssets';
+
+export type { FileState, HarnessStatus, RecommendedInstallResult } from '../types/harness';
 
 // ---------------------------------------------------------------------------
 // Version marker — embedded in every generated harness file
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '17';
+export const HARNESS_VERSION = '18';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -56,7 +64,7 @@ export interface HarnessTarget {
   /** Display label shown in QuickPick. */
   label: string;
   /** Internal identifier. */
-  id: 'claude' | 'copilot' | 'gemini' | 'codex';
+  id: 'claude' | 'agents' | 'copilot' | 'gemini' | 'codex';
   /** Brief description shown in QuickPick. */
   description: string;
   /** Relative path from workspace root where the file will be written. */
@@ -71,6 +79,8 @@ export interface HarnessInstallResult {
   filePath: string;
   alreadyExisted: boolean;
   error?: string;
+  /** Workspace-relative (POSIX) paths this install wrote, set on success. */
+  filesWritten?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +94,17 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
     description: '.claude/skills/erd-studio/SKILL.md',
     relativePath: '.claude/skills/erd-studio/SKILL.md',
     gitignorePattern: '.claude/skills/erd-studio/',
+  },
+  {
+    label: '$(folder-library) Agent Skills — GitHub Copilot, Codex, Gemini CLI, Cursor',
+    id: 'agents',
+    description: '.agents/skills/erd-studio/SKILL.md',
+    relativePath: '.agents/skills/erd-studio/SKILL.md',
+    // No gitignorePattern, deliberately: Gemini CLI's read_file refuses any
+    // path .gitignore matches (`respectGitIgnore` defaults to true), so an
+    // ignored `.agents/skills/` would let the guide start (skill activation
+    // does not go through read_file) and then stall at its first reference
+    // file. See install().
   },
   {
     label: '$(github) GitHub Copilot',
@@ -120,6 +141,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 
 \`\`\`
 .erd-studio/
+├── modelling-approach.md     ← Optional: the team's modelling rules (see below)
 ├── logical-models/           ← Central model definitions (YAML, one per model)
 │   ├── dim_customer.yml
 │   ├── dim_project.yml
@@ -132,6 +154,10 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 \`\`\`
 
 **Key principle:** Models are defined ONCE in \`logical-models/\` and referenced from multiple domain files. Editing a model from any domain updates the shared definition.
+
+### Team Modelling Approach
+
+If \`.erd-studio/modelling-approach.md\` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (\`modelRole\`, \`grain\`, \`scdType\`, \`additiveType\`, \`isNaturalKey\`, \`rationale\`). The \`/erd-studio-setup\` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise.
 
 ### Model Library (Sidebar)
 
@@ -172,7 +198,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`
 | \`stubColumns\` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
 | \`logical.models\` | Yes | Array of model name strings (references to \`logical-models/*.yml\`) |
 | \`logical.relationships\` | Yes | Array of relationship objects |
-| \`viewConfig\` | Yes | Root-level view settings. The extension auto-assigns positions for new models |
+| \`viewConfig\` | Yes | Root-level view settings. The extension auto-assigns positions for new models; a new domain written with \`viewConfig: {}\` (no positions at all) is auto-arranged with the canvas's auto layout the first time it opens |
 
 **viewConfig** must be at the root level, not inside \`logical\`. It stores node positions keyed by model name, and optional canvas annotations (build notes):
 
@@ -565,6 +591,12 @@ models:
 // Format-specific generators
 // ---------------------------------------------------------------------------
 
+/**
+ * The schema skill. Its frontmatter is only \`name\` + \`description\`, which
+ * is portable, so the same text installs for Claude Code
+ * (\`.claude/skills/erd-studio/\`) and for the Agent Skills tools
+ * (\`.agents/skills/erd-studio/\`).
+ */
 function generateClaudeSkill(): string {
   return `---
 name: erd-studio
@@ -592,21 +624,31 @@ function generateEnforceSkillHook(): string {
     '#!/usr/bin/env bash',
     '# ERD Studio — PreToolUse hook for Edit and Write tools.',
     '# Blocks the first .erd-studio file edit per Claude Code session to ensure the',
-    '# /erd-studio skill is loaded before any changes are made. Subsequent edits',
-    '# in the same session are allowed (flag keyed on session_id from stdin JSON).',
+    '# /erd-studio skill is loaded before any changes are made. Every other call',
+    '# exits 0 with NO output, so Claude Code\'s normal permission flow decides —',
+    '# this hook only ever denies, it never approves an edit.',
     '',
-    'deny=\'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"You must load the /erd-studio skill before editing .erd-studio files. It contains the two-file editing rules (YAML models vs JSON domains). Run: /erd-studio — then retry."}}\'',
-    'allow=\'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":""}}\'',
+    'deny=\'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"ERD Studio: load the /erd-studio skill (file-format rules) before editing .erd-studio files, then retry. This is a one-time check per session — the /erd-studio-setup walkthrough expects it."}}\'',
     '',
     '# Read all stdin (Claude sends hook input JSON via stdin)',
     'input="$(cat)"',
     '',
     '# Extract fields from JSON using grep (avoids jq/python dependency)',
+    'tool_name="$(echo "$input" | grep -o \'"tool_name" *: *"[^"]*"\' | head -1 | sed \'s/.*: *"//;s/"$//\')"',
+    '# Claude Code\'s own Edit and Write only. Copilot can run this hook too when',
+    '# it reads Claude hooks (chat.useClaudeHooks), and it ignores the matcher,',
+    '# so every other tool name is waved through here.',
+    'case "$tool_name" in',
+    '  Edit|Write) ;;',
+    '  *) exit 0 ;;',
+    'esac',
     'file_path="$(echo "$input" | grep -o \'"file_path" *: *"[^"]*"\' | head -1 | sed \'s/.*: *"//;s/"$//\')"',
     'session_id="$(echo "$input" | grep -o \'"session_id" *: *"[^"]*"\' | head -1 | sed \'s/.*: *"//;s/"$//\')"',
     '',
-    '# Only act on files inside .erd-studio/ directories',
+    '# Only act on files inside .erd-studio/ directories. modelling-approach.md is',
+    '# free-form notes with no file format, so it needs no skill loaded first.',
     'case "$file_path" in',
+    '  */.erd-studio/modelling-approach.md) ;;',
     '  */.erd-studio/*)',
     '    flag="/tmp/.erd-studio-skill-${session_id}"',
     '    if [ ! -f "$flag" ]; then',
@@ -616,7 +658,7 @@ function generateEnforceSkillHook(): string {
     '    ;;',
     'esac',
     '',
-    'echo "$allow"',
+    '# Not ours to decide: no output, normal permission flow.',
     'exit 0',
   ].join('\n') + '\n';
 }
@@ -740,6 +782,86 @@ export function applySemanticDir(content: string, semanticDir: string): string {
   return content.replace(/\.erd-studio(?![\w-])/g, dir);
 }
 
+const CLAUDE_HOOK_SCRIPT = '.claude/skills/erd-studio/enforce-skill.sh';
+const CLAUDE_SETTINGS = '.claude/settings.local.json';
+/**
+ * The registered hook command. `$CLAUDE_PROJECT_DIR` makes the path work on
+ * any machine; the guard makes it a no-op anywhere that variable is unset —
+ * GitHub Copilot runs `.claude/settings.local.json` hooks when Claude hooks are
+ * enabled in its settings, and would otherwise run `bash /.claude/…` and fail
+ * on every tool call.
+ */
+const HOOK_COMMAND = '[ -n "$CLAUDE_PROJECT_DIR" ] && bash "$CLAUDE_PROJECT_DIR/.claude/skills/erd-studio/enforce-skill.sh" || true';
+
+/** The per-folder paths of the two skill targets (`claude` → `.claude/skills/`, `agents` → `.agents/skills/`). */
+interface SkillTargetPaths {
+  schemaSkill: string;
+  syncGuide: string;
+  setupDir: string;
+  setupSkill: string;
+  /** The setup skill directory's ignore line (added only where the schema skill's is — see install()). */
+  setupIgnore: string;
+}
+
+function skillTargetPaths(target: SkillHarnessTarget): SkillTargetPaths {
+  const base = target === 'claude' ? '.claude/skills' : '.agents/skills';
+  const setupDir = SETUP_SKILL_DIRS[target];
+  return {
+    schemaSkill: `${base}/erd-studio/SKILL.md`,
+    syncGuide: `${base}/erd-studio/SYNC.md`,
+    setupDir,
+    setupSkill: `${setupDir}/SKILL.md`,
+    setupIgnore: `${setupDir}/`,
+  };
+}
+
+function isSkillTarget(id: HarnessTarget['id']): id is SkillHarnessTarget {
+  return id === 'claude' || id === 'agents';
+}
+
+/**
+ * The Claude target's version-marked files, workspace-relative: the schema
+ * skill, its SYNC.md companion and the setup skill's SKILL.md. Staleness is
+ * judged per file (see `detectStale`).
+ */
+export function claudeManagedFiles(): string[] {
+  const p = skillTargetPaths('claude');
+  return [p.schemaSkill, p.syncGuide, p.setupSkill];
+}
+
+/** The `agents` target's version-marked files: the same three, under `.agents/skills/`. */
+export function agentsManagedFiles(): string[] {
+  const p = skillTargetPaths('agents');
+  return [p.schemaSkill, p.syncGuide, p.setupSkill];
+}
+
+/** Classify one harness file by its version marker. An unreadable file counts as unmanaged — never ours to replace. */
+function fileState(filePath: string): FileState {
+  if (!fs.existsSync(filePath)) { return 'missing'; }
+  let content: string;
+  try {
+    content = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return 'unmanaged';
+  }
+  const version = extractHarnessVersion(content);
+  if (version === null) { return 'unmanaged'; }
+  return version === HARNESS_VERSION ? 'current' : 'outdated';
+}
+
+/** Whether `.gitignore` already lists `pattern` (tolerating a leading `/` and a missing trailing `/`). */
+function gitignoreLists(workspaceRoot: string, pattern: string): boolean {
+  let content: string;
+  try {
+    content = fs.readFileSync(path.join(workspaceRoot, '.gitignore'), 'utf-8');
+  } catch {
+    return false;
+  }
+  const norm = (p: string) => p.trim().replace(/^\//, '').replace(/\/$/, '');
+  const want = norm(pattern);
+  return content.split('\n').some((line) => norm(line) === want);
+}
+
 export class HarnessService {
   /**
    * @param semanticDir — the configured `erdStudio.semanticDir`; generated
@@ -757,6 +879,7 @@ export class HarnessService {
   private generateDefaultContent(targetId: HarnessTarget['id']): string {
     switch (targetId) {
       case 'claude':
+      case 'agents':
         return generateClaudeSkill();
       case 'copilot':
         return generateCopilotInstructions();
@@ -775,15 +898,31 @@ export class HarnessService {
    * user content elsewhere in AGENTS.md is always preserved.
    * For all others, creates the file (refusing to overwrite unless
    * `overwrite` is true).
+   *
+   * The two skill targets (`claude`, `agents`) also write companions: SYNC.md
+   * and the `/erd-studio-setup` skill; `claude` additionally writes the
+   * PreToolUse hook and its `.claude/settings.local.json` entry.
+   *
+   * `overwrite` is about the primary file only — the file the caller's
+   * prompt named. The `/erd-studio-setup` companion has its own switch: a
+   * hand-written setup SKILL.md is replaced only with
+   * `replaceUnmanagedSetupSkill`, which only the Welcome panel's
+   * Replace / Keep mine modal ever passes. `keepUnmanagedPrimary` is that
+   * modal's "Keep mine": a hand-written primary SKILL.md is left alone while
+   * every companion that is not hand-written is still installed.
    */
   install(
     workspaceRoot: string,
     target: HarnessTarget,
     overwrite: boolean = false,
+    options: { replaceUnmanagedSetupSkill?: boolean; keepUnmanagedPrimary?: boolean } = {},
   ): HarnessInstallResult {
     const filePath = path.join(workspaceRoot, target.relativePath);
     const dir = path.dirname(filePath);
     const alreadyExisted = fs.existsSync(filePath);
+    const skillTarget = isSkillTarget(target.id) ? target.id : null;
+    const keepPrimary = options.keepUnmanagedPrimary === true && skillTarget !== null
+      && alreadyExisted && fileState(filePath) === 'unmanaged';
 
     try {
       // Ensure parent directory exists
@@ -805,9 +944,12 @@ export class HarnessService {
             success: true,
             filePath,
             alreadyExisted: true,
+            filesWritten: [],
           };
         }
         fs.writeFileSync(filePath, mergeCodexContent(existing, content), 'utf-8');
+      } else if (keepPrimary) {
+        // "Keep mine": the user's SKILL.md stays exactly as it is.
       } else if (alreadyExisted && !overwrite) {
         return {
           target,
@@ -820,31 +962,68 @@ export class HarnessService {
         fs.writeFileSync(filePath, content, 'utf-8');
       }
 
-      // Write companion files for Claude harness
-      if (target.id === 'claude') {
-        // SYNC.md — progressive context loading for sync plan execution
+      const rel = (p: string) => path.relative(workspaceRoot, p).split(path.sep).join('/');
+      const filesWritten: string[] = keepPrimary ? [] : [rel(filePath)];
+
+      // Companion files for the two skill targets
+      let setupDirExisted = true;
+      if (skillTarget) {
+        const paths = skillTargetPaths(skillTarget);
+        // SYNC.md — progressive context loading for sync plan execution.
+        // Under "Keep mine" a hand-written SYNC.md is kept too.
         const syncPath = path.join(dir, 'SYNC.md');
-        fs.writeFileSync(syncPath, applySemanticDir(generateSyncGuide(), this.semanticDir), 'utf-8');
-
-        // enforce-skill.sh — PreToolUse hook that blocks first .erd-studio edit
-        // per session so Claude loads the /erd-studio skill before making changes
-        const hookPath = path.join(dir, 'enforce-skill.sh');
-        fs.writeFileSync(hookPath, applySemanticDir(generateEnforceSkillHook(), this.semanticDir), { mode: 0o755 });
-
-        // Merge hook config into .claude/settings.local.json (local only, never committed)
-        try {
-          this.mergeHookConfig(workspaceRoot);
-        } catch {
-          // Best-effort — don't fail install if settings merge fails
+        if (!(keepPrimary && fileState(syncPath) === 'unmanaged')) {
+          fs.writeFileSync(syncPath, applySemanticDir(generateSyncGuide(), this.semanticDir), 'utf-8');
+          filesWritten.push(rel(syncPath));
         }
+
+        if (skillTarget === 'claude') {
+          // enforce-skill.sh — PreToolUse hook that blocks first .erd-studio edit
+          // per session so Claude loads the /erd-studio skill before making changes.
+          // Claude Code only: the other tools' hook formats differ.
+          const hookPath = path.join(dir, 'enforce-skill.sh');
+          fs.writeFileSync(hookPath, applySemanticDir(generateEnforceSkillHook(), this.semanticDir), { mode: 0o755 });
+          filesWritten.push(rel(hookPath));
+
+          // Merge hook config into .claude/settings.local.json (local only, never committed)
+          try {
+            if (this.mergeHookConfig(workspaceRoot)) { filesWritten.push(CLAUDE_SETTINGS); }
+          } catch {
+            // Best-effort — don't fail install if settings merge fails
+          }
+        }
+
+        // /erd-studio-setup — the onboarding skill, a companion of this target.
+        // Checked before writing so the ignore step below knows whether
+        // this is the directory's first appearance (upgraders included).
+        setupDirExisted = fs.existsSync(path.join(workspaceRoot, paths.setupDir));
+        filesWritten.push(...this.writeSetupSkill(workspaceRoot, skillTarget, options.replaceUnmanagedSetupSkill === true));
       }
 
       // Add to .gitignore on first install only — subsequent updates and
       // version bumps skip this so the user can remove the entry if they
-      // want the harness files tracked in version control.
+      // want the harness files tracked in version control. The `.agents/`
+      // target has no pattern and is never ignored (Gemini CLI cannot read
+      // an ignored file — see its HARNESS_TARGETS entry).
       if (!alreadyExisted && target.gitignorePattern) {
         try {
-          this.addToGitignore(workspaceRoot, target.gitignorePattern);
+          if (this.addToGitignore(workspaceRoot, target.gitignorePattern)) { filesWritten.push('.gitignore'); }
+        } catch {
+          // Best-effort — don't fail the install if .gitignore is unwritable
+        }
+      }
+
+      // The setup skill follows the user's existing choice for the schema
+      // skill in the same folder: it is ignored only while that directory is.
+      // Keyed on the setup directory's first appearance rather than the
+      // primary file's, so users upgrading from v17 get the line too.
+      if (skillTarget && !setupDirExisted && target.gitignorePattern
+        && gitignoreLists(workspaceRoot, target.gitignorePattern)) {
+        try {
+          if (this.addToGitignore(workspaceRoot, skillTargetPaths(skillTarget).setupIgnore)
+            && !filesWritten.includes('.gitignore')) {
+            filesWritten.push('.gitignore');
+          }
         } catch {
           // Best-effort — don't fail the install if .gitignore is unwritable
         }
@@ -855,6 +1034,7 @@ export class HarnessService {
         success: true,
         filePath,
         alreadyExisted,
+        filesWritten,
       };
     } catch (err) {
       return {
@@ -868,18 +1048,60 @@ export class HarnessService {
   }
 
   /**
+   * Write the `/erd-studio-setup` skill into one target's folder.
+   * `applySemanticDir` rewrites data-directory references but leaves the
+   * `~/.erd-studio-cli` launcher path alone (its `(?![\w-])` lookahead); the
+   * version marker is appended to SKILL.md only, and SKILL.md's frontmatter
+   * is cut to the portable fields for `.agents/` (`skillForTarget`). An
+   * existing SKILL.md with no marker is the user's: unless `replaceUnmanaged`
+   * is set, none of the skill's files are touched. Returns the
+   * workspace-relative paths written.
+   */
+  private writeSetupSkill(workspaceRoot: string, target: SkillHarnessTarget, replaceUnmanaged: boolean): string[] {
+    const paths = skillTargetPaths(target);
+    if (!replaceUnmanaged && fileState(path.join(workspaceRoot, paths.setupSkill)) === 'unmanaged') {
+      return [];
+    }
+    const written: string[] = [];
+    for (const [relativePath, content] of this.setupSkillFiles(target)) {
+      const filePath = path.join(workspaceRoot, ...paths.setupDir.split('/'), ...relativePath.split('/'));
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, content, 'utf-8');
+      written.push(`${paths.setupDir}/${relativePath}`);
+    }
+    return written;
+  }
+
+  /**
+   * The setup skill's files exactly as `install()` writes them for `target`:
+   * `[path relative to the skill directory, content]`. Exposed for tests and
+   * for anything that needs to show the installed text without writing it.
+   */
+  setupSkillFiles(target: SkillHarnessTarget): Array<[string, string]> {
+    return SETUP_SKILL_FILES.map((asset) => {
+      let content = applySemanticDir(asset.content, this.semanticDir);
+      if (asset.relativePath === 'SKILL.md') { content = skillForTarget(content, target); }
+      if (asset.versioned) {
+        content = content.replace(/\s*$/, '') + '\n\n' + buildVersionMarker() + '\n';
+      }
+      return [asset.relativePath, content];
+    });
+  }
+
+  /**
    * Add a pattern to the workspace .gitignore if not already present.
    * Only called on first install — subsequent updates skip this so users
-   * who remove the entry don't have it re-added.
+   * who remove the entry don't have it re-added. Returns whether the file
+   * was changed.
    */
-  private addToGitignore(workspaceRoot: string, pattern: string): void {
+  private addToGitignore(workspaceRoot: string, pattern: string): boolean {
     const gitignorePath = path.join(workspaceRoot, '.gitignore');
     let content = '';
     if (fs.existsSync(gitignorePath)) {
       content = fs.readFileSync(gitignorePath, 'utf-8');
       // Check if the pattern is already present (exact line match)
       const lines = content.split('\n').map(l => l.trim());
-      if (lines.includes(pattern)) { return; }
+      if (lines.includes(pattern)) { return false; }
     }
 
     const section = '\n# ERD Studio AI coding harness (auto-generated, safe to remove)\n' + pattern + '\n';
@@ -903,13 +1125,14 @@ export class HarnessService {
       if (insertIndex >= 0) {
         lines.splice(insertIndex, 0, pattern);
         fs.writeFileSync(gitignorePath, lines.join('\n'), 'utf-8');
-        return;
+        return true;
       }
     }
 
     // No existing section — append a new one
     const needsLeadingNewline = content.length > 0 && !content.endsWith('\n');
     fs.appendFileSync(gitignorePath, (needsLeadingNewline ? '\n' : '') + section, 'utf-8');
+    return true;
   }
 
   /**
@@ -958,17 +1181,162 @@ export class HarnessService {
       }
       if (version !== HARNESS_VERSION) {
         stale.push(target);
+      } else if (isSkillTarget(target.id) && this.skillCompanionsStale(workspaceRoot, target.id)) {
+        stale.push(target);
       }
     }
     return stale;
   }
 
   /**
+   * Per-file staleness of a managed skill install's companions. SYNC.md
+   * missing or carrying another marker is stale, so a partial install gets
+   * repaired. The setup skill is stale only when it carries another marker:
+   * a *missing* one is reported by `harnessStatus()` instead (the v18
+   * "Update All" writes it anyway), and an unmarked one is the user's.
+   */
+  private skillCompanionsStale(workspaceRoot: string, target: SkillHarnessTarget): boolean {
+    const paths = skillTargetPaths(target);
+    const sync = fileState(path.join(workspaceRoot, paths.syncGuide));
+    if (sync === 'missing' || sync === 'outdated') { return true; }
+    return fileState(path.join(workspaceRoot, paths.setupSkill)) === 'outdated';
+  }
+
+  /** Schema skill (folding in SYNC.md) and setup skill state for one skill folder. */
+  private skillFolderStatus(workspaceRoot: string, target: SkillHarnessTarget): { schemaSkill: FileState; setupSkill: FileState } {
+    const paths = skillTargetPaths(target);
+    let schemaSkill = fileState(path.join(workspaceRoot, paths.schemaSkill));
+    if (schemaSkill === 'current') {
+      const sync = fileState(path.join(workspaceRoot, paths.syncGuide));
+      if (sync === 'missing' || sync === 'outdated') { schemaSkill = 'outdated'; }
+    }
+    return { schemaSkill, setupSkill: fileState(path.join(workspaceRoot, paths.setupSkill)) };
+  }
+
+  /**
+   * Per-file state of every harness target, for the Welcome panel and the
+   * CLI's `doctor`. Each skill folder's `schemaSkill` folds in SYNC.md: a
+   * current SKILL.md whose SYNC.md is missing or outdated reads as
+   * `outdated`. Codex is `missing` while AGENTS.md has no ERD Studio region
+   * (appending one is always safe there), so it is never `unmanaged`.
+   */
+  harnessStatus(workspaceRoot: string): HarnessStatus {
+    let codex: FileState = 'missing';
+    try {
+      const agents = fs.readFileSync(path.join(workspaceRoot, 'AGENTS.md'), 'utf-8');
+      const region = findCodexRegion(agents);
+      if (region !== null) {
+        const version = extractHarnessVersion(agents.slice(region.start, region.end));
+        codex = version === HARNESS_VERSION ? 'current' : 'outdated';
+      }
+    } catch {
+      // No AGENTS.md (or unreadable) — nothing of ours there.
+    }
+
+    const targetPath = (id: HarnessTarget['id']) =>
+      path.join(workspaceRoot, HARNESS_TARGETS.find((t) => t.id === id)!.relativePath);
+
+    return {
+      claude: {
+        ...this.skillFolderStatus(workspaceRoot, 'claude'),
+        hookRegistered: fs.existsSync(path.join(workspaceRoot, CLAUDE_HOOK_SCRIPT))
+          && this.isHookRegistered(workspaceRoot),
+      },
+      agents: this.skillFolderStatus(workspaceRoot, 'agents'),
+      copilot: fileState(targetPath('copilot')),
+      gemini: fileState(targetPath('gemini')),
+      codex,
+    };
+  }
+
+  /**
+   * One-click install for the Welcome panel. `assistants` (the detected AI
+   * assistants) picks the skill folders via `recommendedSkillTargets()`:
+   * `.claude/skills/` for Claude Code, `.agents/skills/` for any other, both
+   * when none is detected (or `assistants` is omitted). Each folder gets its
+   * schema skill, SYNC.md and setup skill; the Claude one also gets the hook
+   * and settings merge.
+   *
+   * Writes nothing and returns `needs-confirmation` when any selected
+   * SKILL.md exists without a marker and neither `replaceUnmanaged` nor
+   * `keepUnmanaged` is set; returns `unchanged` when every selected folder is
+   * current (and, for Claude, the hook is registered). `keepUnmanaged`
+   * ("Keep mine") installs everything that is not hand-written and leaves
+   * each hand-written SKILL.md exactly as it is.
+   */
+  installRecommended(
+    workspaceRoot: string,
+    options: { replaceUnmanaged: boolean; keepUnmanaged?: boolean; assistants?: readonly AiAssistantId[] },
+  ): RecommendedInstallResult {
+    const targets = recommendedSkillTargets(options.assistants ?? []);
+    let status: HarnessStatus;
+    try {
+      status = this.harnessStatus(workspaceRoot);
+    } catch (err) {
+      return { status: 'failed', unmanaged: [], filesWritten: [], targets, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const unmanaged: string[] = [];
+    for (const t of targets) {
+      const paths = skillTargetPaths(t);
+      if (status[t].schemaSkill === 'unmanaged') { unmanaged.push(paths.schemaSkill); }
+      if (status[t].setupSkill === 'unmanaged') { unmanaged.push(paths.setupSkill); }
+    }
+    const keep = options.keepUnmanaged === true && !options.replaceUnmanaged;
+    if (unmanaged.length > 0 && !options.replaceUnmanaged && !keep) {
+      return { status: 'needs-confirmation', unmanaged, filesWritten: [], targets };
+    }
+
+    const upToDate = (t: SkillHarnessTarget) => status[t].schemaSkill === 'current' && status[t].setupSkill === 'current'
+      && (t !== 'claude' || status.claude.hookRegistered);
+    if (targets.every(upToDate)) {
+      return { status: 'unchanged', unmanaged: [], filesWritten: [], targets };
+    }
+
+    const filesWritten: string[] = [];
+    for (const t of targets) {
+      if (upToDate(t)) { continue; }
+      const target = HARNESS_TARGETS.find((h) => h.id === t)!;
+      const result = this.install(workspaceRoot, target, true, {
+        replaceUnmanagedSetupSkill: options.replaceUnmanaged,
+        keepUnmanagedPrimary: keep,
+      });
+      for (const f of result.filesWritten ?? []) {
+        if (!filesWritten.includes(f)) { filesWritten.push(f); }
+      }
+      if (!result.success) {
+        return { status: 'failed', unmanaged: [], filesWritten, targets, error: result.error };
+      }
+    }
+    return {
+      status: targets.every((t) => status[t].schemaSkill === 'missing') ? 'installed' : 'updated',
+      unmanaged: [],
+      filesWritten,
+      targets,
+    };
+  }
+
+  /** Whether `.claude/settings.local.json` registers the `enforce-skill.sh` PreToolUse hook. */
+  private isHookRegistered(workspaceRoot: string): boolean {
+    try {
+      const settings = JSON.parse(fs.readFileSync(path.join(workspaceRoot, CLAUDE_SETTINGS), 'utf-8'));
+      const preToolUse: unknown = settings?.hooks?.PreToolUse;
+      if (!Array.isArray(preToolUse)) { return false; }
+      return preToolUse.some((entry: { hooks?: Array<{ command?: unknown }> } | null) =>
+        Array.isArray(entry?.hooks) && entry.hooks.some((h) =>
+          typeof h?.command === 'string' && h.command.includes('enforce-skill.sh')));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Merge the PreToolUse hook config into .claude/settings.local.json.
    * Creates the file if it doesn't exist; adds the hook entry if missing.
    * Uses settings.local.json (not settings.json) so it stays local and never committed.
+   * Returns whether the file was written.
    */
-  private mergeHookConfig(workspaceRoot: string): void {
+  private mergeHookConfig(workspaceRoot: string): boolean {
     const settingsPath = path.join(workspaceRoot, '.claude', 'settings.local.json');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -978,17 +1346,16 @@ export class HarnessService {
         settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
       } catch {
         // Malformed JSON — bail out rather than overwriting the user's file
-        return;
+        return false;
       }
     }
 
-    // Use $CLAUDE_PROJECT_DIR so the path works on any machine / project location
     const hookEntry = {
       matcher: 'Edit|Write',
       hooks: [
         {
           type: 'command',
-          command: 'bash "$CLAUDE_PROJECT_DIR/.claude/skills/erd-studio/enforce-skill.sh"',
+          command: HOOK_COMMAND,
           timeout: 5,
         },
       ],
@@ -1010,18 +1377,26 @@ export class HarnessService {
     });
 
     if (alreadyRegistered) {
-      // Replace legacy check-skill.sh entry with current enforce-skill.sh
-      const hasLegacy = preToolUse.some((entry) => {
+      // Replace an outdated ERD Studio entry — the legacy check-skill.sh, or an
+      // enforce-skill.sh command without the $CLAUDE_PROJECT_DIR guard — with
+      // the current one. An entry already carrying HOOK_COMMAND is left alone.
+      const isOutdated = (h: Record<string, unknown>) => isErdStudioHook(h) && h.command !== HOOK_COMMAND;
+      const hasOutdated = preToolUse.some((entry) => {
         const hooks = entry.hooks as Array<Record<string, unknown>> | undefined;
-        return hooks?.some((h) => typeof h.command === 'string' && h.command.includes('check-skill.sh'));
+        return hooks?.some(isOutdated);
       });
-      if (!hasLegacy) { return; } // Current version already registered
+      if (!hasOutdated) { return false; } // Current version already registered
 
-      // Remove legacy entries
-      settings.hooks.PreToolUse = preToolUse.filter((entry) => {
-        const hooks = entry.hooks as Array<Record<string, unknown>> | undefined;
-        return !hooks?.some((h) => typeof h.command === 'string' && h.command.includes('check-skill.sh'));
-      });
+      // Remove every ERD Studio hook (keeping any other hook that shares its
+      // entry), drop entries left empty, then register the current one once.
+      settings.hooks.PreToolUse = preToolUse
+        .map((entry) => {
+          const hooks = entry.hooks as Array<Record<string, unknown>> | undefined;
+          if (!Array.isArray(hooks) || !hooks.some(isErdStudioHook)) { return entry; }
+          const rest = hooks.filter((h) => !isErdStudioHook(h));
+          return rest.length > 0 ? { ...entry, hooks: rest } : null;
+        })
+        .filter((entry): entry is Record<string, unknown> => entry !== null);
       (settings.hooks.PreToolUse as Array<Record<string, unknown>>).push(hookEntry);
     } else {
       preToolUse.push(hookEntry);
@@ -1030,5 +1405,6 @@ export class HarnessService {
     const dir = path.dirname(settingsPath);
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    return true;
   }
 }

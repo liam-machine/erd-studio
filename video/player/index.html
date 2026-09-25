@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!--
+  Getting-started video player. Served from the repo root by ../serve.mjs (so /media/icon.png
+  and /video/build/timeline.json resolve):
+    capture:  capture.mjs calls window.render(t) for every frame
+    preview:  http://localhost:4173/video/player/index.html?preview=1   (click to play with narration)
+    one frame http://localhost:4173/video/player/index.html?t=42.5
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ERD Studio — getting started</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="kicker" id="kicker"></div>
+  <div class="headline" id="headline"></div>
+  <div class="stage" id="stage"></div>
+  <div class="chapters" id="chapters"></div>
+  <div class="preview-hud" id="hud" hidden></div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

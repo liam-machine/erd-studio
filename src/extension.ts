@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -29,6 +30,22 @@ import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnaly
 import { ReportTrackingService } from './services/reportTrackingService';
 import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
 import type { FeedbackKind } from './types/feedback';
+import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
+import {
+  GettingStartedPanel,
+  detectAiAssistants,
+  detectClaude,
+  keepMineInstalls,
+  openClaudeCode,
+  openCopilotChat,
+  runSetupAiHelper,
+  SETUP_CANCELLED_MESSAGE,
+  TRY_SAMPLE_COMMAND,
+  trySampleProject,
+  type GettingStartedDeps,
+} from './providers/GettingStartedPanel';
+import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
+import { assistantInfo } from './types/aiAssistants';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -43,6 +60,32 @@ const LAST_ACTIVATED_VERSION_KEY = 'lastActivatedVersion';
  * for a workspace with no harness files, so it is not shown on every activation.
  */
 const HARNESS_INSTALL_PROMPTED_KEY = 'erdStudio.harnessInstallPrompted';
+
+/**
+ * globalState: the Welcome panel has been opened automatically (or the
+ * upgrade notice shown) on this machine. Once per user, never per workspace.
+ */
+export const GETTING_STARTED_SHOWN_KEY = 'erdStudio.gettingStartedShown';
+
+/**
+ * globalState: a fresh install (no `lastActivatedVersion`) is still owed the
+ * Welcome panel. Set at the very top of activate() — before the no-project
+ * early return — because the panel only auto-opens in a dbt project, and by
+ * the time the user opens one `lastActivatedVersion` is already stored, so
+ * that activation would otherwise look like an upgrade.
+ */
+export const GETTING_STARTED_PENDING_KEY = 'erdStudio.gettingStartedPending';
+
+/**
+ * One automatic open per extension host, even if activation runs twice. Two
+ * windows are two hosts; that race is accepted (both may open the panel once).
+ */
+let gettingStartedAutoOpened = false;
+
+/** Tests run activate() many times in one module instance. */
+export function _resetFirstRunGuardForTests(): void {
+  gettingStartedAutoOpened = false;
+}
 
 /** Directories never descended into when searching for a nested dbt project. */
 const DBT_SEARCH_SKIP_DIRS = new Set(['node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv']);
@@ -149,10 +192,24 @@ const NO_PROJECT_MESSAGE =
  */
 export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.reportBug',
+  'erdStudio.showGettingStarted',
+  'erdStudio.trySampleProject',
+  'erdStudio.setupAiHelper',
   'erdStudio.setFeedbackApiKey',
   'erdStudio.clearFeedbackApiKey',
   'erdStudio.refreshMyReports',
   'erdStudio.openTrackedReport',
+]);
+
+/**
+ * Commands activate() registers before the no-project early return, because
+ * they work without a dbt project. registerFallbackCommands skips them —
+ * registering an id twice throws.
+ */
+export const PRE_REGISTERED_COMMANDS = new Set([
+  'erdStudio.reportBug',
+  'erdStudio.showGettingStarted',
+  'erdStudio.trySampleProject',
 ]);
 
 /**
@@ -175,9 +232,9 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
   }).contributes?.commands ?? [];
 
   for (const { command } of contributed) {
-    // reportBug is registered by activate() before this fallback runs and works
-    // without a project; registering it again would throw ("already exists").
-    if (!command.startsWith('erdStudio.') || command === 'erdStudio.reportBug') { continue; }
+    // PRE_REGISTERED_COMMANDS are registered by activate() before this fallback
+    // runs and work without a project; registering again would throw ("already exists").
+    if (!command.startsWith('erdStudio.') || PRE_REGISTERED_COMMANDS.has(command)) { continue; }
     context.subscriptions.push(vscode.commands.registerCommand(command, showNoProject));
     // Post-rename commands never had a dbtSemantic.* id — see NO_LEGACY_ALIAS.
     if (NO_LEGACY_ALIAS.has(command)) { continue; }
@@ -353,6 +410,32 @@ async function sendFeedbackWithoutCanvas(
   }
 }
 
+/** Welcome panel deps before a dbt project is found: the video plays, the steps ask for a folder. */
+function noProjectGettingStartedDeps(): GettingStartedDeps {
+  return {
+    workspaceRoot: null,
+    semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
+    runSetup: async () => ({ ok: false, filesWritten: [], message: NO_PROJECT_MESSAGE }),
+    getStatus: async () => ({
+      hasProject: false,
+      harness: {
+        claude: { schemaSkill: 'missing', setupSkill: 'missing' },
+        agents: { schemaSkill: 'missing', setupSkill: 'missing' },
+      },
+      cli: 'missing',
+      helper: 'missing',
+      claude: detectClaude().availability,
+      assistants: detectAiAssistants(),
+      domainCount: 0,
+      project: null,
+    }),
+    clipboardText: (assistant) => (assistant && assistant !== 'claude' ? assistantInfo(assistant).prompt : SETUP_PROMPT),
+    openCanvas: async () => {
+      void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE);
+    },
+  };
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('ERD Studio is now active');
 
@@ -366,6 +449,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const currentVersion = context.extension.packageJSON.version as string;
   const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
+  // Fresh install: remember that the Welcome panel is owed, even if this
+  // activation has no dbt project and returns early below.
+  if (previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY)) {
+    await context.globalState.update(GETTING_STARTED_PENDING_KEY, true);
+  }
   if (previousVersion && previousVersion !== currentVersion && hasOpenDomainCanvas()) {
     // If the user cancels the reload (unsaved files), keep activating so
     // commands and the custom editor are still registered for this host.
@@ -388,6 +476,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await sendFeedbackWithoutCanvas(context, prefill, trackingServiceForFeedback);
       },
     ),
+  );
+
+  // "Watch Getting Started Video" works without a project too: the panel
+  // plays the video and asks for a dbt folder. The project path fills in
+  // gettingStartedDeps below (late-bound, like editorProviderForFeedback).
+  let gettingStartedDeps: GettingStartedDeps | undefined;
+  context.subscriptions.push(
+    vscode.commands.registerCommand('erdStudio.showGettingStarted', () => {
+      GettingStartedPanel.createOrShow(context, gettingStartedDeps ?? noProjectGettingStartedDeps());
+    }),
+  );
+
+  // "Try the Sample Project" is for people with no dbt project yet, so it must
+  // work in any window: confirm, then clone the fixed public sample repo.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, async () => { await trySampleProject(); }),
   );
 
   const workspaceRoot = findDbtProjectRoot();
@@ -1614,6 +1718,173 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // fresh, so it costs nothing on a normal activation.
   void trackingService.refresh();
 
+  // -------------------------------------------------------------------------
+  // Welcome panel + Set Up My AI Helper
+  // -------------------------------------------------------------------------
+  const cliLauncher = new CliLauncherService();
+  const launcherOptions: CliLauncherOptions = {
+    homeDir: os.homedir(),
+    extensionVersion: currentVersion,
+    execPath: process.execPath,
+    cliSourcePath: path.join(context.extensionUri.fsPath, 'dist', 'cli.js'),
+  };
+  const firstWorkspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+  const setupHarness = new HarnessService(semanticDir);
+
+  const getGettingStartedStatus = async (): Promise<GettingStartedStatus> => {
+    const status = setupHarness.harnessStatus(workspaceRoot);
+    const harness = {
+      claude: { schemaSkill: status.claude.schemaSkill, setupSkill: status.claude.setupSkill },
+      agents: status.agents,
+    };
+    const cli = cliLauncher.status(launcherOptions);
+    const assistants = detectAiAssistants();
+    const relative = firstWorkspaceFolder ? path.relative(firstWorkspaceFolder, workspaceRoot) : '';
+    return {
+      hasProject: true,
+      harness,
+      cli,
+      helper: deriveAiHelperState(harness, cli, assistants),
+      claude: detectClaude().availability,
+      assistants,
+      domainCount: domainService.listDomains(workspaceRoot, semanticDir).length,
+      project: {
+        name: path.basename(workspaceRoot),
+        relativePath: relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+          ? relative.split(path.sep).join('/')
+          : null,
+      },
+    };
+  };
+  const setupClipboardText = (assistant: Parameters<typeof promptFor>[0] = 'claude'): string =>
+    promptFor(assistant, workspaceRoot, firstWorkspaceFolder, process.platform);
+
+  const runSetup = async () => {
+    const outcome = await runSetupAiHelper({
+      root: workspaceRoot,
+      harness: setupHarness,
+      launcher: cliLauncher,
+      launcherOptions,
+      assistants: detectAiAssistants(),
+      confirmReplace: async (unmanaged, targets) => {
+        const REPLACE = 'Replace';
+        const KEEP = 'Keep mine';
+        const choice = await vscode.window.showWarningMessage(
+          `${unmanaged.join(' and ')} ${unmanaged.length === 1 ? "exists and wasn't" : "exist and weren't"} ` +
+            "written by ERD Studio. Replace with ERD Studio's version?",
+          {
+            modal: true,
+            detail: `Keep mine leaves ${unmanaged.length === 1 ? 'that file' : 'those files'} exactly as ` +
+              `${unmanaged.length === 1 ? 'it is' : 'they are'} and installs everything else ` +
+              `(${keepMineInstalls(unmanaged, targets)}) plus the checking tool.`,
+          },
+          REPLACE,
+          KEEP,
+        );
+        return choice === REPLACE ? 'replace' : choice === KEEP ? 'keep' : undefined;
+      },
+    });
+    if (outcome.filesWritten.length > 0) { refreshContextKeys(); }
+    return outcome;
+  };
+
+  // "Open a domain" from the panel: straight in when there is one, a pick when
+  // there are several, and the create flow when there are none yet.
+  const openCanvas = async (): Promise<void> => {
+    const domains = domainService.listDomains(workspaceRoot, semanticDir);
+    if (domains.length === 0) {
+      await vscode.commands.executeCommand(
+        fs.existsSync(fullSemanticDirPath) ? 'erdStudio.createDomain' : 'erdStudio.setupSemanticDirectory',
+      );
+      return;
+    }
+    let target = domains[0];
+    if (domains.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        domains.map((d) => ({ label: d.domain, description: d.layer, summary: d })),
+        { placeHolder: 'Open which domain?' },
+      );
+      if (!picked) { return; }
+      target = picked.summary;
+    }
+    await vscode.commands.executeCommand('erdStudio.openDomain', target.filePath);
+  };
+
+  gettingStartedDeps = {
+    workspaceRoot,
+    semanticDir,
+    runSetup,
+    getStatus: getGettingStartedStatus,
+    clipboardText: setupClipboardText,
+    workspaceFolder: firstWorkspaceFolder,
+    openCanvas,
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('erdStudio.setupAiHelper', async () => {
+      const outcome = await runSetup();
+      await GettingStartedPanel.currentPanel?.postSetupResult(outcome);
+      if (!outcome.ok) {
+        if (outcome.message !== SETUP_CANCELLED_MESSAGE) {
+          void vscode.window.showErrorMessage(`ERD Studio: ${outcome.message}`);
+        }
+        return;
+      }
+      // Offer an Open button for each assistant the editor can open, and one
+      // Copy for the first detected assistant (Claude Code when none is).
+      const assistants = detectAiAssistants();
+      const OPEN_CLAUDE = 'Open Claude Code';
+      const OPEN_COPILOT = 'Open Copilot Chat';
+      const COPY = 'Copy prompt';
+      const buttons = [
+        ...(assistants.includes('claude') ? [OPEN_CLAUDE] : []),
+        ...(assistants.includes('copilot') ? [OPEN_COPILOT] : []),
+        COPY,
+      ];
+      const choice = await vscode.window.showInformationMessage(
+        `${outcome.message} Guide not showing? Start your assistant from ${path.basename(workspaceRoot)}.`,
+        ...buttons,
+      );
+      if (choice === OPEN_CLAUDE) {
+        await openClaudeCode({ dbtRoot: workspaceRoot, clipboardText: setupClipboardText('claude') });
+      } else if (choice === OPEN_COPILOT) {
+        await openCopilotChat({ dbtRoot: workspaceRoot, workspaceFolder: firstWorkspaceFolder });
+      } else if (choice === COPY) {
+        await vscode.env.clipboard.writeText(setupClipboardText(assistants[0] ?? 'claude'));
+      }
+    }),
+  );
+
+  // First run (spec C.5, addendum P4). A fresh install opens the Welcome panel
+  // once per machine and skips this run's harness QuickPick (the panel offers
+  // the one-click setup instead); an upgrader gets one non-modal notice. The
+  // "shown" flag is written BEFORE the panel opens so a crash cannot loop.
+  let suppressHarnessQuickPick = false;
+  {
+    const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
+    const shown = context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY) === true;
+    if (pending && !shown && !gettingStartedAutoOpened) {
+      gettingStartedAutoOpened = true;
+      suppressHarnessQuickPick = true;
+      await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
+      await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
+      GettingStartedPanel.createOrShow(context, gettingStartedDeps);
+    } else if (pending && shown) {
+      // Another window got there first.
+      await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
+    } else if (!pending && !shown) {
+      await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
+      void vscode.window.showInformationMessage(
+        'ERD Studio: new short getting-started video and a guided setup for your AI assistant ' +
+          '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor).',
+        'Watch',
+        'Not now',
+      ).then((choice) => {
+        if (choice === 'Watch') { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
+      });
+    }
+  }
+
   // AI coding harness — prompt to update stale files; offer install once per
   // workspace when none are present. Never overwrite anything silently:
   // harness files (AGENTS.md in particular) can hold user content.
@@ -1649,7 +1920,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.commands.executeCommand('erdStudio.installCodingHarness');
         }
       });
-    } else if (installedCount === 0 && !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)) {
+    } else if (
+      !suppressHarnessQuickPick &&
+      installedCount === 0 &&
+      !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)
+    ) {
       // No harnesses installed — offer the QuickPick once per workspace, not
       // on every window open. The command stays available in the palette.
       void context.workspaceState.update(HARNESS_INSTALL_PROMPTED_KEY, true);
@@ -1685,6 +1960,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
     }
   }
+
+  // Keep ~/.erd-studio-cli in step with this extension — only if the user
+  // installed it (Set Up My AI Helper). The second documented exception to
+  // "no unprompted writes": it writes outside the workspace, only after that
+  // opt-in, and never throws or toasts.
+  void cliLauncher.refreshIfInstalled(launcherOptions);
 
   // ---------------------------------------------------------------------------
   // Legacy command aliases

@@ -25,6 +25,7 @@ import {
   type DbtProjectConfig,
 } from './dbtProjectConfig';
 import { normaliseName } from './nameUtils';
+import { extractManifestData } from '../workers/manifestExtractor';
 
 /** Default upper bound for a single worker parse before it is abandoned. */
 export const DEFAULT_PARSE_TIMEOUT_MS = 120_000;
@@ -46,6 +47,13 @@ export interface ManifestServiceOptions {
   dbtConfig?: Partial<DbtProjectConfig>;
   /** Abort a worker parse that runs longer than this. */
   parseTimeoutMs?: number;
+  /**
+   * Parse on the calling thread with the same pure extractor the worker runs,
+   * instead of spawning `dist/manifestWorker.js`. For one-shot callers (the
+   * `erd-studio` CLI) that gain nothing from a worker and must stay a single
+   * self-contained file. The extension host always uses the worker.
+   */
+  parseInProcess?: boolean;
 }
 
 /** Reconstruct Maps and Sets from the worker's plain-object result. */
@@ -67,6 +75,9 @@ function deserializeWorkerResult(raw: ManifestWorkerResult): ManifestData {
     // Normalised here so callers can test membership with the same key they
     // use for every other manifest lookup.
     disabledModels: new Set(raw.disabledModels.map(normaliseName)),
+    resourceDocs: new Map(
+      Object.values(raw.resourceDocs ?? {}).map((info) => [normaliseName(info.name), info]),
+    ),
   };
 }
 
@@ -80,6 +91,7 @@ export class ManifestService {
 
   private readonly dbtConfig: DbtProjectConfig;
   private readonly parseTimeoutMs: number;
+  private readonly parseInProcess: boolean;
 
   constructor(options: ManifestServiceOptions = {}) {
     const defaults = defaultDbtProjectConfig();
@@ -91,6 +103,7 @@ export class ManifestService {
       modelPaths: options.dbtConfig?.modelPaths?.length ? options.dbtConfig.modelPaths : defaults.modelPaths,
     };
     this.parseTimeoutMs = options.parseTimeoutMs ?? DEFAULT_PARSE_TIMEOUT_MS;
+    this.parseInProcess = options.parseInProcess === true;
   }
 
   /**
@@ -303,6 +316,10 @@ export class ManifestService {
       return Promise.reject(new Error('Manifest file is empty (likely mid-write by dbt)'));
     }
 
+    if (this.parseInProcess) {
+      return this.parseManifestInProcess(manifestPath);
+    }
+
     return new Promise<ManifestData>((resolve, reject) => {
       // In production (bundled by esbuild), both extension.js and manifestWorker.js
       // live in dist/. When running tests (vitest, unbundled), __dirname is src/services/
@@ -366,6 +383,25 @@ export class ManifestService {
     });
   }
 
+  /**
+   * The worker's job, done on this thread: the same read, `JSON.parse` and
+   * `extractManifestData`, and the same round trip through
+   * `deserializeWorkerResult` so the result is identical to the worker path.
+   * Errors are worded as the worker's are, so `loadManifest` treats them alike.
+   */
+  private async parseManifestInProcess(manifestPath: string): Promise<ManifestData> {
+    let result: ManifestWorkerResult;
+    try {
+      const raw = fs.readFileSync(manifestPath, 'utf-8');
+      result = extractManifestData(JSON.parse(raw) as Record<string, unknown>);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[ManifestService] Failed to parse manifest: ${message}`);
+      throw new Error(`Failed to parse manifest.json: ${message}`);
+    }
+    return deserializeWorkerResult(result);
+  }
+
   private emptyManifest(): ManifestData {
     return {
       models: new Map(),
@@ -373,6 +409,7 @@ export class ManifestService {
       uniqueColumns: new Map(),
       compositeUniqueGroups: new Map(),
       disabledModels: new Set(),
+      resourceDocs: new Map(),
     };
   }
 }

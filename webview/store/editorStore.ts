@@ -87,6 +87,14 @@ export interface EditorState extends CanvasState {
   _searchFocusFn: (() => void) | null;
   /** Internal: registered auto-layout function (not persisted). */
   _autoLayoutFn: (() => void) | null;
+  /**
+   * The host asked for the first-open auto layout (`domainLoaded.autoLayout`):
+   * no model in the domain has a stored position yet. The Toolbar's
+   * `useFirstOpenAutoLayout` clears it and runs the ELK layout once the model
+   * nodes are on the canvas. Every `domainLoaded` / `stageData` overwrites it,
+   * so a later payload without the flag cancels a layout that has not started.
+   */
+  pendingAutoLayout: boolean;
   /** Whether the welcome modal is visible. */
   welcomeModalOpen: boolean;
   /** Whether the Feedback dialog is visible. */
@@ -163,6 +171,8 @@ export interface EditorActions extends CanvasActions {
   registerAutoLayout: (layoutFn: (() => void) | null) => void;
   /** Trigger auto-layout (called by keyboard handler). */
   triggerAutoLayout: () => void;
+  /** Set / clear the first-open auto layout request (see `pendingAutoLayout`). */
+  setPendingAutoLayout: (pending: boolean) => void;
   /** Toggle the welcome modal visibility. */
   setWelcomeModalOpen: (open: boolean) => void;
   /** Open/close the Feedback dialog, optionally with prefilled fields. */
@@ -241,6 +251,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   manifestModels: [],
   _searchFocusFn: null,
   _autoLayoutFn: null,
+  pendingAutoLayout: false,
   welcomeModalOpen: false,
   feedbackDialogOpen: false,
   feedbackPrefill: null,
@@ -286,6 +297,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     const { _autoLayoutFn } = useEditorStore.getState();
     if (_autoLayoutFn) _autoLayoutFn();
   },
+  setPendingAutoLayout: (pending) => set({ pendingAutoLayout: pending }),
   setWelcomeModalOpen: (open) => set({ welcomeModalOpen: open }),
   setFeedbackDialogOpen: (open, prefill = null) =>
     set(

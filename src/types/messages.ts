@@ -94,6 +94,16 @@ export interface DomainLoadedMessage {
   payload: DisplayDomain;
   /** Whether the user has already dismissed the welcome modal (persisted in globalState). */
   welcomeDismissed?: boolean;
+  /**
+   * Set on a logical-stage load when the domain has at least one model and
+   * NONE of them has a stored `viewConfig.positions` entry — typically a
+   * domain an AI assistant has just written with `viewConfig: {}`. The
+   * payload still carries fallback positions (so nothing paints at 0,0), but
+   * the host has not persisted them: the webview runs the ELK auto layout
+   * once and persists that through `updatePositions` instead. Absent means
+   * "do nothing" — partially positioned domains keep the host's placement.
+   */
+  autoLayout?: boolean;
 }
 
 /**
@@ -542,6 +552,15 @@ export interface RequestReloadMessage {
   type: 'requestReload';
 }
 
+/**
+ * Open the "Welcome to ERD Studio" panel (the getting-started video). Sent by
+ * the canvas WelcomeModal's "Watch the short tour" link; the host runs
+ * `erdStudio.showGettingStarted`. No payload; allowed on the physical stage.
+ */
+export interface OpenGettingStartedMessage {
+  type: 'openGettingStarted';
+}
+
 // ---------------------------------------------------------------------------
 // Webview → Extension: Sync reconciliation messages
 // ---------------------------------------------------------------------------
@@ -641,6 +660,7 @@ export type WebviewMessage =
   | CopyFeedbackReportMessage
   | OpenFeedbackLinkMessage
   | RequestReloadMessage
+  | OpenGettingStartedMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage
   | LaunchClaudeSyncMessage

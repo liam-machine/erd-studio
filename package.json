@@ -142,6 +142,24 @@
         "icon": "$(comment-discussion)"
       },
       {
+        "command": "erdStudio.showGettingStarted",
+        "title": "Watch Getting Started Video",
+        "category": "ERD Studio",
+        "icon": "$(play-circle)"
+      },
+      {
+        "command": "erdStudio.trySampleProject",
+        "title": "Try the Sample Project",
+        "category": "ERD Studio",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "erdStudio.setupAiHelper",
+        "title": "Set Up My AI Helper",
+        "category": "ERD Studio",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "erdStudio.setFeedbackApiKey",
         "title": "Set Feedback API Key",
         "category": "ERD Studio"
@@ -235,7 +253,7 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "No ERD domains found.\n\nERD Studio lets you design your data warehouse visually across two stages:\n\n**Logical** — columns, data types, FK keys, and design rationale\n**Physical** — read-only view of what's built in dbt\n\n[Set Up ERD Studio](command:erdStudio.setupSemanticDirectory)\n\nCreates the .erd-studio directory structure and your first domain.\n\n[Install AI Coding Harness](command:erdStudio.installCodingHarness)\n\nAdd ERD Studio schema reference to Claude, Copilot, Gemini, or Codex."
+        "contents": "No ERD domains found.\n\nERD Studio lets you design your data warehouse visually across two stages:\n\n**Logical** — columns, data types, FK keys, and design rationale\n**Physical** — read-only view of what's built in dbt\n\n[Watch the getting-started video](command:erdStudio.showGettingStarted)\n\nNew to ERD Studio? The short video shows how your AI assistant can build your first diagram from your dbt project.\n\n[Set up my AI helper](command:erdStudio.setupAiHelper)\n\nRecommended: lets your AI assistant (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) build your first diagram from your dbt project.\n\nOr start by hand:\n\n[Set Up ERD Studio](command:erdStudio.setupSemanticDirectory)\n\nCreates the .erd-studio directory structure and your first domain.\n\n[Install AI Coding Harness](command:erdStudio.installCodingHarness)\n\nPick exactly which AI assistants get the ERD Studio schema reference.\n\n[Try the sample project](command:erdStudio.trySampleProject)\n\nNo dbt project yet? Download a small sample dbt project with fake coffee-shop data and try ERD Studio on it — no account needed."
       },
       {
         "view": "erdStudio.modelLibrary",
@@ -300,6 +318,11 @@
           "command": "erdStudio.addLayer",
           "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
           "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.showGettingStarted",
+          "when": "view == erdStudio.domainTree",
+          "group": "navigation@8"
         },
         {
           "command": "erdStudio.reportBug",

@@ -33,6 +33,9 @@ features.json
 # analysis hosted tier (see proxy/README.md); it must never reach the VSIX.
 mcp-server/**
 proxy/**
+# Getting-started video pipeline (see video/README.md). Its outputs that ship
+# are media/onboarding/getting-started.mp4 and getting-started-poster.jpg.
+video/**
 # npm workspaces (@erd-studio/core, @erd-studio/renderer). The extension bundles
 # them from source into dist/, so nothing under packages/ is needed at runtime.
 packages/**
