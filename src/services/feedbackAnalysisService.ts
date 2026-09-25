@@ -132,7 +132,7 @@ export const FEEDBACK_PROVIDER_SETTING = 'feedback.provider';
  * `wrangler dev`. The proxy holds the API key, so no key is ever sent with a
  * hosted request.
  */
-export const HOSTED_ANALYSIS_ENDPOINT = 'https://erd-studio.liam-is-an.ai';
+export const HOSTED_ANALYSIS_ENDPOINT = 'https://erd-studio-api.w2solutions.ai';
 
 /**
  * The third party that actually receives the text, named as a user should see

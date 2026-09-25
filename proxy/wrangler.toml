@@ -21,6 +21,12 @@ compatibility_date = "2025-01-01"
 workers_dev = false
 
 [[routes]]
+pattern = "erd-studio-api.w2solutions.ai"
+custom_domain = true
+
+# Legacy hostname: v1.5.0 and earlier ship this URL, so it stays served until
+# those installs have updated. Remove it (and its DNS record) after that.
+[[routes]]
 pattern = "erd-studio.liam-is-an.ai"
 custom_domain = true
 

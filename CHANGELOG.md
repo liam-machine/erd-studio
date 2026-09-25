@@ -8,6 +8,14 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+- The optional AI feedback analysis service and the anonymous usage heartbeat now go to
+  `erd-studio-api.w2solutions.ai` and `erd-studio-telemetry.w2solutions.ai`. Same services and
+  operator, new hostnames. If you had allowed the hosted analysis service, ERD Studio asks once
+  more, because consent is recorded per destination.
+
 ## 1.5.0 — 2026-09-25
 
 ### Added
