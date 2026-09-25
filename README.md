@@ -141,7 +141,7 @@ ERD Studio sends one small, anonymous usage report a day, so the author can see 
 
 The full list of properties is also in [`telemetry.json`](telemetry.json).
 
-**Where it goes.** An HTTPS request to `erd-studio-telemetry.liam-is-an.ai`, a Cloudflare Worker run by the extension author. The Worker checks every field against the lists above and stores only those fields. It does not store your IP address, user agent or any other request header. Individual reports are deleted after 90 days; after that only daily totals are kept, with no install IDs.
+**Where it goes.** An HTTPS request to `erd-studio-telemetry.w2solutions.ai`, a Cloudflare Worker run by the extension author. The Worker checks every field against the lists above and stores only those fields. It does not store your IP address, user agent or any other request header. Individual reports are deleted after 90 days; after that only daily totals are kept, with no install IDs.
 
 **Turning it off.** Either setting stops it completely:
 

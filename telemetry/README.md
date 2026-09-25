@@ -89,16 +89,16 @@ npx wrangler d1 execute erd-studio-telemetry --remote --file schema.sql
 npx wrangler deploy
 ```
 
-The custom domain `erd-studio-telemetry.liam-is-an.ai` needs the
-`liam-is-an.ai` zone on the same Cloudflare account; `wrangler deploy` creates
+The custom domain `erd-studio-telemetry.w2solutions.ai` needs the
+`w2solutions.ai` zone on the same Cloudflare account; `wrangler deploy` creates
 the DNS record. `workers_dev` is off, so the custom domain is the only door.
 
 Smoke-test it (none of these write anything):
 
 ```bash
-curl -si https://erd-studio-telemetry.liam-is-an.ai/v1/heartbeat | head -n 1                 # 405
-curl -si https://erd-studio-telemetry.liam-is-an.ai/ | head -n 1                             # 404
-curl -si -X POST https://erd-studio-telemetry.liam-is-an.ai/v1/heartbeat \
+curl -si https://erd-studio-telemetry.w2solutions.ai/v1/heartbeat | head -n 1                 # 405
+curl -si https://erd-studio-telemetry.w2solutions.ai/ | head -n 1                             # 404
+curl -si -X POST https://erd-studio-telemetry.w2solutions.ai/v1/heartbeat \
   -H 'Content-Type: application/json' --data '{}' | head -n 1                                # 400
 ```
 

@@ -46,7 +46,7 @@ import {
 } from './telemetryPayload';
 
 /** Where heartbeats go. Served by the Worker in `telemetry/`. */
-export const TELEMETRY_ENDPOINT = 'https://erd-studio-telemetry.liam-is-an.ai/v1/heartbeat';
+export const TELEMETRY_ENDPOINT = 'https://erd-studio-telemetry.w2solutions.ai/v1/heartbeat';
 
 export const TELEMETRY_ENABLED_SETTING = 'telemetry.enabled';
 
