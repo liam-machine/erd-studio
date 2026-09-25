@@ -77,6 +77,14 @@ export const GETTING_STARTED_SHOWN_KEY = 'erdStudio.gettingStartedShown';
 export const GETTING_STARTED_PENDING_KEY = 'erdStudio.gettingStartedPending';
 
 /**
+ * globalState: the Welcome panel has already opened once in a window with no
+ * dbt project. It does not clear the pending flag — the panel still opens
+ * once more in the first dbt project, where its setup steps can actually run
+ * (typically the sample project the no-project panel offered).
+ */
+export const GETTING_STARTED_NO_PROJECT_SHOWN_KEY = 'erdStudio.gettingStartedShownNoProject';
+
+/**
  * One automatic open per extension host, even if activation runs twice. Two
  * windows are two hosts; that race is accepted (both may open the panel once).
  */
@@ -495,10 +503,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   const workspaceRoot = findDbtProjectRoot();
+  // Picks which sidebar welcome text shows (package.json viewsWelcome).
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', Boolean(workspaceRoot));
   if (!workspaceRoot) {
     // Register stub commands / editor so palette entries and the sidebar
     // welcome buttons explain the problem instead of "command not found".
     registerFallbackCommands(context);
+    // A fresh install first activated without a dbt project (usually by
+    // clicking the ERD Studio icon) still starts on the Welcome panel: it
+    // plays the video, offers the sample project and says how to open one.
+    const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
+    if (pending && !context.globalState.get<boolean>(GETTING_STARTED_NO_PROJECT_SHOWN_KEY) && !gettingStartedAutoOpened) {
+      gettingStartedAutoOpened = true;
+      await context.globalState.update(GETTING_STARTED_NO_PROJECT_SHOWN_KEY, true);
+      GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps());
+      return; // the panel explains the missing project; no warning toast on top
+    }
     void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Settings').then(choice => {
       if (choice === 'Open Settings') {
         void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');

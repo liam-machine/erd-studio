@@ -161,7 +161,8 @@ describe('buildGettingStartedHtml', () => {
       expect(html).toContain(`data-step="${step}"`);
     }
     expect(html).toContain('ERD Studio: Watch Getting Started Video');
-    expect(html).toContain('Open a folder containing <code>dbt_project.yml</code> to continue.');
+    expect(html).toContain('Open the folder that contains its <code>dbt_project.yml</code>');
+    expect(html).toContain('data-action="openFolder"');
     expect(html).toContain('Your AI assistant');
     expect(html).toContain('Start the guided setup');
   });
@@ -412,8 +413,9 @@ describe('isGettingStartedToHost', () => {
     expect(GETTING_STARTED_EXTERNAL_URLS.sampleRepo).toBe('https://github.com/liam-machine/erd-studio-sample');
     expect(SAMPLE_REPO_URL).toBe('https://github.com/liam-machine/erd-studio-sample');
     expect(SAMPLE_REPO_CLONE_URL).toBe('https://github.com/liam-machine/erd-studio-sample.git');
+    // Not the github.com blob page: it refuses to preview an 8 MB video.
     expect(GETTING_STARTED_EXTERNAL_URLS.videoOnline)
-      .toBe('https://github.com/liam-machine/erd-studio/blob/main/media/onboarding/getting-started.mp4');
+      .toBe('https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4');
   });
 });
 
@@ -941,6 +943,8 @@ describe('GettingStartedPanel', () => {
 
     const trySample = vi.fn();
     vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, trySample);
+    const openFolder = vi.fn();
+    vscode.commands.registerCommand('vscode.openFolder', openFolder);
 
     const messages: Record<string, unknown> = {
       openExternal: { type: 'openExternal', target: 'dbtInstallDocs' },
@@ -951,6 +955,8 @@ describe('GettingStartedPanel', () => {
     }
 
     expect(trySample).toHaveBeenCalledTimes(1);
+    expect(openFolder).toHaveBeenCalledTimes(1);
+    expect(openFolder).toHaveBeenCalledWith(); // no URI: VS Code's own folder picker
 
     // ready, refreshStatus, after setupAiHelper, and before openClaude / openCopilotChat
     expect(deps.getStatus).toHaveBeenCalledTimes(5);

@@ -8,6 +8,15 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+- The empty ERD Studio sidebar is now one short line and a **Get started** button that opens the Welcome tab. The video, the sample project, the AI helper setup and the manual setup all live on that tab.
+- The Welcome tab now also opens the first time you use ERD Studio in a window with no dbt project. It offers **Open a folder…** and the sample project, then opens once more with the setup steps in your first dbt project.
+
+### Fixed
+- The README and the Welcome tab's **Watch in your browser** now play the getting-started video in the browser. The GitHub file page said the video was too large to show.
+
 ## 1.1.0 — 2026-09-25
 
 ### Added

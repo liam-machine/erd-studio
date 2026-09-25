@@ -647,6 +647,9 @@ export class GettingStartedPanel {
       case 'trySample':
         await vscode.commands.executeCommand(TRY_SAMPLE_COMMAND);
         break;
+      case 'openFolder':
+        await vscode.commands.executeCommand('vscode.openFolder');
+        break;
       case 'videoError':
         console.warn(`[GettingStarted] Video could not play here (code ${msg.code}); showing the poster fallback.`);
         break;

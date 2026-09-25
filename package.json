@@ -253,7 +253,13 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "No ERD domains found.\n\nERD Studio lets you design your data warehouse visually across two stages:\n\n**Logical** — columns, data types, FK keys, and design rationale\n**Physical** — read-only view of what's built in dbt\n\n[Watch the getting-started video](command:erdStudio.showGettingStarted)\n\nNew to ERD Studio? The short video shows how your AI assistant can build your first diagram from your dbt project.\n\n[Set up my AI helper](command:erdStudio.setupAiHelper)\n\nRecommended: lets your AI assistant (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) build your first diagram from your dbt project.\n\nOr start by hand:\n\n[Set Up ERD Studio](command:erdStudio.setupSemanticDirectory)\n\nCreates the .erd-studio directory structure and your first domain.\n\n[Install AI Coding Harness](command:erdStudio.installCodingHarness)\n\nPick exactly which AI assistants get the ERD Studio schema reference.\n\n[Try the sample project](command:erdStudio.trySampleProject)\n\nNo dbt project yet? Download a small sample dbt project with fake coffee-shop data and try ERD Studio on it — no account needed."
+        "contents": "No dbt project in this folder yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA 2-minute video, a sample project to try, and how to open your own.",
+        "when": "!erdStudio.hasDbtProject"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA 2-minute video, then your AI assistant builds your first diagram from this dbt project.",
+        "when": "erdStudio.hasDbtProject"
       },
       {
         "view": "erdStudio.modelLibrary",
