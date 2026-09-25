@@ -22,7 +22,7 @@ for each difference. Your job is to execute those choices.
   "modelContext": {
     "dim_customer": {
       "modelName": "dim_customer",
-      "logicalModelPath": ".erd-studio/logical-models/dim_customer.yml",
+      "logicalModelPath": ".erd-studio/logical-models/silver/dim_customer.yml",
       "dbtSqlPath": "models/silver/dim_customer.sql",
       "dbtSchemaPath": "models/silver/dim_customer.yml"
     }
@@ -64,11 +64,11 @@ and no `catalog.json` to observe the real one. It resolves exactly like
 
 | Action | What to do |
 |--------|-----------|
-| `add-to-logical` | Add model name to domain JSON `logical.models[]` + create `logical-models/{name}.yml` from manifest data |
+| `add-to-logical` | Add model name to domain JSON `logical.models[]` + create the model file from manifest data — `logical-models/{layer}/{name}.yml` (the plan's `layer`) when the project uses layer folders, else `logical-models/{name}.yml` — unless a file for that name already exists in any folder |
 | `remove-from-logical` | Remove model name from domain JSON `logical.models[]` + remove related relationships from `logical.relationships[]` |
-| `add-column-to-logical` | Add column to `logical-models/{name}.yml` columns array |
-| `remove-column-from-logical` | Remove column from `logical-models/{name}.yml` |
-| `update-type-in-logical` | Update column `dataType` in `logical-models/{name}.yml` to the value in `resolvedDataType` |
+| `add-column-to-logical` | Add column to the model's yml (`modelContext[name].logicalModelPath`) columns array |
+| `remove-column-from-logical` | Remove column from the model's yml (`logicalModelPath`) |
+| `update-type-in-logical` | Update column `dataType` in the model's yml (`logicalModelPath`) to the value in `resolvedDataType` |
 | `add-relationship-to-logical` | Add relationship object to domain JSON `logical.relationships[]` using the fromModel/fromColumn/toModel/toColumn from the action |
 | `remove-relationship-from-logical` | Remove the matching relationship from domain JSON `logical.relationships[]` |
 | `update-cardinality-in-logical` | Update `cardinality` field on matching relationship in domain JSON to `targetCardinality` |
@@ -77,7 +77,7 @@ and no `catalog.json` to observe the real one. It resolves exactly like
 
 | Action | What to do |
 |--------|-----------|
-| `add-to-physical` | Create dbt SQL model file + schema YAML entry (confirm with user first — this is a major change) |
+| `add-to-physical` | Create dbt SQL model file + schema YAML entry (confirm with user first — this is a major change). If the logical model has an `alias`, set `config: { alias: <alias> }` on the dbt model (and its `schema` if set) so it builds the same table name |
 | `remove-from-physical` | Remove dbt SQL file + schema YAML entry (confirm with user first — destructive) |
 | `add-column-to-physical` | Add column to the dbt SQL SELECT statement + add column entry to schema YAML |
 | `remove-column-from-physical` | Remove column from dbt SQL SELECT + schema YAML (confirm with user first) |
@@ -119,4 +119,4 @@ models:
 - **Cascade deletions**: When removing a model from logical, also remove any relationships referencing it
 - **Column ordering**: When adding columns to logical-models YAML, append to the end of the columns array
 
-<!-- erd-studio-harness: 18 -->
+<!-- erd-studio-harness: 20 -->

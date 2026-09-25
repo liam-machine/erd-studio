@@ -15,7 +15,7 @@ description: >-
 
 # ERD Studio — AI Data Modeling Guide
 
-ERD Studio uses a **central model store** architecture. Model definitions are YAML files in `.erd-studio/logical-models/`. Domain JSON files reference models by name and define relationships and layout.
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and define relationships and layout.
 
 ## Architecture Overview
 
@@ -23,9 +23,11 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 .erd-studio/
 ├── modelling-approach.md     ← Optional: the team's modelling rules (see below)
 ├── logical-models/           ← Central model definitions (YAML, one per model)
-│   ├── dim_customer.yml
-│   ├── dim_project.yml
-│   └── fct_sale.yml
+│   ├── dim_project.yml       ← top level (flat libraries keep working)
+│   ├── silver/               ← optional per-layer folders
+│   │   └── dim_customer.yml
+│   └── gold/
+│       └── fct_sale.yml
 ├── silver/
 │   ├── customer-360.json     ← Domain file (model references + relationships + layout)
 │   └── orders.json
@@ -35,13 +37,21 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 
 **Key principle:** Models are defined ONCE in `logical-models/` and referenced from multiple domain files. Editing a model from any domain updates the shared definition.
 
+### Model file location (layer folders)
+
+- A model file lives at `logical-models/{name}.yml` **or** exactly one folder down at `logical-models/{folder}/{name}.yml`. By convention the folder is a layer id (`bronze`, `silver`, `gold`). Deeper nesting and dot-folders are ignored.
+- The folder is organisational only. Domain files reference models **by name**, never by path, and model names are **unique across all folders** (as dbt model names are across a project). Never create a second file with a name that already exists in another folder.
+- **The same table name in two layers** (a silver `date` and a gold `date`) is two models with different names and the same `alias`: `logical-models/silver/silver_date.yml` (`alias: date`) and `logical-models/gold/gold_date.yml` (`alias: date`), exactly as a dbt project gets two `date` tables. Name the model `{layer}_{name}` and set `alias` to the table name; never reuse the bare name.
+- **To find a model**, look at `logical-models/{name}.yml` first, then in each folder (`logical-models/*/{name}.yml`). If the same name exists twice, the top-level file wins, then folders in alphabetical order; the others are ignored.
+- **Folders are opt-in per project.** Check first: if a folder named after a layer in `layers.json` (`logical-models/{layer}/`) already holds a `.yml` file (or `logical-models/` is empty), the project uses layer folders — create a new model in the folder of the layer of the domain you are adding it to (adding `fct_sale` to `gold/reporting.json` creates `logical-models/gold/fct_sale.yml`). If every model file is at the top level, the project is **flat** — create the new file at the top level too, and never start the folder layout on your own (the user opts in with **ERD Studio: Organise Model Library by Layer**). When editing or renaming an existing model, keep its file in the folder it is already in.
+
 ### Team Modelling Approach
 
 If `.erd-studio/modelling-approach.md` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (`modelRole`, `grain`, `scdType`, `additiveType`, `isNaturalKey`, `rationale`). The `/erd-studio-setup` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise.
 
 ### Model Library (Sidebar)
 
-The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `logical-models/`. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
+The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `logical-models/`, grouped by folder. Use it to understand the difference between "model definition exists" and "model is referenced by a domain":
 
 - **Referenced models** show how many domains use them (e.g. "2 domains")
 - **Orphaned models** show a warning icon and "(unused)" — these exist as `.yml` files but are not in any domain's `logical.models[]` array
@@ -76,7 +86,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `l
 | `description` | No | Human-readable domain description |
 | `modelFolder` | No | Filter for "Add Existing Model" dialog (e.g. `models/silver`) |
 | `stubColumns` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
-| `logical.models` | Yes | Array of model name strings (references to `logical-models/*.yml`) |
+| `logical.models` | Yes | Array of model name strings (references to `logical-models/*.yml` or `logical-models/{folder}/*.yml`) |
 | `logical.relationships` | Yes | Array of relationship objects |
 | `viewConfig` | Yes | Root-level view settings. The extension auto-assigns positions for new models; a new domain written with `viewConfig: {}` (no positions at all) is auto-arranged with the canvas's auto layout the first time it opens |
 
@@ -103,10 +113,10 @@ Annotations are temporary build notes — visible on the canvas while constructi
 
 | User asks to... | Edit this file |
 |-----------------|---------------|
-| Add/remove/rename a column | `logical-models/{name}.yml` |
-| Change column type, PK/FK/NK flags, SCD type | `logical-models/{name}.yml` |
-| Change grain, modelRole, description, rationale | `logical-models/{name}.yml` |
-| Add a model to a domain diagram | Domain `.json` → add name to `logical.models[]` AND create `logical-models/{name}.yml` if it doesn't exist |
+| Add/remove/rename a column | the model's `.yml` (`logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`) |
+| Change column type, PK/FK/NK flags, SCD type | the model's `.yml` |
+| Change grain, modelRole, description, rationale | the model's `.yml` |
+| Add a model to a domain diagram | Domain `.json` → add name to `logical.models[]` AND, if no file for that name exists in any folder, create it — `logical-models/{layer}/{name}.yml` (the domain's layer) when the project uses layer folders, else `logical-models/{name}.yml` |
 | Remove a model from a domain | Domain `.json` → remove name from `logical.models[]` AND remove its relationships from `logical.relationships[]` |
 | Add/remove/edit a relationship | Domain `.json` → `logical.relationships[]` |
 | Change layout positions | Domain `.json` → `viewConfig.positions` |
@@ -117,9 +127,9 @@ Annotations are temporary build notes — visible on the canvas while constructi
 
 ## Models
 
-Model definitions live in `.erd-studio/logical-models/{model_name}.yml`. Create/edit these YAML files to define models. Then reference them by name in domain files.
+Model definitions live in `.erd-studio/logical-models/{model_name}.yml` or `.erd-studio/logical-models/{layer}/{model_name}.yml` (see "Model file location" above). Create/edit these YAML files to define models. Then reference them by name in domain files.
 
-**File:** `.erd-studio/logical-models/dim_customer.yml`
+**File:** `.erd-studio/logical-models/silver/dim_customer.yml`
 
 ```yaml
 name: dim_customer
@@ -151,6 +161,7 @@ columns:
 |-------|----------|-------------|
 | `name` | Yes | Model name (see naming conventions below) |
 | `schema` | No | Target schema for materialization |
+| `alias` | No | Warehouse table name when it differs from `name` — dbt's `alias` config. `name` stays the identity (domain files and relationships use it); the canvas shows the alias. Use it for the same table name in two layers (`silver_date` and `gold_date`, both `alias: date`). A plain identifier: letters, digits, underscores |
 | `description` | No | Human-readable model description |
 | `grain` | No | Grain statement — "One row per ___" |
 | `modelRole` | No | Architecture role (see values below) |
@@ -216,7 +227,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the `.erd-studio/logical-models/{name}.yml` file.
+Write the model's YAML file — the existing file if the model already exists (in whichever folder it is in), otherwise a new file — `.erd-studio/logical-models/{layer}/{name}.yml` for the layer of the target domain when the project uses layer folders, else `.erd-studio/logical-models/{name}.yml` (see "Model file location").
 
 ### Step 4 — Reconcile via set-difference
 Re-read the YAML file you just wrote. Compute the set-difference between source columns and YAML columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -342,4 +353,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 18 -->
+<!-- erd-studio-harness: 20 -->
