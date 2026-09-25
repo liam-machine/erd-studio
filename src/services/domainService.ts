@@ -261,7 +261,8 @@ export class DomainService {
    *
    * DATA TYPE is an n-source fallthrough: catalog, then the declared
    * `data_type:`, then the manifest's copy of it, then ''. DESCRIPTION runs the
-   * other way — yml, then manifest, then the catalog comment — because
+   * other way — yml, then manifest, then (seeds and snapshots only) their
+   * `seeds:` / `snapshots:` documentation, then the catalog comment — because
    * `persist_docs` writes the dbt description INTO the warehouse comment, so a
    * catalog comment is usually a stale echo of the yml.
    *
@@ -314,6 +315,16 @@ export class DomainService {
         const catalogNode =
           (manifestModel ? catalog?.byUniqueId.get(manifestModel.uniqueId) : undefined)
           ?? catalog?.byName.get(key);
+        // Seed / snapshot documentation: DESCRIPTIONS ONLY. It never decides
+        // existence, adds a column or pulls in an edge — those stay the job of
+        // the model sources above, exactly as before seeds were documented.
+        const ymlDoc = ymlData.resourceDocs?.get(key);
+        const manifestDoc = manifest?.resourceDocs?.get(key);
+        const docColumnDescriptions = new Map<string, string>();
+        for (const dc of [...(manifestDoc?.columns ?? []), ...(ymlDoc?.columns ?? [])]) {
+          // yml second so it overwrites the manifest's compiled copy.
+          if (dc.description) { docColumnDescriptions.set(normaliseName(dc.name), dc.description); }
+        }
 
         if (!ymlModel && !manifestModel && !catalogNode && !(sourceFile && !disabled)) {
           // Phantom: the design references a model the dbt project does not have.
@@ -403,7 +414,8 @@ export class DomainService {
             dataType,
             // The human's words beat the warehouse's echo of them: persist_docs
             // copies the dbt description into the relation comment.
-            description: entry.declared?.description || manifestCol?.description || entry.observed?.comment || '',
+            description: entry.declared?.description || manifestCol?.description
+              || docColumnDescriptions.get(entry.key) || entry.observed?.comment || '',
             isPrimaryKey: false,
             isForeignKey: false,
             isNaturalKey: false,
@@ -446,7 +458,9 @@ export class DomainService {
           // lowercase `analytics` the user actually wrote. With neither source
           // the honest answer is '' and the node badge falls back to the layer.
           schema: manifestModel?.schema || catalogNode?.schema || '',
-          description: ymlModel?.description || manifestModel?.description || catalogNode?.comment || model.description || '',
+          description: ymlModel?.description || manifestModel?.description
+            || ymlDoc?.description || manifestDoc?.description
+            || catalogNode?.comment || model.description || '',
           columns,
           rationale: model.rationale,
           grain: model.grain,
@@ -716,7 +730,7 @@ function mergeRelationshipTests(
 }
 
 /** Merge two unique-column maps: union of columns per model. */
-function mergeUniqueMaps(
+export function mergeUniqueMaps(
   primary: Map<string, Set<string>>,
   secondary?: Map<string, Set<string>>,
 ): Map<string, Set<string>> {
@@ -740,7 +754,7 @@ function mergeUniqueMaps(
 }
 
 /** Merge two composite-unique-group maps: concatenate groups per model. */
-function mergeCompositeGroups(
+export function mergeCompositeGroups(
   primary: Map<string, string[][]>,
   secondary?: Map<string, string[][]>,
 ): Map<string, string[][]> {

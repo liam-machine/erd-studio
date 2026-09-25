@@ -198,6 +198,9 @@ function EditorCanvas() {
       switch (msg.type) {
         case 'domainLoaded':
           applyDomainPayload(msg.payload);
+          // Set on a fresh domain (no stored positions), cleared by every other
+          // payload — a later load without the flag cancels a pending layout.
+          useEditorStore.getState().setPendingAutoLayout(msg.autoLayout === true);
           if (!msg.welcomeDismissed) {
             useEditorStore.getState().setWelcomeModalOpen(true);
           }
@@ -207,6 +210,8 @@ function EditorCanvas() {
           // so the canvas never flips back to the wrong stage.
           if (isStaleStageReply(msg.requestId)) break;
           applyDomainPayload(msg.payload);
+          // Stage replies never ask for the first-open layout.
+          useEditorStore.getState().setPendingAutoLayout(false);
           break;
         case 'discrepancyReport':
           setDiscrepancyReport(msg.payload);

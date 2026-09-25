@@ -2,17 +2,74 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import {
   HarnessService,
   HARNESS_TARGETS,
   HARNESS_VERSION,
   CODEX_REGION_BEGIN,
   CODEX_REGION_END,
+  applySemanticDir,
+  agentsManagedFiles,
+  claudeManagedFiles,
   extractHarnessVersion,
   findCodexRegion,
   mergeCodexContent,
 } from '../../src/services/harnessService';
+import { parse as parseYaml } from 'yaml';
+import {
+  AGENT_SKILL_FRONTMATTER_KEYS,
+  AGENTS_SETUP_SKILL_DIR,
+  CLAUDE_SETUP_SKILL_DIR,
+  CLAUDE_SETUP_SKILL_FILES,
+  splitFrontmatter,
+} from '../../src/services/harnessAssets';
+
+const CLAUDE = HARNESS_TARGETS.find((t) => t.id === 'claude')!;
+const AGENTS = HARNESS_TARGETS.find((t) => t.id === 'agents')!;
+const AGENTS_SCHEMA_SKILL = '.agents/skills/erd-studio/SKILL.md';
+const AGENTS_SYNC_GUIDE = '.agents/skills/erd-studio/SYNC.md';
+const AGENTS_SETUP_SKILL = '.agents/skills/erd-studio-setup/SKILL.md';
+
+/** A SKILL.md's frontmatter as parsed YAML, plus the body after it. */
+function parseSkill(content: string): { fm: Record<string, unknown>; body: string } {
+  const parts = splitFrontmatter(content);
+  if (!parts) { throw new Error('no frontmatter'); }
+  return { fm: parseYaml(parts.yaml) as Record<string, unknown>, body: parts.body };
+}
+const SCHEMA_SKILL = '.claude/skills/erd-studio/SKILL.md';
+const SYNC_GUIDE = '.claude/skills/erd-studio/SYNC.md';
+const HOOK = '.claude/skills/erd-studio/enforce-skill.sh';
+const SETUP_SKILL = '.claude/skills/erd-studio-setup/SKILL.md';
+const CURRENT_MARKER = `<!-- erd-studio-harness: ${HARNESS_VERSION} -->`;
+
+function writeFile(root: string, rel: string, content: string): void {
+  const p = path.join(root, rel);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, content);
+}
+
+function read(root: string, rel: string): string {
+  return fs.readFileSync(path.join(root, rel), 'utf-8');
+}
+
+/** Rewrite every marker in a file to an older version, as a v17 install would have left it. */
+function ageMarker(root: string, rel: string, version = '17'): void {
+  writeFile(root, rel, read(root, rel).replace(CURRENT_MARKER, `<!-- erd-studio-harness: ${version} -->`));
+}
+
+/** Every file under `root`, relative, with its contents — to prove a call wrote nothing. */
+function snapshot(root: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(p); } else { out[path.relative(root, p)] = fs.readFileSync(p, 'utf-8'); }
+    }
+  };
+  walk(root);
+  return out;
+}
 
 describe('HarnessService', () => {
   let service: HarnessService;
@@ -28,13 +85,20 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_TARGETS', () => {
-    it('has 4 targets', () => {
-      expect(HARNESS_TARGETS).toHaveLength(4);
+    it('has 5 targets', () => {
+      expect(HARNESS_TARGETS).toHaveLength(5);
     });
 
-    it('covers claude, copilot, gemini, codex', () => {
+    it('covers claude, agents, copilot, gemini, codex', () => {
       const ids = HARNESS_TARGETS.map(t => t.id);
-      expect(ids).toEqual(['claude', 'copilot', 'gemini', 'codex']);
+      expect(ids).toEqual(['claude', 'agents', 'copilot', 'gemini', 'codex']);
+    });
+
+    it('labels the Agent Skills target with the tools that read it', () => {
+      expect(AGENTS.label).toContain('Agent Skills — GitHub Copilot, Codex, Gemini CLI, Cursor');
+      expect(AGENTS.relativePath).toBe(AGENTS_SCHEMA_SKILL);
+      // Never ignored: Gemini CLI's read_file refuses gitignored paths.
+      expect(AGENTS.gitignorePattern).toBeUndefined();
     });
   });
 
@@ -346,9 +410,9 @@ describe('HarnessService', () => {
       const session = `vitest-${process.pid}-${Date.now()}`;
       const flag = `/tmp/.erd-studio-skill-${session}`;
       try {
-        const input = JSON.stringify({ session_id: session, tool_input: { file_path: '/repo/.erd-studio/logical-models/gold/fct_sale.yml' } });
+        const input = JSON.stringify({ session_id: session, tool_name: 'Write', tool_input: { file_path: '/repo/.erd-studio/logical-models/gold/fct_sale.yml' } });
         const out = execFileSync('bash', [hookPath], { input, encoding: 'utf-8' });
-        expect(out).toContain('"permissionDecision":"deny"');
+        expect(JSON.parse(out).hookSpecificOutput.permissionDecision).toBe('deny');
       } finally {
         fs.rmSync(flag, { force: true });
       }
@@ -422,6 +486,33 @@ describe('HarnessService', () => {
       expect(settings.hooks.PreToolUse).toHaveLength(1);
       expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('enforce-skill.sh');
       expect(settings.hooks.PreToolUse[0].hooks[0].command).not.toContain('check-skill.sh');
+    });
+
+    it('guards the hook command so it is a no-op where $CLAUDE_PROJECT_DIR is unset', () => {
+      service.install(tmpDir, HARNESS_TARGETS.find(t => t.id === 'claude')!);
+      const settings = JSON.parse(fs.readFileSync(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf-8'));
+      expect(settings.hooks.PreToolUse[0].hooks[0].command)
+        .toBe('[ -n "$CLAUDE_PROJECT_DIR" ] && bash "$CLAUDE_PROJECT_DIR/.claude/skills/erd-studio/enforce-skill.sh" || true');
+    });
+
+    it('upgrades an unguarded enforce-skill.sh command and keeps other hooks in the same entry', () => {
+      const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: {
+          PreToolUse: [{
+            matcher: 'Edit|Write',
+            hooks: [
+              { type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR/.claude/skills/erd-studio/enforce-skill.sh"' },
+              { type: 'command', command: 'echo mine' },
+            ],
+          }],
+        },
+      }));
+      service.install(tmpDir, HARNESS_TARGETS.find(t => t.id === 'claude')!);
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      const commands = settings.hooks.PreToolUse.flatMap((e: { hooks: Array<{ command: string }> }) => e.hooks.map((h) => h.command));
+      expect(commands).toEqual(['echo mine', expect.stringMatching(/^\[ -n "\$CLAUDE_PROJECT_DIR" \]/)]);
     });
 
     it('does not write SYNC.md for non-Claude targets', () => {
@@ -637,6 +728,676 @@ describe('HarnessService', () => {
       }
 
       expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('lists the Claude target\'s version-marked files', () => {
+      expect(claudeManagedFiles()).toEqual([SCHEMA_SKILL, SYNC_GUIDE, SETUP_SKILL]);
+    });
+
+    it('flags claude when a current SKILL.md has a missing or outdated SYNC.md', () => {
+      service.install(tmpDir, CLAUDE);
+      fs.unlinkSync(path.join(tmpDir, SYNC_GUIDE));
+      expect(service.detectStale(tmpDir).map((t) => t.id)).toEqual(['claude']);
+
+      service.install(tmpDir, CLAUDE, true);
+      ageMarker(tmpDir, SYNC_GUIDE);
+      expect(service.detectStale(tmpDir).map((t) => t.id)).toEqual(['claude']);
+    });
+
+    it('flags claude when the setup skill carries an older marker', () => {
+      service.install(tmpDir, CLAUDE);
+      ageMarker(tmpDir, SETUP_SKILL);
+      expect(service.detectStale(tmpDir).map((t) => t.id)).toEqual(['claude']);
+    });
+
+    it('does not flag claude for a missing setup skill (harnessStatus reports it)', () => {
+      service.install(tmpDir, CLAUDE);
+      fs.rmSync(path.join(tmpDir, CLAUDE_SETUP_SKILL_DIR), { recursive: true });
+      expect(service.detectStale(tmpDir)).toEqual([]);
+      expect(service.harnessStatus(tmpDir).claude.setupSkill).toBe('missing');
+    });
+
+    it('does not flag claude for a hand-written (unmarked) setup skill', () => {
+      service.install(tmpDir, CLAUDE);
+      writeFile(tmpDir, SETUP_SKILL, '# my own setup notes\n');
+      expect(service.detectStale(tmpDir)).toEqual([]);
+    });
+
+    it('flags a v17 Claude install (the bump that delivers the setup skill)', () => {
+      service.install(tmpDir, CLAUDE);
+      fs.rmSync(path.join(tmpDir, CLAUDE_SETUP_SKILL_DIR), { recursive: true });
+      ageMarker(tmpDir, SCHEMA_SKILL);
+      ageMarker(tmpDir, SYNC_GUIDE);
+      expect(service.detectStale(tmpDir).map((t) => t.id)).toEqual(['claude']);
+
+      // "Update All" = install(overwrite) — writes the setup skill too.
+      service.install(tmpDir, CLAUDE, true);
+      expect(service.detectStale(tmpDir)).toEqual([]);
+      expect(extractHarnessVersion(read(tmpDir, SETUP_SKILL))).toBe(HARNESS_VERSION);
+    });
+  });
+
+  describe('HARNESS_VERSION', () => {
+    it('is 19 (layer folders for logical model files, issue #76)', () => {
+      expect(HARNESS_VERSION).toBe('19');
+    });
+  });
+
+  describe('enforce-skill.sh hook', () => {
+    const DENY_TEXT = 'ERD Studio: load the /erd-studio skill (file-format rules) before editing .erd-studio files, then retry. This is a one-time check per session — the /erd-studio-setup walkthrough expects it.';
+
+    function hookText(svc: HarnessService = service): string {
+      svc.install(tmpDir, CLAUDE, true);
+      return read(tmpDir, HOOK);
+    }
+
+    it('never auto-approves: no "permissionDecision":"allow" anywhere in the script', () => {
+      for (const dir of ['.erd-studio', '.erd', 'docs/erd']) {
+        const text = hookText(new HarnessService(dir));
+        expect(text).not.toContain('"permissionDecision":"allow"');
+        expect(text).not.toMatch(/permissionDecision"\s*:\s*"allow/);
+      }
+    });
+
+    it('carries the new deny text', () => {
+      expect(hookText()).toContain(DENY_TEXT);
+    });
+
+    it('rewrites the deny text for a custom semanticDir without touching the skill names', () => {
+      const text = hookText(new HarnessService('.erd'));
+      expect(text).toContain('before editing .erd files');
+      expect(text).toContain('/erd-studio-setup walkthrough');
+    });
+
+    const hasBash = spawnSync('bash', ['-c', 'exit 0']).status === 0;
+    it.skipIf(!hasBash)('denies the first .erd-studio edit per session, then stays silent', () => {
+      const script = path.join(tmpDir, 'hook.sh');
+      fs.writeFileSync(script, hookText());
+      const session = `vitest-${process.pid}-${Date.now()}`;
+      const flag = `/tmp/.erd-studio-skill-${session}`;
+      const run = (filePath: string) => spawnSync('bash', [script], {
+        input: JSON.stringify({ session_id: session, tool_name: 'Write', tool_input: { file_path: filePath } }),
+        encoding: 'utf-8',
+      });
+      try {
+        const other = run('/proj/models/orders.sql');
+        expect(other.status).toBe(0);
+        expect(other.stdout).toBe('');
+
+        const first = run('/proj/.erd-studio/gold/orders.json');
+        expect(first.status).toBe(0);
+        const decision = JSON.parse(first.stdout);
+        expect(decision.hookSpecificOutput.permissionDecision).toBe('deny');
+        expect(decision.hookSpecificOutput.permissionDecisionReason).toBe(DENY_TEXT);
+
+        const second = run('/proj/.erd-studio/gold/orders.json');
+        expect(second.status).toBe(0);
+        expect(second.stdout).toBe('');
+      } finally {
+        fs.rmSync(flag, { force: true });
+      }
+    });
+
+    it.skipIf(!hasBash)('stays silent for any tool that is not Claude Code\'s Edit or Write (Copilot ignores the matcher)', () => {
+      const script = path.join(tmpDir, 'hook.sh');
+      fs.writeFileSync(script, hookText());
+      const session = `vitest-tool-${process.pid}-${Date.now()}`;
+      const flag = `/tmp/.erd-studio-skill-${session}`;
+      try {
+        for (const toolName of ['editFiles', 'runInTerminal', '']) {
+          const r = spawnSync('bash', [script], {
+            input: JSON.stringify({ session_id: session, tool_name: toolName, tool_input: { file_path: '/proj/.erd-studio/gold/orders.json' } }),
+            encoding: 'utf-8',
+          });
+          expect(r.status, toolName).toBe(0);
+          expect(r.stdout, toolName).toBe('');
+        }
+        expect(fs.existsSync(flag)).toBe(false);
+      } finally {
+        fs.rmSync(flag, { force: true });
+      }
+    });
+
+    it.skipIf(!hasBash)('the registered command is a silent no-op where $CLAUDE_PROJECT_DIR is unset', () => {
+      service.install(tmpDir, CLAUDE);
+      const settings = JSON.parse(read(tmpDir, '.claude/settings.local.json'));
+      const command: string = settings.hooks.PreToolUse[0].hooks[0].command;
+      const env = { ...process.env };
+      delete env.CLAUDE_PROJECT_DIR;
+      const r = spawnSync('bash', ['-c', command], {
+        input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: '/p/.erd-studio/x.json' } }),
+        encoding: 'utf-8', env,
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe('');
+    });
+  });
+
+  describe('setup skill install (claude companion)', () => {
+    it('writes every setup skill file, with the version marker appended to SKILL.md only', () => {
+      const result = service.install(tmpDir, CLAUDE);
+      expect(result.success).toBe(true);
+
+      for (const asset of CLAUDE_SETUP_SKILL_FILES) {
+        const rel = `${CLAUDE_SETUP_SKILL_DIR}/${asset.relativePath}`;
+        const content = read(tmpDir, rel);
+        if (asset.versioned) {
+          expect(content.endsWith(`\n\n${CURRENT_MARKER}\n`)).toBe(true);
+          expect(content.startsWith(asset.content.replace(/\s*$/, ''))).toBe(true);
+        } else {
+          expect(content).toBe(asset.content);
+          expect(extractHarnessVersion(content)).toBeNull();
+        }
+        expect(result.filesWritten).toContain(rel);
+      }
+      expect(CLAUDE_SETUP_SKILL_FILES.filter((a) => a.versioned).map((a) => a.relativePath)).toEqual(['SKILL.md']);
+    });
+
+    it('never puts the marker in the source markdown', () => {
+      for (const asset of CLAUDE_SETUP_SKILL_FILES) {
+        expect(extractHarnessVersion(asset.content)).toBeNull();
+      }
+    });
+
+    it('reports every file it wrote, workspace-relative with forward slashes', () => {
+      const result = service.install(tmpDir, CLAUDE);
+      expect(result.filesWritten).toEqual(expect.arrayContaining([
+        SCHEMA_SKILL, SYNC_GUIDE, HOOK, '.claude/settings.local.json', SETUP_SKILL, '.gitignore',
+      ]));
+      for (const rel of result.filesWritten!) {
+        expect(rel).not.toContain('\\');
+        expect(path.isAbsolute(rel)).toBe(false);
+        expect(fs.existsSync(path.join(tmpDir, rel))).toBe(true);
+      }
+    });
+
+    it('does not report settings.local.json when the hook is already registered', () => {
+      service.install(tmpDir, CLAUDE);
+      const again = service.install(tmpDir, CLAUDE, true);
+      expect(again.filesWritten).not.toContain('.claude/settings.local.json');
+      expect(again.filesWritten).not.toContain('.gitignore');
+    });
+
+    it('applies semanticDir to the setup skill but leaves ~/.erd-studio-cli untouched', () => {
+      const sample = 'Run `~/.erd-studio-cli/bin/erd-studio doctor --json`, then edit .erd-studio/gold/x.json and `.erd-studio/logical-models/`.';
+      const rewritten = applySemanticDir(sample, 'docs/erd');
+      expect(rewritten).toContain('~/.erd-studio-cli/bin/erd-studio doctor --json');
+      expect(rewritten).toContain('docs/erd/gold/x.json');
+      expect(rewritten).toContain('`docs/erd/logical-models/`');
+      expect(rewritten).not.toMatch(/\.erd-studio(?![\w-])/);
+
+      const custom = new HarnessService('docs/erd');
+      custom.install(tmpDir, CLAUDE);
+      for (const asset of CLAUDE_SETUP_SKILL_FILES) {
+        const installed = read(tmpDir, `${CLAUDE_SETUP_SKILL_DIR}/${asset.relativePath}`);
+        expect(installed).not.toMatch(/\.erd-studio(?![\w-])/);
+        expect(installed.startsWith(applySemanticDir(asset.content, 'docs/erd').replace(/\s*$/, ''))).toBe(true);
+        // The launcher path is the same for every semanticDir.
+        const launcherRefs = asset.content.match(/~\/\.erd-studio-cli/g)?.length ?? 0;
+        expect(installed.match(/~\/\.erd-studio-cli/g)?.length ?? 0).toBe(launcherRefs);
+      }
+      // The skill's own allowed-tools rule names the launcher.
+      expect(read(tmpDir, SETUP_SKILL)).toContain('~/.erd-studio-cli/bin/erd-studio');
+    });
+
+    it('leaves a hand-written setup SKILL.md alone unless replaceUnmanagedSetupSkill is set', () => {
+      writeFile(tmpDir, SETUP_SKILL, '# mine\n');
+      const result = service.install(tmpDir, CLAUDE);
+      expect(result.success).toBe(true);
+      expect(read(tmpDir, SETUP_SKILL)).toBe('# mine\n');
+      expect(fs.existsSync(path.join(tmpDir, CLAUDE_SETUP_SKILL_DIR, 'references'))).toBe(false);
+      expect(result.filesWritten).not.toContain(SETUP_SKILL);
+
+      service.install(tmpDir, CLAUDE, true, { replaceUnmanagedSetupSkill: true });
+      expect(extractHarnessVersion(read(tmpDir, SETUP_SKILL))).toBe(HARNESS_VERSION);
+    });
+
+    it("an unmarked setup SKILL.md survives Update All / the QuickPick (install(root, claude, true))", () => {
+      service.install(tmpDir, CLAUDE);
+      writeFile(tmpDir, SETUP_SKILL, '# mine\n');
+      ageMarker(tmpDir, SCHEMA_SKILL);
+      const result = service.install(tmpDir, CLAUDE, true);
+      expect(result.success).toBe(true);
+      expect(read(tmpDir, SETUP_SKILL)).toBe('# mine\n');
+      expect(result.filesWritten).not.toContain(SETUP_SKILL);
+      // The primary file the prompt named is still updated.
+      expect(extractHarnessVersion(read(tmpDir, SCHEMA_SKILL))).toBe(HARNESS_VERSION);
+    });
+
+    it('refreshes a managed setup SKILL.md even without overwrite (it is ours)', () => {
+      service.install(tmpDir, CLAUDE);
+      fs.unlinkSync(path.join(tmpDir, SCHEMA_SKILL));
+      ageMarker(tmpDir, SETUP_SKILL);
+      service.install(tmpDir, CLAUDE);
+      expect(extractHarnessVersion(read(tmpDir, SETUP_SKILL))).toBe(HARNESS_VERSION);
+    });
+  });
+
+  describe('setup skill gitignore', () => {
+    it('ignores both skill directories on a fresh install', () => {
+      service.install(tmpDir, CLAUDE);
+      const lines = read(tmpDir, '.gitignore').split('\n');
+      expect(lines).toContain('.claude/skills/erd-studio/');
+      expect(lines).toContain('.claude/skills/erd-studio-setup/');
+      expect(read(tmpDir, '.gitignore').match(/# ERD Studio AI coding harness/g)).toHaveLength(1);
+    });
+
+    it('adds the setup line for a v17 upgrader whose schema skill is ignored', () => {
+      writeFile(tmpDir, '.gitignore', 'node_modules/\n\n# ERD Studio AI coding harness (auto-generated, safe to remove)\n.claude/skills/erd-studio/\n');
+      writeFile(tmpDir, SCHEMA_SKILL, `old\n<!-- erd-studio-harness: 17 -->\n`);
+
+      const result = service.install(tmpDir, CLAUDE, true);
+      expect(result.alreadyExisted).toBe(true);
+      expect(result.filesWritten).toContain('.gitignore');
+      const lines = read(tmpDir, '.gitignore').split('\n');
+      expect(lines).toContain('.claude/skills/erd-studio-setup/');
+      expect(lines.indexOf('.claude/skills/erd-studio-setup/')).toBeGreaterThan(lines.indexOf('.claude/skills/erd-studio/'));
+      expect(lines).toContain('node_modules/');
+    });
+
+    it('recognises a schema-skill line written with a leading slash', () => {
+      writeFile(tmpDir, '.gitignore', '/.claude/skills/erd-studio\n');
+      writeFile(tmpDir, SCHEMA_SKILL, `old\n<!-- erd-studio-harness: 17 -->\n`);
+      service.install(tmpDir, CLAUDE, true);
+      expect(read(tmpDir, '.gitignore').split('\n')).toContain('.claude/skills/erd-studio-setup/');
+    });
+
+    it('follows a user who tracks the schema skill: no setup line either', () => {
+      writeFile(tmpDir, '.gitignore', 'node_modules/\n');
+      writeFile(tmpDir, SCHEMA_SKILL, `old\n<!-- erd-studio-harness: 17 -->\n`);
+      service.install(tmpDir, CLAUDE, true);
+      expect(read(tmpDir, '.gitignore')).toBe('node_modules/\n');
+    });
+
+    it('does not re-add the setup line once the directory exists', () => {
+      service.install(tmpDir, CLAUDE);
+      writeFile(tmpDir, '.gitignore', '.claude/skills/erd-studio/\n');
+      service.install(tmpDir, CLAUDE, true);
+      expect(read(tmpDir, '.gitignore')).toBe('.claude/skills/erd-studio/\n');
+    });
+  });
+
+  describe('agents target (.agents/skills — Copilot, Codex, Gemini CLI, Cursor)', () => {
+    it('writes the schema skill, SYNC.md and the setup skill, but no hook or Claude settings', () => {
+      const result = service.install(tmpDir, AGENTS);
+      expect(result.success).toBe(true);
+      expect(result.filesWritten).toEqual(expect.arrayContaining([AGENTS_SCHEMA_SKILL, AGENTS_SYNC_GUIDE, AGENTS_SETUP_SKILL]));
+      for (const asset of CLAUDE_SETUP_SKILL_FILES) {
+        expect(fs.existsSync(path.join(tmpDir, AGENTS_SETUP_SKILL_DIR, asset.relativePath)), asset.relativePath).toBe(true);
+      }
+      expect(fs.existsSync(path.join(tmpDir, '.agents/skills/erd-studio/enforce-skill.sh'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, '.claude'))).toBe(false);
+      expect(agentsManagedFiles()).toEqual([AGENTS_SCHEMA_SKILL, AGENTS_SYNC_GUIDE, AGENTS_SETUP_SKILL]);
+    });
+
+    it('uses the same schema skill text as Claude Code, with portable frontmatter only', () => {
+      expect(service.generateContent('agents')).toBe(service.generateContent('claude'));
+      const { fm } = parseSkill(service.generateContent('agents'));
+      expect(Object.keys(fm).every((k) => AGENT_SKILL_FRONTMATTER_KEYS.includes(k))).toBe(true);
+      expect(fm.name).toBe('erd-studio'); // == the folder name, as the spec requires
+      expect((fm.description as string).length).toBeLessThanOrEqual(1024);
+    });
+
+    it('installs two frontmatter variants of the setup SKILL.md: Claude-specific and portable', () => {
+      service.install(tmpDir, CLAUDE);
+      service.install(tmpDir, AGENTS);
+      const claude = parseSkill(read(tmpDir, SETUP_SKILL));
+      const agents = parseSkill(read(tmpDir, AGENTS_SETUP_SKILL));
+
+      // .claude copy: Claude Code's allowed-tools list and argument-hint, as authored.
+      expect(Array.isArray(claude.fm['allowed-tools'])).toBe(true);
+      expect((claude.fm['allowed-tools'] as string[]).some((t) => t.startsWith('Bash('))).toBe(true);
+      expect(typeof claude.fm['argument-hint']).toBe('string');
+      expect(read(tmpDir, SETUP_SKILL).startsWith(CLAUDE_SETUP_SKILL_FILES[0].content.replace(/\s*$/, ''))).toBe(true);
+
+      // .agents copy: only spec fields, never a Claude Bash() pattern.
+      expect(Object.keys(agents.fm).every((k) => AGENT_SKILL_FRONTMATTER_KEYS.includes(k))).toBe(true);
+      expect(agents.fm).not.toHaveProperty('allowed-tools');
+      expect(agents.fm).not.toHaveProperty('argument-hint');
+      expect(read(tmpDir, AGENTS_SETUP_SKILL)).not.toContain('Bash(');
+      expect(agents.fm.name).toBe('erd-studio-setup');
+      expect(agents.fm.name).toBe(path.basename(AGENTS_SETUP_SKILL_DIR));
+      expect(/^[a-z0-9-]{1,64}$/.test(agents.fm.name as string)).toBe(true);
+      expect(agents.fm.description).toBe(claude.fm.description);
+      expect((agents.fm.description as string).length).toBeLessThanOrEqual(1024);
+
+      // Same body, same version marker, same references.
+      expect(agents.body).toBe(claude.body);
+      expect(extractHarnessVersion(read(tmpDir, AGENTS_SETUP_SKILL))).toBe(HARNESS_VERSION);
+      for (const asset of CLAUDE_SETUP_SKILL_FILES.filter((a) => a.relativePath !== 'SKILL.md')) {
+        expect(read(tmpDir, `${AGENTS_SETUP_SKILL_DIR}/${asset.relativePath}`)).toBe(read(tmpDir, `${CLAUDE_SETUP_SKILL_DIR}/${asset.relativePath}`));
+      }
+    });
+
+    it('setupSkillFiles returns exactly what install writes', () => {
+      service.install(tmpDir, AGENTS);
+      for (const [rel, content] of service.setupSkillFiles('agents')) {
+        expect(read(tmpDir, `${AGENTS_SETUP_SKILL_DIR}/${rel}`)).toBe(content);
+      }
+    });
+
+    it('rewrites the data directory for a custom semanticDir in the .agents copies too', () => {
+      new HarnessService('docs/erd').install(tmpDir, AGENTS);
+      expect(read(tmpDir, AGENTS_SCHEMA_SKILL)).toContain('docs/erd/logical-models/');
+      expect(read(tmpDir, AGENTS_SCHEMA_SKILL)).not.toContain('.erd-studio/');
+    });
+
+    it('leaves a hand-written .agents setup SKILL.md alone unless told to replace it', () => {
+      writeFile(tmpDir, AGENTS_SETUP_SKILL, '# mine\n');
+      service.install(tmpDir, AGENTS);
+      expect(read(tmpDir, AGENTS_SETUP_SKILL)).toBe('# mine\n');
+      service.install(tmpDir, AGENTS, true, { replaceUnmanagedSetupSkill: true });
+      expect(extractHarnessVersion(read(tmpDir, AGENTS_SETUP_SKILL))).toBe(HARNESS_VERSION);
+    });
+
+    it('is stale when its marker is old, its SYNC.md is missing, or its setup skill is outdated', () => {
+      service.install(tmpDir, AGENTS);
+      expect(service.detectStale(tmpDir)).toEqual([]);
+      ageMarker(tmpDir, AGENTS_SETUP_SKILL);
+      expect(service.detectStale(tmpDir).map((t) => t.id)).toEqual(['agents']);
+      service.install(tmpDir, AGENTS, true);
+      fs.unlinkSync(path.join(tmpDir, AGENTS_SYNC_GUIDE));
+      expect(service.detectStale(tmpDir).map((t) => t.id)).toEqual(['agents']);
+      expect(service.harnessStatus(tmpDir).agents.schemaSkill).toBe('outdated');
+      service.install(tmpDir, AGENTS, true);
+      ageMarker(tmpDir, AGENTS_SCHEMA_SKILL);
+      expect(service.detectStale(tmpDir).map((t) => t.id)).toEqual(['agents']);
+    });
+
+    describe('gitignore', () => {
+      it('never ignores the .agents skill folders (Gemini CLI cannot read an ignored file)', () => {
+        const result = service.install(tmpDir, AGENTS);
+        expect(result.filesWritten).not.toContain('.gitignore');
+        expect(fs.existsSync(path.join(tmpDir, '.gitignore'))).toBe(false);
+      });
+
+      it('adds no .agents line even when the Claude skill is ignored', () => {
+        service.install(tmpDir, CLAUDE); // adds the .claude/skills lines
+        const before = read(tmpDir, '.gitignore');
+        service.install(tmpDir, AGENTS);
+        expect(read(tmpDir, '.gitignore')).toBe(before);
+        expect(before).not.toContain('.agents/');
+      });
+    });
+  });
+
+  describe('modelling-approach.md', () => {
+    it('every target tells the assistant to read and follow .erd-studio/modelling-approach.md', () => {
+      for (const target of HARNESS_TARGETS) {
+        const content = service.generateContent(target.id);
+        expect(content, target.id).toContain('.erd-studio/modelling-approach.md');
+        expect(content, target.id).toMatch(/read it before creating or editing models and follow it/);
+        expect(content, target.id).toContain('ERD Studio never parses it');
+      }
+      expect(new HarnessService('docs/erd').generateContent('claude')).toContain('docs/erd/modelling-approach.md');
+    });
+
+    const hasBash = spawnSync('bash', ['-c', 'exit 0']).status === 0;
+    it.skipIf(!hasBash)('the Claude hook lets modelling-approach.md through without using up the one-time check', () => {
+      service.install(tmpDir, CLAUDE);
+      const script = path.join(tmpDir, HOOK);
+      const session = `vitest-ma-${process.pid}-${Date.now()}`;
+      const flag = `/tmp/.erd-studio-skill-${session}`;
+      const run = (filePath: string) => spawnSync('bash', [script], {
+        input: JSON.stringify({ session_id: session, tool_name: 'Write', tool_input: { file_path: filePath } }),
+        encoding: 'utf-8',
+      });
+      try {
+        const approach = run('/proj/.erd-studio/modelling-approach.md');
+        expect(approach.status).toBe(0);
+        expect(approach.stdout).toBe('');
+        expect(fs.existsSync(flag)).toBe(false);
+        const domain = run('/proj/.erd-studio/gold/orders.json');
+        expect(JSON.parse(domain.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+      } finally {
+        fs.rmSync(flag, { force: true });
+      }
+    });
+  });
+
+  describe('harnessStatus', () => {
+    it('reports everything missing in an empty workspace', () => {
+      expect(service.harnessStatus(tmpDir)).toEqual({
+        claude: { schemaSkill: 'missing', setupSkill: 'missing', hookRegistered: false },
+        agents: { schemaSkill: 'missing', setupSkill: 'missing' },
+        copilot: 'missing',
+        gemini: 'missing',
+        codex: 'missing',
+      });
+    });
+
+    it('reports a fresh install of every target as current', () => {
+      for (const target of HARNESS_TARGETS) { service.install(tmpDir, target); }
+      expect(service.harnessStatus(tmpDir)).toEqual({
+        claude: { schemaSkill: 'current', setupSkill: 'current', hookRegistered: true },
+        agents: { schemaSkill: 'current', setupSkill: 'current' },
+        copilot: 'current',
+        gemini: 'current',
+        codex: 'current',
+      });
+    });
+
+    it('distinguishes outdated, unmanaged and missing files', () => {
+      writeFile(tmpDir, SCHEMA_SKILL, `x\n<!-- erd-studio-harness: 17 -->\n`);
+      writeFile(tmpDir, SETUP_SKILL, '# hand-written\n');
+      writeFile(tmpDir, '.github/instructions/erd-studio.instructions.md', '<!-- erd-studio-harness: 3 -->\n');
+      writeFile(tmpDir, '.gemini/styleguide.md', '# ours, not ERD Studio\n');
+      writeFile(tmpDir, 'AGENTS.md', '# Agents, no ERD section\n');
+      expect(service.harnessStatus(tmpDir)).toEqual({
+        claude: { schemaSkill: 'outdated', setupSkill: 'unmanaged', hookRegistered: false },
+        agents: { schemaSkill: 'missing', setupSkill: 'missing' },
+        copilot: 'outdated',
+        gemini: 'unmanaged',
+        codex: 'missing',
+      });
+    });
+
+    it('reads a current SKILL.md with a missing SYNC.md as outdated', () => {
+      service.install(tmpDir, CLAUDE);
+      fs.unlinkSync(path.join(tmpDir, SYNC_GUIDE));
+      expect(service.harnessStatus(tmpDir).claude.schemaSkill).toBe('outdated');
+    });
+
+    it('reports an outdated Codex region', () => {
+      writeFile(tmpDir, 'AGENTS.md', '# Rules\n\n## ERD Studio Domain Files\nold\n<!-- erd-studio-harness: 9 -->\n');
+      expect(service.harnessStatus(tmpDir).codex).toBe('outdated');
+    });
+
+    it('needs both the hook script and its registration for hookRegistered', () => {
+      service.install(tmpDir, CLAUDE);
+      fs.unlinkSync(path.join(tmpDir, HOOK));
+      expect(service.harnessStatus(tmpDir).claude.hookRegistered).toBe(false);
+
+      service.install(tmpDir, CLAUDE, true);
+      writeFile(tmpDir, '.claude/settings.local.json', '{"hooks":{"PreToolUse":[]}}');
+      expect(service.harnessStatus(tmpDir).claude.hookRegistered).toBe(false);
+
+      writeFile(tmpDir, '.claude/settings.local.json', '{ broken');
+      expect(service.harnessStatus(tmpDir).claude.hookRegistered).toBe(false);
+    });
+  });
+
+  describe('installRecommended', () => {
+    it('installs the Claude target only on a fresh workspace', () => {
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      expect(result.status).toBe('installed');
+      expect(result.unmanaged).toEqual([]);
+      expect(result.filesWritten).toEqual(expect.arrayContaining([SCHEMA_SKILL, SYNC_GUIDE, HOOK, SETUP_SKILL]));
+      const status = service.harnessStatus(tmpDir);
+      expect(status.claude).toEqual({ schemaSkill: 'current', setupSkill: 'current', hookRegistered: true });
+      expect([status.copilot, status.gemini, status.codex]).toEqual(['missing', 'missing', 'missing']);
+      expect(status.agents).toEqual({ schemaSkill: 'missing', setupSkill: 'missing' });
+      expect(fs.existsSync(path.join(tmpDir, '.agents'))).toBe(false);
+    });
+
+    it('is unchanged (and writes nothing) when everything is current', () => {
+      service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      const before = snapshot(tmpDir);
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      expect(result).toEqual({ status: 'unchanged', unmanaged: [], filesWritten: [], targets: ['claude'] });
+      expect(snapshot(tmpDir)).toEqual(before);
+    });
+
+    it('updates an outdated install', () => {
+      service.install(tmpDir, CLAUDE);
+      ageMarker(tmpDir, SCHEMA_SKILL);
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      expect(result.status).toBe('updated');
+      expect(extractHarnessVersion(read(tmpDir, SCHEMA_SKILL))).toBe(HARNESS_VERSION);
+    });
+
+    it('updates when only the setup skill is missing (a v18 install from elsewhere)', () => {
+      service.install(tmpDir, CLAUDE);
+      fs.rmSync(path.join(tmpDir, CLAUDE_SETUP_SKILL_DIR), { recursive: true });
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      expect(result.status).toBe('updated');
+      expect(result.filesWritten).toContain(SETUP_SKILL);
+    });
+
+    it('updates when the hook registration was removed', () => {
+      service.install(tmpDir, CLAUDE);
+      fs.unlinkSync(path.join(tmpDir, '.claude/settings.local.json'));
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      expect(result.status).toBe('updated');
+      expect(result.filesWritten).toContain('.claude/settings.local.json');
+      expect(service.harnessStatus(tmpDir).claude.hookRegistered).toBe(true);
+    });
+
+    it('asks first, writing nothing, when either SKILL.md is unmanaged', () => {
+      writeFile(tmpDir, SCHEMA_SKILL, '# my schema notes\n');
+      writeFile(tmpDir, SETUP_SKILL, '# my setup notes\n');
+      const before = snapshot(tmpDir);
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      expect(result).toEqual({
+        status: 'needs-confirmation', unmanaged: [SCHEMA_SKILL, SETUP_SKILL], filesWritten: [], targets: ['claude'],
+      });
+      expect(snapshot(tmpDir)).toEqual(before);
+    });
+
+    it('asks first when only the setup SKILL.md is unmanaged', () => {
+      service.install(tmpDir, CLAUDE);
+      writeFile(tmpDir, SETUP_SKILL, '# my setup notes\n');
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      expect(result.status).toBe('needs-confirmation');
+      expect(result.unmanaged).toEqual([SETUP_SKILL]);
+      expect(read(tmpDir, SETUP_SKILL)).toBe('# my setup notes\n');
+    });
+
+    it('replaces unmanaged files once confirmed', () => {
+      writeFile(tmpDir, SCHEMA_SKILL, '# my schema notes\n');
+      writeFile(tmpDir, SETUP_SKILL, '# my setup notes\n');
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: true });
+      expect(result.status).toBe('updated');
+      expect(result.unmanaged).toEqual([]);
+      expect(extractHarnessVersion(read(tmpDir, SCHEMA_SKILL))).toBe(HARNESS_VERSION);
+      expect(extractHarnessVersion(read(tmpDir, SETUP_SKILL))).toBe(HARNESS_VERSION);
+    });
+
+    it('Keep mine with only the setup SKILL.md hand-written installs the schema skill and hook', () => {
+      writeFile(tmpDir, SETUP_SKILL, '# my setup notes\n');
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false, keepUnmanaged: true });
+      expect(result.status).toBe('installed');
+      expect(read(tmpDir, SETUP_SKILL)).toBe('# my setup notes\n');
+      expect(result.filesWritten).toEqual(expect.arrayContaining([SCHEMA_SKILL, SYNC_GUIDE, HOOK, '.claude/settings.local.json']));
+      expect(result.filesWritten).not.toContain(SETUP_SKILL);
+      expect(service.harnessStatus(tmpDir).claude).toEqual({ schemaSkill: 'current', setupSkill: 'unmanaged', hookRegistered: true });
+    });
+
+    it('Keep mine with only the schema SKILL.md hand-written installs the setup skill and hook', () => {
+      writeFile(tmpDir, SCHEMA_SKILL, '# my schema notes\n');
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false, keepUnmanaged: true });
+      expect(result.status).toBe('updated');
+      expect(read(tmpDir, SCHEMA_SKILL)).toBe('# my schema notes\n');
+      expect(result.filesWritten).toEqual(expect.arrayContaining([SETUP_SKILL, HOOK]));
+      expect(result.filesWritten).not.toContain(SCHEMA_SKILL);
+      expect(service.harnessStatus(tmpDir).claude).toMatchObject({ schemaSkill: 'unmanaged', setupSkill: 'current', hookRegistered: true });
+    });
+
+    it('Keep mine follows the gitignore choice for the new setup skill directory', () => {
+      writeFile(tmpDir, SCHEMA_SKILL, '# my schema notes\n');
+      writeFile(tmpDir, '.gitignore', 'node_modules/\n.claude/skills/erd-studio/\n');
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false, keepUnmanaged: true });
+      expect(result.filesWritten).toContain('.gitignore');
+      expect(read(tmpDir, '.gitignore').split('\n')).toContain('.claude/skills/erd-studio-setup/');
+    });
+
+    it('reports failed when the install cannot write', () => {
+      // `.claude` as a plain file makes every mkdir under it fail.
+      fs.writeFileSync(path.join(tmpDir, '.claude'), 'not a directory');
+      const result = service.installRecommended(tmpDir, { assistants: ['claude'], replaceUnmanaged: false });
+      expect(result.status).toBe('failed');
+      expect(result.error).toBeTruthy();
+      expect(result.filesWritten).toEqual([]);
+    });
+  });
+  describe('installRecommended for the detected assistants', () => {
+    it('installs only .agents/skills for assistants other than Claude Code', () => {
+      const result = service.installRecommended(tmpDir, { replaceUnmanaged: false, assistants: ['codex', 'gemini'] });
+      expect(result.status).toBe('installed');
+      expect(result.targets).toEqual(['agents']);
+      expect(result.filesWritten).toEqual(expect.arrayContaining([AGENTS_SCHEMA_SKILL, AGENTS_SYNC_GUIDE, AGENTS_SETUP_SKILL]));
+      expect(fs.existsSync(path.join(tmpDir, '.claude'))).toBe(false);
+      expect(service.harnessStatus(tmpDir).agents).toEqual({ schemaSkill: 'current', setupSkill: 'current' });
+    });
+
+    it('installs both folders for Claude Code plus Codex or Gemini, and both when none is detected', () => {
+      for (const assistants of [['claude', 'codex'] as const, ['claude', 'gemini'] as const, [] as const]) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-both-'));
+        try {
+          const result = service.installRecommended(dir, { replaceUnmanaged: false, assistants });
+          expect(result.targets).toEqual(['claude', 'agents']);
+          expect(result.status).toBe('installed');
+          const status = service.harnessStatus(dir);
+          expect(status.claude).toEqual({ schemaSkill: 'current', setupSkill: 'current', hookRegistered: true });
+          expect(status.agents).toEqual({ schemaSkill: 'current', setupSkill: 'current' });
+          // .gitignore lists each Claude path once; `.agents/` is never ignored.
+          const lines = read(dir, '.gitignore').split('\n').filter((l) => l.startsWith('.'));
+          expect(lines).toEqual(['.claude/skills/erd-studio/', '.claude/skills/erd-studio-setup/']);
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    it('omitting assistants means none detected: both folders', () => {
+      expect(service.installRecommended(tmpDir, { replaceUnmanaged: false }).targets).toEqual(['claude', 'agents']);
+    });
+
+    it('installs only .claude/skills for Claude Code plus Copilot or Cursor (they read it too)', () => {
+      for (const assistants of [['claude', 'copilot'] as const, ['claude', 'cursor'] as const]) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-claude-only-'));
+        try {
+          const result = service.installRecommended(dir, { replaceUnmanaged: false, assistants });
+          expect(result.targets).toEqual(['claude']);
+          expect(fs.existsSync(path.join(dir, '.agents'))).toBe(false);
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    it('adds only the missing folder when a new assistant appears, and is then unchanged', () => {
+      service.installRecommended(tmpDir, { replaceUnmanaged: false, assistants: ['claude'] });
+      const claudeBefore = read(tmpDir, SCHEMA_SKILL);
+      const result = service.installRecommended(tmpDir, { replaceUnmanaged: false, assistants: ['claude', 'codex'] });
+      expect(result.status).toBe('updated');
+      expect(result.filesWritten.every((f) => !f.startsWith('.claude/'))).toBe(true);
+      expect(read(tmpDir, SCHEMA_SKILL)).toBe(claudeBefore);
+      expect(service.installRecommended(tmpDir, { replaceUnmanaged: false, assistants: ['claude', 'codex'] }).status).toBe('unchanged');
+    });
+
+    it('asks before replacing a hand-written .agents SKILL.md, and Keep mine leaves it', () => {
+      writeFile(tmpDir, AGENTS_SETUP_SKILL, '# my own\n');
+      const first = service.installRecommended(tmpDir, { replaceUnmanaged: false, assistants: ['copilot'] });
+      expect(first).toEqual({ status: 'needs-confirmation', unmanaged: [AGENTS_SETUP_SKILL], filesWritten: [], targets: ['agents'] });
+      const kept = service.installRecommended(tmpDir, { replaceUnmanaged: false, keepUnmanaged: true, assistants: ['copilot'] });
+      expect(kept.status).toBe('installed');
+      expect(read(tmpDir, AGENTS_SETUP_SKILL)).toBe('# my own\n');
+      expect(kept.filesWritten).toContain(AGENTS_SCHEMA_SKILL);
+      // A hand-written Claude copy is irrelevant when only .agents is being installed.
+      writeFile(tmpDir, SCHEMA_SKILL, '# mine\n');
+      expect(service.installRecommended(tmpDir, { replaceUnmanaged: true, assistants: ['copilot'] }).status).toBe('updated');
+      expect(read(tmpDir, SCHEMA_SKILL)).toBe('# mine\n');
     });
   });
 });

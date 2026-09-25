@@ -16,6 +16,11 @@ import { parseRefModelName, resolveModelNameFromNodeId } from '../services/nameU
 
 const MODEL_KEY_PREFIX = 'model.';
 const TEST_KEY_PREFIX = 'test.';
+/**
+ * Seeds and snapshots: collected into `resourceDocs` for their descriptions
+ * only, never into `models` (existence, picker and relationship derivation).
+ */
+const RESOURCE_DOC_KEY_PREFIXES = ['seed.', 'snapshot.'];
 
 /**
  * Extract all model and test data from a parsed manifest JSON object.
@@ -37,6 +42,7 @@ export function extractManifestData(
       uniqueColumns: {},
       compositeUniqueGroups: {},
       disabledModels,
+      resourceDocs: {},
     };
   }
 
@@ -44,6 +50,7 @@ export function extractManifestData(
   const relationshipTests: ManifestRelationshipTest[] = [];
   const uniqueColumns: Record<string, string[]> = {};
   const compositeUniqueGroups: Record<string, string[][]> = {};
+  const resourceDocs: Record<string, ManifestModelInfo> = {};
 
   for (const [nodeKey, nodeValue] of Object.entries(nodes)) {
     const node = nodeValue as Record<string, unknown>;
@@ -62,6 +69,14 @@ export function extractManifestData(
       continue;
     }
 
+    if (RESOURCE_DOC_KEY_PREFIXES.some((prefix) => nodeKey.startsWith(prefix))) {
+      const info = extractModelInfo(node);
+      if (info && !resourceDocs[info.name]) {
+        resourceDocs[info.name] = info;
+      }
+      continue;
+    }
+
     if (nodeKey.startsWith(TEST_KEY_PREFIX)) {
       const relTest = extractRelationshipTest(node, nodes);
       if (relTest) {
@@ -74,7 +89,7 @@ export function extractManifestData(
     }
   }
 
-  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels };
+  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs };
 }
 
 /**

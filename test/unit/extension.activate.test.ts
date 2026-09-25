@@ -19,7 +19,16 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { activate, NO_LEGACY_ALIAS } from '../../src/extension';
+import {
+  activate,
+  GETTING_STARTED_NO_PROJECT_SHOWN_KEY,
+  GETTING_STARTED_PENDING_KEY,
+  GETTING_STARTED_SHOWN_KEY,
+  NO_LEGACY_ALIAS,
+  PRE_REGISTERED_COMMANDS,
+  _resetFirstRunGuardForTests,
+} from '../../src/extension';
+import { GETTING_STARTED_VIEW_TYPE, GettingStartedPanel } from '../../src/providers/GettingStartedPanel';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 
@@ -34,10 +43,15 @@ const legacyAlias = (command: string) => command.replace(/^erdStudio\./, 'dbtSem
 
 type Context = import('vscode').ExtensionContext;
 
-function makeContext(root: string): Context {
-  const globalState = new Map<string, unknown>();
+function makeContext(
+  root: string,
+  opts: { globalState?: Map<string, unknown>; workspaceState?: Map<string, unknown> } = {},
+): Context {
+  // The Welcome panel was already shown on this "machine", so the first-run
+  // trigger stays out of the way of the tests that are not about it.
+  const globalState = opts.globalState ?? new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
   // Pretend the harness-install QuickPick was already offered for this workspace.
-  const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+  const workspaceState = opts.workspaceState ?? new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
   return {
     subscriptions: [],
     extension: { packageJSON: packageJson },
@@ -78,6 +92,12 @@ beforeEach(() => {
   vscode.workspace.workspaceFolders = [];
   vscode.window.tabGroups.all = [];
   vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
+  vscode._resetMockWebviewPanels();
+  vscode._setMockExtensions([]);
+  _resetFirstRunGuardForTests();
+  // os.homedir() follows HOME: keep the launcher refresh away from the real ~/.erd-studio-cli.
+  vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
@@ -94,8 +114,11 @@ afterEach(async () => {
       // best effort
     }
   }
+  for (const panel of [...vscode.window._webviewPanels]) { panel.dispose(); }
+  vscode._resetMockWebviewPanels();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -525,5 +548,218 @@ describe('activate() project-root resolution', () => {
     await activate(context);
 
     expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${path.join(root, 'a')}`);
+  });
+});
+
+/** Dispose everything the last activate() registered, as a window reload would. */
+function tearDownActivation(): void {
+  for (const sub of [...context.subscriptions].reverse()) { (sub as { dispose(): void }).dispose(); }
+  context.subscriptions.length = 0;
+  vscode._resetRegisteredCommands();
+  _resetFirstRunGuardForTests();
+}
+
+const panelsOfType = () => vscode.window._webviewPanels.filter((p) => p.viewType === GETTING_STARTED_VIEW_TYPE);
+
+describe('Welcome panel: commands', () => {
+  it('erdStudio.showGettingStarted works without a project, is registered once and pre-registered', async () => {
+    await activate(context);
+
+    expect(count('erdStudio.showGettingStarted')).toBe(1);
+    expect(registered().indexOf('erdStudio.showGettingStarted')).toBe(1);
+    expect(PRE_REGISTERED_COMMANDS).toEqual(
+      new Set(['erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject']),
+    );
+    // setupAiHelper needs a project: it gets the standard no-project stub instead.
+    expect(count('erdStudio.setupAiHelper')).toBe(1);
+
+    await vscode.commands.executeCommand('erdStudio.showGettingStarted');
+
+    expect(panelsOfType()).toHaveLength(1);
+    const panel = panelsOfType()[0];
+    expect(panel.title).toBe('Welcome to ERD Studio');
+    await panel._simulateMessage({ type: 'ready' });
+    expect(panel._postedMessages).toContainEqual(
+      expect.objectContaining({ type: 'status', payload: expect.objectContaining({ hasProject: false, project: null }) }),
+    );
+
+    // A second run reveals the same panel instead of opening another.
+    await vscode.commands.executeCommand('erdStudio.showGettingStarted');
+    expect(panelsOfType()).toHaveLength(1);
+    expect(panel._reveals).toHaveLength(1);
+  });
+
+  it('with a project, the panel reports the dbt project and the helper state', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+
+    await vscode.commands.executeCommand('erdStudio.showGettingStarted');
+    const panel = panelsOfType()[0];
+    await panel._simulateMessage({ type: 'ready' });
+
+    const status = panel._postedMessages.find((m) => (m as { type: string }).type === 'status') as {
+      payload: { hasProject: boolean; project: unknown; helper: string; cli: string; domainCount: number };
+    };
+    expect(status.payload.hasProject).toBe(true);
+    expect(status.payload.project).toEqual({ name: path.basename(root), relativePath: null });
+    expect(status.payload.cli).toBe('missing');
+    expect(status.payload.helper).toBe('missing');
+    expect(status.payload.domainCount).toBeGreaterThan(0);
+  });
+});
+
+describe('erdStudio.trySampleProject', () => {
+  const SAMPLE = 'erdStudio.trySampleProject';
+
+  it('is pre-registered once without a project, gets no legacy alias, and runs the real flow (not the stub)', async () => {
+    await activate(context);
+
+    expect(count(SAMPLE)).toBe(1);
+    expect(registered().indexOf(SAMPLE)).toBe(2); // right after reportBug and showGettingStarted
+    expect(count(legacyAlias(SAMPLE))).toBe(0);
+    expect(NO_LEGACY_ALIAS.has(SAMPLE)).toBe(true);
+    expect(PRE_REGISTERED_COMMANDS.has(SAMPLE)).toBe(true);
+    expect(CONTRIBUTED).toContain(SAMPLE);
+
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    warn.mockClear();
+    await vscode.commands.executeCommand(SAMPLE);
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('Download the ERD Studio sample project?'),
+      { modal: true },
+      'Download',
+    );
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), expect.anything());
+  });
+
+  it('is registered exactly once with a project too', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+    expect(count(SAMPLE)).toBe(1);
+    expect(count(legacyAlias(SAMPLE))).toBe(0);
+  });
+});
+
+describe('Welcome panel: first run', () => {
+  it('a fresh install opens the panel once, writes the flag first and skips the harness QuickPick', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.rmSync(path.join(root, '.claude'), { recursive: true, force: true }); // no harness → the QuickPick would be offered
+    openWorkspace(root);
+    const globalState = new Map<string, unknown>();
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    const realCreate = vscode.window.createWebviewPanel;
+    let shownWhenCreated: unknown = 'not created';
+    vi.spyOn(vscode.window, 'createWebviewPanel').mockImplementation((...args: Parameters<typeof realCreate>) => {
+      shownWhenCreated = globalState.get(GETTING_STARTED_SHOWN_KEY);
+      return realCreate(...args);
+    });
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+
+    await activate(context);
+
+    expect(panelsOfType()).toHaveLength(1);
+    expect(shownWhenCreated).toBe(true);
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBeUndefined();
+    // Skipped for this run only: the once-per-workspace offer is still owed.
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
+    expect(pick).not.toHaveBeenCalled();
+
+    // The next window on this machine does not open it again.
+    tearDownActivation();
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(1);
+  });
+
+  it('an upgrader gets one non-modal notice and no panel', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    const globalState = new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]);
+    context = makeContext(root, { globalState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+
+    await activate(context);
+
+    expect(panelsOfType()).toHaveLength(0);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBe(true);
+    const notices = info.mock.calls.filter((c) => String(c[0]).includes('getting-started video'));
+    expect(notices).toHaveLength(1);
+    expect(notices[0].slice(1)).toEqual(['Watch', 'Not now']);
+  });
+
+  it('"Watch" on the upgrade notice opens the panel', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    context = makeContext(root, { globalState: new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]) });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+      (message.includes('getting-started video') ? 'Watch' : undefined)) as never);
+
+    await activate(context);
+    await vi.waitFor(() => expect(panelsOfType()).toHaveLength(1));
+  });
+
+  it('no-project activation first opens the panel, and the first project activation opens it once more', async () => {
+    const globalState = new Map<string, unknown>();
+    context = makeContext(root, { globalState });
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage');
+
+    await activate(context); // no workspace folder: early return
+    expect(panelsOfType()).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled(); // the panel explains the missing project
+    expect(globalState.get(GETTING_STARTED_NO_PROJECT_SHOWN_KEY)).toBe(true);
+    // Still owed in a project, where the setup steps can run.
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBe(true);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
+
+    tearDownActivation();
+    for (const p of panelsOfType()) { p.dispose(); }
+    vscode._resetMockWebviewPanels();
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+
+    // lastActivatedVersion is stored now, so without the pending flag this would look like an upgrade.
+    await activate(context);
+
+    expect(panelsOfType()).toHaveLength(1);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBe(true);
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBeUndefined();
+  });
+
+  it('opens the panel in a no-project window only once, then falls back to the warning', async () => {
+    const globalState = new Map<string, unknown>();
+    context = makeContext(root, { globalState });
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(1);
+
+    for (const p of panelsOfType()) { p.dispose(); }
+    vscode._resetMockWebviewPanels();
+    tearDownActivation();
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(0);
+    expect(GettingStartedPanel.currentPanel).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never opens the panel on a no-project activation after the Welcome was already shown', async () => {
+    context = makeContext(root); // default globalState: the Welcome was already shown on this machine
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(0);
+    expect(GettingStartedPanel.currentPanel).toBeUndefined();
+  });
+
+  it('sets erdStudio.hasDbtProject for the sidebar welcome text', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    context = makeContext(root);
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasDbtProject', false);
+
+    tearDownActivation();
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasDbtProject', true);
   });
 });

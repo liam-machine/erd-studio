@@ -118,11 +118,16 @@ async function waitForError(panel: MockPanel, pattern: RegExp) {
 }
 
 /** Open the showcase domain in a fresh provider; optionally strip a model's position first. */
-async function openShowcase(root: string, opts: { stripPosition?: string; sendReady?: boolean } = {}) {
+async function openShowcase(
+  root: string,
+  opts: { stripPosition?: string; clearViewConfig?: boolean; sendReady?: boolean } = {},
+) {
   const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
-  if (opts.stripPosition) {
+  if (opts.stripPosition || opts.clearViewConfig) {
     const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
-    delete json.viewConfig.positions[opts.stripPosition];
+    if (opts.stripPosition) delete json.viewConfig.positions[opts.stripPosition];
+    // What an AI assistant writes for a brand-new domain.
+    if (opts.clearViewConfig) json.viewConfig = {};
     fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
   }
   const built = buildProvider(root);
@@ -233,6 +238,77 @@ describe('auto-positioning (H24)', () => {
     expect(applyEditSpy).not.toHaveBeenCalled();
     expect(doc.save).not.toHaveBeenCalled();
     expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// First-open ELK auto layout — a domain with no stored position at all
+// ---------------------------------------------------------------------------
+
+describe('first-open auto layout', () => {
+  it('flags a fresh domain for auto layout and writes nothing on ready', async () => {
+    const { doc, panel, file } = await openShowcase(root, { clearViewConfig: true, sendReady: false });
+    const before = fs.readFileSync(file, 'utf-8');
+
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+
+    const loaded = posted(panel).find((m) => m.type === 'domainLoaded')! as Posted & { autoLayout?: boolean };
+    expect(loaded.autoLayout).toBe(true);
+    // The fallback placement still rides along so the first paint is not at 0,0.
+    const positions = loaded.payload.viewConfig.positions as Record<string, { x: number; y: number }>;
+    for (const model of loaded.payload.models as Array<{ name: string }>) {
+      expect(positions[model.name]).toBeDefined();
+      expect(Number.isFinite(positions[model.name].x)).toBe(true);
+    }
+  });
+
+  it('flags a fresh domain on a refresh too, still without writing', async () => {
+    const { provider, panel, file } = await openShowcase(root, { clearViewConfig: true, sendReady: false });
+    const before = fs.readFileSync(file, 'utf-8');
+
+    await provider.refreshAllOpenDomains();
+    await waitForType(panel, 'domainLoaded');
+
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    expect((posted(panel).find((m) => m.type === 'domainLoaded') as { autoLayout?: boolean }).autoLayout).toBe(true);
+  });
+
+  it('keeps today\'s behaviour for a partially positioned domain: writes, no flag', async () => {
+    const { panel, file } = await openShowcase(root, { stripPosition: 'fct_order' });
+
+    expect(applyEditSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fs.readFileSync(file, 'utf-8')).viewConfig.positions.fct_order).toBeDefined();
+    const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
+    expect(loaded).not.toHaveProperty('autoLayout');
+  });
+
+  it('does nothing for a fully positioned domain', async () => {
+    const { panel, doc } = await openShowcase(root);
+
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(posted(panel).find((m) => m.type === 'domainLoaded')!).not.toHaveProperty('autoLayout');
+  });
+
+  it('never flags the physical stage', async () => {
+    const { panel } = await openShowcase(root, { clearViewConfig: true, sendReady: false });
+
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    expect(posted(panel).find((m) => m.type === 'stageData')!).not.toHaveProperty('autoLayout');
+
+    // A load while the panel is on the physical stage goes out as physical.
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
+    expect(loaded.payload.stage).toBe('physical');
+    expect(loaded).not.toHaveProperty('autoLayout');
   });
 });
 

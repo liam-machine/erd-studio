@@ -1,0 +1,26 @@
+{
+  "name": "erd-studio-getting-started-video",
+  "private": true,
+  "description": "Source and render pipeline for media/onboarding/getting-started.mp4. Not part of the extension build.",
+  "type": "module",
+  "scripts": {
+    "tts": "uv run tts.py",
+    "music": "uv run music.py",
+    "tts:say": "uv run tts.py --engine say",
+    "timeline": "node build-timeline.mjs",
+    "preview": "node serve.mjs",
+    "capture": "node capture.mjs",
+    "capture:draft": "node capture.mjs --draft",
+    "encode": "bash encode.sh",
+    "qa": "bash qa.sh",
+    "test": "node --test test/pipeline.test.mjs",
+    "all": "npm run tts && npm run timeline && npm run music && npm run capture && npm run encode"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "yaml": "2.9.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

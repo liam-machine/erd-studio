@@ -9,6 +9,7 @@ ERD Studio uses a **central model store**. Model definitions are YAML files in `
 ```
 .erd-studio/
   layers.json                 ← layer definitions
+  modelling-approach.md       ← optional: the team's modelling rules, for AI assistants
   logical-models/             ← one YAML per model, shared across domains
     dim_customer.yml          ← top level (flat libraries keep working)
     bronze/                   ← optional per-layer folders
@@ -30,11 +31,17 @@ There are two stages. **Logical** is the editable stage stored in the domain fil
 - A model file lives at `logical-models/{name}.yml` **or** exactly one folder down at `logical-models/{folder}/{name}.yml`. By convention the folder is a layer id (`bronze`, `silver`, `gold`). Deeper nesting and dot-folders are not scanned.
 - The folder is organisational only: domain files reference models by **name**, and names are **unique across the whole library**, as dbt model names are across a project.
 - **Lookup:** the top-level file first, then each folder in alphabetical order. A second file with the same name elsewhere is *shadowed* — ignored, and flagged in the Model Library view.
-- **Folders are opt-in per project.** A library uses layer folders once any model file sits in a folder named after a layer in `layers.json` (or while it is empty); a hand-made folder such as `Staging/` does not count. Then a new model created from a canvas is written to the folder of the layer of the domain it is added to (`gold/reporting.json` → `logical-models/gold/`). A flat library stays flat: new files go to the top level until someone runs **ERD Studio: Organise Model Library by Layer**. Opting in is a team decision — a teammate on ERD Studio 1.0.x only reads the top level and would see models in folders as missing. A rename keeps the file in its folder.
+- **Folders are opt-in per project.** A library uses layer folders once any model file sits in a folder named after a layer in `layers.json` (or while it is empty); a hand-made folder such as `Staging/` does not count. Then a new model created from a canvas is written to the folder of the layer of the domain it is added to (`gold/reporting.json` → `logical-models/gold/`). A flat library stays flat: new files go to the top level until someone runs **ERD Studio: Organise Model Library by Layer**. Opting in is a team decision — a teammate on ERD Studio before 1.2.0 only reads the top level and would see models in folders as missing. A rename keeps the file in its folder.
 - **Organise Model Library by Layer** moves each file into the folder of the one layer whose domains reference it: top-level files, and files sitting in *another* layer's folder (the domains that use it moved layer). A model used by several layers, or by none, stays where it is. Folders that are not a layer in `layers.json` (a hand-made `Staging/`, or a layer id since removed) are never touched and are named in the confirmation. Re-running it is always safe.
 - Hosts that cannot list directories (the `@erd-studio/core` `loadDisplayDomain` viewer) probe the top level, then every layer folder alphabetically (the extension's order), so they see only folders named after a layer.
 
 The base directory name (`.erd-studio`) is configurable via the `erdStudio.semanticDir` setting.
+
+### Team modelling approach (`.erd-studio/modelling-approach.md`)
+
+An **optional**, free-form markdown file recording how the team models data: the technique (Kimball dimensional modelling, Data Vault 2.0, Inmon/3NF, One Big Table, Activity Schema, dbt's staging/intermediate/marts layering, or house rules), the user's own description in their words, the concrete rules, how each rule maps onto logical fields (`modelRole`, `grain`, `scdType`, `additiveType`, `isNaturalKey`, `rationale`), the sources consulted and the date. The `/erd-studio-setup` guide writes it after asking the user; it can also be written or edited by hand.
+
+It is guidance for AI assistants only. **The extension never parses it**: it is not a domain, a layer or a model, the canvas and the diff ignore it, and a project without one is valid. AI assistants editing ERD Studio files should read it first when it exists and follow it (the harness skill says so); where a rule conflicts with a request, they should say so and ask which wins. An optional **Target-design backlog** section lists improvements the team wants in the dbt project; differences between logical and physical listed there are intentional, and assistants report them as backlog items instead of "fixing" them. The logical fields still describe what dbt does today — a target that no diff can show (history, keys, grain) is kept in `rationale` and the backlog, not in `scdType` / key flags, because the physical stage copies those flags from logical.
 
 ## Domain File (`.erd-studio/{layer}/{domain}.json`)
 
@@ -192,7 +199,7 @@ Entries missing any of the four string endpoints are dropped on read with a cons
 
 ## View Config (`viewConfig`)
 
-Persisted UI layout state. Safe to leave as `{}` — the extension auto-positions models that lack a position entry.
+Persisted UI layout state. Safe to leave as `{}` — the extension auto-positions models that lack a position entry. When **no** model in the domain has a position (a brand-new domain written with `viewConfig: {}`), the canvas instead runs its ELK auto layout the first time the domain opens and saves the result as one undoable edit; the user can re-run it any time with **Layout** / Shift+L.
 
 ```jsonc
 {
@@ -364,6 +371,21 @@ logical. Cardinality comes from `unique` / `dbt_utils.unique_combination_of_colu
 tests merged from the same two sources (no `unique` test = "many" side). Only
 relationships between models **within the same domain** appear. `catalog.json`
 holds no constraint or foreign-key information, so it contributes no edges.
+
+**Comparing without the canvas.** Nothing in this file format changes for tooling,
+but there is a headless equivalent of the canvas's **Compare**. The `erd-studio` helper
+(`dist/cli.js`, installed to `~/.erd-studio-cli/bin/erd-studio` by **ERD Studio: Set Up My
+AI Helper**) is read-only. `erd-studio diff --domain .erd-studio/{layer}/{domain}.json --json`,
+or `--all`, builds both stages exactly as described above and runs the same comparison
+as the canvas, because both call the same code. It reports each difference as a fix
+that brings the logical side in line with dbt, naming the file to change: the model's
+`logical-models/{name}.yml` for columns and types, the domain file for relationships. It exits `0` when there are no blocking differences and `1` when there are.
+A column that dbt has no type for yet is advisory, not blocking, unless you pass
+`--strict`. `erd-studio inventory --models a,b --json` prints the physical shape of the
+named models, as a starting point for new model files. The `/erd-studio-setup` Claude Code
+skill uses both commands. It writes the files described in this reference with the
+assistant's normal Edit/Write tools, never through the helper, and runs `diff` until it is
+clean.
 
 ## Validation Rules
 
