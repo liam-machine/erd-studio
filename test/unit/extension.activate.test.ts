@@ -21,6 +21,7 @@ import * as vscode from 'vscode';
 
 import {
   activate,
+  GETTING_STARTED_NO_PROJECT_SHOWN_KEY,
   GETTING_STARTED_PENDING_KEY,
   GETTING_STARTED_SHOWN_KEY,
   NO_LEGACY_ALIAS,
@@ -114,6 +115,7 @@ afterEach(async () => {
     }
   }
   for (const panel of [...vscode.window._webviewPanels]) { panel.dispose(); }
+  vscode._resetMockWebviewPanels();
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -530,16 +532,22 @@ describe('Welcome panel: first run', () => {
     await vi.waitFor(() => expect(panelsOfType()).toHaveLength(1));
   });
 
-  it('no-project activation first, then a project activation, still opens the panel', async () => {
+  it('no-project activation first opens the panel, and the first project activation opens it once more', async () => {
     const globalState = new Map<string, unknown>();
     context = makeContext(root, { globalState });
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage');
 
     await activate(context); // no workspace folder: early return
+    expect(panelsOfType()).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled(); // the panel explains the missing project
+    expect(globalState.get(GETTING_STARTED_NO_PROJECT_SHOWN_KEY)).toBe(true);
+    // Still owed in a project, where the setup steps can run.
     expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBe(true);
     expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
-    expect(panelsOfType()).toHaveLength(0);
 
     tearDownActivation();
+    for (const p of panelsOfType()) { p.dispose(); }
+    vscode._resetMockWebviewPanels();
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     openWorkspace(root);
 
@@ -551,10 +559,39 @@ describe('Welcome panel: first run', () => {
     expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBeUndefined();
   });
 
-  it('never opens the panel on a no-project activation', async () => {
-    context = makeContext(root, { globalState: new Map() });
+  it('opens the panel in a no-project window only once, then falls back to the warning', async () => {
+    const globalState = new Map<string, unknown>();
+    context = makeContext(root, { globalState });
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(1);
+
+    for (const p of panelsOfType()) { p.dispose(); }
+    vscode._resetMockWebviewPanels();
+    tearDownActivation();
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
     await activate(context);
     expect(panelsOfType()).toHaveLength(0);
     expect(GettingStartedPanel.currentPanel).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never opens the panel on a no-project activation after the Welcome was already shown', async () => {
+    context = makeContext(root); // default globalState: the Welcome was already shown on this machine
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(0);
+    expect(GettingStartedPanel.currentPanel).toBeUndefined();
+  });
+
+  it('sets erdStudio.hasDbtProject for the sidebar welcome text', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    context = makeContext(root);
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasDbtProject', false);
+
+    tearDownActivation();
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasDbtProject', true);
   });
 });

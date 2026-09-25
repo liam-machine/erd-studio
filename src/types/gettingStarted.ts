@@ -48,7 +48,9 @@ export const GETTING_STARTED_EXTERNAL_URLS: Readonly<Record<GettingStartedExtern
   codexDocs: 'https://developers.openai.com/codex',
   geminiCliDocs: 'https://github.com/google-gemini/gemini-cli',
   cursorDocs: 'https://cursor.com/downloads',
-  videoOnline: 'https://github.com/liam-machine/erd-studio/blob/main/media/onboarding/getting-started.mp4',
+  // jsDelivr serves the repo file as video/mp4, so a browser plays it in place.
+  // The github.com blob page refuses to preview a file this size.
+  videoOnline: 'https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4',
   dbtInstallDocs: 'https://docs.getdbt.com/docs/core/installation-overview',
   sampleRepo: SAMPLE_REPO_URL,
 };
@@ -82,6 +84,8 @@ export type GettingStartedToHost =
   | { type: 'openExternal'; target: GettingStartedExternalTarget }
   /** Runs `erdStudio.trySampleProject` (confirm, then clone the fixed sample repo). No payload. */
   | { type: 'trySample' }
+  /** No project: VS Code's own folder picker (`vscode.openFolder` with no URI). No payload. */
+  | { type: 'openFolder' }
   /** Logged only; the webview has already switched to the poster fallback. */
   | { type: 'videoError'; code: number };
 
@@ -90,7 +94,7 @@ export type GettingStartedToHostType = GettingStartedToHost['type'];
 /** Every host-bound type, for the validator and the "every type is handled" test. */
 export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] = [
   'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'openDomain', 'openExternal',
-  'trySample', 'videoError',
+  'trySample', 'openFolder', 'videoError',
 ];
 
 /** How Claude Code was found. `cli` wins when both are present (it can take the prompt as an argument). */
@@ -157,6 +161,7 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
     case 'openCopilotChat':
     case 'openDomain':
     case 'trySample':
+    case 'openFolder':
       return true;
     case 'copyPrompt': {
       const assistant = (value as { assistant?: unknown }).assistant;
@@ -529,16 +534,12 @@ body {
   .gs-launch__actions { justify-content: flex-start; }
 }
 
-.gs-noproject {
-  margin: 26px 0 0; padding: 14px 16px; border-radius: 8px;
-  border: 1px dashed var(--vscode-widget-border, var(--vscode-panel-border, rgba(127, 127, 127, .4)));
-  color: var(--vscode-descriptionForeground);
-}
-.gs-sample {
+.gs-noproject, .gs-sample {
   margin: 14px 0 0; padding: 16px 18px; border-radius: 8px;
   background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
 }
+.gs-noproject { margin-top: 26px; }
 .gs-sample__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--vscode-foreground); }
 .gs-sample__text { margin: 0 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
 .gs-sample-link { margin: 0 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
@@ -822,7 +823,11 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
     <p class="gs-transcript__text">${escapeHtml(input.transcript)}</p>
   </details>
 
-  <p class="gs-noproject">Open a folder containing <code>dbt_project.yml</code> to continue.</p>
+  <section class="gs-noproject" aria-label="Open your dbt project">
+    <h2 class="gs-sample__title">Have a dbt project?</h2>
+    <p class="gs-sample__text">Open the folder that contains its <code>dbt_project.yml</code>. This page opens again there with the setup steps.</p>
+    <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">Open a folder&hellip;</button>
+  </section>
   <section class="gs-sample" aria-label="Try the sample project">
     <h2 class="gs-sample__title">No dbt project yet? Try the sample</h2>
     <p class="gs-sample__text">A small Kimball-style dbt project with fake coffee-shop data &mdash; runs on your computer, no account needed.</p>
