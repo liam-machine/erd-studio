@@ -551,6 +551,114 @@ describe('activate() project-root resolution', () => {
   });
 });
 
+describe('Select dbt Project… (#82)', () => {
+  type Pick = { label: string; projectRoot?: string };
+  let a: string;
+  let b: string;
+
+  beforeEach(() => {
+    // Two root folders, both dbt projects with ERD data: auto-detection opens "a".
+    a = path.join(root, 'a');
+    b = path.join(root, 'b');
+    fs.cpSync(FIXTURE_ROOT, a, { recursive: true });
+    fs.cpSync(FIXTURE_ROOT, b, { recursive: true });
+    vscode.workspace.workspaceFolders = [
+      { uri: vscode.Uri.file(a), name: 'a', index: 0 },
+      { uri: vscode.Uri.file(b), name: 'b', index: 1 },
+    ];
+  });
+
+  it('a pick stored per machine opens that project, and nothing is written to settings', async () => {
+    const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState: ws });
+    await activate(context);
+    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${a}`);
+
+    const quickPick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
+      (async (items: Pick[]) => items.find((i) => i.projectRoot === b)) as never,
+    );
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Switch and Reload' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const update = vi.fn();
+    vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({ get: () => undefined, inspect: () => undefined, update } as never);
+
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+
+    const items = quickPick.mock.calls[0][0] as unknown as Pick[];
+    expect(items[0].label).toContain('Auto-detect');
+    expect(items.filter((i) => i.projectRoot).map((i) => i.projectRoot)).toEqual([a, b]);
+    expect(ws.get('erdStudio.selectedProjectRoot')).toBe(b);
+    expect(exec).toHaveBeenCalledWith('workbench.action.reloadWindow');
+    expect(update).not.toHaveBeenCalled();
+
+    // "After the reload": the stored pick is honoured.
+    tearDownActivation();
+    (console.log as unknown as ReturnType<typeof vi.fn>).mockClear();
+    vi.restoreAllMocks();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    await activate(context);
+    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${b}`);
+  });
+
+  it('Auto-detect clears the pick and reloads back to the auto-detected project', async () => {
+    const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.selectedProjectRoot', b]]);
+    context = makeContext(root, { workspaceState: ws });
+    await activate(context);
+    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${b}`);
+
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
+      (async (items: Pick[]) => items.find((i) => i.label.includes('Auto-detect'))) as never,
+    );
+    const confirm = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Switch and Reload' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+
+    expect(confirm).toHaveBeenCalledWith('Switch ERD Studio to “a”?', expect.objectContaining({ modal: true }), 'Switch and Reload');
+    expect(ws.has('erdStudio.selectedProjectRoot') ? ws.get('erdStudio.selectedProjectRoot') : undefined).toBeUndefined();
+    expect(exec).toHaveBeenCalledWith('workbench.action.reloadWindow');
+  });
+
+  it('cancelling the confirmation changes nothing', async () => {
+    const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState: ws });
+    await activate(context);
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
+      (async (items: Pick[]) => items.find((i) => i.projectRoot === b)) as never,
+    );
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+
+    expect(ws.get('erdStudio.selectedProjectRoot')).toBeUndefined();
+    expect(exec).not.toHaveBeenCalledWith('workbench.action.reloadWindow');
+  });
+
+  it('while erdStudio.projectPath decides, it points at the setting instead of offering a list', async () => {
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: b });
+    await activate(context);
+    const quickPick = vi.spyOn(vscode.window, 'showQuickPick');
+
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+
+    expect(quickPick).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('the erdStudio.projectPath setting chooses'), 'Open Settings');
+  });
+
+  it('a projectPath that is not a dbt project is reported, not just logged', async () => {
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: '/Users/someone-else/datamodels' });
+    await activate(context);
+
+    expect(warn).toHaveBeenCalledWith(
+      'ERD Studio: erdStudio.projectPath "/Users/someone-else/datamodels" does not contain dbt_project.yml, so ERD Studio opened a instead.',
+      'Open Settings',
+    );
+  });
+});
+
 /** Dispose everything the last activate() registered, as a window reload would. */
 function tearDownActivation(): void {
   for (const sub of [...context.subscriptions].reverse()) { (sub as { dispose(): void }).dispose(); }

@@ -99,6 +99,7 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
+import { findOwningDbtProject, samePath } from '../services/projectDiscovery';
 import type {
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
@@ -611,11 +612,91 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return true;
   }
 
+  /**
+   * The dbt project a domain file belongs to when that is NOT the project
+   * this window opened: the owning project's root, or `undefined` for a file
+   * outside every dbt project and outside this one. `null` means the file is
+   * this project's own.
+   */
+  private foreignProjectOf(filePath: string): string | undefined | null {
+    const owner = findOwningDbtProject(filePath);
+    if (owner) { return samePath(owner, this.workspaceRoot) ? null : owner; }
+    const rel = path.relative(this.workspaceRoot, filePath);
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? null : undefined;
+  }
+
+  /**
+   * Explain why a foreign domain file is not drawn, with a **Switch** button,
+   * plus a notification offering the same. The page is not the canvas: its
+   * only script posts `switchProject`, handled here, and it speaks none of
+   * the canvas message protocol. (A `command:` link is not used — VS Code
+   * blocks it in a custom editor webview.)
+   */
+  private showForeignProject(webviewPanel: vscode.WebviewPanel, filePath: string, owner: string | undefined): void {
+    const esc = (v: string): string =>
+      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const current = path.basename(this.workspaceRoot);
+    const webview = webviewPanel.webview;
+    const nonce = crypto.randomBytes(16).toString('base64');
+    webview.options = { enableScripts: Boolean(owner), localResourceRoots: [] };
+    webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ERD Studio</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+</head>
+<body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); max-width: 44em; line-height: 1.5;">
+  <h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window, and a window shows one dbt project at a time.
+  Drawing this file here would mix its models with the wrong project\u2019s dbt data.</p>
+  ${owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground);">Switch ERD Studio to ${esc(path.basename(owner))}</button></p>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    document.getElementById('switch').addEventListener('click', () => vscode.postMessage({ type: 'switchProject' }));
+  </script>` : ''}
+</body>
+</html>`;
+
+    const name = path.basename(filePath);
+    if (!owner) {
+      void vscode.window.showWarningMessage(
+        `ERD Studio: ${name} is not inside a dbt project, so it cannot be opened with ${current}'s data.`,
+      );
+      return;
+    }
+    const switchProject = (): void => {
+      void vscode.commands.executeCommand('erdStudio.selectDbtProject', owner);
+    };
+    const messages = webview.onDidReceiveMessage((message: unknown) => {
+      if (isTypedMessage(message) && message.type === 'switchProject') { switchProject(); }
+    });
+    webviewPanel.onDidDispose(() => messages.dispose());
+    void vscode.window.showWarningMessage(
+      `ERD Studio: ${name} belongs to the ${path.basename(owner)} dbt project, but ${current} is open.`,
+      'Switch Project',
+    ).then(choice => {
+      if (choice === 'Switch Project') { switchProject(); }
+    });
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     webviewPanel: vscode.WebviewPanel,
     _token: vscode.CancellationToken,
   ): Promise<void> {
+    // A window serves one dbt project (#82). A domain file from another
+    // project in the same workspace would read its models from this
+    // project's logical-models/ and its physical stage from this project's
+    // manifest — and an edit would write model files into the wrong project.
+    // Refuse it and offer to switch instead of rendering wrong data.
+    const foreignOwner = this.foreignProjectOf(document.uri.fsPath);
+    if (foreignOwner !== null) {
+      this.showForeignProject(webviewPanel, document.uri.fsPath, foreignOwner);
+      return;
+    }
+
     webviewPanel.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.context.extensionUri],

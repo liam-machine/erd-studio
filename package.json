@@ -180,6 +180,12 @@
         "title": "Refresh My Reports",
         "category": "ERD Studio",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "erdStudio.selectDbtProject",
+        "title": "Select dbt Project…",
+        "category": "ERD Studio",
+        "icon": "$(folder-library)"
       }
     ],
     "viewsContainers": {
@@ -268,6 +274,11 @@
         "when": "erdStudio.hasDbtProject"
       },
       {
+        "view": "erdStudio.domainTree",
+        "contents": "This workspace has more than one dbt project.\n\n[Select dbt Project](command:erdStudio.selectDbtProject)",
+        "when": "erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects"
+      },
+      {
         "view": "erdStudio.modelLibrary",
         "contents": "No logical models found.\n\nModels are stored as YAML files in .erd-studio/logical-models/, grouped into one folder per layer.\n\nAdd models to a domain using the ERD editor to create them here."
       }
@@ -335,6 +346,11 @@
           "command": "erdStudio.addLayer",
           "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
           "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.selectDbtProject",
+          "when": "view == erdStudio.domainTree && erdStudio.hasMultipleDbtProjects",
+          "group": "navigation@7"
         },
         {
           "command": "erdStudio.showGettingStarted",

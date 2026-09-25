@@ -8,6 +8,20 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased — 1.3.0
+
+### Added
+
+- **Multi-root workspaces open the right dbt project** (closes #82). ERD Studio used to open the first dbt project it found. In a workspace whose first folder was a different dbt project, the sidebar showed **No diagrams yet** even though another folder had a full `.erd-studio/`. ERD Studio now opens the dbt project that already has ERD Studio data, and only falls back to the first project when none has any. Whenever the workspace has more than one dbt project, the first row of the ERD Studio sidebar names the open project. Click it to switch.
+- **ERD Studio: Select dbt Project…** lets you choose the project yourself when the workspace holds more than one, whether that is several root folders or a monorepo. The list marks the open project and the ones that already have diagrams. **Auto-detect**, at the top, goes back to the automatic choice. Picking a project asks once, then reloads the window to open it. The choice is saved for that workspace on your machine only, never in a settings file your team might commit. To set the project for everyone, use `erdStudio.projectPath`, which still takes priority. You can also run it from the project row at the top of the ERD Studio sidebar, or from the button in the sidebar's title bar. Both appear only when there is more than one project to choose from.
+
+### Changed
+
+- **A dbt project with diagrams now wins over one without.** If a workspace holds a dbt project with no `.erd-studio` folder and another dbt project (up to three folders deep) that has one, ERD Studio now opens the one with diagrams. Before, it opened whichever it found first. Set `erdStudio.projectPath`, or use **Select dbt Project…**, to open the other one.
+- **A diagram from another dbt project is no longer drawn with the wrong project's data.** Opening a domain file that belongs to a different dbt project than the open one used to draw it with the open project's model library and dbt data, and edits would have saved model files into the wrong project. It now explains why and offers to switch projects.
+- **An `erdStudio.projectPath` that does not point at a dbt project is now reported.** Before, it was only logged to the console, which made the setting look ignored, for example when it was copied from someone else's machine.
+- **Set Up My AI Helper describes where your dbt project is using the workspace folder that holds it.** In a multi-root workspace it used to measure from the first folder, and it told Copilot users their project was a subfolder when it was a root folder of its own.
+
 ## 1.2.0 — 2026-09-25
 
 ### Added

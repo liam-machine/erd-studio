@@ -19,6 +19,7 @@ import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
 import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
+import { hasErdStudioData, resolveDbtProject, samePath, type DbtProjectResolution } from './services/projectDiscovery';
 import { YmlParserService } from './services/ymlParserService';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
@@ -96,95 +97,144 @@ export function _resetFirstRunGuardForTests(): void {
   gettingStartedAutoOpened = false;
 }
 
-/** Directories never descended into when searching for a nested dbt project. */
-const DBT_SEARCH_SKIP_DIRS = new Set(['node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv']);
+export { findDbtProjectCandidates, hasErdStudioData, resolveDbtProjectRoot } from './services/projectDiscovery';
 
-/** Maximum directory depth (below a workspace folder) searched for dbt_project.yml. */
-const DBT_SEARCH_MAX_DEPTH = 3;
+/**
+ * workspaceState: the dbt project picked with **Select dbt Project…** (#82).
+ * Per machine and never in a settings file — a personal choice must not land
+ * in a `.code-workspace` or `.vscode/settings.json` a team commits.
+ * `erdStudio.projectPath` stays the shareable, explicit override.
+ */
+export const SELECTED_PROJECT_KEY = 'erdStudio.selectedProjectRoot';
 
-function hasDbtProjectFile(dir: string): boolean {
-  try {
-    return fs.statSync(path.join(dir, 'dbt_project.yml')).isFile();
-  } catch {
-    return false;
-  }
+/** Filesystem paths of the open workspace folders, in workspace order. */
+function workspaceFolderPaths(): string[] {
+  return (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
 }
 
 /**
- * Resolve the dbt project root from a list of workspace folder paths and the
- * `erdStudio.projectPath` setting. Pure (no vscode access) so it is unit-testable.
+ * Resolve the project for this window: `erdStudio.projectPath`, then the
+ * picked project, then auto-detection. See `resolveDbtProject`.
+ */
+function resolveWorkspaceProject(context: vscode.ExtensionContext): DbtProjectResolution {
+  return resolveDbtProject(workspaceFolderPaths(), {
+    projectPath: getErdStudioSetting('projectPath', ''),
+    picked: context.workspaceState.get<string>(SELECTED_PROJECT_KEY),
+    semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
+  });
+}
+
+/** Where a project sits in the workspace, for picker rows and messages. */
+function describeProjectLocation(projectRoot: string): string {
+  const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(projectRoot));
+  if (!folder) { return projectRoot; }
+  const rel = path.relative(folder.uri.fsPath, projectRoot);
+  if (rel) { return `${folder.name}/${rel.split(path.sep).join('/')}`; }
+  return folder.name === path.basename(projectRoot) ? 'workspace folder' : `workspace folder ${folder.name}`;
+}
+
+/** "In repo/analytics." plus a blank line for a nested project; nothing for a root folder, whose name is already in the title. */
+function nestedLocation(projectRoot: string): string {
+  const where = describeProjectLocation(projectRoot);
+  return where.startsWith('workspace folder') ? '' : `In ${where}.\n\n`;
+}
+
+/**
+ * **Select dbt Project…** — choose which dbt project ERD Studio opens when the
+ * workspace holds more than one (multi-root workspaces, monorepos; #82).
  *
- * Resolution order:
- *   1. `projectPath` setting — absolute, or relative to each workspace folder —
- *      when it contains dbt_project.yml.
- *   2. A workspace folder whose root contains dbt_project.yml.
- *   3. A depth-limited breadth-first search below each workspace folder
- *      (skipping node_modules, dbt_packages, .git, target, .venv), returning
- *      the shallowest match. Matches the recursive `workspaceContains`
- *      activation event so activation never lands on "no project found"
- *      for a monorepo with dbt in a subfolder.
+ * The first row, **Auto-detect**, clears the choice. Any other pick is kept
+ * in `workspaceState` (this machine only) and applied by reloading the
+ * window, which the confirmation offers directly. `target` skips the list —
+ * the editor's "open this project instead" button passes the project that
+ * owns the domain file the user just opened.
  */
-export function resolveDbtProjectRoot(
-  folderPaths: readonly string[],
-  projectPathSetting: string,
-): string | undefined {
-  const configured = projectPathSetting.trim();
-  if (configured) {
-    if (path.isAbsolute(configured)) {
-      if (hasDbtProjectFile(configured)) { return configured; }
+async function selectDbtProject(
+  context: vscode.ExtensionContext,
+  currentRoot: string,
+  semanticDir: string,
+  target?: string,
+): Promise<void> {
+  const resolution = resolveWorkspaceProject(context);
+  if (resolution.candidates.length === 0) {
+    void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE);
+    return;
+  }
+
+  if (resolution.source === 'setting') {
+    const choice = await vscode.window.showWarningMessage(
+      `ERD Studio: the erdStudio.projectPath setting chooses the dbt project for this workspace (${path.basename(currentRoot)}). ` +
+        'Clear it to pick a project here.',
+      'Open Settings',
+    );
+    if (choice === 'Open Settings') {
+      void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
+    }
+    return;
+  }
+
+  type ProjectPick = vscode.QuickPickItem & { projectRoot: string | undefined };
+  let chosen: string | undefined;
+  let fromAuto = false;
+  if (target) {
+    chosen = target;
+  } else {
+    const autoRoot = resolution.autoRoot;
+    const items: ProjectPick[] = [
+      {
+        projectRoot: undefined,
+        label: `${resolution.source === 'auto' ? '$(check)' : '$(sparkle)'} Auto-detect`,
+        description: autoRoot ? `→ ${path.basename(autoRoot)}` : undefined,
+        detail: 'Open the project that already has ERD diagrams' +
+          (resolution.source === 'auto' ? ' · Current choice' : ''),
+      },
+      { projectRoot: undefined, label: 'dbt projects in this workspace', kind: vscode.QuickPickItemKind.Separator },
+      ...resolution.candidates.map((projectRoot): ProjectPick => ({
+        projectRoot,
+        label: `${projectRoot === currentRoot ? '$(check)' : '$(folder)'} ${path.basename(projectRoot)}`,
+        description: describeProjectLocation(projectRoot),
+        detail: [
+          projectRoot === currentRoot ? 'Open now' : undefined,
+          hasErdStudioData(projectRoot, semanticDir) ? `Has ERD diagrams (${semanticDir})` : 'No ERD diagrams yet',
+        ].filter(Boolean).join(' · '),
+      })),
+    ];
+    const picked = await vscode.window.showQuickPick(items, {
+      title: 'ERD Studio — Select dbt Project',
+      placeHolder: 'Which dbt project should ERD Studio open in this workspace?',
+      matchOnDescription: true,
+    });
+    if (!picked) { return; }
+    if (picked.projectRoot === undefined) {
+      // Auto-detect: forget the pick. Reload only if that moves the project.
+      await context.workspaceState.update(SELECTED_PROJECT_KEY, undefined);
+      if (!autoRoot || samePath(autoRoot, currentRoot)) { return; }
+      chosen = autoRoot;
+      fromAuto = true;
     } else {
-      for (const folder of folderPaths) {
-        const candidate = path.resolve(folder, configured);
-        if (hasDbtProjectFile(candidate)) { return candidate; }
-      }
+      chosen = picked.projectRoot;
     }
-    console.warn(`ERD Studio: erdStudio.projectPath "${configured}" does not contain dbt_project.yml — falling back to auto-detection.`);
   }
 
-  for (const folder of folderPaths) {
-    if (hasDbtProjectFile(folder)) { return folder; }
+  if (samePath(chosen, currentRoot)) {
+    // Already open. An explicit pick still pins it, so a project that gains
+    // ERD data later cannot pull auto-detection away from it.
+    await context.workspaceState.update(SELECTED_PROJECT_KEY, chosen);
+    return;
   }
 
-  // Breadth-first so the shallowest match wins.
-  let frontier = [...folderPaths];
-  for (let depth = 1; depth <= DBT_SEARCH_MAX_DEPTH && frontier.length > 0; depth++) {
-    const next: string[] = [];
-    for (const dir of frontier) {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-      for (const entry of entries) {
-        if (!entry.isDirectory() || DBT_SEARCH_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) {
-          continue;
-        }
-        const child = path.join(dir, entry.name);
-        if (hasDbtProjectFile(child)) { return child; }
-        next.push(child);
-      }
-    }
-    frontier = next;
-  }
-
-  return undefined;
-}
-
-/**
- * Find the dbt project root: honours `erdStudio.projectPath`, then workspace
- * folder roots, then a shallow recursive search. See `resolveDbtProjectRoot`.
- */
-function findDbtProjectRoot(): string | undefined {
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
-    return undefined;
-  }
-  return resolveDbtProjectRoot(
-    workspaceFolders.map(f => f.uri.fsPath),
-    getErdStudioSetting('projectPath', ''),
+  const confirm = await vscode.window.showInformationMessage(
+    `Switch ERD Studio to “${path.basename(chosen)}”?`,
+    {
+      modal: true,
+      detail: `${nestedLocation(chosen)}The window reloads to open it. ` +
+        'The choice is saved for this workspace on this machine only.',
+    },
+    'Switch and Reload',
   );
+  if (confirm !== 'Switch and Reload') { return; }
+  await context.workspaceState.update(SELECTED_PROJECT_KEY, fromAuto ? undefined : chosen);
+  await vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
 
 const NO_PROJECT_MESSAGE =
@@ -209,6 +259,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.refreshMyReports',
   'erdStudio.openTrackedReport',
   'erdStudio.organizeModelLibrary',
+  'erdStudio.selectDbtProject',
 ]);
 
 /**
@@ -504,7 +555,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, async () => { await trySampleProject(); }),
   );
 
-  const workspaceRoot = findDbtProjectRoot();
+  const projectResolution = resolveWorkspaceProject(context);
+  const workspaceRoot = projectResolution.root;
   // Picks which sidebar welcome text shows (package.json viewsWelcome).
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', Boolean(workspaceRoot));
   if (!workspaceRoot) {
@@ -532,6 +584,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   console.log(`ERD Studio: Found dbt project at ${workspaceRoot}`);
 
   const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
+
+  // More than one dbt project in the workspace (multi-root or monorepo, #82):
+  // reveal the sidebar's Select dbt Project button. Re-checked when folders
+  // are added or removed (see the domain tree view below).
+  let hasMultipleProjects = projectResolution.candidates.length > 1;
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
+
+  if (projectResolution.invalidSetting !== undefined) {
+    // Visible, not just a console line: a projectPath copied from someone
+    // else's machine otherwise looks like the setting being ignored.
+    void vscode.window.showWarningMessage(
+      `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" does not contain dbt_project.yml, ` +
+        `so ERD Studio opened ${path.basename(workspaceRoot)} instead.`,
+      'Open Settings',
+    ).then(choice => {
+      if (choice === 'Open Settings') {
+        void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
+      }
+    });
+  }
 
   // v0.6.44 moved the default data directory from erd-studio/ to .erd-studio/.
   // Rename legacy folders in place before any service reads from disk so
@@ -940,7 +1012,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         dragAndDropController: treeProvider,
         canSelectMany: false,
       });
-      return treeView;
+      // Whenever there is a choice to make, the first row of the tree names
+      // the open project and switches it on click — always visible, unlike
+      // the view-title icon, which VS Code only shows on hover (#82).
+      const showProjectName = (): void => {
+        treeProvider.setProjectRow(hasMultipleProjects
+          ? { name: path.basename(workspaceRoot), location: describeProjectLocation(workspaceRoot) }
+          : undefined);
+      };
+      showProjectName();
+      const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        hasMultipleProjects = resolveWorkspaceProject(context).candidates.length > 1;
+        void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
+        showProjectName();
+      });
+      return vscode.Disposable.from(treeView, foldersChanged);
     })(),
     vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, editorProvider, {
       // Keep the webview (React tree, ELK worker, in-progress discrepancy /
@@ -989,6 +1075,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         modelLibraryProvider.refresh();
       }
     }),
+    vscode.commands.registerCommand('erdStudio.selectDbtProject', (target?: unknown) =>
+      selectDbtProject(context, workspaceRoot, semanticDir, typeof target === 'string' ? target : undefined)),
     // Move top-level logical-models/*.yml files into the folder of the one
     // layer whose domains use them (issue #76). Prompted, one WorkspaceEdit.
     vscode.commands.registerCommand('erdStudio.organizeModelLibrary', async () => {
@@ -1830,6 +1918,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     cliSourcePath: path.join(context.extensionUri.fsPath, 'dist', 'cli.js'),
   };
   const firstWorkspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+  // The workspace folder that holds the dbt project — in a multi-root
+  // workspace not necessarily the first one (#82). Used to describe where the
+  // project sits and to tell Copilot's "nested project" hint apart from a
+  // project that is itself a root folder. The Claude command keeps the first
+  // folder: that is where a new terminal starts, so it decides whether the
+  // copied command needs a `cd`.
+  const projectWorkspaceFolder =
+    vscode.workspace.getWorkspaceFolder(vscode.Uri.file(workspaceRoot))?.uri.fsPath ?? firstWorkspaceFolder;
   const setupHarness = new HarnessService(semanticDir);
 
   const getGettingStartedStatus = async (): Promise<GettingStartedStatus> => {
@@ -1840,7 +1936,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
     const cli = cliLauncher.status(launcherOptions);
     const assistants = detectAiAssistants();
-    const relative = firstWorkspaceFolder ? path.relative(firstWorkspaceFolder, workspaceRoot) : '';
+    const relative = projectWorkspaceFolder ? path.relative(projectWorkspaceFolder, workspaceRoot) : '';
     return {
       hasProject: true,
       harness,
@@ -1917,7 +2013,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     runSetup,
     getStatus: getGettingStartedStatus,
     clipboardText: setupClipboardText,
-    workspaceFolder: firstWorkspaceFolder,
+    workspaceFolder: projectWorkspaceFolder,
     openCanvas,
   };
 
@@ -1949,7 +2045,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (choice === OPEN_CLAUDE) {
         await openClaudeCode({ dbtRoot: workspaceRoot, clipboardText: setupClipboardText('claude') });
       } else if (choice === OPEN_COPILOT) {
-        await openCopilotChat({ dbtRoot: workspaceRoot, workspaceFolder: firstWorkspaceFolder });
+        await openCopilotChat({ dbtRoot: workspaceRoot, workspaceFolder: projectWorkspaceFolder });
       } else if (choice === COPY) {
         await vscode.env.clipboard.writeText(setupClipboardText(assistants[0] ?? 'claude'));
       }
