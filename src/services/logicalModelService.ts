@@ -307,6 +307,24 @@ export class LogicalModelService {
   }
 
   /**
+   * Whether new models should be created in layer folders. Folders are
+   * opt-in per project: true once any model file lives in a LAYER folder
+   * (someone ran "Organise Model Library by Layer", or organised by hand),
+   * and for an empty library, which has no flat convention to keep. A flat
+   * library stays flat — a new file in a folder would switch every teammate's
+   * view to the grouped layout, and hide the model from anyone still on an
+   * extension version that only reads the top level.
+   *
+   * `layerIds` (the layers in layers.json) keeps a hand-made folder such as
+   * `Staging/` from counting as opting in. Without it any folder counts.
+   */
+  groupsByFolder(layerIds?: ReadonlySet<string>): boolean {
+    const entries = this.listModelFiles();
+    return entries.length === 0 ||
+      entries.some((e) => e.folder !== '' && (layerIds === undefined || layerIds.has(e.folder)));
+  }
+
+  /**
    * The folder a model's file lives in: `''` for the top level, the folder
    * name for a file one level down, or null when there is no file.
    */

@@ -140,7 +140,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 - A model file lives at \`logical-models/{name}.yml\` **or** exactly one folder down at \`logical-models/{folder}/{name}.yml\`. By convention the folder is a layer id (\`bronze\`, \`silver\`, \`gold\`). Deeper nesting and dot-folders are ignored.
 - The folder is organisational only. Domain files reference models **by name**, never by path, and model names are **unique across all folders** (as dbt model names are across a project). Never create a second file with a name that already exists in another folder.
 - **To find a model**, look at \`logical-models/{name}.yml\` first, then in each folder (\`logical-models/*/{name}.yml\`). If the same name exists twice, the top-level file wins, then folders in alphabetical order; the others are ignored.
-- **To create a new model**, put it in the folder of the layer of the domain you are adding it to: adding \`fct_sale\` to \`gold/reporting.json\` creates \`logical-models/gold/fct_sale.yml\`. When editing or renaming an existing model, keep its file in the folder it is already in.
+- **Folders are opt-in per project.** Check first: if a folder named after a layer in \`layers.json\` (\`logical-models/{layer}/\`) already holds a \`.yml\` file (or \`logical-models/\` is empty), the project uses layer folders — create a new model in the folder of the layer of the domain you are adding it to (adding \`fct_sale\` to \`gold/reporting.json\` creates \`logical-models/gold/fct_sale.yml\`). If every model file is at the top level, the project is **flat** — create the new file at the top level too, and never start the folder layout on your own (the user opts in with **ERD Studio: Organise Model Library by Layer**). When editing or renaming an existing model, keep its file in the folder it is already in.
 
 ### Model Library (Sidebar)
 
@@ -209,7 +209,7 @@ Annotations are temporary build notes — visible on the canvas while constructi
 | Add/remove/rename a column | the model's \`.yml\` (\`logical-models/{name}.yml\` or \`logical-models/{folder}/{name}.yml\`) |
 | Change column type, PK/FK/NK flags, SCD type | the model's \`.yml\` |
 | Change grain, modelRole, description, rationale | the model's \`.yml\` |
-| Add a model to a domain diagram | Domain \`.json\` → add name to \`logical.models[]\` AND, if no file for that name exists in any folder, create \`logical-models/{layer}/{name}.yml\` (the domain's layer) |
+| Add a model to a domain diagram | Domain \`.json\` → add name to \`logical.models[]\` AND, if no file for that name exists in any folder, create it — \`logical-models/{layer}/{name}.yml\` (the domain's layer) when the project uses layer folders, else \`logical-models/{name}.yml\` |
 | Remove a model from a domain | Domain \`.json\` → remove name from \`logical.models[]\` AND remove its relationships from \`logical.relationships[]\` |
 | Add/remove/edit a relationship | Domain \`.json\` → \`logical.relationships[]\` |
 | Change layout positions | Domain \`.json\` → \`viewConfig.positions\` |
@@ -319,7 +319,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the model's YAML file — the existing file if the model already exists (in whichever folder it is in), otherwise \`.erd-studio/logical-models/{layer}/{name}.yml\` for the layer of the target domain.
+Write the model's YAML file — the existing file if the model already exists (in whichever folder it is in), otherwise a new file — \`.erd-studio/logical-models/{layer}/{name}.yml\` for the layer of the target domain when the project uses layer folders, else \`.erd-studio/logical-models/{name}.yml\` (see "Model file location").
 
 ### Step 4 — Reconcile via set-difference
 Re-read the YAML file you just wrote. Compute the set-difference between source columns and YAML columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -515,7 +515,7 @@ and no \`catalog.json\` to observe the real one. It resolves exactly like
 
 | Action | What to do |
 |--------|-----------|
-| \`add-to-logical\` | Add model name to domain JSON \`logical.models[]\` + create \`logical-models/{layer}/{name}.yml\` (the plan's \`layer\`) from manifest data, unless a file for that name already exists in any folder |
+| \`add-to-logical\` | Add model name to domain JSON \`logical.models[]\` + create the model file from manifest data — \`logical-models/{layer}/{name}.yml\` (the plan's \`layer\`) when the project uses layer folders, else \`logical-models/{name}.yml\` — unless a file for that name already exists in any folder |
 | \`remove-from-logical\` | Remove model name from domain JSON \`logical.models[]\` + remove related relationships from \`logical.relationships[]\` |
 | \`add-column-to-logical\` | Add column to the model's yml (\`modelContext[name].logicalModelPath\`) columns array |
 | \`remove-column-from-logical\` | Remove column from the model's yml (\`logicalModelPath\`) |

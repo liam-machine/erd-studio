@@ -1221,6 +1221,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return format === 'v5';
   }
 
+  /**
+   * The layer folder a model created from this domain goes in, or undefined
+   * for the top level: only when the domain's directory is a configured layer
+   * AND the library has opted into layer folders (see `groupsByFolder`).
+   */
+  private newModelFolder(domainFilePath: string): string | undefined {
+    const layer = modelFolderForDomain(domainFilePath);
+    const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
+    return layerIds.has(layer) && this.logicalModelService.groupsByFolder(layerIds) ? layer : undefined;
+  }
+
   /** `logical-models/[{folder}/]{name}.yml` for an existing model file, for messages. */
   private libraryRelativePath(name: string): string {
     const folder = this.logicalModelService.modelFolder(name);
@@ -1283,8 +1294,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    *
    * Where a NEW file goes: a rename keeps the old file's folder; any other new
    * model lands in `logical-models/{layerFolder}/` — the layer of the domain
-   * being edited — so the library groups itself by layer as models are added.
-   * An existing file is always edited where it already is.
+   * being edited — when the caller passes one (only once the library already
+   * uses folders), else at the top level. An existing file is always edited
+   * where it already is.
    */
   private async addModelFileEdits(
     edit: vscode.WorkspaceEdit,
@@ -1435,7 +1447,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const { docs: modelDocs, created, deleted } = await this.addModelFileEdits(
       edit,
       modelFiles,
-      modelFolderForDomain(document.uri.fsPath),
+      // Layer folders are opt-in: a flat library stays flat (see groupsByFolder).
+      modelFiles?.save?.length ? this.newModelFolder(document.uri.fsPath) : undefined,
     );
 
     this.pendingUpdates.set(panelKey, true);

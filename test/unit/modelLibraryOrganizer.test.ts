@@ -74,22 +74,56 @@ describe('planOrganizeByLayer', () => {
     expect(plan.moves.map((m) => m.to)).toEqual([`${DIR}/silver/dim_customer.yml`]);
   });
 
-  it('never touches files already in a folder, nor shadowed entries', () => {
+  it('moves a file out of another layer\'s folder into the one layer that now uses it', () => {
     const plan = planOrganizeByLayer(
+      [inFolder('gold', 'rpt_sales'), inFolder('silver', 'dim_gold_used')],
       [
-        inFolder('gold', 'rpt_sales'),
-        inFolder('silver', 'dim_gold_used'),
-        // A shadowed top-level entry cannot exist in practice (top level wins),
-        // but the planner must skip any shadowed entry regardless.
-        { ...top('dim_shadow'), shadowedBy: `${DIR}/elsewhere/dim_shadow.yml` },
-      ],
-      [
-        { layer: 'silver', modelNames: ['rpt_sales', 'dim_shadow'] },
+        { layer: 'silver', modelNames: ['rpt_sales'] },
         { layer: 'gold', modelNames: ['dim_gold_used'] },
       ],
       target,
+      new Set(['silver', 'gold']),
     );
-    expect(plan).toEqual({ moves: [], shared: [], unused: [], conflicts: [] });
+    expect(plan.moves).toEqual([
+      { name: 'dim_gold_used', layer: 'gold', from: `${DIR}/silver/dim_gold_used.yml`, to: target('dim_gold_used', 'gold'), fromFolder: 'silver' },
+      { name: 'rpt_sales', layer: 'silver', from: `${DIR}/gold/rpt_sales.yml`, to: target('rpt_sales', 'silver'), fromFolder: 'gold' },
+    ]);
+  });
+
+  it('leaves a file that is already in its layer\'s folder, or in a layer folder but now shared or unused', () => {
+    const plan = planOrganizeByLayer(
+      [inFolder('gold', 'fct_ok'), inFolder('gold', 'dim_shared'), inFolder('silver', 'dim_orphan')],
+      [
+        { layer: 'gold', modelNames: ['fct_ok', 'dim_shared'] },
+        { layer: 'silver', modelNames: ['dim_shared'] },
+      ],
+      target,
+      new Set(['silver', 'gold']),
+    );
+    expect(plan).toEqual({ moves: [], shared: [], unused: [], conflicts: [], otherFolders: [] });
+  });
+
+  it('never touches a folder that is not a configured layer, and reports it', () => {
+    const plan = planOrganizeByLayer(
+      [inFolder('Staging', 'rpt_a'), inFolder('Staging', 'rpt_b'), inFolder('old_gold', 'fct_x')],
+      [{ layer: 'gold', modelNames: ['rpt_a', 'fct_x'] }],
+      target,
+      new Set(['silver', 'gold']),
+    );
+    expect(plan.moves).toEqual([]);
+    expect(plan.otherFolders).toEqual([{ folder: 'old_gold', count: 1 }, { folder: 'Staging', count: 2 }]);
+  });
+
+  it('skips shadowed entries', () => {
+    const plan = planOrganizeByLayer(
+      // A shadowed top-level entry cannot exist in practice (top level wins),
+      // but the planner must skip any shadowed entry regardless.
+      [{ ...top('dim_shadow'), shadowedBy: `${DIR}/elsewhere/dim_shadow.yml` }, inFolder('gold', 'dim_shadow2', `${DIR}/dim_shadow2.yml`)],
+      [{ layer: 'silver', modelNames: ['dim_shadow', 'dim_shadow2'] }],
+      target,
+      new Set(['silver', 'gold']),
+    );
+    expect(plan).toEqual({ moves: [], shared: [], unused: [], conflicts: [], otherFolders: [] });
   });
 
   it('treats a layer whose targetPath is null as shared (nowhere safe to put it)', () => {
@@ -139,6 +173,7 @@ describe('describeOrganizePlan', () => {
       shared: [{ name: 'd', layers: ['gold', 'silver'] }],
       unused: ['e', 'f'],
       conflicts: [{ name: 'g', layer: 'silver' }],
+      otherFolders: [],
     };
     expect(describeOrganizePlan(plan)).toBe([
       'Move 3 models into layer folders (1 → gold/, 2 → silver/).',
@@ -149,20 +184,33 @@ describe('describeOrganizePlan', () => {
   });
 
   it('uses the singular for one move and omits the staying line when nothing stays', () => {
-    const text = describeOrganizePlan({ moves: [move('a', 'gold')], shared: [], unused: [], conflicts: [] });
+    const text = describeOrganizePlan({ moves: [move('a', 'gold')], shared: [], unused: [], conflicts: [], otherFolders: [] });
     expect(text).toBe(
       'Move 1 model into layer folders (1 → gold/).\n\nDomain files reference models by name, so no domain file changes.',
     );
   });
 
   it('describes a plan with nothing to move', () => {
-    const text = describeOrganizePlan({ moves: [], shared: [], unused: ['x'], conflicts: [] });
+    const text = describeOrganizePlan({ moves: [], shared: [], unused: ['x'], conflicts: [], otherFolders: [] });
     expect(text).not.toContain('Move ');
     expect(text).toContain('Staying at the top of logical-models/: 1 unused model (x).');
   });
 
   it('names at most three models per group', () => {
-    const text = describeOrganizePlan({ moves: [], shared: [], unused: ['a', 'b', 'c', 'd', 'e'], conflicts: [] });
+    const text = describeOrganizePlan({ moves: [], shared: [], unused: ['a', 'b', 'c', 'd', 'e'], conflicts: [], otherFolders: [] });
     expect(text).toContain('5 unused models (a, b, c and 2 more)');
+  });
+
+  it('explains files moving out of another layer\'s folder and folders it leaves alone', () => {
+    const text = describeOrganizePlan({
+      moves: [{ ...move('rpt_sales', 'silver'), fromFolder: 'gold' }, move('dim_a', 'silver')],
+      shared: [],
+      unused: [],
+      conflicts: [],
+      otherFolders: [{ folder: 'Staging', count: 2 }],
+    });
+    expect(text).toContain('Move 2 models into layer folders (2 → silver/).');
+    expect(text).toContain("One is in another layer's folder, because the domains that use it are now in a different layer (rpt_sales: gold/ → silver/).");
+    expect(text).toContain('Left alone: folders that are not a layer in layers.json — Staging/ (2).');
   });
 });

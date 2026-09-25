@@ -385,6 +385,69 @@ describe('erdStudio.organizeModelLibrary (issue #76)', () => {
     expect(info).toHaveBeenCalledWith('Moved 7 model files into layer folders.');
   });
 
+  /** Answer "Move Files" to the confirmation modal; resolve everything else to undefined. */
+  const acceptMoves = () => vi.spyOn(vscode.window, 'showInformationMessage')
+    .mockImplementation((async (message: string) => (message === 'Organise Model Library by Layer?' ? 'Move Files' : undefined)) as never);
+  const confirmDetail = (info: ReturnType<typeof acceptMoves>) =>
+    (info.mock.calls.find((c) => c[0] === 'Organise Model Library by Layer?')![1] as { detail: string }).detail;
+
+  it('moves a file out of the wrong layer folder into the one layer whose domains use it', async () => {
+    // dim_customer is used only by silver domains, but its file sits in gold/.
+    fs.mkdirSync(path.join(lib(), 'gold'));
+    fs.renameSync(path.join(lib(), 'dim_customer.yml'), path.join(lib(), 'gold', 'dim_customer.yml'));
+    await activate(context);
+    const info = acceptMoves();
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    const detail = confirmDetail(info);
+    expect(detail).toContain("One is in another layer's folder");
+    expect(detail).toContain('dim_customer: gold/ → silver/');
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_customer.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'gold', 'dim_customer.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(lib(), 'dim_customer.yml'))).toBe(false);
+    // gold/ held only dim_customer (the fixture has no gold-only model), so the emptied folder is removed.
+    expect(fs.existsSync(path.join(lib(), 'gold'))).toBe(false);
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/^Moved \d+ model files into layer folders\.$/));
+  });
+
+  it('reports nothing to move when re-run after a successful organise that relocated a file', async () => {
+    fs.mkdirSync(path.join(lib(), 'gold'));
+    fs.renameSync(path.join(lib(), 'dim_customer.yml'), path.join(lib(), 'gold', 'dim_customer.yml'));
+    await activate(context);
+    const info = acceptMoves();
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_customer.yml'))).toBe(true);
+    const after = fs.readdirSync(path.join(lib(), 'silver')).sort();
+    info.mockClear();
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(String(info.mock.calls[0][0])).toMatch(/^Organise Model Library: nothing to move\. /);
+    expect(info.mock.calls.some((c) => c[0] === 'Organise Model Library by Layer?')).toBe(false);
+    expect(fs.readdirSync(path.join(lib(), 'silver')).sort()).toEqual(after);
+  });
+
+  it('leaves a non-layer folder untouched and names it in the dialog detail', async () => {
+    // Staging/ is not a layer in layers.json: fct_order stays there even though only silver uses it.
+    fs.mkdirSync(path.join(lib(), 'Staging'));
+    fs.renameSync(path.join(lib(), 'fct_order.yml'), path.join(lib(), 'Staging', 'fct_order.yml'));
+    const stagedBefore = fs.readFileSync(path.join(lib(), 'Staging', 'fct_order.yml'), 'utf-8');
+    await activate(context);
+    const info = acceptMoves();
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    const detail = confirmDetail(info);
+    expect(detail).toContain('Left alone: folders that are not a layer in layers.json — Staging/ (1).');
+    expect(fs.readdirSync(path.join(lib(), 'Staging'))).toEqual(['fct_order.yml']);
+    expect(fs.readFileSync(path.join(lib(), 'Staging', 'fct_order.yml'), 'utf-8')).toBe(stagedBefore);
+    expect(fs.existsSync(path.join(lib(), 'silver', 'fct_order.yml'))).toBe(false);
+    // The other silver-only models still moved.
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_customer.yml'))).toBe(true);
+  });
+
   it('moves nothing when the confirmation is dismissed', async () => {
     await activate(context);
     const before = fs.readdirSync(lib()).sort();

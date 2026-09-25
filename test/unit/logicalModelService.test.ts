@@ -710,6 +710,64 @@ describe('LogicalModelService layer folders', () => {
     });
   });
 
+  describe('groupsByFolder (layer folders are opt-in)', () => {
+    it('is true when logical-models/ does not exist', () => {
+      expect(fs.existsSync(modelsDir)).toBe(false);
+      expect(service.groupsByFolder()).toBe(true);
+    });
+
+    it('is true for an empty library — there is no flat convention to keep', () => {
+      fs.mkdirSync(modelsDir, { recursive: true });
+      expect(service.groupsByFolder()).toBe(true);
+    });
+
+    it('with layer ids, only a file in a layer folder opts in — a hand-made Staging/ does not', () => {
+      writeRaw('', 'dim_a');
+      writeRaw('Staging', 'rpt_x');
+      const layers = new Set(['silver', 'gold']);
+      expect(service.groupsByFolder(layers)).toBe(false);
+      writeRaw('gold', 'fct_b');
+      expect(service.groupsByFolder(layers)).toBe(true);
+    });
+
+    it('is false for a library of flat files only', () => {
+      writeRaw('', 'dim_a');
+      writeRaw('', 'fct_b');
+      expect(service.groupsByFolder()).toBe(false);
+    });
+
+    it('is true once any model file lives in a folder', () => {
+      writeRaw('', 'dim_a');
+      writeRaw('', 'fct_b');
+      writeRaw('gold', 'rpt_c');
+      expect(service.groupsByFolder()).toBe(true);
+    });
+
+    it('is true for a library whose only files are in folders', () => {
+      writeRaw('silver', 'dim_a');
+      expect(service.groupsByFolder()).toBe(true);
+    });
+
+    it('ignores an empty sub-folder: flat files beside it keep the library flat', () => {
+      writeRaw('', 'dim_a');
+      fs.mkdirSync(path.join(modelsDir, 'gold'), { recursive: true });
+      fs.writeFileSync(path.join(modelsDir, 'gold', 'README.md'), 'not a model\n', 'utf-8');
+      expect(service.groupsByFolder()).toBe(false);
+    });
+
+    it('does not count a file in a dot-folder', () => {
+      writeRaw('', 'dim_a');
+      writeRaw('.git', 'hidden_model');
+      expect(service.groupsByFolder()).toBe(false);
+    });
+
+    it('does not count a file nested two folders deep', () => {
+      writeRaw('', 'dim_a');
+      writeRaw(path.join('gold', 'archive'), 'deep_model');
+      expect(service.groupsByFolder()).toBe(false);
+    });
+  });
+
   describe('modelPath for a new file', () => {
     it('uses the top level when no folder is given', () => {
       expect(service.modelPath('dim_new')).toBe(path.join(modelsDir, 'dim_new.yml'));

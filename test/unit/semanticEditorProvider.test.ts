@@ -437,7 +437,25 @@ describe('payload validation (H21)', () => {
     expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'dim_dupe.yml'))).toBe(false);
   });
 
-  it('accepts a valid addModel and writes the model file into the domain\'s layer folder', async () => {
+  it('accepts a valid addModel and writes the model file (a flat library stays flat)', async () => {
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({
+      type: 'addModel',
+      payload: { name: 'dim_fresh', columns: [{ name: 'fresh_id', dataType: 'int', description: '' }], modelRole: 'domain-dim' },
+    });
+    // The fixture library is flat, so layer folders are not opted into.
+    await vi.waitFor(
+      () => expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'dim_fresh.yml'))).toBe(true),
+      { timeout: 4000 },
+    );
+    expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'silver'))).toBe(false);
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('writes a new model into the domain\'s layer folder once the library uses folders', async () => {
+    const lib = path.join(root, '.erd-studio', 'logical-models');
+    fs.mkdirSync(path.join(lib, 'gold'), { recursive: true });
+    fs.renameSync(path.join(lib, 'fct_sale.yml'), path.join(lib, 'gold', 'fct_sale.yml'));
     const { panel } = await openShowcase(root);
     panel._simulateMessage({
       type: 'addModel',
@@ -445,10 +463,10 @@ describe('payload validation (H21)', () => {
     });
     // showcase is a silver domain, so the new model lands in logical-models/silver/.
     await vi.waitFor(
-      () => expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'silver', 'dim_fresh.yml'))).toBe(true),
+      () => expect(fs.existsSync(path.join(lib, 'silver', 'dim_fresh.yml'))).toBe(true),
       { timeout: 4000 },
     );
-    expect(fs.existsSync(path.join(root, '.erd-studio', 'logical-models', 'dim_fresh.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(lib, 'dim_fresh.yml'))).toBe(false);
     expect(lastError(panel)).toBeUndefined();
   });
 
@@ -961,9 +979,22 @@ describe('layer folders in the edit pipeline (issue #76)', () => {
     expect(fs.existsSync(path.join(lib(), 'silver'))).toBe(false);
   });
 
+  it('addExistingModel into a flat library seeds the file at the top level', async () => {
+    fs.unlinkSync(path.join(lib(), 'fct_sale.yml'));
+    const { panel } = await openShowcase(root);
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+
+    panel._simulateMessage({ type: 'addExistingModel', payload: { modelName: 'fct_sale' } });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    expect(fs.existsSync(path.join(lib(), 'fct_sale.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'silver'))).toBe(false);
+  });
+
   it('addExistingModel seeds a new library file from the dbt yml into the domain\'s layer folder', async () => {
     // fct_sale is in the dbt project yml but not in showcase; drop its library file so it gets seeded.
     fs.unlinkSync(path.join(lib(), 'fct_sale.yml'));
+    moveIntoFolder('dim_location', 'gold'); // the library has opted into folders
     const { panel, doc } = await openShowcase(root);
     const loads = types(panel).filter((t) => t === 'domainLoaded').length;
 
@@ -978,8 +1009,22 @@ describe('layer folders in the edit pipeline (issue #76)', () => {
     expect(lastError(panel)).toBeUndefined();
   });
 
+  it('a hand-made folder that is not a layer does not opt the library into layer folders', async () => {
+    fs.unlinkSync(path.join(lib(), 'fct_sale.yml'));
+    moveIntoFolder('dim_location', 'Staging');
+    const { panel } = await openShowcase(root);
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+
+    panel._simulateMessage({ type: 'addExistingModel', payload: { modelName: 'fct_sale' } });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    expect(fs.existsSync(path.join(lib(), 'fct_sale.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'silver'))).toBe(false);
+  });
+
   it('addExistingModel from a gold domain seeds into gold/', async () => {
     fs.unlinkSync(path.join(lib(), 'fct_sale.yml'));
+    moveIntoFolder('dim_location', 'silver'); // the library has opted into (layer) folders
     const { panel } = await openNewDomain('gold', 'reporting');
     const loads = types(panel).filter((t) => t === 'domainLoaded').length;
 

@@ -886,6 +886,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         logicalModelService.listModelFiles(),
         usage,
         (name, layer) => LogicalModelService.isModelFolderName(layer) ? path.join(modelsDir, layer, `${name}.yml`) : null,
+        new Set(layerService.getAllLayers().map((l) => l.id)),
       );
       if (plan.moves.length === 0) {
         void vscode.window.showInformationMessage(
@@ -922,6 +923,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       for (const move of plan.moves) {
         ownWrites.recordWrite(move.to);
         ownWrites.recordDelete(move.from);
+      }
+      // A layer folder emptied by moving its files out is removed.
+      for (const move of plan.moves) {
+        if (!move.fromFolder) continue;
+        const folder = path.dirname(move.from);
+        try {
+          if (fs.readdirSync(folder).length === 0) fs.rmdirSync(folder);
+        } catch { /* already gone */ }
       }
       logicalModelService.invalidateCache();
       modelLibraryProvider.refresh();

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   MigrationService,
@@ -337,6 +337,58 @@ describe('MigrationService (domain format → v5)', () => {
     const result = migration.migrate();
     expect(result.domainsConverted).toBe(2);
     expect(result.modelsCreated).toBe(3);
+    expect(lms.modelFolder('dim_shared')).toBe('');
+    expect(lms.modelFolder('fct_sale')).toBe('silver');
+    expect(lms.modelFolder('rpt_sales')).toBe('gold');
+  });
+
+  it('extracts to the top level when the library already holds flat model files (no folder created)', () => {
+    lms.saveModel({ name: 'dim_existing', columns: [] });
+    expect(lms.groupsByFolder()).toBe(false);
+    const p = writeDomain('v4', {
+      schemaVersion: 4, domain: 'v4', layer: 'silver',
+      logical: {
+        models: [
+          { name: 'dim_a', columns: [{ name: 'a_id', dataType: 'INT', description: '', isPrimaryKey: true }] },
+          { name: 'fct_b', columns: [] },
+        ],
+        relationships: [],
+      },
+      viewConfig: {},
+    });
+
+    const result = migration.migrate();
+    expect(result.domainsConverted).toBe(1);
+    expect(result.modelsCreated).toBe(2);
+    expect((readJson(p).logical as { models: unknown[] }).models).toEqual(['dim_a', 'fct_b']);
+
+    const modelsDir = path.join(workspaceRoot, '.erd-studio', 'logical-models');
+    expect(lms.modelFolder('dim_a')).toBe('');
+    expect(lms.modelFolder('fct_b')).toBe('');
+    expect(fs.existsSync(path.join(modelsDir, 'silver'))).toBe(false);
+    expect(fs.readdirSync(modelsDir).sort()).toEqual(['dim_a.yml', 'dim_existing.yml', 'fct_b.yml']);
+    expect(lms.groupsByFolder()).toBe(false);
+  });
+
+  it('decides folders once, before writing: the first extracted file does not switch the rest to folders', () => {
+    // Empty library → folders. Models from two single-layer domains both land
+    // in their layer folder (the decision is not re-taken after the first write).
+    const inline = (domain: string, layer: string, models: string[]) => {
+      const dir = path.join(workspaceRoot, '.erd-studio', layer);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${domain}.json`), JSON.stringify({
+        schemaVersion: 4, domain, layer,
+        logical: { models: models.map((name) => ({ name, columns: [] })), relationships: [] },
+        viewConfig: {},
+      }));
+    };
+    inline('sales', 'silver', ['dim_shared', 'fct_sale']);
+    inline('reporting', 'gold', ['dim_shared', 'rpt_sales']);
+
+    const decide = vi.spyOn(lms, 'groupsByFolder');
+    migration.migrate();
+    expect(decide).toHaveBeenCalledTimes(1);
+    // dim_shared (two layers) is written flat — that must not flip later files to flat.
     expect(lms.modelFolder('dim_shared')).toBe('');
     expect(lms.modelFolder('fct_sale')).toBe('silver');
     expect(lms.modelFolder('rpt_sales')).toBe('gold');
