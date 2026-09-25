@@ -30,7 +30,8 @@ There are two stages. **Logical** is the editable stage stored in the domain fil
 
 - A model file lives at `logical-models/{name}.yml` **or** exactly one folder down at `logical-models/{folder}/{name}.yml`. By convention the folder is a layer id (`bronze`, `silver`, `gold`). Deeper nesting and dot-folders are not scanned.
 - The folder is organisational only: domain files reference models by **name**, and names are **unique across the whole library**, as dbt model names are across a project.
-- **Lookup:** the top-level file first, then each folder in alphabetical order. A second file with the same name elsewhere is *shadowed* — ignored, and flagged in the Model Library view.
+- **Lookup:** the top-level file first, then each folder in alphabetical order. A second file with the same name elsewhere is *shadowed* — ignored, flagged in the Model Library view, and named in a warning when a canvas that uses the name opens. **Give Duplicate Model Its Own Name** fixes it: the ignored copy becomes `{folder}_{name}` with `alias: {name}`, and the domains of that folder's layer are repointed at it in the same edit.
+- **The same table name in two layers** is two models with the same `alias`: `silver/silver_date.yml` and `gold/gold_date.yml`, both `alias: date` — the pattern a dbt project uses for two `date` tables (unique model names, `alias` + `schema` for the relation). The canvas labels each node `date`, or `silver.date` / `gold.date` when both are on one canvas.
 - **Folders are opt-in per project.** A library uses layer folders once any model file sits in a folder named after a layer in `layers.json` (or while it is empty); a hand-made folder such as `Staging/` does not count. Then a new model created from a canvas is written to the folder of the layer of the domain it is added to (`gold/reporting.json` → `logical-models/gold/`). A flat library stays flat: new files go to the top level until someone runs **ERD Studio: Organise Model Library by Layer**. Opting in is a team decision — a teammate on ERD Studio before 1.2.0 only reads the top level and would see models in folders as missing. A rename keeps the file in its folder.
 - **Organise Model Library by Layer** moves each file into the folder of the one layer whose domains reference it: top-level files, and files sitting in *another* layer's folder (the domains that use it moved layer). A model used by several layers, or by none, stays where it is. Folders that are not a layer in `layers.json` (a hand-made `Staging/`, or a layer id since removed) are never touched and are named in the confirmation. Re-running it is always safe.
 - Hosts that cannot list directories (the `@erd-studio/core` `loadDisplayDomain` viewer) probe the top level, then every layer folder alphabetically (the extension's order), so they see only folders named after a layer.
@@ -121,6 +122,7 @@ columns:
 |-------|------|----------|-------------|
 | `name` | string | Yes | Model name. Must equal the filename without `.yml`. |
 | `schema` | string | No | Target schema the model materialises in. |
+| `alias` | string | No | Warehouse table name when it differs from `name` — dbt's `alias` config. A plain identifier (letters, digits, underscores; case kept). `name` stays the identity everywhere; the canvas shows the alias, qualified by `schema` when two models on one canvas share it. Set from the detail panel's **Table name** row. |
 | `description` | string | No | Human-readable description. |
 | `grain` | string | No | Grain statement: "One row per ___". |
 | `modelRole` | string | No | Role in the warehouse architecture. See ModelRole enum. |
@@ -313,6 +315,14 @@ never been compiled still renders real models.
 - the compiled manifest carries a node for it;
 - `catalog.json` carries a relation for it.
 
+All of those are looked up by the model **name** first. Only when the name finds
+nothing does the model's warehouse relation — `schema` plus `alias` (or the name)
+— get a second chance against the manifest's `schema` + `alias`, then the
+catalog's `metadata.schema` + `metadata.name`. The pair is always matched
+together, never the alias alone (a silver `date` is not a gold `date`), a model
+with no `schema` never takes that route, and a relation two dbt models share is
+ambiguous and matches neither. A model found this way keeps its logical name on
+the canvas, and its relationship tests are drawn on it.
 A model found in none of those is still emitted, as a **ghost** with no columns —
 the design references something the dbt project does not have. A model dbt has
 **disabled** lands in the manifest's `disabled` section and `ref()` to it fails,
@@ -357,7 +367,9 @@ A column typed on only one stage is reported as **`undeclared`**, not as a type
 mismatch; writing `data_type:` into the schema yml, or running
 `dbt docs generate`, is what fills it in.
 
-**Model-level fields.** `schema` is the manifest's `schema`, then the catalog's
+**Model-level fields.** `alias` is the manifest's `alias` when dbt builds the model
+under another name, then a catalog relation named otherwise, then the logical
+`alias`. `schema` is the manifest's `schema`, then the catalog's
 `metadata.schema`, then blank — it cannot be derived from the filesystem (it needs
 `generate_schema_name` and `profiles.yml`), so with neither artifact the node badge
 falls back to the ERD **layer** abbreviation and says so. Every real physical model

@@ -82,6 +82,7 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
     return {
       name: model.name,
       schema: model.schema ?? '',
+      ...(model.alias ? { alias: model.alias } : {}),
       description: model.description ?? '',
       columns,
       ...(model.rationale ? { rationale: model.rationale } : {}),

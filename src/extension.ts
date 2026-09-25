@@ -26,6 +26,9 @@ import { getErdStudioSetting } from './services/configService';
 import { readDbtProjectConfig } from './services/dbtProjectConfig';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { describeOrganizePlan, planOrganizeByLayer, type DomainModelUsage } from './services/modelLibraryOrganizer';
+import { describeDuplicateFix, planDuplicateFix, repointDomainModel, suggestDuplicateName, type DomainReference } from './services/duplicateModelResolver';
+import { validateModelName } from './providers/payloadValidation';
+import { parseLogicalModelText } from '@erd-studio/core';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 import { submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
@@ -260,6 +263,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.openTrackedReport',
   'erdStudio.organizeModelLibrary',
   'erdStudio.selectDbtProject',
+  'erdStudio.resolveDuplicateModel',
 ]);
 
 /**
@@ -1148,6 +1152,110 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       modelLibraryProvider.refresh();
       void vscode.window.showInformationMessage(
         `Moved ${plan.moves.length} model file${plan.moves.length === 1 ? '' : 's'} into layer folders.`,
+      );
+    }),
+    // A second file with a name the library already has is ignored (names are
+    // identities). Give it its own name — `{layer}_{name}` — with an alias that
+    // keeps the table name, and repoint the domains of its layer at it.
+    // Prompted, one WorkspaceEdit, one undo step.
+    vscode.commands.registerCommand('erdStudio.resolveDuplicateModel', async (arg?: ModelLibraryNode | string) => {
+      const entries = logicalModelService.listModelFiles();
+      const duplicates = entries.filter((e) => e.shadowedBy);
+      const target = typeof arg === 'string' ? arg : arg?.type === 'model' ? arg.filePath : undefined;
+      // Compare real paths: the tree hands over what the library listed, but a
+      // warning or a caller may name the same file through a symlinked prefix.
+      const realPath = (p: string): string => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+      let entry = target === undefined ? undefined : duplicates.find((e) => realPath(e.filePath) === realPath(target));
+      const modelsDir = logicalModelService.getModelsDir();
+      const libPath = (p: string): string => `logical-models/${path.relative(modelsDir, p).split(path.sep).join('/')}`;
+      if (!entry) {
+        if (duplicates.length === 0) {
+          void vscode.window.showInformationMessage('Every model file in the library has its own name.');
+          return;
+        }
+        const pick = await vscode.window.showQuickPick(
+          duplicates.map((e) => ({ label: libPath(e.filePath), description: `ignored — ${libPath(e.shadowedBy!)} is used`, entry: e })),
+          { placeHolder: 'Which duplicate model file should get its own name?' },
+        );
+        if (!pick) return;
+        entry = pick.entry;
+      }
+      const dup = entry;
+
+      const model = (() => {
+        try { return parseLogicalModelText(fs.readFileSync(dup.filePath, 'utf-8'), dup.name); } catch { return null; }
+      })();
+      if (!model) {
+        void vscode.window.showErrorMessage(`${libPath(dup.filePath)} could not be read as a model file. Fix or rename it by hand.`);
+        return;
+      }
+
+      const taken = new Set(entries.map((e) => e.name));
+      const newName = (await vscode.window.showInputBox({
+        title: `Give ${libPath(dup.filePath)} its own name`,
+        prompt: `Model names are unique, as in dbt. The table name stays "${model.alias || dup.name}" (set as the model's alias).`,
+        value: suggestDuplicateName(dup.name, dup.folder, taken),
+        ignoreFocusOut: true,
+        validateInput: (value) => validateModelName(value)
+          ?? (taken.has(value.trim()) ? `"${value.trim()}" already exists in the model library.` : null),
+      }))?.trim();
+      if (!newName) return;
+
+      const references: DomainReference[] = [];
+      for (const summary of domainService.listDomains(workspaceRoot, semanticDir)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
+          if (getRawDomainModelNames(raw).includes(dup.name)) {
+            references.push({ filePath: summary.filePath, domain: summary.domain, layer: summary.layer });
+          }
+        } catch {
+          // An unreadable domain is not repointed; it keeps the name it has.
+        }
+      }
+      const plan = planDuplicateFix(dup.name, dup.folder, newName, model.alias, references);
+      const newPath = path.join(path.dirname(dup.filePath), `${newName}.yml`);
+      const choice = await vscode.window.showInformationMessage(
+        `Rename the duplicate "${dup.name}" to "${newName}"?`,
+        { modal: true, detail: describeDuplicateFix(plan, libPath(dup.filePath), libPath(newPath)) },
+        'Rename',
+      );
+      if (choice !== 'Rename') return;
+
+      const edit = new vscode.WorkspaceEdit();
+      const yamlText = logicalModelService.serializeModelAt({ ...model, name: newName, alias: plan.alias }, dup.filePath);
+      edit.createFile(vscode.Uri.file(newPath), { overwrite: false, contents: Buffer.from(yamlText, 'utf-8') });
+      edit.deleteFile(vscode.Uri.file(dup.filePath), { ignoreIfNotExists: true });
+      const domainDocs: vscode.TextDocument[] = [];
+      for (const ref of plan.repoint) {
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(ref.filePath));
+        const text = doc.getText();
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        if (!repointDomainModel(parsed, dup.name, newName)) continue;
+        edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(text.length)), JSON.stringify(parsed, null, 2) + '\n');
+        domainDocs.push(doc);
+      }
+      if (!(await vscode.workspace.applyEdit(edit))) {
+        void vscode.window.showErrorMessage('VS Code rejected the rename; nothing was changed.');
+        return;
+      }
+      // Domain edits land in memory; a canvas never sits dirty, so save them.
+      // Every path is recorded as our own write, and the refreshes the
+      // watchers would have driven are issued directly below.
+      for (const doc of domainDocs) {
+        await doc.save();
+        ownWrites.recordWrite(doc.uri.fsPath);
+        treeProvider.invalidateDomain(doc.uri.fsPath);
+      }
+      ownWrites.recordWrite(newPath);
+      ownWrites.recordDelete(dup.filePath);
+      logicalModelService.invalidateCache();
+      modelLibraryProvider.refresh();
+      treeProvider.refresh();
+      selectorsService.scheduleRegenerate();
+      await editorProvider.refreshAllOpenDomains();
+      void vscode.window.showInformationMessage(
+        `${libPath(newPath)} is now its own model, "${newName}" (table: ${plan.alias}).` +
+        (domainDocs.length ? ` Repointed ${domainDocs.length} domain${domainDocs.length === 1 ? '' : 's'}.` : ''),
       );
     }),
     vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: ModelLibraryNode | undefined) => {

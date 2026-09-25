@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '19';
+export const HARNESS_VERSION = '20';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -161,6 +161,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 
 - A model file lives at \`logical-models/{name}.yml\` **or** exactly one folder down at \`logical-models/{folder}/{name}.yml\`. By convention the folder is a layer id (\`bronze\`, \`silver\`, \`gold\`). Deeper nesting and dot-folders are ignored.
 - The folder is organisational only. Domain files reference models **by name**, never by path, and model names are **unique across all folders** (as dbt model names are across a project). Never create a second file with a name that already exists in another folder.
+- **The same table name in two layers** (a silver \`date\` and a gold \`date\`) is two models with different names and the same \`alias\`: \`logical-models/silver/silver_date.yml\` (\`alias: date\`) and \`logical-models/gold/gold_date.yml\` (\`alias: date\`), exactly as a dbt project gets two \`date\` tables. Name the model \`{layer}_{name}\` and set \`alias\` to the table name; never reuse the bare name.
 - **To find a model**, look at \`logical-models/{name}.yml\` first, then in each folder (\`logical-models/*/{name}.yml\`). If the same name exists twice, the top-level file wins, then folders in alphabetical order; the others are ignored.
 - **Folders are opt-in per project.** Check first: if a folder named after a layer in \`layers.json\` (\`logical-models/{layer}/\`) already holds a \`.yml\` file (or \`logical-models/\` is empty), the project uses layer folders — create a new model in the folder of the layer of the domain you are adding it to (adding \`fct_sale\` to \`gold/reporting.json\` creates \`logical-models/gold/fct_sale.yml\`). If every model file is at the top level, the project is **flat** — create the new file at the top level too, and never start the folder layout on your own (the user opts in with **ERD Studio: Organise Model Library by Layer**). When editing or renaming an existing model, keep its file in the folder it is already in.
 
@@ -280,6 +281,7 @@ columns:
 |-------|----------|-------------|
 | \`name\` | Yes | Model name (see naming conventions below) |
 | \`schema\` | No | Target schema for materialization |
+| \`alias\` | No | Warehouse table name when it differs from \`name\` — dbt's \`alias\` config. \`name\` stays the identity (domain files and relationships use it); the canvas shows the alias. Use it for the same table name in two layers (\`silver_date\` and \`gold_date\`, both \`alias: date\`). A plain identifier: letters, digits, underscores |
 | \`description\` | No | Human-readable model description |
 | \`grain\` | No | Grain statement — "One row per ___" |
 | \`modelRole\` | No | Architecture role (see values below) |
@@ -554,7 +556,7 @@ and no \`catalog.json\` to observe the real one. It resolves exactly like
 
 | Action | What to do |
 |--------|-----------|
-| \`add-to-physical\` | Create dbt SQL model file + schema YAML entry (confirm with user first — this is a major change) |
+| \`add-to-physical\` | Create dbt SQL model file + schema YAML entry (confirm with user first — this is a major change). If the logical model has an \`alias\`, set \`config: { alias: <alias> }\` on the dbt model (and its \`schema\` if set) so it builds the same table name |
 | \`remove-from-physical\` | Remove dbt SQL file + schema YAML entry (confirm with user first — destructive) |
 | \`add-column-to-physical\` | Add column to the dbt SQL SELECT statement + add column entry to schema YAML |
 | \`remove-column-from-physical\` | Remove column from dbt SQL SELECT + schema YAML (confirm with user first) |

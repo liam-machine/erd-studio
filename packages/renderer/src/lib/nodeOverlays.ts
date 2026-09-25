@@ -22,6 +22,7 @@ import type {
   AnnotationFlowNode,
   AnnotationFlowEdge,
 } from '../types/graph';
+import { matchesModelSearch } from './modelLabels';
 
 export type GraphNode = ModelFlowNode | AnnotationFlowNode;
 export type GraphEdge = FkFlowEdge | AnnotationFlowEdge;
@@ -97,7 +98,7 @@ export function applyNodeOverlays(
       return node;
     }
     const data = node.data as ModelFlowNode['data'];
-    const searchDimmed = query ? !data.modelName.toLowerCase().includes(query) : false;
+    const searchDimmed = query ? !matchesModelSearch(data, query) : false;
     const selectionDimmed = hasSelection && !connected.has(node.id);
     const dimmed = searchDimmed || selectionDimmed;
     const expanded = isExpanded(node.id);

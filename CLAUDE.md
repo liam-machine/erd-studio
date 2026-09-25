@@ -31,6 +31,8 @@ The base directory is configurable via the `erdStudio.semanticDir` setting (defa
     └── reporting.json
 ```
 
+**Model name vs alias.** A model's `name` is its identity everywhere (domain `logical.models`, relationship endpoints, `viewConfig.positions` keys, physical matching) and is unique across the whole library, as dbt model names are across a project — never make a folder part of it. The optional `alias` (model YAML, `SemanticModel.alias` / `DisplayModel.alias`) is the warehouse table name, dbt's `alias` config: two layers each get a `date` table as `silver_date` and `gold_date`, both `alias: date`. The canvas label comes from `computeModelLabels()` (`packages/renderer/src/lib/modelLabels.ts`: `alias ?? name`, schema-qualified when two nodes would read the same); `buildPhysicalDomain` falls back to `(schema, alias ?? name)` only when the name finds nothing, as a pair and never on an ambiguous key. A second file with an existing name is shadowed: `SemanticEditorProvider.warnAboutDuplicateModels()` warns once per session, and `erdStudio.resolveDuplicateModel` (planner in `src/services/duplicateModelResolver.ts`) renames it to `{folder}_{name}` with `alias: {name}` and repoints that layer's domains in one `WorkspaceEdit`.
+
 File format detection is centralised in `detectDomainFormat()` (`packages/core/src/types/semantic.ts`) → `v5` | `v4` (inline models, loads but prompts for `erdStudio.migrateToV5`) | `hybrid` / `legacy` (rejected with an error naming the migration command; `MigrationService` repairs both). Never add a second detector. The full on-disk contract is in `docs/semantic-domain-json-reference.md`; the copy shipped to AI assistants is `SCHEMA_CONTENT` in `src/services/harnessService.ts`.
 
 ### Internal Identifiers
@@ -165,7 +167,7 @@ Extension <-> Webview communication uses discriminated unions on `type` field:
 - **Extension -> Webview**: `domainLoaded`, `stageData`, `discrepancyReport`, `manifestStaleness`, `syncPlanGenerated`, `openFeedback`, `feedbackContext`, `feedbackAnalysis`, `feedbackSubmitted`, `error`
 - **Webview -> Extension**:
   - lifecycle/navigation: `ready`, `dismissWelcome`, `openGettingStarted`, `viewFile`, `requestReload`, `switchStage`, `refreshManifest`, `undo`, `redo`
-  - schema mutations: `addModel`, `addExistingModel`, `renameModel`, `removeModel`, `removeModels`, `addColumn`, `removeColumn`, `updateColumn`, `reorderColumns`, `toggleColumnKey`, `updateModelDescription`, `updateModelGrain`, `updateModelRole`, `updateModelRationale`, `addRelationship`, `updateRelationship`, `editRelationship`, `removeRelationship`, `removeRelationships`
+  - schema mutations: `addModel`, `addExistingModel`, `renameModel`, `removeModel`, `removeModels`, `addColumn`, `removeColumn`, `updateColumn`, `reorderColumns`, `toggleColumnKey`, `updateModelDescription`, `updateModelGrain`, `updateModelAlias`, `updateModelRole`, `updateModelRationale`, `addRelationship`, `updateRelationship`, `editRelationship`, `removeRelationship`, `removeRelationships`
   - canvas metadata: `updatePositions`, `addAnnotation`, `updateAnnotation`, `removeAnnotation`, `removeAnnotations`
   - sync/discrepancy: `toggleDiscrepancy`, `generateSyncPlan`, `runDbtCompile`, `launchClaudeSync`
   - feedback: `requestFeedbackContext`, `analyzeFeedback`, `setFeedbackProvider`, `submitFeedback`, `copyFeedbackReport`, `openFeedbackLink`
@@ -292,7 +294,7 @@ Discrepancy statuses for models/columns/relationships: `matched`, `extra`, `miss
 AI coding harness files (installed via `erdStudio.installCodingHarness`) embed a version marker to track staleness:
 
 ```
-<!-- erd-studio-harness: 19 -->
+<!-- erd-studio-harness: 20 -->
 ```
 
 **Key components in `src/services/harnessService.ts`:**

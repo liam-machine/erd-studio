@@ -50,6 +50,7 @@ export const read_model = {
             {
               name: model.name,
               schema: model.schema ?? null,
+              alias: model.alias ?? null,
               description: model.description ?? null,
               grain: model.grain ?? null,
               model_role: model.modelRole ?? null,

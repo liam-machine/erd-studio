@@ -168,12 +168,17 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
 
   const version = parseVersion(node.version);
   const latestVersion = parseVersion(node.latest_version);
+  // A versioned model's default alias is `<name>_v<N>`: that is dbt's naming
+  // of the version, not a table name the user chose, so it is not recorded.
+  const alias = typeof node.alias === 'string' ? node.alias.trim() : '';
+  const hasOwnAlias = alias !== '' && alias !== name && (version === undefined || alias !== `${name}_v${version}`);
 
   return {
     name,
     uniqueId,
     projectName,
     schema: typeof node.schema === 'string' ? node.schema : '',
+    ...(hasOwnAlias ? { alias } : {}),
     description: typeof node.description === 'string' ? node.description : '',
     columns,
     originalFilePath:

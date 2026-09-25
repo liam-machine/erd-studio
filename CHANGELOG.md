@@ -8,6 +8,17 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased — 1.4.0
+
+### Added
+
+- **The same table name in more than one layer** (#76 follow-up). A silver `Date` and a gold `Date` can now both exist. Following dbt's own pattern, they are two models with unique names (`silver_date` and `gold_date`), each built as a table called `date` through its **alias**.
+  - Set it from the detail panel's new **Table name** row, or add `alias: date` to the model's YAML file. The canvas then shows the table name as the node's title, with the model name beside it. When two models on one canvas share a table name, each title adds its schema (`silver.date`, `gold.date`). Search finds a model by either name.
+  - The physical stage looks a model up by its name first, as before. When the name finds nothing, it tries the warehouse table instead: `schema` together with `alias`, matched against dbt's own `alias` config and the warehouse catalog. It never matches on the table name alone, so a silver `date` is never mistaken for a gold one. The physical node shows the table name dbt actually builds.
+  - **Duplicate model files are no longer ignored silently.** Two files called `date.yml` in different layer folders used to mean one of them was quietly skipped, so a canvas could show the other layer's columns. Opening a canvas that uses such a name now shows a warning that names both files, with a **Fix…** button. The Model Library's new **Give Duplicate Model Its Own Name** action does the fix in one undoable step: it renames the ignored copy to `{layer}_{name}` (for example `silver_date`), sets `alias: date` so the table name stays the same, and points that layer's domains at the new name.
+  - When **Add Model** is given a name the library already has, the error now suggests the `{layer}_{name}` model name with the table name set to what you typed.
+  - Domain files do not change. `alias` is an optional key in the model file, and older versions of ERD Studio keep it when they save the file. The AI coding harness moves to v20 so assistants follow the same pattern; run **Update All** when the prompt appears.
+
 ## 1.3.0 — 2026-09-25
 
 ### Added

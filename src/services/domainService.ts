@@ -295,11 +295,34 @@ export class DomainService {
 
     const ymlIndex = indexByNormalisedName(ymlData.models);
     const manifestIndex = manifest ? indexByNormalisedName(manifest.models) : undefined;
+    // Second-chance index by warehouse relation: (schema, alias ?? name). Only
+    // consulted when the model NAME found nothing, and only as a pair — an
+    // alias alone would join silver.date to gold.date. See relationKey().
+    const manifestByRelation = manifest
+      ? indexByRelation([...manifest.models.values()], m => relationKey(m.schema, m.alias ?? m.name))
+      : undefined;
+    // dbt model name (normalised) → logical name, for models resolved through
+    // the relation index, so their relationship tests land on the right node.
+    const resolvedViaRelation = new Map<string, string>();
+    const catalogByRelation = catalog
+      ? indexByRelation([...catalog.byUniqueId.values()].filter(n => n.resourceType === 'model'), n => relationKey(n.schema, n.relationName))
+      : undefined;
 
     const models: DisplayModel[] = logicalStage.models.map(model => {
-        const key = normaliseName(model.name);
-        const ymlModel = ymlData.models.get(model.name) ?? ymlIndex.get(key);
-        const manifestModel = manifest?.models.get(model.name) ?? manifestIndex?.get(key);
+        const byName = manifest?.models.get(model.name) ?? manifestIndex?.get(normaliseName(model.name));
+        const knownByName = !!byName || !!ymlData.models.get(model.name)
+          || !!ymlIndex.get(normaliseName(model.name)) || !!ymlData.sourceFiles?.get(normaliseName(model.name));
+        const byRelation = !knownByName
+          ? manifestByRelation?.get(relationKey(model.schema, model.alias ?? model.name))
+          : undefined;
+        if (byRelation) {
+          resolvedViaRelation.set(normaliseName(byRelation.name), model.name);
+        }
+        // Everything below is looked up by the dbt model's own name, which is
+        // the logical name unless the relation index resolved it.
+        const key = normaliseName(byRelation?.name ?? model.name);
+        const ymlModel = ymlData.models.get(byRelation?.name ?? model.name) ?? ymlIndex.get(key);
+        const manifestModel = byName ?? byRelation;
         // `sourceFiles` is keyed by an already-normalised stem — look it up with
         // normaliseName(), never through indexByNormalisedName().
         const sourceFile = ymlData.sourceFiles?.get(key);
@@ -314,7 +337,8 @@ export class DomainService {
         // manifest-absent case (highest version wins, first entry on a tie).
         const catalogNode =
           (manifestModel ? catalog?.byUniqueId.get(manifestModel.uniqueId) : undefined)
-          ?? catalog?.byName.get(key);
+          ?? catalog?.byName.get(key)
+          ?? (manifestModel ? undefined : catalogByRelation?.get(relationKey(model.schema, model.alias ?? model.name)));
         // Seed / snapshot documentation: DESCRIPTIONS ONLY. It never decides
         // existence, adds a column or pulls in an edge — those stay the job of
         // the model sources above, exactly as before seeds were documented.
@@ -333,6 +357,7 @@ export class DomainService {
           return {
             name: model.name,
             schema: '',
+            ...(model.alias ? { alias: model.alias } : {}),
             description: model.description || '',
             columns: [],
             rationale: model.rationale,
@@ -449,6 +474,7 @@ export class DomainService {
           columnSources.push(declaredSource ?? (catalogNode ? 'catalog' : 'file'));
         }
         const types = SOURCE_AUTHORITY.find(s => typeSources.has(s)) ?? columnSources[0];
+        const alias = physicalAlias(model.alias, manifestModel, catalogNode);
 
         return {
           name: model.name,
@@ -458,6 +484,10 @@ export class DomainService {
           // lowercase `analytics` the user actually wrote. With neither source
           // the honest answer is '' and the node badge falls back to the layer.
           schema: manifestModel?.schema || catalogNode?.schema || '',
+          // The name dbt actually builds the table as wins over the design's:
+          // the physical stage shows what exists. A catalog relation named
+          // after the model says "no alias", so it does not clear the logical one.
+          ...(alias ? { alias } : {}),
           description: ymlModel?.description || manifestModel?.description
             || ymlDoc?.description || manifestDoc?.description
             || catalogNode?.comment || model.description || '',
@@ -486,10 +516,10 @@ export class DomainService {
     );
 
     const relationships = derivePhysicalRelationships(
-      mergedRelationshipTests,
+      renameTestModels(mergedRelationshipTests, resolvedViaRelation),
       physicalModelNames,
-      mergedUniqueColumns,
-      mergedCompositeGroups,
+      renameMapKeys(mergedUniqueColumns, resolvedViaRelation),
+      renameMapKeys(mergedCompositeGroups, resolvedViaRelation),
     );
 
     return {
@@ -692,6 +722,72 @@ function isColumnEffectivelyUnique(
 // ---------------------------------------------------------------------------
 // Merge helpers — combine data from yml (primary) and manifest
 // ---------------------------------------------------------------------------
+
+/**
+ * Key for a warehouse relation: normalised `schema.relation`, or '' when the
+ * schema is unknown. Matching on the relation name alone is exactly what the
+ * alias fallback must never do — `date` exists in silver AND gold — so a
+ * model with no schema never takes this route.
+ */
+function relationKey(schema: string | undefined, relation: string | undefined): string {
+  if (!schema || !relation) { return ''; }
+  return `${normaliseName(schema)}.${normaliseName(relation)}`;
+}
+
+/**
+ * Index entries by relation key. A key two entries share is AMBIGUOUS and is
+ * left out entirely: a guess between them would render one model's columns
+ * under another's name, and a missing model is the honest answer.
+ */
+function indexByRelation<T>(entries: T[], keyOf: (entry: T) => string): Map<string, T> {
+  const index = new Map<string, T>();
+  const ambiguous = new Set<string>();
+  for (const entry of entries) {
+    const key = keyOf(entry);
+    if (!key || ambiguous.has(key)) { continue; }
+    if (index.has(key)) {
+      index.delete(key);
+      ambiguous.add(key);
+      continue;
+    }
+    index.set(key, entry);
+  }
+  return index;
+}
+
+/** The physical model's alias: dbt's, then a catalog relation named otherwise, then the design's. */
+function physicalAlias(
+  logicalAlias: string | undefined,
+  manifestModel: { name: string; alias?: string } | undefined,
+  catalogNode: { name: string; relationName: string; version?: string } | undefined,
+): string | undefined {
+  if (manifestModel) { return manifestModel.alias ?? logicalAlias; }
+  if (catalogNode?.relationName && catalogNode.version === undefined
+    && normaliseName(catalogNode.relationName) !== normaliseName(catalogNode.name)) {
+    return catalogNode.relationName;
+  }
+  return logicalAlias;
+}
+
+/** Rewrite relationship test endpoints named in `renames` (normalised dbt name → logical name). */
+function renameTestModels(tests: RelationshipTest[], renames: Map<string, string>): RelationshipTest[] {
+  if (renames.size === 0) { return tests; }
+  return tests.map(t => ({
+    ...t,
+    fromModel: renames.get(normaliseName(t.fromModel)) ?? t.fromModel,
+    toModel: renames.get(normaliseName(t.toModel)) ?? t.toModel,
+  }));
+}
+
+/** Re-key a per-model map with `renames` (normalised dbt name → logical name). */
+function renameMapKeys<V>(map: Map<string, V>, renames: Map<string, string>): Map<string, V> {
+  if (renames.size === 0) { return map; }
+  const out = new Map<string, V>();
+  for (const [model, value] of map) {
+    out.set(renames.get(normaliseName(model)) ?? model, value);
+  }
+  return out;
+}
 
 /** Build a lookup keyed by normalised model name (first entry wins on collision). */
 function indexByNormalisedName<T>(map: Map<string, T>): Map<string, T> {

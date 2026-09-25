@@ -217,6 +217,16 @@ function pruneViewConfigForRemovedModels(
 }
 
 /**
+ * The model name to suggest when a new model's name is taken but the user
+ * wants a table of that name in this domain's layer: `{layer}_{name}`, the
+ * dbt convention, with the alias carrying the table name.
+ */
+function sameTableName(name: string, domainPath: string): string {
+  const layer = path.basename(path.dirname(domainPath)).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  return layer ? `${layer}_${name}` : `${name}_2`;
+}
+
+/**
  * Thrown by an `applyDomainEdit` mutator to abort without an edit. The mutator
  * has already reported the reason to the webview (or decided the request is a
  * silent no-op), so `applyDomainEdit` swallows it and returns `false`.
@@ -235,6 +245,7 @@ import {
   validateColumnDef as validateColumnDefPayload,
   validateColumnDefs,
   validateModelName,
+  validateModelAliasPayload,
   validateAnnotationPositions,
   validateAnnotationUpdate,
   validateModelNameSafety,
@@ -278,6 +289,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * never force-saved on their behalf.
    */
   private readonly editedModelPaths = new Map<string, Set<string>>();
+
+  /** `{layer}/{domain}\0{ignored file}` pairs already warned about this session. */
+  private readonly duplicateWarningsShown = new Set<string>();
 
   /**
    * Fires after this provider has written a domain file (and any model files)
@@ -1147,6 +1161,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'updateModelAlias': {
+            const payload = (message as { payload?: { modelName: string; alias: string } }).payload;
+            if (payload) {
+              const aliasError = validateModelAliasPayload(payload);
+              if (aliasError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update table name: ${aliasError}` } });
+                break;
+              }
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateModelAlias(webviewPanel.webview, document, payload));
+            }
+            break;
+          }
           case 'updateModelRole': {
             const payload = (message as { payload?: { modelName: string; modelRole: string | null } }).payload;
             if (payload) {
@@ -1606,6 +1633,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Say so — once per session per file — when this domain uses a name that
+   * two files in the library define. Only one of them can be used (names are
+   * identities), so without this a gold canvas would quietly show the silver
+   * `date` table's columns. The warning names both files and offers the fix.
+   */
+  private warnAboutDuplicateModels(domain: UnifiedDomain): void {
+    const used = new Set(domain.logical.models.map((m) => m.name));
+    const modelsDir = this.logicalModelService.getModelsDir();
+    const rel = (p: string): string => `logical-models/${path.relative(modelsDir, p).split(path.sep).join('/')}`;
+    for (const entry of this.logicalModelService.listModelFiles()) {
+      if (!entry.shadowedBy || !used.has(entry.name)) continue;
+      const key = `${domain.layer}/${domain.domain}\0${entry.filePath}`;
+      if (this.duplicateWarningsShown.has(key)) continue;
+      this.duplicateWarningsShown.add(key);
+      const meantThisCopy = entry.folder === domain.layer;
+      const message = `"${entry.name}" is defined twice. ${domain.layer}/${domain.domain} uses ${rel(entry.shadowedBy)}` +
+        (meantThisCopy
+          ? `, not the ${domain.layer} copy ${rel(entry.filePath)}, which is ignored.`
+          : `; ${rel(entry.filePath)} is ignored.`);
+      void vscode.window.showWarningMessage(message, 'Fix…').then((choice) => {
+        if (choice === 'Fix…') {
+          void vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', entry.filePath);
+        }
+      });
+    }
+  }
+
+  /**
    * Convert a SemanticDomain to a DisplayDomain for the webview.
    * viewConfig is passed separately since it lives at the unified domain root level.
    */
@@ -1672,6 +1727,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
 
       let unifiedDomain = await this.readDomainTolerantly(document.uri.fsPath);
+      this.warnAboutDuplicateModels(unifiedDomain);
 
       // A fresh domain — models but not one stored position, typically written
       // by an AI assistant with `viewConfig: {}` — is laid out by the webview's
@@ -1955,7 +2011,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             type: 'error',
             payload: {
               message: `Model "${model.name}" already exists in the model library (${this.libraryRelativePath(model.name)}). ` +
-                'Use "Add Existing Model" to reference it in this domain, or choose a different name.',
+                'Use "Add Existing Model" to reference it in this domain, or, for a separate table also called ' +
+                `${model.name}, name the model ${sameTableName(model.name, document.uri.fsPath)} and set its Table name to ${model.name}.`,
             },
           });
           return;
@@ -3457,6 +3514,40 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Update grain failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update grain: ${message}` } });
+    }
+  }
+
+  /**
+   * Set or clear a model's `alias` — the warehouse table name. It lives only
+   * in the model file (v5), so it goes through applyModelEdit and shares that
+   * path's single undo step; a v4 domain has no model files to hold it.
+   */
+  private async handleUpdateModelAlias(
+    webview: vscode.Webview,
+    document: vscode.TextDocument,
+    payload: { modelName: string; alias: string },
+  ): Promise<void> {
+    try {
+      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      if (!this.isDomainV5(parsed)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Table names need the model library: run "ERD Studio: Migrate Domain to v5" first.' },
+        });
+        return;
+      }
+      const alias = payload.alias.trim();
+      const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        // An alias equal to the name says nothing dbt does not already do.
+        if (alias && alias !== model.name) { model.alias = alias; } else { delete model.alias; }
+      });
+      if (!ok) {
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to update table name.' } });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update alias failed: ${message}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to update table name: ${message}` } });
     }
   }
 

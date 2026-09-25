@@ -50,6 +50,7 @@ import type {
   UpdateModelRationaleMessage,
   UpdateModelDescriptionMessage,
   UpdateModelGrainMessage,
+  UpdateModelAliasMessage,
   UpdateModelRoleMessage,
   ReorderColumnsMessage,
   UpdateAnnotationMessage,
@@ -74,6 +75,7 @@ export type {
   UpdateModelRationaleMessage,
   UpdateModelDescriptionMessage,
   UpdateModelGrainMessage,
+  UpdateModelAliasMessage,
   UpdateModelRoleMessage,
   ReorderColumnsMessage,
   UpdateAnnotationMessage,
@@ -648,6 +650,7 @@ export type WebviewMessage =
   | UpdateModelRationaleMessage
   | UpdateModelDescriptionMessage
   | UpdateModelGrainMessage
+  | UpdateModelAliasMessage
   | UpdateModelRoleMessage
   | SwitchStageMessage
   | ToggleDiscrepancyMessage

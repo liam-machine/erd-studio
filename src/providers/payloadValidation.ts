@@ -13,6 +13,7 @@
 import type { Cardinality, ColumnDef, ModelRole, Stage } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, MODEL_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
+import { MODEL_ALIAS_MAX_LENGTH, MODEL_ALIAS_RULE, isValidModelAlias } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,32 @@ export function validateModelName(name: unknown): string | null {
   }
   if (!MODEL_NAME_PATTERN.test((name as string).trim())) {
     return MODEL_NAME_RULE;
+  }
+  return null;
+}
+
+/**
+ * Validate an `updateModelAlias` payload. An empty alias is valid — it clears
+ * the key — so only a non-empty one is held to the table-name rule.
+ */
+export function validateModelAliasPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return 'Missing payload.';
+  }
+  const { modelName, alias } = payload as { modelName?: unknown; alias?: unknown };
+  const nameError = validateModelNameSafety(modelName);
+  if (nameError) {
+    return nameError;
+  }
+  if (typeof alias !== 'string') {
+    return 'Table name must be a string.';
+  }
+  const trimmed = alias.trim();
+  if (trimmed.length > MODEL_ALIAS_MAX_LENGTH) {
+    return `Table name is longer than ${MODEL_ALIAS_MAX_LENGTH} characters.`;
+  }
+  if (trimmed && !isValidModelAlias(trimmed)) {
+    return MODEL_ALIAS_RULE;
   }
   return null;
 }
