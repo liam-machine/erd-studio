@@ -21,6 +21,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 
 ```
 .erd-studio/
+├── modelling-approach.md     ← Optional: the team's modelling rules (see below)
 ├── logical-models/           ← Central model definitions (YAML, one per model)
 │   ├── dim_customer.yml
 │   ├── dim_project.yml
@@ -33,6 +34,10 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 ```
 
 **Key principle:** Models are defined ONCE in `logical-models/` and referenced from multiple domain files. Editing a model from any domain updates the shared definition.
+
+### Team Modelling Approach
+
+If `.erd-studio/modelling-approach.md` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (`modelRole`, `grain`, `scdType`, `additiveType`, `isNaturalKey`, `rationale`). The `/erd-studio-setup` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise.
 
 ### Model Library (Sidebar)
 
@@ -73,7 +78,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `l
 | `stubColumns` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
 | `logical.models` | Yes | Array of model name strings (references to `logical-models/*.yml`) |
 | `logical.relationships` | Yes | Array of relationship objects |
-| `viewConfig` | Yes | Root-level view settings. The extension auto-assigns positions for new models |
+| `viewConfig` | Yes | Root-level view settings. The extension auto-assigns positions for new models; a new domain written with `viewConfig: {}` (no positions at all) is auto-arranged with the canvas's auto layout the first time it opens |
 
 **viewConfig** must be at the root level, not inside `logical`. It stores node positions keyed by model name, and optional canvas annotations (build notes):
 
@@ -337,4 +342,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 17 -->
+<!-- erd-studio-harness: 18 -->

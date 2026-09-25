@@ -187,7 +187,9 @@ describe('doctor', () => {
   it('reports a manifest dbt changed after as stale, a fresh one as ok', async () => {
     const root = copyFixture('dbt-project');
     const past = new Date('2020-01-01T00:00:00Z');
-    const now = new Date();
+    // Whole seconds: utimes stores seconds as a float, so a millisecond-precise Date can read
+    // back 1 ms off (…848Z vs …849Z) and flake an exact timestamp comparison.
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
     const walk = (dir: string): void => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, e.name);
@@ -220,7 +222,9 @@ describe('doctor', () => {
   it('says ready when nothing is left to do', async () => {
     const root = copyFixture('dbt-project-sparse');
     fs.rmSync(path.join(root, '.erd-studio'), { recursive: true });
-    const now = new Date();
+    // Whole seconds: utimes stores seconds as a float, so a millisecond-precise Date can read
+    // back 1 ms off (…848Z vs …849Z) and flake an exact timestamp comparison.
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
     fs.writeFileSync(path.join(root, 'target', 'catalog.json'), JSON.stringify({ metadata: {}, nodes: {}, sources: {} }));
     fs.utimesSync(path.join(root, 'target', 'manifest.json'), now, now);
     const r: DoctorResult = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
