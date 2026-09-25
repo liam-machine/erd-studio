@@ -99,6 +99,7 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
+import { findOwningDbtProject, samePath } from '../services/projectDiscovery';
 import type {
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
@@ -611,11 +612,73 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return true;
   }
 
+  /**
+   * The dbt project a domain file belongs to when that is NOT the project
+   * this window opened: the owning project's root, or `undefined` for a file
+   * outside every dbt project and outside this one. `null` means the file is
+   * this project's own.
+   */
+  private foreignProjectOf(filePath: string): string | undefined | null {
+    const owner = findOwningDbtProject(filePath);
+    if (owner) { return samePath(owner, this.workspaceRoot) ? null : owner; }
+    const rel = path.relative(this.workspaceRoot, filePath);
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? null : undefined;
+  }
+
+  /** Static page (no scripts) plus a notification offering to open the file's own project. */
+  private showForeignProject(webviewPanel: vscode.WebviewPanel, filePath: string, owner: string | undefined): void {
+    const esc = (v: string): string =>
+      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const current = path.basename(this.workspaceRoot);
+    const switchUri = owner
+      ? `command:erdStudio.selectDbtProject?${encodeURIComponent(JSON.stringify([owner]))}`
+      : '';
+    webviewPanel.webview.options = { enableScripts: false, enableCommandUris: owner ? ['erdStudio.selectDbtProject'] : false };
+    webviewPanel.webview.html =
+      '<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\';"></head>' +
+      '<body style="font-family:var(--vscode-font-family);color:var(--vscode-foreground);padding:2em;max-width:44em;line-height:1.5">' +
+      `<h2>This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>` +
+      `<p>ERD Studio has <code>${esc(current)}</code> open in this window, and a window shows one dbt project at a time. ` +
+      'Opening this file here would mix its models with the wrong project\u2019s dbt data.</p>' +
+      (owner
+        ? `<p><a href="${esc(switchUri)}" style="display:inline-block;padding:6px 14px;border-radius:2px;text-decoration:none;` +
+          'background:var(--vscode-button-background);color:var(--vscode-button-foreground)">' +
+          `Switch ERD Studio to ${esc(path.basename(owner))}</a></p>`
+        : '') +
+      '</body></html>';
+    const name = path.basename(filePath);
+    if (!owner) {
+      void vscode.window.showWarningMessage(
+        `ERD Studio: ${name} is not inside a dbt project, so it cannot be opened with ${current}'s data.`,
+      );
+      return;
+    }
+    void vscode.window.showWarningMessage(
+      `ERD Studio: ${name} belongs to the ${path.basename(owner)} dbt project, but ${current} is open.`,
+      'Switch Project',
+    ).then(choice => {
+      if (choice === 'Switch Project') {
+        void vscode.commands.executeCommand('erdStudio.selectDbtProject', owner);
+      }
+    });
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     webviewPanel: vscode.WebviewPanel,
     _token: vscode.CancellationToken,
   ): Promise<void> {
+    // A window serves one dbt project (#82). A domain file from another
+    // project in the same workspace would read its models from this
+    // project's logical-models/ and its physical stage from this project's
+    // manifest — and an edit would write model files into the wrong project.
+    // Refuse it and offer to switch instead of rendering wrong data.
+    const foreignOwner = this.foreignProjectOf(document.uri.fsPath);
+    if (foreignOwner !== null) {
+      this.showForeignProject(webviewPanel, document.uri.fsPath, foreignOwner);
+      return;
+    }
+
     webviewPanel.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.context.extensionUri],

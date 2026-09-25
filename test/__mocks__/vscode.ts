@@ -94,6 +94,14 @@ export const workspace = {
   }),
   onDidChangeTextDocument: () => ({ dispose: () => {} }),
   onDidChangeConfiguration: () => ({ dispose: () => {} }),
+  onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
+  /** Mirrors VS Code: the folder whose path contains the uri, deepest first. */
+  getWorkspaceFolder(uri: { fsPath: string }) {
+    const inside = (root: string) => uri.fsPath === root || uri.fsPath.startsWith(root.endsWith('/') ? root : `${root}/`);
+    return [...workspace.workspaceFolders]
+      .filter(f => inside(f.uri.fsPath))
+      .sort((x, y) => y.uri.fsPath.length - x.uri.fsPath.length)[0];
+  },
   findFiles: async () => [] as unknown[],
   fs: {
     readFile: async () => Buffer.from('{}'),
@@ -187,6 +195,11 @@ export interface MockStatusBarItem {
   show: () => void;
   hide: () => void;
   dispose: () => void;
+}
+
+export enum QuickPickItemKind {
+  Separator = -1,
+  Default = 0,
 }
 
 export enum StatusBarAlignment {
