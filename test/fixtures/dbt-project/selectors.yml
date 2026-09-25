@@ -15,9 +15,13 @@ selectors:
         - method: fqn
           value: fct_task_event
         - method: fqn
+          value: dim_task
+        - method: fqn
           value: dim_project
         - method: fqn
-          value: dim_task
+          value: dim_customer
+        - method: fqn
+          value: dim_date
         - method: fqn
           value: fct_order
   # User-managed: nightly incremental refresh job

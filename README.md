@@ -59,10 +59,40 @@ dbt is the only stack ERD Studio can read today. If you model somewhere else, [c
 
 Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logical-only setup](#not-using-dbt)). The Physical view needs nothing beyond your dbt schema YAMLs, and gets richer once `manifest.json` and `catalog.json` exist.
 
+<a href="https://github.com/liam-machine/erd-studio/blob/main/media/onboarding/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/onboarding/getting-started-poster.jpg" width="640" alt="Getting-started video: a short tour from a dbt project to a checked ERD with your AI assistant. Click to watch." /></a>
+
+**New to ERD Studio?** [Watch the short getting-started video](https://github.com/liam-machine/erd-studio/blob/main/media/onboarding/getting-started.mp4). The first time ERD Studio opens in a dbt project it shows a Welcome panel with the same video and a short checklist. You can open it again from the ▶ button in the ERD Studio sidebar or with **ERD Studio: Watch Getting Started Video**.
+
+**No dbt project yet?** Try the [ERD Studio sample project](https://github.com/liam-machine/erd-studio-sample): a small Kimball-style dbt project with fake coffee-shop data that runs on your computer (DuckDB, no account needed). It ships its dbt artifacts, so both the Logical and Physical views work without installing dbt. Run **ERD Studio: Try the Sample Project** (also in the Welcome panel and the empty ERD Studio sidebar) and VS Code clones it to a folder you choose and offers to open it, or use **Code → Download ZIP** on GitHub and open the unzipped folder.
+
+**Quickest route, with your AI assistant:** click **Set Up My AI Helper** in the Welcome panel, or run **ERD Studio: Set Up My AI Helper**. It installs a guided setup for the AI assistants it finds on your computer, then shows exactly what to type in each. Start your assistant in your dbt project folder and:
+
+| Assistant | Type |
+|---|---|
+| Claude Code | `/erd-studio-setup` |
+| GitHub Copilot (Agent mode, or the Copilot CLI) | `/erd-studio-setup` |
+| Codex | `$erd-studio-setup` (or pick it from `/skills`) |
+| Gemini CLI | *Set up ERD Studio for this dbt project* |
+| Cursor | `/erd-studio-setup` |
+
+The guide:
+
+- checks that dbt is installed and set up, and helps fix it if not;
+- asks which part of your project to model;
+- works out how your project is already modelled — a medallion or staging → marts layout, Kimball, Data Vault, One Big Table or Activity Schema tables — from its names, folders, snapshots and packages, and confirms it with you in one sentence (a plain yes is enough, or describe your own rules); it then looks up that standard, plays the rules back to you and saves them in `.erd-studio/modelling-approach.md` so later AI edits follow them too. When it can't see a particular style, it draws your model exactly as dbt has it instead of making you pick one;
+- builds the logical models from your dbt project, applying those rules;
+- compares them with the Physical view, and fixes the differences until the two match.
+
+It uses a small read-only `erd-studio` helper that ERD Studio installs in `~/.erd-studio-cli`. Your assistant still asks before it edits any file.
+
+The guide is an [Agent Skill](https://agentskills.io): Claude Code reads it from `.claude/skills/`, and GitHub Copilot, Codex, Gemini CLI and Cursor read the copy in `.agents/skills/`. It has been tested end to end with Claude Code; the other four read the same skill from the open standard's folder.
+
+**Or step by step:**
+
 1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) and open your project in VS Code.
 2. Click the **ERD Studio** icon in the Activity Bar, choose **Set Up ERD Studio**, and follow the prompts to create your first domain (a diagram).
 3. Design models on the canvas, or add existing dbt models. If you use dbt, switch between **Logical** and **Physical** to compare your design with it.
-4. To work with AI, run **ERD Studio: Install AI Coding Harness** from the Command Palette. It adds project instructions for Claude Code, GitHub Copilot, Gemini, or Codex.
+4. To work with AI, run **ERD Studio: Install AI Coding Harness** from the Command Palette. It adds project instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini, or Codex's `AGENTS.md`.
 
 Then try asking your assistant:
 

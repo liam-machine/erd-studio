@@ -18,6 +18,7 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
+import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
 import {
   runElkLayout,
   detectLayerBound,
@@ -483,6 +484,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     }
     runLayout();
   }, [domain, nodes, isLayouting, runLayout]);
+
+  /**
+   * First open of a domain with no stored positions (the host sets
+   * `domainLoaded.autoLayout`): run the same layout once, persisted the same way.
+   */
+  useFirstOpenAutoLayout(runLayout, domain, nodes, isLayouting);
 
   /** Register auto-layout function for Shift+L shortcut */
   useEffect(() => {

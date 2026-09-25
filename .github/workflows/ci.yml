@@ -20,6 +20,13 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run compile
       - run: npm run build
+      # Smoke-test the bundled erd-studio CLI (dist/cli.js) against the fixture project:
+      # doctor must succeed, and diff may report drift (exit 1) but never a usage,
+      # environment or internal error (2–4).
+      - name: CLI smoke test
+        run: |
+          node dist/cli.js doctor --project test/fixtures/dbt-project --json --no-dbt > /dev/null
+          rc=0; node dist/cli.js diff --project test/fixtures/dbt-project --all --json > /dev/null || rc=$?; test "$rc" -le 1
       - run: npm run test
       - run: npm run package
 

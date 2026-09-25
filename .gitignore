@@ -17,5 +17,9 @@ dev-preview.html
 # Git worktrees (per-branch checkouts, not for tracking)
 .worktrees/
 
+# Getting-started video pipeline: intermediates and its own dependencies
+video/build/
+video/node_modules/
+
 # LinkedIn post/comment archive (personal, not for the repo)
 .linkedin/

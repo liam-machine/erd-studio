@@ -345,3 +345,26 @@
 .welcome-modal__button--primary:hover {
   background: var(--button-hover-bg);
 }
+
+.welcome-modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Secondary, link-style action next to Get Started (opens the tour panel). */
+.welcome-modal__button--link {
+  padding: 8px 4px;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+}
+
+.welcome-modal__button--link:hover {
+  color: var(--vscode-textLink-activeForeground);
+  text-decoration: underline;
+}
+
+.welcome-modal__button:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 2px;
+}

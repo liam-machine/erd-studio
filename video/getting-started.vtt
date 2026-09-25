@@ -1,0 +1,153 @@
+WEBVTT
+
+1
+00:00:00.450 --> 00:00:02.345
+Welcome to ERD Studio.
+
+2
+00:00:02.395 --> 00:00:06.425
+Let's turn your dbt project into a data model you can see.
+
+3
+00:00:07.125 --> 00:00:10.145
+Physical is what your dbt project builds.
+
+4
+00:00:10.195 --> 00:00:14.356
+Logical is your design: the tables, keys, and how they connect.
+
+5
+00:00:15.056 --> 00:00:18.371
+First, click 'Set up my AI helper' in the Welcome panel.
+
+6
+00:00:18.421 --> 00:00:22.824
+It adds a setup guide for your AI assistant, and a small checking tool.
+
+7
+00:00:22.924 --> 00:00:26.382
+No AI assistant yet? The panel links you to one.
+
+8
+00:00:27.082 --> 00:00:30.881
+Then open your AI assistant in your project folder:
+
+9
+00:00:30.931 --> 00:00:35.382
+Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor.
+
+10
+00:00:35.432 --> 00:00:37.500
+Type /erd-studio-setup.
+
+11
+00:00:37.550 --> 00:00:39.906
+It explains every step as it goes.
+
+12
+00:00:40.606 --> 00:00:46.349
+It starts by checking your dbt setup. dbt parse maps every model in your project.
+
+13
+00:00:46.399 --> 00:00:51.023
+dbt docs generate adds the real column types from your warehouse.
+
+14
+00:00:51.723 --> 00:00:53.842
+No dbt yet? That's fine.
+
+15
+00:00:53.892 --> 00:00:59.537
+It reads your SQL and YAML files instead, and shows you how to install dbt later.
+
+16
+00:01:00.237 --> 00:01:03.174
+Next, it suggests a business area to start with.
+
+17
+00:01:03.224 --> 00:01:07.679
+That area becomes a domain: a focused diagram of related tables.
+
+18
+00:01:08.379 --> 00:01:12.413
+Then it works out how your project is modelled, like medallion layers,
+
+19
+00:01:12.463 --> 00:01:15.580
+Kimball or Data Vault, and shows you the evidence.
+
+20
+00:01:15.630 --> 00:01:17.754
+Say yes, or describe it your way.
+
+21
+00:01:17.804 --> 00:01:20.271
+It looks up the standard, plays it back to you,
+
+22
+00:01:20.321 --> 00:01:22.760
+and applies it to the tables it writes.
+
+23
+00:01:23.460 --> 00:01:26.714
+Then it writes your logical model: one file per table,
+
+24
+00:01:26.764 --> 00:01:31.545
+with columns, types, keys and relationships from your dbt project.
+
+25
+00:01:32.245 --> 00:01:33.899
+Now the important part.
+
+26
+00:01:33.949 --> 00:01:38.305
+It compares logical with physical, just like the Diff button on the canvas.
+
+27
+00:01:38.355 --> 00:01:40.292
+Anything that doesn't match gets fixed,
+
+28
+00:01:40.342 --> 00:01:43.290
+and it checks again until there are no differences.
+
+29
+00:01:43.990 --> 00:01:48.365
+Open a domain from the ERD Studio sidebar to see your diagram.
+
+30
+00:01:48.415 --> 00:01:52.001
+Switch between logical and physical, and keep designing.
+
+31
+00:01:52.701 --> 00:01:55.706
+No dbt project yet? Start with the sample,
+
+32
+00:01:55.756 --> 00:01:58.918
+a small coffee-shop project that runs on your computer.
+
+33
+00:01:58.968 --> 00:02:02.419
+Open it from the Welcome panel, the ERD Studio sidebar,
+
+34
+00:02:02.469 --> 00:02:06.595
+or the Command Palette: 'ERD Studio: Try the Sample Project'.
+
+35
+00:02:06.645 --> 00:02:09.090
+Pick any one, then choose where to save it.
+
+36
+00:02:11.301 --> 00:02:12.207
+That's it.
+
+37
+00:02:12.257 --> 00:02:15.700
+Rewatch this any time from the ERD Studio sidebar.
+
+38
+00:02:15.750 --> 00:02:17.092
+Happy modelling!
