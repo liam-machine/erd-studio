@@ -1012,10 +1012,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         dragAndDropController: treeProvider,
         canSelectMany: false,
       });
-      // Name the open project beside the view title whenever there is a
-      // choice to make, so "which project am I looking at?" never needs a click.
+      // Whenever there is a choice to make, the first row of the tree names
+      // the open project and switches it on click — always visible, unlike
+      // the view-title icon, which VS Code only shows on hover (#82).
       const showProjectName = (): void => {
-        treeView.description = hasMultipleProjects ? path.basename(workspaceRoot) : undefined;
+        treeProvider.setProjectRow(hasMultipleProjects
+          ? { name: path.basename(workspaceRoot), location: describeProjectLocation(workspaceRoot) }
+          : undefined);
       };
       showProjectName();
       const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {

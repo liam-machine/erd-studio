@@ -100,9 +100,9 @@ Then try asking your assistant:
 
 ### More than one dbt project in a workspace?
 
-A VS Code window shows one dbt project at a time. In a multi-root workspace or a monorepo, ERD Studio opens the project that already has an `.erd-studio` folder, and falls back to the first dbt project it finds. The sidebar shows which project is open next to the **ERD Studio** title.
+A VS Code window shows one dbt project at a time. In a multi-root workspace or a monorepo, ERD Studio opens the project that already has an `.erd-studio` folder, and falls back to the first dbt project it finds. When there's more than one, the first row of the ERD Studio sidebar shows which project is open.
 
-To choose another project, run **ERD Studio: Select dbt Project…**, or click its button on the ERD Studio sidebar. The button appears only when there is more than one project. VS Code then reloads the window to open the project you picked. Your choice is saved for that workspace on your machine only, so it never ends up in a settings file your team commits. **Auto-detect**, at the top of the list, clears your choice.
+To choose another project, click that row, or run **ERD Studio: Select dbt Project…**. VS Code then reloads the window to open the project you picked. Your choice is saved for that workspace on your machine only, so it never ends up in a settings file your team commits. **Auto-detect**, at the top of the list, clears your choice.
 
 To choose the project for everyone who opens the workspace, set `erdStudio.projectPath` in the workspace settings. That is the `settings` block of the `.code-workspace` file, or `.vscode/settings.json` for a single folder. Use a relative path so the setting works on every machine. ERD Studio tries it against each workspace folder in turn, so in a multi-root workspace whose folders sit side by side, `../datamodels` points at the `datamodels` folder. The setting takes priority over the picker. In a multi-root workspace ERD Studio reads it from the workspace level only: a value in one folder's own `.vscode/settings.json` is ignored.
 

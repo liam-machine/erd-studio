@@ -157,6 +157,37 @@ describe('DomainTreeProvider', () => {
     });
   });
 
+  describe('project row (#82)', () => {
+    it('leads the tree with a clickable project row when there is more than one project', () => {
+      const fired = vi.fn();
+      provider.onDidChangeTreeData(fired);
+      provider.setProjectRow({ name: 'datamodels', location: 'workspace folder' });
+
+      const children = provider.getChildren(undefined)!;
+      expect(children[0]).toEqual({ type: 'project', name: 'datamodels', location: 'workspace folder' });
+      expect(children.slice(1).map((c) => c.type)).toEqual(['layer', 'layer', 'layer']);
+      expect(fired).toHaveBeenCalled();
+
+      const item = provider.getTreeItem(children[0]);
+      expect(item.label).toBe('datamodels');
+      expect(item.description).toBe('dbt project · Switch…');
+      expect(item.contextValue).toBe('dbtProject');
+      expect(item.command).toMatchObject({ command: 'erdStudio.selectDbtProject' });
+    });
+
+    it('is removed again with undefined', () => {
+      provider.setProjectRow({ name: 'datamodels', location: 'workspace folder' });
+      provider.setProjectRow(undefined);
+      expect(provider.getChildren(undefined)!.every((c) => c.type === 'layer')).toBe(true);
+    });
+
+    it('never makes an empty tree non-empty, so the welcome view still shows', () => {
+      const providerNoSemantic = new DomainTreeProvider(domainService, layerService, '/nonexistent/path');
+      providerNoSemantic.setProjectRow({ name: 'finance-dbt', location: 'workspace folder' });
+      expect(providerNoSemantic.getChildren(undefined)).toEqual([]);
+    });
+  });
+
   describe('getChildren (layer)', () => {
     it('returns domain nodes for silver layer', () => {
       const children = provider.getChildren({ type: 'layer', layer: 'silver' })!;
