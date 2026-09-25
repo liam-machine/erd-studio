@@ -4,7 +4,8 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
-    # Docs-only / fixture-only / planning-only PRs do not produce a release.
+    # Docs-only / fixture-only / planning-only / CI-only PRs do not produce a
+    # release (nothing under .github/ ships in the VSIX).
     # Every marketplace release triggers a save-all + window reload for users
     # with a canvas open, so avoid publishing when nothing shipped changes.
     paths-ignore:
@@ -12,6 +13,7 @@ on:
       - 'docs/**'
       - 'test/fixtures/**'
       - '.planning/**'
+      - '.github/**'
 
 concurrency:
   group: deploy-main
