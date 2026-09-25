@@ -67,6 +67,7 @@ function makeProvider(models: SemanticModel[]) {
     modelPath: (name: string) => `/ws/.erd-studio/logical-models/${name}.yml`,
     ensureDir: () => {},
     getModelsDir: () => '/ws/.erd-studio/logical-models',
+    groupsByFolder: () => false,
     invalidateCache: () => {},
   };
   vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(true);
@@ -76,7 +77,7 @@ function makeProvider(models: SemanticModel[]) {
     {} as never, // manifestService
     {} as never, // ymlParserService
     {} as never, // templateService
-    {} as never, // layerService
+    { getAllLayers: () => [] } as never, // layerService
     '/ws',
     {} as never, // selectorsService
     logicalModelService as never,

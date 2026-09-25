@@ -44,7 +44,7 @@ Per domain (`domains[i]`):
 | `counts.blocking` / `counts.advisory` | How many differences of each kind |
 | `counts.matchedModels` / `matchedColumns` / `matchedRelationships` | What matched — use these in the success line |
 | `phantoms[]` | Models in the diagram that dbt does not have: `reason` is `absent` (not in the project at all) or `disabled` (dbt has it switched off). They are left out of the comparison |
-| `missingModelFiles[]` | Names in `logical.models` with no `logical-models/<name>.yml` file |
+| `missingModelFiles[]` | Names in `logical.models` with no model file (at the top of `logical-models/` or in any folder) |
 | `fixes[]` | What to change, already sorted: blocking first, then by model and column |
 | `report` | The raw comparison — you rarely need it |
 | `plan` | The same content as a canvas sync plan, with dbt as the source of truth everywhere |
@@ -56,7 +56,7 @@ Each fix:
 | `severity` | `blocking` — must be fixed or explained for a clean result. `advisory` — dbt has no type for this column yet; not drift you can fix in ERD Studio |
 | `kind` | What to do (section 2) |
 | `model`, `column` | Where |
-| `file` | The file to edit, relative to the project folder: the model's `logical-models/<model>.yml` or the domain JSON |
+| `file` | The file to edit, relative to the project folder: the model's yml under `logical-models/` (its real folder, when the library is grouped by layer) or the domain JSON |
 | `from`, `to` | Current logical value and the dbt value, for types and cardinalities. **Write `to`** |
 | `relationship` | The connection, for relationship fixes |
 | `explain` | One plain-English sentence — use it when describing the fix to the user |

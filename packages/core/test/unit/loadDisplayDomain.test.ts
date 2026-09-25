@@ -137,6 +137,103 @@ describe('loadDisplayDomain', () => {
     expect('existingModels' in domain).toBe(false);
   });
 
+  describe('models grouped in layer folders', () => {
+    const THREE_LAYERS = JSON.stringify({
+      schemaVersion: 1,
+      layers: [
+        { id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', creatable: true, order: 0 },
+        { id: 'silver', label: 'Silver', abbreviation: 'SLV', color: '#c0c0c0', creatable: true, order: 1 },
+        { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#ffd700', creatable: true, order: 2 },
+      ],
+    });
+
+    it('makes exactly one read for a model at the top level', async () => {
+      const { reads, result } = load({
+        [DOMAIN]: v5(['dim_a']),
+        '.erd-studio/layers.json': THREE_LAYERS,
+        '.erd-studio/logical-models/dim_a.yml': modelYml('dim_a'),
+        '.erd-studio/logical-models/silver/dim_a.yml': modelYml('dim_a', ['id', 'shadowed']),
+      });
+      const domain = await result;
+      expect(reads).toEqual([DOMAIN, '.erd-studio/layers.json', '.erd-studio/logical-models/dim_a.yml']);
+      expect(domain.models[0].columns.map((c) => c.name)).toEqual(['id']);
+    });
+
+    it('probes the top level, then the layer folders alphabetically (the extension\'s order)', async () => {
+      const { reads, result } = load({
+        [DOMAIN]: v5(['dim_a']),
+        '.erd-studio/layers.json': THREE_LAYERS,
+        '.erd-studio/logical-models/silver/dim_a.yml': modelYml('dim_a', ['id', 'name']),
+        '.erd-studio/logical-models/gold/dim_a.yml': modelYml('dim_a'),
+      });
+      const domain = await result;
+      // A name in two folders resolves to the alphabetically first one, as
+      // LogicalModelService does — never differently in the two hosts.
+      expect(reads.slice(2)).toEqual([
+        '.erd-studio/logical-models/dim_a.yml',
+        '.erd-studio/logical-models/bronze/dim_a.yml',
+        '.erd-studio/logical-models/gold/dim_a.yml',
+      ]);
+      expect(domain.models[0].columns.map((c) => c.name)).toEqual(['id']);
+    });
+
+    it('stops at the first hit and probes every layer folder for a missing model', async () => {
+      const { reads, result } = load({
+        [DOMAIN]: v5(['sap__mara', 'missing']),
+        '.erd-studio/layers.json': THREE_LAYERS,
+        '.erd-studio/logical-models/gold/sap__mara.yml': modelYml('sap__mara', ['matnr']),
+      }, { maxParallelReads: 1 });
+      const domain = await result;
+      expect(reads.slice(2)).toEqual([
+        '.erd-studio/logical-models/sap__mara.yml',
+        '.erd-studio/logical-models/bronze/sap__mara.yml',
+        '.erd-studio/logical-models/gold/sap__mara.yml',
+        '.erd-studio/logical-models/missing.yml',
+        '.erd-studio/logical-models/bronze/missing.yml',
+        '.erd-studio/logical-models/gold/missing.yml',
+        '.erd-studio/logical-models/silver/missing.yml',
+      ]);
+      expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([['sap__mara', 1], ['missing', 0]]);
+    });
+
+    it('uses the default layers when there is no layers.json', async () => {
+      const { reads, result } = load({
+        [DOMAIN]: v5(['fct_b']),
+        '.erd-studio/logical-models/gold/fct_b.yml': modelYml('fct_b'),
+      });
+      const domain = await result;
+      expect(reads.slice(2)).toEqual([
+        '.erd-studio/logical-models/fct_b.yml',
+        '.erd-studio/logical-models/gold/fct_b.yml',
+      ]);
+      expect(domain.models[0].columns).toHaveLength(1);
+    });
+
+    it('never probes a folder for a name the filter rejects', async () => {
+      const { reads, result } = load({ [DOMAIN]: v5(['../x', 'a/b']) });
+      await result;
+      expect(reads.some((r) => r.includes('logical-models'))).toBe(false);
+    });
+
+    it('keeps at most maxParallelReads probes in flight', async () => {
+      const names = Array.from({ length: 12 }, (_, i) => `m${i}`);
+      const files: Record<string, string> = { [DOMAIN]: v5(names) };
+      for (const n of names) files[`.erd-studio/logical-models/gold/${n}.yml`] = modelYml(n);
+      let inFlight = 0;
+      let peak = 0;
+      const readFile = async (p: string) => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 1));
+        inFlight--;
+        return files[p] ?? null;
+      };
+      const domain = await loadDisplayDomain({ domainPath: DOMAIN, readFile, readOnly: true, warn: () => {}, maxParallelReads: 3 });
+      expect(domain.models.every((m) => m.columns.length === 1)).toBe(true);
+      expect(peak).toBe(3);
+    });
+  });
+
   it('passes readOnly through', async () => {
     const domain = await load({ [DOMAIN]: v5([]) }, { readOnly: false }).result;
     expect(domain.readOnly).toBe(false);

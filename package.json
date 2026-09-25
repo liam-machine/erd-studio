@@ -136,6 +136,12 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.organizeModelLibrary",
+        "title": "Organise Model Library by Layer",
+        "category": "ERD Studio",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "erdStudio.reportBug",
         "title": "Send Feedback",
         "category": "ERD Studio",
@@ -263,7 +269,7 @@
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "No logical models found.\n\nModels are stored as YAML files in .erd-studio/logical-models/.\n\nAdd models to a domain using the ERD editor to create them here."
+        "contents": "No logical models found.\n\nModels are stored as YAML files in .erd-studio/logical-models/, grouped into one folder per layer.\n\nAdd models to a domain using the ERD editor to create them here."
       }
     ],
     "customEditors": [
@@ -305,7 +311,7 @@
         },
         {
           "command": "erdStudio.revealLogicalModel",
-          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate)?$/",
           "group": "navigation@1"
         },
         {
@@ -315,6 +321,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "erdStudio.organizeModelLibrary",
+          "when": "view == erdStudio.modelLibrary",
+          "group": "navigation@0"
+        },
         {
           "command": "erdStudio.installCodingHarness",
           "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",

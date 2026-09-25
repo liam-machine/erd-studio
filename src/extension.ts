@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 
 import { DomainService, renameDomainInRaw } from './services/domainService';
 import { LayerService } from './services/layerService';
-import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
+import { CURRENT_SCHEMA_VERSION, getRawDomainModelNames, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
 import { ManifestService } from './services/manifestService';
 import { TemplateService } from './services/templateService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
@@ -24,6 +24,7 @@ import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
 import { readDbtProjectConfig } from './services/dbtProjectConfig';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
+import { describeOrganizePlan, planOrganizeByLayer, type DomainModelUsage } from './services/modelLibraryOrganizer';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 import { submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
@@ -207,6 +208,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.clearFeedbackApiKey',
   'erdStudio.refreshMyReports',
   'erdStudio.openTrackedReport',
+  'erdStudio.organizeModelLibrary',
 ]);
 
 /**
@@ -651,7 +653,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   }
   const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
-  const modelLibraryProvider = new ModelLibraryTreeProvider(logicalModelService, domainService, workspaceRoot, semanticDir);
+  const modelLibraryProvider = new ModelLibraryTreeProvider(
+    logicalModelService,
+    domainService,
+    workspaceRoot,
+    semanticDir,
+    () => layerService.getAllLayers(),
+  );
   const editorProvider = new SemanticEditorProvider(
     context,
     domainService,
@@ -980,6 +988,79 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         logicalModelService.deleteModel(node.name);
         modelLibraryProvider.refresh();
       }
+    }),
+    // Move top-level logical-models/*.yml files into the folder of the one
+    // layer whose domains use them (issue #76). Prompted, one WorkspaceEdit.
+    vscode.commands.registerCommand('erdStudio.organizeModelLibrary', async () => {
+      if (!logicalModelService.dirExists()) {
+        void vscode.window.showInformationMessage('Organise Model Library: there is no logical-models/ folder yet.');
+        return;
+      }
+      const usage: DomainModelUsage[] = [];
+      for (const summary of domainService.listDomains(workspaceRoot, semanticDir)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
+          usage.push({ layer: summary.layer, modelNames: getRawDomainModelNames(raw) });
+        } catch {
+          // An unreadable domain contributes no usage; its models stay put.
+        }
+      }
+      const modelsDir = logicalModelService.getModelsDir();
+      const plan = planOrganizeByLayer(
+        logicalModelService.listModelFiles(),
+        usage,
+        (name, layer) => LogicalModelService.isModelFolderName(layer) ? path.join(modelsDir, layer, `${name}.yml`) : null,
+        new Set(layerService.getAllLayers().map((l) => l.id)),
+      );
+      if (plan.moves.length === 0) {
+        void vscode.window.showInformationMessage(
+          `Organise Model Library: nothing to move. ${describeOrganizePlan(plan).replace(/\n+/g, ' ')}`,
+        );
+        return;
+      }
+      const choice = await vscode.window.showInformationMessage(
+        'Organise Model Library by Layer?',
+        { modal: true, detail: describeOrganizePlan(plan) },
+        'Move Files',
+      );
+      if (choice !== 'Move Files') return;
+
+      const edit = new vscode.WorkspaceEdit();
+      const newFolders = new Set<string>();
+      for (const move of plan.moves) {
+        const folder = path.dirname(move.to);
+        if (!fs.existsSync(folder)) newFolders.add(folder);
+        logicalModelService.ensureDir(move.to);
+        edit.renameFile(vscode.Uri.file(move.from), vscode.Uri.file(move.to), { overwrite: false });
+      }
+      if (!(await vscode.workspace.applyEdit(edit))) {
+        // Leave no empty layer folders behind for a move that did not happen.
+        for (const folder of newFolders) {
+          try { fs.rmdirSync(folder); } catch { /* not empty, or already gone */ }
+        }
+        void vscode.window.showErrorMessage('Organise Model Library: VS Code rejected the file moves; nothing was changed.');
+        return;
+      }
+      // Our own moves: the watcher must not bounce them back as external
+      // edits. Nothing a canvas shows changed (domains resolve models by
+      // name), so only the library view needs refreshing.
+      for (const move of plan.moves) {
+        ownWrites.recordWrite(move.to);
+        ownWrites.recordDelete(move.from);
+      }
+      // A layer folder emptied by moving its files out is removed.
+      for (const move of plan.moves) {
+        if (!move.fromFolder) continue;
+        const folder = path.dirname(move.from);
+        try {
+          if (fs.readdirSync(folder).length === 0) fs.rmdirSync(folder);
+        } catch { /* already gone */ }
+      }
+      logicalModelService.invalidateCache();
+      modelLibraryProvider.refresh();
+      void vscode.window.showInformationMessage(
+        `Moved ${plan.moves.length} model file${plan.moves.length === 1 ? '' : 's'} into layer folders.`,
+      );
     }),
     vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: ModelLibraryNode | undefined) => {
       if (!node || node.type !== 'model') {

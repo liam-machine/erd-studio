@@ -131,6 +131,16 @@ const DOMAIN_READ_RETRY_DELAYS_MS = [150, 350, 700];
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * The logical-models/ sub-folder new models created from a domain go in: the
+ * domain file's layer directory (`{semanticDir}/{layer}/{domain}.json`).
+ * `LogicalModelService` ignores a name that is not layer-shaped, so a domain
+ * opened from anywhere else simply creates its models at the top level.
+ */
+export function modelFolderForDomain(domainFilePath: string): string {
+  return path.basename(path.dirname(domainFilePath));
+}
+
+/**
  * logical-models/*.yml operations to bundle into a domain WorkspaceEdit so the
  * model file and the domain file change (and undo) together.
  */
@@ -1222,6 +1232,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * The layer folder a model created from this domain goes in, or undefined
+   * for the top level: only when the domain's directory is a configured layer
+   * AND the library has opted into layer folders (see `groupsByFolder`).
+   */
+  private newModelFolder(domainFilePath: string): string | undefined {
+    const layer = modelFolderForDomain(domainFilePath);
+    const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
+    return layerIds.has(layer) && this.logicalModelService.groupsByFolder(layerIds) ? layer : undefined;
+  }
+
+  /** `logical-models/[{folder}/]{name}.yml` for an existing model file, for messages. */
+  private libraryRelativePath(name: string): string {
+    const folder = this.logicalModelService.modelFolder(name);
+    return `logical-models/${folder ? `${folder}/` : ''}${name}.yml`;
+  }
+
+  /**
    * Apply a mutation to a model stored in logical-models/{name}.yml (v5 path).
    * Reads the model, applies the mutator callback, and writes it back through
    * the same WorkspaceEdit as the domain file so both files form one undo step
@@ -1274,10 +1301,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Returns the TextDocuments that were edited in place (so the caller can
    * save them after `applyEdit` succeeds — new/deleted files need no save)
    * plus the paths created and deleted, which the caller records as own writes.
+   *
+   * Where a NEW file goes: a rename keeps the old file's folder; any other new
+   * model lands in `logical-models/{layerFolder}/` — the layer of the domain
+   * being edited — when the caller passes one (only once the library already
+   * uses folders), else at the top level. An existing file is always edited
+   * where it already is.
    */
   private async addModelFileEdits(
     edit: vscode.WorkspaceEdit,
     ops: ModelFileOps | undefined,
+    layerFolder?: string,
   ): Promise<{ docs: vscode.TextDocument[]; created: string[]; deleted: string[] }> {
     const docs: vscode.TextDocument[] = [];
     const created: string[] = [];
@@ -1292,7 +1326,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
 
     for (const { model, fromName } of ops.save ?? []) {
-      const modelPath = this.logicalModelService.modelPath(model.name);
+      const renamedFrom = fromName !== undefined && fromName !== model.name
+        ? this.logicalModelService.modelFolder(fromName)
+        : null;
+      const modelPath = this.logicalModelService.modelPath(model.name, renamedFrom ?? layerFolder);
       const uri = vscode.Uri.file(modelPath);
       const yamlText = this.logicalModelService.serializeModel(model, fromName);
       if (this.logicalModelService.modelExists(model.name)) {
@@ -1304,7 +1341,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         edit.replace(uri, range, yamlText);
         docs.push(modelDoc);
       } else {
-        this.logicalModelService.ensureDir();
+        this.logicalModelService.ensureDir(modelPath);
         edit.createFile(uri, { overwrite: false, contents: Buffer.from(yamlText, 'utf-8') });
         created.push(modelPath);
       }
@@ -1417,7 +1454,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       document.positionAt(text.length),
     );
     edit.replace(document.uri, fullRange, updatedText);
-    const { docs: modelDocs, created, deleted } = await this.addModelFileEdits(edit, modelFiles);
+    const { docs: modelDocs, created, deleted } = await this.addModelFileEdits(
+      edit,
+      modelFiles,
+      // Layer folders are opt-in: a flat library stays flat (see groupsByFolder).
+      modelFiles?.save?.length ? this.newModelFolder(document.uri.fsPath) : undefined,
+    );
 
     this.pendingUpdates.set(panelKey, true);
     try {
@@ -1831,7 +1873,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({
             type: 'error',
             payload: {
-              message: `Model "${model.name}" already exists in the model library (logical-models/${model.name}.yml). ` +
+              message: `Model "${model.name}" already exists in the model library (${this.libraryRelativePath(model.name)}). ` +
                 'Use "Add Existing Model" to reference it in this domain, or choose a different name.',
             },
           });
@@ -2429,7 +2471,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({
             type: 'error',
             payload: {
-              message: `Model "${trimmedNew}" already exists in the model library (logical-models/${trimmedNew}.yml). ` +
+              message: `Model "${trimmedNew}" already exists in the model library (${this.libraryRelativePath(trimmedNew)}). ` +
                 'Choose a different name, or use "Add Existing Model" to reference it in this domain.',
             },
           });
@@ -2614,6 +2656,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               // Delete through a WorkspaceEdit so VS Code snapshots the files
               // and the deletion is undoable, rather than a bare unlink.
               const deleteEdit = new vscode.WorkspaceEdit();
+              // Captured before the delete: afterwards the folder is unknowable.
+              const singlePath = fileIsSingle ? this.libraryRelativePath(filesToOffer[0]) : '';
               for (const name of filesToOffer) {
                 deleteEdit.deleteFile(
                   vscode.Uri.file(this.logicalModelService.modelPath(name)),
@@ -2626,7 +2670,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 return;
               }
               const summary = fileIsSingle
-                ? `Deleted logical-models/${filesToOffer[0]}.yml`
+                ? `Deleted ${singlePath}`
                 : `Deleted ${filesToOffer.length} model files`;
               vscode.window.showInformationMessage(summary);
             });
@@ -3541,6 +3585,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         semanticDir,
         domain: parsed.domain ?? '',
         layer: parsed.layer ?? '',
+        modelFolder: (name) => this.logicalModelService.modelFolder(name),
       });
 
       const totalActions = countSyncPlanActions(syncPlan);

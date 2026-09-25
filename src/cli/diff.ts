@@ -291,6 +291,7 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
     semanticDir: ctx.semanticDir,
     domain: unified.domain,
     layer: unified.layer,
+    modelFolder: (name) => ctx.logicalModelService.modelFolder(name),
   });
   const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms);
   const blocking = fixes.filter((f) => f.severity === 'blocking').length;

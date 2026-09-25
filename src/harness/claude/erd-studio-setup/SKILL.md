@@ -381,7 +381,7 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
    diff (`references/verify-and-fix.md` → "Adding dbt relationship tests").
 6. Write the files by following `references/building-the-model.md`:
    - `layers.json`, only if it is missing or lacks the chosen layer;
-   - one `logical-models/<name>.yml` per model that is **not** already in the library — columns,
+   - one model file per model **not** already in the library (which folder: see that file) — columns,
      types and descriptions copied from the inventory, never invented — **plus the approach's
      design fields** (`modelRole`, `grain`, `scdType`, `additiveType`, `isNaturalKey`,
      `rationale`), following `references/modelling-approaches.md` section 2 (with no agreed
@@ -389,7 +389,7 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
      or a relationship: those come from dbt, and the diff checks them;
    - the domain file, `.erd-studio/<layer>/<domain>.json`, listing the models and copying the
      inventory `relationships` exactly.
-   Models that already have a `logical-models/*.yml` are **referenced by name, never rewritten** —
+   Models that already have a model file (in any folder) are **referenced by name, never rewritten** —
    they may be someone's careful design and other domains may share them.
 7. Keep a list, **created this session**, of every model yml you wrote (Stage 5 needs it).
 8. Tell the user what you wrote in one or two lines ("Wrote 8 model files and the `orders`
@@ -419,7 +419,7 @@ Then loop, following `references/verify-and-fix.md`, which maps every fix to its
   default: recommend **keep** instead, and just list the drift so they know it is there.
 - **`phantoms`** — models in the diagram that dbt does not have. Always ask (unless the backlog
   lists it as intentional): usually a typo or a model not built yet. Offer to rename it to the
-  real dbt name or remove it from this domain. Never delete a `logical-models/*.yml` file.
+  real dbt name or remove it from this domain. Never delete a model file under `logical-models/`.
 - **`needsMigration`** — older file format; suggest **ERD Studio: Migrate to v5**, skip it now.
 - Re-run the diff after each round of edits. **Stop after 3 rounds.** If anything remains, list
   it using each fix's `explain` text and suggest opening the domain and clicking **⊕ Diff** in

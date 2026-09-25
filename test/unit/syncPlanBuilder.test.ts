@@ -141,6 +141,15 @@ describe('buildSyncPlan', () => {
     }
   });
 
+  it('points logicalModelPath at the model\'s real layer folder when a lookup is given (issue #76)', () => {
+    const folders: Record<string, string | null> = { fct_order: 'gold', dim_customer: '', dim_missing: null };
+    const plan = buildSyncPlan(report(), allSelections(report(), 'physical'), { ...ctx, modelFolder: (n) => folders[n] ?? null });
+    expect(plan.modelContext.fct_order.logicalModelPath).toBe('.erd-studio/logical-models/gold/fct_order.yml');
+    expect(plan.modelContext.dim_customer.logicalModelPath).toBe('.erd-studio/logical-models/dim_customer.yml');
+    // No file yet (a model to add): the top-level path, as before.
+    expect(plan.modelContext.dim_missing.logicalModelPath).toBe('.erd-studio/logical-models/dim_missing.yml');
+  });
+
   it('resolves types stage-absolutely when compared from physical', () => {
     const r = report('physical');
     const plan = buildSyncPlan(r, { 'col:fct_order:amount': 'physical' }, ctx);

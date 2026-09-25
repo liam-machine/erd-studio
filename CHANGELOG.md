@@ -8,6 +8,17 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased — 1.2.0
+
+### Added
+
+- **Group the Model Library by layer** (closes #76). Model files no longer have to sit side by side in one flat `logical-models/` folder, with SAP bronze tables mixed in among your gold facts: a model can live one folder down, in a folder named after its layer, such as `logical-models/bronze/sap__mara.yml` or `logical-models/gold/fct_order.yml`.
+  - **Folders are opt-in per project.** Nothing changes for an existing flat library: new models keep going to the top level. Run **ERD Studio: Organise Model Library by Layer** once, commit the moves, and from then on a new model created from a canvas (**Add Model**, or adding an existing dbt model) is written to the folder of its domain's layer. Make sure your team is on 1.2.0 first: earlier versions only read the top level of `logical-models/`. Renaming a model keeps its file where it is.
+  - The **Model Library** view groups models by folder.
+  - The new **ERD Studio: Organise Model Library by Layer** command moves each model file into the folder of the one layer whose domains use it, including files that ended up in another layer's folder because their domains moved. Models used by more than one layer, or by none, stay where they are, and hand-made folders that are not a layer are never touched. It shows the plan before moving anything, and running it again is always safe.
+  - Domain files and `layers.json` are not changed. Folders are for organising only: domain files still refer to models by name, so model names stay unique across all folders, as dbt model names are across a project.
+  - The AI coding harness, the domain file reference and the v4 migration all know about the folders, and so does the `/erd-studio-setup` guided setup; the harness moves to v19, so run **Update All** when the prompt appears.
+
 ## 1.1.1 — 2026-09-25
 
 ### Changed

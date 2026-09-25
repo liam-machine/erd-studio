@@ -15,11 +15,18 @@ from `inventory --models` output. Anything you had to guess is marked "(draft)" 
 | File | Write it when |
 |---|---|
 | `.erd-studio/layers.json` | It does not exist and the chosen layer is not `silver` or `gold` (e.g. `bronze` or `core`), or it exists and lacks the chosen layer |
-| `.erd-studio/logical-models/<name>.yml` | Once per chosen model that is **not** in `alreadyModelled` |
+| `.erd-studio/logical-models/<layer>/<name>.yml` (or `logical-models/<name>.yml` in a flat library — see below) | Once per chosen model that is **not** in `alreadyModelled` |
 | `.erd-studio/<layer>/<domain>.json` | Once per domain |
 
+**Where a new model file goes.** Model files may sit at the top of `logical-models/` or one folder
+down in a folder named after a layer. Use the domain's layer folder (`logical-models/<layer>/`)
+when the library is empty or a `logical-models/<layer>/` folder already holds a `.yml` file; if every
+existing model file is at the top level, the library is flat — write at the top level and leave
+the choice to organise to the user (**ERD Studio: Organise Model Library by Layer**). Model names
+are unique across all folders, and the domain file lists models by name, never by path.
+
 Models in `alreadyModelled` are referenced by name in the domain file and their yml is left
-alone. Someone may have designed them by hand, and other domains may share them. If their content
+alone, wherever it is. Someone may have designed them by hand, and other domains may share them. If their content
 disagrees with dbt, Stage 5 will say so and ask.
 
 ## layers.json
@@ -172,7 +179,7 @@ user's layout.
   `foreignKeys: ["customer_id", "product_id"]`.
 - `relationships`: the two many-to-one links in the domain example above.
 
-The agreed approach is Kimball. You write `logical-models/fct_order.yml`:
+The agreed approach is Kimball. You write `logical-models/gold/fct_order.yml` (`logical-models/fct_order.yml` in a flat library):
 
 ```yaml
 name: fct_order

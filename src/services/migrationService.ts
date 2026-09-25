@@ -269,7 +269,12 @@ export class MigrationService {
    * Migrate all v4 domain files to v5 format.
    *
    * 1. For each domain file with inline models:
-   *    - Extract each model to logical-models/{name}.yml (if not already there)
+   *    - Extract each model to logical-models/{layer}/{name}.yml (if not
+   *      already there), where {layer} is the directory of the domain it came
+   *      from. A model inlined in domains of more than one layer goes to the
+   *      top level, logical-models/{name}.yml — the same rule the
+   *      "Organise Model Library by Layer" command applies. A library that
+   *      already holds flat model files stays flat.
    *    - Convert models array from objects to string names
    *    - Bump schemaVersion to 5
    *    - Write updated domain file
@@ -325,10 +330,19 @@ export class MigrationService {
       }
     }
 
-    // Phase 2: Write model files (skip if already exists from a prior partial migration)
-    for (const [name, { model }] of allModels) {
+    // Phase 2: Write model files (skip if already exists from a prior partial migration).
+    // Decided once, before anything is written: layer folders only when the
+    // library already uses them or is empty — a flat library stays flat.
+    const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
+    const useFolders = this.logicalModelService.groupsByFolder(layerIds);
+    for (const [name, { model, sources }] of allModels) {
       if (!this.logicalModelService.modelExists(name)) {
-        this.logicalModelService.saveModel(model);
+        // The domain's layer is its parent directory name.
+        const layers = new Set(sources.map((source) => path.basename(path.dirname(source))));
+        const only = layers.size === 1 ? [...layers][0] : undefined;
+        // Never create a folder for a directory that is not a configured layer.
+        const folder = useFolders && only !== undefined && layerIds.has(only) ? only : undefined;
+        this.logicalModelService.saveModel(model, folder);
         result.modelsCreated++;
       }
     }
