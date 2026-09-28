@@ -21,6 +21,7 @@ import type { ColumnDef, SemanticModel } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
+import { sameName } from '../types/naming';
 
 // The directory name and the YAML -> SemanticModel parsing live in
 // @erd-studio/core; re-exported so existing imports of this module keep working.
@@ -208,6 +209,17 @@ export class LogicalModelService {
   modelExists(name: string): boolean {
     const filePath = this.resolveModelPath(name);
     return filePath !== null && fs.existsSync(filePath);
+  }
+
+  /**
+   * The library's spelling of a model whose name matches `name` ignoring
+   * case, or null when there is none. {@link modelExists} asks the file
+   * system, which ignores case on macOS/Windows but not on Linux; this lists
+   * the files, so `dimdate.yml` blocks a new `DimDate` on every platform —
+   * the two would be one file on a teammate's Mac and one table in dbt.
+   */
+  findModelNameIgnoringCase(name: string): string | null {
+    return this.listModelFiles().find((e) => sameName(e.name, name))?.name ?? null;
   }
 
   /**
