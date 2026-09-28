@@ -110,16 +110,22 @@ export function DetailPanel() {
       const trimmed = value.trim();
       if (!trimmed) return 'Name cannot be empty';
       if (/\s/.test(trimmed)) return 'Name cannot contain spaces';
-      if (!/^[a-z]/.test(trimmed)) return 'Must start with a lowercase letter';
-      if (!/^[a-z][a-z0-9_]*$/.test(trimmed)) return 'Only lowercase letters, numbers, and underscores';
-      if (domain && trimmed !== selectedNode && domain.models.some((m) => m.name === trimmed)) {
+      if (!/^[A-Za-z]/.test(trimmed)) return 'Must start with a letter';
+      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(trimmed)) return 'Only letters, numbers, and underscores';
+      // Names are compared without case: `DimDate` and `dimdate` are one file
+      // on macOS/Windows and one table in dbt.
+      const same = (name: string) => name.toLowerCase() === trimmed.toLowerCase();
+      if (selectedNode && trimmed !== selectedNode && same(selectedNode)) {
+        return 'Only the upper/lower case differs — rename to another name first';
+      }
+      if (domain && trimmed !== selectedNode && domain.models.some((m) => same(m.name))) {
         return 'A model with this name already exists';
       }
       // logical-models/ is shared across domains — renaming onto an existing
       // library model would overwrite a file another domain depends on.
       if (
         trimmed !== selectedNode &&
-        existingModels.some((m) => m.source === 'logical' && m.name === trimmed)
+        existingModels.some((m) => m.source === 'logical' && same(m.name))
       ) {
         return 'A model with this name already exists in the model library';
       }

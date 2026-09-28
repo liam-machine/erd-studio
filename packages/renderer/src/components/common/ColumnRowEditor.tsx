@@ -102,12 +102,13 @@ function validateColumnName(
   if (!trimmed) {
     return 'Name is required';
   }
-  if (!/^[a-z0-9_]+$/.test(trimmed)) {
-    return 'Use lowercase letters, numbers, underscores';
+  if (!/^[A-Za-z0-9_]+$/.test(trimmed)) {
+    return 'Use only letters, numbers, underscores';
   }
-  // Check duplicate (exclude current column name for edits)
+  // Check duplicate (exclude current column name for edits). Case is ignored:
+  // `Date` and `date` are one column to the warehouse.
   const otherNames = existingNames.filter((n) => n !== currentName);
-  if (otherNames.includes(trimmed)) {
+  if (otherNames.some((n) => n.toLowerCase() === trimmed.toLowerCase())) {
     return 'Column name already exists';
   }
   return null;

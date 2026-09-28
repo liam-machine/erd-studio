@@ -112,13 +112,17 @@ describe('inventory', () => {
     expect(empty.inputs.manifest).not.toBe('missing');
   });
 
-  it('skips dbt models whose names break the naming rule', async () => {
+  it('skips dbt models whose names break the naming rule, but not mixed-case ones', async () => {
     const root = path.join(tmp, 'p');
     fs.cpSync(PROJECT, root, { recursive: true });
-    fs.writeFileSync(path.join(root, 'models', 'silver', 'DimWeird.sql'), 'select 1');
+    fs.writeFileSync(path.join(root, 'models', 'silver', '2024_weird.sql'), 'select 1');
+    fs.writeFileSync(path.join(root, 'models', 'silver', 'DimDate.sql'), 'select 1');
     const r = runInventory(await ctxFor(root));
-    expect(r.skipped).toContainEqual({ name: 'DimWeird', reason: 'invalid-name' });
-    expect(r.models.map((m) => m.name)).not.toContain('DimWeird');
+    expect(r.skipped).toContainEqual({ name: '2024_weird', reason: 'invalid-name' });
+    expect(r.models.map((m) => m.name)).not.toContain('2024_weird');
+    // Issue #93: PascalCase is a valid ERD Studio name now.
+    expect(r.skipped.map((s) => s.name)).not.toContain('DimDate');
+    expect(r.models.map((m) => m.name)).toContain('DimDate');
   });
 });
 
