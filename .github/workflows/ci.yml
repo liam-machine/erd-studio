@@ -3,6 +3,11 @@ name: CI
 on:
   pull_request:
     branches: [main, develop]
+  # Also run after every merge into develop: GitHub checks a PR against the
+  # base it was opened on, so two PRs that each passed can still break develop
+  # together. main needs no push trigger — deploy.yml builds and tests it.
+  push:
+    branches: [develop]
 
 jobs:
   check:
