@@ -14,6 +14,7 @@
 import { useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { ColumnDisplay } from '../../types/graph';
+import { metaRows } from '../../lib/metaFormat';
 import './ColumnTooltip.css';
 
 // ---------------------------------------------------------------------------
@@ -50,7 +51,8 @@ export function hasTooltipContent(column: ColumnDisplay): boolean {
     column.isForeignKey ||
     column.isNaturalKey ||
     column.scdType != null ||
-    column.additiveType
+    column.additiveType ||
+    metaRows(column.meta).length > 0
   );
 }
 
@@ -75,7 +77,8 @@ export function ColumnTooltip({ column, anchorRef, visible }: ColumnTooltipProps
 
   const hasExtras = keys.length > 0 || column.scdType != null || column.additiveType;
   const hasDescription = !!column.description;
-  const hasContent = hasDescription || hasExtras;
+  const meta = metaRows(column.meta);
+  const hasContent = hasDescription || hasExtras || meta.length > 0;
 
   /**
    * Callback ref — fires once when the tooltip div mounts into the portal.
@@ -150,7 +153,24 @@ export function ColumnTooltip({ column, anchorRef, visible }: ColumnTooltipProps
           )}
         </div>
       )}
+
+      {meta.length > 0 && <MetaSection rows={meta} />}
     </div>,
     document.body,
+  );
+}
+
+/** The column's `meta:` entries, one `key  value` row each, keys as written. */
+function MetaSection({ rows }: { rows: [string, string][] }) {
+  return (
+    <div className="column-tooltip__meta">
+      <div className="column-tooltip__label">Metadata</div>
+      {rows.map(([key, value]) => (
+        <div key={key} className="column-tooltip__row">
+          <span className="column-tooltip__meta-key">{key}</span>
+          <span className="column-tooltip__value">{value}</span>
+        </div>
+      ))}
+    </div>
   );
 }

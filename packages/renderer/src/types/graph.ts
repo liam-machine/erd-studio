@@ -7,7 +7,7 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { AnnotationColor, Cardinality, Layer, ModelRole, Stage } from '@erd-studio/core';
+import type { AnnotationColor, Cardinality, Layer, Meta, ModelRole, Stage } from '@erd-studio/core';
 import type { LayerConfig } from '@erd-studio/core';
 import type { ModelDiscrepancy } from '@erd-studio/core';
 import type { PhysicalProvenance } from '@erd-studio/core';
@@ -31,6 +31,8 @@ export interface ColumnDisplay {
   scdType?: 0 | 1 | 2;
   /** Additive type for fact measure columns. */
   additiveType?: 'additive' | 'semi-additive' | 'non-additive';
+  /** Structured metadata (`meta:`) — shown in the tooltip. Absent when empty. */
+  meta?: Meta;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +75,8 @@ export type ModelNodeData = {
   grain?: string;
   /** Model's role in the data warehouse architecture. Shown as badge on node. */
   modelRole?: ModelRole;
+  /** Structured metadata (`meta:`) — shown in the name's hover tip. Absent when empty. */
+  meta?: Meta;
   /** Whether this stage is read-only (physical). */
   readOnly?: boolean;
   /**

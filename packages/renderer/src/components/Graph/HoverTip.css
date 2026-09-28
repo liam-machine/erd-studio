@@ -28,3 +28,27 @@
 .hover-tip--visible {
   opacity: 1;
 }
+
+/* Label/value rows under the text (a model's `meta:` entries) */
+.hover-tip__rows {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hover-tip__row {
+  display: flex;
+  gap: 10px;
+}
+
+.hover-tip__label {
+  flex-shrink: 0;
+  min-width: 52px;
+  max-width: 45%;
+  overflow-wrap: anywhere;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-descriptionForeground, #888);
+}
