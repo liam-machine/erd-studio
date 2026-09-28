@@ -87,9 +87,9 @@ And since the launch, it's taking off.
 Come and see why.
 
 23
-00:01:20,087 --> 00:01:23,318
-ERD Studio. Free, with the source on GitHub.
+00:01:20,087 --> 00:01:24,318
+ERD Studio for VS Code. Free, with the source on GitHub.
 
 24
-00:01:23,368 --> 00:01:26,866
+00:01:24,368 --> 00:01:27,866
 Know a data team? Send them this. Link in the comments.

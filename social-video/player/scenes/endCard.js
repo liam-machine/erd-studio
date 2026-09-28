@@ -29,11 +29,12 @@ export default {
     html += `<div class="abs" style="left:0;right:0;top:${g(326)}px;text-align:center;font-size:116px;line-height:1;font-weight:800;letter-spacing:-.04em;white-space:nowrap;${appear(t, name, { dy: 16, dur: 0.45 })}">ERD Studio</div>`;
     html += `<div class="abs" style="left:0;right:0;top:${g(466)}px;text-align:center;font-size:40px;line-height:1.2;font-weight:700;letter-spacing:-.01em;white-space:nowrap;${appear(t, name + 0.35)}">${tagA}<span style="color:var(--green)">${tagB}</span></div>`;
 
-    // "Free" ≈ name+1.25, "source on GitHub" ≈ name+2.2 (measured in e_name.wav), VS Code closes the row.
+    // "ERD Studio for VS Code. Free, with the source on GitHub." (e_name.wav: "Free" ≈ name+2.2,
+    // "source" ≈ name+3.1). "Free" is attached to the VS Code extension on purpose: it is what is
+    // free, and the pill says so without implying anything about the Confluence app.
     html += `<div class="abs" style="left:0;right:0;top:${g(560)}px;display:flex;justify-content:center;gap:16px">
-      ${pill('Free', name + 1.25, { green: true, icon: ICON.check({ size: 24 }) })}
-      ${pill('Source on GitHub', name + 2.2, { green: true, icon: ICON.check({ size: 24 }) })}
-      ${pill('VS Code extension', name + 2.75)}</div>`;
+      ${pill('Free VS Code extension', name + 2.2, { green: true, icon: ICON.check({ size: 24 }) })}
+      ${pill('Source on GitHub', name + 3.1, { green: true, icon: ICON.check({ size: 24 }) })}</div>`;
 
     // ---- CTA: Extensions search ----
     const cardAt = cta + 0.3;             // once the brand block has mostly lifted

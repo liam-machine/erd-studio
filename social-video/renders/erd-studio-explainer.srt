@@ -135,9 +135,9 @@ And since the launch, it's taking off.
 Come and see why.
 
 35
-00:01:53,906 --> 00:01:57,137
-ERD Studio. Free, with the source on GitHub.
+00:01:53,906 --> 00:01:58,137
+ERD Studio for VS Code. Free, with the source on GitHub.
 
 36
-00:01:57,187 --> 00:02:01,110
+00:01:58,187 --> 00:02:02,110
 Search ERD Studio in VS Code. Link in the comments.
