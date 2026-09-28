@@ -2,7 +2,7 @@ name: fct_large_table
 schema: silver
 description: Fact table with many columns to test drag-reorder auto-scroll
 grain: One row per transaction event
-modelRole: fact
+modelRole: transaction-fact
 columns:
   - name: transaction_id
     dataType: INT
