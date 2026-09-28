@@ -8,6 +8,26 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+- **Draw from dbt.** A new command, **ERD Studio: Draw from dbt…**, turns your dbt project into a first diagram in under a minute, with no AI and no setup. Pick a folder of models (marts first) or a group of related models, or choose them yourself. ERD Studio copies their columns, types and descriptions into logical models, adds a relationship for each dbt `relationships` test (one-to-one when both ends are unique), marks the keys your tests show, and opens the diagram laid out automatically. It is in the sidebar's title bar, in the empty sidebar, on the Welcome tab and in the walkthrough. Models already in your library are reused as they are, never changed. Only your own project's models with documented columns are offered: models from installed dbt packages, and models dbt knows only from a `.sql` file, are left out.
+- **Empty diagrams now help you start.** A diagram with no models shows **Add models from dbt** and **New model**. Add models from dbt adds the models you pick in one undoable step.
+- **A Get started walkthrough.** On a first install, VS Code's walkthrough page opens with five steps: watch the tour, try the sample project, open your dbt project, draw from dbt, and add the detail with your AI assistant.
+- **A status bar count of your diagrams** (`ERD 3`). Click it to open one. **Open Semantic Domain** in the Command Palette now shows the same list instead of failing.
+- Once per project with existing diagrams, ERD Studio offers to open one of them (the one changed most recently, when the file dates tell them apart).
+- The Welcome tab shows a one-line summary of your dbt project (models, layout, how old the manifest is).
+
+### Changed
+- **The Welcome tab starts with your diagram.** "Open your diagrams", or "Draw your dbt project — no AI needed" when there are none, now comes first. AI setup follows as an optional step for keys, grain, rationale and your modelling style.
+- **The `/erd-studio-setup` guide gets a diagram on the canvas first.** It now starts with a quick start that mirrors your dbt project, then offers to apply your team's modelling style. When you already have a diagram (for example from Draw from dbt) it offers to enrich it with keys, grain and rationale backed by dbt, without rebuilding it. The AI coding harness moves to v21; run **Update All** when the prompt appears.
+- **Add Existing Model** now reads relationship tests from both your schema files and the manifest, makes a relationship one-to-one when both ends are unique, and marks the primary and foreign keys it can see on a newly added model.
+- The Marketplace listing and the README's opening section are rewritten around getting a first diagram quickly.
+- Usage telemetry counts three more features: Draw from dbt, Add models from dbt and opening an empty diagram.
+
+### Removed
+- The "No dbt project found" warning when you open a folder without a dbt project. The sidebar already explains what to do. An `erdStudio.projectPath` setting that points at no dbt project is still reported.
+
 ## 1.5.1 — 2026-09-25
 
 ### Changed

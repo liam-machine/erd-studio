@@ -17,6 +17,7 @@ import {
   validatePoint,
   validatePositions,
   findDuplicateNames,
+  validateAddModelsFromDbtPayload,
 } from '../../src/providers/payloadValidation';
 import { MODEL_NAME_PATTERN } from '../../src/types/naming';
 
@@ -224,5 +225,16 @@ describe('positions', () => {
     expect(validateAnnotationPositions([null])).toMatch(/non-empty/);
     expect(validateAnnotationPositions([{ id: 'n1', x: NaN, y: 2 }])).toMatch(/"n1".*finite/);
     expect(validateAnnotationPositions([{ id: 'n1', x: 1 }])).toMatch(/"n1"/);
+  });
+});
+
+describe('validateAddModelsFromDbtPayload', () => {
+  it('accepts no payload or an empty object', () => {
+    expect(validateAddModelsFromDbtPayload(undefined)).toBeNull();
+    expect(validateAddModelsFromDbtPayload({})).toBeNull();
+  });
+
+  it.each([null, 'x', 3, [], { modelNames: ['a'] }])('rejects %j', (value) => {
+    expect(validateAddModelsFromDbtPayload(value)).toMatch(/takes no payload/);
   });
 });

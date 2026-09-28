@@ -17,6 +17,8 @@ import * as vscode from 'vscode';
 import {
   GETTING_STARTED_EXTERNAL_URLS,
   GETTING_STARTED_TO_HOST_TYPES,
+  SAMPLE_CODESPACES_LIVE,
+  SAMPLE_CODESPACES_URL,
   SAMPLE_REPO_CLONE_URL,
   SAMPLE_REPO_URL,
   SETUP_PROMPT,
@@ -25,6 +27,7 @@ import {
   copyText,
   deriveAiHelperState,
   describeWrittenFiles,
+  formatProjectSummary,
   isGettingStartedToHost,
   promptFor,
   setupReadyMessage,
@@ -45,6 +48,8 @@ import {
   SAMPLE_FALLBACK_MESSAGE,
   SAMPLE_OPEN_ON_GITHUB_ACTION,
   TRY_SAMPLE_COMMAND,
+  DRAW_FROM_DBT_COMMAND,
+  computeProjectSummary,
   trySampleProject,
   claudeLaunchLine,
   claudeTerminalLaunch,
@@ -153,13 +158,20 @@ describe('buildGettingStartedHtml', () => {
     expect(html).toContain('data-target="videoOnline"');
   });
 
-  it('has the hero copy, the four steps and the rewatch footer', () => {
+  it('has the hero copy, a diagram first then the optional AI cards, and the rewatch footer', () => {
     const html = buildGettingStartedHtml(HTML_INPUT);
     expect(html).toContain('Welcome to ERD Studio');
     expect(html).toContain('Turn the dbt project you already have into a data model you can see.');
-    for (const step of ['assistant', 'helper', 'start', 'canvas']) {
-      expect(html).toContain(`data-step="${step}"`);
-    }
+    const order = ['open', 'draw', 'assistant', 'helper', 'start'].map((step) => html.indexOf(`data-step="${step}"`));
+    expect(order.every((i) => i > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html).not.toContain('data-step="canvas"');
+    expect(html).toContain('Draw your dbt project &mdash; no AI needed');
+    expect(html).toContain('Copies your dbt models and tests into a diagram you can edit.');
+    expect(html).toContain('Enrich with your AI assistant (optional)');
+    expect(html).toContain('keys, grain, rationale and your team\'s modelling style');
+    // The AI section comes after both diagram cards.
+    expect(html.indexOf('Enrich with your AI assistant')).toBeGreaterThan(html.indexOf('data-step="draw"'));
     expect(html).toContain('ERD Studio: Watch Getting Started Video');
     expect(html).toContain('Open the folder that contains its <code>dbt_project.yml</code>');
     expect(html).toContain('data-action="openFolder"');
@@ -242,7 +254,12 @@ describe('panel script', () => {
       // The skill detects the modelling style and confirms it (SKILL.md Stage 3b) — it never asks cold.
       expect(visible('[data-step="start"] .gs-step__text').join()).toContain('works out how your project is modelled and checks with you');
       expect(visible('[data-step="start"] .gs-step__text').join()).not.toContain('asks how your team');
-      expect(visible('[data-step="canvas"] .gs-btn')).toEqual(['Create your first domain']);
+      // No domain yet: Draw from dbt leads (primary), numbered 1; "Open your diagrams" is not shown.
+      expect(visible('[data-step="open"]')).toEqual([]);
+      expect(visible('[data-step="draw"] .gs-step__title')).toEqual(['Draw your dbt project \u2014 no AI needed']);
+      expect(visible('[data-step="draw"] .gs-btn--primary')).toEqual(['Draw from dbt']);
+      expect(visible('[data-step="draw"] .gs-link')).toEqual(['Create a blank diagram']);
+      expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4']);
       expect(doc.querySelector('.gs-project-path')?.textContent).toBe('jaffle_shop');
 
       send({ type: 'status', payload: {
@@ -260,8 +277,15 @@ describe('panel script', () => {
       expect(visible('[data-step="start"] .gs-btn').join()).toContain('Open Copilot Chat');
       expect(visible('[data-step="start"] .gs-btn').join()).toContain('Copy start command'); // Claude, nested
       expect((doc.querySelector('.gs-nested-hint') as HTMLElement).hidden).toBe(false);
-      expect(doc.querySelector('.gs-domain-count')?.textContent).toBe('You have 3 domains.');
-      expect(visible('[data-step="canvas"] .gs-btn')).toEqual(['Open a domain']);
+      expect(doc.querySelector('.gs-domain-count')?.textContent).toBe('You have 3 diagrams.');
+      // Domains exist: "Open your diagrams" leads, Draw from dbt drops to a secondary button.
+      expect(visible('[data-step="open"] .gs-btn--primary')).toEqual(['Open your diagrams']);
+      expect(visible('[data-step="draw"] .gs-step__title')).toEqual(['Draw another area from dbt']);
+      expect(visible('[data-step="draw"] .gs-btn--primary')).toEqual([]);
+      expect(visible('[data-step="draw"] .gs-btn')).toEqual(['Draw from dbt']);
+      expect(visible('.gs-step__num')).toEqual(['1', '2', '3', '4', '5']);
+      const shown = [...doc.querySelectorAll<HTMLElement>('.gs-step')].filter((el) => !el.hidden).map((el) => el.dataset.step);
+      expect(shown).toEqual(['open', 'draw', 'assistant', 'helper', 'start']);
     } finally {
       dom.window.close();
     }
@@ -274,11 +298,11 @@ describe('panel script', () => {
       expect(visible('.gs-chip')).toEqual(['Claude Code']);
       expect(visible('.gs-launch__row')).toEqual([]);
       expect(visible('[data-step="start"] .gs-btn')).toEqual([]);
-      expect(visible('[data-step="start"] .gs-step__hint').join()).toContain('Do step 2 first: Set up my AI helper installs the guide your assistant runs.');
+      expect(visible('[data-step="start"] .gs-step__hint').join()).toContain('First press Set up my AI helper above: it installs the guide your assistant runs.');
       expect(visible('[data-step="assistant"] .gs-recheck').join()).toContain('ERD Studio: Install AI Coding Harness → Agent Skills');
       send({ type: 'status', payload: { ...STATUS, assistants: ['claude'], helper: 'ready' } });
       expect(visible('.gs-launch__name')).toEqual(['Claude Code']);
-      expect(visible('[data-step="start"] .gs-step__hint').join()).not.toContain('Do step 2 first');
+      expect(visible('[data-step="start"] .gs-step__hint').join()).not.toContain('First press');
     } finally {
       dom.window.close();
     }
@@ -315,6 +339,46 @@ describe('panel script', () => {
       send({ type: 'status', payload: STATUS });
       (doc.querySelector('.gs-sample-link [data-action="trySample"]') as HTMLElement).click();
       expect(posted.slice(1)).toEqual([{ type: 'trySample' }, { type: 'trySample' }]);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('shows the project summary line only when the host sent one, as text', () => {
+    const { dom, send, visible, doc } = runPanelScript(buildGettingStartedHtml(HTML_INPUT));
+    try {
+      send({ type: 'status', payload: STATUS });
+      expect(visible('.gs-summary')).toEqual([]);
+      const line = 'Found 42 dbt models \u00b7 medallion layout \u00b7 manifest 3 days old <b>';
+      send({ type: 'status', payload: { ...STATUS, summary: { modelCount: 42, layering: 'medallion', manifest: { state: 'present', ageDays: 3 }, line } } });
+      expect(visible('.gs-summary')).toEqual([line]);
+      expect(doc.querySelector('.gs-summary b')).toBeNull(); // text, never HTML
+      send({ type: 'status', payload: { ...STATUS, hasProject: false, project: null, summary: { modelCount: 1, layering: null, manifest: { state: 'unknown' }, line: 'x' } } });
+      expect((doc.querySelector('.gs-summary') as HTMLElement).hidden).toBe(true);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('leaves the Codespaces button off until the sample repo is ready for it', () => {
+    expect(SAMPLE_CODESPACES_LIVE).toBe(false);
+    const html = buildGettingStartedHtml(HTML_INPUT);
+    expect(html).not.toContain('data-target="sampleCodespaces"');
+    expect(html).toContain('data-action="trySample"');
+  });
+
+  it('without a project, the sample card can also open the sample in Codespaces', () => {
+    const html = buildGettingStartedHtml({ ...HTML_INPUT, codespaces: true });
+    const sampleCard = html.slice(html.indexOf('<section class="gs-sample"'), html.indexOf('<div class="gs-steps-wrap">'));
+    expect(sampleCard).toContain('data-action="openExternal" data-target="sampleCodespaces"');
+    expect(sampleCard).toContain('Open in Codespaces');
+    expect(sampleCard).toContain('Runs in your browser &mdash; nothing to install.');
+    const { dom, posted, send, doc } = runPanelScript(html);
+    try {
+      send({ type: 'status', payload: { ...STATUS, hasProject: false, project: null } });
+      (doc.querySelector('.gs-sample [data-target="sampleCodespaces"]') as HTMLElement).click();
+      (doc.querySelector('[data-step="draw"] [data-action="drawFromDbt"]') as HTMLElement).click();
+      expect(posted.slice(1)).toEqual([{ type: 'openExternal', target: 'sampleCodespaces' }, { type: 'drawFromDbt' }]);
     } finally {
       dom.window.close();
     }
@@ -381,8 +445,10 @@ describe('isGettingStartedToHost', () => {
     }
   });
 
-  it('accepts trySample (no payload needed)', () => {
+  it('accepts trySample and drawFromDbt (no payload needed)', () => {
     expect(isGettingStartedToHost({ type: 'trySample' })).toBe(true);
+    expect(isGettingStartedToHost({ type: 'drawFromDbt' })).toBe(true);
+    expect(isGettingStartedToHost({ type: 'openExternal', target: 'sampleCodespaces' })).toBe(true);
   });
 
   it('copyPrompt takes an optional known assistant only', () => {
@@ -404,9 +470,12 @@ describe('isGettingStartedToHost', () => {
 
   it('external targets map only to fixed https URLs', () => {
     expect(Object.keys(GETTING_STARTED_EXTERNAL_URLS).sort()).toEqual([
-      'claudeCodeDocs', 'codexDocs', 'copilotDocs', 'cursorDocs', 'dbtInstallDocs', 'geminiCliDocs', 'sampleRepo',
-      'videoOnline',
+      'claudeCodeDocs', 'codexDocs', 'copilotDocs', 'cursorDocs', 'dbtInstallDocs', 'geminiCliDocs', 'sampleCodespaces',
+      'sampleRepo', 'videoOnline',
     ]);
+    expect(GETTING_STARTED_EXTERNAL_URLS.sampleCodespaces)
+      .toBe('https://codespaces.new/liam-machine/erd-studio-sample?quickstart=1');
+    expect(SAMPLE_CODESPACES_URL).toBe(GETTING_STARTED_EXTERNAL_URLS.sampleCodespaces);
     for (const url of Object.values(GETTING_STARTED_EXTERNAL_URLS)) {
       expect(url).toMatch(/^https:\/\//);
     }
@@ -420,6 +489,47 @@ describe('isGettingStartedToHost', () => {
 });
 
 describe('pure helpers', () => {
+  it('formatProjectSummary joins only the known parts', () => {
+    expect(formatProjectSummary({ modelCount: 42, layering: 'medallion', manifest: { state: 'present', ageDays: 3.9 } }))
+      .toBe('Found 42 dbt models \u00b7 medallion layout \u00b7 manifest 3 days old');
+    expect(formatProjectSummary({ modelCount: 1, layering: 'dbt-layered', manifest: { state: 'present', ageDays: 0.2 } }))
+      .toBe('Found 1 dbt model \u00b7 staging \u2192 marts layout \u00b7 manifest from today');
+    expect(formatProjectSummary({ modelCount: 5, layering: null, manifest: { state: 'present', ageDays: 1 } }))
+      .toBe('Found 5 dbt models \u00b7 manifest 1 day old');
+    expect(formatProjectSummary({ modelCount: 0, layering: null, manifest: { state: 'absent' } }))
+      .toBe('No documented dbt models found yet \u00b7 no manifest yet');
+    expect(formatProjectSummary({ modelCount: null, layering: null, manifest: { state: 'unknown' } })).toBe('');
+  });
+
+  it('computeProjectSummary counts models, reads layering from folders/schemas and ages the manifest', () => {
+    const now = Date.UTC(2026, 8, 28, 12);
+    const models = [
+      { name: 'brz_orders', folder: 'bronze', description: '' },
+      { name: 'slv_orders', folder: 'silver', description: '' },
+      { name: 'fct_orders', folder: 'gold', description: '' },
+      { name: 'dim_customer', folder: null, description: '' },
+    ];
+    const s = computeProjectSummary({ models, manifestMtime: now - 3 * 86_400_000 - 1000, now });
+    expect(s).toMatchObject({ modelCount: 4, layering: 'medallion', manifest: { state: 'present', ageDays: 3 } });
+    expect(s.line).toBe('Found 4 dbt models \u00b7 medallion layout \u00b7 manifest 3 days old');
+
+    const flat = computeProjectSummary({ models: [{ name: 'orders', folder: null, description: '' }], manifestMtime: null, now });
+    expect(flat).toMatchObject({ modelCount: 1, layering: null, manifest: { state: 'absent' } });
+    expect(computeProjectSummary({ models: [], now })).toMatchObject({ modelCount: 0, layering: null, manifest: { state: 'unknown' } });
+  });
+
+  it('computeProjectSummary also sees layers in manifest schemas', () => {
+    const manifest = {
+      models: new Map([
+        ['a', { name: 'a', schema: 'analytics_bronze' }],
+        ['b', { name: 'b', schema: 'analytics_silver' }],
+        ['c', { name: 'c', schema: 'analytics_gold' }],
+      ]),
+    } as unknown as import('../../src/types/manifest').ManifestData;
+    const models = ['a', 'b', 'c'].map((name) => ({ name, folder: null, description: '' }));
+    expect(computeProjectSummary({ models, manifest, now: 0 }).layering).toBe('medallion');
+  });
+
   it('deriveAiHelperState (Claude Code only)', () => {
     const claude = (schemaSkill: string, setupSkill: string): GettingStartedHarness =>
       ({ claude: { schemaSkill, setupSkill }, agents: MISSING_FOLDER } as GettingStartedHarness);
@@ -945,6 +1055,8 @@ describe('GettingStartedPanel', () => {
     vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, trySample);
     const openFolder = vi.fn();
     vscode.commands.registerCommand('vscode.openFolder', openFolder);
+    const drawFromDbt = vi.fn();
+    vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, drawFromDbt);
 
     const messages: Record<string, unknown> = {
       openExternal: { type: 'openExternal', target: 'dbtInstallDocs' },
@@ -957,9 +1069,11 @@ describe('GettingStartedPanel', () => {
     expect(trySample).toHaveBeenCalledTimes(1);
     expect(openFolder).toHaveBeenCalledTimes(1);
     expect(openFolder).toHaveBeenCalledWith(); // no URI: VS Code's own folder picker
+    expect(DRAW_FROM_DBT_COMMAND).toBe('erdStudio.drawFromDbt');
+    expect(drawFromDbt).toHaveBeenCalledTimes(1);
 
-    // ready, refreshStatus, after setupAiHelper, and before openClaude / openCopilotChat
-    expect(deps.getStatus).toHaveBeenCalledTimes(5);
+    // ready, refreshStatus, after setupAiHelper, before openClaude / openCopilotChat, after drawFromDbt
+    expect(deps.getStatus).toHaveBeenCalledTimes(6);
     expect(deps.runSetup).toHaveBeenCalledTimes(1);
     expect(clip).toHaveBeenCalledWith('COPY-ME:claude'); // copyPrompt without an assistant means Claude Code
     expect(clip).toHaveBeenCalledWith(SETUP_PROMPT); // openCopilotChat (no chat command here → docs page)
@@ -1004,6 +1118,79 @@ describe('GettingStartedPanel', () => {
     expect(deps.runSetup).toHaveBeenCalledTimes(1);
     expect(opened).not.toHaveBeenCalled();
     expect(panel._postedMessages.some((m) => (m as { type: string }).type === 'setupResult')).toBe(true);
+  });
+
+  it('adds the project summary to status, and leaves it off when it fails or there is no project', async () => {
+    const summary = { modelCount: 2, layering: null, manifest: { state: 'absent' as const }, line: 'Found 2 dbt models \u00b7 no manifest yet' };
+    const deps = makeDeps({ getProjectSummary: vi.fn(async () => summary) });
+    GettingStartedPanel.createOrShow(makeContext(), deps);
+    const panel = vscode.window._webviewPanels[0];
+    const statuses = () => panel._postedMessages.filter((m) => (m as { type: string }).type === 'status') as Array<{ payload: GettingStartedStatus }>;
+
+    await panel._simulateMessage({ type: 'ready' });
+    expect(statuses().at(-1)!.payload.summary).toEqual(summary);
+
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    (deps.getProjectSummary as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('manifest mid-write'));
+    await panel._simulateMessage({ type: 'refreshStatus' });
+    expect(statuses().at(-1)!.payload.summary).toBeNull();
+    expect(statuses().at(-1)!.payload.hasProject).toBe(true); // the rest of the status still goes out
+
+    (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, hasProject: false, project: null });
+    const calls = (deps.getProjectSummary as ReturnType<typeof vi.fn>).mock.calls.length;
+    await panel._simulateMessage({ type: 'refreshStatus' });
+    expect(statuses().at(-1)!.payload.summary).toBeNull();
+    expect((deps.getProjectSummary as ReturnType<typeof vi.fn>).mock.calls.length).toBe(calls);
+  });
+
+  it('posts the cards before a slow summary resolves, then the summary in a second status', async () => {
+    const summary = { modelCount: 2, layering: null, manifest: { state: 'absent' as const }, line: 'Found 2 dbt models · no manifest yet' };
+    let resolveSummary!: (s: typeof summary) => void;
+    const deps = makeDeps({ getProjectSummary: vi.fn(() => new Promise<typeof summary>((r) => { resolveSummary = r; })) });
+    GettingStartedPanel.createOrShow(makeContext(), deps);
+    const panel = vscode.window._webviewPanels[0];
+    const statuses = () => panel._postedMessages.filter((m) => (m as { type: string }).type === 'status') as Array<{ payload: GettingStartedStatus }>;
+
+    const ready = panel._simulateMessage({ type: 'ready' });
+    await vi.waitFor(() => expect(statuses().length).toBeGreaterThan(0));
+    expect(statuses().at(-1)!.payload.summary).toBeNull();
+    expect(statuses().at(-1)!.payload.hasProject).toBe(true);
+
+    resolveSummary(summary);
+    await ready;
+    await vi.waitFor(() => expect(statuses().at(-1)!.payload.summary).toEqual(summary));
+  });
+
+  it('drops a slow summary a setup or a newer status has overtaken', async () => {
+    const summary = { modelCount: 2, layering: null, manifest: { state: 'absent' as const }, line: 'Found 2 dbt models' };
+    const pending: Array<(s: typeof summary) => void> = [];
+    let finishSetup!: (o: SetupOutcome) => void;
+    const deps = makeDeps({
+      getProjectSummary: vi.fn(() => new Promise<typeof summary>((r) => { pending.push(r); })),
+      runSetup: vi.fn(() => new Promise<SetupOutcome>((r) => { finishSetup = r; })),
+    });
+    GettingStartedPanel.createOrShow(makeContext(), deps);
+    const panel = vscode.window._webviewPanels[0];
+    const statuses = () => panel._postedMessages.filter((m) => (m as { type: string }).type === 'status') as Array<{ payload: GettingStartedStatus }>;
+
+    const ready = panel._simulateMessage({ type: 'ready' });
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    const setup = panel._simulateMessage({ type: 'setupAiHelper' });
+    await vi.waitFor(() => expect(deps.runSetup).toHaveBeenCalled());
+
+    // The first summary lands mid-setup: its stale status (which would re-enable the button) is not posted.
+    const before = statuses().length;
+    pending[0](summary);
+    await ready;
+    expect(statuses()).toHaveLength(before);
+
+    (deps.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ...STATUS, helper: 'ready', domainCount: 4 });
+    finishSetup({ ok: true, filesWritten: [], message: 'ok' });
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(statuses().at(-1)!.payload.domainCount).toBe(4);
+    pending[1](summary);
+    await setup;
+    await vi.waitFor(() => expect(statuses().at(-1)!.payload).toMatchObject({ domainCount: 4, summary }));
   });
 
   it('createOrShow on an open panel reveals it with the new deps; dispose clears the singleton', async () => {

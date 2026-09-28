@@ -681,6 +681,41 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
     });
 
+    it('adds relationship tests to models already in the domain and marks the seeded keys', async () => {
+      const modelsDir = path.join(h.root, 'models');
+      fs.mkdirSync(modelsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(modelsDir, 'schema.yml'),
+        [
+          'version: 2',
+          'models:',
+          '  - name: dim_new',
+          '    columns:',
+          '      - name: dim_new_key',
+          '        tests: [unique]',
+          '  - name: fct_order',
+          '    columns:',
+          '      - name: customer_key',
+          '        tests:',
+          '          - relationships:',
+          "              to: ref('dim_new')",
+          '              field: dim_new_key',
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      await h.send({ type: 'addExistingModel', payload: { modelName: 'dim_new' } });
+
+      expect(h.errors()).toEqual([]);
+      expect(h.readDomain().logical.relationships).toContainEqual({
+        fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_new', toColumn: 'dim_new_key', cardinality: 'many-to-one',
+      });
+      expect(h.logicalModelService.getModel('dim_new')!.columns![0].isPrimaryKey).toBe(true);
+      // The library model on the other end is referenced, never rewritten.
+      expect(_appliedEdits[0]._opsFor(ymlPath(h, 'fct_order'))).toEqual([]);
+    });
+
     it('does not rewrite the yml of a model that is already in the library', async () => {
       const before = fs.readFileSync(ymlPath(h, 'dim_customer'), 'utf-8');
 

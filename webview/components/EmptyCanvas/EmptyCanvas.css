@@ -1,0 +1,99 @@
+/**
+ * EmptyCanvas styles.
+ *
+ * The overlay covers the flow area but takes no pointer events, so panning and
+ * zooming work everywhere except on the card itself. Below the dialogs
+ * (z-index 10) and React Flow's panels (5). Theme tokens only.
+ */
+
+.empty-canvas {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.empty-canvas__card {
+  pointer-events: auto;
+  max-width: 380px;
+  padding: 20px 24px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  color: var(--editor-fg);
+  text-align: center;
+}
+
+.empty-canvas__title {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.empty-canvas__body {
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  color: var(--dim-fg);
+}
+
+.empty-canvas__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.empty-canvas__button {
+  padding: 6px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.empty-canvas__button:hover {
+  background: var(--selection-bg);
+}
+
+.empty-canvas__button:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 2px;
+}
+
+.empty-canvas__button--primary {
+  border-color: transparent;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.empty-canvas__button--primary:hover {
+  background: var(--button-hover-bg);
+}
+
+.empty-canvas__hint {
+  margin: 14px 0 0 0;
+  font-size: 12px;
+  color: var(--dim-fg);
+}
+
+.empty-canvas__link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.empty-canvas__link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}

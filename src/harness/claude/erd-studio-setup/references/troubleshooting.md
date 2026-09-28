@@ -20,7 +20,7 @@ Then run doctor again. There is no need to restart your AI assistant for the hel
 the skill itself.
 
 If they cannot or do not want to (no VS Code on this machine, a locked-down laptop), continue in
-**canvas-fallback mode** from SKILL.md and tell them the checks will be less exact.
+**canvas-fallback mode** (below) and tell them the checks will be less exact.
 
 ## Launcher stale
 
@@ -149,3 +149,20 @@ If `inventory --summary` lists hundreds of models, do not read them all out. Sum
 propose one small area (at most 15 models) and use `inventory --models` for just those. The user
 can re-run the setup (`/erd-studio-setup`, or their assistant's form of it) for each
 further area.
+
+## Canvas-fallback mode (no helper available)
+
+When no route to the helper works, follow SKILL.md's stages with these changes:
+- **Stage 1–2:** run `dbt --version` yourself (if the user agrees) and skip the rest of doctor.
+- **Stage 3:** build the inventory by hand — Glob for `dbt_project.yml`'s `model-paths` (usually
+  `models/**/*.yml` and `models/**/*.sql`), Read the schema yml files for model names, columns,
+  `data_type:` and `relationships` / `unique` tests. For the modelling style, apply the
+  `conventions` rules in `references/modelling-approaches.md` section 4 yourself (names,
+  descriptions, table shape, folders, `packages.yml`, snapshots), then confirm as usual.
+- **Stage 4:** as normal, but only copy relationships that a dbt `relationships` test declares
+  between two chosen models.
+- **Stage 5:** use "Fallback A" in `references/verify-and-fix.md` (the canvas writes a sync plan
+  you then read), and if that is not possible, "Fallback B" (a best-effort manual comparison,
+  labelled as such).
+
+Tell the user once that checks in this mode are less exact than with the helper.

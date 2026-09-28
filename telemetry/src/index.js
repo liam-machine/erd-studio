@@ -112,6 +112,9 @@ const FEATURES = [
   'harnessInstallCodex',
   'migrateV5',
   'feedbackOpened',
+  'drawFromDbt',
+  'addFromDbt',
+  'emptyCanvas',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

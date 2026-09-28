@@ -449,6 +449,25 @@ export function validateOpenFeedbackLinkPayload(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Validate an `addModelsFromDbt` payload. It carries nothing — the host asks
+ * which models itself — so only an absent payload or an empty object passes;
+ * anything else is refused rather than ignored, so a sender that starts
+ * passing model names is caught instead of silently dropped.
+ */
+export function validateAddModelsFromDbtPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Add models from dbt takes no payload.';
+  }
+  if (Object.keys(value).length > 0) {
+    return 'Add models from dbt takes no payload.';
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Numbers / positions
 // ---------------------------------------------------------------------------
