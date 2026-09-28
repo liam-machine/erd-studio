@@ -182,6 +182,22 @@ export interface UpdateModelAliasMessage {
 }
 
 /**
+ * Request to change a model's or a column's `meta` — a patch, never the whole
+ * map, so nested values the canvas only displays are never rewritten.
+ * `set` writes top-level text values; `remove` deletes top-level keys.
+ * `columnName` targets that column's `meta` instead of the model's.
+ */
+export interface UpdateMetaMessage {
+  type: 'updateMeta';
+  payload: {
+    modelName: string;
+    columnName?: string;
+    set?: Record<string, string>;
+    remove?: string[];
+  };
+}
+
+/**
  * Request to update the model role for a model.
  * If the role is null/empty, the `modelRole` key is removed from the JSON entirely.
  */
@@ -246,6 +262,7 @@ export type CanvasEditMessage =
   | UpdateModelDescriptionMessage
   | UpdateModelGrainMessage
   | UpdateModelAliasMessage
+  | UpdateMetaMessage
   | UpdateModelRoleMessage
   | ReorderColumnsMessage
   | UpdateAnnotationMessage

@@ -10,7 +10,7 @@
 import { parseDocument, isAlias, isMap, isPair, isScalar, isSeq, visit } from 'yaml';
 import type { Alias, Document, Node, Pair } from 'yaml';
 
-import type { ColumnDef, SemanticModel } from './types/semantic.js';
+import type { ColumnDef, Meta, MetaValue, SemanticModel } from './types/semantic.js';
 import { checkLimit } from './limits.js';
 
 /** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
@@ -74,6 +74,7 @@ interface YamlModel {
   grain?: string;
   modelRole?: string;
   rationale?: Record<string, string>;
+  meta?: unknown;
   columns?: YamlColumn[];
 }
 
@@ -86,6 +87,7 @@ interface YamlColumn {
   isNaturalKey?: boolean;
   scdType?: number;
   additiveType?: string;
+  meta?: unknown;
 }
 
 /** Per-document state threaded through `toPlain`. */
@@ -256,7 +258,10 @@ function toPlain(doc: Document, node: unknown, state: ToPlainState): unknown {
   if (isMap(node)) {
     const obj: Record<string, unknown> = {};
     for (const pair of node.items) {
-      obj[String(toPlain(doc, pair.key, state))] = toPlain(doc, pair.value, state);
+      // defineProperty, not assignment: a key named `__proto__` is data here.
+      Object.defineProperty(obj, String(toPlain(doc, pair.key, state)), {
+        value: toPlain(doc, pair.value, state), enumerable: true, writable: true, configurable: true,
+      });
     }
     return obj;
   }
@@ -314,6 +319,43 @@ function scalarValue(node: { value: unknown; source?: string }): unknown {
   return node.source ?? String(v);
 }
 
+/**
+ * Normalise a parsed value into a {@link MetaValue}. `toPlain` already turns
+ * numbers into their source text; anything it leaves that is not plain data
+ * (a raw `!!pairs` entry) is read as text, the way every other field reads it.
+ */
+function toMetaValue(value: unknown): MetaValue {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value.map(toMetaValue);
+  if (typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return toMeta(value as Record<string, unknown>);
+  }
+  return String(value);
+}
+
+function toMeta(obj: Record<string, unknown>): Meta {
+  const meta: Meta = {};
+  for (const [key, value] of Object.entries(obj)) setMetaEntry(meta, key, toMetaValue(value));
+  return meta;
+}
+
+/**
+ * Set one `meta` entry as an own property. A user's key may be any text,
+ * `__proto__` included, and plain assignment would swallow that one.
+ */
+export function setMetaEntry(meta: Meta, key: string, value: MetaValue): void {
+  Object.defineProperty(meta, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+/** A `meta:` value as the model gets it: a non-empty map, or nothing. */
+function readMeta(value: unknown): Meta | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
+  const meta = toMeta(value as Record<string, unknown>);
+  return Object.keys(meta).length > 0 ? meta : undefined;
+}
+
 function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
   const str = (v: unknown): string | undefined =>
     v === undefined || v === null ? undefined : String(v);
@@ -341,6 +383,8 @@ function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
       if (value) model.rationale[key] = value;
     }
   }
+  const meta = readMeta(raw.meta);
+  if (meta) model.meta = meta;
 
   if (raw.columns && Array.isArray(raw.columns)) {
     model.columns = raw.columns
@@ -360,6 +404,8 @@ function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
         }
         const additiveType = str(col.additiveType);
         if (additiveType) column.additiveType = additiveType as ColumnDef['additiveType'];
+        const columnMeta = readMeta(col.meta);
+        if (columnMeta) column.meta = columnMeta;
         return column;
       });
   }

@@ -22,6 +22,24 @@ export const CURRENT_SCHEMA_VERSION = 5;
 export const LEGACY_SCHEMA_VERSION = 4;
 
 // ---------------------------------------------------------------------------
+// Free-form metadata
+// ---------------------------------------------------------------------------
+
+/**
+ * One value in a `meta` map. Numbers are carried as their YAML source text
+ * (`tier: 1` reads as `'1'`), the same rule every other model field follows,
+ * so a value that is written back unchanged keeps its exact spelling.
+ */
+export type MetaValue = string | boolean | null | MetaValue[] | { [key: string]: MetaValue };
+
+/**
+ * Structured metadata on a model or a column — owner, lineage, source system,
+ * anything the team wants to record. Named after dbt's `meta:`. ERD Studio
+ * shows it and edits top-level text values; it never compares or syncs it.
+ */
+export type Meta = Record<string, MetaValue>;
+
+// ---------------------------------------------------------------------------
 // Column definitions
 // ---------------------------------------------------------------------------
 
@@ -46,6 +64,8 @@ export interface ColumnDef {
    * Only meaningful on fact-role models but stored unconditionally.
    */
   additiveType?: 'additive' | 'semi-additive' | 'non-additive';
+  /** Free-form structured metadata (dbt-style `meta:`). */
+  meta?: Meta;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +140,8 @@ export interface SemanticModel {
   grain?: string;
   /** Model's role in the data warehouse architecture (e.g. conformed-dim, transaction-fact). */
   modelRole?: ModelRole;
+  /** Free-form structured metadata (dbt-style `meta:`). */
+  meta?: Meta;
 }
 
 /**

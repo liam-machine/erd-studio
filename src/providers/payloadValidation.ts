@@ -91,6 +91,73 @@ export function validateModelAliasPayload(payload: unknown): string | null {
   return null;
 }
 
+/** Longest `meta` key accepted from the canvas. */
+export const META_KEY_MAX_LENGTH = 100;
+/** Longest `meta` value accepted from the canvas. */
+export const META_VALUE_MAX_LENGTH = 2000;
+
+/**
+ * Validate an `updateMeta` payload: a patch of top-level text values
+ * (`set`) and key removals (`remove`) on a model's or a column's `meta`.
+ * A key is a single line of text; it may not be set and removed at once.
+ */
+export function validateMetaPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return 'Missing payload.';
+  }
+  const { modelName, columnName, set, remove } = payload as {
+    modelName?: unknown; columnName?: unknown; set?: unknown; remove?: unknown;
+  };
+  const nameError = validateModelNameSafety(modelName);
+  if (nameError) {
+    return nameError;
+  }
+  if (columnName !== undefined && (typeof columnName !== 'string' || !columnName.trim())) {
+    return 'Column name must be a non-empty string.';
+  }
+  if (set !== undefined && (!set || typeof set !== 'object' || Array.isArray(set))) {
+    return 'Metadata values must be an object.';
+  }
+  if (remove !== undefined && (!Array.isArray(remove) || remove.some((k) => typeof k !== 'string'))) {
+    return 'Metadata keys to remove must be a list of strings.';
+  }
+  const entries = Object.entries((set ?? {}) as Record<string, unknown>);
+  const removed = new Set((remove ?? []) as string[]);
+  if (entries.length === 0 && removed.size === 0) {
+    return 'Nothing to change.';
+  }
+  for (const [key, value] of entries) {
+    const keyError = validateMetaKey(key);
+    if (keyError) return keyError;
+    if (typeof value !== 'string') {
+      return `Value of "${key}" must be text.`;
+    }
+    if (value.length > META_VALUE_MAX_LENGTH) {
+      return `Value of "${key}" is longer than ${META_VALUE_MAX_LENGTH} characters.`;
+    }
+    if (removed.has(key)) {
+      return `"${key}" cannot be set and removed at once.`;
+    }
+  }
+  return null;
+}
+
+function validateMetaKey(key: string): string | null {
+  if (!key.trim()) {
+    return 'Metadata key is required.';
+  }
+  if (key !== key.trim()) {
+    return 'Metadata key cannot start or end with a space.';
+  }
+  if (key.length > META_KEY_MAX_LENGTH) {
+    return `Metadata key is longer than ${META_KEY_MAX_LENGTH} characters.`;
+  }
+  if (/[\u0000-\u001f\u007f]/.test(key)) {
+    return 'Metadata key must be a single line of text.';
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Columns
 // ---------------------------------------------------------------------------

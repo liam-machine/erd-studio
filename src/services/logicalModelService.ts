@@ -13,8 +13,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Document, parseDocument, isMap, isScalar, isSeq } from 'yaml';
-import type { YAMLMap, YAMLSeq } from 'yaml';
+import { Document, parseDocument, isAlias, isMap, isPair, isScalar, isSeq } from 'yaml';
+import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
 
 import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, parseLogicalModelText } from '@erd-studio/core';
 import type { ColumnDef, SemanticModel } from '../types/semantic';
@@ -65,11 +65,11 @@ export interface ModelFileEntry {
 }
 
 /** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
-const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'columns'] as const;
+const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns'] as const;
 const COLUMN_KEYS = [
   'name', 'dataType', 'description',
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
-  'scdType', 'additiveType',
+  'scdType', 'additiveType', 'meta',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -697,6 +697,10 @@ export class LogicalModelService {
         this.syncColumns(doc, existing, value as Record<string, unknown>[]);
         continue;
       }
+      if (key === 'meta' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {
+        this.syncMeta(doc, existing, value as Record<string, unknown>);
+        continue;
+      }
       if (isScalar(existing)) {
         if (existing.value === value) continue;
         if (this.scalarValue(existing) === value) {
@@ -713,6 +717,65 @@ export class LogicalModelService {
       }
       map.set(key, this.isScalarLike(value) ? value : doc.createNode(value));
     }
+  }
+
+  /**
+   * Bring a `meta` map in line with `desired`. Unlike the managed keys, every
+   * key here is the user's: a key missing from `desired` was removed, any
+   * other is kept. A value whose text is unchanged is never touched — not
+   * even re-pinned the way `syncMap` pins a coerced scalar — so `tier: 1`
+   * stays an unquoted number and a nested map keeps its comments. Only a value
+   * that really changed is replaced.
+   */
+  private syncMeta(doc: Document, map: YAMLMap, desired: Record<string, unknown>): void {
+    // Keys are compared as the parser reads them (`2024:` is the key '2024'),
+    // never through YAMLMap.get/set, whose strict match would miss a numeric or
+    // boolean key and append a duplicate — which the next parse rejects.
+    const keyOf = (pair: Pair): string =>
+      isScalar(pair.key) ? String(this.scalarValue(pair.key)) : String(pair.key);
+    const wanted = (key: string): boolean => Object.prototype.hasOwnProperty.call(desired, key);
+    map.items = map.items.filter((pair) => wanted(keyOf(pair)));
+    for (const [key, value] of Object.entries(desired)) {
+      const pair = map.items.find((p) => keyOf(p) === key);
+      if (!pair) {
+        map.items.push(doc.createPair(key, value));
+        continue;
+      }
+      if (this.sameMetaValue(doc, pair.value, value)) continue;
+      if (isScalar(pair.value) && this.isScalarLike(value)) {
+        // Keep the node, and with it any trailing comment on the line.
+        pair.value.value = value;
+      } else {
+        pair.value = doc.createNode(value);
+      }
+    }
+  }
+
+  /**
+   * Whether a YAML node holds `value`, reading it the way the parser does:
+   * scalars as their source text, an alias as what it points at (so `*shared`
+   * is left an alias rather than expanded into a copy), and a raw `!!pairs`
+   * entry as the text the model reads it as.
+   */
+  private sameMetaValue(doc: Document, node: unknown, value: unknown): boolean {
+    if (isAlias(node)) return this.sameMetaValue(doc, node.resolve(doc), value);
+    if (isPair(node)) return String(node) === value;
+    if (isScalar(node)) return this.scalarValue(node) === (value ?? null);
+    if (isMap(node)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+      const obj = value as Record<string, unknown>;
+      if (node.items.length !== Object.keys(obj).length) return false;
+      return node.items.every((pair) => {
+        const key = isScalar(pair.key) ? String(this.scalarValue(pair.key)) : String(pair.key);
+        return key in obj && this.sameMetaValue(doc, pair.value, obj[key]);
+      });
+    }
+    if (isSeq(node)) {
+      return Array.isArray(value)
+        && node.items.length === value.length
+        && node.items.every((item, i) => this.sameMetaValue(doc, item, value[i]));
+    }
+    return false;
   }
 
   /**
@@ -790,6 +853,8 @@ export class LogicalModelService {
       if (Object.keys(rat).length > 0) obj.rationale = rat;
     }
 
+    if (model.meta && Object.keys(model.meta).length > 0) obj.meta = model.meta;
+
     if (model.columns && model.columns.length > 0) {
       obj.columns = model.columns.map((col) => {
         const yamlCol: Record<string, unknown> = {
@@ -802,6 +867,7 @@ export class LogicalModelService {
         if (col.isNaturalKey) yamlCol.isNaturalKey = true;
         if (col.scdType !== undefined) yamlCol.scdType = col.scdType;
         if (col.additiveType) yamlCol.additiveType = col.additiveType;
+        if (col.meta && Object.keys(col.meta).length > 0) yamlCol.meta = col.meta;
         return yamlCol;
       });
     }

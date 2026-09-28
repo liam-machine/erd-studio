@@ -77,6 +77,7 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
       isNaturalKey: col.isNaturalKey === true,
       ...(col.scdType != null ? { scdType: col.scdType } : {}),
       ...(col.additiveType ? { additiveType: col.additiveType } : {}),
+      ...(col.meta ? { meta: col.meta } : {}),
     }));
 
     return {
@@ -88,6 +89,7 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
       ...(model.rationale ? { rationale: model.rationale } : {}),
       ...(model.grain ? { grain: model.grain } : {}),
       ...(model.modelRole ? { modelRole: model.modelRole } : {}),
+      ...(model.meta ? { meta: model.meta } : {}),
     };
   });
 

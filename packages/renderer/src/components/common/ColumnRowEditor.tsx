@@ -81,6 +81,8 @@ export interface ColumnRowEditorProps {
   onSelect?: (e: React.MouseEvent) => void;
   /** Whether the store says this column should enter edit mode (F2). */
   isEditingActive?: boolean;
+  /** Rendered at the foot of the expanded area — the column's metadata editor. */
+  metaSlot?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +139,7 @@ export function ColumnRowEditor({
   isSelected = false,
   onSelect,
   isEditingActive = false,
+  metaSlot,
 }: ColumnRowEditorProps) {
   // Local state for editing
   const [localColumn, setLocalColumn] = useState<ColumnDef>({
@@ -714,6 +717,8 @@ export function ColumnRowEditor({
               </select>
             </div>
           )}
+
+          {metaSlot}
         </div>
       )}
 

@@ -24,6 +24,7 @@ export {
   parseLogicalModelText,
   isSafeModelName,
   isValidModelAlias,
+  setMetaEntry,
   MODEL_ALIAS_MAX_LENGTH,
   MODEL_ALIAS_RULE,
   type ParseLogicalModelOptions,

@@ -25,7 +25,7 @@ import {
   _clearMockFileWatchers,
   _mockFileWatchers,
 } from '../__mocks__/vscode';
-import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE } from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { ManifestService } from '../../src/services/manifestService';
@@ -479,6 +479,144 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(h.errors()).toHaveLength(1);
       expect(h.errors()[0]).toMatch(/^Failed to update table name: A table name must start/);
       expect(fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8')).toBe(before);
+    });
+  });
+
+  describe('updateMeta', () => {
+    const read = () => fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8');
+
+    it('sets a model key, then removes it (dropping an empty meta: block)', async () => {
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'analytics' } } });
+      expect(h.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')!.meta).toEqual({ owner: 'analytics' });
+      expect(read()).toMatch(/\nmeta:\n\s+owner: analytics\n/);
+
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', remove: ['owner'] } });
+      expect(h.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')).not.toHaveProperty('meta');
+      expect(read()).not.toMatch(/meta:|owner/);
+    });
+
+    it('sets a key on a column when columnName is given', async () => {
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', columnName: 'amount', set: { unit: 'AUD' } } });
+      expect(h.errors()).toEqual([]);
+      const model = h.logicalModelService.getModel('fct_order')!;
+      expect(model.columns!.find((c) => c.name === 'amount')!.meta).toEqual({ unit: 'AUD' });
+      expect(model).not.toHaveProperty('meta');
+      expect(model.columns!.find((c) => c.name === 'order_key')).not.toHaveProperty('meta');
+    });
+
+    it('applies exactly one WorkspaceEdit that replaces the yml', async () => {
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'analytics' } } });
+      expect(_appliedEdits).toHaveLength(1);
+      expect(_appliedEdits[0]._opsFor(ymlPath(h, 'fct_order')).map((op) => op.kind)).toEqual(['replace']);
+    });
+
+    it('reports an unknown column and leaves the file byte-for-byte unchanged', async () => {
+      const before = read();
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', columnName: 'ghost', set: { a: 'b' } } });
+      expect(h.errors()).toHaveLength(1);
+      expect(h.errors()[0]).toMatch(/^Failed to update metadata: .*ghost/);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(read()).toBe(before);
+    });
+
+    it.each([
+      ['a non-text value', { modelName: 'fct_order', set: { owner: 42 } }],
+      ['a nested value', { modelName: 'fct_order', set: { lineage: { a: 'b' } } }],
+      ['an empty patch', { modelName: 'fct_order' }],
+      ['set and remove of one key', { modelName: 'fct_order', set: { a: 'b' }, remove: ['a'] }],
+    ])('refuses %s, writing nothing', async (_label, payload) => {
+      const before = read();
+      await h.send({ type: 'updateMeta', payload });
+      expect(h.errors()).toHaveLength(1);
+      expect(h.errors()[0]).toMatch(/^Failed to update metadata: /);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(read()).toBe(before);
+    });
+
+    it('surfaces a rejected WorkspaceEdit', async () => {
+      _mockWorkspaceState.applyEditResult = false;
+      const before = read();
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'x' } } });
+      expect(h.errors()).toEqual(['Failed to update metadata.']);
+      expect(read()).toBe(before);
+    });
+
+    it('keeps comments and nested values in a hand-written meta block when setting another key', async () => {
+      const handWritten = [
+        'name: fct_order',
+        'description: Orders',
+        'meta:',
+        '  # who to ask',
+        '  owner: analytics # team alias',
+        '  lineage:',
+        '    source: sap',
+        '    tables:',
+        '      - mara # material master',
+        '      - marc',
+        'columns:',
+        '  - name: order_key',
+        '    dataType: string',
+        '    description: PK',
+        '    isPrimaryKey: true',
+        '',
+      ].join('\n');
+      fs.writeFileSync(ymlPath(h, 'fct_order'), handWritten, 'utf-8');
+      h.logicalModelService.invalidateCache('fct_order');
+
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { steward: 'jane' } } });
+
+      expect(h.errors()).toEqual([]);
+      const expected = handWritten.replace('      - marc\n', '      - marc\n  steward: jane\n');
+      expect(read()).toBe(expected);
+    });
+
+    // Known deviation: the yaml stringifier pads flow collections, so a
+    // hand-written `[a, b]` anywhere in the file comes back as `[ a, b ]` on
+    // any canvas write (STRINGIFY_OPTIONS lacks flowCollectionPadding: false).
+    // The value is unchanged; only the spacing moves.
+    it('keeps the value of a flow-style list (spacing may change)', async () => {
+      fs.writeFileSync(
+        ymlPath(h, 'fct_order'),
+        ['name: fct_order', 'meta:', '  tags: [pii, gold]', 'columns:', '  - name: order_key', '    dataType: string', ''].join('\n'),
+        'utf-8',
+      );
+      h.logicalModelService.invalidateCache('fct_order');
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'x' } } });
+      expect(h.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')!.meta).toEqual({ tags: ['pii', 'gold'], owner: 'x' });
+      expect(read()).toMatch(/\n  tags: \[ ?pii, gold ?\]\n  owner: x\n/);
+    });
+
+    it('updateColumn on a column with meta keeps the meta', async () => {
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', columnName: 'amount', set: { unit: 'AUD' } } });
+      expect(h.errors()).toEqual([]);
+
+      await h.send({
+        type: 'updateColumn',
+        payload: {
+          modelName: 'fct_order',
+          oldColumnName: 'amount',
+          column: { name: 'amount', dataType: 'decimal', description: 'Order total' },
+        },
+      });
+
+      expect(h.errors()).toEqual([]);
+      const col = h.logicalModelService.getModel('fct_order')!.columns!.find((c) => c.name === 'amount')!;
+      expect(col.description).toBe('Order total');
+      expect(col.meta).toEqual({ unit: 'AUD' });
+    });
+
+    it('is refused while viewing the physical stage', async () => {
+      await h.send({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+      const before = read();
+
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'x' } } });
+
+      expect(h.errors()).toEqual([PHYSICAL_READ_ONLY_MESSAGE]);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(read()).toBe(before);
     });
   });
 

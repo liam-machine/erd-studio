@@ -778,8 +778,18 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 21 (setup skill quick start: first canvas before the modelling style)', () => {
-      expect(HARNESS_VERSION).toBe('21');
+    it('is 22 (model and column `meta` documented in SCHEMA_CONTENT)', () => {
+      expect(HARNESS_VERSION).toBe('22');
+    });
+
+    it('documents `meta` on models and columns, never compared with dbt', () => {
+      service.install(tmpDir, CLAUDE, true);
+      const skill = read(tmpDir, '.claude/skills/erd-studio/SKILL.md');
+      expect(skill).toContain('### Metadata (`meta`)');
+      expect(skill).toContain('| `meta` | No | Free-form metadata map');
+      expect(skill).toContain('| `meta` | No | Free-form dbt-style metadata map for this column');
+      expect(skill).toContain('never compares, diffs or syncs `meta` with dbt');
+      expect(skill).toContain('Keep every existing entry');
     });
   });
 

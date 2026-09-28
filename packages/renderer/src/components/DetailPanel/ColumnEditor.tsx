@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { BulkColumnActions } from './BulkColumnActions';
+import { MetaEditor } from './MetaEditor';
 import { useIsViewer, useSend } from '../../host/canvasEnvironment';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { useEditorStore } from '../../store/editorStore';
@@ -302,6 +303,15 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             isSelected={selectedColumns.includes(col.name)}
             onSelect={(e) => handleColumnSelect(col.name, e)}
             isEditingActive={editingColumn === col.name}
+            metaSlot={
+              <MetaEditor
+                modelName={modelName}
+                columnName={col.name}
+                meta={col.meta}
+                readOnly={!isEditable}
+                compact
+              />
+            }
           />
         ))}
 

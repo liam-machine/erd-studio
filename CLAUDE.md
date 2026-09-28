@@ -272,6 +272,7 @@ Onboarding for a beginner who has a dbt project and an AI coding assistant — *
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
 - Stage switching sends `switchStage`; the extension responds with `stageData` (physical is derived on demand, never persisted; positions inherited from logical)
 - Mutation handlers target model bodies through `applyModelEdit` (v5 yml) and `parsed.logical.models` / `.relationships` in the domain file; `updateColumn` treats omitted `scdType`/`additiveType` as "keep" and `null` as "clear"
+- `meta` (on a model and on each column, dbt-style) is the user's free-form map: `LogicalModelService.syncMeta` writes only the top-level key that changed, matching keys as the parser reads them (never via `YAMLMap.get/set`), and leaves comments, unquoted numbers, nested values and aliases as written. The canvas edits it only through `updateMeta` patches (`set` text values / `remove` keys, v5 only); nested values are display-only. It is never compared, diffed or synced to dbt, and the physical stage does not read dbt's `meta:`
 - Model names must match `MODEL_NAME_PATTERN` (`/^[a-z][a-z0-9_]*$/`); Add/Rename refuse names already present in the model library
 - `SelectorsService` only owns `domain_*` selectors whose description ends with `Managed by ERD Studio.`; everything else in `selectors.yml` is preserved
 - Host `error` messages render as a dismissable toast over a live canvas; the full-screen error page (with Retry / Send Feedback) is reserved for initial-load failure
@@ -307,7 +308,7 @@ Discrepancy statuses for models/columns/relationships: `matched`, `extra`, `miss
 AI coding harness files (installed via `erdStudio.installCodingHarness`) embed a version marker to track staleness:
 
 ```
-<!-- erd-studio-harness: 21 -->
+<!-- erd-studio-harness: 22 -->
 ```
 
 **Key components in `src/services/harnessService.ts`:**
