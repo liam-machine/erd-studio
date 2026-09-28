@@ -49,7 +49,7 @@ export function validateModelNameSafety(name: unknown): string | null {
 /**
  * Validate a model name the user authored (New Model dialog, rename). On top
  * of {@link validateModelNameSafety} this enforces the project's naming
- * convention (`[a-z][a-z0-9_]*`) so newly created models stay consistent.
+ * convention (`[A-Za-z][A-Za-z0-9_]*`) so newly created models stay consistent.
  *
  * Do NOT use this for names discovered in the dbt project — see
  * {@link validateModelNameSafety}.
@@ -106,7 +106,7 @@ export function validateColumnDef(column: unknown): string | null {
     return 'Column name is required';
   }
   if (!COLUMN_NAME_PATTERN.test(trimmedName)) {
-    return 'Column name must use lowercase letters, numbers, and underscores';
+    return 'Column name must use only letters, numbers, and underscores';
   }
   if (typeof col.dataType !== 'string' || !col.dataType.trim()) {
     return 'Data type is required';
@@ -129,10 +129,10 @@ export function validateColumnDefs(columns: unknown): string | null {
       return error;
     }
     const name = (column as ColumnDef).name.trim();
-    if (seen.has(name)) {
+    if (seen.has(name.toLowerCase())) {
       return `Duplicate column name "${name}".`;
     }
-    seen.add(name);
+    seen.add(name.toLowerCase());
   }
   return null;
 }
