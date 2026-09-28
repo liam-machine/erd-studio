@@ -424,7 +424,9 @@ The association uses the default `.erd-studio` directory. With a custom `erdStud
 name: dim_customer
 ```
 
-The schemas describe the current format (`schemaVersion` 5) and still accept a version 4 domain until it is migrated.
+The schemas describe the current format (`schemaVersion` 5) and still accept a version 4 domain until it is migrated. A domain that mixes model names with inline model objects is flagged, because it does not open. The schemas are slightly stricter than the reader: a quoted `scdType: "1"` or `isPrimaryKey: yes` still loads, but is flagged, so hand edits end up in the form the canvas writes.
+
+Red Hat YAML matches paths with dot-folders skipped, so a project inside a hidden folder (`~/.work/shop/…`) gets no model validation from the built-in association; map it in `yaml.schemas` instead.
 
 ## Validation Rules
 

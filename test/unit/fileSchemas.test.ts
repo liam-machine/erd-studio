@@ -15,7 +15,7 @@ import ts from 'typescript';
 import { parse as parseYaml } from 'yaml';
 import { describe, expect, it } from 'vitest';
 
-import { CURRENT_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION } from '../../packages/core/src/types/semantic';
+import { CURRENT_SCHEMA_VERSION, LEGACY_SCHEMA_VERSION, detectDomainFormat } from '../../packages/core/src/types/semantic';
 import { LAYERS_SCHEMA_VERSION } from '../../packages/core/src/types/layer';
 import { RATIONALE_KEYS } from '../../packages/core/src/logicalModel';
 import { VALID_CARDINALITIES } from '../../packages/core/src/domain';
@@ -90,6 +90,19 @@ describe('schemas match the TypeScript types', () => {
     expect(schemaKeys(domainSchema.properties.logical)).toEqual(
       [...interfaceKeys(SEMANTIC, 'StageDataV5'), 'viewConfig'].sort(),
     );
+  });
+
+  it('no $ref carries siblings — VS Code drops a description written next to one', () => {
+    const offenders: string[] = [];
+    const walk = (node: unknown, at: string): void => {
+      if (Array.isArray(node)) node.forEach((n, i) => walk(n, `${at}/${i}`));
+      else if (node && typeof node === 'object') {
+        if ('$ref' in node && Object.keys(node).length > 1) offenders.push(at);
+        for (const [k, v] of Object.entries(node)) walk(v, `${at}/${k}`);
+      }
+    };
+    for (const [file, schema] of Object.entries({ domainSchema, modelSchema, layersSchema, templateSchema })) walk(schema, file);
+    expect(offenders).toEqual([]);
   });
 
   it('every schema rejects properties it does not declare', () => {
@@ -252,6 +265,27 @@ describe('what a hand-editor is told', () => {
       $schema: 'https://example.test/s.json', schemaVersion: 5, domain: 'd', layer: 'silver',
       logical: { models: [], relationships: [] }, viewConfig: {},
     })).toEqual([]);
+  });
+
+  it('flags the hybrid domains detectDomainFormat refuses to open', () => {
+    const domain = (schemaVersion: number, models: unknown[]) => ({
+      schemaVersion, domain: 'd', layer: 'silver', logical: { models, relationships: [] }, viewConfig: {},
+    });
+    const cases: Array<[number, unknown[]]> = [
+      [5, ['dim_a', { name: 'dim_b' }]],
+      [4, ['dim_a', { name: 'dim_b' }]],
+      [5, [{ name: 'dim_a' }]],
+    ];
+    for (const [version, models] of cases) {
+      const raw = domain(version, models);
+      expect(detectDomainFormat(raw)).toBe('hybrid');
+      expect(validate('domain.schema.json', raw)).not.toEqual([]);
+    }
+    for (const [version, models, format] of [[5, ['dim_a'], 'v5'], [5, [], 'v5'], [4, [{ name: 'dim_a' }], 'v4']] as const) {
+      const raw = domain(version, [...models]);
+      expect(detectDomainFormat(raw)).toBe(format);
+      expect(validate('domain.schema.json', raw)).toEqual([]);
+    }
   });
 
   it('keeps accepting a version 4 domain with inline models, which still loads until migrated', () => {

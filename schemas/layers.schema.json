@@ -3,21 +3,41 @@
   "title": "ERD Studio layers",
   "description": "Layer definitions: .erd-studio/layers.json. Each layer id is also the directory holding that layer's domain files. Reference: https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md#layers-file-erd-studiolayersjson",
   "type": "object",
-  "required": ["schemaVersion", "layers"],
+  "required": [
+    "schemaVersion",
+    "layers"
+  ],
   "additionalProperties": false,
   "properties": {
-    "$schema": { "type": "string", "description": "Optional schema reference for editors outside VS Code. Ignored by ERD Studio." },
-    "schemaVersion": { "type": "integer", "minimum": 1, "maximum": 1, "description": "Layers file format version. Must be 1." },
+    "$schema": {
+      "type": "string",
+      "description": "Optional schema reference for editors outside VS Code. Ignored by ERD Studio."
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "description": "Layers file format version. Must be 1."
+    },
     "layers": {
       "type": "array",
       "description": "The layers, each with a unique id.",
-      "items": { "$ref": "#/definitions/layer" }
+      "items": {
+        "$ref": "#/definitions/layer"
+      }
     }
   },
   "definitions": {
     "layer": {
       "type": "object",
-      "required": ["id", "label", "abbreviation", "color", "creatable", "order"],
+      "required": [
+        "id",
+        "label",
+        "abbreviation",
+        "color",
+        "creatable",
+        "order"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -25,11 +45,28 @@
           "pattern": "^[a-z][a-z0-9_-]*$",
           "description": "Lowercase identifier (letters, digits, hyphens, underscores). Also the directory name for this layer's domains."
         },
-        "label": { "type": "string", "minLength": 1, "description": "Display name." },
-        "abbreviation": { "type": "string", "description": "Short badge label, e.g. SLV." },
-        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "description": "Hex colour, e.g. #a0a0a0." },
-        "creatable": { "type": "boolean", "description": "Whether new domains can be created in this layer." },
-        "order": { "type": "number", "description": "Display order (lower first)." }
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name."
+        },
+        "abbreviation": {
+          "type": "string",
+          "description": "Short badge label, e.g. SLV."
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "Hex colour, e.g. #a0a0a0."
+        },
+        "creatable": {
+          "type": "boolean",
+          "description": "Whether new domains can be created in this layer."
+        },
+        "order": {
+          "type": "number",
+          "description": "Display order (lower first)."
+        }
       }
     }
   }
