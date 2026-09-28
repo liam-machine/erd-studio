@@ -11,7 +11,7 @@
 # ("code", "file", "AI", "engineers", "app" and "data" are fine.)
 
 title: ERD Studio — your data map is probably wrong
-maxDuration: 95
+maxDuration: 100
 
 voice:
   engine: kokoro
@@ -48,14 +48,20 @@ scenes:
     chapter: 1
     minDur: 7
     accent: blue
-    headline: ["Every app has one:", "a {map of its data}."]
+    headline: ["What's a data map?", "A {drawing} of your lists."]
     lines:
-      - id: x_apps
-        beat: apps
-        caption: "Every app keeps information: | customers, orders, payments."
+      - id: x_shop
+        beat: shop
+        caption: Picture an {online shop}.
+      - id: x_lists
+        beat: lists
+        caption: "It keeps three lists: | customers, orders and payments. | Like tabs in a {spreadsheet}."
       - id: x_map
         beat: map
-        caption: A {data map} shows what's kept, | and how it all connects.
+        caption: A {data map} is a drawing of those lists, | and how they link up.
+      - id: x_link
+        beat: link
+        caption: Every order belongs to a customer. | Every payment is for an order.
 
   - id: apart
     module: simple/apart
