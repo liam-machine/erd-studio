@@ -778,8 +778,8 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 20 (model alias: the same table name in two layers, issue #76 follow-up)', () => {
-      expect(HARNESS_VERSION).toBe('20');
+    it('is 21 (setup skill quick start: first canvas before the modelling style)', () => {
+      expect(HARNESS_VERSION).toBe('21');
     });
   });
 

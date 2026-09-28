@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" width="480" height="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <style>
+    .ew-bg{fill:var(--vscode-editor-background,#1e1e1e)}
+    .ew-card{fill:var(--vscode-editorWidget-background,#252526);stroke:var(--vscode-panel-border,#555555);stroke-width:1.5}
+    .ew-fg{fill:var(--vscode-foreground,#cccccc)}
+    .ew-muted{fill:var(--vscode-descriptionForeground,#999999)}
+    .ew-sel{fill:var(--vscode-list-activeSelectionBackground,#04395e)}
+    .ew-folder{fill:var(--vscode-textLink-foreground,#3794ff);fill-opacity:0.18;stroke:var(--vscode-textLink-foreground,#3794ff);stroke-width:1.5}
+  </style>
+  <!-- explorer panel -->
+  <rect x="60" y="30" width="360" height="240" rx="10" class="ew-card"/>
+  <g transform="translate(84 52)">
+    <path d="M0 6a4 4 0 0 1 4-4h14l6 6h28a4 4 0 0 1 4 4v22a4 4 0 0 1-4 4H4a4 4 0 0 1-4-4z" class="ew-folder"/>
+    <text x="70" y="26" font-size="14" font-weight="600" class="ew-fg">my_dbt_project</text>
+  </g>
+  <line x1="84" y1="104" x2="396" y2="104" stroke="var(--vscode-panel-border,#555555)" stroke-width="1"/>
+  <g font-size="12" class="ew-muted">
+    <g transform="translate(96 116)">
+      <path d="M0 4a2 2 0 0 1 2-2h6l3 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" class="ew-folder"/>
+      <text x="32" y="15">models/</text>
+    </g>
+    <g transform="translate(96 146)">
+      <path d="M0 4a2 2 0 0 1 2-2h6l3 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" class="ew-folder"/>
+      <text x="32" y="15">target/</text>
+    </g>
+  </g>
+  <!-- highlighted dbt_project.yml -->
+  <rect x="84" y="174" width="312" height="34" rx="6" class="ew-sel"/>
+  <rect x="84" y="174" width="4" height="34" rx="2" fill="#22c55e"/>
+  <g transform="translate(98 181)">
+    <path d="M0 2a2 2 0 0 1 2-2h11l6 6v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+    <path d="M13 0v6h6" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+  </g>
+  <text x="130" y="196" font-size="13" font-weight="600" class="ew-fg">dbt_project.yml</text>
+  <!-- found badge -->
+  <circle cx="372" cy="191" r="10" fill="#22c55e"/>
+  <path d="M367 191 l3.5 3.5 l6.5 -7" fill="none" stroke="var(--vscode-editor-background,#1e1e1e)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <g font-size="12" class="ew-muted">
+    <g transform="translate(96 220)">
+      <path d="M0 2a2 2 0 0 1 2-2h11l6 6v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2z" fill="none" stroke="var(--vscode-descriptionForeground,#999999)" stroke-width="1.2"/>
+      <text x="32" y="14">packages.yml</text>
+    </g>
+  </g>
+</svg>

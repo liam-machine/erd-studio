@@ -8,6 +8,9 @@
  * would let a careless caller put them, and none of it may reach the JSON.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -264,5 +267,38 @@ describe('nothing identifying reaches the heartbeat', () => {
     }
     expect(json).not.toContain('jane');
     expect(json).not.toContain('acme');
+  });
+});
+
+describe('allowlists agree with the Worker', () => {
+  // The Worker drops any `features` / `errors` key it does not list, so a key
+  // added on one side only would be counted here and silently lost there.
+  const worker = fs.readFileSync(path.join(__dirname, '../../telemetry/src/index.js'), 'utf8');
+  const workerList = (name: string): string[] => {
+    const match = worker.match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`));
+    expect(match, `${name} not found in telemetry/src/index.js`).not.toBeNull();
+    return [...match![1].matchAll(/'([A-Za-z0-9]+)'/g)].map(m => m[1]);
+  };
+
+  it('FEATURES matches the Worker key for key, in order', () => {
+    expect(workerList('FEATURES')).toEqual([...FEATURES]);
+  });
+
+  it('ERROR_CODES matches the Worker key for key, in order', () => {
+    expect(workerList('ERROR_CODES')).toEqual([...ERROR_CODES]);
+  });
+
+  it('counts the onboarding flows', () => {
+    let s = emptyCounters('2026-09-24');
+    s = recordFeature(s, 'drawFromDbt');
+    s = recordFeature(s, 'addFromDbt');
+    s = recordFeature(s, 'addFromDbt');
+    s = recordFeature(s, 'emptyCanvas');
+    expect(buildHeartbeat(s, ENV).features).toEqual({ drawFromDbt: 1, addFromDbt: 2, emptyCanvas: 1 });
+  });
+
+  it('telemetry.json documents every feature key', () => {
+    const doc = fs.readFileSync(path.join(__dirname, '../../telemetry.json'), 'utf8');
+    for (const f of FEATURES) expect(doc).toContain(f);
   });
 });

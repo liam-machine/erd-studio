@@ -388,6 +388,13 @@ describe('validation — acceptance and normalisation', () => {
     assert.equal(params[18], '{"manifestMissing":1}');
   });
 
+  it('keeps the onboarding feature keys', async () => {
+    const params = await storedParams(
+      heartbeat({ features: { drawFromDbt: 1, addFromDbt: 3, emptyCanvas: 2 } }),
+    );
+    assert.equal(params[17], '{"drawFromDbt":1,"addFromDbt":3,"emptyCanvas":2}');
+  });
+
   it('treats omitted features and errors as empty', async () => {
     const body = heartbeat();
     delete body.features;

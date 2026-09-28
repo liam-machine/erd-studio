@@ -193,6 +193,64 @@ describe('harnessAssets', () => {
     it('uses no `!` dynamic-context injection', () => {
       expect(skill.content).not.toMatch(/!`[^`]+`/);
     });
+
+    describe('routes (quick start by default, enrich, full setup)', () => {
+      const body = (): string => splitFrontmatter(skill.content)!.body;
+      const reference = (name: string): string =>
+        CLAUDE_SETUP_SKILL_FILES.find((a) => a.relativePath === `references/${name}`)!.content;
+
+      it('defines all three routes and picks one itself rather than asking', () => {
+        expect(body()).toMatch(/\*\*Quick start\*\* — everyone else/);
+        expect(body()).toMatch(/\*\*Enrich\*\* — doctor's `erd\.domains` is above 0/);
+        expect(body()).toMatch(/\*\*Full setup\*\* — the user asks for it/);
+        expect(body()).toContain('never ask the user to choose');
+      });
+
+      it('defers the modelling style until after the first canvas in a quick start', () => {
+        expect(body()).toContain('never before the first canvas');
+        expect(body()).toContain(
+          "\"Want me to apply your team's modelling style — keys,\n    grain, SCD? That's the next step.\"",
+        );
+        // The quick start mirrors dbt through the documented no-style rules, which must still exist.
+        expect(body()).toContain('"When no style is agreed"');
+        expect(reference('modelling-approaches.md')).toContain('**When no style is agreed**');
+      });
+
+      it('does not gate a quick start on the catalog', () => {
+        expect(body()).toContain('**`run-catalog`** — full setup only');
+      });
+
+      it('names the no-AI Draw from dbt command as it is contributed', () => {
+        expect(body()).toContain('**ERD Studio: Draw from dbt…**');
+        const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as {
+          contributes: { commands: { command: string; title: string; category?: string }[] };
+        };
+        const command = pkg.contributes.commands.find((c) => c.command === 'erdStudio.drawFromDbt');
+        expect(command, 'erdStudio.drawFromDbt is contributed').toBeDefined();
+        expect(command!.title.startsWith('Draw from dbt')).toBe(true);
+      });
+
+      it('enriches an existing diagram with design fields only, never rebuilding it', () => {
+        const start = body().indexOf('## Enriching an existing diagram');
+        expect(start).toBeGreaterThan(-1);
+        const section = body().slice(start, body().indexOf('## Reference files'));
+        expect(section).toContain('never rebuild, rename, or change a column, type or relationship');
+        expect(section).toContain('ask "Add these?" once');
+        for (const field of ['isPrimaryKey', 'isForeignKey', 'grain', 'isNaturalKey', 'modelRole', 'rationale']) {
+          expect(section).toContain(field);
+        }
+      });
+
+      it('keeps every safety rule on the shorter path', () => {
+        expect(body()).toContain('never `dbt run`, `build`, `seed` or `snapshot`');
+        expect(body()).toContain('`--trust-venv`');
+        expect(body()).toContain('**Stop after 3 rounds.**');
+        expect(body()).toContain('**referenced by name, never rewritten**');
+        // Canvas-fallback mode moved to the troubleshooting reference; SKILL.md still points at it.
+        expect(body()).toContain('**canvas-fallback mode**\n(`references/troubleshooting.md`)');
+        expect(reference('troubleshooting.md')).toContain('## Canvas-fallback mode (no helper available)');
+      });
+    });
   });
 
   describe('frontmatter variants', () => {

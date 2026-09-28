@@ -2,11 +2,13 @@
 name: erd-studio-setup
 description: >-
   Friendly, step-by-step setup for ERD Studio in an existing dbt project, for people who may be
-  new to dbt or data modelling. Checks the dbt CLI (install, profiles.yml, dbt parse, catalog),
-  detects how the project is modelled (medallion or staging/marts layers; Kimball, Data Vault,
-  One Big Table or Activity Schema tables) and confirms it with the user - or mirrors dbt exactly
-  when no style shows - builds ERD Studio logical models and domains from the dbt project, then
-  checks them with the ERD Studio diff until logical matches physical.
+  new to dbt or data modelling. By default a quick start: checks the dbt CLI, draws one business
+  area as an ERD Studio logical model that mirrors dbt, checks it with the ERD Studio diff until
+  logical matches physical and opens the canvas within minutes - then offers to detect and apply
+  the team's modelling style (medallion or staging/marts layers; Kimball, Data Vault, One Big
+  Table or Activity Schema tables). Enriches diagrams that already exist (such as a Draw from dbt
+  draft) with keys, grain, roles and rationale instead of rebuilding them. Full guided setup on
+  request.
   Use when the user runs /erd-studio-setup or $erd-studio-setup, is new to ERD Studio, or asks to
   "set up ERD Studio", "create a logical model from my dbt project", "model my dbt project the
   Kimball way" or "sync my logical model with dbt" - even if they only want a diagram of their
@@ -38,9 +40,9 @@ You are walking someone through setting up ERD Studio on a dbt project they alre
 are new to dbt, data modelling or AI coding assistants. The goal is that they finish with a
 working diagram **and** understand what just happened, so they can keep going on their own.
 
-The finished result is: one or more ERD Studio *domains* whose logical model follows the team's
-modelling approach and has been checked against the dbt project with the ERD Studio diff, and
-either matches it or has every remaining difference explained.
+The first result, within minutes, is one ERD Studio *domain* that mirrors the dbt project, has
+been checked against it with the ERD Studio diff, and is open on the canvas. The design work —
+the team's modelling approach, keys, grain, roles — comes next, on a diagram they can already see.
 
 ## How to talk
 
@@ -67,14 +69,17 @@ These rules matter most: a beginner who gets lost or scared stops, and nothing g
 
   ```
   ✓ 1. Check dbt
-  – 2. Refresh dbt's project files (skipped — not needed without dbt)
-  → 3. Choose a business area and modelling style
+  – 2. Refresh dbt's project files (skipped — already up to date)
+  → 3. Choose a business area
     4. Write the logical model
     5. Check it against dbt
     6. Open it in ERD Studio
+    Next: your modelling style (optional)
   ```
 
-  Mark a skipped step "–" with a few words why, never "✓" — a tick claims work that did not happen.
+  A full setup has no "Next" line (step 3 adds "and modelling style"); enriching lists Check dbt
+  · Add keys, grain and roles · Check it against dbt · Open it · Next. Mark a skipped step "–"
+  with a few words why, never "✓" — a tick claims work that did not happen.
 - **Never block on something optional.** dbt, a warehouse connection, the catalog and a web
   lookup all make the result more exact, but ERD Studio works without them. If something is
   missing, say what it would add, offer to fix it, and carry on either way.
@@ -159,25 +164,37 @@ if doctor reports `project.found: false`, ask which folder holds it and pass `--
   `~/.erd-studio-cli/bin/erd-studio.cmd` (in PowerShell: `& "$HOME\.erd-studio-cli\bin\erd-studio.cmd" …`).
   Tell the user which route you are using.
 
-If no route to the helper works, carry on in **canvas-fallback mode** (see the end of this file)
-and tell the user its checks are less exact.
+If no route to the helper works, carry on in **canvas-fallback mode**
+(`references/troubleshooting.md`) and tell the user its checks are less exact.
 
 ---
 
-## Stage 0 — Say hello and explain
+## Stage 0 — Say hello and pick the route
 
 Greet the user and explain, in about five short lines:
 
 - ERD Studio shows data two ways. **Physical** is what really exists in the dbt project — it is
   read-only and ERD Studio works it out for itself. **Logical** is the design: the tables, their
   keys, and how they connect.
-- This walkthrough builds the logical view from what already exists, following the way their
-  project is already modelled, then checks it against physical until they match.
-- It takes six steps (show the checklist) and nothing in their dbt project changes unless they
-  say so.
+- First one diagram goes on screen — a copy of what dbt already has, checked against it. Then,
+  if they like, you add their team's design rules. Nothing in dbt changes unless they say so.
+- The first diagram needs no AI at all: **ERD Studio: Draw from dbt…** in the Command Palette, or
+  on the Welcome tab, drafts one from the dbt files. This walkthrough does the same and checks it.
 
-Then ask "Ready?". Once doctor has run (Stage 1), if `erd.logicalModels > 0` add one line: "You
-already have N logical models — I won't change any of them without asking first."
+Show the checklist and ask "Ready?". After doctor (Stage 1), pick the route yourself and say it in
+one line — never ask the user to choose:
+
+- **Enrich** — doctor's `erd.domains` is above 0: a diagram exists, often a **Draw from dbt**
+  draft (dbt's columns, no grain, role, rationale or natural keys). Do not rebuild it: follow
+  "Enriching an existing diagram" below — unless they asked for a new area (quick start for it).
+- **Full setup** — the user asks for it ("the full setup", "do it properly") or already described
+  how their team models data: every stage in order, 1 to 6.
+- **Quick start** — everyone else: Stage 1, Stage 2 for the manifest only, 3a, then 4–6 with no
+  style (mirror dbt: `references/modelling-approaches.md` "When no style is agreed"). Stage 3b
+  comes **after** Stage 6, as its first next step.
+
+If `erd.logicalModels > 0`, add: "You already have N logical models — I won't change any of
+them without asking first."
 
 ## Stage 1 — Check dbt
 
@@ -192,28 +209,20 @@ the result and tell the user what you found in one or two sentences, based on `d
   run it if you say so." Only on a yes, re-run doctor with `--trust-venv`, and keep passing
   `--trust-venv` on every later doctor run. On a no, carry on as if it were not there. Your
   assistant may also ask before each command that runs it; that is expected.
-- **`fusion-v2`** — explain that this is dbt's new engine (dbt Fusion). Everything works; the
-  column types come from `dbt compile --write-catalog` instead of `dbt docs generate`.
-- **`cloud-cli`** — explain that this is the dbt platform CLI: it runs the project on dbt's
-  servers and signs in with `dbt_cloud.yml`, not `profiles.yml`, so the files ERD Studio reads
-  may not appear on this machine. Offer two routes: carry on from the project files alone (the
-  default), or install dbt Core in a local environment (`references/dbt-setup.md`).
-- **`unknown`** — say dbt answered in a way you did not recognise, show the first line of
-  `rawVersionOutput`, and treat it like Core.
+- **`fusion-v2`, `cloud-cli`, `unknown`** — say what it means in one line, as
+  `references/dbt-setup.md` section 1 says (Cloud CLI: carry on from the project files).
 - **Not found** (`dbt.found: false`) — first ask **one** question, because dbt is often
   installed but hidden in an environment this terminal cannot see:
 
   > "Do you usually run dbt from a particular terminal or environment? If so, run `which dbt`
   > there (`where dbt` on Windows) and paste what it prints — or say 'no dbt'."
 
-  If they paste a path, re-run doctor with `--dbt '<that path>'` — single-quoted, and on Windows
-  with the backslashes turned into forward slashes (`'C:/Users/me/…/dbt.exe'`), because your
-  shell may treat a backslash as an escape. Remember that path and pass the same `--dbt` on
-  **every later doctor run**, exactly like `--project`; without it doctor reports dbt missing
-  again. If they say no dbt, explain that **dbt is optional**: ERD Studio can read the `.sql` and
-  `.yml` files directly, and dbt adds exact column lists and types. Offer the install steps for
-  their operating system from `references/dbt-setup.md`, ask whether to install now or carry on
-  without it, and never insist.
+  If they paste a path, re-run doctor with `--dbt '<that path>'` — single-quoted, on Windows with
+  forward slashes (`'C:/Users/me/…/dbt.exe'`; a backslash may be an escape) — and pass the same
+  `--dbt` on **every later doctor run**, like `--project`, or doctor reports dbt missing. No dbt:
+  explain that **dbt is optional**: ERD Studio can read the `.sql` and `.yml` files directly, and
+  dbt adds exact column lists and types. Offer the install steps from `references/dbt-setup.md`,
+  ask whether to install now or carry on, and never insist.
 
 If `profiles.required` is true and `profiles.found` is false, explain what `profiles.yml` is (the
 file that tells dbt which warehouse to use and how to sign in) and offer to create one from the
@@ -239,8 +248,8 @@ Then work through doctor's `nextSteps`, which are already in the right order:
 - **`run-deps`** — the project uses dbt packages that are not downloaded yet. Say "Downloading
   the dbt packages this project uses," then run `dbt deps` (with the same dbt as below).
 - **`run-parse` / `refresh-parse`** — offer to run `dbt.commands.parse`.
-- **`run-catalog`** — offer `dbt.commands.catalog`, warning that it connects to the warehouse.
-  It is fine to skip; say what it would add (exact types) and that you can do it later.
+- **`run-catalog`** — full setup only: offer `dbt.commands.catalog`, warning that it connects to
+  the warehouse; fine to skip. Otherwise do not run it now: say it adds exact types, offered later.
 
 Run exactly the command doctor gives in `dbt.commands` — it has the right path, e.g.
 `.venv/bin/dbt parse` (`.venv/Scripts/dbt.exe parse` on Windows), never an activate-then-run pair:
@@ -261,7 +270,7 @@ again now that the manifest is built.") — and report what you have as short �
 – catalog.json — skipped (column types will come from your .yml files)
 ```
 
-## Stage 3 — Choose a business area and modelling style
+## Stage 3 — Choose a business area (and, in a full setup, the modelling style)
 
 ### 3a. The business area
 
@@ -286,23 +295,26 @@ Then propose **one concrete default** the user can accept with "yes". Pick it li
 > **gold** layer — layers are just folders for organising diagrams, you can change them later.
 > OK?"
 
-Only if they say no, show a short numbered list of the other clusters or folders to choose from.
-A first run works best with one domain of at most 15 models — a small diagram is easy to check.
+Only if they say no, show a short numbered list of other clusters or folders. A first run works
+best with one domain of at most 15 models — a small diagram is easy to check.
 
-Explain one rule now, because it surprises people later: **lines are only drawn between tables
-in the same domain.** Keep a fact table and its dimensions together; a dimension used by several
-areas (like `dim_customer`) can be added to each domain — shared by name, not copied.
+Explain one rule now, as it surprises people: **lines are only drawn between tables in the same
+domain.** Keep a fact and its dimensions together; a shared one (`dim_customer`) can be in each.
 
 Models listed in `skipped` cannot be used (a name ERD Studio does not accept, or disabled in dbt);
 mention them in one line if any fall in the chosen area.
 
 ### 3b. The modelling style
 
+**When.** In a full setup, now. In a quick start or when enriching, only after Stage 6, once
+the user says yes to the style offer — never before the first canvas.
+
 How a project is modelled decides what each table's role, grain and history mean. Two things
 describe it, usually combined: **layering** — where data sits (medallion bronze → silver → gold,
 or dbt's staging → intermediate → marts) — and **table shape** — how tables are designed (Kimball,
 Data Vault, One Big Table, Activity Schema, Inmon / 3NF). `conventions` reports both, with
-evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-approaches.md` now.
+evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-approaches.md` now
+(section 4's table has the wording for every case).
 
 - **If `.erd-studio/modelling-approach.md` exists**, read it and confirm in one line: "I'll follow
   your saved approach: Kimball dimensional modelling — say 'change it' to update." Do not
@@ -316,51 +328,34 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
 
   Mention only what `conventions` found, in plain words; with both, add that the layout is where
   data sits and the style how tables are shaped.
-- **Weak or mixed** (`shape.confidence` weak) → best guess and alternative in one question:
-
-  > "Your tables look mostly Kimball-style (`dim_`/`fct_` names), but `hub_customer` looks like
-  > Data Vault. I'll model it the Kimball way — sound right, or is it Data Vault? Or describe how
-  > your team does it."
-
-  With no `alternatives`, drop the "or is it …" part. "Not sure" means the best guess.
+- **Weak or mixed** (`shape.confidence` weak) → the best guess and the first alternative in one
+  question ("…I'll model it the Kimball way — sound right, or is it Data Vault?"). With no
+  `alternatives`, drop the "or is it …" part. "Not sure" means the best guess.
 - **Not from names** (`shape.sources` has no `names`) → say so honestly; with only `structure`
-  it is a guess from table shape, worded as one (section 4 has each style, incl. `inmon-3nf`):
-
-  > "Your tables are shaped like a Data Vault — `customer_hub` and `order_hub` hold hash keys
-  > with load dates, and `customer_sat` tracks changes with a hashdiff. I'll model it that way —
-  > sound right? Or describe how your team does it."
-
+  it is a guess from table shape, worded as one (an `inmon-3nf` guess is always a real question).
 - **No table shape detected** (`shape.style` none) → first glance at the inventory's model
-  descriptions: one that clearly describes a style is a weak guess, asked as above (section 4).
-  Otherwise do not make the user pick. Say, with no question (after the layering, if found —
-  "Your project uses dbt's staging → marts layout."): "I couldn't see a particular modelling
-  style, so I'll draw your model exactly as dbt has it." No lookup, play-back, saved approach
-  file or conformance review; `modelRole` and `grain` only where unambiguous (section 4); a style
-  is an optional Stage 6 next step. Recommend none.
+  descriptions: one that clearly describes a style is a weak guess, asked as above. Otherwise do
+  not make the user pick; say (after the layering, if found) "I couldn't see a particular
+  modelling style, so I'll draw your model exactly as dbt has it." — after a quick start, "…so
+  your diagram stays exactly as dbt has it; if your team follows one, describe it." No lookup,
+  play-back, approach file or review; `modelRole`/`grain` only where unambiguous (section 4).
 - **On a yes**, or when the user **describes it in their own words** (instead, or after "change
   it"), identify the technique(s) and **look up the standard** (section 1): narrate it ("Looking
   up Kimball's dimensional modelling standards on kimballgroup.com"), use a web tool if you have
   one, else the bundled summary, and say which you used. Never block on the lookup.
 - An unrecognised technique or unclear house rules get **at most one** clarifying question.
-- **Play it back** as 3–6 short, concrete bullets, then ask "Sound right?" (default yes):
-
-  > "Here's how I'll apply that:
-  > - Facts store one row per business event, at the lowest detail available.
-  > - Dimensions like customer and product are shared across areas, not copied.
-  > - Dimensions get a surrogate key; the source system's id is kept as a natural key.
-  > - Customer history is kept as SCD Type 2 — a new row whenever details change.
-  > Sound right?"
-
+- **Play it back** as 3–6 short, concrete bullets ("Here's how I'll apply that:" — e.g. "Facts
+  store one row per business event, at the lowest detail available", "Customer history is kept
+  as SCD Type 2 — a new row whenever details change"), then ask "Sound right?" (default yes).
   Define each term the first time (grain, surrogate key, SCD — `references/dbt-explained.md`).
 - Keep the agreed rules for Stage 4 (none when no style was agreed). You save them there.
 
 ## Stage 4 — Write the logical model
 
-1. Say "Loading ERD Studio's file-format rules first," and load them the way your row in "Your
-   AI assistant" says — the one source of truth for the file formats. One exception: do **not**
-   show the user their "Building Models from External Sources" steps (column listing, scope,
-   reconcile block); `inventory` supplies the columns and the Stage 5 `diff` reconciles more
-   strictly, so report one line per batch ("copied 24 columns from dbt into 6 model files").
+1. Say "Loading ERD Studio's file-format rules first," and load them as your row in "Your AI
+   assistant" says — the one source of truth for the formats. Do **not** show the user their
+   "Building Models from External Sources" steps (column listing, scope, reconcile block): the
+   Stage 5 `diff` reconciles more strictly; report one line per batch ("copied 24 columns…").
 2. Prepare the user for the approval prompts they are about to see (see "Your AI assistant";
    Claude Code has two extra lines to say).
 3. **Save the modelling approach**, only when a style was agreed, as
@@ -444,18 +439,23 @@ changes in the logical model; never rename a model; never edit dbt files.
 ## Stage 6 — Open it in ERD Studio
 
 - Tell the user how to see it: open the **ERD Studio** sidebar in VS Code, expand the layer,
-  click the domain. ERD Studio auto-arranges the diagram (auto layout) the first time it opens; they can re-run it any time with **Layout** in the toolbar or Shift+L.
-  The **Logical** / **Physical** tabs are at the top, and **⊕ Diff** compares the view you are on with the other one.
+  click the domain. ERD Studio auto-arranges it the first time it opens (re-run with **Layout**
+  or Shift+L). **Logical** / **Physical** tabs are at the top; **⊕ Diff** compares them.
 - Summarise the files you wrote, the approach you applied (or that you drew dbt as it is), and
   the **to confirm** list, if any: guessed column types, and any role or grain left blank
   because it was unclear. With a target design, say "logical is a target design: N backlog
   items" (every backlog line) and point to the backlog in `.erd-studio/modelling-approach.md`.
 - Suggest next steps:
+  - **quick start or enrich, first:** "Want me to apply your team's modelling style — keys,
+    grain, SCD? That's the next step." (default yes). On a yes: Stage 3b, then the approach's
+    design fields (Stage 4 steps 1–3 and step 6's design fields) on this domain's models — for
+    models not written this session, after one "Add these?" — then Stage 5 with its review and
+    this summary again. No style found and none described: stop, the mirror is complete;
+  - if the catalog was skipped: generating it (Stage 2) fills in exact column types;
   - fill in any descriptions marked "(draft)" and the blanks on the "to confirm" list;
-  - with no agreed style, optionally: "If your team follows a modelling style, such as Kimball
-    or Data Vault, tell me and I'll apply it and check your project against it.";
-  - run `/erd-studio-setup` again for another business area — it is safe to re-run, existing
-    models are kept and the saved approach is reused;
+  - another business area: run `/erd-studio-setup` again (safe to re-run — existing models are
+    kept and the saved approach is reused), or draft it with **Draw from dbt…** and run this
+    again to enrich it;
   - after changing dbt, run `dbt parse` and click **⊕ Diff** on the canvas;
   - future logical ↔ dbt changes can go through the canvas: **⊕ Diff** → **⊕ Sync** → **Apply
     Changes** writes a sync plan the schema skill's SYNC.md guide carries out (with a target
@@ -465,24 +465,24 @@ changes in the logical model; never rename a model; never edit dbt files.
   `relationships` tests to your dbt yml would make them appear in both views. Want me to do that?"
   The only dbt edit, and only on a yes; then run `dbt parse` (if available) and the diff again.
 
----
+## Enriching an existing diagram
 
-## Canvas-fallback mode (no helper available)
+The diagram's columns and connections already mirror dbt; what is missing is the design dbt does
+not record. Add it — never rebuild, rename, or change a column, type or relationship.
 
-When no route to the helper works:
-- **Stage 1–2:** run `dbt --version` yourself (if the user agrees) and skip the rest of doctor.
-- **Stage 3:** build the inventory by hand — Glob for `dbt_project.yml`'s `model-paths` (usually
-  `models/**/*.yml` and `models/**/*.sql`), Read the schema yml files for model names, columns,
-  `data_type:` and `relationships` / `unique` tests. For the modelling style, apply the
-  `conventions` rules in `references/modelling-approaches.md` section 4 yourself (names,
-  descriptions, table shape, folders, `packages.yml`, snapshots), then confirm as usual.
-- **Stage 4:** as normal, but only copy relationships that a dbt `relationships` test declares
-  between two chosen models.
-- **Stage 5:** use "Fallback A" in `references/verify-and-fix.md` (the canvas writes a sync plan
-  you then read), and if that is not possible, "Fallback B" (a best-effort manual comparison,
-  labelled as such).
-
-Tell the user once that checks in this mode are less exact than with the helper.
+1. Glob `.erd-studio/*/*.json` and propose one domain (the one named, else the largest): "You
+   already have the **orders** diagram (8 models). I'll add what dbt doesn't record — keys,
+   grain, roles and why — and leave its columns and connections alone. OK?"
+2. Load the format rules and prepare the approval prompts (Stage 4 steps 1–2). Read the domain
+   and model files, run `inventory --models <its models>`, then Stage 5 on the domain (these
+   models existed before this session: drift is asked once).
+3. Draft, per model, only what is missing and backed by evidence: `isPrimaryKey` /
+   `isForeignKey` from the inventory (`references/building-the-model.md` table); `grain` where a
+   unique test backs it; `isNaturalKey` on an obvious source business key; `modelRole` only where
+   the name or description already says it (values: `references/modelling-approaches.md` §2);
+   `rationale.purpose` from dbt's description. Anything unclear goes on the "to confirm" list.
+4. Show the drafts as one short list per model, ask "Add these?" once, and write them on a yes.
+5. Re-run the diff, then Stage 6 — whose first next step is the modelling-style offer.
 
 ## Reference files
 
@@ -495,4 +495,4 @@ Read these when the stage calls for them — not all up front:
 | `references/modelling-approaches.md` | Stage 3b (the modelling style), Stage 4 (applying it), the Stage 5 review |
 | `references/building-the-model.md` | Stage 4, before writing any file |
 | `references/verify-and-fix.md` | Stage 5, and for adding dbt relationship tests |
-| `references/troubleshooting.md` | The helper is missing or stale, the skill or its format rules cannot be found, the safety check keeps blocking, Windows / remote setups |
+| `references/troubleshooting.md` | The helper is missing or stale (canvas-fallback mode), the skill or its format rules cannot be found, the safety check keeps blocking, Windows / remote setups |

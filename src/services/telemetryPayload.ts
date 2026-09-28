@@ -33,6 +33,9 @@ export const FEATURES = [
   'harnessInstallCodex',
   'migrateV5',
   'feedbackOpened',
+  'drawFromDbt',
+  'addFromDbt',
+  'emptyCanvas',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
