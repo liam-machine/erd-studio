@@ -17,7 +17,7 @@
  * command in extension.ts builds the WorkspaceEdit from the plan.
  */
 
-import { MODEL_NAME_PATTERN } from '../types/naming';
+import { MODEL_NAME_PATTERN, sameName } from '../types/naming';
 
 /** A domain file that references the duplicated name. */
 export interface DomainReference {
@@ -51,7 +51,8 @@ export function suggestDuplicateName(name: string, folder: string, taken: Readon
   const prefix = folder.toLowerCase().replace(/[^a-z0-9_]/g, '_');
   const base = prefix ? `${prefix}_${name}` : `${name}_copy`;
   const candidates = [base, ...[2, 3, 4, 5, 6, 7, 8, 9].map((n) => `${base}_${n}`)];
-  return candidates.find((c) => MODEL_NAME_PATTERN.test(c) && !taken.has(c)) ?? '';
+  const isTaken = (c: string) => taken.has(c) || [...taken].some((t) => sameName(t, c));
+  return candidates.find((c) => MODEL_NAME_PATTERN.test(c) && !isTaken(c)) ?? '';
 }
 
 /**

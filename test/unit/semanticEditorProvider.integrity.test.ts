@@ -25,7 +25,7 @@ import {
   _clearMockFileWatchers,
   _mockFileWatchers,
 } from '../__mocks__/vscode';
-import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE } from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { ManifestService } from '../../src/services/manifestService';
@@ -293,6 +293,88 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     });
   });
 
+  // ---- Issue #93: names in either case, but unique ignoring case ----------
+
+  describe('mixed-case names (issue #93)', () => {
+    it('creates a PascalCase model with PascalCase columns, spelled as typed', async () => {
+      await h.send({
+        type: 'addModel',
+        payload: {
+          name: 'DimDate', schema: '', description: '',
+          columns: [
+            { name: 'DateKey', dataType: 'varchar', description: '', isPrimaryKey: true },
+            { name: 'Date', dataType: 'date', description: '' },
+          ],
+        },
+      });
+
+      expect(h.errors()).toEqual([]);
+      expect(h.readDomain().logical.models).toContain('DimDate');
+      expect(fs.readFileSync(ymlPath(h, 'DimDate'), 'utf-8')).toContain('name: DimDate');
+      expect(h.logicalModelService.getModel('DimDate')!.columns!.map((c) => c.name)).toEqual(['DateKey', 'Date']);
+    });
+
+    // listModelFiles, not existsSync: on Linux CI existsSync is case-sensitive,
+    // so this pins that the guard does not depend on the file system.
+    it('refuses a new model whose name differs from a library model only in case', async () => {
+      const before = fs.readFileSync(ymlPath(h, 'dim_customer'), 'utf-8');
+
+      await h.send({ type: 'addModel', payload: { name: 'Dim_Customer', schema: '', description: '', columns: [] } });
+
+      expect(h.errors()).toHaveLength(1);
+      expect(h.errors()[0]).toMatch(/Model "dim_customer" already exists in the model library/);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(fs.readFileSync(ymlPath(h, 'dim_customer'), 'utf-8')).toBe(before);
+    });
+
+    it('refuses a new model whose name differs from one in the domain only in case', async () => {
+      await h.send({ type: 'addModel', payload: { name: 'FCT_ORDER', schema: '', description: '', columns: [] } });
+
+      expect(h.errors()[0]).toMatch(/Model "fct_order" already exists in this domain/);
+      expect(_appliedEdits).toHaveLength(0);
+    });
+
+    it('refuses a column whose name differs from an existing one only in case', async () => {
+      await h.send({
+        type: 'addColumn',
+        payload: { modelName: 'fct_order', column: { name: 'Order_Key', dataType: 'string', description: '' } },
+      });
+
+      expect(h.errors()[0]).toMatch(/Column "Order_Key" already exists/);
+      expect(h.logicalModelService.getModel('fct_order')!.columns!.map((c) => c.name))
+        .toEqual(['order_key', 'customer_key', 'amount']);
+    });
+
+    it('renames to a PascalCase name', async () => {
+      await h.send({ type: 'renameModel', payload: { oldName: 'fct_order', newName: 'FctOrders' } });
+
+      expect(h.errors()).toEqual([]);
+      expect(h.readDomain().logical.models).toEqual(['FctOrders', 'dim_task']);
+      expect(fs.existsSync(ymlPath(h, 'fct_order'))).toBe(false);
+      expect(h.logicalModelService.getModel('FctOrders')!.columns!.map((c) => c.name))
+        .toEqual(['order_key', 'customer_key', 'amount']);
+    });
+
+    it('refuses to rename onto a library model that differs only in case', async () => {
+      await h.send({ type: 'renameModel', payload: { oldName: 'fct_order', newName: 'DIM_CUSTOMER' } });
+
+      expect(h.errors()[0]).toMatch(/Model "dim_customer" already exists in the model library/);
+      expect(_appliedEdits).toHaveLength(0);
+    });
+
+    // write-new + delete-old on a case-insensitive disk would delete the model.
+    it('refuses a case-only rename and leaves the model file alone', async () => {
+      const before = fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8');
+
+      await h.send({ type: 'renameModel', payload: { oldName: 'fct_order', newName: 'Fct_Order' } });
+
+      expect(h.errors()[0]).toMatch(/only in upper\/lower case/);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8')).toBe(before);
+      expect(h.readDomain().logical.models).toEqual(['fct_order', 'dim_task']);
+    });
+  });
+
   describe('renameModel', () => {
     it('refuses to rename onto a model that exists in the library (other domains depend on it)', async () => {
       const before = fs.readFileSync(ymlPath(h, 'dim_customer'), 'utf-8');
@@ -479,6 +561,144 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(h.errors()).toHaveLength(1);
       expect(h.errors()[0]).toMatch(/^Failed to update table name: A table name must start/);
       expect(fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8')).toBe(before);
+    });
+  });
+
+  describe('updateMeta', () => {
+    const read = () => fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8');
+
+    it('sets a model key, then removes it (dropping an empty meta: block)', async () => {
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'analytics' } } });
+      expect(h.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')!.meta).toEqual({ owner: 'analytics' });
+      expect(read()).toMatch(/\nmeta:\n\s+owner: analytics\n/);
+
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', remove: ['owner'] } });
+      expect(h.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')).not.toHaveProperty('meta');
+      expect(read()).not.toMatch(/meta:|owner/);
+    });
+
+    it('sets a key on a column when columnName is given', async () => {
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', columnName: 'amount', set: { unit: 'AUD' } } });
+      expect(h.errors()).toEqual([]);
+      const model = h.logicalModelService.getModel('fct_order')!;
+      expect(model.columns!.find((c) => c.name === 'amount')!.meta).toEqual({ unit: 'AUD' });
+      expect(model).not.toHaveProperty('meta');
+      expect(model.columns!.find((c) => c.name === 'order_key')).not.toHaveProperty('meta');
+    });
+
+    it('applies exactly one WorkspaceEdit that replaces the yml', async () => {
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'analytics' } } });
+      expect(_appliedEdits).toHaveLength(1);
+      expect(_appliedEdits[0]._opsFor(ymlPath(h, 'fct_order')).map((op) => op.kind)).toEqual(['replace']);
+    });
+
+    it('reports an unknown column and leaves the file byte-for-byte unchanged', async () => {
+      const before = read();
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', columnName: 'ghost', set: { a: 'b' } } });
+      expect(h.errors()).toHaveLength(1);
+      expect(h.errors()[0]).toMatch(/^Failed to update metadata: .*ghost/);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(read()).toBe(before);
+    });
+
+    it.each([
+      ['a non-text value', { modelName: 'fct_order', set: { owner: 42 } }],
+      ['a nested value', { modelName: 'fct_order', set: { lineage: { a: 'b' } } }],
+      ['an empty patch', { modelName: 'fct_order' }],
+      ['set and remove of one key', { modelName: 'fct_order', set: { a: 'b' }, remove: ['a'] }],
+    ])('refuses %s, writing nothing', async (_label, payload) => {
+      const before = read();
+      await h.send({ type: 'updateMeta', payload });
+      expect(h.errors()).toHaveLength(1);
+      expect(h.errors()[0]).toMatch(/^Failed to update metadata: /);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(read()).toBe(before);
+    });
+
+    it('surfaces a rejected WorkspaceEdit', async () => {
+      _mockWorkspaceState.applyEditResult = false;
+      const before = read();
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'x' } } });
+      expect(h.errors()).toEqual(['Failed to update metadata.']);
+      expect(read()).toBe(before);
+    });
+
+    it('keeps comments and nested values in a hand-written meta block when setting another key', async () => {
+      const handWritten = [
+        'name: fct_order',
+        'description: Orders',
+        'meta:',
+        '  # who to ask',
+        '  owner: analytics # team alias',
+        '  lineage:',
+        '    source: sap',
+        '    tables:',
+        '      - mara # material master',
+        '      - marc',
+        'columns:',
+        '  - name: order_key',
+        '    dataType: string',
+        '    description: PK',
+        '    isPrimaryKey: true',
+        '',
+      ].join('\n');
+      fs.writeFileSync(ymlPath(h, 'fct_order'), handWritten, 'utf-8');
+      h.logicalModelService.invalidateCache('fct_order');
+
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { steward: 'jane' } } });
+
+      expect(h.errors()).toEqual([]);
+      const expected = handWritten.replace('      - marc\n', '      - marc\n  steward: jane\n');
+      expect(read()).toBe(expected);
+    });
+
+    // Known deviation: the yaml stringifier pads flow collections, so a
+    // hand-written `[a, b]` anywhere in the file comes back as `[ a, b ]` on
+    // any canvas write (STRINGIFY_OPTIONS lacks flowCollectionPadding: false).
+    // The value is unchanged; only the spacing moves.
+    it('keeps the value of a flow-style list (spacing may change)', async () => {
+      fs.writeFileSync(
+        ymlPath(h, 'fct_order'),
+        ['name: fct_order', 'meta:', '  tags: [pii, gold]', 'columns:', '  - name: order_key', '    dataType: string', ''].join('\n'),
+        'utf-8',
+      );
+      h.logicalModelService.invalidateCache('fct_order');
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'x' } } });
+      expect(h.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')!.meta).toEqual({ tags: ['pii', 'gold'], owner: 'x' });
+      expect(read()).toMatch(/\n  tags: \[ ?pii, gold ?\]\n  owner: x\n/);
+    });
+
+    it('updateColumn on a column with meta keeps the meta', async () => {
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', columnName: 'amount', set: { unit: 'AUD' } } });
+      expect(h.errors()).toEqual([]);
+
+      await h.send({
+        type: 'updateColumn',
+        payload: {
+          modelName: 'fct_order',
+          oldColumnName: 'amount',
+          column: { name: 'amount', dataType: 'decimal', description: 'Order total' },
+        },
+      });
+
+      expect(h.errors()).toEqual([]);
+      const col = h.logicalModelService.getModel('fct_order')!.columns!.find((c) => c.name === 'amount')!;
+      expect(col.description).toBe('Order total');
+      expect(col.meta).toEqual({ unit: 'AUD' });
+    });
+
+    it('is refused while viewing the physical stage', async () => {
+      await h.send({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+      const before = read();
+
+      await h.send({ type: 'updateMeta', payload: { modelName: 'fct_order', set: { owner: 'x' } } });
+
+      expect(h.errors()).toEqual([PHYSICAL_READ_ONLY_MESSAGE]);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(read()).toBe(before);
     });
   });
 

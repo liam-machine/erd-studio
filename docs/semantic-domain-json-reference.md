@@ -101,6 +101,11 @@ rationale:
   purpose: Central customer entity shared across sales, marketing, and support
   roleChoice: Conformed dimension because customer data is referenced by multiple business areas
   scdStrategy: SCD1 for mutable attributes; customer_code and customer_id never change
+meta:
+  owner: crm-team
+  lineage:
+    upstream: [stg_salesforce__account]
+    refreshed: daily
 columns:
   - name: customer_id
     dataType: INTEGER
@@ -116,6 +121,8 @@ columns:
     dataType: STRING
     description: Primary email address
     scdType: 1
+    meta:
+      pii: true
 ```
 
 | Field | Type | Required | Description |
@@ -128,6 +135,7 @@ columns:
 | `modelRole` | string | No | Role in the warehouse architecture. See ModelRole enum. |
 | `columns` | array | No | Array of `ColumnDef`. |
 | `rationale` | object | No | Design rationale. Omit entirely if empty. |
+| `meta` | map | No | Free-form, dbt-style metadata (owner, source system, lineage…). See [Metadata](#metadata-meta). Omit entirely if empty. |
 
 Models are defined once and can be referenced from several domains. Editing a model from any domain canvas updates the shared YAML.
 
@@ -143,6 +151,7 @@ Models are defined once and can be referenced from several domains. Editing a mo
 | `isNaturalKey` | boolean | No | Business identifier (email, SKU, customer_code). Only include when `true`. |
 | `scdType` | `0` \| `1` \| `2` | No | Dimension columns: 0 = never changes, 1 = overwrite, 2 = track history. |
 | `additiveType` | string | No | Fact measures: `"additive"`, `"semi-additive"`, or `"non-additive"`. |
+| `meta` | map | No | Free-form, dbt-style metadata for this column. See [Metadata](#metadata-meta). Omit entirely if empty. |
 
 ### ModelRole Enum
 
@@ -170,6 +179,15 @@ Optional object documenting the reasoning behind a model's design. All fields ar
 | `grainChoice` | Why this grain was chosen over alternatives |
 | `scdStrategy` | Overall SCD strategy across dimension attributes |
 | `measures` | Why measures are structured this way — additive type choices |
+
+### Metadata (`meta`)
+
+Optional map on a model and on any column, named after and shaped like dbt's `meta:`. Keys are strings; values may be text, numbers, booleans, `null`, lists or nested maps (`MetaValue = string | boolean | null | MetaValue[] | { [key]: MetaValue }`; numbers are read as their source text, like every other field). A `meta` that is not a map, or is an empty map, is ignored.
+
+- **Never compared with dbt.** `meta` is logical-only: the physical stage does not read dbt's `meta:`, and discrepancy reports, `erd-studio diff` and sync plans ignore it.
+- **Canvas.** The Detail panel's **Metadata** section (for the model, and inside each expanded column row) lists every entry. Top-level text values can be added, edited and removed there; nested maps, lists, booleans and `null` are shown read-only — edit them in the file.
+- **Writes are surgical.** A canvas edit rewrites only the top-level key that changed; comments, unquoted numbers, nested values and aliases elsewhere in `meta` stay byte-identical. Removing the last key removes `meta`.
+- **AI assistants** keep every existing entry and add or change only the keys the user asks for.
 
 ## Relationships (`logical.relationships`)
 
@@ -231,7 +249,7 @@ Persisted UI layout state. Safe to leave as `{}` — the extension auto-position
 | To... | Edit |
 |-------|------|
 | Add/remove/rename a column, change type or PK/FK/NK/SCD flags | the model's yml (`logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`) |
-| Change grain, modelRole, description, rationale | the model's yml |
+| Change grain, modelRole, description, rationale, meta | the model's yml |
 | Add a model to a domain diagram | Domain `.json` → append the name to `logical.models` **and**, if no file for the name exists in any folder, create `logical-models/{layer}/{name}.yml` for the domain's layer |
 | Remove a model from a domain | Domain `.json` → remove the name from `logical.models` and its relationships from `logical.relationships` |
 | Add/remove/edit a relationship | Domain `.json` → `logical.relationships` |
@@ -362,6 +380,7 @@ warehouse does not have renders a physical column nothing has verified.
 | `dataType` | `catalog.json` → declared `data_type:` → the manifest's copy of it → blank |
 | `description` | `.yml` description → manifest description → catalog column `comment` (`persist_docs` writes the dbt description *into* that comment, so it ranks last) |
 | PK/FK/NK, `scdType`, `additiveType` | Carried forward from the logical model — dbt yml does not carry them |
+| `meta` | Not shown — logical-only, never read from dbt |
 
 A column typed on only one stage is reported as **`undeclared`**, not as a type
 mismatch; writing `data_type:` into the schema yml, or running
@@ -398,6 +417,35 @@ named models, as a starting point for new model files. The `/erd-studio-setup` C
 skill uses both commands. It writes the files described in this reference with the
 assistant's normal Edit/Write tools, never through the helper, and runs `diff` until it is
 clean.
+
+## Editor Support (JSON Schemas)
+
+Each hand-editable file has a JSON Schema (draft-07) in [`schemas/`](../schemas). It gives completion, hover descriptions and warnings for undeclared properties and invalid values:
+
+| File | Schema |
+|------|--------|
+| `.erd-studio/{layer}/{domain}.json` | [`domain.schema.json`](../schemas/domain.schema.json) |
+| `.erd-studio/logical-models/[{folder}/]{name}.yml` | [`logical-model.schema.json`](../schemas/logical-model.schema.json) |
+| `.erd-studio/layers.json` | [`layers.schema.json`](../schemas/layers.schema.json) |
+| `.erd-studio/templates/{id}.json` | [`template.schema.json`](../schemas/template.schema.json) |
+
+**In VS Code** the extension associates them by path (`contributes.jsonValidation` / `yamlValidation`), so nothing needs to be added to your files. JSON validation is built into VS Code. YAML needs Red Hat's [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml). Domain files open in the diagram editor by default; use **Open With… → Text Editor** to edit one as JSON. Schema problems are warnings, never errors: the extension still loads what it can, as described above.
+
+The association uses the default `.erd-studio` directory. With a custom `erdStudio.semanticDir`, or in another editor, point at the schemas yourself. Either map them in settings (`json.schemas` / `yaml.schemas` in VS Code), or add a reference to the file. ERD Studio ignores the reference. Domain files keep a `$schema` key, and model files keep the comment, when the canvas saves them. `layers.json` is rewritten whenever layers are edited from the sidebar, which drops the key, so map that one in settings:
+
+```jsonc
+// domain / layers / template JSON: a top-level key
+{ "$schema": "https://raw.githubusercontent.com/liam-machine/erd-studio/main/schemas/domain.schema.json", "schemaVersion": 5, ... }
+```
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/liam-machine/erd-studio/main/schemas/logical-model.schema.json
+name: dim_customer
+```
+
+The schemas describe the current format (`schemaVersion` 5) and still accept a version 4 domain until it is migrated. A domain that mixes model names with inline model objects is flagged, because it does not open. The schemas are slightly stricter than the reader: a quoted `scdType: "1"` or `isPrimaryKey: yes` still loads, but is flagged, so hand edits end up in the form the canvas writes.
+
+Red Hat YAML matches paths with dot-folders skipped, so a project inside a hidden folder (`~/.work/shop/…`) gets no model validation from the built-in association; map it in `yaml.schemas` instead.
 
 ## Validation Rules
 

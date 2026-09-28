@@ -75,7 +75,7 @@ import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
-import { computeMissingPositions, toDisplayDomain } from '@erd-studio/core';
+import { computeMissingPositions, setMetaEntry, toDisplayDomain } from '@erd-studio/core';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import {
@@ -115,8 +115,8 @@ import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplayDomain } from '../types/display';
-import type { Rationale, Cardinality, ColumnDef, DesignModel, Stage } from '../types/semantic';
-import type { UpdateColumnPayloadColumn } from '../types/messages';
+import type { Rationale, Cardinality, ColumnDef, DesignModel, Meta, Stage } from '../types/semantic';
+import type { UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
@@ -282,6 +282,7 @@ import {
   validateColumnDefs,
   validateModelName,
   validateModelAliasPayload,
+  validateMetaPayload,
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
   validateAnnotationUpdate,
@@ -296,6 +297,7 @@ import {
   validateSubmitFeedbackPayload,
   type AnnotationPositionPayload,
 } from './payloadValidation';
+import { sameName } from '../types/naming';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -1228,6 +1230,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'updateMeta': {
+            const payload = (message as { payload?: UpdateMetaMessage['payload'] }).payload;
+            const metaError = validateMetaPayload(payload);
+            if (metaError || !payload) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update metadata: ${metaError ?? 'Missing payload.'}` } });
+              break;
+            }
+            await this.queueEdit(panelKey, () =>
+              this.handleUpdateMeta(webviewPanel.webview, document, payload));
+            break;
+          }
           case 'updateModelRole': {
             const payload = (message as { payload?: { modelName: string; modelRole: string | null } }).payload;
             if (payload) {
@@ -2081,17 +2094,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V5: create central model file + add name reference to domain
       if (this.isDomainV5(parsed)) {
         const modelNames = (section.models ?? []) as string[];
-        if (modelNames.includes(model.name)) {
-          webview.postMessage({ type: 'error', payload: { message: `Model "${model.name}" already exists in this domain.` } });
+        const inDomain = modelNames.find((n) => sameName(n, model.name));
+        if (inDomain !== undefined) {
+          webview.postMessage({ type: 'error', payload: { message: `Model "${inDomain}" already exists in this domain.` } });
           return;
         }
         // The model library is shared across domains — never overwrite a
-        // logical-models/{name}.yml that another domain may depend on.
-        if (this.logicalModelService.modelExists(model.name)) {
+        // logical-models/{name}.yml that another domain may depend on. Case is
+        // ignored: `DimDate` next to `dimdate.yml` is one file on macOS/Windows.
+        const inLibrary = this.logicalModelService.findModelNameIgnoringCase(model.name);
+        if (inLibrary !== null) {
           webview.postMessage({
             type: 'error',
             payload: {
-              message: `Model "${model.name}" already exists in the model library (${this.libraryRelativePath(model.name)}). ` +
+              message: `Model "${inLibrary}" already exists in the model library (${this.libraryRelativePath(inLibrary)}). ` +
                 'Use "Add Existing Model" to reference it in this domain, or, for a separate table also called ' +
                 `${model.name}, name the model ${sameTableName(model.name, document.uri.fsPath)} and set its Table name to ${model.name}.`,
             },
@@ -2147,7 +2163,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         (sec, p) => {
           const models = (sec.models ?? []) as Array<Record<string, unknown>>;
 
-          if (models.some((m) => m.name === model.name)) {
+          if (models.some((m) => typeof m.name === 'string' && sameName(m.name, model.name))) {
             webview.postMessage({
               type: 'error',
               payload: { message: `Model "${model.name}" already exists in this domain.` },
@@ -2219,7 +2235,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.isDomainV5(parsed)) {
         const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
           const columns = model.columns ?? [];
-          if (columns.some((c) => c.name === payload.column.name)) {
+          if (columns.some((c) => sameName(c.name, payload.column.name))) {
             throw new Error(`Column "${payload.column.name}" already exists.`);
           }
           columns.push({
@@ -2250,7 +2266,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
 
           const columns = (model.columns ?? []) as Array<Record<string, unknown>>;
-          if (columns.some((c) => c.name === payload.column.name)) {
+          if (columns.some((c) => typeof c.name === 'string' && sameName(c.name, payload.column.name))) {
             webview.postMessage({ type: 'error', payload: { message: `Column "${payload.column.name}" already exists.` } });
             throw new EditAborted();
           }
@@ -2309,7 +2325,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           const columns = model.columns ?? [];
           const columnIndex = columns.findIndex((c) => c.name === payload.oldColumnName);
           if (columnIndex === -1) throw new Error(`Column "${payload.oldColumnName}" not found.`);
-          if (columnRenamed && columns.some((c) => c.name === payload.column.name)) {
+          if (columnRenamed && columns.some((c, i) => i !== columnIndex && sameName(c.name, payload.column.name))) {
             throw new Error(`Column "${payload.column.name}" already exists.`);
           }
           const existing = columns[columnIndex];
@@ -2325,6 +2341,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             ...(payload.column.isNaturalKey ?? existing.isNaturalKey ? { isNaturalKey: true } : {}),
             ...(newScd != null ? { scdType: newScd } : {}),
             ...(newAdditive ? { additiveType: newAdditive } : {}),
+            // Metadata is edited by `updateMeta` only; a column edit carries it across.
+            ...(existing.meta ? { meta: existing.meta } : {}),
           } as ColumnDef;
         }, domainMutator);
         if (!ok) {
@@ -2352,7 +2370,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
 
           if (payload.oldColumnName !== payload.column.name) {
-            if (columns.some((c) => c.name === payload.column.name)) {
+            if (columns.some((c, i) => i !== columnIndex && typeof c.name === 'string' && sameName(c.name, payload.column.name))) {
               webview.postMessage({ type: 'error', payload: { message: `Column "${payload.column.name}" already exists.` } });
               throw new EditAborted();
             }
@@ -2679,18 +2697,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       // V5: rename central model file + update domain references
       if (this.isDomainV5(parsed)) {
+        // A case-only rename (`dimdate` → `DimDate`) is refused: on macOS and
+        // Windows the new file IS the old one, and the rename's write-new +
+        // delete-old edit would delete the model.
+        if (sameName(trimmedNew, payload.oldName)) {
+          webview.postMessage({
+            type: 'error',
+            payload: {
+              message: `"${trimmedNew}" differs from "${payload.oldName}" only in upper/lower case, which cannot be renamed in place. ` +
+                'Rename it to a different name first, then to the one you want.',
+            },
+          });
+          return;
+        }
         const currentNames = (section.models ?? []) as string[];
-        if (currentNames.includes(trimmedNew)) {
-          webview.postMessage({ type: 'error', payload: { message: `Model "${trimmedNew}" already exists in this domain.` } });
+        const inDomain = currentNames.find((n) => sameName(n, trimmedNew));
+        if (inDomain !== undefined) {
+          webview.postMessage({ type: 'error', payload: { message: `Model "${inDomain}" already exists in this domain.` } });
           return;
         }
         // The model library is shared across domains — renaming onto an
         // existing yml would silently replace another domain's model.
-        if (this.logicalModelService.modelExists(trimmedNew)) {
+        const inLibrary = this.logicalModelService.findModelNameIgnoringCase(trimmedNew);
+        if (inLibrary !== null) {
           webview.postMessage({
             type: 'error',
             payload: {
-              message: `Model "${trimmedNew}" already exists in the model library (${this.libraryRelativePath(trimmedNew)}). ` +
+              message: `Model "${inLibrary}" already exists in the model library (${this.libraryRelativePath(inLibrary)}). ` +
                 'Choose a different name, or use "Add Existing Model" to reference it in this domain.',
             },
           });
@@ -2755,7 +2788,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             webview.postMessage({ type: 'error', payload: { message: `Model "${payload.oldName}" not found.` } });
             throw new EditAborted();
           }
-          if (models.some((m) => m.name === trimmedNew)) {
+          if (models.some((m) => m !== model && typeof m.name === 'string' && sameName(m.name, trimmedNew))) {
             webview.postMessage({ type: 'error', payload: { message: `Model "${trimmedNew}" already exists in this domain.` } });
             throw new EditAborted();
           }
@@ -3757,6 +3790,48 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Update alias failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update table name: ${message}` } });
+    }
+  }
+
+  /**
+   * Patch a model's or a column's `meta`. Only top-level keys are touched —
+   * `set` writes text values, `remove` deletes keys — so nested maps and lists
+   * the canvas only displays are carried across as they are. Like `alias`, it
+   * lives only in the model file (v5).
+   */
+  private async handleUpdateMeta(
+    webview: vscode.Webview,
+    document: vscode.TextDocument,
+    payload: UpdateMetaMessage['payload'],
+  ): Promise<void> {
+    try {
+      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      if (!this.isDomainV5(parsed)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Metadata needs the model library: run "ERD Studio: Migrate Domain to v5" first.' },
+        });
+        return;
+      }
+      const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        let target: { meta?: Meta } = model;
+        if (payload.columnName !== undefined) {
+          const column = model.columns?.find((c) => c.name === payload.columnName);
+          if (!column) throw new Error(`Column "${payload.columnName}" not found.`);
+          target = column;
+        }
+        const meta: Meta = { ...(target.meta ?? {}) };
+        for (const key of payload.remove ?? []) delete meta[key];
+        for (const [key, value] of Object.entries(payload.set ?? {})) setMetaEntry(meta, key, value);
+        if (Object.keys(meta).length > 0) { target.meta = meta; } else { delete target.meta; }
+      });
+      if (!ok) {
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to update metadata.' } });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update meta failed: ${message}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to update metadata: ${message}` } });
     }
   }
 

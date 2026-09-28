@@ -7,6 +7,8 @@ export type {
   Layer,
   Stage,
   ColumnDef,
+  Meta,
+  MetaValue,
   ModelRole,
   Rationale,
   SemanticModel,

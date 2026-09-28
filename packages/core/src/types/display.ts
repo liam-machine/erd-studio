@@ -7,7 +7,7 @@
  * directly from its data source.
  */
 
-import type { Cardinality, Layer, ModelRole, ModelTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
+import type { Cardinality, Layer, Meta, ModelRole, ModelTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
 import type { LayerConfig } from './layer.js';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,8 @@ export interface DisplayColumn {
   isNaturalKey: boolean;
   scdType?: 0 | 1 | 2;
   additiveType?: 'additive' | 'semi-additive' | 'non-additive';
+  /** Structured metadata from the model file (logical stage only). */
+  meta?: Meta;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +96,8 @@ export interface DisplayModel {
   rationale?: Rationale;
   grain?: string;
   modelRole?: ModelRole;
+  /** Structured metadata from the model file (logical stage only). */
+  meta?: Meta;
   /**
    * True when the model was found in the dbt project — a .sql/.py/.csv file
    * under model/seed/snapshot paths, a schema .yml declaration, a manifest node,

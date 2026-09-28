@@ -79,7 +79,7 @@ The getting-started video is **not** built by any npm script: it is regenerated 
 
 Tests use vitest with `vscode` module aliased to `test/__mocks__/vscode.ts` (a stateful mock: `inspect()`-backed configuration via `_setMockConfiguration`, in-memory `WorkspaceEdit`/`applyEdit`, command registry that throws on duplicate ids, `_simulateMessage` for webview messages). `vitest.config.ts` mirrors two esbuild settings — an `md-text` transform plugin (a `.md` import is its text) and the `__ERD_CLI_VERSION__` define — so harness and CLI code runs unbundled. `test/globalSetup.ts` builds `dist/manifestWorker.js` before the run so manifest tests pass on a fresh clone. Fixture dbt projects live in `test/fixtures/` (`dbt-project` is the main one; `dbt-project-modern-tests` covers `data_tests:` / `arguments:` / versioned refs; the `-empty-manifest`, `-malformed`, `-sparse`, `-zero-byte` variants cover manifest edge cases).
 
-CI (`.github/workflows/ci.yml`) runs on every PR: `npm audit --omit=dev --audit-level=high`, compile, build, a **CLI smoke test** (`doctor --no-dbt` must exit 0; `diff --all` may exit 1 for drift but never 2–4), test, package, and fails if `vsce ls --no-dependencies` lists more than 60 files. A second job type-checks, builds and smoke-tests `mcp-server/` (which imports `src/services/*` and bundles `src/workers/manifestWorker.ts` — an accidental `import 'vscode'` in a shared service fails there).
+CI (`.github/workflows/ci.yml`) runs on every PR into `main` or `develop` and on every push to `develop` (i.e. after each merge there): `npm audit --omit=dev --audit-level=high`, compile, build, a **CLI smoke test** (`doctor --no-dbt` must exit 0; `diff --all` may exit 1 for drift but never 2–4), test, package, and fails if `vsce ls --no-dependencies` lists more than 60 files. A second job type-checks, builds and smoke-tests `mcp-server/` (which imports `src/services/*` and bundles `src/workers/manifestWorker.ts` — an accidental `import 'vscode'` in a shared service fails there).
 
 ## Architecture
 
@@ -272,7 +272,8 @@ Onboarding for a beginner who has a dbt project and an AI coding assistant — *
 - ELK worker code is injected at build time via `define` — VS Code webviews cannot use `importScripts()`
 - Stage switching sends `switchStage`; the extension responds with `stageData` (physical is derived on demand, never persisted; positions inherited from logical)
 - Mutation handlers target model bodies through `applyModelEdit` (v5 yml) and `parsed.logical.models` / `.relationships` in the domain file; `updateColumn` treats omitted `scdType`/`additiveType` as "keep" and `null` as "clear"
-- Model names must match `MODEL_NAME_PATTERN` (`/^[a-z][a-z0-9_]*$/`); Add/Rename refuse names already present in the model library
+- `meta` (on a model and on each column, dbt-style) is the user's free-form map: `LogicalModelService.syncMeta` writes only the top-level key that changed, matching keys as the parser reads them (never via `YAMLMap.get/set`), and leaves comments, unquoted numbers, nested values and aliases as written. The canvas edits it only through `updateMeta` patches (`set` text values / `remove` keys, v5 only); nested values are display-only. It is never compared, diffed or synced to dbt, and the physical stage does not read dbt's `meta:`
+- Model names must match `MODEL_NAME_PATTERN` (`/^[A-Za-z][A-Za-z0-9_]*$/`) and column names `COLUMN_NAME_PATTERN` (`/^[A-Za-z0-9_]+$/`) — either case (issue #93). Every uniqueness check compares with `sameName()` (`src/types/naming.ts`, case-insensitive): Add/Rename refuse a name already in the domain or the model library in any case (`LogicalModelService.findModelNameIgnoringCase` lists files rather than trusting `existsSync`, which is case-sensitive on Linux), and a case-only model rename is refused because the write-new + delete-old edit would delete the file on macOS/Windows. The renderer keeps its own copies of both regexes (it cannot import `src/`)
 - `SelectorsService` only owns `domain_*` selectors whose description ends with `Managed by ERD Studio.`; everything else in `selectors.yml` is preserved
 - Host `error` messages render as a dismissable toast over a live canvas; the full-screen error page (with Retry / Send Feedback) is reserved for initial-load failure
 - Put user-facing release notes under `## Unreleased` in `CHANGELOG.md` as part of every PR (the deploy workflow stamps the version)
@@ -307,7 +308,7 @@ Discrepancy statuses for models/columns/relationships: `matched`, `extra`, `miss
 AI coding harness files (installed via `erdStudio.installCodingHarness`) embed a version marker to track staleness:
 
 ```
-<!-- erd-studio-harness: 21 -->
+<!-- erd-studio-harness: 22 -->
 ```
 
 **Key components in `src/services/harnessService.ts`:**

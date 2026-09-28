@@ -22,7 +22,8 @@ import {
 import { MODEL_NAME_PATTERN } from '../../src/types/naming';
 
 describe('validateModelName', () => {
-  it.each(['dim_customer', 'fct_order_2', 'a'])('accepts %j', (name) => {
+  // Either case is allowed (issue #93): PascalCase modellers write DimDate.
+  it.each(['dim_customer', 'fct_order_2', 'a', 'DimDate', 'D_Date', 'Dim_Customer', 'X'])('accepts %j', (name) => {
     expect(validateModelName(name)).toBeNull();
   });
 
@@ -36,8 +37,9 @@ describe('validateModelName', () => {
     ['a\\b', /path separators/],
     ['..', /path separators/],
     ['1abc', /start with a letter/],
-    ['Dim_Customer', /start with a letter/],
     ['dim-customer', /start with a letter/],
+    ['Dim Date', /start with a letter/],
+    ['_dim', /start with a letter/],
     ['', /empty/],
     ['   ', /empty/],
   ])('rejects %j', (name, pattern) => {
@@ -50,7 +52,7 @@ describe('validateModelName', () => {
   });
 
   it('agrees with the shared MODEL_NAME_PATTERN used by the New Model dialog', () => {
-    for (const name of ['dim_ok', '1bad', 'Bad', 'has-dash']) {
+    for (const name of ['dim_ok', '1bad', 'Bad', 'DimDate', 'has-dash', 'Has Space']) {
       expect(validateModelName(name) === null).toBe(MODEL_NAME_PATTERN.test(name));
     }
   });
@@ -136,7 +138,8 @@ describe('validateColumnDef / validateColumnDefs', () => {
 
   it('rejects missing name, bad name, and missing data type', () => {
     expect(validateColumnDef({ name: '', dataType: 'int' })).toMatch(/name is required/);
-    expect(validateColumnDef({ name: 'Bad Name', dataType: 'int' })).toMatch(/lowercase/);
+    expect(validateColumnDef({ name: 'Bad Name', dataType: 'int' })).toMatch(/only letters, numbers, and underscores/);
+    expect(validateColumnDef({ name: 'bad-name', dataType: 'int' })).toMatch(/only letters, numbers, and underscores/);
     expect(validateColumnDef({ name: 'id', dataType: '' })).toMatch(/Data type/);
     expect(validateColumnDef(null)).toMatch(/required/);
   });
@@ -150,6 +153,19 @@ describe('validateColumnDef / validateColumnDefs', () => {
     expect(error).toMatch(/Duplicate column name "name"/);
   });
 
+  it('accepts mixed-case column names (issue #93)', () => {
+    for (const name of ['DateKey', 'Date', 'D_Date_SK', 'YearMonth', '2nd_line']) {
+      expect(validateColumnDef({ name, dataType: 'int' })).toBeNull();
+    }
+  });
+
+  it('treats column names that differ only in case as duplicates', () => {
+    expect(validateColumnDefs([
+      { name: 'DateKey', dataType: 'string' },
+      { name: 'datekey', dataType: 'string' },
+    ])).toMatch(/Duplicate column name "datekey"/);
+  });
+
   it('accepts a list with unique names and rejects non-arrays', () => {
     expect(validateColumnDefs([{ name: 'a', dataType: 'int' }, { name: 'b', dataType: 'int' }])).toBeNull();
     expect(validateColumnDefs([])).toBeNull();
@@ -159,6 +175,12 @@ describe('validateColumnDef / validateColumnDefs', () => {
   it('findDuplicateNames ignores blanks and reports each duplicate once', () => {
     expect(findDuplicateNames(['a', '', 'b', 'a', ' a ', 'b', ''])).toEqual(['a', 'b']);
     expect(findDuplicateNames(['x', 'y'])).toEqual([]);
+  });
+
+  it('findDuplicateNames ignores case and lists every spelling in a clash', () => {
+    // Both rows are flagged, so the New Model dialog outlines each of them.
+    expect(findDuplicateNames(['Date', 'DateKey', 'date'])).toEqual(['Date', 'date']);
+    expect(findDuplicateNames(['DateKey', 'Date'])).toEqual([]);
   });
 });
 
