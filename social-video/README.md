@@ -14,7 +14,7 @@ names (`erd-studio-explainer[-simple].*`). Both cuts share the player, `lib.js`,
 music, and the `stars` and `endCard` scenes (a script can pass `props`, e.g. the end card's
 tagline). The finished renders are committed in `renders/` (see below).
 
-It is the getting-started video's pipeline (same Kokoro `af_heart` voice, same synthesised
+It is the getting-started video's pipeline ([`../video/`](../video/README.md): same Kokoro `af_heart` voice, same synthesised
 underscore `music/synth_music.py`, same pure `render(t)` player captured frame by frame with
 Playwright), re-laid out for a phone feed:
 
@@ -34,7 +34,7 @@ uses (tables, YAML, JSON, drift, PR) is `STORY` in `player/lib.js`, in the real 
 
 ## Render
 
-Prerequisites are the same as the getting-started video (ffmpeg 7 with libx264, Node 18+,
+Prerequisites are the same as the getting-started video in [`../video/`](../video/README.md) (ffmpeg 7 with libx264, Node 18+,
 `npm install` + `npx playwright install chromium`, `uv`, the Kokoro model files in
 `build/models/` or `KOKORO_MODEL_DIR`).
 
