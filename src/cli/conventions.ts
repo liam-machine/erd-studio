@@ -20,6 +20,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { parse as parseYaml } from 'yaml';
+import type { Meta } from '@erd-studio/core';
+import { detectMetaConventions, type MetaConventions } from './metaConventions';
 
 export type LayeringStyle = 'medallion' | 'dbt-layered' | 'none';
 export type ShapeStyle = 'kimball' | 'data-vault' | 'one-big-table' | 'activity-schema' | 'inmon-3nf' | 'none';
@@ -47,6 +49,8 @@ export interface ProjectConventions {
     sources: ShapeSource[];
   };
   history: { snapshots: string[] };
+  /** The dbt `meta:` keys the project records — see `./metaConventions.ts`. */
+  meta: MetaConventions;
 }
 
 /** What detection needs to know about one model. */
@@ -59,7 +63,9 @@ export interface ConventionModel {
   /** Model description (yml → manifest → catalog comment). */
   description?: string;
   /** Columns with type and description, when known (structure and column wording need them). */
-  columns?: ReadonlyArray<{ name: string; dataType?: string; description?: string }>;
+  columns?: ReadonlyArray<{ name: string; dataType?: string; description?: string; meta?: Meta }>;
+  /** dbt `meta:` on the model. */
+  meta?: Meta;
   /** Columns with a `unique` test (a key the model is identified by). */
   uniqueKeys?: readonly string[];
 }
@@ -737,6 +743,7 @@ export function detectConventions(input: ConventionInput): ProjectConventions {
     layering: detectLayering(input.models),
     shape: detectShape(input, snapshots),
     history: { snapshots },
+    meta: detectMetaConventions(input.models),
   };
 }
 

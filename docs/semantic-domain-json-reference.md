@@ -44,6 +44,8 @@ An **optional**, free-form markdown file recording how the team models data: the
 
 It is guidance for AI assistants only. **The extension never parses it**: it is not a domain, a layer or a model, the canvas and the diff ignore it, and a project without one is valid. AI assistants editing ERD Studio files should read it first when it exists and follow it (the harness skill says so); where a rule conflicts with a request, they should say so and ask which wins. An optional **Target-design backlog** section lists improvements the team wants in the dbt project; differences between logical and physical listed there are intentional, and assistants report them as backlog items instead of "fixing" them. The logical fields still describe what dbt does today — a target that no diff can show (history, keys, grain) is kept in `rationale` and the backlog, not in `scdType` / key flags, because the physical stage copies those flags from logical.
 
+An optional **Metadata** section is the team's **metadata list**: the `meta` keys the team records, as a table of **Key**, **On** (models, columns or both), **Values** and **Source** — `dbt` (copied from the dbt model's own `meta:`, never typed in, left out when dbt has no value) or `the team` (filled in by people, never by an AI). Assistants use its key names exactly — a user's "data owner" becomes the listed `owner` — and copy the `dbt` keys whenever they create a model or add a column from dbt, including from a sync plan. The setup guide writes the section after detecting the keys dbt already records (`erd-studio inventory`'s `conventions.meta`) and one yes from the user. A file holding only a title and this section is valid: no technique agreed yet, so the guide still detects the style.
+
 ## Domain File (`.erd-studio/{layer}/{domain}.json`)
 
 ### Top-Level Schema
@@ -187,7 +189,9 @@ Optional map on a model and on any column, named after and shaped like dbt's `me
 - **Never compared with dbt.** `meta` is logical-only: the physical stage does not read dbt's `meta:`, and discrepancy reports, `erd-studio diff` and sync plans ignore it.
 - **Canvas.** The Detail panel's **Metadata** section (for the model, and inside each expanded column row) lists every entry. Top-level text values can be added, edited and removed there; nested maps, lists, booleans and `null` are shown read-only — edit them in the file.
 - **Writes are surgical.** A canvas edit rewrites only the top-level key that changed; comments, unquoted numbers, nested values and aliases elsewhere in `meta` stay byte-identical. Removing the last key removes `meta`.
-- **AI assistants** keep every existing entry and add or change only the keys the user asks for.
+- **Hover.** On the canvas, hovering a model's name lists its `meta`; hovering a column shows the column's under its description.
+- **AI assistants** keep every existing entry. With a team metadata list (a `## Metadata` section in `modelling-approach.md`, above) they follow it; without one they add or change only the keys the user asks for and never copy dbt's `meta:` unasked.
+- **dbt's own `meta:`** is read only by `erd-studio inventory` — `models[].meta` / `columns[].meta` (the schema yml over the manifest per key, and `config: meta:` over `meta:`, as dbt merges them) plus the project-wide `conventions.meta` summary of keys, counts, kinds and examples — so the setup guide can offer to carry it across. The physical stage still never shows or compares it.
 
 ## Relationships (`logical.relationships`)
 

@@ -10,12 +10,16 @@
  * current — no `dbt compile` required.
  */
 
+import type { Meta } from './semantic';
+
 /** Column metadata from a dbt schema .yml file. */
 export interface YmlColumn {
   name: string;
   description: string;
   /** Often null — dbt .yml files rarely declare data_type on every column. */
   dataType: string | null;
+  /** dbt `meta:` (merged with `config: meta:`), when non-empty. CLI inventory only. */
+  meta?: Meta;
 }
 
 /**
@@ -56,6 +60,8 @@ export interface YmlModelInfo {
   filePath: string;
   /** Tags from config.tags (e.g. ["silver", "domain:showcase"]) */
   tags: string[];
+  /** dbt `meta:` (merged with `config: meta:`), when non-empty. CLI inventory only. */
+  meta?: Meta;
 }
 
 /**
