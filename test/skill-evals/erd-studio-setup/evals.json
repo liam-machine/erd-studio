@@ -1,0 +1,372 @@
+{
+  "skill_name": "erd-studio-setup",
+  "evals": [
+    {
+      "id": 1,
+      "name": "beginner-no-dbt",
+      "fixture": "test/fixtures/dbt-project-modern-tests",
+      "setup": "Copy the fixture to a temp dir. Run with a PATH that has no dbt on it and no .venv in the project. Helper installed.",
+      "prompt": "/erd-studio-setup\n\nhi! total beginner here. my team lead said to install this ERD Studio thing and point it at our dbt repo so I can see how the tables connect. I don't think I even have dbt installed on this laptop, is that a problem?",
+      "expected_output": "A warm, plain-English walkthrough that explains dbt is optional, asks one question about where dbt might be installed, then carries on from the project files alone. It proposes one default domain from the schema.yml models (dim_customer, dim_product, fct_orders, fct_shipments), writes logical-models yml files and a domain JSON whose relationships are copied from the inventory, runs the diff and reports an honest result.",
+      "files": [],
+      "expectations": [
+        "Explains that dbt is optional for ERD Studio before or alongside any install instructions",
+        "Asks the user to paste the output of `which dbt` / `where dbt` from their usual environment before giving install steps",
+        "Does not run any dbt install command without the user agreeing",
+        "Defines 'domain' and 'layer' in plain language before asking the user to choose",
+        "Proposes one concrete default domain the user can accept with 'yes'",
+        "Asks at most one question per message",
+        "Writes a domain JSON with schemaVersion 5 whose logical.relationships match the inventory relationships exactly",
+        "Does not paste raw JSON output from the helper at the user",
+        "Runs `erd-studio diff` after writing the files and reports the result using the diff counts"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 2,
+      "name": "venv-dbt-core",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Create .venv/bin/dbt as a stub script: `--version` prints a dbt Core 1.9.4 block (Core: / - installed: 1.9.4 / Plugins: / - duckdb: 1.9.1); `parse` touches target/manifest.json and exits 0; `docs generate` exits 0. Put a minimal ~/.dbt/profiles.yml with profile 'test' in a temp HOME.",
+      "prompt": "/erd-studio-setup orders\n\nwe use dbt core, it's in a .venv in the repo. can you get the orders stuff into an ERD for me?",
+      "expected_output": "Recognises dbt Core 1.x in .venv, explains manifest vs catalog, runs `.venv/bin/dbt parse` by path (no activation), uses 'orders' from $ARGUMENTS without asking for a business area, writes logical models for the order-related models and a domain, runs the diff, fixes any drift on session-created models automatically, and finishes with a success line based on the diff counts.",
+      "files": [],
+      "expectations": [
+        "Reports that dbt Core 1.x was found in .venv",
+        "Runs dbt through the venv path (e.g. `.venv/bin/dbt parse`) rather than `source .venv/bin/activate && dbt ...`",
+        "Narrates each command in one sentence before running it",
+        "Does not ask which business area to model, because 'orders' was given as an argument",
+        "Invokes the /erd-studio skill before writing any .erd-studio file",
+        "Warns in advance about the one-time safety check that pauses the first .erd-studio write",
+        "Never runs `dbt run`, `dbt build`, `dbt seed` or `dbt snapshot`",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)",
+        "Shows the numbered 1-6 progress checklist at stage boundaries"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 3,
+      "name": "fusion",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete .erd-studio/ and target/catalog.json. Put a stub `dbt` on PATH whose `--version` prints `dbt-fusion 2.0.0-preview.92`; `parse` exits 0; `compile --write-catalog` exits 0. Minimal profiles.yml with profile 'test'.",
+      "prompt": "Can you set up ERD Studio for this project? We just moved to the new dbt Fusion engine, `dbt --version` says dbt-fusion 2.0.0-preview.",
+      "expected_output": "The skill triggers without the slash command. It identifies dbt Fusion, explains it briefly, and when offering the catalog uses `dbt compile --write-catalog` (not `dbt docs generate`), warning that it connects to the warehouse. Continues through domain selection, writing and a diff.",
+      "files": [],
+      "expectations": [
+        "Uses the erd-studio-setup workflow even though the user did not type /erd-studio-setup",
+        "Identifies the installation as dbt Fusion (2.x) and explains it in plain language",
+        "Offers `dbt compile --write-catalog` as the catalog command, not `dbt docs generate`",
+        "Warns that the catalog command connects to the warehouse before running it",
+        "Offers to skip the catalog and continue if the user prefers"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 4,
+      "name": "cloud-cli",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete .erd-studio/ and target/. Put a stub `dbt` on PATH whose `--version` prints `dbt Cloud CLI - 0.40.14 (abc123 2025-01-01)`; any other command prints an authentication error and exits 1. No profiles.yml anywhere.",
+      "prompt": "/erd-studio-setup\n\nheads up, we run everything through dbt Cloud. I only have the cloud CLI on my machine and no profiles.yml, not sure if that matters.",
+      "expected_output": "Explains the Cloud CLI runs on dbt's servers and uses dbt_cloud.yml, not profiles.yml, so it does not ask for a profiles.yml. Offers continuing from project files (default) or installing dbt Core locally, then builds a domain from the yml and sql files and verifies it with the diff despite the missing manifest.",
+      "files": [],
+      "expectations": [
+        "Does not tell the user to create a profiles.yml",
+        "Explains that the Cloud CLI runs remotely and local manifest/catalog files may not appear",
+        "Offers to continue from the project files alone as the default route",
+        "If a dbt command fails, quotes only the key error line rather than the full log",
+        "Still writes a domain and runs `erd-studio diff` on it"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 5,
+      "name": "existing-user-with-logical-models",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture as-is (it already has .erd-studio/logical-models/*.yml, several domains, and some v4 domain files). Keep target/manifest.json and target/catalog.json. Stub dbt Core on PATH.",
+      "prompt": "I've been using ERD Studio for a few months and already have a bunch of logical models. Can you reverse-engineer the rest of my dbt models into a new domain and check everything lines up with dbt? Please don't mess with my existing designs.",
+      "expected_output": "Notices existing logical models and says they will not be changed without asking. Suggests migrating the older-format domains. References existing logical-models yml files by name without rewriting them. When the diff reports drift on pre-existing models, groups it into one plain-English summary and asks once (default: match dbt). Session-created models are fixed automatically.",
+      "files": [],
+      "expectations": [
+        "States early that existing logical models will not be changed without asking",
+        "Mentions that some existing domains use an older format and suggests 'ERD Studio: Migrate to v5'",
+        "Does not overwrite any logical-models/*.yml file that existed before the session unless the user agreed",
+        "Asks a single grouped question about drift on pre-existing models, recommending 'keep' because the user asked not to change their existing designs (the usual default is 'match dbt')",
+        "Never deletes a logical-models/*.yml file",
+        "Does not clear or rewrite viewConfig.positions in any existing domain file"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 6,
+      "name": "thin-project-sql-only",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir, then delete target/, .erd-studio/, and every models/**/*.yml so only the .sql files remain (dim_project, dim_region, dim_task, fct_sale, fct_task_event). No dbt on PATH.",
+      "prompt": "/erd-studio-setup\n\nour dbt project is pretty bare bones honestly, it's just sql files, we never got round to writing the yml docs. will this still work?",
+      "expected_output": "Explains plainly that dbt does not list these columns anywhere yet. Offers, in order: running the catalog (not possible here - no dbt), drafting columns from each model's final SELECT marked '(draft)' with types to confirm, and opt-in relationship tests. The final report does not claim a full match and says how many models have no column information in dbt.",
+      "files": [],
+      "expectations": [
+        "Explains in plain language that dbt has no column information for these models yet",
+        "Offers drafting columns from the SQL SELECT list, marking them '(draft)'",
+        "Lists drafted or guessed column types under a 'types to confirm' heading or list",
+        "Asks before adding any relationships tests to dbt yml files (opt-in), and uses `severity: warn` if it adds them",
+        "Does not invent relationships in the domain JSON that no dbt relationships test declares",
+        "The final summary says how many models have no column information in dbt, rather than claiming everything matches"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 7,
+      "name": "modelling-kimball",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. WebSearch/WebFetch available.",
+      "prompt": "/erd-studio-setup orders\n\nWe follow Kimball — star schemas, conformed dimensions, and we keep customer history.",
+      "expected_output": "Uses the Kimball description the user already gave instead of confirming the detected style (its words beat the detection). Narrates a lookup of Kimball's standards (kimballgroup.com or dbt docs) or says it is using ERD Studio's bundled summary, plays back 3-6 concrete rules and asks 'Sound right?'. Saves .erd-studio/modelling-approach.md with the user's words quoted verbatim, the rules, the field mapping, sources and date. Model yml files carry modelRole (valid values only), grain, isNaturalKey/additiveType where they apply and a rationale citing the approach, while columns, types, keys and relationships still match dbt so the diff is clean. After the diff, a conformance review notes that dim_customer does not keep history today and offers keep-in-sync (default) or target design.",
+      "files": [],
+      "expectations": [
+        "Does not ask the user to confirm a detected style or how the team models data, because the user already described it; plays their description back instead",
+        "Names the source used for the rules (a URL such as kimballgroup.com / docs.getdbt.com, or 'ERD Studio's bundled summary')",
+        "Plays back between 3 and 6 concrete rule bullets and asks for confirmation with a yes default",
+        "Writes .erd-studio/modelling-approach.md containing the user's sentence verbatim in quotes, a rules list, a field-mapping section, sources and a date",
+        "Every modelRole written is one of conformed-dim, domain-dim, transaction-fact, periodic-snapshot, accumulating-snapshot, factless-fact, reference, gold-fact, gold-dim",
+        "fct_order.yml has a grain and modelRole transaction-fact; dim_customer.yml has modelRole conformed-dim",
+        "Does not add, rename or remove any column or relationship because of the approach",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)",
+        "Runs a conformance review after the clean diff, offering keep-in-sync as the default and describing target design as intentional differences",
+        "Does not write scdType: 2 on dim_customer columns unless the dbt model actually keeps history (snapshot or validity columns)",
+        "customer_id on dim_customer carries isNaturalKey: true (the source system's key, also the PK); email is not flagged as a natural key",
+        "The target-design offer says history, key and grain targets are recorded in the backlog and rationale, not in scdType or the key flags"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "modelling-data-vault",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed.",
+      "prompt": "/erd-studio-setup\n\n(When the skill states the modelling style it detected and asks 'Sound right?', answer instead: \"Data Vault 2.0 — hubs, links and satellites in the raw vault, with Kimball-style information marts on top.\")",
+      "expected_output": "Detects a medallion layout (silver, gold) with Kimball-style marts from the project and confirms it in one sentence with the evidence and a yes default. The user overrides it in their own words; the skill identifies Data Vault 2.0 plus Kimball marts, looks the standard up or uses the bundled summary, and plays back the rules. Explains once that ERD Studio's model roles are dimensional, so vault tables would get the closest role with the vault type recorded in rationale.roleChoice. Because this project's models are fct_/dim_ marts, it applies the Kimball mart mapping and the conformance review notes the vault layer is not in this domain.",
+      "files": [],
+      "expectations": [
+        "Confirms the detected style (medallion silver → gold, Kimball-style dim_/fct_ tables) in one sentence with evidence and a yes default, alone in its message — never an open 'how do you model data?' question",
+        "Accepts the user's override in their own words and follows it instead of the detected style",
+        "Identifies both Data Vault 2.0 and Kimball information marts in the answer",
+        "Explains that hubs/links/satellites have no exact ERD Studio role and says how they would be recorded (closest modelRole plus rationale.roleChoice)",
+        "Never writes a modelRole value outside the nine valid values (no 'hub', 'link' or 'satellite')",
+        "Saves .erd-studio/modelling-approach.md naming Data Vault 2.0 and the mart style",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "modelling-not-sure",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project-modern-tests",
+      "setup": "Copy the fixture to a temp dir. No dbt on PATH. Helper installed. No web tools (deny WebSearch/WebFetch).",
+      "prompt": "/erd-studio-setup\n\n(When the skill states the modelling style it detected, answer: \"not sure, whatever you think\".)",
+      "expected_output": "Detects Kimball-style marts from the dim_/fct_ names (no layering: only a marts folder) and confirms it with the evidence and a yes default. On 'not sure' it goes with the detected style. With no web tool it says it is using ERD Studio's bundled summary. Plays back the rules, saves the approach file and applies it without creating drift.",
+      "files": [],
+      "expectations": [
+        "States the detected style (Kimball, from dim_customer/dim_product and fct_orders/fct_shipments) with its evidence before any rules, and does not ask an open question about how the team models data",
+        "Treats 'not sure' as a yes to the detected style, without a second question about it",
+        "Says it is using ERD Studio's bundled summary rather than a web source, and does not stall on the lookup",
+        "Plays back the rules and asks 'Sound right?' (or equivalent) with a yes default",
+        "Saves .erd-studio/modelling-approach.md recording the detection evidence and that the user was not sure",
+        "The step-3 checklist line reads 'Choose a business area and modelling style'",
+        "Asks at most one question per message"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "modelling-custom-house-rules",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed.",
+      "prompt": "/erd-studio-setup\n\n(When the skill states the modelling style it detected, answer instead: \"Our own rules: every table has a surrogate key called <table>_sk, money is stored in cents as integers, facts are named fct_<process>, and we never snowflake dimensions.\")",
+      "expected_output": "Records the house rules verbatim and turns each into a concrete rule, asking at most one clarifying question. Maps what it can to ERD Studio fields (roles from fct_/dim_ names, additiveType on amounts) and says the naming and key rules are checked in the review only. The diff stays clean; the conformance review lists tables without a <table>_sk column and money columns that are not integers as suggestions, with keep-in-sync as the default and no columns renamed.",
+      "files": [],
+      "expectations": [
+        "Quotes the user's rules verbatim in .erd-studio/modelling-approach.md",
+        "Asks at most one clarifying question about the rules",
+        "Does not rename any column to <table>_sk or add a surrogate-key column while building the model",
+        "The final `erd-studio diff` for the new domain exits 0 (clean) unless the user chose target design",
+        "The conformance review lists departures from the house rules as plain-English suggestions and offers (a) keep in sync (default) or (b) target design",
+        "If the user picks target design, says explicitly that the remaining differences are intentional and lists them as a backlog without running the fix loop on them"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "harness-codex",
+      "harness": "codex",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Install the skills into .agents/skills/ only (erd-studio and erd-studio-setup, Agent Skills frontmatter). No .claude/ folder. Run in Codex CLI.",
+      "prompt": "$erd-studio-setup orders",
+      "expected_output": "Codex picks up the skill from .agents/skills/, reads .agents/skills/erd-studio/SKILL.md for the format rules (no /erd-studio slash command), never mentions Shift+Tab, accept-edits mode or the Claude Code safety-check hook, and completes the walkthrough to a clean diff.",
+      "files": [],
+      "expectations": [
+        "Loads the format rules by reading .agents/skills/erd-studio/SKILL.md",
+        "Does not tell the user to type /erd-studio or /erd-studio-setup; any re-run hint uses $erd-studio-setup",
+        "Does not mention Shift+Tab, 'accept edits on', plan mode or the one-time safety check",
+        "Asks the modelling-style question and saves .erd-studio/modelling-approach.md",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "harness-gemini-plain-sentence",
+      "harness": "gemini-cli",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Install the skills into .agents/skills/ only. Run in Gemini CLI (approve the skill activation prompt).",
+      "prompt": "Set up ERD Studio for this dbt project",
+      "expected_output": "Gemini CLI activates the erd-studio-setup skill from its description, reads the schema skill file from .agents/skills/erd-studio/, and completes the walkthrough without referring to slash commands.",
+      "files": [],
+      "expectations": [
+        "The erd-studio-setup skill is activated from the plain sentence",
+        "Loads the format rules by reading .agents/skills/erd-studio/SKILL.md",
+        "Never tells the user to type a slash command; a re-run hint is phrased as a sentence",
+        "Narrates each command in one sentence before running it",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "harness-copilot",
+      "harness": "github-copilot",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Install the skills into .agents/skills/ only. Run in VS Code Copilot Chat agent mode (or Copilot CLI).",
+      "prompt": "/erd-studio-setup",
+      "expected_output": "Copilot runs the skill, reads the schema skill file for the format rules, describes approvals in Copilot's own terms without Claude Code specifics, and completes the walkthrough to a clean diff.",
+      "files": [],
+      "expectations": [
+        "Loads the format rules by reading .agents/skills/erd-studio/SKILL.md (or .claude/skills/erd-studio/SKILL.md if that is what exists)",
+        "Does not mention Shift+Tab, 'accept edits on' or the Claude Code safety-check hook",
+        "Runs the helper at ~/.erd-studio-cli/bin/erd-studio (or the .cmd route on Windows) and narrates it",
+        "Confirms the detected modelling style (medallion silver → gold, Kimball-style dim_/fct_ tables) in one question with evidence and a yes default, never an open 'how do you model data?' question",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "modelling-detected-medallion-kimball",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Add models/bronze/raw_customers.sql and models/bronze/raw_orders.sql (each 'select 1'), and snapshots/customers_snapshot.sql containing '{% snapshot customers_snapshot %} select 1 {% endsnapshot %}'. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. WebSearch/WebFetch available.",
+      "prompt": "/erd-studio-setup orders",
+      "expected_output": "Reads inventory.conventions (medallion bronze/silver/gold, Kimball strong with dim_/fct_ counts, snapshot customers_snapshot) and, without asking how the team models data, says in one plain sentence that the project looks like a medallion layout (bronze → silver → gold) with Kimball-style marts — naming the dim_/fct_ tables and that snapshots keep history — then 'I'll model it that way. Sound right? Or describe how your team does it.' It explains that the layout (where data sits) and the style (how tables are shaped) are different things. On yes it narrates a Kimball lookup, plays back 3-6 rules, saves modelling-approach.md with the detection evidence, applies the Kimball mapping and finishes with a clean diff and a conformance review.",
+      "files": [],
+      "expectations": [
+        "Never asks an open question such as 'How does your team like to model data?'",
+        "The confirmation names both the medallion layout (bronze → silver → gold) and Kimball-style tables, cites evidence (dim_/fct_ names and the snapshot) in plain words, and makes 'yes' a complete answer",
+        "The confirmation is alone in its message and is the only question in it",
+        "Says layering and table shape are different things (where data sits vs how tables are shaped)",
+        "Does not paste raw conventions evidence strings or JSON",
+        "Narrates the Kimball lookup (or names the bundled summary) and plays back 3-6 rules with 'Sound right?'",
+        "Writes .erd-studio/modelling-approach.md naming Kimball and medallion and recording what the style was detected from",
+        "If a domain is created in the bronze layer, writes .erd-studio/layers.json with bronze, silver and gold (never drops the built-ins)",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)",
+        "Runs the conformance review after the clean diff with keep-in-sync as the default"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "modelling-detected-data-vault-package",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder. Add packages.yml with '- package: Datavault-UK/automate_dv' (version 0.11.0) and models/raw_vault/hub_customer.sql, models/raw_vault/sat_customer_details.sql, models/raw_vault/lnk_customer_order.sql (each 'select 1'). Create an empty dbt_packages/automate_dv/ folder so doctor does not ask for dbt deps. Keep target/manifest.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed.",
+      "prompt": "/erd-studio-setup",
+      "expected_output": "inventory.conventions reports shape data-vault, strong (the automate_dv package plus hub_/sat_/lnk_ models), with kimball as an alternative and medallion layering. The skill says the project looks like Data Vault (AutomateDV package, hub/satellite/link tables) with Kimball-style marts on top, and asks for a yes. On yes it looks up / summarises Data Vault 2.0, explains once that vault tables get the closest dimensional role with the vault type in rationale.roleChoice, and never writes an invalid modelRole.",
+      "files": [],
+      "expectations": [
+        "Never asks an open question about how the team models data",
+        "Names Data Vault as the detected style and cites the automate_dv package and/or the hub_/sat_/lnk_ tables as evidence",
+        "Mentions the Kimball-style dim_/fct_ marts as part of the picture (information marts on the vault), not as a competing question",
+        "The confirmation has a yes default and is the only question in its message",
+        "Explains that hubs/links/satellites have no exact ERD Studio role and how they are recorded (closest modelRole plus rationale.roleChoice)",
+        "Never writes a modelRole value outside the nine valid values (no 'hub', 'link' or 'satellite')",
+        "Saves .erd-studio/modelling-approach.md naming Data Vault 2.0, the mart style and the automate_dv evidence",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "modelling-no-signal-mirror",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project-modern-tests",
+      "setup": "Copy the fixture to a temp dir. Remove the style signals: move every file from models/marts/ to models/, rename dim_customer→customer, dim_product→product, fct_orders→orders, fct_shipments→shipments (file names and every name / ref() inside the .sql and .yml files), and neutralise the style wording in the yml descriptions (\"Customer dimension\"→\"Customers\", \"Product dimension\"→\"Products\", \"Order facts\"→\"Orders\", \"Shipment facts\"→\"Shipments\"). Run `node dist/cli.js inventory --summary --json --project <copy>` once to confirm conventions.shape.style and conventions.layering.style are both 'none'. No dbt on PATH. Helper installed.",
+      "prompt": "/erd-studio-setup",
+      "expected_output": "With no layering and no table shape detected, the skill does not ask the user to pick a modelling style and does not recommend one. It says 'I couldn't see a particular modelling style, so I'll draw your model exactly as dbt has it.' and carries on: no lookup, no play-back, no modelling-approach.md. Model files copy dbt faithfully, with grain only where a unique key backs it and no guessed modelRole. The diff is clean, there is no conformance review, and Stage 6 offers a style only as an optional next step.",
+      "files": [],
+      "expectations": [
+        "Says it could not see a particular modelling style and will draw the model exactly as dbt has it",
+        "Does not ask the user which modelling style they use and does not recommend Kimball (or any style) as a default",
+        "No web lookup of a modelling standard and no 'Here's how I'll apply that' play-back",
+        "Does not write .erd-studio/modelling-approach.md",
+        "No modelRole is written except where unambiguous (e.g. a code/lookup seed → reference); no rationale cites an approach",
+        "Any grain written is backed by a unique key or composite unique test in the inventory",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)",
+        "Does not run a conformance review",
+        "Stage 6 offers applying a modelling style only as an optional next step",
+        "Asks at most one question per message"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "modelling-kimball-in-spirit",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project-modern-tests",
+      "setup": "Copy the fixture to a temp dir. Remove the name and folder signals only: move models/marts/schema.yml to models/, rename dim_customer→customer, dim_product→product, fct_orders→orders, fct_shipments→shipments (every name / ref()). Rewrite the model descriptions the jaffle-shop way: customer → \"Customer dimension table. One row per customer.\", product → \"Product dimension table. One row per product.\", orders → \"Order lines. One row per order and product.\", shipments → \"Shipments. One row per shipment.\" Add a column `order_total` with `data_type: numeric(12,2)` to orders. Run `node dist/cli.js inventory --summary --json --project <copy>` once to confirm conventions.shape is { style: 'kimball', confidence: 'strong', sources: ['descriptions', 'structure'] }. No dbt on PATH. Helper installed. (The same run against a copy of the jaffle-shop demo project is a good second check: its products/locations/supplies say \"dimension table\" and orders/order_items look like facts.)",
+      "prompt": "/erd-studio-setup",
+      "expected_output": "Reads inventory.conventions: Kimball, strong, from descriptions and table structure — no dim_/fct_ names. The confirmation says honestly that the models aren't named dim_/fct_ but read like Kimball, citing that customer and product are described as dimension tables and that orders holds keys to other tables plus an amount to add up (one row per order and product), then 'I'll model it that way — sound right? Or describe how your team does it.' It never claims a dim_/fct_ naming convention and never says it couldn't see a modelling style. On yes it continues exactly like a detected Kimball project: lookup, play-back, saved modelling-approach.md recording descriptions and table shape as the evidence, a clean diff and the conformance review.",
+      "files": [],
+      "expectations": [
+        "Never says 'I couldn't see a particular modelling style' and never asks an open question such as 'How does your team like to model data?'",
+        "The confirmation says the models are not named dim_/fct_ (or otherwise makes clear the evidence is not the names)",
+        "The confirmation cites the descriptions (customer / product described as dimension tables) and the table shape (orders has keys to other tables and amounts) in plain words, with 'yes' as a complete answer",
+        "Does not paste raw conventions evidence strings or JSON",
+        "Writes .erd-studio/modelling-approach.md naming Kimball and recording that it was detected from descriptions and table shape, not names",
+        "Does not rename any model to add a dim_/fct_ prefix",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)",
+        "Asks at most one question per message"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "modelling-data-vault-by-structure",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project-modern-tests",
+      "setup": "Copy the fixture to a temp dir and delete models/marts/. Create models/raw_vault/ with one `select 1 as x` .sql per model and a schema.yml declaring (every column with a data_type): customer_hub (customer_hk binary(16) unique, customer_id varchar, load_date timestamp, record_source varchar); order_hub (order_hk binary(16) unique, order_id, load_date, record_source); customer_order_link (customer_order_hk binary(16) unique, customer_hk and order_hk binary(16) with relationships tests to customer_hub / order_hub, load_date, record_source); customer_sat (customer_hk binary(16) with a relationships test to customer_hub, hashdiff binary(16), customer_name, email, credit_limit numeric(12,2), load_date, record_source). Descriptions are plain ('Customers.', 'Orders.', 'Which customer placed which order.', 'Customer details over time.') - no hub_/lnk_/sat_ names and no vault wording. Run `node dist/cli.js inventory --summary --json --project <copy>` once to confirm conventions.shape is { style: 'data-vault', confidence: 'weak', sources: ['structure'], alternatives: [] } with hub, link and satellite evidence. No dbt on PATH. Helper installed.",
+      "prompt": "/erd-studio-setup",
+      "expected_output": "Reads inventory.conventions: Data Vault, weak, from table structure only. The confirmation presents it as a guess from how the tables are built, not from names or descriptions - e.g. 'Your tables are shaped like a Data Vault - customer_hub and order_hub hold hash keys with load dates, and customer_sat tracks changes with a hashdiff. I'll model it that way - sound right? Or describe how your team does it.' It never calls customer_sat a fact or customer_hub a dimension, never claims a hub_/sat_ naming convention and never says it couldn't see a modelling style. On yes it looks up / summarises Data Vault 2.0, explains once that vault tables get the closest dimensional role with the vault type in rationale.roleChoice, never writes an invalid modelRole, and finishes with a clean diff.",
+      "files": [],
+      "expectations": [
+        "The confirmation names Data Vault and cites the hash keys + load dates (hubs) and the hashdiff (satellite) in plain words, with 'yes' as a complete answer",
+        "Makes clear the style is a guess from the table shape (not from names or descriptions); never claims a hub_/lnk_/sat_ naming convention",
+        "Does not describe customer_sat as a fact or customer_hub / order_hub as dimensions, and does not offer Kimball as the detected style",
+        "Never says 'I couldn't see a particular modelling style' and never asks an open question such as 'How does your team like to model data?'",
+        "Does not paste raw conventions evidence strings or JSON",
+        "Every modelRole written is a valid value; vault table types are recorded in rationale.roleChoice",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)",
+        "Asks at most one question per message"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "modelling-3nf-weak-guess",
+      "harness": "claude-code",
+      "fixture": "test/fixtures/dbt-project-modern-tests",
+      "setup": "Copy the fixture to a temp dir and delete models/marts/. Create models/core/ with one `select 1 as x` .sql per model and a schema.yml with no descriptions declaring (every column varchar unless noted, first column with a unique test): customer (customer_id, customer_name, email); address (address_id, street, city); customer_address (customer_id, address_id - relationships tests to customer / address - and address_type, no unique test); category (category_id, category_name); product (product_id, product_name, category_id -> category); sales_order (order_id, customer_id -> customer, order_date date, status); order_line (order_line_id, order_id -> sales_order, product_id -> product). Run `node dist/cli.js inventory --summary --json --project <copy>` once to confirm conventions.shape is { style: 'inmon-3nf', confidence: 'weak', sources: ['structure'] } with 'shape: 7 of 7 models are joined by keys with no amounts to add up - normalised (3NF-style)' in the evidence. No dbt on PATH. Helper installed.",
+      "prompt": "/erd-studio-setup\n\n(When the skill asks whether the project is normalised / Inmon-style, answer: \"not sure\".)",
+      "expected_output": "Reads inventory.conventions: inmon-3nf, weak, from structure only. It asks - as a real question, not 'I'll model it that way' - whether the team models this way, in plain words: 'Your tables look normalised (3NF) - joined by keys, no amounts to add up - which is how Inmon-style warehouses are built. Is that how your team models, or should I just draw it as dbt has it?' On 'not sure' it mirrors dbt faithfully: no lookup, no play-back, no modelling-approach.md, no guessed modelRole, grain only where a unique key backs it, no conformance review, and a clean diff. Stage 6 may offer a style only as an optional next step.",
+      "files": [],
+      "expectations": [
+        "Offers Inmon / 3NF (normalised tables) as a question with 'draw it as dbt has it' as the other option - never states it as the detected style or says 'I'll model it that way'",
+        "Cites the table shape in plain words (tables joined by keys, no amounts to add up), not names or descriptions",
+        "Does not offer Kimball, Data Vault or any other style as the guess",
+        "On 'not sure', does not look up a standard, play back rules or write .erd-studio/modelling-approach.md",
+        "No modelRole is written except where unambiguous (e.g. a code/lookup seed -> reference); no rationale cites an approach",
+        "Does not run a conformance review",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)",
+        "Asks at most one question per message"
+      ]
+    }
+  ]
+}

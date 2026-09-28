@@ -127,6 +127,12 @@ const EXTRA_BADGE_WIDTH = 30;
 /** Header horizontal padding (10px each side) + layer badge + gap. */
 const HEADER_PADDING = 20;
 
+/** Width per character of the smaller model-name text shown beside an alias label. */
+const CHAR_WIDTH_ID = 6;
+
+/** Gap between an alias label and the model name beside it. */
+const ID_GAP = 8;
+
 /** Layer badge approximate width. */
 const LAYER_BADGE_WIDTH = 36;
 
@@ -161,13 +167,14 @@ const MAX_NODE_WIDTH = 560;
  * slightly more space than the minimum estimate, preventing overlap
  * when font rendering or badge widths differ from the approximation.
  */
-export function estimateNodeWidth(data: Pick<ModelNodeData, 'modelName' | 'columns' | 'provenance'>): number {
-  const { modelName, columns, provenance } = data;
+export function estimateNodeWidth(data: Pick<ModelNodeData, 'modelName' | 'label' | 'columns' | 'provenance'>): number {
+  const { modelName, label, columns, provenance } = data;
 
-  // Header: name + layer badge + provenance chip (physical only) + padding
+  // Header: label (+ the model name beside it when they differ) + layer badge
+  // + provenance chip (physical only) + padding
   const headerWidth =
     HEADER_PADDING
-    + modelName.length * CHAR_WIDTH_BODY
+    + (label ? label.length * CHAR_WIDTH_BODY + ID_GAP + modelName.length * CHAR_WIDTH_ID : modelName.length * CHAR_WIDTH_BODY)
     + LAYER_BADGE_WIDTH
     + (provenance ? SOURCE_BADGE_WIDTH : 0);
 

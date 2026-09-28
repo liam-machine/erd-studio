@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as extension from '../../src/extension';
-import { resolveDbtProjectRoot } from '../../src/extension';
+import { findDbtProjectCandidates, hasErdStudioData, resolveDbtProjectRoot } from '../../src/extension';
 
 describe('extension', () => {
   it('exports activate and deactivate functions', () => {
@@ -105,5 +105,54 @@ describe('resolveDbtProjectRoot', () => {
     } finally {
       fs.rmSync(other, { recursive: true, force: true });
     }
+  });
+
+  describe('multi-root workspaces (#82)', () => {
+    let folders: string[];
+
+    beforeEach(() => {
+      // Five workspace folders; every one is a dbt project, only the last
+      // holds ERD Studio data — the layout from the issue's screenshot.
+      folders = ['alpha', 'beta', 'gamma', 'delta', 'datamodels'].map(makeDbtProject);
+      fs.mkdirSync(path.join(root, 'datamodels', '.erd-studio', 'silver'), { recursive: true });
+    });
+
+    it('opens the project that already has .erd-studio, not the first folder', () => {
+      expect(resolveDbtProjectRoot(folders, '')).toBe(path.join(root, 'datamodels'));
+    });
+
+    it('still falls back to the first folder when no project has ERD data', () => {
+      fs.rmSync(path.join(root, 'datamodels', '.erd-studio'), { recursive: true });
+      expect(resolveDbtProjectRoot(folders, '')).toBe(folders[0]);
+    });
+
+    it('honours a custom semanticDir when looking for ERD data', () => {
+      fs.mkdirSync(path.join(root, 'gamma', 'erd'));
+      expect(resolveDbtProjectRoot(folders, '', 'erd')).toBe(path.join(root, 'gamma'));
+    });
+
+    it('recognises a pre-0.6.44 erd-studio/ folder as ERD data', () => {
+      fs.rmSync(path.join(root, 'datamodels', '.erd-studio'), { recursive: true });
+      fs.mkdirSync(path.join(root, 'beta', 'erd-studio'));
+      fs.writeFileSync(path.join(root, 'beta', 'erd-studio', 'layers.json'), '{}');
+      expect(hasErdStudioData(path.join(root, 'beta'), '.erd-studio')).toBe(true);
+      expect(resolveDbtProjectRoot(folders, '')).toBe(path.join(root, 'beta'));
+    });
+
+    it('prefers a nested project with ERD data over a bare root project', () => {
+      fs.rmSync(path.join(root, 'datamodels', '.erd-studio'), { recursive: true });
+      const nested = makeDbtProject('alpha/analytics');
+      fs.mkdirSync(path.join(nested, '.erd-studio'));
+      expect(resolveDbtProjectRoot(folders, '')).toBe(nested);
+    });
+
+    it('an explicit projectPath still wins over the ERD-data preference', () => {
+      expect(resolveDbtProjectRoot(folders, folders[1])).toBe(folders[1]);
+    });
+
+    it('lists every project, roots first in workspace order, then nested, without duplicates', () => {
+      const nested = makeDbtProject('beta/sub');
+      expect(findDbtProjectCandidates([...folders, folders[0]])).toEqual([...folders, nested]);
+    });
   });
 });

@@ -59,14 +59,54 @@ dbt is the only stack ERD Studio can read today. If you model somewhere else, [c
 
 Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logical-only setup](#not-using-dbt)). The Physical view needs nothing beyond your dbt schema YAMLs, and gets richer once `manifest.json` and `catalog.json` exist.
 
+<a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="640" alt="Getting-started video: a short tour from a dbt project to a checked ERD with your AI assistant. Click to watch." /></a>
+
+**New to ERD Studio?** [Watch the short getting-started video](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4). After you install, ERD Studio opens a **Welcome** tab the first time you use it, with the same video and a short setup checklist. Open it again any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
+
+**No dbt project yet?** Try the [ERD Studio sample project](https://github.com/liam-machine/erd-studio-sample): a small Kimball-style dbt project with fake coffee-shop data that runs on your computer (DuckDB, no account needed). It ships its dbt artifacts, so both the Logical and Physical views work without installing dbt. Run **ERD Studio: Try the Sample Project** (also on the Welcome tab) and VS Code clones it to a folder you choose and offers to open it, or use **Code → Download ZIP** on GitHub and open the unzipped folder.
+
+**Quickest route, with your AI assistant:** click **Set Up My AI Helper** on the Welcome tab, or run **ERD Studio: Set Up My AI Helper**. It installs a guided setup for the AI assistants it finds on your computer, then shows exactly what to type in each. Start your assistant in your dbt project folder and:
+
+| Assistant | Type |
+|---|---|
+| Claude Code | `/erd-studio-setup` |
+| GitHub Copilot (Agent mode, or the Copilot CLI) | `/erd-studio-setup` |
+| Codex | `$erd-studio-setup` (or pick it from `/skills`) |
+| Gemini CLI | *Set up ERD Studio for this dbt project* |
+| Cursor | `/erd-studio-setup` |
+
+The guide:
+
+- checks that dbt is installed and set up, and helps fix it if not;
+- asks which part of your project to model;
+- works out how your project is already modelled — a medallion or staging → marts layout, Kimball, Data Vault, One Big Table or Activity Schema tables — from its names, folders, snapshots and packages, and confirms it with you in one sentence (a plain yes is enough, or describe your own rules); it then looks up that standard, plays the rules back to you and saves them in `.erd-studio/modelling-approach.md` so later AI edits follow them too. When it can't see a particular style, it draws your model exactly as dbt has it instead of making you pick one;
+- builds the logical models from your dbt project, applying those rules;
+- compares them with the Physical view, and fixes the differences until the two match.
+
+It uses a small read-only `erd-studio` helper that ERD Studio installs in `~/.erd-studio-cli`. Your assistant still asks before it edits any file.
+
+The guide is an [Agent Skill](https://agentskills.io): Claude Code reads it from `.claude/skills/`, and GitHub Copilot, Codex, Gemini CLI and Cursor read the copy in `.agents/skills/`. It has been tested end to end with Claude Code; the other four read the same skill from the open standard's folder.
+
+**Or step by step:**
+
 1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) and open your project in VS Code.
 2. Click the **ERD Studio** icon in the Activity Bar, choose **Set Up ERD Studio**, and follow the prompts to create your first domain (a diagram).
 3. Design models on the canvas, or add existing dbt models. If you use dbt, switch between **Logical** and **Physical** to compare your design with it.
-4. To work with AI, run **ERD Studio: Install AI Coding Harness** from the Command Palette. It adds project instructions for Claude Code, GitHub Copilot, Gemini, or Codex.
+4. To work with AI, run **ERD Studio: Install AI Coding Harness** from the Command Palette. It adds project instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini, or Codex's `AGENTS.md`.
 
 Then try asking your assistant:
 
 > Read my source models and propose a star schema for orders in ERD Studio. Include grain, keys, and design rationale. Let me review the diagram before generating dbt code.
+
+### More than one dbt project in a workspace?
+
+A VS Code window shows one dbt project at a time. In a multi-root workspace or a monorepo, ERD Studio opens the project that already has an `.erd-studio` folder, and falls back to the first dbt project it finds. When there's more than one, the first row of the ERD Studio sidebar shows which project is open.
+
+To choose another project, click that row, or run **ERD Studio: Select dbt Project…**. VS Code then reloads the window to open the project you picked. Your choice is saved for that workspace on your machine only, so it never ends up in a settings file your team commits. **Auto-detect**, at the top of the list, clears your choice.
+
+To choose the project for everyone who opens the workspace, set `erdStudio.projectPath` in the workspace settings. That is the `settings` block of the `.code-workspace` file, or `.vscode/settings.json` for a single folder. Use a relative path so the setting works on every machine. ERD Studio tries it against each workspace folder in turn, so in a multi-root workspace whose folders sit side by side, `../datamodels` points at the `datamodels` folder. The setting takes priority over the picker. In a multi-root workspace ERD Studio reads it from the workspace level only: a value in one folder's own `.vscode/settings.json` is ignored.
+
+If you open a diagram that belongs to a different dbt project than the one ERD Studio has open, ERD Studio doesn't draw it against the wrong project's data. It offers to switch projects instead.
 
 ### Not using dbt?
 
@@ -75,6 +115,42 @@ Use ERD Studio for your **logical models**: design tables, relationships, and bu
 For now, add a `dbt_project.yml` file containing `name: logical_models` to your project root and reload VS Code. The extension still uses that file to recognise the project; no dbt build or warehouse connection is needed for logical modelling.
 
 Physical comparison needs dbt, so the canvas stays on the Logical stage — everything else works unchanged.
+
+## Telemetry
+
+ERD Studio sends one small, anonymous usage report a day, so the author can see which features get used and which errors people hit. It never contains model, column, domain or project names, file paths, file contents, error messages or anything you typed.
+
+**What is sent.** For the previous UTC day, if you used ERD Studio that day:
+
+| Field | What it holds |
+|---|---|
+| `v` | The report format version (`1`) |
+| `installId` | A random ID, made up by ERD Studio and replaced every 30 days. It is not VS Code's machine ID and is not derived from anything about you |
+| `day` | The UTC date the counts describe |
+| `extVersion`, `vscodeMajor`, `os` | ERD Studio version, VS Code version (major.minor only), and `darwin` / `win32` / `linux` / `other` |
+| `tenure` | Days since ERD Studio first ran, as a range: `0`, `1-7`, `8-30`, `31-90`, `90+` |
+| `activation` | Whether a dbt project was found (`project_found` / `no_project`) |
+| `hasSemanticDir` | Whether the project has an `.erd-studio` folder |
+| `domainCount` | Number of diagrams, as a range: `0`, `1-3`, `4-10`, `10+` |
+| `activations`, `canvasOpens` | How many times ERD Studio started and a diagram was opened (capped at 50 and 200) |
+| `stages`, `schemaFormats` | Which stages were viewed (`logical`, `physical`) and which diagram file formats were opened (`v5`, `v4`) |
+| `modelCount` | The largest diagram opened, as a range: `none`, `1-10`, `11-50`, `51+` |
+| `manifest`, `catalog` | Whether dbt's `manifest.json` was `ok`, `missing` or `stale`, and whether a `catalog.json` was present |
+| `features` | How often each of a fixed list of features was used (capped at 100 each): the physical stage, compare, sync plan, Execute with Claude, dbt compile, notes, auto layout, adding a model, adding a relationship, installing each AI harness, migrating to v5, and opening Send Feedback |
+| `errors` | How often each of a fixed list of error kinds happened (capped at 100 each): manifest missing / malformed / timed out, catalog unreadable, diagram failed to load, model file failed to parse, invalid `layers.json`, edit rejected by VS Code, migration failed, other |
+
+The full list of properties is also in [`telemetry.json`](telemetry.json).
+
+**Where it goes.** An HTTPS request to `erd-studio-telemetry.w2solutions.ai`, a Cloudflare Worker run by the extension author. The Worker checks every field against the lists above and stores only those fields. It does not store your IP address, user agent or any other request header. Individual reports are deleted after 90 days; after that only daily totals are kept, with no install IDs.
+
+**Turning it off.** Either setting stops it completely:
+
+- VS Code's own `telemetry.telemetryLevel` set to `off` (ERD Studio also respects `error` and `crash`, which send no usage data), or
+- `erdStudio.telemetry.enabled` set to `false`. This setting can only turn telemetry off, never on, and only your user settings count — a repository's `.vscode/settings.json` cannot change it.
+
+Turning telemetry off also throws away anything already counted for that day. A failed send is dropped, never retried.
+
+**Seeing what is sent.** Reports go through VS Code's own telemetry logger. Run **Developer: Set Log Level…**, set the telemetry log to **Trace**, then open the **Output** panel and choose **Extension Telemetry**: each report appears there as it is sent. VS Code's `--telemetry` command-line flag also lists every event ERD Studio declares.
 
 [File format reference](docs/semantic-domain-json-reference.md) · [Release notes](CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
 

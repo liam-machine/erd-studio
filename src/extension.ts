@@ -1,34 +1,58 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { DomainService, renameDomainInRaw } from './services/domainService';
 import { LayerService } from './services/layerService';
-import { CURRENT_SCHEMA_VERSION, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
-import { ManifestService } from './services/manifestService';
+import { CURRENT_SCHEMA_VERSION, getRawDomainModelNames, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
+import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
 import { TemplateService } from './services/templateService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
 import { LayerDecorationProvider } from './providers/LayerDecorationProvider';
 import { FileWatcherService } from './watchers/FileWatcherService';
-import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion } from './services/harnessService';
+import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { LogicalModelService } from './services/logicalModelService';
 import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
+import { hasErdStudioData, resolveDbtProject, samePath, type DbtProjectResolution } from './services/projectDiscovery';
 import { YmlParserService } from './services/ymlParserService';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
 import { readDbtProjectConfig } from './services/dbtProjectConfig';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
+import { describeOrganizePlan, planOrganizeByLayer, type DomainModelUsage } from './services/modelLibraryOrganizer';
+import { describeDuplicateFix, planDuplicateFix, repointDomainModel, suggestDuplicateName, type DomainReference } from './services/duplicateModelResolver';
+import { validateModelName } from './providers/payloadValidation';
+import { parseLogicalModelText } from '@erd-studio/core';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 import { submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
+import { TelemetryService, telemetry } from './services/telemetryService';
+import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
 import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
 import type { FeedbackKind } from './types/feedback';
+import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
+import {
+  GettingStartedPanel,
+  detectAiAssistants,
+  detectClaude,
+  keepMineInstalls,
+  openClaudeCode,
+  openCopilotChat,
+  runSetupAiHelper,
+  SETUP_CANCELLED_MESSAGE,
+  TRY_SAMPLE_COMMAND,
+  trySampleProject,
+  type GettingStartedDeps,
+} from './providers/GettingStartedPanel';
+import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
+import { assistantInfo } from './types/aiAssistants';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -44,95 +68,199 @@ const LAST_ACTIVATED_VERSION_KEY = 'lastActivatedVersion';
  */
 const HARNESS_INSTALL_PROMPTED_KEY = 'erdStudio.harnessInstallPrompted';
 
-/** Directories never descended into when searching for a nested dbt project. */
-const DBT_SEARCH_SKIP_DIRS = new Set(['node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv']);
+/**
+ * globalState: the Welcome panel has been opened automatically (or the
+ * upgrade notice shown) on this machine. Once per user, never per workspace.
+ */
+export const GETTING_STARTED_SHOWN_KEY = 'erdStudio.gettingStartedShown';
 
-/** Maximum directory depth (below a workspace folder) searched for dbt_project.yml. */
-const DBT_SEARCH_MAX_DEPTH = 3;
+/**
+ * globalState: a fresh install (no `lastActivatedVersion`) is still owed the
+ * Welcome panel. Set at the very top of activate() — before the no-project
+ * early return — because the panel only auto-opens in a dbt project, and by
+ * the time the user opens one `lastActivatedVersion` is already stored, so
+ * that activation would otherwise look like an upgrade.
+ */
+export const GETTING_STARTED_PENDING_KEY = 'erdStudio.gettingStartedPending';
 
-function hasDbtProjectFile(dir: string): boolean {
-  try {
-    return fs.statSync(path.join(dir, 'dbt_project.yml')).isFile();
-  } catch {
-    return false;
-  }
+/**
+ * globalState: the Welcome panel has already opened once in a window with no
+ * dbt project. It does not clear the pending flag — the panel still opens
+ * once more in the first dbt project, where its setup steps can actually run
+ * (typically the sample project the no-project panel offered).
+ */
+export const GETTING_STARTED_NO_PROJECT_SHOWN_KEY = 'erdStudio.gettingStartedShownNoProject';
+
+/**
+ * One automatic open per extension host, even if activation runs twice. Two
+ * windows are two hosts; that race is accepted (both may open the panel once).
+ */
+let gettingStartedAutoOpened = false;
+
+/** Tests run activate() many times in one module instance. */
+export function _resetFirstRunGuardForTests(): void {
+  gettingStartedAutoOpened = false;
+}
+
+export { findDbtProjectCandidates, hasErdStudioData, resolveDbtProjectRoot } from './services/projectDiscovery';
+
+/**
+ * workspaceState: the dbt project picked with **Select dbt Project…** (#82).
+ * Per machine and never in a settings file — a personal choice must not land
+ * in a `.code-workspace` or `.vscode/settings.json` a team commits.
+ * `erdStudio.projectPath` stays the shareable, explicit override.
+ */
+export const SELECTED_PROJECT_KEY = 'erdStudio.selectedProjectRoot';
+
+/** Filesystem paths of the open workspace folders, in workspace order. */
+function workspaceFolderPaths(): string[] {
+  return (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
 }
 
 /**
- * Resolve the dbt project root from a list of workspace folder paths and the
- * `erdStudio.projectPath` setting. Pure (no vscode access) so it is unit-testable.
+ * Resolve the project for this window: `erdStudio.projectPath`, then the
+ * picked project, then auto-detection. See `resolveDbtProject`.
+ */
+function resolveWorkspaceProject(context: vscode.ExtensionContext): DbtProjectResolution {
+  return resolveDbtProject(workspaceFolderPaths(), {
+    projectPath: getErdStudioSetting('projectPath', ''),
+    picked: context.workspaceState.get<string>(SELECTED_PROJECT_KEY),
+    semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
+  });
+}
+
+/** Where a project sits in the workspace, for picker rows and messages. */
+function describeProjectLocation(projectRoot: string): string {
+  const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(projectRoot));
+  if (!folder) { return projectRoot; }
+  const rel = path.relative(folder.uri.fsPath, projectRoot);
+  if (rel) { return `${folder.name}/${rel.split(path.sep).join('/')}`; }
+  return folder.name === path.basename(projectRoot) ? 'workspace folder' : `workspace folder ${folder.name}`;
+}
+
+/** "In repo/analytics." plus a blank line for a nested project; nothing for a root folder, whose name is already in the title. */
+function nestedLocation(projectRoot: string): string {
+  const where = describeProjectLocation(projectRoot);
+  return where.startsWith('workspace folder') ? '' : `In ${where}.\n\n`;
+}
+
+/**
+ * **Select dbt Project…** — choose which dbt project ERD Studio opens when the
+ * workspace holds more than one (multi-root workspaces, monorepos; #82).
  *
- * Resolution order:
- *   1. `projectPath` setting — absolute, or relative to each workspace folder —
- *      when it contains dbt_project.yml.
- *   2. A workspace folder whose root contains dbt_project.yml.
- *   3. A depth-limited breadth-first search below each workspace folder
- *      (skipping node_modules, dbt_packages, .git, target, .venv), returning
- *      the shallowest match. Matches the recursive `workspaceContains`
- *      activation event so activation never lands on "no project found"
- *      for a monorepo with dbt in a subfolder.
+ * The first row, **Auto-detect**, clears the choice. Any other pick is kept
+ * in `workspaceState` (this machine only) and applied by reloading the
+ * window, which the confirmation offers directly. `target` skips the list —
+ * the editor's "open this project instead" button passes the project that
+ * owns the domain file the user just opened.
  */
-export function resolveDbtProjectRoot(
-  folderPaths: readonly string[],
-  projectPathSetting: string,
-): string | undefined {
-  const configured = projectPathSetting.trim();
-  if (configured) {
-    if (path.isAbsolute(configured)) {
-      if (hasDbtProjectFile(configured)) { return configured; }
+async function selectDbtProject(
+  context: vscode.ExtensionContext,
+  currentRoot: string,
+  semanticDir: string,
+  target?: string,
+): Promise<void> {
+  const resolution = resolveWorkspaceProject(context);
+  if (resolution.candidates.length === 0) {
+    void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE);
+    return;
+  }
+
+  if (resolution.source === 'setting') {
+    const choice = await vscode.window.showWarningMessage(
+      `ERD Studio: the erdStudio.projectPath setting chooses the dbt project for this workspace (${path.basename(currentRoot)}). ` +
+        'Clear it to pick a project here.',
+      'Open Settings',
+    );
+    if (choice === 'Open Settings') {
+      void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
+    }
+    return;
+  }
+
+  type ProjectPick = vscode.QuickPickItem & { projectRoot: string | undefined };
+  let chosen: string | undefined;
+  let fromAuto = false;
+  if (target) {
+    chosen = target;
+  } else {
+    const autoRoot = resolution.autoRoot;
+    const items: ProjectPick[] = [
+      {
+        projectRoot: undefined,
+        label: `${resolution.source === 'auto' ? '$(check)' : '$(sparkle)'} Auto-detect`,
+        description: autoRoot ? `→ ${path.basename(autoRoot)}` : undefined,
+        detail: 'Open the project that already has ERD diagrams' +
+          (resolution.source === 'auto' ? ' · Current choice' : ''),
+      },
+      { projectRoot: undefined, label: 'dbt projects in this workspace', kind: vscode.QuickPickItemKind.Separator },
+      ...resolution.candidates.map((projectRoot): ProjectPick => ({
+        projectRoot,
+        label: `${projectRoot === currentRoot ? '$(check)' : '$(folder)'} ${path.basename(projectRoot)}`,
+        description: describeProjectLocation(projectRoot),
+        detail: [
+          projectRoot === currentRoot ? 'Open now' : undefined,
+          hasErdStudioData(projectRoot, semanticDir) ? `Has ERD diagrams (${semanticDir})` : 'No ERD diagrams yet',
+        ].filter(Boolean).join(' · '),
+      })),
+    ];
+    const picked = await vscode.window.showQuickPick(items, {
+      title: 'ERD Studio — Select dbt Project',
+      placeHolder: 'Which dbt project should ERD Studio open in this workspace?',
+      matchOnDescription: true,
+    });
+    if (!picked) { return; }
+    if (picked.projectRoot === undefined) {
+      // Auto-detect: forget the pick. Reload only if that moves the project.
+      await context.workspaceState.update(SELECTED_PROJECT_KEY, undefined);
+      if (!autoRoot || samePath(autoRoot, currentRoot)) { return; }
+      chosen = autoRoot;
+      fromAuto = true;
     } else {
-      for (const folder of folderPaths) {
-        const candidate = path.resolve(folder, configured);
-        if (hasDbtProjectFile(candidate)) { return candidate; }
-      }
+      chosen = picked.projectRoot;
     }
-    console.warn(`ERD Studio: erdStudio.projectPath "${configured}" does not contain dbt_project.yml — falling back to auto-detection.`);
   }
 
-  for (const folder of folderPaths) {
-    if (hasDbtProjectFile(folder)) { return folder; }
+  if (samePath(chosen, currentRoot)) {
+    // Already open. An explicit pick still pins it, so a project that gains
+    // ERD data later cannot pull auto-detection away from it.
+    await context.workspaceState.update(SELECTED_PROJECT_KEY, chosen);
+    return;
   }
 
-  // Breadth-first so the shallowest match wins.
-  let frontier = [...folderPaths];
-  for (let depth = 1; depth <= DBT_SEARCH_MAX_DEPTH && frontier.length > 0; depth++) {
-    const next: string[] = [];
-    for (const dir of frontier) {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-      for (const entry of entries) {
-        if (!entry.isDirectory() || DBT_SEARCH_SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) {
-          continue;
-        }
-        const child = path.join(dir, entry.name);
-        if (hasDbtProjectFile(child)) { return child; }
-        next.push(child);
-      }
-    }
-    frontier = next;
-  }
-
-  return undefined;
+  const confirm = await vscode.window.showInformationMessage(
+    `Switch ERD Studio to “${path.basename(chosen)}”?`,
+    {
+      modal: true,
+      detail: `${nestedLocation(chosen)}The window reloads to open it. ` +
+        'The choice is saved for this workspace on this machine only.',
+    },
+    'Switch and Reload',
+  );
+  if (confirm !== 'Switch and Reload') { return; }
+  await context.workspaceState.update(SELECTED_PROJECT_KEY, fromAuto ? undefined : chosen);
+  await vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
 
-/**
- * Find the dbt project root: honours `erdStudio.projectPath`, then workspace
- * folder roots, then a shallow recursive search. See `resolveDbtProjectRoot`.
- */
-function findDbtProjectRoot(): string | undefined {
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
-    return undefined;
+const MANIFEST_FAILURE_CODES: Record<ManifestLoadFailure, TelemetryErrorCode> = {
+  missing: 'manifestMissing',
+  malformed: 'manifestMalformed',
+  timeout: 'manifestTimeout',
+};
+
+/** The generic Agent Skills target has no feature key of its own and is not counted. */
+const HARNESS_INSTALL_FEATURES: Partial<Record<HarnessTarget['id'], TelemetryFeature>> = {
+  claude: 'harnessInstallClaude',
+  copilot: 'harnessInstallCopilot',
+  gemini: 'harnessInstallGemini',
+  codex: 'harnessInstallCodex',
+};
+
+function recordHarnessInstalls(results: HarnessInstallResult[]): void {
+  for (const r of results) {
+    const feature = r.success ? HARNESS_INSTALL_FEATURES[r.target.id] : undefined;
+    if (feature) telemetry.feature(feature);
   }
-  return resolveDbtProjectRoot(
-    workspaceFolders.map(f => f.uri.fsPath),
-    getErdStudioSetting('projectPath', ''),
-  );
 }
 
 const NO_PROJECT_MESSAGE =
@@ -149,10 +277,27 @@ const NO_PROJECT_MESSAGE =
  */
 export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.reportBug',
+  'erdStudio.showGettingStarted',
+  'erdStudio.trySampleProject',
+  'erdStudio.setupAiHelper',
   'erdStudio.setFeedbackApiKey',
   'erdStudio.clearFeedbackApiKey',
   'erdStudio.refreshMyReports',
   'erdStudio.openTrackedReport',
+  'erdStudio.organizeModelLibrary',
+  'erdStudio.selectDbtProject',
+  'erdStudio.resolveDuplicateModel',
+]);
+
+/**
+ * Commands activate() registers before the no-project early return, because
+ * they work without a dbt project. registerFallbackCommands skips them —
+ * registering an id twice throws.
+ */
+export const PRE_REGISTERED_COMMANDS = new Set([
+  'erdStudio.reportBug',
+  'erdStudio.showGettingStarted',
+  'erdStudio.trySampleProject',
 ]);
 
 /**
@@ -175,9 +320,9 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
   }).contributes?.commands ?? [];
 
   for (const { command } of contributed) {
-    // reportBug is registered by activate() before this fallback runs and works
-    // without a project; registering it again would throw ("already exists").
-    if (!command.startsWith('erdStudio.') || command === 'erdStudio.reportBug') { continue; }
+    // PRE_REGISTERED_COMMANDS are registered by activate() before this fallback
+    // runs and work without a project; registering again would throw ("already exists").
+    if (!command.startsWith('erdStudio.') || PRE_REGISTERED_COMMANDS.has(command)) { continue; }
     context.subscriptions.push(vscode.commands.registerCommand(command, showNoProject));
     // Post-rename commands never had a dbtSemantic.* id — see NO_LEGACY_ALIAS.
     if (NO_LEGACY_ALIAS.has(command)) { continue; }
@@ -353,6 +498,32 @@ async function sendFeedbackWithoutCanvas(
   }
 }
 
+/** Welcome panel deps before a dbt project is found: the video plays, the steps ask for a folder. */
+function noProjectGettingStartedDeps(): GettingStartedDeps {
+  return {
+    workspaceRoot: null,
+    semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
+    runSetup: async () => ({ ok: false, filesWritten: [], message: NO_PROJECT_MESSAGE }),
+    getStatus: async () => ({
+      hasProject: false,
+      harness: {
+        claude: { schemaSkill: 'missing', setupSkill: 'missing' },
+        agents: { schemaSkill: 'missing', setupSkill: 'missing' },
+      },
+      cli: 'missing',
+      helper: 'missing',
+      claude: detectClaude().availability,
+      assistants: detectAiAssistants(),
+      domainCount: 0,
+      project: null,
+    }),
+    clipboardText: (assistant) => (assistant && assistant !== 'claude' ? assistantInfo(assistant).prompt : SETUP_PROMPT),
+    openCanvas: async () => {
+      void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE);
+    },
+  };
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('ERD Studio is now active');
 
@@ -366,6 +537,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const currentVersion = context.extension.packageJSON.version as string;
   const previousVersion = context.globalState.get<string>(LAST_ACTIVATED_VERSION_KEY);
   await context.globalState.update(LAST_ACTIVATED_VERSION_KEY, currentVersion);
+  // Fresh install: remember that the Welcome panel is owed, even if this
+  // activation has no dbt project and returns early below.
+  if (previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY)) {
+    await context.globalState.update(GETTING_STARTED_PENDING_KEY, true);
+  }
   if (previousVersion && previousVersion !== currentVersion && hasOpenDomainCanvas()) {
     // If the user cancels the reload (unsaved files), keep activating so
     // commands and the custom editor are still registered for this host.
@@ -373,6 +549,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
   }
+
+  // Usage telemetry: one anonymous heartbeat per UTC day, never while VS Code's
+  // telemetry or erdStudio.telemetry.enabled is off. Constructed before the
+  // project check so a no-project activation is counted too.
+  const telemetryService = new TelemetryService(context);
+  context.subscriptions.push(telemetryService);
+  telemetryService.start();
 
   // "Send Feedback" is registered before any early return so it is always
   // reachable from the command palette, even when no dbt project is open.
@@ -385,16 +568,47 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'erdStudio.reportBug',
       async (prefill?: { kind?: FeedbackKind; title?: string; description?: string }) => {
         if (editorProviderForFeedback?.requestFeedbackDialog(prefill)) return;
+        telemetry.feature('feedbackOpened');
         await sendFeedbackWithoutCanvas(context, prefill, trackingServiceForFeedback);
       },
     ),
   );
 
-  const workspaceRoot = findDbtProjectRoot();
+  // "Watch Getting Started Video" works without a project too: the panel
+  // plays the video and asks for a dbt folder. The project path fills in
+  // gettingStartedDeps below (late-bound, like editorProviderForFeedback).
+  let gettingStartedDeps: GettingStartedDeps | undefined;
+  context.subscriptions.push(
+    vscode.commands.registerCommand('erdStudio.showGettingStarted', () => {
+      GettingStartedPanel.createOrShow(context, gettingStartedDeps ?? noProjectGettingStartedDeps());
+    }),
+  );
+
+  // "Try the Sample Project" is for people with no dbt project yet, so it must
+  // work in any window: confirm, then clone the fixed public sample repo.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, async () => { await trySampleProject(); }),
+  );
+
+  const projectResolution = resolveWorkspaceProject(context);
+  const workspaceRoot = projectResolution.root;
+  // Picks which sidebar welcome text shows (package.json viewsWelcome).
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', Boolean(workspaceRoot));
   if (!workspaceRoot) {
+    telemetry.activation('no_project', false, 0);
     // Register stub commands / editor so palette entries and the sidebar
     // welcome buttons explain the problem instead of "command not found".
     registerFallbackCommands(context);
+    // A fresh install first activated without a dbt project (usually by
+    // clicking the ERD Studio icon) still starts on the Welcome panel: it
+    // plays the video, offers the sample project and says how to open one.
+    const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
+    if (pending && !context.globalState.get<boolean>(GETTING_STARTED_NO_PROJECT_SHOWN_KEY) && !gettingStartedAutoOpened) {
+      gettingStartedAutoOpened = true;
+      await context.globalState.update(GETTING_STARTED_NO_PROJECT_SHOWN_KEY, true);
+      GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps());
+      return; // the panel explains the missing project; no warning toast on top
+    }
     void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Settings').then(choice => {
       if (choice === 'Open Settings') {
         void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
@@ -406,6 +620,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   console.log(`ERD Studio: Found dbt project at ${workspaceRoot}`);
 
   const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
+
+  // More than one dbt project in the workspace (multi-root or monorepo, #82):
+  // reveal the sidebar's Select dbt Project button. Re-checked when folders
+  // are added or removed (see the domain tree view below).
+  let hasMultipleProjects = projectResolution.candidates.length > 1;
+  void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
+
+  if (projectResolution.invalidSetting !== undefined) {
+    // Visible, not just a console line: a projectPath copied from someone
+    // else's machine otherwise looks like the setting being ignored.
+    void vscode.window.showWarningMessage(
+      `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" does not contain dbt_project.yml, ` +
+        `so ERD Studio opened ${path.basename(workspaceRoot)} instead.`,
+      'Open Settings',
+    ).then(choice => {
+      if (choice === 'Open Settings') {
+        void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
+      }
+    });
+  }
 
   // v0.6.44 moved the default data directory from erd-studio/ to .erd-studio/.
   // Rename legacy folders in place before any service reads from disk so
@@ -432,13 +666,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
   const logicalModelService = new LogicalModelService(workspaceRoot, semanticDir);
+  logicalModelService.onParseFailure = () => telemetry.error('modelFileParse');
   domainService.setLogicalModelService(logicalModelService);
-  const manifestService = new ManifestService({ dbtConfig });
+  const manifestService = new ManifestService({ dbtConfig, onLoadFailure: f => telemetry.error(MANIFEST_FAILURE_CODES[f]) });
   const ymlParserService = new YmlParserService({ dbtConfig });
   // target/catalog.json — present only after `dbt docs generate`, and the only
   // source of the types the warehouse actually has. Shares the one dbtConfig
   // read above; never re-read dbt_project.yml for a second consumer.
-  const catalogService = new CatalogService({ dbtConfig });
+  const catalogService = new CatalogService({ dbtConfig, onReadFailure: () => telemetry.error('catalogUnreadable') });
   const templateService = new TemplateService();
   // Status bar item shown while selectors.yml is out of sync (skipped writes).
   // Hidden as soon as a regenerate succeeds.
@@ -527,7 +762,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   }
   const treeProvider = new DomainTreeProvider(domainService, layerService, workspaceRoot, semanticDir);
-  const modelLibraryProvider = new ModelLibraryTreeProvider(logicalModelService, domainService, workspaceRoot, semanticDir);
+  const modelLibraryProvider = new ModelLibraryTreeProvider(
+    logicalModelService,
+    domainService,
+    workspaceRoot,
+    semanticDir,
+    () => layerService.getAllLayers(),
+  );
   const editorProvider = new SemanticEditorProvider(
     context,
     domainService,
@@ -564,6 +805,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
   };
   refreshContextKeys();
+  telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), domainService.listDomains(workspaceRoot, semanticDir).length);
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the
@@ -576,6 +818,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
     lastLayerLoadErrorShown = loadError;
+    telemetry.error('layersInvalid');
     void vscode.window.showWarningMessage(
       `ERD Studio: ${semanticDir}/layers.json could not be loaded (${loadError}). ` +
       'Default layers are shown until the file is fixed; layer changes are disabled to avoid overwriting it.',
@@ -808,7 +1051,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         dragAndDropController: treeProvider,
         canSelectMany: false,
       });
-      return treeView;
+      // Whenever there is a choice to make, the first row of the tree names
+      // the open project and switches it on click — always visible, unlike
+      // the view-title icon, which VS Code only shows on hover (#82).
+      const showProjectName = (): void => {
+        treeProvider.setProjectRow(hasMultipleProjects
+          ? { name: path.basename(workspaceRoot), location: describeProjectLocation(workspaceRoot) }
+          : undefined);
+      };
+      showProjectName();
+      const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        hasMultipleProjects = resolveWorkspaceProject(context).candidates.length > 1;
+        void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
+        showProjectName();
+      });
+      return vscode.Disposable.from(treeView, foldersChanged);
     })(),
     vscode.window.registerCustomEditorProvider(DOMAIN_EDITOR_VIEW_TYPE, editorProvider, {
       // Keep the webview (React tree, ELK worker, in-progress discrepancy /
@@ -856,6 +1113,185 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         logicalModelService.deleteModel(node.name);
         modelLibraryProvider.refresh();
       }
+    }),
+    vscode.commands.registerCommand('erdStudio.selectDbtProject', (target?: unknown) =>
+      selectDbtProject(context, workspaceRoot, semanticDir, typeof target === 'string' ? target : undefined)),
+    // Move top-level logical-models/*.yml files into the folder of the one
+    // layer whose domains use them (issue #76). Prompted, one WorkspaceEdit.
+    vscode.commands.registerCommand('erdStudio.organizeModelLibrary', async () => {
+      if (!logicalModelService.dirExists()) {
+        void vscode.window.showInformationMessage('Organise Model Library: there is no logical-models/ folder yet.');
+        return;
+      }
+      const usage: DomainModelUsage[] = [];
+      for (const summary of domainService.listDomains(workspaceRoot, semanticDir)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
+          usage.push({ layer: summary.layer, modelNames: getRawDomainModelNames(raw) });
+        } catch {
+          // An unreadable domain contributes no usage; its models stay put.
+        }
+      }
+      const modelsDir = logicalModelService.getModelsDir();
+      const plan = planOrganizeByLayer(
+        logicalModelService.listModelFiles(),
+        usage,
+        (name, layer) => LogicalModelService.isModelFolderName(layer) ? path.join(modelsDir, layer, `${name}.yml`) : null,
+        new Set(layerService.getAllLayers().map((l) => l.id)),
+      );
+      if (plan.moves.length === 0) {
+        void vscode.window.showInformationMessage(
+          `Organise Model Library: nothing to move. ${describeOrganizePlan(plan).replace(/\n+/g, ' ')}`,
+        );
+        return;
+      }
+      const choice = await vscode.window.showInformationMessage(
+        'Organise Model Library by Layer?',
+        { modal: true, detail: describeOrganizePlan(plan) },
+        'Move Files',
+      );
+      if (choice !== 'Move Files') return;
+
+      const edit = new vscode.WorkspaceEdit();
+      const newFolders = new Set<string>();
+      for (const move of plan.moves) {
+        const folder = path.dirname(move.to);
+        if (!fs.existsSync(folder)) newFolders.add(folder);
+        logicalModelService.ensureDir(move.to);
+        edit.renameFile(vscode.Uri.file(move.from), vscode.Uri.file(move.to), { overwrite: false });
+      }
+      if (!(await vscode.workspace.applyEdit(edit))) {
+        // Leave no empty layer folders behind for a move that did not happen.
+        for (const folder of newFolders) {
+          try { fs.rmdirSync(folder); } catch { /* not empty, or already gone */ }
+        }
+        void vscode.window.showErrorMessage('Organise Model Library: VS Code rejected the file moves; nothing was changed.');
+        return;
+      }
+      // Our own moves: the watcher must not bounce them back as external
+      // edits. Nothing a canvas shows changed (domains resolve models by
+      // name), so only the library view needs refreshing.
+      for (const move of plan.moves) {
+        ownWrites.recordWrite(move.to);
+        ownWrites.recordDelete(move.from);
+      }
+      // A layer folder emptied by moving its files out is removed.
+      for (const move of plan.moves) {
+        if (!move.fromFolder) continue;
+        const folder = path.dirname(move.from);
+        try {
+          if (fs.readdirSync(folder).length === 0) fs.rmdirSync(folder);
+        } catch { /* already gone */ }
+      }
+      logicalModelService.invalidateCache();
+      modelLibraryProvider.refresh();
+      void vscode.window.showInformationMessage(
+        `Moved ${plan.moves.length} model file${plan.moves.length === 1 ? '' : 's'} into layer folders.`,
+      );
+    }),
+    // A second file with a name the library already has is ignored (names are
+    // identities). Give it its own name — `{layer}_{name}` — with an alias that
+    // keeps the table name, and repoint the domains of its layer at it.
+    // Prompted, one WorkspaceEdit, one undo step.
+    vscode.commands.registerCommand('erdStudio.resolveDuplicateModel', async (arg?: ModelLibraryNode | string) => {
+      const entries = logicalModelService.listModelFiles();
+      const duplicates = entries.filter((e) => e.shadowedBy);
+      const target = typeof arg === 'string' ? arg : arg?.type === 'model' ? arg.filePath : undefined;
+      // Compare real paths: the tree hands over what the library listed, but a
+      // warning or a caller may name the same file through a symlinked prefix.
+      const realPath = (p: string): string => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+      let entry = target === undefined ? undefined : duplicates.find((e) => realPath(e.filePath) === realPath(target));
+      const modelsDir = logicalModelService.getModelsDir();
+      const libPath = (p: string): string => `logical-models/${path.relative(modelsDir, p).split(path.sep).join('/')}`;
+      if (!entry) {
+        if (duplicates.length === 0) {
+          void vscode.window.showInformationMessage('Every model file in the library has its own name.');
+          return;
+        }
+        const pick = await vscode.window.showQuickPick(
+          duplicates.map((e) => ({ label: libPath(e.filePath), description: `ignored — ${libPath(e.shadowedBy!)} is used`, entry: e })),
+          { placeHolder: 'Which duplicate model file should get its own name?' },
+        );
+        if (!pick) return;
+        entry = pick.entry;
+      }
+      const dup = entry;
+
+      const model = (() => {
+        try { return parseLogicalModelText(fs.readFileSync(dup.filePath, 'utf-8'), dup.name); } catch { return null; }
+      })();
+      if (!model) {
+        void vscode.window.showErrorMessage(`${libPath(dup.filePath)} could not be read as a model file. Fix or rename it by hand.`);
+        return;
+      }
+
+      const taken = new Set(entries.map((e) => e.name));
+      const newName = (await vscode.window.showInputBox({
+        title: `Give ${libPath(dup.filePath)} its own name`,
+        prompt: `Model names are unique, as in dbt. The table name stays "${model.alias || dup.name}" (set as the model's alias).`,
+        value: suggestDuplicateName(dup.name, dup.folder, taken),
+        ignoreFocusOut: true,
+        validateInput: (value) => validateModelName(value)
+          ?? (taken.has(value.trim()) ? `"${value.trim()}" already exists in the model library.` : null),
+      }))?.trim();
+      if (!newName) return;
+
+      const references: DomainReference[] = [];
+      for (const summary of domainService.listDomains(workspaceRoot, semanticDir)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
+          if (getRawDomainModelNames(raw).includes(dup.name)) {
+            references.push({ filePath: summary.filePath, domain: summary.domain, layer: summary.layer });
+          }
+        } catch {
+          // An unreadable domain is not repointed; it keeps the name it has.
+        }
+      }
+      const plan = planDuplicateFix(dup.name, dup.folder, newName, model.alias, references);
+      const newPath = path.join(path.dirname(dup.filePath), `${newName}.yml`);
+      const choice = await vscode.window.showInformationMessage(
+        `Rename the duplicate "${dup.name}" to "${newName}"?`,
+        { modal: true, detail: describeDuplicateFix(plan, libPath(dup.filePath), libPath(newPath)) },
+        'Rename',
+      );
+      if (choice !== 'Rename') return;
+
+      const edit = new vscode.WorkspaceEdit();
+      const yamlText = logicalModelService.serializeModelAt({ ...model, name: newName, alias: plan.alias }, dup.filePath);
+      edit.createFile(vscode.Uri.file(newPath), { overwrite: false, contents: Buffer.from(yamlText, 'utf-8') });
+      edit.deleteFile(vscode.Uri.file(dup.filePath), { ignoreIfNotExists: true });
+      const domainDocs: vscode.TextDocument[] = [];
+      for (const ref of plan.repoint) {
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(ref.filePath));
+        const text = doc.getText();
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        if (!repointDomainModel(parsed, dup.name, newName)) continue;
+        edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(text.length)), JSON.stringify(parsed, null, 2) + '\n');
+        domainDocs.push(doc);
+      }
+      if (!(await vscode.workspace.applyEdit(edit))) {
+        void vscode.window.showErrorMessage('VS Code rejected the rename; nothing was changed.');
+        return;
+      }
+      // Domain edits land in memory; a canvas never sits dirty, so save them.
+      // Every path is recorded as our own write, and the refreshes the
+      // watchers would have driven are issued directly below.
+      for (const doc of domainDocs) {
+        await doc.save();
+        ownWrites.recordWrite(doc.uri.fsPath);
+        treeProvider.invalidateDomain(doc.uri.fsPath);
+      }
+      ownWrites.recordWrite(newPath);
+      ownWrites.recordDelete(dup.filePath);
+      logicalModelService.invalidateCache();
+      modelLibraryProvider.refresh();
+      treeProvider.refresh();
+      selectorsService.scheduleRegenerate();
+      await editorProvider.refreshAllOpenDomains();
+      void vscode.window.showInformationMessage(
+        `${libPath(newPath)} is now its own model, "${newName}" (table: ${plan.alias}).` +
+        (domainDocs.length ? ` Repointed ${domainDocs.length} domain${domainDocs.length === 1 ? '' : 's'}.` : ''),
+      );
     }),
     vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: ModelLibraryNode | undefined) => {
       if (!node || node.type !== 'model') {
@@ -1233,7 +1669,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       if (confirm !== 'Migrate Now') return;
 
-      const result = migrationService.migrate();
+      let result: ReturnType<typeof migrationService.migrate>;
+      try {
+        result = migrationService.migrate();
+      } catch (err) {
+        telemetry.error('migrationFailed');
+        throw err;
+      }
+      telemetry.feature('migrateV5');
       const details: string[] = [];
       if (result.domainsConverted > 0) details.push(`${result.domainsConverted} domain(s) converted`);
       if (result.modelsCreated > 0) details.push(`${result.modelsCreated} model file(s) created in logical-models/`);
@@ -1591,6 +2034,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const results = selected.map(s =>
           harnessService.install(workspaceRoot, s.target, true),
         );
+        recordHarnessInstalls(results);
 
         const succeeded = results.filter(r => r.success);
         const failed = results.filter(r => !r.success);
@@ -1614,6 +2058,181 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // fresh, so it costs nothing on a normal activation.
   void trackingService.refresh();
 
+  // -------------------------------------------------------------------------
+  // Welcome panel + Set Up My AI Helper
+  // -------------------------------------------------------------------------
+  const cliLauncher = new CliLauncherService();
+  const launcherOptions: CliLauncherOptions = {
+    homeDir: os.homedir(),
+    extensionVersion: currentVersion,
+    execPath: process.execPath,
+    cliSourcePath: path.join(context.extensionUri.fsPath, 'dist', 'cli.js'),
+  };
+  const firstWorkspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+  // The workspace folder that holds the dbt project — in a multi-root
+  // workspace not necessarily the first one (#82). Used to describe where the
+  // project sits and to tell Copilot's "nested project" hint apart from a
+  // project that is itself a root folder. The Claude command keeps the first
+  // folder: that is where a new terminal starts, so it decides whether the
+  // copied command needs a `cd`.
+  const projectWorkspaceFolder =
+    vscode.workspace.getWorkspaceFolder(vscode.Uri.file(workspaceRoot))?.uri.fsPath ?? firstWorkspaceFolder;
+  const setupHarness = new HarnessService(semanticDir);
+
+  const getGettingStartedStatus = async (): Promise<GettingStartedStatus> => {
+    const status = setupHarness.harnessStatus(workspaceRoot);
+    const harness = {
+      claude: { schemaSkill: status.claude.schemaSkill, setupSkill: status.claude.setupSkill },
+      agents: status.agents,
+    };
+    const cli = cliLauncher.status(launcherOptions);
+    const assistants = detectAiAssistants();
+    const relative = projectWorkspaceFolder ? path.relative(projectWorkspaceFolder, workspaceRoot) : '';
+    return {
+      hasProject: true,
+      harness,
+      cli,
+      helper: deriveAiHelperState(harness, cli, assistants),
+      claude: detectClaude().availability,
+      assistants,
+      domainCount: domainService.listDomains(workspaceRoot, semanticDir).length,
+      project: {
+        name: path.basename(workspaceRoot),
+        relativePath: relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+          ? relative.split(path.sep).join('/')
+          : null,
+      },
+    };
+  };
+  const setupClipboardText = (assistant: Parameters<typeof promptFor>[0] = 'claude'): string =>
+    promptFor(assistant, workspaceRoot, firstWorkspaceFolder, process.platform);
+
+  const runSetup = async () => {
+    const outcome = await runSetupAiHelper({
+      root: workspaceRoot,
+      harness: setupHarness,
+      launcher: cliLauncher,
+      launcherOptions,
+      assistants: detectAiAssistants(),
+      confirmReplace: async (unmanaged, targets) => {
+        const REPLACE = 'Replace';
+        const KEEP = 'Keep mine';
+        const choice = await vscode.window.showWarningMessage(
+          `${unmanaged.join(' and ')} ${unmanaged.length === 1 ? "exists and wasn't" : "exist and weren't"} ` +
+            "written by ERD Studio. Replace with ERD Studio's version?",
+          {
+            modal: true,
+            detail: `Keep mine leaves ${unmanaged.length === 1 ? 'that file' : 'those files'} exactly as ` +
+              `${unmanaged.length === 1 ? 'it is' : 'they are'} and installs everything else ` +
+              `(${keepMineInstalls(unmanaged, targets)}) plus the checking tool.`,
+          },
+          REPLACE,
+          KEEP,
+        );
+        return choice === REPLACE ? 'replace' : choice === KEEP ? 'keep' : undefined;
+      },
+    });
+    if (outcome.filesWritten.length > 0) { refreshContextKeys(); }
+    return outcome;
+  };
+
+  // "Open a domain" from the panel: straight in when there is one, a pick when
+  // there are several, and the create flow when there are none yet.
+  const openCanvas = async (): Promise<void> => {
+    const domains = domainService.listDomains(workspaceRoot, semanticDir);
+    if (domains.length === 0) {
+      await vscode.commands.executeCommand(
+        fs.existsSync(fullSemanticDirPath) ? 'erdStudio.createDomain' : 'erdStudio.setupSemanticDirectory',
+      );
+      return;
+    }
+    let target = domains[0];
+    if (domains.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        domains.map((d) => ({ label: d.domain, description: d.layer, summary: d })),
+        { placeHolder: 'Open which domain?' },
+      );
+      if (!picked) { return; }
+      target = picked.summary;
+    }
+    await vscode.commands.executeCommand('erdStudio.openDomain', target.filePath);
+  };
+
+  gettingStartedDeps = {
+    workspaceRoot,
+    semanticDir,
+    runSetup,
+    getStatus: getGettingStartedStatus,
+    clipboardText: setupClipboardText,
+    workspaceFolder: projectWorkspaceFolder,
+    openCanvas,
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('erdStudio.setupAiHelper', async () => {
+      const outcome = await runSetup();
+      await GettingStartedPanel.currentPanel?.postSetupResult(outcome);
+      if (!outcome.ok) {
+        if (outcome.message !== SETUP_CANCELLED_MESSAGE) {
+          void vscode.window.showErrorMessage(`ERD Studio: ${outcome.message}`);
+        }
+        return;
+      }
+      // Offer an Open button for each assistant the editor can open, and one
+      // Copy for the first detected assistant (Claude Code when none is).
+      const assistants = detectAiAssistants();
+      const OPEN_CLAUDE = 'Open Claude Code';
+      const OPEN_COPILOT = 'Open Copilot Chat';
+      const COPY = 'Copy prompt';
+      const buttons = [
+        ...(assistants.includes('claude') ? [OPEN_CLAUDE] : []),
+        ...(assistants.includes('copilot') ? [OPEN_COPILOT] : []),
+        COPY,
+      ];
+      const choice = await vscode.window.showInformationMessage(
+        `${outcome.message} Guide not showing? Start your assistant from ${path.basename(workspaceRoot)}.`,
+        ...buttons,
+      );
+      if (choice === OPEN_CLAUDE) {
+        await openClaudeCode({ dbtRoot: workspaceRoot, clipboardText: setupClipboardText('claude') });
+      } else if (choice === OPEN_COPILOT) {
+        await openCopilotChat({ dbtRoot: workspaceRoot, workspaceFolder: projectWorkspaceFolder });
+      } else if (choice === COPY) {
+        await vscode.env.clipboard.writeText(setupClipboardText(assistants[0] ?? 'claude'));
+      }
+    }),
+  );
+
+  // First run (spec C.5, addendum P4). A fresh install opens the Welcome panel
+  // once per machine and skips this run's harness QuickPick (the panel offers
+  // the one-click setup instead); an upgrader gets one non-modal notice. The
+  // "shown" flag is written BEFORE the panel opens so a crash cannot loop.
+  let suppressHarnessQuickPick = false;
+  {
+    const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
+    const shown = context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY) === true;
+    if (pending && !shown && !gettingStartedAutoOpened) {
+      gettingStartedAutoOpened = true;
+      suppressHarnessQuickPick = true;
+      await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
+      await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
+      GettingStartedPanel.createOrShow(context, gettingStartedDeps);
+    } else if (pending && shown) {
+      // Another window got there first.
+      await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
+    } else if (!pending && !shown) {
+      await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
+      void vscode.window.showInformationMessage(
+        'ERD Studio: new short getting-started video and a guided setup for your AI assistant ' +
+          '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor).',
+        'Watch',
+        'Not now',
+      ).then((choice) => {
+        if (choice === 'Watch') { void vscode.commands.executeCommand('erdStudio.showGettingStarted'); }
+      });
+    }
+  }
+
   // AI coding harness — prompt to update stale files; offer install once per
   // workspace when none are present. Never overwrite anything silently:
   // harness files (AGENTS.md in particular) can hold user content.
@@ -1633,6 +2252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ).then(choice => {
         if (choice === 'Update All') {
           const results = staleTargets.map(target => harnessService.install(workspaceRoot, target, true));
+          recordHarnessInstalls(results);
           const failed = results.filter(r => !r.success);
           if (failed.length > 0) {
             const errors = failed.map(r => `${r.target.id}: ${r.error}`).join('; ');
@@ -1649,7 +2269,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.commands.executeCommand('erdStudio.installCodingHarness');
         }
       });
-    } else if (installedCount === 0 && !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)) {
+    } else if (
+      !suppressHarnessQuickPick &&
+      installedCount === 0 &&
+      !context.workspaceState.get<boolean>(HARNESS_INSTALL_PROMPTED_KEY)
+    ) {
       // No harnesses installed — offer the QuickPick once per workspace, not
       // on every window open. The command stays available in the palette.
       void context.workspaceState.update(HARNESS_INSTALL_PROMPTED_KEY, true);
@@ -1685,6 +2309,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       });
     }
   }
+
+  // Keep ~/.erd-studio-cli in step with this extension — only if the user
+  // installed it (Set Up My AI Helper). The second documented exception to
+  // "no unprompted writes": it writes outside the workspace, only after that
+  // opt-in, and never throws or toasts.
+  void cliLauncher.refreshIfInstalled(launcherOptions);
 
   // ---------------------------------------------------------------------------
   // Legacy command aliases

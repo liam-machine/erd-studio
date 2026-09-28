@@ -11,7 +11,7 @@ import { useCallback } from 'react';
 import { Panel } from '@xyflow/react';
 
 import { useEditorStore } from '../../store/editorStore';
-import { useVsCodeApi } from '../../hooks/useVsCodeApi';
+import { useSend } from '../../hooks/useMessageBus';
 import './WelcomeModal.css';
 
 // ---------------------------------------------------------------------------
@@ -19,15 +19,21 @@ import './WelcomeModal.css';
 // ---------------------------------------------------------------------------
 
 export function WelcomeModal() {
-  const vscode = useVsCodeApi();
+  const send = useSend();
   const welcomeModalOpen = useEditorStore((s) => s.welcomeModalOpen);
   const setWelcomeModalOpen = useEditorStore((s) => s.setWelcomeModalOpen);
 
   // Handle "Get Started" button — tell extension to persist dismissal in globalState
   const handleGetStarted = useCallback(() => {
-    vscode.postMessage({ type: 'dismissWelcome' });
+    send({ type: 'dismissWelcome' });
     setWelcomeModalOpen(false);
-  }, [vscode, setWelcomeModalOpen]);
+  }, [send, setWelcomeModalOpen]);
+
+  // Opens the "Welcome to ERD Studio" panel (the getting-started video) in its
+  // own tab. The modal stays open: watching the tour is not a dismissal.
+  const handleWatchTour = useCallback(() => {
+    send({ type: 'openGettingStarted' });
+  }, [send]);
 
   if (!welcomeModalOpen) {
     return null;
@@ -156,12 +162,22 @@ export function WelcomeModal() {
           <span className="welcome-modal__tip">
             Press <kbd>?</kbd> to show the legend anytime
           </span>
-          <button
-            className="welcome-modal__button welcome-modal__button--primary"
-            onClick={handleGetStarted}
-          >
-            Get Started
-          </button>
+          <div className="welcome-modal__actions">
+            <button
+              type="button"
+              className="welcome-modal__button welcome-modal__button--link"
+              onClick={handleWatchTour}
+            >
+              Watch the short tour
+            </button>
+            <button
+              type="button"
+              className="welcome-modal__button welcome-modal__button--primary"
+              onClick={handleGetStarted}
+            >
+              Get Started
+            </button>
+          </div>
         </div>
       </Panel>
     </>

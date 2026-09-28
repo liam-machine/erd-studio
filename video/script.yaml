@@ -1,0 +1,263 @@
+# Getting-started video: the single source of truth.
+#
+# Each scene has a headline (two lines; `{word}` is highlighted in the scene's accent colour),
+# the player module that draws it (player/scenes/<module>.js) and narration lines.
+#
+# A line is:
+#   id       stable file name for its voice clip (build/voice/<id>.wav) and cue
+#   beat     name the scene module keys its animation off (beats.<name>.t / .end, seconds
+#            from scene start, taken from the REAL audio duration)
+#   caption  what the viewer reads (captions, transcript) — Australian spelling
+#   say      optional: what the voice reads, when it must differ from the caption
+#            (pronunciation respellings — see the table in README.md)
+#   pause    optional: silence before this line instead of timing.gap
+#
+# Timing (build-timeline.mjs): a scene starts where the previous one ended; its first line
+# starts `lead` seconds in; each further line follows `gap` seconds after the previous one;
+# the scene lasts max(minDur, lastLineEnd + tail).
+
+title: ERD Studio — getting started
+maxDuration: 140
+
+voice:
+  engine: kokoro        # kokoro | say
+  kokoro: af_heart      # Kokoro v1.0 voice id (Apache-2.0)
+  speed: 1.0
+  say: Karen            # macOS fallback voice (en-AU)
+  sayRate: 175
+
+timing:
+  lead: 0.45
+  gap: 0.25
+  tail: 0.6
+  fade: 0.3
+
+chapters: ["1 · SET UP", "2 · CHECK", "3 · BUILD", "4 · VERIFY", "5 · EXPLORE"]
+
+scenes:
+  - id: intro
+    module: intro
+    chapter: 0
+    minDur: 6.5
+    accent: blue
+    headline: ["From your dbt project", "to a {data model}."]
+    lines:
+      - id: s01_welcome
+        beat: welcome
+        caption: Welcome to ERD Studio.
+      - id: s01_turn
+        beat: turn
+        caption: Let's turn your dbt project into a data model you can see.
+
+  - id: two-ways
+    module: twoWays
+    chapter: 0
+    minDur: 7.5
+    accent: blue
+    headline: ["Physical is what you built.", "{Logical} is what you mean."]
+    lines:
+      - id: s02_physical
+        beat: physical
+        caption: Physical is what your dbt project builds.
+      - id: s02_logical
+        beat: logical
+        caption: "Logical is your design: the tables, keys, and how they connect."
+
+  - id: helper
+    module: helper
+    chapter: 1
+    minDur: 10
+    accent: blue
+    headline: ["One click sets up", "your {AI helper}."]
+    lines:
+      - id: s03_click
+        beat: click
+        caption: First, click 'Set up my AI helper' in the Welcome panel.
+      - id: s03_adds
+        beat: adds
+        caption: It adds a setup guide for your AI assistant, and a small checking tool.
+      - id: s03_noai
+        beat: noai
+        pause: 0.45
+        caption: No AI assistant yet? The panel links you to one.
+
+  - id: claude
+    module: claude
+    chapter: 1
+    minDur: 7.5
+    accent: blue
+    headline: ["Then ask your", "{AI assistant} to start."]
+    lines:
+      - id: s04_open
+        beat: open
+        caption: "Then open your AI assistant in your project folder: Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor."
+      - id: s04_type
+        beat: type
+        pause: 0.2
+        caption: Type /erd-studio-setup.
+        say: Type slash ERD studio setup.
+      - id: s04_explains
+        beat: explains
+        caption: It explains every step as it goes.
+
+  - id: checks
+    module: checks
+    chapter: 2
+    minDur: 9
+    accent: blue
+    headline: ["First, it checks", "your {dbt} setup."]
+    lines:
+      - id: s05_checks
+        beat: checks
+        caption: It starts by checking your dbt setup.
+      - id: s05_parse
+        beat: parse
+        caption: dbt parse maps every model in your project.
+      - id: s05_catalog
+        beat: catalog
+        caption: dbt docs generate adds the real column types from your warehouse.
+
+  - id: no-dbt
+    module: noDbt
+    chapter: 2
+    minDur: 7
+    accent: green
+    headline: ["No dbt on this machine?", "It {still works}."]
+    lines:
+      - id: s06_none
+        beat: none
+        caption: No dbt yet? That's fine.
+      - id: s06_reads
+        beat: reads
+        caption: It reads your SQL and YAML files instead,
+      - id: s06_later
+        beat: later
+        pause: 0.12
+        caption: and shows you how to install dbt later.
+
+  - id: areas
+    module: areas
+    chapter: 3
+    minDur: 8
+    accent: blue
+    headline: ["You choose a", "{business area}."]
+    lines:
+      - id: s07_asks
+        beat: asks
+        caption: Next, it suggests a business area to start with.
+      - id: s07_domain
+        beat: domain
+        caption: "That area becomes a domain: a focused diagram of related tables."
+
+  - id: modelling
+    module: modelling
+    chapter: 3
+    minDur: 13.4
+    accent: blue
+    headline: ["It works out", "{how you model}."]
+    lines:
+      - id: s07b_detects
+        beat: detects
+        caption: Then it works out how your project is modelled, like medallion layers, Kimball or Data Vault, and shows you the evidence.
+        say: Then it works out how your project is modeled, like medallion layers, Kimball or Data Vault, and shows you the evidence.
+      - id: s07b_confirm
+        beat: confirm
+        caption: Say yes, or describe it your way.
+      - id: s07b_lookup
+        beat: lookup
+        caption: It looks up the standard, plays it back to you, and applies it to the tables it writes.
+
+  - id: writes
+    module: writes
+    chapter: 3
+    minDur: 8.5
+    accent: blue
+    headline: ["Your logical model,", "{written for you}."]
+    lines:
+      - id: s08_writes
+        beat: writes
+        caption: "Then it writes your logical model: one file per table,"
+      - id: s08_details
+        beat: details
+        pause: 0.12
+        caption: with columns, types, keys and relationships from your dbt project.
+
+  - id: verify
+    module: verify
+    chapter: 4
+    minDur: 11
+    accent: amber
+    accentAfter: { beat: fix, offset: 3.9, accent: green }   # turns green with "0 differences"
+    headline: ["Then it checks", "its {own work}."]
+    lines:
+      - id: s09_important
+        beat: important
+        caption: Now the important part.
+      - id: s09_compare
+        beat: compare
+        caption: It compares logical with physical, just like the Diff button on the canvas.
+      - id: s09_fix
+        beat: fix
+        caption: Anything that doesn't match gets fixed, and it checks again until there are no differences.
+
+  - id: explore
+    module: explore
+    chapter: 5
+    minDur: 8
+    accent: green
+    headline: ["Open the canvas", "and {explore}."]
+    lines:
+      - id: s10_open
+        beat: open
+        caption: Open a domain from the ERD Studio sidebar to see your diagram.
+      - id: s10_switch
+        beat: switch
+        caption: Switch between logical and physical, and keep designing.
+
+  - id: sample
+    module: sample
+    chapter: 0            # after the last chapter: the bar shows every chapter done (main.js)
+    minDur: 18.6          # holds the confirm dialog after the last line (sample.js)
+    accent: green
+    headline: ["No dbt project yet?", "Try the {sample}."]
+    lines:
+      - id: s02c_sample
+        beat: sample
+        caption: No dbt project yet? Start with the sample,
+      - id: s02c_coffee
+        beat: coffee
+        pause: 0.12
+        caption: a small coffee-shop project that runs on your computer.
+      - id: s12_panel
+        beat: panel
+        caption: Open it from the Welcome panel,
+      - id: s12_sidebar
+        beat: sidebar
+        pause: 0.12
+        caption: the ERD Studio sidebar,
+      - id: s12_palette
+        beat: palette
+        pause: 0.12
+        caption: "or the Command Palette: 'ERD Studio: Try the Sample Project'."
+        say: "or the Command Palette: ERD Studio, Try the Sample Project."
+      - id: s12_save
+        beat: save
+        caption: Pick any one, then choose where to save it.
+
+  - id: end
+    module: endCard
+    chapter: 0
+    minDur: 7
+    accent: green
+    headline: null
+    lines:
+      - id: s11_thats
+        beat: thats
+        caption: That's it.
+      - id: s11_rewatch
+        beat: rewatch
+        caption: Rewatch this any time from the ERD Studio sidebar.
+      - id: s11_happy
+        beat: happy
+        caption: Happy modelling!
+        say: Happy modeling!

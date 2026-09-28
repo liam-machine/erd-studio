@@ -25,6 +25,7 @@ import type {
   ColumnDisplay,
 } from '../types/graph';
 import { resolveNodeDimensions } from './nodeSizing';
+import { computeModelLabels } from './modelLabels';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -173,6 +174,7 @@ export function transformDomain(
 
   // --- Nodes ---------------------------------------------------------------
 
+  const labels = computeModelLabels(models);
   const nodes: (ModelFlowNode | AnnotationFlowNode)[] = models.map((model) => {
     const columns = mapColumns(model);
     const position = positionMap.get(model.name) ?? DEFAULT_POSITION;
@@ -184,6 +186,7 @@ export function transformDomain(
       position,
       data: {
         modelName: model.name,
+        ...(labels.has(model.name) ? { label: labels.get(model.name) } : {}),
         stage,
         layer,
         layerConfig,

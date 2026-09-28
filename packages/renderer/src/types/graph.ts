@@ -41,6 +41,12 @@ export interface ColumnDisplay {
 export type ModelNodeData = {
   /** Model name (unique within a domain). */
   modelName: string;
+  /**
+   * Header label when it differs from `modelName`: the model's table name
+   * (`alias`), qualified by schema when another model on the canvas would read
+   * the same. See `computeModelLabels`.
+   */
+  label?: string;
   /** The active design stage. */
   stage: Stage;
   /** Data warehouse layer. */

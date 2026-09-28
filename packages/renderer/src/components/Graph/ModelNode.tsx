@@ -535,7 +535,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, ghostReason, provenance, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, label, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, ghostReason, provenance, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const send = useSend();
   const viewer = useIsViewer();
@@ -611,12 +611,14 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
   // Header hover tips. `title` is not a usable tooltip on a React Flow node —
   // the node is a drag surface and the browser shows the grab cursor instead —
   // so the header uses the same portal hover card the column rows use.
+  // An aliased model reads as its table name; the tip says which model it is.
+  const title = label ? `${label} (model ${modelName})` : modelName;
   const nameTip = useHoverTip<HTMLSpanElement>(
     ghostReason
-      ? `${modelName} \u2014 ${GHOST_REASON_TITLE[ghostReason]}`
+      ? `${title} \u2014 ${GHOST_REASON_TITLE[ghostReason]}`
       : isDiscExtra
-        ? `${modelName} \u2014 only in ${discrepancySourceStage ?? 'this stage'}, not in ${discrepancyTargetStage ?? 'the stage being compared'}`
-        : modelName,
+        ? `${title} \u2014 only in ${discrepancySourceStage ?? 'this stage'}, not in ${discrepancyTargetStage ?? 'the stage being compared'}`
+        : title,
   );
   const sourceTip = useHoverTip<HTMLSpanElement>(
     provenance ? sourceTitle(provenance, columns) : '',
@@ -647,7 +649,8 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
       {/* Header */}
       <div className="model-node__header">
         <span className="model-node__name" {...nameTip.anchorProps}>
-          {modelName}
+          {label ?? modelName}
+          {label && <span className="model-node__model-id">{modelName}</span>}
         </span>
         {nameTip.tip}
         {provenance && (

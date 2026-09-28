@@ -24,6 +24,7 @@ import type {
   YmlData,
   YmlModelInfo,
   YmlRelationshipTest,
+  YmlResourceDoc,
 } from '../types/ymlData';
 import { normaliseName, parseRefModelName } from './nameUtils';
 import { defaultDbtProjectConfig, type DbtProjectConfig } from './dbtProjectConfig';
@@ -178,7 +179,7 @@ export class YmlParserService {
 
     // One walk finds both the schema .yml files and the source files that
     // define models, seeds and snapshots.
-    const { ymlFiles, sourceFilePaths } = this.findProjectFiles(projectPath);
+    const { ymlFiles, resourceYmlFiles, sourceFilePaths } = this.findProjectFiles(projectPath);
 
     for (const filePath of ymlFiles) {
       try {
@@ -189,6 +190,20 @@ export class YmlParserService {
           uniqueColumns,
           compositeUniqueGroups,
         );
+      } catch (err) {
+        console.warn(
+          `[YmlParserService] Failed to parse ${filePath}: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
+
+    // `seeds:` / `snapshots:` blocks may sit in a property file under any of
+    // the three roots; they only ever feed descriptions (see YmlResourceDoc).
+    const resourceDocs = new Map<string, YmlResourceDoc>();
+    for (const filePath of [...ymlFiles, ...resourceYmlFiles]) {
+      try {
+        this.parseResourceDocs(filePath, resourceDocs);
       } catch (err) {
         console.warn(
           `[YmlParserService] Failed to parse ${filePath}: ` +
@@ -208,17 +223,72 @@ export class YmlParserService {
       sourceFiles.set(stem, path.relative(projectPath, filePath).replace(/\\/g, '/'));
     }
 
-    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles };
+    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles, resourceDocs };
+  }
+
+  /**
+   * Collect `seeds:` / `snapshots:` entries from one property file into
+   * `resourceDocs` — name, description and column descriptions only. Tests
+   * declared on them are ignored on purpose: seeds and snapshots take no part
+   * in relationship or cardinality derivation.
+   */
+  private parseResourceDocs(filePath: string, resourceDocs: Map<string, YmlResourceDoc>): void {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    if (!/^(seeds|snapshots)\s*:/m.test(raw)) {
+      return; // cheap pre-check: most model schema files have neither key
+    }
+    const doc = parseDocument(raw);
+    for (const [key, resourceType] of [['seeds', 'seed'], ['snapshots', 'snapshot']] as const) {
+      const seq = doc.get(key);
+      if (!isSeq(seq)) {
+        continue;
+      }
+      for (const item of (seq as YAMLSeq).items) {
+        if (!isMap(item)) {
+          continue;
+        }
+        const node = item as YAMLMap;
+        const name = this.getString(node, 'name');
+        if (!name || resourceDocs.has(normaliseName(name))) {
+          continue; // first declaration wins, as for source files
+        }
+        const columns: YmlColumn[] = [];
+        const columnsNode = node.get('columns');
+        if (isSeq(columnsNode)) {
+          for (const colItem of (columnsNode as YAMLSeq).items) {
+            if (!isMap(colItem)) {
+              continue;
+            }
+            const colName = this.getString(colItem as YAMLMap, 'name');
+            if (colName) {
+              columns.push({
+                name: colName,
+                description: this.getString(colItem as YAMLMap, 'description'),
+                dataType: this.getStringOrNull(colItem as YAMLMap, 'data_type'),
+              });
+            }
+          }
+        }
+        resourceDocs.set(normaliseName(name), {
+          name,
+          resourceType,
+          description: this.getString(node, 'description'),
+          columns,
+          filePath,
+        });
+      }
+    }
   }
 
   /**
    * Recursively walk the configured dbt directories once, collecting both the
    * schema .yml files and the source files that define nodes.
    *
-   * `model-paths` (default `models/`) yields both; `seed-paths` and
-   * `snapshot-paths` yield source files only — a schema .yml under `seeds/`
-   * must NOT enter `YmlData.models`, because that map feeds the Add Existing
-   * Model picker and relationship derivation.
+   * `model-paths` (default `models/`) yields schema .yml files for `models:`
+   * parsing. A .yml under `seed-paths` / `snapshot-paths` lands in
+   * `resourceYmlFiles` instead, which is read ONLY for `seeds:` / `snapshots:`
+   * documentation — it must NOT enter `YmlData.models`, because that map feeds
+   * the Add Existing Model picker and relationship derivation.
    *
    * Skips excluded directories (packages, venvs, build output): a model
    * vendored under `dbt_packages` or a venv is not part of this project and
@@ -226,40 +296,42 @@ export class YmlParserService {
    */
   private findProjectFiles(projectPath: string): {
     ymlFiles: string[];
+    resourceYmlFiles: string[];
     sourceFilePaths: string[];
   } {
     const ymlFiles: string[] = [];
+    const resourceYmlFiles: string[] = [];
     const sourceFilePaths: string[] = [];
     // Roots can be duplicated or nested (e.g. `seed-paths: ["models/seeds"]`);
     // walking a resolved root twice would only cost IO, so guard on it.
     const walked = new Set<string>();
 
-    const walkRoots = (roots: string[], collectYml: boolean): void => {
+    const walkRoots = (roots: string[], ymlTarget: string[]): void => {
       for (const root of roots) {
         const dir = path.resolve(projectPath, root);
         if (walked.has(dir)) {
           continue;
         }
         walked.add(dir);
-        this.walkDir(dir, collectYml ? ymlFiles : null, sourceFilePaths);
+        this.walkDir(dir, ymlTarget, sourceFilePaths);
       }
     };
 
-    walkRoots(this.modelPaths, true);
-    walkRoots(this.seedPaths, false);
-    walkRoots(this.snapshotPaths, false);
+    walkRoots(this.modelPaths, ymlFiles);
+    walkRoots(this.seedPaths, resourceYmlFiles);
+    walkRoots(this.snapshotPaths, resourceYmlFiles);
 
-    return { ymlFiles, sourceFilePaths };
+    return { ymlFiles, resourceYmlFiles, sourceFilePaths };
   }
 
   /**
-   * Walk one directory tree. `ymlFiles` is null for roots whose schema files
-   * are out of scope (seeds, snapshots); `sourceFiles` is always collected.
+   * Walk one directory tree, pushing .yml/.yaml files into `ymlFiles` (the
+   * caller's list for this root) and source files into `sourceFiles`.
    *
    * Never reads a file body — the walk is pure `readdirSync`, which already
    * enumerates every entry, so indexing the source files is free.
    */
-  private walkDir(dir: string, ymlFiles: string[] | null, sourceFiles: string[]): void {
+  private walkDir(dir: string, ymlFiles: string[], sourceFiles: string[]): void {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -274,7 +346,7 @@ export class YmlParserService {
         }
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
-        if (ymlFiles && (ext === '.yml' || ext === '.yaml')) {
+        if (ext === '.yml' || ext === '.yaml') {
           ymlFiles.push(path.join(dir, entry.name));
         } else if (SOURCE_FILE_EXTENSIONS.has(ext)) {
           sourceFiles.push(path.join(dir, entry.name));
@@ -612,12 +684,24 @@ export class YmlParserService {
       }
     }
 
+    let filteredResourceDocs: Map<string, YmlResourceDoc> | undefined;
+    if (data.resourceDocs) {
+      filteredResourceDocs = new Map<string, YmlResourceDoc>();
+      for (const [key, doc] of data.resourceDocs) {
+        const relativePath = path.relative(projectPath, doc.filePath).replace(/\\/g, '/');
+        if (relativePath.startsWith(normalizedPrefix)) {
+          filteredResourceDocs.set(key, doc);
+        }
+      }
+    }
+
     return {
       models: filteredModels,
       relationshipTests: filteredRelTests,
       uniqueColumns: filteredUniqueColumns,
       compositeUniqueGroups: filteredCompositeGroups,
       sourceFiles: filteredSourceFiles,
+      resourceDocs: filteredResourceDocs,
     };
   }
 

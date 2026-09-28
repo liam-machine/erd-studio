@@ -1,0 +1,28 @@
+{
+  "commonProperties": {},
+  "events": {
+    "liamwynne.erd-studio/heartbeat": {
+      "owner": "liamwynne",
+      "comment": "One anonymous usage summary per UTC day, sent the day after ERD Studio was used. No names, paths, file contents or error text. Raw rows are deleted after 90 days.",
+      "v": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "comment": "Report format version (1)." },
+      "installId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Random UUID v4 minted by the extension and replaced every 30 days. Not vscode.env.machineId." },
+      "day": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The UTC date (YYYY-MM-DD) the counts describe." },
+      "extVersion": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "ERD Studio version (major.minor.patch)." },
+      "vscodeMajor": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "VS Code version, major.minor only." },
+      "os": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "darwin, win32, linux or other." },
+      "tenure": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Days since first activation, bucketed: 0, 1-7, 8-30, 31-90, 90+." },
+      "activation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "project_found or no_project, for the most recent activation that day." },
+      "hasSemanticDir": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Whether the dbt project has an .erd-studio folder." },
+      "domainCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Number of domain diagrams, bucketed: 0, 1-3, 4-10, 10+." },
+      "activations": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "comment": "Activations that day, capped at 50." },
+      "canvasOpens": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "comment": "Diagrams opened that day, capped at 200." },
+      "stages": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Stages viewed, a subset of [logical, physical]." },
+      "schemaFormats": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Domain file formats opened, a subset of [v5, v4]." },
+      "modelCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Largest diagram opened, bucketed: none, 1-10, 11-50, 51+." },
+      "manifest": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "State of dbt's manifest.json when a diagram was opened: ok, missing, stale or unknown." },
+      "catalog": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Whether a dbt catalog.json was present." },
+      "features": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Use counts (0-100 each, zero keys omitted) keyed only by: physicalStage, compare, syncPlan, launchClaude, dbtCompile, annotation, autoLayout, addModel, addRelationship, harnessInstallClaude, harnessInstallCopilot, harnessInstallGemini, harnessInstallCodex, migrateV5, feedbackOpened." },
+      "errors": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "comment": "Failure counts (0-100 each, zero keys omitted) keyed only by: manifestMissing, manifestMalformed, manifestTimeout, catalogUnreadable, domainLoad, modelFileParse, layersInvalid, editRejected, migrationFailed, other. Never messages or stack traces." }
+    }
+  }
+}

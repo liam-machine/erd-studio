@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt — design your data warehouse on a canvas, in your repo, as plain YAML your AI assistant can read. Kimball/dimensional modelling, then compare the design against what dbt actually built.",
-  "version": "1.0.11",
+  "version": "1.5.1",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -136,10 +136,40 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.organizeModelLibrary",
+        "title": "Organise Model Library by Layer",
+        "category": "ERD Studio",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "erdStudio.resolveDuplicateModel",
+        "title": "Give Duplicate Model Its Own Name…",
+        "category": "ERD Studio",
+        "icon": "$(wand)"
+      },
+      {
         "command": "erdStudio.reportBug",
         "title": "Send Feedback",
         "category": "ERD Studio",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "erdStudio.showGettingStarted",
+        "title": "Watch Getting Started Video",
+        "category": "ERD Studio",
+        "icon": "$(play-circle)"
+      },
+      {
+        "command": "erdStudio.trySampleProject",
+        "title": "Try the Sample Project",
+        "category": "ERD Studio",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "erdStudio.setupAiHelper",
+        "title": "Set Up My AI Helper",
+        "category": "ERD Studio",
+        "icon": "$(sparkle)"
       },
       {
         "command": "erdStudio.setFeedbackApiKey",
@@ -156,6 +186,12 @@
         "title": "Refresh My Reports",
         "category": "ERD Studio",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "erdStudio.selectDbtProject",
+        "title": "Select dbt Project…",
+        "category": "ERD Studio",
+        "icon": "$(folder-library)"
       }
     ],
     "viewsContainers": {
@@ -235,11 +271,22 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "No ERD domains found.\n\nERD Studio lets you design your data warehouse visually across two stages:\n\n**Logical** — columns, data types, FK keys, and design rationale\n**Physical** — read-only view of what's built in dbt\n\n[Set Up ERD Studio](command:erdStudio.setupSemanticDirectory)\n\nCreates the .erd-studio directory structure and your first domain.\n\n[Install AI Coding Harness](command:erdStudio.installCodingHarness)\n\nAdd ERD Studio schema reference to Claude, Copilot, Gemini, or Codex."
+        "contents": "No dbt project in this folder yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA 2-minute video, a sample project to try, and how to open your own.",
+        "when": "!erdStudio.hasDbtProject"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA 2-minute video, then your AI assistant builds your first diagram from this dbt project.",
+        "when": "erdStudio.hasDbtProject"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "This workspace has more than one dbt project.\n\n[Select dbt Project](command:erdStudio.selectDbtProject)",
+        "when": "erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects"
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "No logical models found.\n\nModels are stored as YAML files in .erd-studio/logical-models/.\n\nAdd models to a domain using the ERD editor to create them here."
+        "contents": "No logical models found.\n\nModels are stored as YAML files in .erd-studio/logical-models/, grouped into one folder per layer.\n\nAdd models to a domain using the ERD editor to create them here."
       }
     ],
     "customEditors": [
@@ -281,16 +328,31 @@
         },
         {
           "command": "erdStudio.revealLogicalModel",
-          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate)?$/",
           "group": "navigation@1"
         },
         {
           "command": "erdStudio.deleteLogicalModel",
           "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
           "group": "7_modification@1"
+        },
+        {
+          "command": "erdStudio.resolveDuplicateModel",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModelDuplicate",
+          "group": "inline"
+        },
+        {
+          "command": "erdStudio.resolveDuplicateModel",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModelDuplicate",
+          "group": "7_modification@0"
         }
       ],
       "view/title": [
+        {
+          "command": "erdStudio.organizeModelLibrary",
+          "when": "view == erdStudio.modelLibrary",
+          "group": "navigation@0"
+        },
         {
           "command": "erdStudio.installCodingHarness",
           "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
@@ -300,6 +362,16 @@
           "command": "erdStudio.addLayer",
           "when": "view == erdStudio.domainTree && erdStudio.hasSemanticDir",
           "group": "navigation@1"
+        },
+        {
+          "command": "erdStudio.selectDbtProject",
+          "when": "view == erdStudio.domainTree && erdStudio.hasMultipleDbtProjects",
+          "group": "navigation@7"
+        },
+        {
+          "command": "erdStudio.showGettingStarted",
+          "when": "view == erdStudio.domainTree",
+          "group": "navigation@8"
         },
         {
           "command": "erdStudio.reportBug",
@@ -383,6 +455,16 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show a **My Reports** view listing issues you filed from ERD Studio, refreshed from GitHub every few hours. Requires you to be signed in to GitHub in VS Code; the view is hidden otherwise and you are never prompted to sign in."
+        },
+        "erdStudio.telemetry.enabled": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": true,
+          "tags": [
+            "telemetry",
+            "usesOnlineServices"
+          ],
+          "markdownDescription": "Send one anonymous usage heartbeat a day: which ERD Studio features were used and how often, bucketed project sizes and error counts — never names, paths, file contents or error messages. This setting can only turn telemetry **off**: VS Code's `#telemetry.telemetryLevel#` must also allow it, and nothing is sent when that is `off`. See [Telemetry](https://github.com/liam-machine/erd-studio#telemetry) for every field sent and how long it is kept."
         },
         "dbtSemantic.projectPath": {
           "type": "string",

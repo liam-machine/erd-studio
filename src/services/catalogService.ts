@@ -45,6 +45,12 @@ export interface CatalogServiceOptions {
   dbtConfig?: Partial<DbtProjectConfig>;
   /** Refuse to read a catalog larger than this. Defaults to {@link DEFAULT_CATALOG_MAX_BYTES}. */
   maxBytes?: number;
+  /**
+   * Told when a catalog exists but cannot be used (unreadable, malformed or
+   * over the size limit) — never for an absent one. The extension host counts
+   * these for usage telemetry.
+   */
+  onReadFailure?: () => void;
 }
 
 export class CatalogService {
@@ -56,6 +62,7 @@ export class CatalogService {
 
   private readonly dbtConfig: DbtProjectConfig;
   private readonly maxBytes: number;
+  private readonly onReadFailure?: () => void;
 
   /** Zero-arg construction must work, mirroring `new ManifestService()`. */
   constructor(options: CatalogServiceOptions = {}) {
@@ -67,6 +74,7 @@ export class CatalogService {
       targetPath: overrides.targetPath || defaults.targetPath,
     };
     this.maxBytes = options.maxBytes ?? DEFAULT_CATALOG_MAX_BYTES;
+    this.onReadFailure = options.onReadFailure;
   }
 
   /** Absolute path of the catalog this service reads for `projectPath`. */
@@ -124,6 +132,7 @@ export class CatalogService {
           `[CatalogService] ${catalogPath} is ${stat.size} bytes ` +
             `(limit ${this.maxBytes}) — skipping.`,
         );
+        this.onReadFailure?.();
         return undefined;
       }
       const raw = await fs.promises.readFile(catalogPath, 'utf-8');
@@ -135,6 +144,7 @@ export class CatalogService {
           `[CatalogService] Could not read ${catalogPath}: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
+        this.onReadFailure?.();
       }
       // Absent, unreadable or malformed — all the same answer to the caller.
       return undefined;

@@ -17,7 +17,8 @@
  *                         feedback (requestFeedbackContext, analyzeFeedback,
  *                         submitFeedback, copyFeedbackReport,
  *                         openFeedbackLink),
- *                         viewFile, requestReload, dismissWelcome
+ *                         viewFile, requestReload, dismissWelcome,
+ *                         openGettingStarted
  *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
  *                         requestId), discrepancyReport, manifestStaleness,
  *                         syncPlanGenerated, openFeedback, feedbackContext,
@@ -65,7 +66,9 @@ import {
   isDomainFilePath,
   relationshipReferencesColumn,
 } from '../services/domainService';
-import { compare as compareStages } from '../services/discrepancyService';
+import { computeDomainDiff } from '../services/stageDiff';
+import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
+import { findVenvActivate } from '../services/dbtEnv';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -96,6 +99,7 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
+import { findOwningDbtProject, samePath } from '../services/projectDiscovery';
 import type {
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
@@ -114,21 +118,9 @@ import type { DisplayDomain } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignModel, Stage } from '../types/semantic';
 import type { UpdateColumnPayloadColumn } from '../types/messages';
 import type { GroundTruth } from '../types/syncPlan';
-import {
-  deriveModelAction,
-  deriveColumnAction,
-  resolveGroundTruthDataType,
-  deriveRelationshipAction,
-} from '../types/syncPlan';
-import type {
-  SyncPlan,
-  ModelResolution,
-  ColumnResolution,
-  RelationshipResolution,
-  ModelContext,
-} from '../types/syncPlan';
 import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
+import { telemetry } from '../services/telemetryService';
 
 /**
  * Backoff between re-reads of a domain file that read as empty or truncated.
@@ -139,6 +131,16 @@ import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelN
 const DOMAIN_READ_RETRY_DELAYS_MS = [150, 350, 700];
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The logical-models/ sub-folder new models created from a domain go in: the
+ * domain file's layer directory (`{semanticDir}/{layer}/{domain}.json`).
+ * `LogicalModelService` ignores a name that is not layer-shaped, so a domain
+ * opened from anywhere else simply creates its models at the top level.
+ */
+export function modelFolderForDomain(domainFilePath: string): string {
+  return path.basename(path.dirname(domainFilePath));
+}
 
 /**
  * logical-models/*.yml operations to bundle into a domain WorkspaceEdit so the
@@ -162,6 +164,22 @@ interface ModelFileSave {
    * the new path instead of being regenerated from scratch.
    */
   fromName?: string;
+}
+
+/**
+ * True when the domain has at least one model and NONE of them has a stored
+ * `viewConfig.positions` entry (missing or empty `positions` included) — the
+ * case where the webview should run the ELK auto layout on first open rather
+ * than the host persisting its simple placement. A domain with any stored
+ * position is not fresh: the missing ones keep today's host placement.
+ */
+export function isFreshLayout(
+  unifiedDomain: { logical: { models: Array<{ name: string }> }; viewConfig: { positions?: Record<string, NodePosition> } },
+): boolean {
+  const models = unifiedDomain.logical.models;
+  if (models.length === 0) return false;
+  const positions = unifiedDomain.viewConfig.positions ?? {};
+  return models.every((m) => !positions[m.name]);
 }
 
 /**
@@ -200,6 +218,16 @@ function pruneViewConfigForRemovedModels(
 }
 
 /**
+ * The model name to suggest when a new model's name is taken but the user
+ * wants a table of that name in this domain's layer: `{layer}_{name}`, the
+ * dbt convention, with the alias carrying the table name.
+ */
+function sameTableName(name: string, domainPath: string): string {
+  const layer = path.basename(path.dirname(domainPath)).toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  return layer ? `${layer}_${name}` : `${name}_2`;
+}
+
+/**
  * Thrown by an `applyDomainEdit` mutator to abort without an edit. The mutator
  * has already reported the reason to the webview (or decided the request is a
  * silent no-op), so `applyDomainEdit` swallows it and returns `false`.
@@ -218,6 +246,7 @@ import {
   validateColumnDef as validateColumnDefPayload,
   validateColumnDefs,
   validateModelName,
+  validateModelAliasPayload,
   validateAnnotationPositions,
   validateAnnotationUpdate,
   validateModelNameSafety,
@@ -261,6 +290,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * never force-saved on their behalf.
    */
   private readonly editedModelPaths = new Map<string, Set<string>>();
+
+  /** `{layer}/{domain}\0{ignored file}` pairs already warned about this session. */
+  private readonly duplicateWarningsShown = new Set<string>();
 
   /**
    * Fires after this provider has written a domain file (and any model files)
@@ -595,11 +627,91 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return true;
   }
 
+  /**
+   * The dbt project a domain file belongs to when that is NOT the project
+   * this window opened: the owning project's root, or `undefined` for a file
+   * outside every dbt project and outside this one. `null` means the file is
+   * this project's own.
+   */
+  private foreignProjectOf(filePath: string): string | undefined | null {
+    const owner = findOwningDbtProject(filePath);
+    if (owner) { return samePath(owner, this.workspaceRoot) ? null : owner; }
+    const rel = path.relative(this.workspaceRoot, filePath);
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? null : undefined;
+  }
+
+  /**
+   * Explain why a foreign domain file is not drawn, with a **Switch** button,
+   * plus a notification offering the same. The page is not the canvas: its
+   * only script posts `switchProject`, handled here, and it speaks none of
+   * the canvas message protocol. (A `command:` link is not used — VS Code
+   * blocks it in a custom editor webview.)
+   */
+  private showForeignProject(webviewPanel: vscode.WebviewPanel, filePath: string, owner: string | undefined): void {
+    const esc = (v: string): string =>
+      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const current = path.basename(this.workspaceRoot);
+    const webview = webviewPanel.webview;
+    const nonce = crypto.randomBytes(16).toString('base64');
+    webview.options = { enableScripts: Boolean(owner), localResourceRoots: [] };
+    webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ERD Studio</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+</head>
+<body style="font-family: var(--vscode-font-family, sans-serif); padding: 24px; color: var(--vscode-foreground); max-width: 44em; line-height: 1.5;">
+  <h2 style="margin-top: 0;">This diagram belongs to ${owner ? `the <code>${esc(path.basename(owner))}</code> dbt project` : 'no dbt project'}</h2>
+  <p>ERD Studio has <code>${esc(current)}</code> open in this window, and a window shows one dbt project at a time.
+  Drawing this file here would mix its models with the wrong project\u2019s dbt data.</p>
+  ${owner ? `<p><button id="switch" style="padding: 6px 14px; border: none; border-radius: 2px; cursor: pointer; font: inherit;
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground);">Switch ERD Studio to ${esc(path.basename(owner))}</button></p>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    document.getElementById('switch').addEventListener('click', () => vscode.postMessage({ type: 'switchProject' }));
+  </script>` : ''}
+</body>
+</html>`;
+
+    const name = path.basename(filePath);
+    if (!owner) {
+      void vscode.window.showWarningMessage(
+        `ERD Studio: ${name} is not inside a dbt project, so it cannot be opened with ${current}'s data.`,
+      );
+      return;
+    }
+    const switchProject = (): void => {
+      void vscode.commands.executeCommand('erdStudio.selectDbtProject', owner);
+    };
+    const messages = webview.onDidReceiveMessage((message: unknown) => {
+      if (isTypedMessage(message) && message.type === 'switchProject') { switchProject(); }
+    });
+    webviewPanel.onDidDispose(() => messages.dispose());
+    void vscode.window.showWarningMessage(
+      `ERD Studio: ${name} belongs to the ${path.basename(owner)} dbt project, but ${current} is open.`,
+      'Switch Project',
+    ).then(choice => {
+      if (choice === 'Switch Project') { switchProject(); }
+    });
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     webviewPanel: vscode.WebviewPanel,
     _token: vscode.CancellationToken,
   ): Promise<void> {
+    // A window serves one dbt project (#82). A domain file from another
+    // project in the same workspace would read its models from this
+    // project's logical-models/ and its physical stage from this project's
+    // manifest — and an edit would write model files into the wrong project.
+    // Refuse it and offer to switch instead of rendering wrong data.
+    const foreignOwner = this.foreignProjectOf(document.uri.fsPath);
+    if (foreignOwner !== null) {
+      this.showForeignProject(webviewPanel, document.uri.fsPath, foreignOwner);
+      return;
+    }
+
     webviewPanel.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.context.extensionUri],
@@ -634,7 +746,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'refreshManifest', 'dismissWelcome',
           'viewFile', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'removeAnnotations',
-          'requestReload',
+          'requestReload', 'openGettingStarted',
           'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
           'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
         ]);
@@ -668,6 +780,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'dismissWelcome':
             await this.context.globalState.update('welcomeDismissed', true);
             break;
+          case 'openGettingStarted':
+            // No payload to validate. Writes nothing, so it is on the physical allowlist.
+            await vscode.commands.executeCommand('erdStudio.showGettingStarted');
+            break;
           case 'updatePositions': {
             const payload = (message as Record<string, unknown>).payload as
               | { positions: Record<string, { x: number; y: number }>; annotations?: unknown }
@@ -697,6 +813,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'addModel': {
             const payload = (message as { payload?: DesignModel }).payload;
             if (payload) {
+              telemetry.feature('addModel');
               await this.queueEdit(panelKey, () =>
                 this.handleAddModel(document, webviewPanel.webview, payload, activeStage));
             }
@@ -745,6 +862,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: unknown cardinality "${String(payload.cardinality)}".` } });
                 break;
               }
+              telemetry.feature('addRelationship');
               await this.queueEdit(panelKey, () =>
                 this.handleAddRelationship(document, webviewPanel.webview, payload, activeStage));
             }
@@ -817,6 +935,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'addExistingModel': {
             const payload = (message as { payload?: { modelName: string } }).payload;
             if (payload) {
+              telemetry.feature('addModel');
               await this.queueEdit(panelKey, () =>
                 this.handleAddExistingModel(document, webviewPanel.webview, payload, activeStage));
             }
@@ -846,6 +965,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               });
               break;
             }
+            telemetry.feature('feedbackOpened');
             try {
               await this.sendFeedbackContext(webviewPanel.webview, payload);
             } catch (err) {
@@ -1046,6 +1166,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'updateModelAlias': {
+            const payload = (message as { payload?: { modelName: string; alias: string } }).payload;
+            if (payload) {
+              const aliasError = validateModelAliasPayload(payload);
+              if (aliasError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update table name: ${aliasError}` } });
+                break;
+              }
+              await this.queueEdit(panelKey, () =>
+                this.handleUpdateModelAlias(webviewPanel.webview, document, payload));
+            }
+            break;
+          }
           case 'updateModelRole': {
             const payload = (message as { payload?: { modelName: string; modelRole: string | null } }).payload;
             if (payload) {
@@ -1068,6 +1201,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               const requestId = typeof payload.requestId === 'number' && Number.isFinite(payload.requestId)
                 ? payload.requestId
                 : undefined;
+              if (payload.stage === 'physical') { telemetry.feature('physicalStage'); telemetry.stage('physical'); }
               await this.handleSwitchStage(panelKey, document, webviewPanel.webview, payload.stage, requestId);
             }
             break;
@@ -1075,6 +1209,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'toggleDiscrepancy': {
             const payload = (message as { payload?: { enabled: boolean; compareAgainst?: Stage } }).payload;
             if (payload) {
+              if (payload.enabled) telemetry.feature('compare');
               await this.handleToggleDiscrepancy(panelKey, document, webviewPanel.webview, payload);
             }
             break;
@@ -1082,15 +1217,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'generateSyncPlan': {
             const payload = (message as { payload?: { selections: Record<string, GroundTruth> } }).payload;
             if (payload) {
+              telemetry.feature('syncPlan');
               await this.handleGenerateSyncPlan(panelKey, document, webviewPanel.webview, payload.selections);
             }
             break;
           }
           case 'runDbtCompile': {
+            telemetry.feature('dbtCompile');
             await this.handleRunDbtCompile();
             break;
           }
           case 'launchClaudeSync': {
+            telemetry.feature('launchClaude');
             await this.handleLaunchClaudeSync();
             break;
           }
@@ -1110,6 +1248,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add annotation: ${pointError}` } });
                 break;
               }
+              telemetry.feature('annotation');
               await this.queueEdit(panelKey, () =>
                 this.handleAddAnnotation(document, webviewPanel.webview, payload));
             }
@@ -1212,6 +1351,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * The layer folder a model created from this domain goes in, or undefined
+   * for the top level: only when the domain's directory is a configured layer
+   * AND the library has opted into layer folders (see `groupsByFolder`).
+   */
+  private newModelFolder(domainFilePath: string): string | undefined {
+    const layer = modelFolderForDomain(domainFilePath);
+    const layerIds = new Set(this.layerService.getAllLayers().map((l) => l.id));
+    return layerIds.has(layer) && this.logicalModelService.groupsByFolder(layerIds) ? layer : undefined;
+  }
+
+  /** `logical-models/[{folder}/]{name}.yml` for an existing model file, for messages. */
+  private libraryRelativePath(name: string): string {
+    const folder = this.logicalModelService.modelFolder(name);
+    return `logical-models/${folder ? `${folder}/` : ''}${name}.yml`;
+  }
+
+  /**
    * Apply a mutation to a model stored in logical-models/{name}.yml (v5 path).
    * Reads the model, applies the mutator callback, and writes it back through
    * the same WorkspaceEdit as the domain file so both files form one undo step
@@ -1264,10 +1420,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Returns the TextDocuments that were edited in place (so the caller can
    * save them after `applyEdit` succeeds — new/deleted files need no save)
    * plus the paths created and deleted, which the caller records as own writes.
+   *
+   * Where a NEW file goes: a rename keeps the old file's folder; any other new
+   * model lands in `logical-models/{layerFolder}/` — the layer of the domain
+   * being edited — when the caller passes one (only once the library already
+   * uses folders), else at the top level. An existing file is always edited
+   * where it already is.
    */
   private async addModelFileEdits(
     edit: vscode.WorkspaceEdit,
     ops: ModelFileOps | undefined,
+    layerFolder?: string,
   ): Promise<{ docs: vscode.TextDocument[]; created: string[]; deleted: string[] }> {
     const docs: vscode.TextDocument[] = [];
     const created: string[] = [];
@@ -1282,7 +1445,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
 
     for (const { model, fromName } of ops.save ?? []) {
-      const modelPath = this.logicalModelService.modelPath(model.name);
+      const renamedFrom = fromName !== undefined && fromName !== model.name
+        ? this.logicalModelService.modelFolder(fromName)
+        : null;
+      const modelPath = this.logicalModelService.modelPath(model.name, renamedFrom ?? layerFolder);
       const uri = vscode.Uri.file(modelPath);
       const yamlText = this.logicalModelService.serializeModel(model, fromName);
       if (this.logicalModelService.modelExists(model.name)) {
@@ -1294,7 +1460,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         edit.replace(uri, range, yamlText);
         docs.push(modelDoc);
       } else {
-        this.logicalModelService.ensureDir();
+        this.logicalModelService.ensureDir(modelPath);
         edit.createFile(uri, { overwrite: false, contents: Buffer.from(yamlText, 'utf-8') });
         created.push(modelPath);
       }
@@ -1407,12 +1573,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       document.positionAt(text.length),
     );
     edit.replace(document.uri, fullRange, updatedText);
-    const { docs: modelDocs, created, deleted } = await this.addModelFileEdits(edit, modelFiles);
+    const { docs: modelDocs, created, deleted } = await this.addModelFileEdits(
+      edit,
+      modelFiles,
+      // Layer folders are opt-in: a flat library stays flat (see groupsByFolder).
+      modelFiles?.save?.length ? this.newModelFolder(document.uri.fsPath) : undefined,
+    );
 
     this.pendingUpdates.set(panelKey, true);
     try {
       const success = await vscode.workspace.applyEdit(edit);
       if (!success) {
+        telemetry.error('editRejected');
         if (errorLabel && webview) {
           webview.postMessage({ type: 'error', payload: { message: errorLabel } });
         }
@@ -1470,6 +1642,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     onSuccess?.();
     return true;
+  }
+
+  /**
+   * Say so — once per session per file — when this domain uses a name that
+   * two files in the library define. Only one of them can be used (names are
+   * identities), so without this a gold canvas would quietly show the silver
+   * `date` table's columns. The warning names both files and offers the fix.
+   */
+  private warnAboutDuplicateModels(domain: UnifiedDomain): void {
+    const used = new Set(domain.logical.models.map((m) => m.name));
+    const modelsDir = this.logicalModelService.getModelsDir();
+    const rel = (p: string): string => `logical-models/${path.relative(modelsDir, p).split(path.sep).join('/')}`;
+    for (const entry of this.logicalModelService.listModelFiles()) {
+      if (!entry.shadowedBy || !used.has(entry.name)) continue;
+      const key = `${domain.layer}/${domain.domain}\0${entry.filePath}`;
+      if (this.duplicateWarningsShown.has(key)) continue;
+      this.duplicateWarningsShown.add(key);
+      const meantThisCopy = entry.folder === domain.layer;
+      const message = `"${entry.name}" is defined twice. ${domain.layer}/${domain.domain} uses ${rel(entry.shadowedBy)}` +
+        (meantThisCopy
+          ? `, not the ${domain.layer} copy ${rel(entry.filePath)}, which is ignored.`
+          : `; ${rel(entry.filePath)} is ignored.`);
+      void vscode.window.showWarningMessage(message, 'Fix…').then((choice) => {
+        if (choice === 'Fix…') {
+          void vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', entry.filePath);
+        }
+      });
+    }
   }
 
   /**
@@ -1539,11 +1739,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
 
       let unifiedDomain = await this.readDomainTolerantly(document.uri.fsPath);
+      this.warnAboutDuplicateModels(unifiedDomain);
+
+      // A fresh domain — models but not one stored position, typically written
+      // by an AI assistant with `viewConfig: {}` — is laid out by the webview's
+      // ELK auto layout instead, which persists through `updatePositions` (one
+      // edit, one undo step). The simple placement below still goes out in the
+      // payload so the first paint is never at (0,0), but it is not written:
+      // should the ELK run fail, the next open simply asks again.
+      const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
       const computed = this.computeMissingPositions(unifiedDomain);
       if (computed) {
-        if (options.persistPositions) {
+        if (options.persistPositions && !autoLayout) {
           const positionsWritten = await this.autoPositionNewModels(document, computed);
           if (positionsWritten) {
             // Re-read since we wrote new positions to the file
@@ -1560,10 +1769,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
         if (layerConfig) { physicalDomain.layerConfig = layerConfig; }
         this.post(webview, { type: 'domainLoaded', payload: physicalDomain, welcomeDismissed });
+        if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
       } else {
         const domain = DomainService.toLogicalStage(unifiedDomain);
         const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
-        this.post(webview, { type: 'domainLoaded', payload: displayDomain, welcomeDismissed });
+        this.post(webview, {
+          type: 'domainLoaded',
+          payload: displayDomain,
+          welcomeDismissed,
+          ...(autoLayout ? { autoLayout: true } : {}),
+        });
+        if (options.persistPositions) this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
+        if (autoLayout) telemetry.feature('autoLayout');
       }
       // A payload went out, so the next failure is news again.
       this.lastLoadError.delete(errorKey);
@@ -1574,6 +1791,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         ...(err instanceof DomainFileError ? { kind: 'domain-file' as const } : {}),
       }, err);
     }
+  }
+
+  /** Usage telemetry for a canvas's first load: only the stage, format and counts. */
+  private recordCanvasOpen(document: vscode.TextDocument, stage: Stage, modelCount: number, hasCatalog: boolean): void {
+    let format: 'v4' | 'v5' = 'v5';
+    try {
+      if (detectDomainFormat(JSON.parse(document.getText()) as Record<string, unknown>) === 'v4') format = 'v4';
+    } catch {
+      // Loaded a moment ago, so this cannot really fail; v5 is the only other loadable format.
+    }
+    telemetry.canvasOpened(stage, format, modelCount);
+    telemetry.manifest(this.manifestService.isMissing ? 'missing' : this.manifestService.isStale ? 'stale' : 'ok');
+    telemetry.catalog(hasCatalog);
   }
 
   /**
@@ -1627,6 +1857,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       return;
     }
     this.lastLoadError.set(errorKey, payload.message);
+    telemetry.error('domainLoad');
     hostErrorLog.record('sendDomainData', err ?? payload.message);
     console.error(`[SemanticEditorProvider] Failed to load domain: ${payload.message}`);
     this.post(webview, { type: 'error', payload });
@@ -1808,8 +2039,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({
             type: 'error',
             payload: {
-              message: `Model "${model.name}" already exists in the model library (logical-models/${model.name}.yml). ` +
-                'Use "Add Existing Model" to reference it in this domain, or choose a different name.',
+              message: `Model "${model.name}" already exists in the model library (${this.libraryRelativePath(model.name)}). ` +
+                'Use "Add Existing Model" to reference it in this domain, or, for a separate table also called ' +
+                `${model.name}, name the model ${sameTableName(model.name, document.uri.fsPath)} and set its Table name to ${model.name}.`,
             },
           });
           return;
@@ -2406,7 +2638,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview.postMessage({
             type: 'error',
             payload: {
-              message: `Model "${trimmedNew}" already exists in the model library (logical-models/${trimmedNew}.yml). ` +
+              message: `Model "${trimmedNew}" already exists in the model library (${this.libraryRelativePath(trimmedNew)}). ` +
                 'Choose a different name, or use "Add Existing Model" to reference it in this domain.',
             },
           });
@@ -2591,6 +2823,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               // Delete through a WorkspaceEdit so VS Code snapshots the files
               // and the deletion is undoable, rather than a bare unlink.
               const deleteEdit = new vscode.WorkspaceEdit();
+              // Captured before the delete: afterwards the folder is unknowable.
+              const singlePath = fileIsSingle ? this.libraryRelativePath(filesToOffer[0]) : '';
               for (const name of filesToOffer) {
                 deleteEdit.deleteFile(
                   vscode.Uri.file(this.logicalModelService.modelPath(name)),
@@ -2603,7 +2837,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 return;
               }
               const summary = fileIsSingle
-                ? `Deleted logical-models/${filesToOffer[0]}.yml`
+                ? `Deleted ${singlePath}`
                 : `Deleted ${filesToOffer.length} model files`;
               vscode.window.showInformationMessage(summary);
             });
@@ -3312,6 +3546,40 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /**
+   * Set or clear a model's `alias` — the warehouse table name. It lives only
+   * in the model file (v5), so it goes through applyModelEdit and shares that
+   * path's single undo step; a v4 domain has no model files to hold it.
+   */
+  private async handleUpdateModelAlias(
+    webview: vscode.Webview,
+    document: vscode.TextDocument,
+    payload: { modelName: string; alias: string },
+  ): Promise<void> {
+    try {
+      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      if (!this.isDomainV5(parsed)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Table names need the model library: run "ERD Studio: Migrate Domain to v5" first.' },
+        });
+        return;
+      }
+      const alias = payload.alias.trim();
+      const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        // An alias equal to the name says nothing dbt does not already do.
+        if (alias && alias !== model.name) { model.alias = alias; } else { delete model.alias; }
+      });
+      if (!ok) {
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to update table name.' } });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update alias failed: ${message}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to update table name: ${message}` } });
+    }
+  }
+
   private async handleUpdateModelRole(
     document: vscode.TextDocument,
     webview: vscode.Webview,
@@ -3448,19 +3716,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const sourceStage = panel.activeStage;
       const targetStage = payload.compareAgainst;
 
-      // Build source DisplayDomain
-      const sourceDomain = await this.buildStageDisplayDomain(
-        document, sourceStage, manifest, ymlData, catalog,
+      // The one comparison orchestration, shared with the `erd-studio diff` CLI.
+      const { report } = computeDomainDiff(
+        { domainService: this.domainService, ymlData, manifest, catalog },
+        document.uri.fsPath,
+        sourceStage,
+        targetStage,
       );
-
-      // Build target DisplayDomain
-      const targetDomain = await this.buildStageDisplayDomain(
-        document, targetStage, manifest, ymlData, catalog,
-      );
-
-      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
-      const stubColumnModels = new Set(unifiedDomain.stubColumns ?? []);
-      const report = compareStages(sourceDomain, targetDomain, stubColumnModels);
 
       // Cache the report and comparison target for sync plan generation
       // and to allow re-running after stub column changes.
@@ -3484,27 +3746,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       console.error(`[SemanticEditorProvider] Discrepancy comparison failed: ${message}`);
       webview.postMessage({ type: 'discrepancyReport', payload: null });
     }
-  }
-
-  /**
-   * Build a DisplayDomain for any stage, given the current document as context.
-   * For physical, derives from the unified file's logical section, the dbt
-   * project's own files, and the manifest / catalog when either is present.
-   * For logical, extracts the logical section from the unified file.
-   */
-  private async buildStageDisplayDomain(
-    document: vscode.TextDocument,
-    stage: Stage,
-    manifest: ManifestData,
-    ymlData: YmlData,
-    catalog?: CatalogData,
-  ): Promise<DisplayDomain> {
-    const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
-    if (stage === 'physical') {
-      return this.domainService.buildPhysicalDomain(unifiedDomain, ymlData, manifest, catalog);
-    }
-    const domain = this.domainService.getDomainStage(document.uri.fsPath);
-    return this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
   }
 
   // ---------------------------------------------------------------------------
@@ -3535,91 +3776,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const semanticDir = getErdStudioSetting('semanticDir', '.erd-studio');
 
-      // Build resolutions from selections
-      const models: ModelResolution[] = [];
-      const columns: ColumnResolution[] = [];
-      const relationships: RelationshipResolution[] = [];
-      const referencedModels = new Set<string>();
+      // Parse domain info from the document
+      const parsed = JSON.parse(document.getText());
 
-      for (const [key, groundTruth] of Object.entries(selections)) {
-        const parts = key.split(':');
-        const kind = parts[0];
+      const syncPlan = buildSyncPlan(report, selections, {
+        manifest,
+        ymlData,
+        projectRoot: this.workspaceRoot,
+        semanticDir,
+        domain: parsed.domain ?? '',
+        layer: parsed.layer ?? '',
+        modelFolder: (name) => this.logicalModelService.modelFolder(name),
+      });
 
-        if (kind === 'model') {
-          const modelName = parts[1];
-          const disc = report.models.find((m) => m.name === modelName);
-          if (!disc || disc.status === 'matched') continue;
-
-          const action = deriveModelAction(disc.status, groundTruth, report.sourceStage);
-          if (!action) continue;
-
-          models.push({
-            modelName,
-            discrepancyStatus: disc.status,
-            groundTruth,
-            action,
-          });
-          referencedModels.add(modelName);
-        } else if (kind === 'col') {
-          const modelName = parts[1];
-          const columnName = parts.slice(2).join(':'); // column name may contain colons
-          const modelDisc = report.models.find((m) => m.name === modelName);
-          const colDisc = modelDisc?.columns.find((c) => c.name === columnName);
-          if (!colDisc || colDisc.status === 'matched') continue;
-
-          const action = deriveColumnAction(colDisc.status, groundTruth, report.sourceStage);
-          if (!action) continue;
-
-          columns.push({
-            modelName,
-            columnName,
-            discrepancyStatus: colDisc.status,
-            groundTruth,
-            action,
-            sourceDataType: colDisc.sourceDataType,
-            targetDataType: colDisc.targetDataType,
-            // Stage-absolute: the two fields above are named for the comparison
-            // direction, not for a stage, so which one carries the ground-truth
-            // value flips when the user compares from the physical stage.
-            resolvedDataType: resolveGroundTruthDataType(
-              groundTruth,
-              report.sourceStage,
-              colDisc.sourceDataType,
-              colDisc.targetDataType,
-            ),
-          });
-          referencedModels.add(modelName);
-        } else if (kind === 'rel') {
-          const [, fromModel, fromColumn, toModel, toColumn] = parts;
-          const relDisc = report.relationships.find(
-            (r) =>
-              r.fromModel === fromModel &&
-              r.fromColumn === fromColumn &&
-              r.toModel === toModel &&
-              r.toColumn === toColumn,
-          );
-          if (!relDisc || relDisc.status === 'matched') continue;
-
-          const action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);
-          if (!action) continue;
-
-          relationships.push({
-            fromModel,
-            fromColumn,
-            toModel,
-            toColumn,
-            discrepancyStatus: relDisc.status,
-            groundTruth,
-            action,
-            sourceCardinality: relDisc.sourceCardinality,
-            targetCardinality: relDisc.targetCardinality,
-          });
-          referencedModels.add(fromModel);
-          referencedModels.add(toModel);
-        }
-      }
-
-      const totalActions = models.length + columns.length + relationships.length;
+      const totalActions = countSyncPlanActions(syncPlan);
       if (totalActions === 0) {
         webview.postMessage({
           type: 'error',
@@ -3627,63 +3797,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         });
         return;
       }
-
-      // Build model context with file paths (prefer yml source, fall back to manifest heuristic)
-      const modelContext: Record<string, ModelContext> = {};
-      for (const modelName of referencedModels) {
-        const manifestModel = manifest.models.get(modelName);
-        const ymlModel = ymlData.models.get(modelName);
-        let dbtSqlPath: string | null = null;
-        let dbtSchemaPath: string | null = null;
-
-        if (ymlModel?.filePath) {
-          // Use the actual yml file path from YmlParserService
-          dbtSchemaPath = path.relative(this.workspaceRoot, ymlModel.filePath);
-          // Heuristic: SQL file is next to the YAML file with .sql extension
-          dbtSqlPath = dbtSchemaPath.replace(/\.ya?ml$/, '.sql');
-        } else if (manifestModel?.originalFilePath) {
-          dbtSqlPath = manifestModel.originalFilePath;
-          dbtSchemaPath = dbtSqlPath.replace(/\.sql$/, '.yml');
-        }
-
-        modelContext[modelName] = {
-          modelName,
-          logicalModelPath: path.join(semanticDir, 'logical-models', `${modelName}.yml`),
-          dbtSqlPath,
-          dbtSchemaPath,
-        };
-      }
-
-      // Determine if compile is needed (any physical-side action)
-      const physicalActions = [
-        'add-to-physical', 'remove-from-physical',
-        'add-column-to-physical', 'remove-column-from-physical',
-        'update-type-in-physical',
-        'add-relationship-test-to-physical', 'remove-relationship-test-from-physical',
-        'update-cardinality-in-physical',
-      ];
-      const allActions = [
-        ...models.map((m) => m.action),
-        ...columns.map((c) => c.action),
-        ...relationships.map((r) => r.action),
-      ];
-      const requiresCompile = allActions.some((a) => physicalActions.includes(a));
-
-      // Parse domain info from the document
-      const parsed = JSON.parse(document.getText());
-
-      const syncPlan: SyncPlan = {
-        generatedAt: new Date().toISOString(),
-        domain: parsed.domain ?? '',
-        layer: parsed.layer ?? '',
-        sourceStage: report.sourceStage,
-        targetStage: report.targetStage,
-        modelContext,
-        models,
-        columns,
-        relationships,
-        requiresCompile,
-      };
 
       // Write to disk directly (not via WorkspaceEdit) — this is a generated output
       // file, not a domain mutation, so undo/redo integration is not needed.
@@ -3855,20 +3968,4 @@ function isTerminalAlive(terminal: vscode.Terminal): boolean {
   if (terminal.exitStatus !== undefined) return false;
   const open = vscode.window.terminals;
   return Array.isArray(open) ? open.includes(terminal) : true;
-}
-
-const VENV_CANDIDATES = ['.venv', 'venv', 'env'];
-
-function findVenvActivate(workspaceRoot: string): string | null {
-  const isWindows = process.platform === 'win32';
-  for (const dir of VENV_CANDIDATES) {
-    if (isWindows) {
-      const bat = path.join(workspaceRoot, dir, 'Scripts', 'activate.bat');
-      if (fs.existsSync(bat)) return `"${bat.replace(/"/g, '')}"`;
-    } else {
-      const sh = path.join(workspaceRoot, dir, 'bin', 'activate');
-      if (fs.existsSync(sh)) return `source '${sh.replace(/'/g, "'\\''")}'`;
-    }
-  }
-  return null;
 }

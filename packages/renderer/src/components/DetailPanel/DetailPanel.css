@@ -194,6 +194,55 @@
   min-width: 84px;
 }
 
+/* Table name (alias). A model with no alias is built under its own name,
+   which is shown dimmed so it does not read as a value someone set. */
+.detail-panel__value--muted {
+  color: var(--dim-fg);
+}
+
+.detail-panel__metadata-row--alias .detail-panel__alias-edit-btn {
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+}
+
+.detail-panel__metadata-row--alias:hover .detail-panel__alias-edit-btn {
+  opacity: 1;
+}
+
+.detail-panel__alias-edit {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.detail-panel__alias-input {
+  padding: 2px 6px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--input-fg, var(--editor-fg));
+  background: var(--input-bg);
+  border: 1px solid var(--focus-border);
+  border-radius: 3px;
+  outline: none;
+}
+
+.detail-panel__alias-input--error {
+  border-color: var(--error-fg);
+}
+
+.detail-panel__alias-hint {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--dim-fg);
+}
+
+.detail-panel__alias-hint--error {
+  color: var(--error-fg);
+}
+
 /* Provenance is prose, not an identifier — the monospace face of a value makes
    it read as a schema name. */
 .detail-panel__value--provenance {

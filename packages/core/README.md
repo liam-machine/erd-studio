@@ -4,7 +4,7 @@ The ERD Studio domain model, shared by the [ERD Studio](https://github.com/liam-
 
 It holds:
 
-- the TypeScript types for the on-disk domain format (schema v5 plus `logical-models/*.yml`), the layer configuration, the display-ready `DisplayDomain` the canvas renders, the cross-stage discrepancy report, and the edit messages the canvas posts to its host;
+- the TypeScript types for the on-disk domain format (schema v5 plus `logical-models/*.yml` and `logical-models/{layer}/*.yml`), the layer configuration, the display-ready `DisplayDomain` the canvas renders, the cross-stage discrepancy report, and the edit messages the canvas posts to its host;
 - the pure pipeline the extension host uses to turn those files into a `DisplayDomain`: `parseDomainJson`, `validateDomainDocument`, `buildUnifiedDomain`, `toLogicalStage`, `parseLogicalModelText`, `parseLayersText` / `validateLayersConfig`, `computeMissingPositions` and `toDisplayDomain`;
 - `loadDisplayDomain`, which does all of that in one call over any async `readFile`.
 
@@ -28,7 +28,7 @@ const domain = await loadDisplayDomain({
 });
 ```
 
-`layers.json` and `logical-models/{model}.yml` are read from the same semantic directory as the domain file. Each model file is read and parsed once, however often the domain lists it, with at most `maxParallelReads` (8) reads in flight. A model that is missing, unparseable or rejected renders as a placeholder, as it does in the extension.
+`layers.json` and the `logical-models/` library are read from the same semantic directory as the domain file. A model file may sit at the top of the library or one folder down, in a folder named after a layer (`logical-models/gold/fct_order.yml`); names are unique across the library. Since `readFile` cannot list a directory, each model is found by probing `logical-models/{model}.yml`, then `logical-models/{layer}/{model}.yml` for every layer in `layers.json` (and the domain's own) in alphabetical order — the same order the extension uses — taking the first file that exists — a flat library costs one read per model, as before. A folder not named after a layer is only visible to hosts that can list directories (the extension). Each model file is read and parsed once, however often the domain lists it, with at most `maxParallelReads` (8) reads in flight. A model that is missing, unparseable or rejected renders as a placeholder, as it does in the extension.
 
 Bad input rejects with one of four classes, so a host can map them to its own errors:
 

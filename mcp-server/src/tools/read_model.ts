@@ -16,7 +16,7 @@ export const read_model = {
         .describe('Absolute path to the dbt project root.'),
       model_name: z
         .string()
-        .describe('Logical model name (filename without .yml).'),
+        .describe('Logical model name (filename without .yml; the file may be at the top of logical-models/ or in a layer folder).'),
     },
     annotations: {
       readOnlyHint: true,
@@ -50,6 +50,7 @@ export const read_model = {
             {
               name: model.name,
               schema: model.schema ?? null,
+              alias: model.alias ?? null,
               description: model.description ?? null,
               grain: model.grain ?? null,
               model_role: model.modelRole ?? null,

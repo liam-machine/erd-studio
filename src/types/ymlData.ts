@@ -58,6 +58,26 @@ export interface YmlModelInfo {
   tags: string[];
 }
 
+/**
+ * Documentation for a seed or snapshot, from a `seeds:` / `snapshots:` block in
+ * a property .yml under any of `model-paths`, `seed-paths` or `snapshot-paths`.
+ *
+ * Deliberately NOT a `YmlModelInfo` in `YmlData.models`: that map feeds the
+ * Add Existing Model picker, existence and relationship derivation. This one
+ * only ever supplies descriptions (model- and column-level) — it never adds a
+ * model, a column or an edge.
+ */
+export interface YmlResourceDoc {
+  /** Short name as written in the .yml (e.g. "raw_customers") */
+  name: string;
+  resourceType: 'seed' | 'snapshot';
+  description: string;
+  /** Documented columns — used for their descriptions only */
+  columns: YmlColumn[];
+  /** Absolute path to the .yml file */
+  filePath: string;
+}
+
 /** Parsed data from all dbt schema .yml files in the project. */
 export interface YmlData {
   /** Models indexed by short name (e.g. "dim_customer") */
@@ -94,4 +114,10 @@ export interface YmlData {
    * care about the schema .yml data) stay valid.
    */
   sourceFiles?: Map<string, string>;
+  /**
+   * Seed / snapshot documentation, keyed by `normaliseName(name)`. Supplies
+   * descriptions only — see `YmlResourceDoc`. Optional so hand-built literals
+   * stay valid.
+   */
+  resourceDocs?: Map<string, YmlResourceDoc>;
 }

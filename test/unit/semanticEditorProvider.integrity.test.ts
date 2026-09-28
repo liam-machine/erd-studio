@@ -433,6 +433,7 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     it.each([
       ['updateModelDescription', { modelName: 'fct_order', description: 'x' }, 'Failed to update description.'],
       ['updateModelGrain', { modelName: 'fct_order', grain: 'one row per order' }, 'Failed to update grain statement.'],
+      ['updateModelAlias', { modelName: 'fct_order', alias: 'orders' }, 'Failed to update table name.'],
       ['updateModelRole', { modelName: 'fct_order', modelRole: 'transaction-fact' }, 'Failed to update model role.'],
       ['updateModelRationale', { modelName: 'fct_order', rationale: { purpose: 'p' } }, 'Failed to update design rationale.'],
       ['toggleColumnKey', { modelName: 'fct_order', columnName: 'amount', keyType: 'NK', value: true }, 'Failed to toggle key type.'],
@@ -452,6 +453,64 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       await h.send({ type: 'updateModelGrain', payload: { modelName: 'ghost', grain: 'x' } });
       expect(h.errors()).toHaveLength(1);
       expect(h.errors()[0]).toMatch(/not found in logical-models/);
+    });
+  });
+
+  describe('updateModelAlias', () => {
+    it('writes the table name to the model file and clears it again', async () => {
+      await h.send({ type: 'updateModelAlias', payload: { modelName: 'fct_order', alias: 'Orders' } });
+      expect(h.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')!.alias).toBe('Orders');
+      expect(fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8')).toMatch(/\nalias: Orders\n/);
+
+      await h.send({ type: 'updateModelAlias', payload: { modelName: 'fct_order', alias: '' } });
+      expect(h.logicalModelService.getModel('fct_order')).not.toHaveProperty('alias');
+      expect(fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8')).not.toMatch(/alias/);
+    });
+
+    it('treats an alias equal to the model name as no alias', async () => {
+      await h.send({ type: 'updateModelAlias', payload: { modelName: 'fct_order', alias: 'fct_order' } });
+      expect(h.logicalModelService.getModel('fct_order')).not.toHaveProperty('alias');
+    });
+
+    it('refuses a table name that is not a plain identifier, writing nothing', async () => {
+      const before = fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8');
+      await h.send({ type: 'updateModelAlias', payload: { modelName: 'fct_order', alias: 'gold.orders' } });
+      expect(h.errors()).toHaveLength(1);
+      expect(h.errors()[0]).toMatch(/^Failed to update table name: A table name must start/);
+      expect(fs.readFileSync(ymlPath(h, 'fct_order'), 'utf-8')).toBe(before);
+    });
+  });
+
+  describe('duplicate model files', () => {
+    it('warns once, naming both files, when the domain uses a name two files define', async () => {
+      // fct_order sits at the top level (it wins); a silver/ copy is ignored.
+      const dir = path.join(h.logicalModelService.getModelsDir(), 'silver');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'fct_order.yml'), 'name: fct_order\n');
+      const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
+
+      await h.send({ type: 'ready' });
+      await h.send({ type: 'ready' });
+
+      const calls = warn.mock.calls.filter((c) => String(c[0]).includes('is defined twice'));
+      expect(calls).toHaveLength(1);
+      expect(calls[0][0]).toBe(
+        '"fct_order" is defined twice. silver/orders uses logical-models/fct_order.yml, ' +
+        'not the silver copy logical-models/silver/fct_order.yml, which is ignored.',
+      );
+      expect(calls[0][1]).toBe('Fix…');
+    });
+
+    it('does not warn about a duplicated name the domain does not use', async () => {
+      const dir = path.join(h.logicalModelService.getModelsDir(), 'gold');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'dim_customer.yml'), 'name: dim_customer\n');
+      const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
+
+      await h.send({ type: 'ready' });
+
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('is defined twice'))).toEqual([]);
     });
   });
 

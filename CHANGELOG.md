@@ -8,6 +8,97 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## 1.5.1 — 2026-09-25
+
+### Changed
+- The optional AI feedback analysis service and the anonymous usage heartbeat now go to
+  `erd-studio-api.w2solutions.ai` and `erd-studio-telemetry.w2solutions.ai`. Same services and
+  operator, new hostnames. If you had allowed the hosted analysis service, ERD Studio asks once
+  more, because consent is recorded per destination.
+
+## 1.5.0 — 2026-09-25
+
+### Added
+
+- **Anonymous usage telemetry.** ERD Studio now sends one small report a day about the previous day's use: which features were used and how often, project sizes as ranges (for example "1-10 models"), whether dbt's manifest and catalog were there, and counts of a fixed list of error kinds. It never contains model, column, domain or project names, file paths, file contents, error messages or anything you typed, and the ID it carries is random and replaced every 30 days. Individual reports are deleted after 90 days. The [Telemetry](README.md#telemetry) section of the README lists every field.
+  - It follows VS Code's `telemetry.telemetryLevel`: set that to `off` and nothing is sent. To turn off only ERD Studio's, set the new **`erdStudio.telemetry.enabled`** to `false`. Only your user settings count, so a repository cannot switch it for you.
+  - To see exactly what is sent, set the telemetry log level to Trace and open **Output → Extension Telemetry**.
+
+## 1.4.0 — 2026-09-25
+
+### Added
+
+- **The same table name in more than one layer** (#76 follow-up). A silver `Date` and a gold `Date` can now both exist. Following dbt's own pattern, they are two models with unique names (`silver_date` and `gold_date`), each built as a table called `date` through its **alias**.
+  - Set it from the detail panel's new **Table name** row, or add `alias: date` to the model's YAML file. The canvas then shows the table name as the node's title, with the model name beside it. When two models on one canvas share a table name, each title adds its schema (`silver.date`, `gold.date`). Search finds a model by either name.
+  - The physical stage looks a model up by its name first, as before. When the name finds nothing, it tries the warehouse table instead: `schema` together with `alias`, matched against dbt's own `alias` config and the warehouse catalog. It never matches on the table name alone, so a silver `date` is never mistaken for a gold one. The physical node shows the table name dbt actually builds.
+  - **Duplicate model files are no longer ignored silently.** Two files called `date.yml` in different layer folders used to mean one of them was quietly skipped, so a canvas could show the other layer's columns. Opening a canvas that uses such a name now shows a warning that names both files, with a **Fix…** button. The Model Library's new **Give Duplicate Model Its Own Name** action does the fix in one undoable step: it renames the ignored copy to `{layer}_{name}` (for example `silver_date`), sets `alias: date` so the table name stays the same, and points that layer's domains at the new name.
+  - When **Add Model** is given a name the library already has, the error now suggests the `{layer}_{name}` model name with the table name set to what you typed.
+  - Domain files do not change. `alias` is an optional key in the model file, and older versions of ERD Studio keep it when they save the file. The AI coding harness moves to v20 so assistants follow the same pattern; run **Update All** when the prompt appears.
+
+## 1.3.0 — 2026-09-25
+
+### Added
+
+- **Multi-root workspaces open the right dbt project** (closes #82). ERD Studio used to open the first dbt project it found. In a workspace whose first folder was a different dbt project, the sidebar showed **No diagrams yet** even though another folder had a full `.erd-studio/`. ERD Studio now opens the dbt project that already has ERD Studio data, and only falls back to the first project when none has any. Whenever the workspace has more than one dbt project, the first row of the ERD Studio sidebar names the open project. Click it to switch.
+- **ERD Studio: Select dbt Project…** lets you choose the project yourself when the workspace holds more than one, whether that is several root folders or a monorepo. The list marks the open project and the ones that already have diagrams. **Auto-detect**, at the top, goes back to the automatic choice. Picking a project asks once, then reloads the window to open it. The choice is saved for that workspace on your machine only, never in a settings file your team might commit. To set the project for everyone, use `erdStudio.projectPath`, which still takes priority. You can also run it from the project row at the top of the ERD Studio sidebar, or from the button in the sidebar's title bar. Both appear only when there is more than one project to choose from.
+
+### Changed
+
+- **A dbt project with diagrams now wins over one without.** If a workspace holds a dbt project with no `.erd-studio` folder and another dbt project (up to three folders deep) that has one, ERD Studio now opens the one with diagrams. Before, it opened whichever it found first. Set `erdStudio.projectPath`, or use **Select dbt Project…**, to open the other one.
+- **A diagram from another dbt project is no longer drawn with the wrong project's data.** Opening a domain file that belongs to a different dbt project than the open one used to draw it with the open project's model library and dbt data, and edits would have saved model files into the wrong project. It now explains why and offers to switch projects.
+- **An `erdStudio.projectPath` that does not point at a dbt project is now reported.** Before, it was only logged to the console, which made the setting look ignored, for example when it was copied from someone else's machine.
+- **Set Up My AI Helper describes where your dbt project is using the workspace folder that holds it.** In a multi-root workspace it used to measure from the first folder, and it told Copilot users their project was a subfolder when it was a root folder of its own.
+
+## 1.2.0 — 2026-09-25
+
+### Added
+
+- **Group the Model Library by layer** (closes #76). Model files no longer have to sit side by side in one flat `logical-models/` folder, with SAP bronze tables mixed in among your gold facts: a model can live one folder down, in a folder named after its layer, such as `logical-models/bronze/sap__mara.yml` or `logical-models/gold/fct_order.yml`.
+  - **Folders are opt-in per project.** Nothing changes for an existing flat library: new models keep going to the top level. Run **ERD Studio: Organise Model Library by Layer** once, commit the moves, and from then on a new model created from a canvas (**Add Model**, or adding an existing dbt model) is written to the folder of its domain's layer. Make sure your team is on 1.2.0 first: earlier versions only read the top level of `logical-models/`. Renaming a model keeps its file where it is.
+  - The **Model Library** view groups models by folder.
+  - The new **ERD Studio: Organise Model Library by Layer** command moves each model file into the folder of the one layer whose domains use it, including files that ended up in another layer's folder because their domains moved. Models used by more than one layer, or by none, stay where they are, and hand-made folders that are not a layer are never touched. It shows the plan before moving anything, and running it again is always safe.
+  - Domain files and `layers.json` are not changed. Folders are for organising only: domain files still refer to models by name, so model names stay unique across all folders, as dbt model names are across a project.
+  - The AI coding harness, the domain file reference and the v4 migration all know about the folders, and so does the `/erd-studio-setup` guided setup; the harness moves to v19, so run **Update All** when the prompt appears.
+
+## 1.1.1 — 2026-09-25
+
+### Changed
+- The empty ERD Studio sidebar is now one short line and a **Get started** button that opens the Welcome tab. The video, the sample project, the AI helper setup and the manual setup all live on that tab.
+- The Welcome tab now also opens the first time you use ERD Studio in a window with no dbt project. It offers **Open a folder…** and the sample project, then opens once more with the setup steps in your first dbt project.
+
+### Fixed
+- The README and the Welcome tab's **Watch in your browser** now play the getting-started video in the browser. The GitHub file page said the video was too large to show.
+
+## 1.1.0 — 2026-09-25
+
+### Added
+
+- **New diagrams open tidily arranged.** A diagram built by an AI assistant (for example with `/erd-studio-setup`) is auto-arranged with Auto Layout the first time you open it, and the arrangement is saved. You can re-run it any time with **Layout** in the canvas toolbar or Shift+L.
+- **A Welcome panel with a short getting-started video.** It opens by itself the first time ERD Studio starts in a dbt project, once per machine. You can watch it again from the ▶ button in the ERD Studio sidebar or with **ERD Studio: Watch Getting Started Video**. The video has captions and a written transcript. If your editor can't play it (some VS Code-compatible editors leave out the video codec), you get a poster and a link to watch it in your browser. The panel checks your setup as a short checklist: your AI assistant, the AI helper, running the guide, and opening your first diagram. If you are upgrading, you get a single notice with a **Watch** button, and no panel opens by itself.
+- **Set Up My AI Helper.** One click, from the Welcome panel or **ERD Studio: Set Up My AI Helper**, installs the `/erd-studio-setup` guided setup for your AI assistant. Run it and it will:
+  - check your dbt setup, including where dbt is installed, your profile and your packages;
+  - work out how your project is already modelled instead of quizzing you: where data sits (a medallion bronze → silver → gold layout, or dbt's staging → marts) and how tables are shaped (Kimball `dim_`/`fct_` tables, Data Vault hubs and satellites or the AutomateDV package, One Big Table, Activity Schema), read from your model names, folders, snapshots and packages — and from what your models' descriptions say ("Product dimension table", "one row per order") and how the tables are shaped (tables holding keys to others plus amounts to add up look like facts; the keyed, descriptive tables they point at look like dimensions), so a project that follows Kimball without `dim_`/`fct_` names is still recognised, and the guide says honestly that it's going by descriptions and table shape rather than names. It tells you what it found and why in one sentence — "Your project looks like a medallion layout (bronze → silver → gold) with Kimball-style marts… Sound right?" — and a plain yes is enough; when the signs are mixed it names its best guess and the alternative in the same question, and you can always describe your own rules instead. It then looks up that standard (on the web when your assistant can, otherwise from its built-in notes), plays the rules back to you and saves them in `.erd-studio/modelling-approach.md`, so every later AI edit follows them too. When it can't see any particular style, it doesn't make you pick one: it draws your model exactly as dbt has it, and offers a style later as an optional extra;
+  - build logical models for one area of your dbt project, filling in grain, model roles, history tracking and design rationale the way your approach says;
+  - compare them with the Physical view, and fix the differences until they match, then list where your dbt project departs from the approach as suggestions (you choose whether the diagram records the improvements as a target design or stays in sync with dbt).
+
+  It explains each step as it goes and asks before changing models you already had. If a hand-written file is already there, you're asked before it is replaced, and **Keep mine** leaves it alone. Only the guided-setup files are installed; the older Copilot instructions, Gemini styleguide and Codex `AGENTS.md` files are not touched.
+- **Works with Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor.** The guide is an [Agent Skill](https://agentskills.io). The Welcome panel finds the assistants on your computer (installed VS Code extensions, their command-line tools, or running inside Cursor; nothing is started to check) and Set Up My AI Helper installs the guide where each one looks: `.claude/skills/` for Claude Code, and `.agents/skills/` for Codex and Gemini CLI, and for GitHub Copilot and Cursor when Claude Code is not also there (they read `.claude/skills/` too, so installing both would list the guide twice). When it finds none, it installs both, so the guide is ready whichever you install. The launch buttons wait until the guide is installed, and **Open Copilot Chat** opens the chat in Agent mode. The panel then shows exactly what to type in each: `/erd-studio-setup` in Claude Code, Copilot (Agent mode) and Cursor, `$erd-studio-setup` in Codex, and "Set up ERD Studio for this dbt project" in Gemini CLI, with a Copy button for each, **Open Claude Code**, and **Open Copilot Chat**. The Claude Code copy keeps its pre-approved read-only commands; the `.agents` copy carries only the fields every tool understands. Tested end to end on a real dbt project (dbt Core + DuckDB) with Claude Code, GitHub Copilot CLI and Codex CLI: each loaded the guide from its own folder, built the logical model and finished with a clean diff. Gemini CLI and Cursor follow the same Agent Skills standard but have not been run end to end yet.
+- **Agent Skills in Install AI Coding Harness.** A new **Agent Skills — GitHub Copilot, Codex, Gemini CLI, Cursor** choice installs ERD Studio's file-format rules and the guided setup into `.agents/skills/`. They are never added to `.gitignore`, because Gemini CLI will not open a file that `.gitignore` lists and the guide would stop at its first reference file. Commit them or ignore them yourself.
+- **A bundled `erd-studio` helper** (`doctor`, `inventory`, `diff`) that the skill uses to check its work. `inventory` also reports the project's modelling `conventions` (layering, table shape with its evidence, confidence and where the evidence came from — names, descriptions, table structure, snapshots or packages — and dbt snapshots), worked out from the project files alone; a confident answer needs two of those to agree, or a modelling package. It is read-only, and it gives the same comparison as the canvas's **⊕ Diff** button because both use the same code. Set Up My AI Helper copies it to `~/.erd-studio-cli` in your home folder. After that, ERD Studio updates that copy when the extension updates. Nothing is written there unless you click Set Up My AI Helper. You can delete the folder at any time. The helper never runs a `dbt` that sits inside the project's own `.venv` until you have said yes: the guide shows you its path and asks first, because a cloned repo decides what that file does.
+- **The guide recognises Data Vault and Activity Schema from how the tables are built, and offers Inmon / 3NF as a guess.** Your tables don't need `hub_`/`sat_` names: tables with hash keys, load dates and record sources are read as hubs, links (two or more hash keys) and satellites (a hashdiff plus descriptive columns), and a narrow table with an activity, a customer and a timestamp as an activity stream. Those tables are no longer mistaken for Kimball facts and dimensions. A project of tables joined by keys, with association tables and no amounts to add up, is offered as normalised (3NF, Inmon-style) — always as a question, since the table shape alone can't prove it: "Your tables look normalised (3NF)… Is that how your team models, or should I just draw it as dbt has it?" It's only stated with confidence when your model descriptions say so too ("third normal form", "Inmon", "enterprise data warehouse"). When the guide goes by table shape alone, it says so.
+- **Try the sample project.** No dbt project yet? **ERD Studio: Try the Sample Project** — also a card in the Welcome panel, a link at the top of its checklist and a link in the empty ERD Studio sidebar — downloads [erd-studio-sample](https://github.com/liam-machine/erd-studio-sample), a small Kimball-style dbt project with fake coffee-shop data that runs on your computer with no account. It asks first, then VS Code clones it to a folder you choose and offers to open it. Without Git, it points you to the GitHub page, where **Code → Download ZIP** works with nothing installed. The sample is not bundled in the extension. The getting-started video shows where to find it.
+- The canvas's welcome screen now has a **Watch the short tour** link, and the empty sidebar links to the video and to Set Up My AI Helper.
+
+### Changed
+
+- **The Claude Code safety hook no longer approves edits for you.** Before, the hook that makes Claude load the ERD Studio file-format rules also approved every other Edit and Write in the project, so Claude Code didn't ask you about them. It now only blocks the first `.erd-studio` edit of a session until those rules are loaded, and Claude Code's normal approval prompts decide everything else. The block message now says it is a one-time check.
+- **AI coding harness updated to v18.** Anyone with ERD Studio harness files sees the "outdated" prompt once, including Copilot, Gemini and Codex users whose files barely changed. **Update All** brings them up to date and, for Claude Code, adds the `/erd-studio-setup` skill. If `.claude/skills/erd-studio/` is in your `.gitignore`, the new skill folder is added there too. The file-format rules now also tell your assistant to read `.erd-studio/modelling-approach.md`, when there is one, before creating or editing models. ERD Studio itself never reads that file, and the Claude Code safety check lets edits to it through.
+- The download is about 8 MB larger, because the video is part of the extension.
+
+### Fixed
+
+- **Seeds and snapshots show their descriptions in the Physical view.** Descriptions written in a `seeds:` or `snapshots:` block of a dbt properties file, at table and column level, now appear on those tables, read from the file or from `manifest.json`. Before, they showed blank. Nothing else about them changes: they gain no columns and no relationships.
+
 ## 1.0.11 — 2026-09-23
 
 - feat: shared @erd-studio/renderer and @erd-studio/core packages (#74)

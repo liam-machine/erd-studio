@@ -69,6 +69,7 @@ export interface ParseLogicalModelOptions {
 interface YamlModel {
   name: string;
   schema?: string;
+  alias?: string;
   description?: string;
   grain?: string;
   modelRole?: string;
@@ -170,6 +171,25 @@ export function parseLogicalModelTextWithUsage(
     return { model: null, nodes, chars };
   }
   return { model: yamlToModel(raw, fallbackName), nodes, chars };
+}
+
+/**
+ * A model alias (the warehouse table name): an unquoted SQL identifier. Case
+ * is kept as written — `Date` and `date` are both fine — because some
+ * warehouses show it, and dbt passes the alias through unchanged.
+ */
+const MODEL_ALIAS_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Longest alias accepted (Snowflake and Postgres cap identifiers well below common limits). */
+export const MODEL_ALIAS_MAX_LENGTH = 128;
+
+/** Human-readable statement of the alias rule (used in error messages). */
+export const MODEL_ALIAS_RULE =
+  'A table name must start with a letter or underscore and use only letters, numbers and underscores.';
+
+/** Whether `alias` is a usable table name for a model's `alias`. */
+export function isValidModelAlias(alias: unknown): alias is string {
+  return typeof alias === 'string' && alias.length <= MODEL_ALIAS_MAX_LENGTH && MODEL_ALIAS_PATTERN.test(alias);
 }
 
 /** A C0 control character (NUL included) or DEL. */
@@ -305,10 +325,12 @@ function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
   };
 
   const schema = str(raw.schema);
+  const alias = str(raw.alias)?.trim();
   const description = str(raw.description);
   const grain = str(raw.grain);
   const modelRole = str(raw.modelRole);
   if (schema) model.schema = schema;
+  if (alias) model.alias = alias;
   if (description) model.description = description;
   if (grain) model.grain = grain;
   if (modelRole) model.modelRole = modelRole as SemanticModel['modelRole'];

@@ -112,7 +112,7 @@ export function isFeedbackAiProviderChoice(value: unknown): value is FeedbackAiP
  */
 export interface FeedbackAiOption {
   id: FeedbackAiProviderChoice;
-  /** What the destination is called, e.g. "Copilot" or "erd-studio.liam-is-an.ai \u2192 DeepSeek". */
+  /** What the destination is called, e.g. "Copilot" or "erd-studio-api.w2solutions.ai \u2192 DeepSeek". */
   label: string;
   /** Whether picking this would actually resolve to a working tier. */
   available: boolean;

@@ -390,3 +390,33 @@ describe('parseLogicalModelTextWithUsage', () => {
     expect(core).toHaveProperty('YamlCharLimitError');
   });
 });
+
+describe('alias (the warehouse table name)', () => {
+  it('reads alias as a trimmed string, keeping its case', () => {
+    expect(parseLogicalModelText('name: gold_date\nalias: " Date "\n', 'x')!.alias).toBe('Date');
+  });
+
+  it('leaves alias unset when absent or blank', () => {
+    expect(parseLogicalModelText('name: gold_date\n', 'x')).not.toHaveProperty('alias');
+    expect(parseLogicalModelText('name: gold_date\nalias: ""\n', 'x')).not.toHaveProperty('alias');
+  });
+
+  it('validates a table name', () => {
+    expect(core.isValidModelAlias('Date')).toBe(true);
+    expect(core.isValidModelAlias('gold.date')).toBe(false);
+    expect(core.isValidModelAlias('a'.repeat(core.MODEL_ALIAS_MAX_LENGTH + 1))).toBe(false);
+    expect(core.isValidModelAlias(undefined)).toBe(false);
+  });
+
+  it('is carried onto the display model only when set', () => {
+    const display = core.toDisplayDomain(
+      {
+        schemaVersion: 5, domain: 'finance', layer: 'gold', stage: 'logical', description: '',
+        models: [{ name: 'gold_date', alias: 'date' }, { name: 'fct_sale' }], relationships: [],
+      },
+      { viewConfig: {}, layerConfig: undefined, readOnly: false },
+    );
+    expect(display.models[0].alias).toBe('date');
+    expect(display.models[1]).not.toHaveProperty('alias');
+  });
+});

@@ -42,7 +42,18 @@ interface NewDomainNode {
   readonly layer: Layer;
 }
 
-export type TreeElement = LayerNode | DomainNode | NewDomainNode;
+/**
+ * The open dbt project, shown as the first row when the workspace holds more
+ * than one (#82). Clicking it runs **Select dbt Project…** — a row in the
+ * tree is always visible, where the view-title icon only appears on hover.
+ */
+interface ProjectNode {
+  readonly type: 'project';
+  readonly name: string;
+  readonly location: string;
+}
+
+export type TreeElement = ProjectNode | LayerNode | DomainNode | NewDomainNode;
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -71,6 +82,9 @@ export class DomainTreeProvider
    * the file watcher reports a change.
    */
   private readonly summaryCache = new Map<string, CachedDomainSummary>();
+
+  /** The project row, or undefined while the workspace has one dbt project. */
+  private projectRow: ProjectNode | undefined;
 
   // TreeDragAndDropController properties
   readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE];
@@ -203,8 +217,19 @@ export class DomainTreeProvider
     return modelCount;
   }
 
+  /**
+   * Show (or, with `undefined`, hide) the switchable project row at the top
+   * of the tree. Called at activation and when workspace folders change.
+   */
+  setProjectRow(project: { name: string; location: string } | undefined): void {
+    this.projectRow = project ? { type: 'project', ...project } : undefined;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
   getTreeItem(element: TreeElement): vscode.TreeItem {
     switch (element.type) {
+      case 'project':
+        return this.createProjectItem(element);
       case 'layer':
         return this.createLayerItem(element);
       case 'domain':
@@ -221,7 +246,10 @@ export class DomainTreeProvider
         return [];
       }
       const layers = this.layerService.getAllLayers();
-      return layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
+      const layerNodes = layers.map((layerConfig): LayerNode => ({ type: 'layer', layer: layerConfig.id }));
+      // Only alongside real content: an empty tree must stay empty so the
+      // welcome view (which has its own Select dbt Project button) shows.
+      return this.projectRow ? [this.projectRow, ...layerNodes] : layerNodes;
     }
 
     if (element.type === 'layer') {
@@ -253,6 +281,16 @@ export class DomainTreeProvider
     }
 
     return children;
+  }
+
+  private createProjectItem(element: ProjectNode): vscode.TreeItem {
+    const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
+    item.description = 'dbt project · Switch…';
+    item.tooltip = `Open dbt project: ${element.name} (${element.location}).\nClick to open a different dbt project in this workspace.`;
+    item.contextValue = 'dbtProject';
+    item.iconPath = new vscode.ThemeIcon('folder-library');
+    item.command = { command: 'erdStudio.selectDbtProject', title: 'Select dbt Project…' };
+    return item;
   }
 
   private createLayerItem(element: LayerNode): vscode.TreeItem {

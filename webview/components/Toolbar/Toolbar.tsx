@@ -18,6 +18,7 @@ import { Panel, useReactFlow, useStore } from '@xyflow/react';
 
 import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import { useEditorStore } from '../../store/editorStore';
+import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
 import {
   runElkLayout,
   detectLayerBound,
@@ -28,6 +29,7 @@ import {
   type LayoutDirection,
 } from '../../lib/elkLayout';
 import { StageTabs } from './StageTabs';
+import { matchesModelSearch } from '@erd-studio/renderer/editor';
 import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
 import type { Stage } from '../../../src/types/semantic';
 import type { WebviewMessage } from '../../hooks/useMessageBus';
@@ -151,7 +153,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toLowerCase();
     return nodes
-      .filter((node) => node.type === 'model' && (node.data as ModelFlowNode['data']).modelName.toLowerCase().includes(query))
+      .filter((node) => node.type === 'model' && matchesModelSearch(node.data as ModelFlowNode['data'], query))
       .map((node) => node.id);
   }, [searchQuery, nodes]);
 
@@ -483,6 +485,12 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     }
     runLayout();
   }, [domain, nodes, isLayouting, runLayout]);
+
+  /**
+   * First open of a domain with no stored positions (the host sets
+   * `domainLoaded.autoLayout`): run the same layout once, persisted the same way.
+   */
+  useFirstOpenAutoLayout(runLayout, domain, nodes, isLayouting);
 
   /** Register auto-layout function for Shift+L shortcut */
   useEffect(() => {

@@ -132,7 +132,7 @@ export const FEEDBACK_PROVIDER_SETTING = 'feedback.provider';
  * `wrangler dev`. The proxy holds the API key, so no key is ever sent with a
  * hosted request.
  */
-export const HOSTED_ANALYSIS_ENDPOINT = 'https://erd-studio.liam-is-an.ai';
+export const HOSTED_ANALYSIS_ENDPOINT = 'https://erd-studio-api.w2solutions.ai';
 
 /**
  * The third party that actually receives the text, named as a user should see
@@ -596,10 +596,11 @@ function endpointBaseUrl(): string {
 
 /**
  * `value` with trailing slashes stripped, or `''` when it is not somewhere a
- * request may be sent. Shared by the user's endpoint and the hosted proxy so
- * there is one rule about what a base URL may be, not two.
+ * request may be sent. Shared by the user's endpoint, the hosted proxy and the
+ * usage telemetry endpoint (`telemetryService.ts`) so there is one rule about
+ * what a base URL may be, not three.
  */
-function safeBaseUrl(value: string): string {
+export function safeBaseUrl(value: string): string {
   const raw = value.trim().replace(/\/+$/, '');
   if (!raw) return '';
 

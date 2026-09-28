@@ -80,6 +80,8 @@ const mockStoreState: Record<string, unknown> = {
   setDetailPanelOpen: noop,
   registerSearchFocus: noop,
   registerAutoLayout: noop,
+  pendingAutoLayout: false,
+  setPendingAutoLayout: noop,
   discrepancyVisible: false,
   discrepancyCompareStage: null,
   setDiscrepancyVisible: noop,

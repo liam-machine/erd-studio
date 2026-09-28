@@ -19,7 +19,16 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { activate, NO_LEGACY_ALIAS } from '../../src/extension';
+import {
+  activate,
+  GETTING_STARTED_NO_PROJECT_SHOWN_KEY,
+  GETTING_STARTED_PENDING_KEY,
+  GETTING_STARTED_SHOWN_KEY,
+  NO_LEGACY_ALIAS,
+  PRE_REGISTERED_COMMANDS,
+  _resetFirstRunGuardForTests,
+} from '../../src/extension';
+import { GETTING_STARTED_VIEW_TYPE, GettingStartedPanel } from '../../src/providers/GettingStartedPanel';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 
@@ -34,10 +43,15 @@ const legacyAlias = (command: string) => command.replace(/^erdStudio\./, 'dbtSem
 
 type Context = import('vscode').ExtensionContext;
 
-function makeContext(root: string): Context {
-  const globalState = new Map<string, unknown>();
+function makeContext(
+  root: string,
+  opts: { globalState?: Map<string, unknown>; workspaceState?: Map<string, unknown> } = {},
+): Context {
+  // The Welcome panel was already shown on this "machine", so the first-run
+  // trigger stays out of the way of the tests that are not about it.
+  const globalState = opts.globalState ?? new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
   // Pretend the harness-install QuickPick was already offered for this workspace.
-  const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+  const workspaceState = opts.workspaceState ?? new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
   return {
     subscriptions: [],
     extension: { packageJSON: packageJson },
@@ -78,6 +92,12 @@ beforeEach(() => {
   vscode.workspace.workspaceFolders = [];
   vscode.window.tabGroups.all = [];
   vscode.window.tabGroups.activeTabGroup.activeTab = undefined;
+  vscode._resetMockWebviewPanels();
+  vscode._setMockExtensions([]);
+  _resetFirstRunGuardForTests();
+  // os.homedir() follows HOME: keep the launcher refresh away from the real ~/.erd-studio-cli.
+  vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
@@ -94,8 +114,11 @@ afterEach(async () => {
       // best effort
     }
   }
+  for (const panel of [...vscode.window._webviewPanels]) { panel.dispose(); }
+  vscode._resetMockWebviewPanels();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -332,6 +355,279 @@ describe('activate() with a dbt project', () => {
   });
 });
 
+describe('erdStudio.organizeModelLibrary (issue #76)', () => {
+  const lib = () => path.join(root, '.erd-studio', 'logical-models');
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  it('is a post-rename command: contributed, registered once, with no dbtSemantic alias', async () => {
+    expect(NO_LEGACY_ALIAS.has('erdStudio.organizeModelLibrary')).toBe(true);
+    expect(CONTRIBUTED).toContain('erdStudio.organizeModelLibrary');
+    await activate(context);
+    expect(count('erdStudio.organizeModelLibrary')).toBe(1);
+    expect(count('dbtSemantic.organizeModelLibrary')).toBe(0);
+  });
+
+  it('moves single-layer models into their layer folder after confirmation, leaving shared and unused ones', async () => {
+    // A v5 gold domain that shares dim_date with showcase (silver) and alone uses fct_sale.
+    fs.writeFileSync(path.join(root, '.erd-studio', 'gold', 'reporting.json'), JSON.stringify({
+      schemaVersion: 5,
+      domain: 'reporting',
+      layer: 'gold',
+      description: '',
+      logical: { models: ['dim_date', 'fct_sale'], relationships: [] },
+      viewConfig: { positions: {} },
+    }));
+    const showcaseBefore = fs.readFileSync(path.join(root, '.erd-studio', 'silver', 'showcase.json'), 'utf-8');
+    await activate(context);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (message: string) => (message === 'Organise Model Library by Layer?' ? 'Move Files' : undefined)) as never);
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    // The modal lists the plan.
+    const confirm = info.mock.calls.find((c) => c[0] === 'Organise Model Library by Layer?')!;
+    expect(confirm[1]).toMatchObject({ modal: true });
+    const detail = (confirm[1] as { detail: string }).detail;
+    expect(detail).toContain('Move 7 models into layer folders (1 → gold/, 6 → silver/).');
+    expect(detail).toContain('1 model used by more than one layer');
+    expect(detail).toContain('1 unused model');
+
+    const silver = fs.readdirSync(path.join(lib(), 'silver')).sort();
+    expect(silver).toEqual([
+      'dim_customer.yml', 'dim_project.yml', 'dim_task.yml', 'fct_large_table.yml', 'fct_order.yml', 'fct_task_event.yml',
+    ]);
+    expect(fs.readdirSync(path.join(lib(), 'gold'))).toEqual(['fct_sale.yml']);
+    const topLevel = fs.readdirSync(lib()).filter((f) => f.endsWith('.yml')).sort();
+    expect(topLevel).toEqual(['dim_date.yml', 'dim_location.yml']);
+    // Domain files are untouched — they reference models by name.
+    expect(fs.readFileSync(path.join(root, '.erd-studio', 'silver', 'showcase.json'), 'utf-8')).toBe(showcaseBefore);
+    expect(info).toHaveBeenCalledWith('Moved 7 model files into layer folders.');
+  });
+
+  /** Answer "Move Files" to the confirmation modal; resolve everything else to undefined. */
+  const acceptMoves = () => vi.spyOn(vscode.window, 'showInformationMessage')
+    .mockImplementation((async (message: string) => (message === 'Organise Model Library by Layer?' ? 'Move Files' : undefined)) as never);
+  const confirmDetail = (info: ReturnType<typeof acceptMoves>) =>
+    (info.mock.calls.find((c) => c[0] === 'Organise Model Library by Layer?')![1] as { detail: string }).detail;
+
+  it('moves a file out of the wrong layer folder into the one layer whose domains use it', async () => {
+    // dim_customer is used only by silver domains, but its file sits in gold/.
+    fs.mkdirSync(path.join(lib(), 'gold'));
+    fs.renameSync(path.join(lib(), 'dim_customer.yml'), path.join(lib(), 'gold', 'dim_customer.yml'));
+    await activate(context);
+    const info = acceptMoves();
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    const detail = confirmDetail(info);
+    expect(detail).toContain("One is in another layer's folder");
+    expect(detail).toContain('dim_customer: gold/ → silver/');
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_customer.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'gold', 'dim_customer.yml'))).toBe(false);
+    expect(fs.existsSync(path.join(lib(), 'dim_customer.yml'))).toBe(false);
+    // gold/ held only dim_customer (the fixture has no gold-only model), so the emptied folder is removed.
+    expect(fs.existsSync(path.join(lib(), 'gold'))).toBe(false);
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/^Moved \d+ model files into layer folders\.$/));
+  });
+
+  it('reports nothing to move when re-run after a successful organise that relocated a file', async () => {
+    fs.mkdirSync(path.join(lib(), 'gold'));
+    fs.renameSync(path.join(lib(), 'dim_customer.yml'), path.join(lib(), 'gold', 'dim_customer.yml'));
+    await activate(context);
+    const info = acceptMoves();
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_customer.yml'))).toBe(true);
+    const after = fs.readdirSync(path.join(lib(), 'silver')).sort();
+    info.mockClear();
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(String(info.mock.calls[0][0])).toMatch(/^Organise Model Library: nothing to move\. /);
+    expect(info.mock.calls.some((c) => c[0] === 'Organise Model Library by Layer?')).toBe(false);
+    expect(fs.readdirSync(path.join(lib(), 'silver')).sort()).toEqual(after);
+  });
+
+  it('leaves a non-layer folder untouched and names it in the dialog detail', async () => {
+    // Staging/ is not a layer in layers.json: fct_order stays there even though only silver uses it.
+    fs.mkdirSync(path.join(lib(), 'Staging'));
+    fs.renameSync(path.join(lib(), 'fct_order.yml'), path.join(lib(), 'Staging', 'fct_order.yml'));
+    const stagedBefore = fs.readFileSync(path.join(lib(), 'Staging', 'fct_order.yml'), 'utf-8');
+    await activate(context);
+    const info = acceptMoves();
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    const detail = confirmDetail(info);
+    expect(detail).toContain('Left alone: folders that are not a layer in layers.json — Staging/ (1).');
+    expect(fs.readdirSync(path.join(lib(), 'Staging'))).toEqual(['fct_order.yml']);
+    expect(fs.readFileSync(path.join(lib(), 'Staging', 'fct_order.yml'), 'utf-8')).toBe(stagedBefore);
+    expect(fs.existsSync(path.join(lib(), 'silver', 'fct_order.yml'))).toBe(false);
+    // The other silver-only models still moved.
+    expect(fs.existsSync(path.join(lib(), 'silver', 'dim_customer.yml'))).toBe(true);
+  });
+
+  it('moves nothing when the confirmation is dismissed', async () => {
+    await activate(context);
+    const before = fs.readdirSync(lib()).sort();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(fs.readdirSync(lib()).sort()).toEqual(before);
+    expect(fs.existsSync(path.join(lib(), 'silver'))).toBe(false);
+  });
+
+  it('says there is nothing to move, without a modal, when every model is shared, unused or already filed', async () => {
+    await activate(context);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (message: string) => (message === 'Organise Model Library by Layer?' ? 'Move Files' : undefined)) as never);
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+    info.mockClear();
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(String(info.mock.calls[0][0])).toMatch(/^Organise Model Library: nothing to move\. /);
+    expect(String(info.mock.calls[0][0])).not.toContain('\n');
+  });
+
+  it('reports a rejected WorkspaceEdit and leaves the files where they were', async () => {
+    await activate(context);
+    const before = fs.readdirSync(lib()).sort();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Move Files' as never);
+    vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(false);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('rejected the file moves'));
+    expect(fs.readdirSync(lib()).filter((f) => f.endsWith('.yml')).sort())
+      .toEqual(before.filter((f) => f.endsWith('.yml')));
+    // No empty layer folders are left behind for the move that did not happen.
+    expect(fs.readdirSync(lib()).sort()).toEqual(before);
+  });
+
+  it('explains when there is no logical-models/ folder yet', async () => {
+    fs.rmSync(lib(), { recursive: true, force: true });
+    await activate(context);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.organizeModelLibrary');
+
+    expect(info).toHaveBeenCalledWith('Organise Model Library: there is no logical-models/ folder yet.');
+  });
+});
+
+describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two layers)', () => {
+  const erd = () => path.join(root, '.erd-studio');
+  const lib = () => path.join(erd(), 'logical-models');
+  const writeJson = (p: string, v: unknown) => fs.writeFileSync(p, JSON.stringify(v, null, 2) + '\n');
+  const readJson = (p: string) => JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, any>;
+  const ignored = () => path.join(lib(), 'silver', 'date.yml');
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.mkdirSync(path.join(lib(), 'silver'));
+    fs.mkdirSync(path.join(lib(), 'gold'));
+    // Two files called date. Folders are looked up alphabetically, so gold/
+    // wins and the silver domain silently rendered the gold table's columns.
+    fs.writeFileSync(path.join(lib(), 'gold', 'date.yml'), 'name: date\nschema: gold\ncolumns:\n  - name: date_key\n    dataType: int\n  - name: fiscal_year\n    dataType: int\n');
+    fs.writeFileSync(ignored(), '# silver calendar\nname: date\nschema: silver\ncolumns:\n  - name: date_key\n    dataType: int\n');
+    writeJson(path.join(erd(), 'silver', 'calendar.json'), {
+      schemaVersion: 5, domain: 'calendar', layer: 'silver', description: '',
+      logical: { models: ['fct_order', 'date'], relationships: [{ fromModel: 'fct_order', fromColumn: 'order_date_key', toModel: 'date', toColumn: 'date_key', cardinality: 'many-to-one' }] },
+      viewConfig: { positions: { date: { x: 10, y: 20 } } },
+    });
+    writeJson(path.join(erd(), 'gold', 'reporting.json'), {
+      schemaVersion: 5, domain: 'reporting', layer: 'gold', description: '',
+      logical: { models: ['date'], relationships: [] }, viewConfig: {},
+    });
+    openWorkspace(root);
+  });
+
+  const answer = (modalChoice: string | undefined) => {
+    vi.spyOn(vscode.window, 'showInputBox').mockImplementation((async (opts?: { value?: string }) => opts?.value) as never);
+    return vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockImplementation((async (message: string) => (message.startsWith('Rename the duplicate') ? modalChoice : undefined)) as never);
+  };
+
+  it('is a post-rename command: contributed, registered once, with no dbtSemantic alias', async () => {
+    expect(NO_LEGACY_ALIAS.has('erdStudio.resolveDuplicateModel')).toBe(true);
+    expect(CONTRIBUTED).toContain('erdStudio.resolveDuplicateModel');
+    await activate(context);
+    expect(count('erdStudio.resolveDuplicateModel')).toBe(1);
+    expect(count('dbtSemantic.resolveDuplicateModel')).toBe(0);
+  });
+
+  it('renames the ignored silver copy to silver_date with alias date, and repoints only the silver domain', async () => {
+    const goldDomainBefore = fs.readFileSync(path.join(erd(), 'gold', 'reporting.json'), 'utf-8');
+    await activate(context);
+    const info = answer('Rename');
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    const modal = info.mock.calls.find((c) => String(c[0]).startsWith('Rename the duplicate'))!;
+    const detail = (modal[1] as { detail: string }).detail;
+    expect(detail).toContain('logical-models/silver/date.yml → logical-models/silver/silver_date.yml');
+    expect(detail).toContain('silver/calendar');
+    expect(detail).toContain('gold/reporting');
+
+    expect(fs.existsSync(ignored())).toBe(false);
+    // The hand-written document is carried over: comment, columns, and the new keys.
+    expect(fs.readFileSync(path.join(lib(), 'silver', 'silver_date.yml'), 'utf-8')).toBe(
+      '# silver calendar\nname: silver_date\nschema: silver\ncolumns:\n  - name: date_key\n    dataType: int\nalias: date\n',
+    );
+    const silver = readJson(path.join(erd(), 'silver', 'calendar.json'));
+    expect(silver.logical.models).toEqual(['fct_order', 'silver_date']);
+    expect(silver.logical.relationships[0].toModel).toBe('silver_date');
+    expect(silver.viewConfig.positions).toEqual({ silver_date: { x: 10, y: 20 } });
+    // The gold domain keeps the gold file, byte for byte.
+    expect(fs.readFileSync(path.join(erd(), 'gold', 'reporting.json'), 'utf-8')).toBe(goldDomainBefore);
+    expect(fs.existsSync(path.join(lib(), 'gold', 'date.yml'))).toBe(true);
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/"silver_date" \(table: date\)\. Repointed 1 domain\.$/));
+  });
+
+  it('changes nothing when the confirmation is dismissed', async () => {
+    const silverBefore = fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8');
+    await activate(context);
+    answer(undefined);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(fs.existsSync(ignored())).toBe(true);
+    expect(fs.existsSync(path.join(lib(), 'silver', 'silver_date.yml'))).toBe(false);
+    expect(fs.readFileSync(path.join(erd(), 'silver', 'calendar.json'), 'utf-8')).toBe(silverBefore);
+  });
+
+  it('changes nothing when VS Code rejects the edit', async () => {
+    await activate(context);
+    answer('Rename');
+    vscode._mockWorkspaceState.applyEditResult = false;
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(error).toHaveBeenCalledWith('VS Code rejected the rename; nothing was changed.');
+    expect(fs.existsSync(ignored())).toBe(true);
+    expect(readJson(path.join(erd(), 'silver', 'calendar.json')).logical.models).toContain('date');
+  });
+
+  it('says so when there is no duplicate to fix', async () => {
+    fs.rmSync(ignored());
+    await activate(context);
+    const info = answer('Rename');
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel');
+
+    expect(info).toHaveBeenCalledWith('Every model file in the library has its own name.');
+  });
+});
+
 describe('activate() project-root resolution', () => {
   it('reads projectPath through getErdStudioSetting, so a legacy dbtSemantic.projectPath still wins over auto-detection', async () => {
     // Two candidate projects: auto-detection would pick "a" (shallowest, sorted first);
@@ -357,5 +653,326 @@ describe('activate() project-root resolution', () => {
     await activate(context);
 
     expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${path.join(root, 'a')}`);
+  });
+});
+
+describe('Select dbt Project… (#82)', () => {
+  type Pick = { label: string; projectRoot?: string };
+  let a: string;
+  let b: string;
+
+  beforeEach(() => {
+    // Two root folders, both dbt projects with ERD data: auto-detection opens "a".
+    a = path.join(root, 'a');
+    b = path.join(root, 'b');
+    fs.cpSync(FIXTURE_ROOT, a, { recursive: true });
+    fs.cpSync(FIXTURE_ROOT, b, { recursive: true });
+    vscode.workspace.workspaceFolders = [
+      { uri: vscode.Uri.file(a), name: 'a', index: 0 },
+      { uri: vscode.Uri.file(b), name: 'b', index: 1 },
+    ];
+  });
+
+  it('a pick stored per machine opens that project, and nothing is written to settings', async () => {
+    const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState: ws });
+    await activate(context);
+    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${a}`);
+
+    const quickPick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
+      (async (items: Pick[]) => items.find((i) => i.projectRoot === b)) as never,
+    );
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Switch and Reload' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const update = vi.fn();
+    vi.spyOn(vscode.workspace, 'getConfiguration').mockReturnValue({ get: () => undefined, inspect: () => undefined, update } as never);
+
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+
+    const items = quickPick.mock.calls[0][0] as unknown as Pick[];
+    expect(items[0].label).toContain('Auto-detect');
+    expect(items.filter((i) => i.projectRoot).map((i) => i.projectRoot)).toEqual([a, b]);
+    expect(ws.get('erdStudio.selectedProjectRoot')).toBe(b);
+    expect(exec).toHaveBeenCalledWith('workbench.action.reloadWindow');
+    expect(update).not.toHaveBeenCalled();
+
+    // "After the reload": the stored pick is honoured.
+    tearDownActivation();
+    (console.log as unknown as ReturnType<typeof vi.fn>).mockClear();
+    vi.restoreAllMocks();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    await activate(context);
+    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${b}`);
+  });
+
+  it('Auto-detect clears the pick and reloads back to the auto-detected project', async () => {
+    const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.selectedProjectRoot', b]]);
+    context = makeContext(root, { workspaceState: ws });
+    await activate(context);
+    expect(console.log).toHaveBeenCalledWith(`ERD Studio: Found dbt project at ${b}`);
+
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
+      (async (items: Pick[]) => items.find((i) => i.label.includes('Auto-detect'))) as never,
+    );
+    const confirm = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Switch and Reload' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+
+    expect(confirm).toHaveBeenCalledWith('Switch ERD Studio to “a”?', expect.objectContaining({ modal: true }), 'Switch and Reload');
+    expect(ws.has('erdStudio.selectedProjectRoot') ? ws.get('erdStudio.selectedProjectRoot') : undefined).toBeUndefined();
+    expect(exec).toHaveBeenCalledWith('workbench.action.reloadWindow');
+  });
+
+  it('cancelling the confirmation changes nothing', async () => {
+    const ws = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+    context = makeContext(root, { workspaceState: ws });
+    await activate(context);
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation(
+      (async (items: Pick[]) => items.find((i) => i.projectRoot === b)) as never,
+    );
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+
+    expect(ws.get('erdStudio.selectedProjectRoot')).toBeUndefined();
+    expect(exec).not.toHaveBeenCalledWith('workbench.action.reloadWindow');
+  });
+
+  it('while erdStudio.projectPath decides, it points at the setting instead of offering a list', async () => {
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: b });
+    await activate(context);
+    const quickPick = vi.spyOn(vscode.window, 'showQuickPick');
+
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+
+    expect(quickPick).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('the erdStudio.projectPath setting chooses'), 'Open Settings');
+  });
+
+  it('a projectPath that is not a dbt project is reported, not just logged', async () => {
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: '/Users/someone-else/datamodels' });
+    await activate(context);
+
+    expect(warn).toHaveBeenCalledWith(
+      'ERD Studio: erdStudio.projectPath "/Users/someone-else/datamodels" does not contain dbt_project.yml, so ERD Studio opened a instead.',
+      'Open Settings',
+    );
+  });
+});
+
+/** Dispose everything the last activate() registered, as a window reload would. */
+function tearDownActivation(): void {
+  for (const sub of [...context.subscriptions].reverse()) { (sub as { dispose(): void }).dispose(); }
+  context.subscriptions.length = 0;
+  vscode._resetRegisteredCommands();
+  _resetFirstRunGuardForTests();
+}
+
+const panelsOfType = () => vscode.window._webviewPanels.filter((p) => p.viewType === GETTING_STARTED_VIEW_TYPE);
+
+describe('Welcome panel: commands', () => {
+  it('erdStudio.showGettingStarted works without a project, is registered once and pre-registered', async () => {
+    await activate(context);
+
+    expect(count('erdStudio.showGettingStarted')).toBe(1);
+    expect(registered().indexOf('erdStudio.showGettingStarted')).toBe(1);
+    expect(PRE_REGISTERED_COMMANDS).toEqual(
+      new Set(['erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject']),
+    );
+    // setupAiHelper needs a project: it gets the standard no-project stub instead.
+    expect(count('erdStudio.setupAiHelper')).toBe(1);
+
+    await vscode.commands.executeCommand('erdStudio.showGettingStarted');
+
+    expect(panelsOfType()).toHaveLength(1);
+    const panel = panelsOfType()[0];
+    expect(panel.title).toBe('Welcome to ERD Studio');
+    await panel._simulateMessage({ type: 'ready' });
+    expect(panel._postedMessages).toContainEqual(
+      expect.objectContaining({ type: 'status', payload: expect.objectContaining({ hasProject: false, project: null }) }),
+    );
+
+    // A second run reveals the same panel instead of opening another.
+    await vscode.commands.executeCommand('erdStudio.showGettingStarted');
+    expect(panelsOfType()).toHaveLength(1);
+    expect(panel._reveals).toHaveLength(1);
+  });
+
+  it('with a project, the panel reports the dbt project and the helper state', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+
+    await vscode.commands.executeCommand('erdStudio.showGettingStarted');
+    const panel = panelsOfType()[0];
+    await panel._simulateMessage({ type: 'ready' });
+
+    const status = panel._postedMessages.find((m) => (m as { type: string }).type === 'status') as {
+      payload: { hasProject: boolean; project: unknown; helper: string; cli: string; domainCount: number };
+    };
+    expect(status.payload.hasProject).toBe(true);
+    expect(status.payload.project).toEqual({ name: path.basename(root), relativePath: null });
+    expect(status.payload.cli).toBe('missing');
+    expect(status.payload.helper).toBe('missing');
+    expect(status.payload.domainCount).toBeGreaterThan(0);
+  });
+});
+
+describe('erdStudio.trySampleProject', () => {
+  const SAMPLE = 'erdStudio.trySampleProject';
+
+  it('is pre-registered once without a project, gets no legacy alias, and runs the real flow (not the stub)', async () => {
+    await activate(context);
+
+    expect(count(SAMPLE)).toBe(1);
+    expect(registered().indexOf(SAMPLE)).toBe(2); // right after reportBug and showGettingStarted
+    expect(count(legacyAlias(SAMPLE))).toBe(0);
+    expect(NO_LEGACY_ALIAS.has(SAMPLE)).toBe(true);
+    expect(PRE_REGISTERED_COMMANDS.has(SAMPLE)).toBe(true);
+    expect(CONTRIBUTED).toContain(SAMPLE);
+
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    warn.mockClear();
+    await vscode.commands.executeCommand(SAMPLE);
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('Download the ERD Studio sample project?'),
+      { modal: true },
+      'Download',
+    );
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), expect.anything());
+  });
+
+  it('is registered exactly once with a project too', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+    expect(count(SAMPLE)).toBe(1);
+    expect(count(legacyAlias(SAMPLE))).toBe(0);
+  });
+});
+
+describe('Welcome panel: first run', () => {
+  it('a fresh install opens the panel once, writes the flag first and skips the harness QuickPick', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    fs.rmSync(path.join(root, '.claude'), { recursive: true, force: true }); // no harness → the QuickPick would be offered
+    openWorkspace(root);
+    const globalState = new Map<string, unknown>();
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    const realCreate = vscode.window.createWebviewPanel;
+    let shownWhenCreated: unknown = 'not created';
+    vi.spyOn(vscode.window, 'createWebviewPanel').mockImplementation((...args: Parameters<typeof realCreate>) => {
+      shownWhenCreated = globalState.get(GETTING_STARTED_SHOWN_KEY);
+      return realCreate(...args);
+    });
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+
+    await activate(context);
+
+    expect(panelsOfType()).toHaveLength(1);
+    expect(shownWhenCreated).toBe(true);
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBeUndefined();
+    // Skipped for this run only: the once-per-workspace offer is still owed.
+    expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBeUndefined();
+    expect(pick).not.toHaveBeenCalled();
+
+    // The next window on this machine does not open it again.
+    tearDownActivation();
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(1);
+  });
+
+  it('an upgrader gets one non-modal notice and no panel', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    const globalState = new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]);
+    context = makeContext(root, { globalState });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+
+    await activate(context);
+
+    expect(panelsOfType()).toHaveLength(0);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBe(true);
+    const notices = info.mock.calls.filter((c) => String(c[0]).includes('getting-started video'));
+    expect(notices).toHaveLength(1);
+    expect(notices[0].slice(1)).toEqual(['Watch', 'Not now']);
+  });
+
+  it('"Watch" on the upgrade notice opens the panel', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    context = makeContext(root, { globalState: new Map<string, unknown>([['lastActivatedVersion', '1.0.0']]) });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+      (message.includes('getting-started video') ? 'Watch' : undefined)) as never);
+
+    await activate(context);
+    await vi.waitFor(() => expect(panelsOfType()).toHaveLength(1));
+  });
+
+  it('no-project activation first opens the panel, and the first project activation opens it once more', async () => {
+    const globalState = new Map<string, unknown>();
+    context = makeContext(root, { globalState });
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage');
+
+    await activate(context); // no workspace folder: early return
+    expect(panelsOfType()).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled(); // the panel explains the missing project
+    expect(globalState.get(GETTING_STARTED_NO_PROJECT_SHOWN_KEY)).toBe(true);
+    // Still owed in a project, where the setup steps can run.
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBe(true);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBeUndefined();
+
+    tearDownActivation();
+    for (const p of panelsOfType()) { p.dispose(); }
+    vscode._resetMockWebviewPanels();
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+
+    // lastActivatedVersion is stored now, so without the pending flag this would look like an upgrade.
+    await activate(context);
+
+    expect(panelsOfType()).toHaveLength(1);
+    expect(globalState.get(GETTING_STARTED_SHOWN_KEY)).toBe(true);
+    expect(globalState.get(GETTING_STARTED_PENDING_KEY)).toBeUndefined();
+  });
+
+  it('opens the panel in a no-project window only once, then falls back to the warning', async () => {
+    const globalState = new Map<string, unknown>();
+    context = makeContext(root, { globalState });
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(1);
+
+    for (const p of panelsOfType()) { p.dispose(); }
+    vscode._resetMockWebviewPanels();
+    tearDownActivation();
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(0);
+    expect(GettingStartedPanel.currentPanel).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never opens the panel on a no-project activation after the Welcome was already shown', async () => {
+    context = makeContext(root); // default globalState: the Welcome was already shown on this machine
+    await activate(context);
+    expect(panelsOfType()).toHaveLength(0);
+    expect(GettingStartedPanel.currentPanel).toBeUndefined();
+  });
+
+  it('sets erdStudio.hasDbtProject for the sidebar welcome text', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    context = makeContext(root);
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasDbtProject', false);
+
+    tearDownActivation();
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasDbtProject', true);
   });
 });

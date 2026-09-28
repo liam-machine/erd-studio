@@ -82,6 +82,13 @@ export interface PhysicalProvenance {
 export interface DisplayModel {
   name: string;
   schema: string;
+  /**
+   * Warehouse table name when it differs from the model name (dbt `alias`).
+   * Logical stage: the model file's `alias`. Physical stage: the alias dbt
+   * builds the model under, falling back to the logical one. Absent when the
+   * table is simply named after the model.
+   */
+  alias?: string;
   description: string;
   columns: DisplayColumn[];
   rationale?: Rationale;

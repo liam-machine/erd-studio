@@ -13,6 +13,7 @@ import { Panel } from '@xyflow/react';
 import { ModelRationale, hasRationaleContent } from './ModelRationale';
 import { DescriptionEditor } from './DescriptionEditor';
 import { GrainEditor } from './GrainEditor';
+import { AliasEditor } from './AliasEditor';
 import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
 import { useEditorStore } from '../../store/editorStore';
@@ -308,9 +309,10 @@ export function DetailPanel() {
       <div className="detail-panel__section">
         <div className="detail-panel__metadata">
           <div className="detail-panel__metadata-row">
-            <span className="detail-panel__label">Schema</span>
+            <span className="detail-panel__label detail-panel__label--wide">Schema</span>
             <span className="detail-panel__value">{model.schema || '—'}</span>
           </div>
+          <AliasEditor modelName={model.name} alias={model.alias} readOnly={isReadOnly || viewer} />
           {/* Physical stage only — logical models never carry provenance, so the
               logical panel does not sprout an empty row. */}
           {model.provenance && (

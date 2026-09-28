@@ -2,6 +2,10 @@
  * StalenessService — detects whether the dbt manifest is stale by comparing
  * the mtime of `{target-path}/manifest.json` against source model files
  * under the configured `model-paths`.
+ *
+ * The comparison itself is `checkManifestStalenessFromMtimes`
+ * (`manifestStaleness.ts`), shared with the CLI; this module only supplies the
+ * VS Code workspace file listing.
  */
 
 import * as fs from 'fs';
@@ -10,17 +14,16 @@ import * as vscode from 'vscode';
 import {
   modelPathsGlob,
   readDbtProjectConfig,
-  resolveManifestPath,
   type DbtProjectConfig,
 } from './dbtProjectConfig';
+import {
+  checkManifestStalenessFromMtimes,
+  MAX_STALENESS_SOURCE_FILES,
+  readManifestMtime,
+  type StalenessResult,
+} from './manifestStaleness';
 
-export interface StalenessResult {
-  isStale: boolean;
-  /** Epoch ms of manifest.json mtime, or null if the file is missing. */
-  manifestMtime: number | null;
-  /** Epoch ms of the newest source file, or null if no sources found. */
-  newestSourceMtime: number | null;
-}
+export type { StalenessResult } from './manifestStaleness';
 
 /**
  * Check whether dbt model source files have been modified after the manifest
@@ -37,16 +40,9 @@ export async function checkManifestStaleness(
   projectPath: string,
   dbtConfig: DbtProjectConfig = readDbtProjectConfig(projectPath),
 ): Promise<StalenessResult> {
-  const manifestPath = resolveManifestPath(projectPath, dbtConfig);
-
-  // Get manifest mtime
-  let manifestMtime: number | null = null;
-  try {
-    const stat = fs.statSync(manifestPath);
-    manifestMtime = stat.mtimeMs;
-  } catch {
-    // Manifest doesn't exist
-    return { isStale: true, manifestMtime: null, newestSourceMtime: null };
+  const manifestMtime = readManifestMtime(projectPath, dbtConfig);
+  if (manifestMtime === null) {
+    return checkManifestStalenessFromMtimes(null, []);
   }
 
   // Find all model source files
@@ -54,26 +50,16 @@ export async function checkManifestStaleness(
     projectPath,
     `${modelPathsGlob(dbtConfig)}/**/*.{sql,yml,yaml}`,
   );
-  const sourceUris = await vscode.workspace.findFiles(pattern, null, 5000);
+  const sourceUris = await vscode.workspace.findFiles(pattern, null, MAX_STALENESS_SOURCE_FILES);
 
-  if (sourceUris.length === 0) {
-    // No source files — manifest is not stale
-    return { isStale: false, manifestMtime, newestSourceMtime: null };
-  }
-
-  // Find the newest source file mtime
-  let newestSourceMtime: number | null = null;
+  const sourceMtimes: number[] = [];
   for (const uri of sourceUris) {
     try {
-      const stat = fs.statSync(uri.fsPath);
-      if (newestSourceMtime === null || stat.mtimeMs > newestSourceMtime) {
-        newestSourceMtime = stat.mtimeMs;
-      }
+      sourceMtimes.push(fs.statSync(uri.fsPath).mtimeMs);
     } catch {
       // File may have been deleted between findFiles and stat
     }
   }
 
-  const isStale = newestSourceMtime !== null && newestSourceMtime > manifestMtime;
-  return { isStale, manifestMtime, newestSourceMtime };
+  return checkManifestStalenessFromMtimes(manifestMtime, sourceMtimes);
 }

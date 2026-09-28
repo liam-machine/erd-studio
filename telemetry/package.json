@@ -1,0 +1,18 @@
+{
+  "name": "erd-studio-telemetry",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Cloudflare Worker that collects ERD Studio's anonymous daily usage heartbeat. Not part of the extension build.",
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
+  "scripts": {
+    "test": "node --test test/worker.test.mjs",
+    "check": "node --check src/index.js && npx --yes -p typescript@5 tsc --noEmit -p tsconfig.json",
+    "dev": "npx --yes wrangler@4 dev",
+    "deploy": "npx --yes wrangler@4 deploy",
+    "tail": "npx --yes wrangler@4 tail --format pretty"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

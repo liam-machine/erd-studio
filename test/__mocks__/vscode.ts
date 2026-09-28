@@ -94,6 +94,14 @@ export const workspace = {
   }),
   onDidChangeTextDocument: () => ({ dispose: () => {} }),
   onDidChangeConfiguration: () => ({ dispose: () => {} }),
+  onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
+  /** Mirrors VS Code: the folder whose path contains the uri, deepest first. */
+  getWorkspaceFolder(uri: { fsPath: string }) {
+    const inside = (root: string) => uri.fsPath === root || uri.fsPath.startsWith(root.endsWith('/') ? root : `${root}/`);
+    return [...workspace.workspaceFolders]
+      .filter(f => inside(f.uri.fsPath))
+      .sort((x, y) => y.uri.fsPath.length - x.uri.fsPath.length)[0];
+  },
   findFiles: async () => [] as unknown[],
   fs: {
     readFile: async () => Buffer.from('{}'),
@@ -145,11 +153,37 @@ export const window = {
   },
   /** Open terminals — createTerminal adds to this list; tests may splice to simulate close. */
   terminals: [] as MockTerminal[],
-  createTerminal: (options?: { name?: string; cwd?: string }): MockTerminal => {
+  createTerminal: (options?: { name?: string; cwd?: string; env?: Record<string, string> }): MockTerminal => {
     const terminal = createMockTerminal(options?.name ?? 'terminal');
+    terminal._options = options;
     window.terminals.push(terminal);
     return terminal;
   },
+  /** Every panel createWebviewPanel returned, in order (reset with `_resetMockWebviewPanels`). */
+  _webviewPanels: [] as MockWebviewPanel[],
+  createWebviewPanel: (viewType: string, title: string, column?: unknown, options?: Record<string, unknown>): MockWebviewPanel => {
+    const panel = createMockWebviewPanel();
+    panel.viewType = viewType;
+    panel.title = title;
+    panel._column = column;
+    panel.webview.options = options ?? {};
+    window._webviewPanels.push(panel);
+    return panel;
+  },
+};
+
+/** Forget every panel createWebviewPanel returned. */
+export function _resetMockWebviewPanels(): void {
+  window._webviewPanels.length = 0;
+}
+
+/** Installed extensions, by id — `_setMockExtensions(['anthropic.claude-code'])` simulates an install. */
+let _mockExtensionIds = new Set<string>();
+export function _setMockExtensions(ids: string[]): void {
+  _mockExtensionIds = new Set(ids);
+}
+export const extensions = {
+  getExtension: (id: string) => (_mockExtensionIds.has(id) ? { id, isActive: false, packageJSON: {} } : undefined),
 };
 
 /** Minimal mock of vscode.StatusBarItem. */
@@ -161,6 +195,11 @@ export interface MockStatusBarItem {
   show: () => void;
   hide: () => void;
   dispose: () => void;
+}
+
+export enum QuickPickItemKind {
+  Separator = -1,
+  Default = 0,
 }
 
 export enum StatusBarAlignment {
@@ -178,12 +217,45 @@ export enum ProgressLocation {
 export const version = '1.85.0-mock';
 
 export const env = {
+  appName: 'Visual Studio Code',
   /** Resolves true (browser opened); spy on it to assert the URL a bug report opens. */
   openExternal: async (_target: unknown): Promise<boolean> => true,
   clipboard: {
     writeText: async (_text: string): Promise<void> => {},
     readText: async (): Promise<string> => '',
   },
+  /** Flip with `_setMockTelemetryEnabled`, which also fires the change event. */
+  isTelemetryEnabled: true,
+  onDidChangeTelemetryEnabled: (listener: (enabled: boolean) => void) =>
+    telemetryEnabledEmitter.event(listener as (...args: unknown[]) => void),
+  /**
+   * Mirrors VS Code's logger closely enough for the telemetry service: usage
+   * events reach the sender only while telemetry is enabled, with the event
+   * name prefixed by the extension id and the data cloned. Errors are passed
+   * to `sendErrorData` the same way.
+   */
+  createTelemetryLogger: (
+    sender: {
+      sendEventData: (eventName: string, data?: Record<string, unknown>) => void;
+      sendErrorData: (error: Error, data?: Record<string, unknown>) => void;
+    },
+    _options?: { ignoreBuiltInCommonProperties?: boolean },
+  ) => ({
+    get isUsageEnabled() { return env.isTelemetryEnabled; },
+    get isErrorsEnabled() { return env.isTelemetryEnabled; },
+    onDidChangeEnableStates: () => ({ dispose: () => {} }),
+    logUsage: (eventName: string, data?: Record<string, unknown>) => {
+      if (env.isTelemetryEnabled) {
+        sender.sendEventData(`liamwynne.erd-studio/${eventName}`, JSON.parse(JSON.stringify(data ?? {})));
+      }
+    },
+    logError: (error: Error | string, data?: Record<string, unknown>) => {
+      if (env.isTelemetryEnabled) {
+        sender.sendErrorData(error instanceof Error ? error : new Error(error), data);
+      }
+    },
+    dispose: () => {},
+  }),
 };
 
 /** Minimal mock of vscode.Terminal for launch-in-terminal handlers. */
@@ -195,6 +267,8 @@ export interface MockTerminal {
   dispose: () => void;
   /** Test helper: every string passed to sendText, in order. */
   _sentText: string[];
+  /** Test helper: the options createTerminal received. */
+  _options?: { name?: string; cwd?: string; env?: Record<string, string> };
 }
 
 export function createMockTerminal(name: string): MockTerminal {
@@ -246,6 +320,8 @@ export const commands = {
       },
     };
   },
+  /** Ids of every registered command (the `filterInternal` flag is ignored). */
+  getCommands: async (_filterInternal?: boolean): Promise<string[]> => _registeredCommands.map((e) => e.command),
   /** Runs the registered handler when one exists (mirrors VS Code); resolves undefined otherwise. */
   executeCommand: async (command: string, ...args: unknown[]): Promise<unknown> => {
     const entry = _registeredCommands.find((e) => e.command === command);
@@ -336,6 +412,15 @@ export class EventEmitter {
   dispose() {
     this.listeners = [];
   }
+}
+
+const telemetryEnabledEmitter = new EventEmitter();
+
+/** Set `env.isTelemetryEnabled` and fire `onDidChangeTelemetryEnabled` when it changes. */
+export function _setMockTelemetryEnabled(enabled: boolean): void {
+  if (env.isTelemetryEnabled === enabled) return;
+  env.isTelemetryEnabled = enabled;
+  telemetryEnabledEmitter.fire(enabled);
 }
 
 export class Disposable {
@@ -430,9 +515,26 @@ export function createMockWebviewPanel() {
     },
     visible: true,
     active: true,
-    dispose: () => {},
+    viewType: '',
+    title: '',
+    iconPath: undefined as unknown,
+    /** Records each reveal's column in `_reveals`. */
+    reveal: (column?: unknown) => {
+      panel._reveals.push(column);
+    },
+    /** Like VS Code: fires onDidDispose once. */
+    dispose: () => {
+      if (panel._disposed) return;
+      panel._disposed = true;
+      for (const handler of disposeHandlers) {
+        handler();
+      }
+    },
 
     // Test helpers (not part of VS Code API)
+    _reveals: [] as unknown[],
+    _disposed: false,
+    _column: undefined as unknown,
     /** Dispatch a message to every handler; resolves once async handlers finish. */
     _simulateMessage: (message: unknown): Promise<void> =>
       Promise.all(messageHandlers.map((handler) => handler(message))).then(() => undefined),
@@ -451,6 +553,8 @@ export function createMockWebviewPanel() {
 
   return panel;
 }
+
+export type MockWebviewPanel = ReturnType<typeof createMockWebviewPanel>;
 
 // ---------------------------------------------------------------------------
 // Text documents + WorkspaceEdit (for testing mutation handlers end-to-end)

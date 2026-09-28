@@ -40,6 +40,12 @@ export interface ManifestModelInfo {
   projectName: string;
   /** Schema the model is materialised in */
   schema: string;
+  /**
+   * Relation name dbt builds the model as, when it differs from `name` (the
+   * `alias` config). dbt fills `alias` in on every node — equal to the name
+   * when none is configured — so it is recorded here only when it differs.
+   */
+  alias?: string;
   /** Model description from dbt */
   description: string;
   /** Column definitions from dbt */
@@ -64,6 +70,8 @@ export interface ManifestWorkerResult {
   compositeUniqueGroups: Record<string, string[][]>;
   /** Short names of models in `manifest.disabled` (raw spelling, deduped) */
   disabledModels: string[];
+  /** Seed and snapshot nodes, keyed by short name (descriptions only — see ManifestData.resourceDocs) */
+  resourceDocs?: Record<string, ManifestModelInfo>;
 }
 
 /** Error result from the manifest worker thread. */
@@ -93,4 +101,12 @@ export interface ManifestData {
    * a file alone must never be taken as evidence that the model exists.
    */
   disabledModels: Set<string>;
+  /**
+   * `seed.` and `snapshot.` nodes, keyed by `normaliseName(name)`. They are
+   * kept OUT of `models` (which drives existence, the Add-Existing picker and
+   * relationship derivation) and supply only descriptions — model- and
+   * column-level — to the physical stage when no schema .yml has them.
+   * Optional so hand-built literals stay valid.
+   */
+  resourceDocs?: Map<string, ManifestModelInfo>;
 }

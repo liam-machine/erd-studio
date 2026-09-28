@@ -1,5 +1,6 @@
-// esbuild.js — Dual-target build for ERD Studio VS Code extension
-// Targets: Extension host (Node.js, CJS) + Webview (Browser, IIFE with React)
+// esbuild.js — Build for ERD Studio VS Code extension
+// Targets: Extension host (Node.js, CJS), Webview (Browser, IIFE with React),
+// manifest worker (Node.js worker thread) and the standalone `erd-studio` CLI.
 
 const esbuild = require('esbuild');
 const path = require('path');
@@ -55,6 +56,8 @@ const extensionConfig = {
   minify: isProduction,
   treeShaking: true,
   logLevel: 'warning',
+  // Harness skill files (src/harness/**/*.md) are bundled as plain strings.
+  loader: { '.md': 'text' },
   plugins: [problemMatcherPlugin],
 };
 
@@ -71,6 +74,29 @@ const workerConfig = {
   minify: isProduction,
   treeShaking: true,
   logLevel: 'warning',
+  plugins: [problemMatcherPlugin],
+};
+
+// Standalone CLI build — `node dist/cli.js`, run by the ~/.erd-studio-cli
+// launcher outside VS Code. No `external`: it must never import 'vscode', and
+// an unresolvable 'vscode' import fails this bundle rather than the runtime.
+const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
+const cliConfig = {
+  entryPoints: ['./src/cli/index.ts'],
+  bundle: true,
+  outfile: './dist/cli.js',
+  format: 'cjs',
+  platform: 'node',
+  target: 'node18',
+  sourcemap: !isProduction,
+  minify: isProduction,
+  treeShaking: true,
+  logLevel: 'warning',
+  banner: { js: '#!/usr/bin/env node' },
+  loader: { '.md': 'text' },
+  define: {
+    '__ERD_CLI_VERSION__': JSON.stringify(pkg.version),
+  },
   plugins: [problemMatcherPlugin],
 };
 
@@ -103,18 +129,20 @@ async function build() {
   console.log(`Building [${isProduction ? 'production' : 'development'}]...`);
 
   if (isWatch) {
-    const [extCtx, webCtx, workerCtx] = await Promise.all([
+    const contexts = await Promise.all([
       esbuild.context(extensionConfig),
       esbuild.context(webviewConfig),
       esbuild.context(workerConfig),
+      esbuild.context(cliConfig),
     ]);
-    await Promise.all([extCtx.watch(), webCtx.watch(), workerCtx.watch()]);
+    await Promise.all(contexts.map((ctx) => ctx.watch()));
     console.log('Watching for changes...');
   } else {
     await Promise.all([
       esbuild.build(extensionConfig),
       esbuild.build(webviewConfig),
       esbuild.build(workerConfig),
+      esbuild.build(cliConfig),
     ]);
     console.log('Build complete.');
   }
