@@ -201,12 +201,17 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 
     if (editingField === 'name') {
       if (!trimmed) { cancelEdit(); return; }
-      if (!/^[a-z0-9_]+$/.test(trimmed)) {
+      if (!/^[A-Za-z0-9_]+$/.test(trimmed)) {
         if (revertOnError) { cancelEdit(); return; }
-        setEditError('Use lowercase letters, numbers, underscores');
+        setEditError('Use only letters, numbers, underscores');
         return;
       }
-      if (trimmed !== column.name && existingColumnNames?.includes(trimmed)) {
+      // Case is ignored (`Date` and `date` are one column to the warehouse),
+      // but renaming this column to its own name in another case is allowed.
+      if (
+        trimmed !== column.name &&
+        existingColumnNames?.some((n) => n !== column.name && n.toLowerCase() === trimmed.toLowerCase())
+      ) {
         if (revertOnError) { cancelEdit(); return; }
         setEditError('Column name already exists');
         return;

@@ -18,7 +18,7 @@ import { useEditorStore } from '../../store/editorStore';
 import { useSend } from '../../hooks/useMessageBus';
 import { KeyBadgeGroup } from '@erd-studio/renderer/editor';
 import type { ColumnDef, DesignModel, ModelRole, ModelTemplate } from '../../../src/types/semantic';
-import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, findDuplicateNames } from '../../../src/types/naming';
+import { COLUMN_NAME_PATTERN, COLUMN_NAME_RULE, MODEL_NAME_PATTERN, findDuplicateNames, sameName } from '../../../src/types/naming';
 import './NewModelDialog.css';
 
 // ---------------------------------------------------------------------------
@@ -76,30 +76,34 @@ function validateForm(
   if (!modelName.trim()) {
     errors.modelName = 'Model name is required';
   } else if (!MODEL_NAME_PATTERN.test(modelName)) {
-    errors.modelName = 'Start with a letter; use lowercase letters, numbers, and underscores only';
+    errors.modelName = 'Start with a letter; use only letters, numbers, and underscores';
   } else if (template.prefix && !modelName.startsWith(template.prefix)) {
     errors.modelName = `Must start with "${template.prefix}" for ${template.label} template`;
   } else if (template.prefix && modelName.length <= template.prefix.length) {
     errors.modelName = `Add content after "${template.prefix}" (e.g., ${template.prefix}example)`;
-  } else if (existingModelNames.includes(modelName)) {
-    errors.modelName = `Model "${modelName}" already exists in this domain`;
-  } else if (libraryModelNames.includes(modelName)) {
+  } else if (existingModelNames.some((n) => sameName(n, modelName))) {
+    // Compared without case, like the host: `DimDate` and `dimdate` are one
+    // file on macOS/Windows and one table in dbt.
+    const existing = existingModelNames.find((n) => sameName(n, modelName));
+    errors.modelName = `Model "${existing}" already exists in this domain`;
+  } else if (libraryModelNames.some((n) => sameName(n, modelName))) {
     // The model library (logical-models/) is shared across domains — a new
     // model must not overwrite one another domain already uses.
-    errors.modelName = `Model "${modelName}" already exists in the model library — use "Add Existing Model" instead`;
+    const existing = libraryModelNames.find((n) => sameName(n, modelName));
+    errors.modelName = `Model "${existing}" already exists in the model library — use "Add Existing Model" instead`;
   }
 
   // Bridge entity validation (check for requiresLeftEntity/requiresRightEntity flags)
   if (template.requiresLeftEntity || template.requiresRightEntity) {
     if (!leftEntity.trim()) {
       errors.leftEntity = 'Left entity is required';
-    } else if (!/^[a-z0-9_]+$/.test(leftEntity)) {
-      errors.leftEntity = 'Use lowercase letters, numbers, and underscores only';
+    } else if (!COLUMN_NAME_PATTERN.test(leftEntity)) {
+      errors.leftEntity = COLUMN_NAME_RULE;
     }
     if (!rightEntity.trim()) {
       errors.rightEntity = 'Right entity is required';
-    } else if (!/^[a-z0-9_]+$/.test(rightEntity)) {
-      errors.rightEntity = 'Use lowercase letters, numbers, and underscores only';
+    } else if (!COLUMN_NAME_PATTERN.test(rightEntity)) {
+      errors.rightEntity = COLUMN_NAME_RULE;
     }
   }
 

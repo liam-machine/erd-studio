@@ -88,7 +88,7 @@ For each `InventoryModel` in the `inventory --models` output:
 | `name` | `name`, exactly |
 | `schema` | `schema`, if not empty; otherwise omit |
 | `description` | `description`; if empty, a one-line plain draft ending in "(draft)" |
-| `columns[].name` | `columns[].name`, in the same order. If a name is all UPPERCASE (a warehouse spelling), write it in lowercase — matching is case-insensitive, and ERD Studio's naming is lowercase |
+| `columns[].name` | `columns[].name`, in the same order. If a name is all UPPERCASE (a warehouse spelling), write it in lowercase — matching is case-insensitive. Mixed case the team chose (`DateKey`) is kept as written |
 | `columns[].dataType` | `columns[].dataType`, copied exactly (e.g. `NUMBER(38,0)`, `varchar`). If it is `''`, see "When dbt has no type" |
 | `columns[].description` | `columns[].description`; if empty, a short draft ending in "(draft)" when the meaning is obvious from the name, else `""` |
 | `columns[].isPrimaryKey: true` | The column in `keyCandidates.unique` when there is exactly one. With several, prefer the one named like `<entity>_id` for the model (`order_id` for `fct_order`). With none, every column of the first `keyCandidates.compositeUnique` group |
@@ -219,7 +219,7 @@ history, that gap goes in the Stage 5 review, not into a `scdType: 2` dbt does n
 
 ## Names ERD Studio cannot use
 
-Model names must match `^[a-z][a-z0-9_]*$` — lowercase, starting with a letter. The inventory
+Model names must match `^[A-Za-z][A-Za-z0-9_]*$` — letters (either case), digits and `_`, starting with a letter. The inventory
 already lists dbt models that do not as `skipped` with reason `invalid-name`. Do not rename or
 include them; tell the user in one line which were skipped and why.
 
