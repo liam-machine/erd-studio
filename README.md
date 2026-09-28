@@ -129,6 +129,10 @@ To choose the project for everyone who opens the workspace, set `erdStudio.proje
 
 If you open a diagram that belongs to a different dbt project than the one ERD Studio has open, ERD Studio doesn't draw it against the wrong project's data. It offers to switch projects instead.
 
+### Editing the files by hand
+
+Every file ERD Studio writes is plain JSON or YAML, and the extension ships a JSON Schema for each one. Open a domain with **Open With… → Text Editor**, or open a model's `.yml`, and you get completion for every supported property, a description on hover, and a warning on a misspelt property or an invalid value (`modelRole`, `cardinality`, `scdType`…). JSON files work out of the box. For the model `.yml` files, install Red Hat's [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml). The schemas and how to use them in other editors are in the [file format reference](docs/semantic-domain-json-reference.md#editor-support-json-schemas).
+
 ### Not using dbt?
 
 Use ERD Studio for your **logical models**: design tables, relationships, and business rules without installing or running dbt.

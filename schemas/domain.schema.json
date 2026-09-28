@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ERD Studio domain",
+  "description": "A domain diagram: .erd-studio/{layer}/{domain}.json. References models by name and holds relationships and canvas layout. Reference: https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md#domain-file-erd-studiolayerdomainjson",
+  "type": "object",
+  "required": ["schemaVersion", "domain", "layer", "logical"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "description": "Optional schema reference for editors outside VS Code. Ignored by ERD Studio." },
+    "schemaVersion": {
+      "type": "integer",
+      "enum": [5, 4],
+      "description": "Domain file format version. Write 5. Version 4 (inline model objects) still loads until migrated with \"ERD Studio: Migrate Domains to Central Model Store\"."
+    },
+    "domain": { "type": "string", "minLength": 1, "description": "Domain slug. Should equal the file name without .json." },
+    "layer": { "type": "string", "minLength": 1, "description": "Must match an id in layers.json and the parent directory name." },
+    "description": { "type": "string", "description": "Human-readable domain description." },
+    "modelFolder": { "type": "string", "description": "Path prefix filter for the \"Add Existing Model\" dialog, e.g. models/silver." },
+    "stubColumns": {
+      "type": "array",
+      "description": "Models (typically conformed dimensions / reference tables) that define only key columns. Missing-column discrepancies for them are hidden in Compare.",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "logical": {
+      "type": "object",
+      "description": "The editable logical stage.",
+      "required": ["models", "relationships"],
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "type": "array",
+          "description": "Model NAME strings. Each resolves to .erd-studio/logical-models/{name}.yml or .erd-studio/logical-models/{folder}/{name}.yml. (Version 4 files hold inline model objects here instead; never mix the two.)",
+          "items": {
+            "anyOf": [
+              { "type": "string", "minLength": 1, "description": "Model name." },
+              { "type": "object", "required": ["name"], "description": "Deprecated version 4 inline model. Migrate to a name string." }
+            ]
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "description": "FK relationships. (fromModel, fromColumn, toModel, toColumn) must be unique within the domain.",
+          "items": { "$ref": "#/definitions/relationship" }
+        },
+        "viewConfig": { "$ref": "#/definitions/viewConfig", "description": "Deprecated location — viewConfig belongs at the root of the document." }
+      }
+    },
+    "viewConfig": { "$ref": "#/definitions/viewConfig", "description": "Canvas layout, at the root of the document. Write {} for a new domain — models without a position are placed automatically." }
+  },
+  "definitions": {
+    "relationship": {
+      "type": "object",
+      "required": ["fromModel", "fromColumn", "toModel", "toColumn", "cardinality"],
+      "additionalProperties": false,
+      "properties": {
+        "fromModel": { "type": "string", "minLength": 1, "description": "Model holding the FK (the \"many\" side of many-to-one)." },
+        "fromColumn": { "type": "string", "minLength": 1, "description": "FK column on fromModel." },
+        "toModel": { "type": "string", "minLength": 1, "description": "Referenced model (PK side)." },
+        "toColumn": { "type": "string", "minLength": 1, "description": "Referenced PK column on toModel." },
+        "cardinality": {
+          "type": "string",
+          "description": "Relationship cardinality, read from fromModel to toModel.",
+          "enum": ["many-to-one", "one-to-one", "one-to-many", "many-to-many"]
+        }
+      }
+    },
+    "viewConfig": {
+      "type": "object",
+      "description": "Canvas layout. Safe to leave as {} — models without a position are placed automatically.",
+      "additionalProperties": false,
+      "properties": {
+        "showFkEdges": { "type": "boolean", "description": "Whether FK edges are drawn." },
+        "layoutOptions": {
+          "type": "object",
+          "description": "ELK layout options as string key/value pairs, e.g. \"elk.direction\": \"DOWN\".",
+          "additionalProperties": { "type": "string" }
+        },
+        "positions": {
+          "type": "object",
+          "description": "Node positions keyed by model name. Preserve existing entries when adding models.",
+          "additionalProperties": { "$ref": "#/definitions/position" }
+        },
+        "annotations": {
+          "type": "array",
+          "description": "Canvas post-it notes.",
+          "items": { "$ref": "#/definitions/annotation" }
+        }
+      }
+    },
+    "position": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "annotation": {
+      "type": "object",
+      "required": ["id", "text", "x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "Unique note id." },
+        "text": { "type": "string", "description": "Note text." },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "color": {
+          "type": "string",
+          "description": "Note colour.",
+          "enum": ["yellow", "blue", "green", "pink", "orange"]
+        },
+        "linkedModel": { "type": "string", "description": "Draws a dashed edge from the note to this model." }
+      }
+    }
+  }
+}

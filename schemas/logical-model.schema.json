@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ERD Studio logical model",
+  "description": "One logical model: .erd-studio/logical-models/{name}.yml or .erd-studio/logical-models/{folder}/{name}.yml. Shared by every domain that lists its name. Reference: https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md#model-files-erd-studiological-modelsfoldernameyml",
+  "type": "object",
+  "required": ["name"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "description": "Optional schema reference for editors outside VS Code. Ignored by ERD Studio." },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Model name — its identity everywhere (domain files, relationships, positions). Must equal the file name without .yml and be unique across the whole model library."
+    },
+    "schema": { "type": "string", "description": "Target schema the model materialises in." },
+    "alias": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "maxLength": 128,
+      "description": "Warehouse table name when it differs from `name` (dbt's `alias` config). Letters, digits and underscores; must not start with a digit. The canvas shows the alias as the model's label."
+    },
+    "description": { "type": "string", "description": "Human-readable model description." },
+    "grain": { "type": "string", "description": "Grain statement: \"One row per ___\"." },
+    "modelRole": { "$ref": "#/definitions/modelRole" },
+    "rationale": { "$ref": "#/definitions/rationale" },
+    "columns": {
+      "type": "array",
+      "description": "Column definitions, in display order.",
+      "items": { "$ref": "#/definitions/column" }
+    }
+  },
+  "definitions": {
+    "modelRole": {
+      "type": "string",
+      "description": "The model's role in the warehouse architecture.",
+      "enum": [
+        "conformed-dim",
+        "domain-dim",
+        "transaction-fact",
+        "periodic-snapshot",
+        "accumulating-snapshot",
+        "factless-fact",
+        "reference",
+        "gold-fact",
+        "gold-dim"
+      ],
+      "enumDescriptions": [
+        "Shared dimension reused across domains",
+        "Dimension specific to this domain",
+        "Discrete event fact",
+        "Recurring measurement per period",
+        "Lifecycle with milestones",
+        "M:M bridge table, FKs only",
+        "Low-cardinality lookup",
+        "Pre-joined Gold view",
+        "Flattened Gold dimension view"
+      ]
+    },
+    "rationale": {
+      "type": "object",
+      "description": "Why the model is designed this way. Every field is optional; omit the whole object when it would be empty. The canvas shows an \"R\" badge on models that have one.",
+      "additionalProperties": false,
+      "properties": {
+        "purpose": { "type": "string", "description": "What requirements or purpose this model fulfils." },
+        "design": { "type": "string", "description": "Why the model was designed this way — trade-offs, constraints, patterns." },
+        "grainChoice": { "type": "string", "description": "Why this grain was chosen over alternatives." },
+        "roleChoice": { "type": "string", "description": "Why this model role was selected." },
+        "scdStrategy": { "type": "string", "description": "Overall SCD strategy across dimension attributes." },
+        "measures": { "type": "string", "description": "Why measures are structured this way — additive type choices." }
+      }
+    },
+    "column": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "Column name." },
+        "dataType": {
+          "type": "string",
+          "description": "SQL data type, e.g. STRING, INTEGER, BOOLEAN, DATE, DECIMAL(18,2), TIMESTAMP_NTZ, VARCHAR."
+        },
+        "description": { "type": "string", "description": "Human-readable column description." },
+        "isPrimaryKey": { "type": "boolean", "description": "Primary key. Only include when true." },
+        "isForeignKey": { "type": "boolean", "description": "Foreign key intent. Only include when true; the relationship itself lives in the domain file." },
+        "isNaturalKey": { "type": "boolean", "description": "Business identifier (email, SKU, customer_code). Only include when true." },
+        "scdType": {
+          "description": "Dimension columns: how the attribute handles change.",
+          "enum": [0, 1, 2],
+          "enumDescriptions": ["Never changes", "Overwrite", "Track history"]
+        },
+        "additiveType": {
+          "type": "string",
+          "description": "Fact measures: how the measure aggregates across dimensions.",
+          "enum": ["additive", "semi-additive", "non-additive"]
+        }
+      }
+    }
+  }
+}

@@ -399,6 +399,33 @@ skill uses both commands. It writes the files described in this reference with t
 assistant's normal Edit/Write tools, never through the helper, and runs `diff` until it is
 clean.
 
+## Editor Support (JSON Schemas)
+
+Each hand-editable file has a JSON Schema (draft-07) in [`schemas/`](../schemas). It gives completion, hover descriptions and warnings for undeclared properties and invalid values:
+
+| File | Schema |
+|------|--------|
+| `.erd-studio/{layer}/{domain}.json` | [`domain.schema.json`](../schemas/domain.schema.json) |
+| `.erd-studio/logical-models/[{folder}/]{name}.yml` | [`logical-model.schema.json`](../schemas/logical-model.schema.json) |
+| `.erd-studio/layers.json` | [`layers.schema.json`](../schemas/layers.schema.json) |
+| `.erd-studio/templates/{id}.json` | [`template.schema.json`](../schemas/template.schema.json) |
+
+**In VS Code** the extension associates them by path (`contributes.jsonValidation` / `yamlValidation`), so nothing needs to be added to your files. JSON validation is built into VS Code. YAML needs Red Hat's [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml). Domain files open in the diagram editor by default; use **Open With… → Text Editor** to edit one as JSON. Schema problems are warnings, never errors: the extension still loads what it can, as described above.
+
+The association uses the default `.erd-studio` directory. With a custom `erdStudio.semanticDir`, or in another editor, point at the schemas yourself. Either map them in settings (`json.schemas` / `yaml.schemas` in VS Code), or add a reference to the file. ERD Studio ignores the reference. Domain files keep a `$schema` key, and model files keep the comment, when the canvas saves them. `layers.json` is rewritten whenever layers are edited from the sidebar, which drops the key, so map that one in settings:
+
+```jsonc
+// domain / layers / template JSON: a top-level key
+{ "$schema": "https://raw.githubusercontent.com/liam-machine/erd-studio/main/schemas/domain.schema.json", "schemaVersion": 5, ... }
+```
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/liam-machine/erd-studio/main/schemas/logical-model.schema.json
+name: dim_customer
+```
+
+The schemas describe the current format (`schemaVersion` 5) and still accept a version 4 domain until it is migrated.
+
 ## Validation Rules
 
 1. `schemaVersion` must be `5`. Versions below 4 and top-level `models` arrays are rejected; version 4 is accepted only until migrated.

@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ERD Studio model template",
+  "description": "A model template: .erd-studio/templates/{id}.json. Preset columns offered when creating a model from the canvas. In column names and descriptions, {name} is the model name minus its prefix; bridge templates also get {left} and {right}. Reference: https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md#model-templates-erd-studiotemplatesidjson",
+  "type": "object",
+  "required": ["id", "label"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "description": "Optional schema reference for editors outside VS Code. Ignored by ERD Studio." },
+    "id": { "type": "string", "minLength": 1, "description": "Unique across all template files — a duplicate id is skipped with a warning." },
+    "label": { "type": "string", "minLength": 1, "description": "Name shown in the template picker." },
+    "prefix": { "type": "string", "description": "Model name prefix, e.g. dim_ or fct_. Empty for none." },
+    "description": { "type": "string", "description": "What the template is for." },
+    "requiresLeftEntity": { "type": "boolean", "description": "Bridge templates: ask for a left entity ({left})." },
+    "requiresRightEntity": { "type": "boolean", "description": "Bridge templates: ask for a right entity ({right})." },
+    "columns": {
+      "type": "array",
+      "description": "Preset columns. The full column shape is carried through to the created model; invalid values are dropped.",
+      "items": { "$ref": "#/definitions/column" }
+    }
+  },
+  "definitions": {
+    "column": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "Column name. May use {name}, {left} and {right}." },
+        "dataType": { "type": "string", "description": "SQL data type, e.g. STRING, INTEGER, DECIMAL(18,2)." },
+        "description": { "type": "string", "description": "Column description. May use {name}, {left} and {right}." },
+        "isPrimaryKey": { "type": "boolean", "description": "Primary key. Only include when true." },
+        "isForeignKey": { "type": "boolean", "description": "Foreign key intent. Only include when true." },
+        "isNaturalKey": { "type": "boolean", "description": "Business identifier. Only include when true." },
+        "scdType": {
+          "description": "Dimension columns: how the attribute handles change.",
+          "enum": [0, 1, 2],
+          "enumDescriptions": ["Never changes", "Overwrite", "Track history"]
+        },
+        "additiveType": {
+          "type": "string",
+          "description": "Fact measures: how the measure aggregates across dimensions.",
+          "enum": ["additive", "semi-additive", "non-additive"]
+        }
+      }
+    }
+  }
+}
