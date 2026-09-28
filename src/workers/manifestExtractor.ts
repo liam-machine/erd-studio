@@ -6,12 +6,14 @@
  * can be transferred via structured clone (worker postMessage).
  */
 
+import type { Meta } from '../types/semantic';
 import type {
   ManifestColumn,
   ManifestModelInfo,
   ManifestRelationshipTest,
   ManifestWorkerResult,
 } from '../types/manifest';
+import { readMeta } from '@erd-studio/core';
 import { parseRefModelName, resolveModelNameFromNodeId } from '../services/nameUtils';
 
 const MODEL_KEY_PREFIX = 'model.';
@@ -157,15 +159,18 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
   if (rawColumns && typeof rawColumns === 'object' && !Array.isArray(rawColumns)) {
     for (const col of Object.values(rawColumns as Record<string, Record<string, unknown>>)) {
       if (col && typeof col === 'object') {
+        const colMeta = metaOf(col);
         columns.push({
           name: typeof col.name === 'string' ? col.name : '',
           data_type: typeof col.data_type === 'string' ? col.data_type : null,
           description: typeof col.description === 'string' ? col.description : '',
+          ...(colMeta ? { meta: colMeta } : {}),
         });
       }
     }
   }
 
+  const meta = metaOf(node);
   const version = parseVersion(node.version);
   const latestVersion = parseVersion(node.latest_version);
   // A versioned model's default alias is `<name>_v<N>`: that is dbt's naming
@@ -181,11 +186,23 @@ function extractModelInfo(node: Record<string, unknown>): ManifestModelInfo | nu
     ...(hasOwnAlias ? { alias } : {}),
     description: typeof node.description === 'string' ? node.description : '',
     columns,
+    ...(meta ? { meta } : {}),
     originalFilePath:
       typeof node.original_file_path === 'string' ? node.original_file_path : undefined,
     ...(version !== undefined ? { version } : {}),
     ...(latestVersion !== undefined ? { latestVersion } : {}),
   };
+}
+
+/**
+ * A node's or column's dbt `meta`: the top-level `meta` merged with
+ * `config.meta`, the config winning per key. dbt 1.10 moved `meta` under
+ * `config`; older manifests carry the project-level `+meta` only there.
+ */
+function metaOf(entry: Record<string, unknown>): Meta | undefined {
+  const config = entry.config;
+  const configMeta = config && typeof config === 'object' ? (config as Record<string, unknown>).meta : undefined;
+  return readMeta(entry.meta, configMeta);
 }
 
 /** dbt records `version` / `latest_version` as a number or string; normalise to a number. */

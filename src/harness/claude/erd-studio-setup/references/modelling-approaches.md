@@ -74,6 +74,9 @@ would make the read-only Physical tab claim something about the dbt project that
 - When unsure of a model's role or grain, leave the field out and add it to a short "to confirm"
   list for Stage 6. A blank field is honest; a wrong one is misleading.
 
+Metadata (`meta:` — owner, source system, personal data…) is not part of the approach and follows
+its own list: `references/metadata.md`. Like the fields above, the diff never compares it.
+
 `additiveType` guide: amounts, quantities, counts → `additive`; balances, stock levels,
 headcounts (true at a point in time, not summable across dates) → `semi-additive`; prices, rates,
 ratios, percentages, averages → `non-additive`. Keys, ids, dates and flags get no `additiveType`.
@@ -429,6 +432,14 @@ The fields describe what dbt does **today**. A rule dbt does not meet yet is lis
 | 3 | `isNaturalKey: true` on the source system's id (also when it is the primary key) |
 | 4 | `scdType: 2` on tracked `dim_customer` columns *where dbt keeps history* (a snapshot, or `valid_from`/`valid_to` columns). Otherwise `scdType: 1`, with the gap listed under Target-design backlog |
 
+## Metadata
+
+(Only when the team keeps metadata — see `references/metadata.md` section 4.)
+
+| Key | On | Values | Source |
+|---|---|---|---|
+| `owner` | models | team name, e.g. `crm-team` | dbt |
+
 ## Sources
 
 - Kimball Group, "Dimensional Modeling Techniques" — https://www.kimballgroup.com/…
@@ -441,6 +452,11 @@ here are intentional: later runs report them as backlog items and never "fix" th
 
 On a re-run, update the file in place when the user says "change it"; keep the old quote under a
 "Previously" heading only if they ask.
+
+The file can also hold only a title and the `## Metadata` section (a quick start agrees no style,
+but may save the metadata list). With no **Technique** line, the style is still to be agreed:
+Stage 3b detects it as if there were no file, and writing the approach later adds the other
+sections around the existing `## Metadata`, which is kept as it is.
 
 ## 6. Conformance review
 

@@ -64,9 +64,9 @@ and no `catalog.json` to observe the real one. It resolves exactly like
 
 | Action | What to do |
 |--------|-----------|
-| `add-to-logical` | Add model name to domain JSON `logical.models[]` + create the model file from manifest data — `logical-models/{layer}/{name}.yml` (the plan's `layer`) when the project uses layer folders, else `logical-models/{name}.yml` — unless a file for that name already exists in any folder |
+| `add-to-logical` | Add model name to domain JSON `logical.models[]` + create the model file from manifest data — `logical-models/{layer}/{name}.yml` (the plan's `layer`) when the project uses layer folders, else `logical-models/{name}.yml` — unless a file for that name already exists in any folder. Copy the dbt `meta` keys the team's metadata list names (the schema skill's "The team's metadata list") |
 | `remove-from-logical` | Remove model name from domain JSON `logical.models[]` + remove related relationships from `logical.relationships[]` |
-| `add-column-to-logical` | Add column to the model's yml (`modelContext[name].logicalModelPath`) columns array |
+| `add-column-to-logical` | Add column to the model's yml (`modelContext[name].logicalModelPath`) columns array, with the dbt column `meta` keys the team's metadata list names |
 | `remove-column-from-logical` | Remove column from the model's yml (`logicalModelPath`) |
 | `update-type-in-logical` | Update column `dataType` in the model's yml (`logicalModelPath`) to the value in `resolvedDataType` |
 | `add-relationship-to-logical` | Add relationship object to domain JSON `logical.relationships[]` using the fromModel/fromColumn/toModel/toColumn from the action |
@@ -119,4 +119,4 @@ models:
 - **Cascade deletions**: When removing a model from logical, also remove any relationships referencing it
 - **Column ordering**: When adding columns to logical-models YAML, append to the end of the columns array
 
-<!-- erd-studio-harness: 22 -->
+<!-- erd-studio-harness: 23 -->

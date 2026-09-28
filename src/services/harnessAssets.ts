@@ -23,6 +23,7 @@ import dbtExplained from '../harness/claude/erd-studio-setup/references/dbt-expl
 import dbtSetup from '../harness/claude/erd-studio-setup/references/dbt-setup.md';
 import buildingTheModel from '../harness/claude/erd-studio-setup/references/building-the-model.md';
 import modellingApproaches from '../harness/claude/erd-studio-setup/references/modelling-approaches.md';
+import metadata from '../harness/claude/erd-studio-setup/references/metadata.md';
 import verifyAndFix from '../harness/claude/erd-studio-setup/references/verify-and-fix.md';
 import troubleshooting from '../harness/claude/erd-studio-setup/references/troubleshooting.md';
 
@@ -51,6 +52,7 @@ export const CLAUDE_SETUP_SKILL_FILES: readonly HarnessAsset[] = [
   { relativePath: 'references/dbt-explained.md', content: dbtExplained, versioned: false },
   { relativePath: 'references/dbt-setup.md', content: dbtSetup, versioned: false },
   { relativePath: 'references/modelling-approaches.md', content: modellingApproaches, versioned: false },
+  { relativePath: 'references/metadata.md', content: metadata, versioned: false },
   { relativePath: 'references/building-the-model.md', content: buildingTheModel, versioned: false },
   { relativePath: 'references/verify-and-fix.md', content: verifyAndFix, versioned: false },
   { relativePath: 'references/troubleshooting.md', content: troubleshooting, versioned: false },

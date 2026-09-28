@@ -47,7 +47,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 
 ### Team Modelling Approach
 
-If `.erd-studio/modelling-approach.md` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (`modelRole`, `grain`, `scdType`, `additiveType`, `isNaturalKey`, `rationale`). The `/erd-studio-setup` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise.
+If `.erd-studio/modelling-approach.md` exists, **read it before creating or editing models and follow it.** It records how this team models data — the technique (e.g. Kimball dimensional modelling, Data Vault 2.0), the user's own words, the concrete rules, and how each rule maps onto ERD Studio fields (`modelRole`, `grain`, `scdType`, `additiveType`, `isNaturalKey`, `rationale`). The `/erd-studio-setup` guide writes it after asking the user; it can also be written or edited by hand. It is free-form markdown: ERD Studio never parses it, and a project without one is valid. When a rule in it conflicts with a user request, say so and ask which wins. If it has a **Target-design backlog** section, the differences between logical and physical listed there are intentional: when a sync plan or diff proposes undoing one, report it as a backlog item and leave it as it is unless the user says otherwise. If it has a **Metadata** section, that is the team's metadata list — follow it as "Metadata (`meta`)" below says. A file holding only a title and a Metadata section is valid: no modelling technique has been agreed yet.
 
 ### Model Library (Sidebar)
 
@@ -219,8 +219,19 @@ columns:
 ```
 
 - ERD Studio **never compares, diffs or syncs `meta` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's `meta:`.
-- The canvas shows it in the Detail panel; top-level text values can be edited there, nested maps, lists, booleans and `null` are shown read-only.
-- **Keep every existing entry** when you edit a model file, and only add or change the keys the user asks for — never invent metadata, and never move keys between the model and its columns.
+- The canvas shows it in the Detail panel and when the user hovers a model's name or a column; top-level text values can be edited in the panel, nested maps, lists, booleans and `null` are shown read-only.
+- **Keep every existing entry** when you edit a model file — including keys that are not on the team's list — and never move keys between the model and its columns. Never invent metadata.
+
+#### The team's metadata list
+
+If `.erd-studio/modelling-approach.md` has a `## Metadata` section, it lists the `meta` keys this team records, as a table: **Key**, **On** (models, columns or both), **Values**, and **Source** (`dbt` or `the team`). Read it before creating or editing a model, and follow it:
+
+- **Use its key names exactly.** When the user describes a key in other words ("data owner", "does it hold personal data?"), use the listed key (`owner`, `pii`), never a new spelling, and put it where **On** says. Use the listed values and the same kind of value (text, `true` / `false`, a list).
+- **Source `dbt`: copy it, never type it.** The value comes from the dbt model's own `meta:` — in its schema `.yml` (`meta:` and `config: meta:`, the `config` one winning per key; a column's are under that column), or `~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json` (`models[].meta`, `columns[].meta`) when that helper is installed. Copy it whenever you create a logical model or add a column from dbt (including from a sync plan), and bring a copied value up to date when you edit that model and dbt's has changed. Copy the value exactly — `true` unquoted, a list as a list. When dbt has no value, leave the key out: never guess and never write a placeholder.
+- **Source `the team`: leave it to people.** Never fill it in yourself unless the user gives you the value. After creating a model, say in one line which of these keys it still lacks.
+- **A key that is not on the list:** add it when the user asks, then offer once to add it to the list.
+
+Without that section, add or change only the keys the user asks for, and never copy dbt's `meta:` unasked.
 
 ---
 
@@ -254,7 +265,7 @@ State which of those columns you intend to build, in plain English.
 Proceed straight to step 3 — do not wait for confirmation. The user will correct you if the scope is wrong.
 
 ### Step 3 — Build
-Write the model's YAML file — the existing file if the model already exists (in whichever folder it is in), otherwise a new file — `.erd-studio/logical-models/{layer}/{name}.yml` for the layer of the target domain when the project uses layer folders, else `.erd-studio/logical-models/{name}.yml` (see "Model file location").
+Write the model's YAML file — the existing file if the model already exists (in whichever folder it is in), otherwise a new file — `.erd-studio/logical-models/{layer}/{name}.yml` for the layer of the target domain when the project uses layer folders, else `.erd-studio/logical-models/{name}.yml` (see "Model file location"). When the source is a dbt model and the team's metadata list has `dbt` keys, copy those too (see "The team's metadata list").
 
 ### Step 4 — Reconcile via set-difference
 Re-read the YAML file you just wrote. Compute the set-difference between source columns and YAML columns — do not rely on a total count alone, because counts can coincidentally match while columns still differ.
@@ -381,4 +392,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 22 -->
+<!-- erd-studio-harness: 23 -->

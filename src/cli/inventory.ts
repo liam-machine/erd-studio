@@ -14,7 +14,8 @@ import * as path from 'path';
 
 import type { DisplayDomain, PhysicalColumnSource } from '../types/display';
 import { MODEL_NAME_PATTERN } from '../types/naming';
-import type { Cardinality, UnifiedDomain } from '../types/semantic';
+import { readMeta } from '@erd-studio/core';
+import type { Cardinality, Meta, UnifiedDomain } from '../types/semantic';
 import { getRawDomainModelNames } from '../types/semantic';
 import { mergeCompositeGroups, mergeUniqueMaps } from '../services/domainService';
 import { normaliseName } from '../services/nameUtils';
@@ -51,7 +52,12 @@ export interface InventoryModel {
   suggestedLayer: string | null;
   existsInProject: boolean;
   /** Omitted with --summary. */
-  columns?: Array<{ name: string; dataType: string; description: string }>;
+  columns?: Array<{ name: string; dataType: string; description: string; meta?: Meta }>;
+  /**
+   * dbt's `meta:` for the model (schema yml over manifest, per key), when
+   * non-empty. Omitted with --summary — `conventions.meta` summarises it.
+   */
+  meta?: Meta;
   columnCount: number;
   provenance: { columns: PhysicalColumnSource[]; types: PhysicalColumnSource } | null;
   keyCandidates: { unique: string[]; compositeUnique: string[][] };
@@ -290,8 +296,18 @@ function describeModels(ctx: CliContext, names: readonly string[], summary: bool
       keyCandidates: { unique, compositeUnique: compositeByModel.get(key) ?? [] },
       foreignKeys: [...new Set(relationships.filter((r) => r.fromModel === m.name).map((r) => r.fromColumn))],
     };
+    // dbt's meta, the schema yml winning per key (the manifest is a compiled
+    // copy of it, plus any project-level `+meta` config).
+    const meta = readMeta(man?.meta, yml?.meta);
+    if (meta) { model.meta = meta; }
     if (!summary) {
-      model.columns = m.columns.map((c) => ({ name: c.name, dataType: c.dataType, description: c.description }));
+      const ymlColumns = new Map((yml?.columns ?? []).map((c) => [normaliseName(c.name), c.meta]));
+      const manifestColumns = new Map((man?.columns ?? []).map((c) => [normaliseName(c.name), c.meta]));
+      model.columns = m.columns.map((c) => {
+        const colKey = normaliseName(c.name);
+        const colMeta = readMeta(manifestColumns.get(colKey), ymlColumns.get(colKey));
+        return { name: c.name, dataType: c.dataType, description: c.description, ...(colMeta ? { meta: colMeta } : {}) };
+      });
     }
     return model;
   });
@@ -320,6 +336,7 @@ export function projectConventions(
       columnCount: m.columnCount,
       description: m.description,
       columns: m.columns ?? [],
+      ...(m.meta ? { meta: m.meta } : {}),
       uniqueKeys: m.keyCandidates.unique,
     })),
     packages: readPackageIdentifiers(ctx.root),
@@ -337,7 +354,7 @@ export function runInventory(ctx: CliContext, opts: InventoryOptions = {}): Inve
   const project = scoped ? describeModels(ctx, chooseNames(ctx).names, false) : { models, relationships };
   const conventions = projectConventions(ctx, project.models, project.relationships);
   if (opts.summary) {
-    for (const m of models) { delete m.columns; }
+    for (const m of models) { delete m.columns; delete m.meta; }
   }
   if (conventions.layering.style === 'medallion') {
     const layerIds = ctx.layerService.getValidLayerIds();

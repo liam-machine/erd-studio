@@ -26,6 +26,7 @@ import type {
   YmlRelationshipTest,
   YmlResourceDoc,
 } from '../types/ymlData';
+import { readMeta, type Meta } from '@erd-studio/core';
 import { normaliseName, parseRefModelName } from './nameUtils';
 import { defaultDbtProjectConfig, type DbtProjectConfig } from './dbtProjectConfig';
 
@@ -422,10 +423,12 @@ export class YmlParserService {
           continue;
         }
 
+        const colMeta = this.extractMeta(col);
         columns.push({
           name: colName,
           description: this.getString(col, 'description'),
           dataType: this.getStringOrNull(col, 'data_type'),
+          ...(colMeta ? { meta: colMeta } : {}),
         });
 
         // Extract tests on this column
@@ -442,12 +445,14 @@ export class YmlParserService {
     // Extract model-level tests (unique_combination_of_columns)
     this.extractModelLevelTests(name, modelNode, compositeUniqueGroups);
 
+    const meta = this.extractMeta(modelNode);
     models.set(name, {
       name,
       description,
       columns,
       filePath,
       tags,
+      ...(meta ? { meta } : {}),
     });
   }
 
@@ -722,6 +727,25 @@ export class YmlParserService {
     return (tagsNode as YAMLSeq).items
       .map((item) => this.resolveScalar(item))
       .filter((s): s is string => typeof s === 'string');
+  }
+
+  /**
+   * A model's or column's dbt `meta:` — the top-level key merged with
+   * `config: meta:` (where dbt 1.10 moved it), the config winning per key as
+   * dbt merges them. Read for the CLI inventory only; the physical stage never
+   * shows or compares it.
+   */
+  private extractMeta(node: YAMLMap): Meta | undefined {
+    const plain = (value: unknown): unknown => {
+      if (!isMap(value)) { return undefined; }
+      try {
+        return (value as YAMLMap).toJSON();
+      } catch {
+        return undefined; // an alias the detached node cannot resolve
+      }
+    };
+    const configNode = node.get('config');
+    return readMeta(plain(node.get('meta')), isMap(configNode) ? plain((configNode as YAMLMap).get('meta')) : undefined);
   }
 
   /** Get a string value from a YAML map, defaulting to ''. */

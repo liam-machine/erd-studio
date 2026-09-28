@@ -778,8 +778,22 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 22 (model and column `meta` documented in SCHEMA_CONTENT)', () => {
-      expect(HARNESS_VERSION).toBe('22');
+    it('is 23 (the team\'s metadata list in modelling-approach.md)', () => {
+      expect(HARNESS_VERSION).toBe('23');
+    });
+
+    it('tells every assistant to follow the team\'s metadata list, copying dbt keys and never guessing', () => {
+      service.install(tmpDir, CLAUDE, true);
+      const skill = read(tmpDir, '.claude/skills/erd-studio/SKILL.md');
+      expect(skill).toContain('#### The team\'s metadata list');
+      expect(skill).toContain('If it has a **Metadata** section, that is the team\'s metadata list');
+      expect(skill).toContain('**Use its key names exactly.**');
+      expect(skill).toContain('**Source `dbt`: copy it, never type it.**');
+      expect(skill).toContain('When dbt has no value, leave the key out: never guess');
+      expect(skill).toContain('**Source `the team`: leave it to people.**');
+      expect(skill).toContain('never copy dbt\'s `meta:` unasked');
+      const sync = read(tmpDir, '.claude/skills/erd-studio/SYNC.md');
+      expect(sync).toContain('Copy the dbt `meta` keys the team\'s metadata list names');
     });
 
     it('documents `meta` on models and columns, never compared with dbt', () => {
