@@ -12,7 +12,7 @@ never publishes a release), and no build, tsconfig or test run refers to it.
 `VARIANT` selects the script, the build folder (`build/` or `build-simple/`) and the output
 names (`erd-studio-explainer[-simple].*`). Both cuts share the player, `lib.js`, the voice, the
 music, and the `stars` and `endCard` scenes (a script can pass `props`, e.g. the end card's
-tagline). The finished renders are committed in `renders/` (see below).
+tagline). Finished renders are kept, gitignored, in `renders/` (see below).
 
 It is the getting-started video's pipeline ([`../video/`](../video/README.md): same Kokoro `af_heart` voice, same synthesised
 underscore `music/synth_music.py`, same pure `render(t)` player captured frame by frame with
@@ -55,12 +55,11 @@ Outputs, in `out/` (gitignored; `-simple` for the plain cut):
 | `erd-studio-explainer-end.jpg` | the end card, an alternative thumbnail |
 | `erd-studio-explainer.srt` | captions, only if you also want LinkedIn's own caption track (the video already has them burned in, so normally skip it) |
 
-## Committed renders
+## Finished renders
 
-`renders/` holds the finished upload files for both cuts (mp4, thumbnail, end frame, srt) so
-they live with the repo. They are ~15 MB each and git keeps every version for ever, so replace
-them only for a render you mean to post, not for every tweak (`cp out/erd-studio-explainer*
-renders/`).
+Copy a render you mean to post into `renders/` (`cp out/erd-studio-explainer* renders/`). The
+folder is **gitignored**, like `out/`: the finished videos are kept on disk, not in git (an mp4
+is 10–15 MB and git would keep every version for ever).
 
 ## Licences
 
