@@ -8,6 +8,11 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+- **Metadata shows on hover** ([#95](https://github.com/liam-machine/erd-studio/issues/95)). Hovering a model's name on the canvas now lists its `meta:` entries, and hovering a column shows that column's metadata below its description, so you can read an owner or source system without opening the Detail panel.
+
 ## 1.6.0 — 2026-09-28
 
 ### Added

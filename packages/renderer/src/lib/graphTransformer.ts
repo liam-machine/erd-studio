@@ -12,6 +12,7 @@
 import type {
   DisplayDomain,
   DisplayModel,
+  Meta,
 } from '@erd-studio/core';
 import type {
   DiscrepancyReport,
@@ -62,6 +63,8 @@ export interface TransformOptions {
 /** Default position for models without a saved position in viewConfig. */
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
+const hasMeta = (meta: Meta | undefined): meta is Meta => !!meta && Object.keys(meta).length > 0;
+
 /**
  * Convert a DisplayModel's columns to ColumnDisplay[].
  * Sort by key priority (PK → NK → FK → non-key).
@@ -76,6 +79,7 @@ function mapColumns(model: DisplayModel): ColumnDisplay[] {
     isNaturalKey: col.isNaturalKey,
     ...(col.scdType != null ? { scdType: col.scdType } : {}),
     ...(col.additiveType ? { additiveType: col.additiveType } : {}),
+    ...(hasMeta(col.meta) ? { meta: col.meta } : {}),
   }));
   return mapped;
 }
@@ -196,6 +200,7 @@ export function transformDomain(
         ...(model.rationale && (model.rationale.purpose || model.rationale.design || model.rationale.grainChoice || model.rationale.roleChoice || model.rationale.scdStrategy || model.rationale.measures) ? { hasRationale: true } : {}),
         ...(model.grain ? { grain: model.grain } : {}),
         ...(model.modelRole ? { modelRole: model.modelRole } : {}),
+        ...(hasMeta(model.meta) ? { meta: model.meta } : {}),
         ...(readOnly ? { readOnly: true } : {}),
         // Strict `=== false`: logical models leave existsInProject undefined,
         // so `!model.existsInProject` would ghost the entire logical canvas.

@@ -31,13 +31,17 @@ const TIP_GAP = 6;
 // Component
 // ---------------------------------------------------------------------------
 
+/** Label/value pairs shown under the text, e.g. a model's `meta:` entries. */
+export type HoverTipRows = ReadonlyArray<readonly [string, string]>;
+
 interface HoverTipProps {
   text: string;
+  rows?: HoverTipRows;
   anchorRef: React.RefObject<HTMLElement | null>;
   visible: boolean;
 }
 
-export function HoverTip({ text, anchorRef, visible }: HoverTipProps) {
+export function HoverTip({ text, rows, anchorRef, visible }: HoverTipProps) {
   const positionRef = useCallback(
     (tip: HTMLDivElement | null) => {
       if (!tip || !anchorRef.current) { return; }
@@ -62,7 +66,19 @@ export function HoverTip({ text, anchorRef, visible }: HoverTipProps) {
   if (!visible || !text) { return null; }
 
   return createPortal(
-    <div ref={positionRef} className="hover-tip" role="tooltip">{text}</div>,
+    <div ref={positionRef} className="hover-tip" role="tooltip">
+      {text}
+      {rows && rows.length > 0 && (
+        <div className="hover-tip__rows">
+          {rows.map(([label, value]) => (
+            <div key={label} className="hover-tip__row">
+              <span className="hover-tip__label">{label}</span>
+              <span className="hover-tip__value">{value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>,
     document.body,
   );
 }
@@ -92,10 +108,13 @@ export interface UseHoverTipReturn<T extends HTMLElement> {
 /**
  * Attach a hover tip to one element.
  *
- * `aria-label` carries the same text, so the explanation is not lost to a
- * screen reader that will never fire a mouseenter.
+ * `aria-label` carries the same text (and rows), so the explanation is not
+ * lost to a screen reader that will never fire a mouseenter.
  */
-export function useHoverTip<T extends HTMLElement = HTMLElement>(text: string): UseHoverTipReturn<T> {
+export function useHoverTip<T extends HTMLElement = HTMLElement>(
+  text: string,
+  rows?: HoverTipRows,
+): UseHoverTipReturn<T> {
   const ref = useRef<T | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [visible, setVisible] = useState(false);
@@ -110,8 +129,12 @@ export function useHoverTip<T extends HTMLElement = HTMLElement>(text: string): 
     setVisible(false);
   }, []);
 
+  const label = rows && rows.length > 0
+    ? `${text}; ${rows.map(([k, v]) => `${k}: ${v}`).join('; ')}`
+    : text;
+
   return {
-    anchorProps: { ref: ref as React.RefObject<T>, onMouseEnter, onMouseLeave, 'aria-label': text },
-    tip: <HoverTip text={text} anchorRef={ref} visible={visible} />,
+    anchorProps: { ref: ref as React.RefObject<T>, onMouseEnter, onMouseLeave, 'aria-label': label },
+    tip: <HoverTip text={text} rows={rows} anchorRef={ref} visible={visible} />,
   };
 }
