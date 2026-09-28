@@ -54,9 +54,9 @@ Choose the keys to offer:
 
 ## 3. Offering it
 
-**When.** After `inventory --models` for the chosen models (Stage 4 step 4) and before you write
-any model file, on every route, with or without a modelling style. Never earlier: the first
-diagram comes first.
+**When.** After `inventory --models` for the chosen models (Stage 4 step 4, or enrich step 2)
+and before you write any model file, on every route, with or without a modelling style. Never
+earlier: the first diagram comes first.
 
 - **The saved file already has a `## Metadata` section** → do not ask. Say in one line: "I'll copy
   your team's metadata — `owner`, `pii` — where dbt has it." If dbt records an offerable key that
@@ -64,8 +64,8 @@ diagram comes first.
   Add it to your metadata list?"
 - **None of the chosen models or their columns has `meta`** in `inventory --models` → say nothing
   now (section 6 covers a project with none at all).
-- **Otherwise** → one sentence with the evidence for the chosen models, a plain definition and a
-  yes default, alone in its message:
+- **Otherwise, when not enriching** → one sentence with the evidence for the chosen models, a
+  plain definition and a yes default, alone in its message:
 
   > "Your dbt models also record some metadata — extra facts like who owns a table or whether a
   > column holds personal data: `owner` on 7 of your 9 models, and `pii` on 3 columns. I'll copy
@@ -85,8 +85,8 @@ diagram comes first.
 
 Write it into `.erd-studio/modelling-approach.md` as a `## Metadata` section, after "How ERD
 Studio records it" and before "Sources". With no saved file yet — a quick start agrees no style —
-create the file with only a title and this section, and **no** "Technique" line: that is what
-tells a later run the style is still to be agreed.
+create the file with only a title and this section — nothing that describes a style: that is
+what tells a later run the style is still to be agreed.
 
 ```markdown
 # Modelling approach
@@ -107,7 +107,8 @@ Left out: `dimension`, `metrics` (Lightdash settings).
 - **On** — `models`, `columns`, or `models, columns` when dbt has it on both.
 - **Values** — `true` / `false` for `yes-no`; for `text`, a short description with one of the
   `examples`; a fixed set only when the user names one ("`public`, `internal`, `confidential`").
-- **Source** — `dbt` for every key detected in dbt: copied from dbt, never typed in. `the team`
+- **Source** — `dbt` for every key detected in dbt: copied from dbt — typed in only when the
+  user gives the value. `the team`
   for a key people fill in (the user asked for it and dbt does not have it): an AI fills it only
   with a value the user gives.
 - **Left out** — one line naming the keys you left out as another tool's settings, so no later
@@ -123,7 +124,8 @@ Take them from `inventory --models` for the models you are writing (`models[].me
 where dbt has it.
 
 - **Exact values.** `true` / `false` stay unquoted and a list stays a list. Numbers arrive as
-  text (`"24"`); write them either way — ERD Studio reads `24` and `"24"` the same. Nothing is
+  text (`"24"`); write them quoted or not — ERD Studio reads `24` and `"24"` the same — but keep
+  the quotes when leaving them off would change the digits (`"1.10"`, `"007"`). Nothing is
   reworded, merged or summarised.
 - **No value in dbt, no key.** A key dbt has as empty (`null`) counts as no value. Never guess one
   and never write an empty placeholder.

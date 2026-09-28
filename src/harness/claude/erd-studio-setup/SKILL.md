@@ -280,8 +280,8 @@ Explain two terms, one line each:
   as silver or gold. It can be changed later.
 
 Then propose **one concrete default** the user can accept with "yes". Pick it like this:
-- If the user named an area, use the models whose names or folders match it, plus the models in
-  their `clusters` entry (connected by relationship tests), up to 15.
+- If the user named an area, use the models whose names or folders match it first, then the rest
+  of their `clusters` entry (connected by relationship tests), up to 15 in all.
 - Otherwise use the largest `clusters` entry (models connected by dbt relationship tests),
   trimmed to at most 15 models, or else the biggest folder.
 - Use their most common `suggestedLayer` (`null` → `core`); name the domain after the area in

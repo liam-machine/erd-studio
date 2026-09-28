@@ -788,7 +788,7 @@ describe('HarnessService', () => {
       expect(skill).toContain('#### The team\'s metadata list');
       expect(skill).toContain('If it has a **Metadata** section, that is the team\'s metadata list');
       expect(skill).toContain('**Use its key names exactly.**');
-      expect(skill).toContain('**Source `dbt`: copy it, never type it.**');
+      expect(skill).toContain('**Source `dbt`: copy it; never make it up.**');
       expect(skill).toContain('leave the key out: never guess and never write a placeholder');
       expect(skill).toContain('say that dbt does not record it, and offer to add it');
       expect(skill).toContain('**Source `the team`: leave it to people.**');
