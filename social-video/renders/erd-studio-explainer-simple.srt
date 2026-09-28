@@ -51,45 +51,45 @@ Now the AI reads it too.
 ERD Studio turns that file into a picture anyone can read.
 
 14
-00:00:46,235 --> 00:00:50,076
-Change the picture, the file changes. And the other way round.
+00:00:46,235 --> 00:00:49,637
+Change the picture, the file changes. And vice versa.
 
 15
-00:00:50,526 --> 00:00:53,024
+00:00:50,087 --> 00:00:52,585
 And if what's really built stops matching the map,
 
 16
-00:00:53,074 --> 00:00:56,101
+00:00:52,635 --> 00:00:55,662
 it lights up the difference, before it causes problems.
 
 17
-00:00:58,026 --> 00:01:01,093
+00:00:57,587 --> 00:01:00,654
 Now the map and the code change together, in one approval.
 
 18
-00:01:01,143 --> 00:01:04,099
+00:01:00,704 --> 00:01:03,660
 Reviewed together. Tracked together. Shipped together.
 
 19
-00:01:04,149 --> 00:01:08,038
+00:01:03,710 --> 00:01:07,599
 It's just common sense. Why did this take us decades to figure out?
 
 20
-00:01:09,026 --> 00:01:13,004
+00:01:08,587 --> 00:01:12,565
 And managers still see the picture, right on their team's wiki page.
 
 21
-00:01:15,026 --> 00:01:17,066
+00:01:14,587 --> 00:01:16,627
 And since the launch, it's taking off.
 
 22
-00:01:17,116 --> 00:01:18,386
+00:01:16,677 --> 00:01:17,947
 Come and see why.
 
 23
-00:01:20,526 --> 00:01:23,757
+00:01:20,087 --> 00:01:23,318
 ERD Studio. Free, with the source on GitHub.
 
 24
-00:01:23,807 --> 00:01:27,305
+00:01:23,368 --> 00:01:26,866
 Know a data team? Send them this. Link in the comments.

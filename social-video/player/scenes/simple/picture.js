@@ -1,10 +1,10 @@
 // simple/picture · "ERD Studio turns that file into a picture anyone can read. / Change the picture,
-// the file changes. And the other way round." Opens on the plain-text orders.yml exactly where
+// the file changes. And vice versa." Opens on the plain-text orders.yml exactly where
 // simple/flip left it; on "turns that file" it folds down into a strip under the real ERD Studio
 // canvas (toolbar(), node() for customers + orders, edge()) whose edge lands on "picture", with a
 // plain callout "the same map, as a picture". On `both`: a `status` row grows in the orders card
 // (on "picture") and `- name: status` lands in the file (on "the file changes"), both green; on
-// "the other way round" a two-way pill "picture ⇄ file".
+// "vice versa" a two-way pill "picture ⇄ file".
 import { COLORS, ICON, NODE, SIMPLE, appIcon, appear, card, caret, easeInOut, easeOut, edge, lerp, node, nodeHeight, rowY, seg, toolbar, typed, yamlLine } from '../../lib.js';
 
 // canvas (same geometry as the pro canvas scene)
@@ -31,11 +31,11 @@ export default {
     const nodesAt = d + 1.35;
     const edgeAt = d + 1.8, edgeEnd = d + 2.25;          // lands on "picture"
     const calloutAt = d + 2.35;
-    // x_both: "Change the picture(+0.42), the file changes(+1.1..1.9). And the other way round(+2.2..3.2)."
+    // x_both: "Change the picture(+0.42), the file changes(+1.1..1.9). And vice versa(+2.21..2.99)."
     const growAt = b + 0.45;                             // the picture changes…
     const L1 = '  - name: status', L2 = '    dataType: VARCHAR';
     const typeAt = b + 1.0, l1End = typeAt + L1.length / 34, l2At = l1End + 0.05; // …the file changes
-    const swapAt = b + 2.3;                              // "…the other way round"
+    const swapAt = b + 2.3;                              // "…vice versa"
     const grow = easeOut(seg(t, growAt, growAt + 0.35));
     const hotNode = 1 - 0.55 * seg(t, b + 2.6, b + 3.3);
     const hotFile = t >= typeAt ? 1 - 0.55 * seg(t, b + 2.6, b + 3.3) : 0;

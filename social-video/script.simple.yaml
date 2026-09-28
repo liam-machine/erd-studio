@@ -119,7 +119,7 @@ scenes:
         caption: ERD Studio turns that file | into a {picture} anyone can read.
       - id: x_both
         beat: both
-        caption: Change the picture, the file changes. | And the other way round.
+        caption: Change the picture, the file changes. | And {vice versa}.
 
   - id: catch
     module: simple/catch
