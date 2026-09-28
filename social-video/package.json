@@ -1,0 +1,27 @@
+{
+  "name": "erd-studio-linkedin-explainer",
+  "private": true,
+  "description": "Source and render pipeline for the LinkedIn explainer video (out/). Not part of the extension build.",
+  "type": "module",
+  "scripts": {
+    "tts": "uv run tts.py",
+    "music": "uv run music.py",
+    "tts:say": "uv run tts.py --engine say",
+    "timeline": "node build-timeline.mjs",
+    "preview": "node serve.mjs",
+    "capture": "node capture.mjs",
+    "capture:draft": "node capture.mjs --draft",
+    "encode": "bash encode.sh",
+    "qa": "bash qa.sh",
+    "all": "npm run tts && npm run timeline && npm run music && npm run capture && npm run encode",
+    "all:simple": "VARIANT=simple npm run all",
+    "qa:simple": "VARIANT=simple npm run qa"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "yaml": "2.9.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

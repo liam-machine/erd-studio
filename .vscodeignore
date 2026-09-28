@@ -81,3 +81,6 @@ selectors.yml
 !dist/*.js
 !dist/*.css
 telemetry.json
+
+# LinkedIn explainer video pipeline (not part of the extension)
+social-video/**

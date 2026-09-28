@@ -1,0 +1,95 @@
+1
+00:00:00,350 --> 00:00:03,124
+The map of your company's data is probably wrong.
+
+2
+00:00:03,174 --> 00:00:05,298
+Here's why, and the simple fix.
+
+3
+00:00:05,748 --> 00:00:09,273
+Every app keeps information: customers, orders, payments.
+
+4
+00:00:09,323 --> 00:00:12,575
+A data map shows what's kept, and how it all connects.
+
+5
+00:00:13,025 --> 00:00:16,923
+For decades, that map was drawn in a separate tool, for the managers.
+
+6
+00:00:16,973 --> 00:00:19,629
+The engineers build the real thing somewhere else.
+
+7
+00:00:19,679 --> 00:00:22,914
+It's like keeping the blueprints in a different city to the building site.
+
+8
+00:00:22,964 --> 00:00:27,803
+So the map slowly stops being true, and people make decisions on the wrong picture.
+
+9
+00:00:28,253 --> 00:00:31,688
+I'm a data engineer, and I wanted AI to help build it all.
+
+10
+00:00:31,738 --> 00:00:35,027
+But it could read the code, not the map. So it had to guess.
+
+11
+00:00:35,753 --> 00:00:39,499
+So I moved the map right next to the code, as a simple text file.
+
+12
+00:00:39,549 --> 00:00:41,368
+Now the AI reads it too.
+
+13
+00:00:42,253 --> 00:00:46,185
+ERD Studio turns that file into a picture anyone can read.
+
+14
+00:00:46,235 --> 00:00:49,637
+Change the picture, the file changes. And vice versa.
+
+15
+00:00:50,087 --> 00:00:52,585
+And if what's really built stops matching the map,
+
+16
+00:00:52,635 --> 00:00:55,662
+it lights up the difference, before it causes problems.
+
+17
+00:00:57,587 --> 00:01:00,654
+Now the map and the code change together, in one approval.
+
+18
+00:01:00,704 --> 00:01:03,660
+Reviewed together. Tracked together. Shipped together.
+
+19
+00:01:03,710 --> 00:01:07,599
+It's just common sense. Why did this take us decades to figure out?
+
+20
+00:01:08,587 --> 00:01:12,565
+And managers still see the picture, right on their team's wiki page.
+
+21
+00:01:14,587 --> 00:01:16,627
+And since the launch, it's taking off.
+
+22
+00:01:16,677 --> 00:01:17,947
+Come and see why.
+
+23
+00:01:20,087 --> 00:01:24,318
+ERD Studio for VS Code. Free, with the source on GitHub.
+
+24
+00:01:24,368 --> 00:01:27,866
+Know a data team? Send them this. Link in the comments.

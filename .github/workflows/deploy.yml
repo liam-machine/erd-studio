@@ -14,6 +14,7 @@ on:
       - 'test/fixtures/**'
       - '.planning/**'
       - '.github/**'
+      - 'social-video/**'
 
 concurrency:
   group: deploy-main
