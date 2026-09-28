@@ -865,3 +865,144 @@
 .detail-panel__grain-section:hover .detail-panel__rationale-edit-btn {
   opacity: 1;
 }
+
+/* ── Metadata (meta:) ─────────────────────────────────────────── */
+
+.meta-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meta-editor__title {
+  margin: 0;
+}
+
+.meta-editor__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.meta-editor__list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-editor__row {
+  display: grid;
+  grid-template-columns: minmax(70px, 35%) 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.meta-editor__row:hover {
+  background: var(--input-bg);
+}
+
+.meta-editor__key {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta-editor__value {
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--editor-fg);
+}
+
+.meta-editor__text {
+  overflow-wrap: anywhere;
+}
+
+.meta-editor__text--structured {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11px;
+  color: var(--dim-fg);
+}
+
+.meta-editor__actions {
+  display: flex;
+  gap: 2px;
+  visibility: hidden;
+}
+
+.meta-editor__row:hover .meta-editor__actions,
+.meta-editor__row:focus-within .meta-editor__actions {
+  visibility: visible;
+}
+
+.meta-editor__icon-btn {
+  border: none;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 1px 3px;
+}
+
+.meta-editor__icon-btn:hover,
+.meta-editor__icon-btn:focus-visible {
+  color: var(--editor-fg);
+}
+
+.meta-editor__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font-size: 12px;
+}
+
+.meta-editor__input:focus {
+  outline: none;
+  border-color: var(--focus-border);
+}
+
+.meta-editor__input--key {
+  font-family: var(--vscode-editor-font-family);
+}
+
+.meta-editor__new {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meta-editor__new-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.meta-editor__error {
+  font-size: 11px;
+  color: var(--error-fg);
+}
+
+.meta-editor__add-btn {
+  align-self: flex-start;
+}
+
+.meta-editor--compact {
+  margin-top: 6px;
+  gap: 4px;
+}
+
+.meta-editor--compact .meta-editor__add-btn {
+  padding: 3px 8px;
+  font-size: 10px;
+}

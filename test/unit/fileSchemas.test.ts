@@ -259,6 +259,14 @@ describe('what a hand-editor is told', () => {
     ]);
   });
 
+  it('accepts free-form meta on a model and its columns, and still flags a misspelt field beside it', () => {
+    const meta = { owner: 'finance', tier: 1, pii: false, steward: null, lineage: { upstream: ['stg_a', 'stg_b'] } };
+    expect(validate('logical-model.schema.json', { name: 'd', meta, columns: [{ ...column, meta }] })).toEqual([]);
+    expect(validate('logical-model.schema.json', { name: 'd', meta, grian: 'x' })).toEqual([
+      ' must NOT have additional properties',
+    ]);
+  });
+
   it('accepts a $schema pointer, so other editors can be pointed at the same file', () => {
     expect(validate('logical-model.schema.json', { $schema: 'https://example.test/s.json', name: 'd' })).toEqual([]);
     expect(validate('domain.schema.json', {

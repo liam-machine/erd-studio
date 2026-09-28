@@ -115,7 +115,7 @@ Annotations are temporary build notes — visible on the canvas while constructi
 |-----------------|---------------|
 | Add/remove/rename a column | the model's `.yml` (`logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`) |
 | Change column type, PK/FK/NK flags, SCD type | the model's `.yml` |
-| Change grain, modelRole, description, rationale | the model's `.yml` |
+| Change grain, modelRole, description, rationale, meta | the model's `.yml` |
 | Add a model to a domain diagram | Domain `.json` → add name to `logical.models[]` AND, if no file for that name exists in any folder, create it — `logical-models/{layer}/{name}.yml` (the domain's layer) when the project uses layer folders, else `logical-models/{name}.yml` |
 | Remove a model from a domain | Domain `.json` → remove name from `logical.models[]` AND remove its relationships from `logical.relationships[]` |
 | Add/remove/edit a relationship | Domain `.json` → `logical.relationships[]` |
@@ -140,6 +140,9 @@ modelRole: conformed-dim
 rationale:
   purpose: Customer master data for cross-domain joins
   roleChoice: Conformed dimension shared across domains
+meta:
+  owner: crm-team
+  source_system: salesforce
 columns:
   - name: customer_id
     dataType: INT
@@ -167,6 +170,7 @@ columns:
 | `modelRole` | No | Architecture role (see values below) |
 | `columns` | No | Array of column definitions |
 | `rationale` | No | Design rationale object (omit if empty) |
+| `meta` | No | Free-form metadata map (see "Metadata" below) |
 
 ### modelRole Values
 
@@ -194,6 +198,29 @@ Optional `rationale` object — all fields are optional strings. Omit the entire
 | `roleChoice` | Why this model role was selected |
 | `scdStrategy` | Overall SCD strategy across dimension attributes |
 | `measures` | Why measures are structured this way |
+
+### Metadata (`meta`)
+
+Optional `meta` map on a model **and** on any column — free-form key/value metadata named after, and shaped like, dbt's `meta:` (owner, source system, lineage, classification…). Keys are strings; values may be text, numbers, booleans, `null`, lists or nested maps. Omit `meta` entirely when there is nothing to record (an empty map is removed).
+
+```yaml
+meta:
+  owner: crm-team
+  lineage:
+    upstream: [stg_salesforce__account]
+    refreshed: daily
+columns:
+  - name: email
+    dataType: VARCHAR
+    description: Email address
+    meta:
+      pii: true
+      classification: confidential
+```
+
+- ERD Studio **never compares, diffs or syncs `meta` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's `meta:`.
+- The canvas shows it in the Detail panel; top-level text values can be edited there, nested maps, lists, booleans and `null` are shown read-only.
+- **Keep every existing entry** when you edit a model file, and only add or change the keys the user asks for — never invent metadata, and never move keys between the model and its columns.
 
 ---
 
@@ -258,6 +285,7 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 | `isNaturalKey` | No | Business identifier (email, SKU, etc.). Only include when `true`. |
 | `scdType` | No | SCD type for dimensions: `0` = fixed/never changes, `1` = overwrite, `2` = track history |
 | `additiveType` | No | Fact measures: `"additive"`, `"semi-additive"`, `"non-additive"` |
+| `meta` | No | Free-form dbt-style metadata map for this column (see "Metadata" above) |
 
 **Boolean flags** (`isPrimaryKey`, `isForeignKey`, `isNaturalKey`): omit rather than setting to `false`.
 
@@ -317,7 +345,7 @@ The physical stage has **no files on disk**. It is derived at runtime from the d
 7. **Relationships**: derived from **dbt relationship tests** — the union of those declared in `.yml` files and those in the manifest, deduped; never copied from logical. `catalog.json` holds no constraint or foreign-key information, so it contributes no edges.
 8. **Cardinality**: derived from **uniqueness tests** merged from yml and manifest — no `unique` test = "many" side.
 9. **Scoping**: only relationships between models **within the same domain** appear. References to models outside the domain are silently excluded.
-10. **Carried forward from logical**: PK/FK/NK flags, grain, modelRole, scdType and additiveType — dbt yml does not carry them.
+10. **Carried forward from logical**: PK/FK/NK flags, grain, modelRole, scdType and additiveType — dbt yml does not carry them. `meta` is logical-only and is never read from, or compared with, dbt.
 
 A model known **only** by the file that defines it renders as a real node with **zero columns**: nothing has stated its shape, and seeding it from the logical design would invent one. Sync comparison skips such a model entirely rather than reporting every logical column as missing. That suppression is automatic and distinct from `stubColumns`, which is the user's own switch for models they know are deliberately partial.
 
@@ -353,4 +381,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 21 -->
+<!-- erd-studio-harness: 22 -->

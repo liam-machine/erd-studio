@@ -101,8 +101,16 @@
             "semi-additive",
             "non-additive"
           ]
+        },
+        "meta": {
+          "$ref": "#/definitions/meta"
         }
       }
+    },
+    "meta": {
+      "type": "object",
+      "description": "Structured metadata — owner, source system, lineage, anything your team records — in the shape of dbt's `meta:`. Free-form: values may be text, numbers, true/false, lists or nested maps. The canvas shows it in the Detail panel and edits top-level text values; ERD Studio never compares it with dbt.",
+      "additionalProperties": true
     }
   }
 }

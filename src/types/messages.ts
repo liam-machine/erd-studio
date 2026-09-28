@@ -51,6 +51,7 @@ import type {
   UpdateModelDescriptionMessage,
   UpdateModelGrainMessage,
   UpdateModelAliasMessage,
+  UpdateMetaMessage,
   UpdateModelRoleMessage,
   ReorderColumnsMessage,
   UpdateAnnotationMessage,
@@ -76,6 +77,7 @@ export type {
   UpdateModelDescriptionMessage,
   UpdateModelGrainMessage,
   UpdateModelAliasMessage,
+  UpdateMetaMessage,
   UpdateModelRoleMessage,
   ReorderColumnsMessage,
   UpdateAnnotationMessage,
@@ -664,6 +666,7 @@ export type WebviewMessage =
   | UpdateModelDescriptionMessage
   | UpdateModelGrainMessage
   | UpdateModelAliasMessage
+  | UpdateMetaMessage
   | UpdateModelRoleMessage
   | SwitchStageMessage
   | ToggleDiscrepancyMessage

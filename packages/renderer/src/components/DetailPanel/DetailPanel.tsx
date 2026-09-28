@@ -16,6 +16,7 @@ import { GrainEditor } from './GrainEditor';
 import { AliasEditor } from './AliasEditor';
 import { RoleEditor } from './RoleEditor';
 import { ColumnEditor } from './ColumnEditor';
+import { MetaEditor } from './MetaEditor';
 import { useEditorStore } from '../../store/editorStore';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import type { DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
@@ -353,6 +354,13 @@ export function DetailPanel() {
       {!isReadOnly && (
         <div className="detail-panel__section">
           <GrainEditor modelName={model.name} grain={model.grain} />
+        </div>
+      )}
+
+      {/* Structured metadata (a read-only panel shows it only when there is some) */}
+      {((!isReadOnly && !viewer) || (model.meta && Object.keys(model.meta).length > 0)) && (
+        <div className="detail-panel__section">
+          <MetaEditor modelName={model.name} meta={model.meta} readOnly={isReadOnly} />
         </div>
       )}
 

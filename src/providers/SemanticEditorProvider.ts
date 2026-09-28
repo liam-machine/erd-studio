@@ -75,7 +75,7 @@ import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
-import { computeMissingPositions, toDisplayDomain } from '@erd-studio/core';
+import { computeMissingPositions, setMetaEntry, toDisplayDomain } from '@erd-studio/core';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import {
@@ -115,8 +115,8 @@ import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplayDomain } from '../types/display';
-import type { Rationale, Cardinality, ColumnDef, DesignModel, Stage } from '../types/semantic';
-import type { UpdateColumnPayloadColumn } from '../types/messages';
+import type { Rationale, Cardinality, ColumnDef, DesignModel, Meta, Stage } from '../types/semantic';
+import type { UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
@@ -282,6 +282,7 @@ import {
   validateColumnDefs,
   validateModelName,
   validateModelAliasPayload,
+  validateMetaPayload,
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
   validateAnnotationUpdate,
@@ -1227,6 +1228,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               await this.queueEdit(panelKey, () =>
                 this.handleUpdateModelAlias(webviewPanel.webview, document, payload));
             }
+            break;
+          }
+          case 'updateMeta': {
+            const payload = (message as { payload?: UpdateMetaMessage['payload'] }).payload;
+            const metaError = validateMetaPayload(payload);
+            if (metaError || !payload) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to update metadata: ${metaError ?? 'Missing payload.'}` } });
+              break;
+            }
+            await this.queueEdit(panelKey, () =>
+              this.handleUpdateMeta(webviewPanel.webview, document, payload));
             break;
           }
           case 'updateModelRole': {
@@ -2329,6 +2341,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             ...(payload.column.isNaturalKey ?? existing.isNaturalKey ? { isNaturalKey: true } : {}),
             ...(newScd != null ? { scdType: newScd } : {}),
             ...(newAdditive ? { additiveType: newAdditive } : {}),
+            // Metadata is edited by `updateMeta` only; a column edit carries it across.
+            ...(existing.meta ? { meta: existing.meta } : {}),
           } as ColumnDef;
         }, domainMutator);
         if (!ok) {
@@ -3776,6 +3790,48 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Update alias failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update table name: ${message}` } });
+    }
+  }
+
+  /**
+   * Patch a model's or a column's `meta`. Only top-level keys are touched —
+   * `set` writes text values, `remove` deletes keys — so nested maps and lists
+   * the canvas only displays are carried across as they are. Like `alias`, it
+   * lives only in the model file (v5).
+   */
+  private async handleUpdateMeta(
+    webview: vscode.Webview,
+    document: vscode.TextDocument,
+    payload: UpdateMetaMessage['payload'],
+  ): Promise<void> {
+    try {
+      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      if (!this.isDomainV5(parsed)) {
+        webview.postMessage({
+          type: 'error',
+          payload: { message: 'Metadata needs the model library: run "ERD Studio: Migrate Domain to v5" first.' },
+        });
+        return;
+      }
+      const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
+        let target: { meta?: Meta } = model;
+        if (payload.columnName !== undefined) {
+          const column = model.columns?.find((c) => c.name === payload.columnName);
+          if (!column) throw new Error(`Column "${payload.columnName}" not found.`);
+          target = column;
+        }
+        const meta: Meta = { ...(target.meta ?? {}) };
+        for (const key of payload.remove ?? []) delete meta[key];
+        for (const [key, value] of Object.entries(payload.set ?? {})) setMetaEntry(meta, key, value);
+        if (Object.keys(meta).length > 0) { target.meta = meta; } else { delete target.meta; }
+      });
+      if (!ok) {
+        webview.postMessage({ type: 'error', payload: { message: 'Failed to update metadata.' } });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Update meta failed: ${message}`);
+      webview.postMessage({ type: 'error', payload: { message: `Failed to update metadata: ${message}` } });
     }
   }
 
