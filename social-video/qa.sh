@@ -7,13 +7,16 @@
 #                    from the timeline the player was rendered with.
 set -euo pipefail
 cd "$(dirname "$0")"
-MP4=out/erd-studio-explainer.mp4
-QA=build/qa
+VARIANT="${VARIANT:-pro}"
+if [[ "$VARIANT" == pro ]]; then B=build; NAME=erd-studio-explainer; else B="build-$VARIANT"; NAME="erd-studio-explainer-$VARIANT"; fi
+export B
+MP4=out/$NAME.mp4
+QA=$B/qa
 mkdir -p "$QA"
 rm -f "$QA"/scene-*.png
 
 TIMES=$(node -e "
-const t=require('./build/timeline.json');
+const t=require('./'+process.env.B+'/timeline.json');
 const pts=t.scenes.map(s=>s.start+s.dur*0.72);
 pts.push(t.scenes.at(-1).start+1.5);
 console.log(pts.map(x=>x.toFixed(2)).join(' '))")
@@ -30,10 +33,10 @@ ffmpeg -v error -y "${INPUTS[@]}" -filter_complex "$FILTER" -frames:v 1 "$QA/con
 echo "contact sheet: $QA/contact.png ($N frames)"
 
 # A/V: speech onsets vs line starts
-ffmpeg -hide_banner -i build/narration.wav -af silencedetect=noise=-40dB:d=0.1 -f null - 2>&1 \
+ffmpeg -hide_banner -i $B/narration.wav -af silencedetect=noise=-40dB:d=0.1 -f null - 2>&1 \
   | sed -n 's/.*silence_end: \([0-9.]*\).*/\1/p' > "$QA/onsets.txt"
 node -e "
-const t=require('./build/timeline.json');
+const t=require('./'+process.env.B+'/timeline.json');
 const on=require('fs').readFileSync('$QA/onsets.txt','utf8').trim().split('\n').map(Number);
 on.unshift(0);
 let worst=0; const rows=[];

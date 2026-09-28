@@ -48,9 +48,14 @@ import soundfile as sf
 import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BUILD = os.path.join(HERE, "build")
+# VARIANT picks the cut: "pro" (script.yaml, build/) or e.g. "simple" (script.simple.yaml, build-simple/).
+VARIANT = os.environ.get("VARIANT", "pro")
+SCRIPT = os.path.join(HERE, "script.yaml" if VARIANT == "pro" else f"script.{VARIANT}.yaml")
+BUILD = os.path.join(HERE, "build" if VARIANT == "pro" else f"build-{VARIANT}")
 VOICE_DIR = os.path.join(BUILD, "voice")
-MODEL_DIR = os.environ.get("KOKORO_MODEL_DIR", os.path.join(BUILD, "models"))
+# The Kokoro model and the short espeak data copy are shared by every variant.
+SHARED = os.path.join(HERE, "build")
+MODEL_DIR = os.environ.get("KOKORO_MODEL_DIR", os.path.join(SHARED, "models"))
 MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 MODEL_FILES = ("kokoro-v1.0.onnx", "voices-v1.0.bin")
 # espeak-ng's path buffer is small; anything longer than this gets a temp-dir copy instead.
@@ -83,7 +88,7 @@ def short_espeak_data() -> str:
     import espeakng_loader
 
     src = espeakng_loader.get_data_path()
-    dest = os.path.join(BUILD, "ed")
+    dest = os.path.join(SHARED, "ed")
     if len(dest) > MAX_ESPEAK_PATH:
         dest = os.path.join(tempfile.gettempdir(), "erd-studio-espeak-data")
     if not os.path.exists(os.path.join(dest, "phontab")):
@@ -137,7 +142,7 @@ def say_engine(voice: str, rate: int):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--script", default=os.path.join(HERE, "script.yaml"))
+    ap.add_argument("--script", default=SCRIPT)
     ap.add_argument("--engine", choices=["kokoro", "say"], default=None)
     ap.add_argument("--voice", default=None)
     ap.add_argument("--speed", type=float, default=None)

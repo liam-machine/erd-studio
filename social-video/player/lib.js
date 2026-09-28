@@ -257,3 +257,38 @@ export function jsonLine(s) {
     str ? (colon ? `<span class="k">${esc(str)}</span><span class="p">${colon}</span>` : `<span class="s">${esc(str)}</span>`)
       : lit ? `<span class="kw">${lit}</span>` : `<span class="p">${punc}</span>`);
 }
+
+// ---------- the plain-language cut (script.simple.yaml, scenes/simple/*) ----------
+// Same story, no jargon on screen: friendly table names, plain field labels, no key badges or
+// SQL types in the narration. The file excerpts are still the REAL v5 formats (a viewer who
+// pauses sees exactly what the extension reads), just with everyday names.
+export const SIMPLE = {
+  customers: {
+    name: 'customers', grain: 'One row per customer',
+    cols: [{ name: 'customer_id', type: 'INT' }, { name: 'name', type: 'VARCHAR' }, { name: 'email', type: 'VARCHAR' }],
+  },
+  orders: {
+    name: 'orders', grain: 'One row per order',
+    cols: [{ name: 'order_id', type: 'INT' }, { name: 'customer_id', type: 'INT' }, { name: 'order_date', type: 'DATE' }, { name: 'total', type: 'DECIMAL(12,2)' }],
+  },
+  payments: {
+    name: 'payments', grain: 'One row per payment',
+    cols: [{ name: 'payment_id', type: 'INT' }, { name: 'order_id', type: 'INT' }, { name: 'amount', type: 'DECIMAL(12,2)' }],
+  },
+  /** .erd-studio/logical-models/orders.yml, the real model format (dataType is required), cut short. */
+  ordersYml: [
+    'name: orders',
+    'grain: One row per order',
+    'columns:',
+    '  - name: order_id',
+    '    dataType: INT',
+    '  - name: customer_id',
+    '    dataType: INT',
+    '  - name: total',
+    '    dataType: DECIMAL(12,2)',
+  ],
+  /** The drift the "catch" scene lights up: the code renamed a field the map still calls `total`. */
+  drift: { model: 'orders', map: 'total', built: 'order_amount' },
+  /** The approval scene. */
+  change: { number: 128, title: 'Add order status', field: 'status' },
+};

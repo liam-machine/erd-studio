@@ -17,7 +17,8 @@ import { fileURLToPath } from 'node:url';
 import { startServer } from './serve.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUILD = join(HERE, 'build');
+const VARIANT = process.env.VARIANT ?? 'pro';
+const BUILD = join(HERE, VARIANT === 'pro' ? 'build' : `build-${VARIANT}`);
 const argv = process.argv.slice(2);
 const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i < 0 ? dflt : argv[i + 1]; };
 const DRAFT = argv.includes('--draft');
@@ -31,7 +32,7 @@ const FPS = timeline.fps;
 const N = Math.round(timeline.total * FPS);
 
 const server = await startServer(0);
-const URL_ = `http://127.0.0.1:${server.address().port}/social-video/player/index.html`;
+const URL_ = `http://127.0.0.1:${server.address().port}/social-video/player/index.html?variant=${VARIANT}`;
 const browser = await chromium.launch({ args: ['--hide-scrollbars', '--force-color-profile=srgb', '--font-render-hinting=none'] });
 
 async function openPage() {

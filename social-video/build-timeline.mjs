@@ -14,7 +14,10 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUILD = join(HERE, 'build');
+// VARIANT picks the cut: "pro" (script.yaml, build/) or e.g. "simple" (script.simple.yaml, build-simple/).
+const VARIANT = process.env.VARIANT ?? 'pro';
+const SCRIPT = join(HERE, VARIANT === 'pro' ? 'script.yaml' : `script.${VARIANT}.yaml`);
+const BUILD = join(HERE, VARIANT === 'pro' ? 'build' : `build-${VARIANT}`);
 const round = (x) => Math.round(x * 1000) / 1000;
 
 /** Cue text limit: two caption rows of ~42 characters. */
@@ -44,7 +47,7 @@ export function buildTimeline(script, durations) {
     const scene = {
       id: sc.id, module: sc.module, chapter: sc.chapter ?? 0, start: round(clock), dur,
       accent: sc.accent ?? 'blue', accentAfter: sc.accentAfter ?? null,
-      headline: sc.headline ?? null, beats, lines,
+      headline: sc.headline ?? null, props: sc.props ?? {}, beats, lines,
     };
     clock += dur;
     return scene;
@@ -206,9 +209,9 @@ function mixNarration(timeline, manifest) {
 }
 
 function main() {
-  const script = parse(readFileSync(join(HERE, 'script.yaml'), 'utf8'));
+  const script = parse(readFileSync(SCRIPT, 'utf8'));
   const mpath = join(BUILD, 'voice', 'manifest.json');
-  if (!existsSync(mpath)) throw new Error('build/voice/manifest.json missing — run `npm run tts` first');
+  if (!existsSync(mpath)) throw new Error(`${mpath} missing — run tts first (same VARIANT)`);
   const manifest = Object.fromEntries(JSON.parse(readFileSync(mpath, 'utf8')).lines.map((l) => [l.id, l]));
   const durations = Object.fromEntries(Object.values(manifest).map((l) => [l.id, l.dur]));
 
@@ -220,7 +223,7 @@ function main() {
   const cues = buildCues(timeline);
   mkdirSync(BUILD, { recursive: true });
   const chunks = buildChunks(timeline);
-  writeFileSync(join(BUILD, 'timeline.json'), JSON.stringify({ ...timeline, cues, chunks }, null, 1));
+  writeFileSync(join(BUILD, 'timeline.json'), JSON.stringify({ ...timeline, variant: VARIANT, cues, chunks }, null, 1));
   writeFileSync(join(BUILD, 'explainer.vtt'), toVtt(cues));
   writeFileSync(join(BUILD, 'explainer.srt'), toSrt(cues));
   if (!process.argv.includes('--no-audio')) mixNarration(timeline, manifest);

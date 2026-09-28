@@ -10,7 +10,9 @@ const search = (size = 28) =>
   `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/></svg>`;
 
 export default {
-  render(t, { beats }) {
+  render(t, { beats, scene }) {
+    // Tagline: [plain, highlighted]. A cut can override it (script `props.tagline`).
+    const [tagA, tagB] = scene?.props?.tagline ?? ['The logical model, ', 'in your repo.'];
     const name = beats.name.t, cta = beats.cta.t;
     // The brand block starts centred in the frame and eases up to make room for the CTA.
     const lift = easeInOut(seg(t, cta - 0.05, cta + 0.45));
@@ -25,7 +27,7 @@ export default {
 
     html += `<div class="abs" style="left:0;right:0;top:${g(96)}px;display:flex;justify-content:center;${appear(t, 0.05, { dy: 18, dur: 0.5 })}">${appIcon(200)}</div>`;
     html += `<div class="abs" style="left:0;right:0;top:${g(326)}px;text-align:center;font-size:116px;line-height:1;font-weight:800;letter-spacing:-.04em;white-space:nowrap;${appear(t, name, { dy: 16, dur: 0.45 })}">ERD Studio</div>`;
-    html += `<div class="abs" style="left:0;right:0;top:${g(466)}px;text-align:center;font-size:40px;line-height:1.2;font-weight:700;letter-spacing:-.01em;white-space:nowrap;${appear(t, name + 0.35)}">The logical model, <span style="color:var(--green)">in your repo.</span></div>`;
+    html += `<div class="abs" style="left:0;right:0;top:${g(466)}px;text-align:center;font-size:40px;line-height:1.2;font-weight:700;letter-spacing:-.01em;white-space:nowrap;${appear(t, name + 0.35)}">${tagA}<span style="color:var(--green)">${tagB}</span></div>`;
 
     // "Free" ≈ name+1.25, "source on GitHub" ≈ name+2.2 (measured in e_name.wav), VS Code closes the row.
     html += `<div class="abs" style="left:0;right:0;top:${g(560)}px;display:flex;justify-content:center;gap:16px">
@@ -49,7 +51,7 @@ export default {
         <div class="abs" style="left:22px;right:22px;top:160px;height:84px;border-radius:12px;background:rgba(37,99,235,.16);display:flex;align-items:center;gap:18px;padding:0 18px;white-space:nowrap;${appear(t, resAt, { dy: 8, dur: 0.3 })}">
           ${appIcon(58, 'box-shadow:none')}
           <div style="flex:1;min-width:0"><div style="font-size:28px;font-weight:700;line-height:1.15">ERD Studio</div>
-          <div style="font-size:24px;color:var(--text-2);line-height:1.25">The logical model, in your repo</div></div>
+          <div style="font-size:24px;color:var(--text-2);line-height:1.25">${tagA}${tagB.replace(/\.$/, '')}</div></div>
           <span style="display:inline-flex;align-items:center;height:48px;padding:0 24px;border-radius:8px;background:#0e639c;color:#fff;font-size:24px;font-weight:700">Install</span></div></div>`;
 
       // "Link in the comments" + chevron

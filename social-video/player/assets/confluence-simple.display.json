@@ -1,0 +1,322 @@
+{
+ "schemaVersion": 5,
+ "domain": "orders",
+ "layer": "silver",
+ "stage": "logical",
+ "description": "Customers and their orders",
+ "modelFolder": "models/marts",
+ "models": [
+  {
+   "name": "customers",
+   "schema": "silver",
+   "description": "One row per customer",
+   "grain": "One row per customer",
+   "modelRole": "dimension",
+   "columns": [
+    {
+     "name": "customer_id",
+     "dataType": "INT",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "name",
+     "dataType": "VARCHAR",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "email",
+     "dataType": "VARCHAR",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    }
+   ]
+  },
+  {
+   "name": "orders",
+   "schema": "silver",
+   "description": "One row per order",
+   "grain": "One row per order",
+   "modelRole": "fact",
+   "columns": [
+    {
+     "name": "order_id",
+     "dataType": "INT",
+     "description": "",
+     "isPrimaryKey": true,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "customer_id",
+     "dataType": "INT",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": true,
+     "isNaturalKey": false
+    },
+    {
+     "name": "order_date",
+     "dataType": "DATE",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    },
+    {
+     "name": "total",
+     "dataType": "DECIMAL(12,2)",
+     "description": "",
+     "isPrimaryKey": false,
+     "isForeignKey": false,
+     "isNaturalKey": false
+    }
+   ]
+  }
+ ],
+ "relationships": [
+  {
+   "fromModel": "orders",
+   "fromColumn": "customer_id",
+   "toModel": "customers",
+   "toColumn": "customer_id",
+   "cardinality": "many-to-one"
+  }
+ ],
+ "viewConfig": {
+  "positions": {
+   "customers": {
+    "x": 0,
+    "y": 40
+   },
+   "orders": {
+    "x": 380,
+    "y": 0
+   }
+  },
+  "annotations": []
+ },
+ "templates": [
+  {
+   "id": "dimension",
+   "label": "Dimension",
+   "prefix": "dim_",
+   "description": "Standard dimension table with SCD Type 1 tracking",
+   "columns": [
+    {
+     "name": "{name}_key",
+     "dataType": "INTEGER",
+     "description": "Surrogate key — warehouse-generated, one per row",
+     "isPrimaryKey": true,
+     "scdType": 0
+    },
+    {
+     "name": "{name}_id",
+     "dataType": "VARCHAR",
+     "description": "Business key from the source system",
+     "isNaturalKey": true,
+     "scdType": 0
+    },
+    {
+     "name": "name",
+     "dataType": "VARCHAR",
+     "description": "Display name",
+     "scdType": 1
+    },
+    {
+     "name": "description",
+     "dataType": "VARCHAR",
+     "description": "Long description",
+     "scdType": 1
+    },
+    {
+     "name": "is_active",
+     "dataType": "BOOLEAN",
+     "description": "Active flag",
+     "scdType": 1
+    },
+    {
+     "name": "dwh_inserted_at",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "Warehouse insert timestamp"
+    },
+    {
+     "name": "dwh_updated_at",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "Warehouse update timestamp"
+    }
+   ]
+  },
+  {
+   "id": "fact",
+   "label": "Fact",
+   "prefix": "fct_",
+   "description": "Transactional fact table with event tracking",
+   "columns": [
+    {
+     "name": "{name}_id",
+     "dataType": "INTEGER",
+     "description": "Transaction id from the source system (degenerate dimension)",
+     "isPrimaryKey": true,
+     "isNaturalKey": true
+    },
+    {
+     "name": "date_key",
+     "dataType": "INTEGER",
+     "description": "FK to dim_date",
+     "isForeignKey": true
+    },
+    {
+     "name": "event_date",
+     "dataType": "DATE",
+     "description": "Business event date"
+    },
+    {
+     "name": "amount",
+     "dataType": "DECIMAL(18,2)",
+     "description": "Monetary amount",
+     "additiveType": "additive"
+    },
+    {
+     "name": "dwh_inserted_at",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "Warehouse insert timestamp"
+    },
+    {
+     "name": "dwh_updated_at",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "Warehouse update timestamp"
+    }
+   ]
+  },
+  {
+   "id": "bridge",
+   "label": "Bridge",
+   "prefix": "brg_",
+   "description": "Many-to-many bridge table linking two entities",
+   "columns": [
+    {
+     "name": "{name}_key",
+     "dataType": "INTEGER",
+     "description": "Surrogate key — one per link row",
+     "isPrimaryKey": true
+    },
+    {
+     "name": "{left}_key",
+     "dataType": "INTEGER",
+     "description": "FK to {left}",
+     "isForeignKey": true
+    },
+    {
+     "name": "{right}_key",
+     "dataType": "INTEGER",
+     "description": "FK to {right}",
+     "isForeignKey": true
+    },
+    {
+     "name": "dwh_inserted_at",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "Warehouse insert timestamp"
+    }
+   ],
+   "requiresLeftEntity": true,
+   "requiresRightEntity": true
+  },
+  {
+   "id": "scd2",
+   "label": "SCD Type 2",
+   "prefix": "dim_",
+   "description": "Slowly Changing Dimension Type 2 with full history tracking",
+   "columns": [
+    {
+     "name": "{name}_key",
+     "dataType": "INTEGER",
+     "description": "Surrogate key — one per row, so one per version of the entity",
+     "isPrimaryKey": true,
+     "scdType": 0
+    },
+    {
+     "name": "{name}_id",
+     "dataType": "VARCHAR",
+     "description": "Business key — repeats across the versions of one entity",
+     "isNaturalKey": true,
+     "scdType": 0
+    },
+    {
+     "name": "name",
+     "dataType": "VARCHAR",
+     "description": "Display name",
+     "scdType": 2
+    },
+    {
+     "name": "description",
+     "dataType": "VARCHAR",
+     "description": "Long description",
+     "scdType": 2
+    },
+    {
+     "name": "is_active",
+     "dataType": "BOOLEAN",
+     "description": "Active flag",
+     "scdType": 2
+    },
+    {
+     "name": "scd_valid_from",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "SCD effective start"
+    },
+    {
+     "name": "scd_valid_to",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "SCD effective end"
+    },
+    {
+     "name": "scd_is_current",
+     "dataType": "BOOLEAN",
+     "description": "Current version flag"
+    },
+    {
+     "name": "scd_hash",
+     "dataType": "VARCHAR",
+     "description": "Hash of tracked columns"
+    },
+    {
+     "name": "dwh_inserted_at",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "Warehouse insert timestamp"
+    },
+    {
+     "name": "dwh_updated_at",
+     "dataType": "TIMESTAMP_NTZ",
+     "description": "Warehouse update timestamp"
+    }
+   ]
+  },
+  {
+   "id": "blank",
+   "label": "Blank",
+   "prefix": "",
+   "description": "Empty model with no predefined columns",
+   "columns": []
+  }
+ ],
+ "manifestModels": [],
+ "existingModels": [],
+ "layerConfig": {
+  "id": "silver",
+  "label": "Silver",
+  "abbreviation": "SLV",
+  "color": "#a0a0a0",
+  "creatable": true,
+  "order": 0
+ },
+ "readOnly": false,
+ "positionDraggable": true
+}

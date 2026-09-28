@@ -6,14 +6,18 @@
 // content inside FRAME.stage: `render(localT, ctx) -> string`, ctx = { beats, dur, t, scene }.
 import { seg, easeOut, lerp, mix, ACCENT, FRAME } from './lib.js';
 
-const MODULES = ['hook', 'problem', 'ai', 'flip', 'yaml', 'canvas', 'view', 'physical', 'diff', 'pr', 'business', 'noDbt', 'stars', 'endCard'];
+const params = new URLSearchParams(location.search);
+// ?variant=simple renders build-simple/ (script.simple.yaml); the default is the pro cut in build/.
+const VARIANT = params.get('variant') ?? 'pro';
+const BUILD = `/social-video/${VARIANT === 'pro' ? 'build' : `build-${VARIANT}`}`;
+const timeline = await (await fetch(`${BUILD}/timeline.json`, { cache: 'no-store' })).json();
+window.TIMELINE = timeline;
+
+// Scene modules come from the timeline itself (a module may live in a sub-folder, e.g. simple/hook).
+const MODULES = [...new Set(timeline.scenes.map((s) => s.module))];
 const scenesByName = Object.fromEntries(
   await Promise.all(MODULES.map(async (m) => [m, (await import(`./scenes/${m}.js`)).default])),
 );
-
-const params = new URLSearchParams(location.search);
-const timeline = await (await fetch('/social-video/build/timeline.json', { cache: 'no-store' })).json();
-window.TIMELINE = timeline;
 
 const $ = (id) => document.getElementById(id);
 const els = { kicker: $('kicker'), headline: $('headline'), stage: $('stage'), caption: $('caption'), chapters: $('chapters'), hud: $('hud') };
@@ -76,7 +80,7 @@ window.render = function render(t) {
     accent = mix(accent, ACCENT[sc.accentAfter.accent], seg(lt, at, at + 0.4));
   }
 
-  const isEnd = sc.module === 'endCard';
+  const isEnd = sc.module === 'endCard' || sc.module.endsWith('/endCard');
   const chromeOp = isEnd ? 1 - seg(lt, 0, 0.5) : 1;
   put('kicker', els.kicker, `ERD STUDIO${sc.chapter ? ` · <b>${timeline.chapters[sc.chapter - 1]}</b>` : ''}`);
   els.kicker.style.opacity = chromeOp.toFixed(3);
@@ -126,7 +130,7 @@ if (params.has('guides')) {
 
 if (params.has('preview')) {
   els.hud.hidden = false;
-  const audio = new Audio('/social-video/build/narration.wav');
+  const audio = new Audio(`${BUILD}/narration.wav`);
   const loop = () => { window.render(audio.currentTime); requestAnimationFrame(loop); };
   document.body.addEventListener('click', () => (audio.paused ? audio.play() : audio.pause()));
   document.addEventListener('keydown', (e) => {

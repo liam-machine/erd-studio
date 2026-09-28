@@ -1,0 +1,198 @@
+# LinkedIn explainer — the PLAIN-LANGUAGE cut (VARIANT=simple). Same story as script.yaml for
+# people who have never heard of data engineering: no "logical/physical model", no dbt, no
+# YAML/JSON/schema/PR/warehouse in the narration. One everyday analogy (blueprints kept in a
+# different city to the building site) carries the core idea.
+#
+# Format: exactly as script.yaml (see its header). Scenes live in player/scenes/simple/, except
+# `stars` and `endCard`, which are shared with the pro cut (same beat names).
+#
+# Words to keep OUT of the narration and captions: logical, physical, model, schema, dbt, YAML,
+# JSON, SQL, warehouse, pipeline, domain, grain, key, column, table, pull request, repo, commit.
+# ("code", "file", "AI", "engineers", "app" and "data" are fine.)
+
+title: ERD Studio — your data map is probably wrong
+maxDuration: 95
+
+voice:
+  engine: kokoro
+  kokoro: af_heart      # same voice as the pro cut and the getting-started video
+  speed: 1.06
+  say: Karen
+  sayRate: 175
+
+timing:
+  lead: 0.35
+  gap: 0.2
+  tail: 0.45
+  fade: 0.25
+
+chapters: ["PROBLEM", "FIX", "HOW IT WORKS", "TOGETHER"]
+
+scenes:
+  - id: hook
+    module: simple/hook
+    chapter: 0
+    minDur: 4.5
+    accent: amber
+    headline: ["Your company's data map", "is {probably wrong}."]
+    lines:
+      - id: x_wrong
+        beat: wrong
+        caption: The map of your company's data | is {probably wrong}.
+      - id: x_fix
+        beat: fix
+        caption: Here's why, | and the {simple fix}.
+
+  - id: map
+    module: simple/map
+    chapter: 1
+    minDur: 7
+    accent: blue
+    headline: ["Every app has one:", "a {map of its data}."]
+    lines:
+      - id: x_apps
+        beat: apps
+        caption: "Every app keeps information: | customers, orders, payments."
+      - id: x_map
+        beat: map
+        caption: A {data map} shows what's kept, | and how it all connects.
+
+  - id: apart
+    module: simple/apart
+    chapter: 1
+    minDur: 11
+    accent: amber
+    headline: ["The map lives here.", "The work {happens there}."]
+    lines:
+      - id: x_drawn
+        beat: drawn
+        caption: For decades, that map was drawn | in a {separate tool}, for the managers.
+      - id: x_built
+        beat: built
+        caption: The engineers build the real thing | somewhere else.
+      - id: x_city
+        beat: city
+        pause: 0.3
+        caption: It's like keeping the {blueprints} | in a different city | to the building site.
+      - id: x_stale
+        beat: stale
+        pause: 0.3
+        caption: So the map slowly | {stops being true}.
+
+  - id: ai
+    module: simple/ai
+    chapter: 1
+    minDur: 7.5
+    accent: blue
+    headline: ["AI can write the code.", "It {can't see the map}."]
+    lines:
+      - id: x_ai
+        beat: ai
+        caption: I wanted {AI} to help build it all.
+      - id: x_guess
+        beat: guess
+        caption: But it could read the code, | not the map. | So it had to {guess}.
+
+  - id: flip
+    module: simple/flip
+    chapter: 2
+    minDur: 6.5
+    accent: green
+    headline: ["So I moved the map", "{next to the code}."]
+    lines:
+      - id: x_moved
+        beat: moved
+        caption: So I moved the map | right {next to the code}, | as a simple text file.
+      - id: x_reads
+        beat: reads
+        caption: Now the AI reads it too.
+
+  - id: picture
+    module: simple/picture
+    chapter: 3
+    minDur: 7.5
+    accent: blue
+    headline: ["ERD Studio turns it", "into a {picture}."]
+    lines:
+      - id: x_draw
+        beat: draw
+        caption: ERD Studio turns that file | into a {picture} anyone can read.
+      - id: x_both
+        beat: both
+        caption: Change the picture, the file changes. | And the other way round.
+
+  - id: catch
+    module: simple/catch
+    chapter: 3
+    minDur: 7.5
+    accent: amber
+    headline: ["If the build changes,", "the map {catches it}."]
+    lines:
+      - id: x_stops
+        beat: stops
+        caption: And if what's really built | stops matching the map,
+      - id: x_lights
+        beat: lights
+        caption: it {lights up} the difference, | before it causes problems.
+
+  - id: together
+    module: simple/together
+    chapter: 4
+    minDur: 11
+    accent: green
+    headline: ["One change.", "{One approval}."]
+    lines:
+      - id: x_one
+        beat: one
+        caption: Now the map and the code | change together, | in {one approval}.
+      - id: x_rts
+        beat: rts
+        caption: Reviewed together. | Tracked together. | {Shipped} together.
+      - id: x_sense
+        beat: sense
+        pause: 0.4
+        caption: It's just common sense. | Why did this take us {decades} | to figure out?
+
+  - id: business
+    module: simple/business
+    chapter: 4
+    minDur: 6
+    accent: blue
+    headline: ["Managers still get", "{the picture}."]
+    lines:
+      - id: x_mgr
+        beat: mgr
+        caption: And managers still see the picture, | right on their {team's wiki page}.
+
+  - id: stars
+    module: stars
+    chapter: 4
+    minDur: 5.5
+    accent: green
+    headline: ["People noticed.", "It's {taking off}."]
+    lines:
+      - id: s_week
+        beat: week
+        caption: And since the launch, | it's {taking off}.
+        say: And since the launch, it's taking off.
+      - id: s_why
+        beat: why
+        pause: 0.3
+        caption: Come and see {why}.
+
+  - id: end
+    module: endCard
+    chapter: 0
+    minDur: 6
+    accent: green
+    headline: null
+    props:
+      tagline: ["Your data map, ", "next to your code."]
+    lines:
+      - id: e_name
+        beat: name
+        caption: ERD Studio. | {Free}, with the {source on GitHub}.
+        say: ERD Studio. Free, with the source on GitHub.
+      - id: e_cta
+        beat: cta
+        caption: Search ERD Studio in VS Code. | Link in the comments.

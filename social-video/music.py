@@ -134,14 +134,18 @@ def impact():
 SUPPLIED = [HERE / 'music' / f'background.{ext}' for ext in ('m4a', 'mp3', 'wav', 'flac')]
 # Loudness the rest of the pipeline is tuned for (encode.sh's steady bed level assumes it).
 TARGET_LUFS = -14.5
+# VARIANT picks the cut (see tts.py): build/ for "pro", build-<variant>/ otherwise.
+import os as _os
+VARIANT = _os.environ.get('VARIANT', 'pro')
+BUILD = HERE / ('build' if VARIANT == 'pro' else f'build-{VARIANT}')
 
 
 def from_supplied(src: pathlib.Path, total: float) -> None:
     """Trim the supplied track to the video, fade it in and out, and level it to TARGET_LUFS."""
     import subprocess
     import re
-    out = HERE / 'build' / 'music.wav'
-    raw = HERE / 'build' / 'music.raw.wav'
+    out = BUILD / 'music.wav'
+    raw = BUILD / 'music.raw.wav'
     fade_out = 4.0
     subprocess.run([
         'ffmpeg', '-v', 'error', '-y', '-i', str(src), '-t', f'{total:.3f}',
@@ -160,7 +164,7 @@ def from_supplied(src: pathlib.Path, total: float) -> None:
 
 
 def main() -> None:
-    tl = json.loads((HERE / 'build' / 'timeline.json').read_text())
+    tl = json.loads((BUILD / 'timeline.json').read_text())
     total = tl['total']
     supplied = next((p for p in SUPPLIED if p.exists()), None)
     generator = HERE / 'music' / 'synth_music.py'
@@ -169,8 +173,8 @@ def main() -> None:
         # 96 BPM). It writes music_raw.wav (200 s, stereo) into its working directory.
         import subprocess
         import sys
-        subprocess.run([sys.executable, str(generator)], cwd=HERE / 'build', check=True)
-        supplied = HERE / 'build' / 'music_raw.wav'
+        subprocess.run([sys.executable, str(generator)], cwd=BUILD, check=True)
+        supplied = BUILD / 'music_raw.wav'
     if supplied:
         from_supplied(supplied, total)
         return
@@ -285,7 +289,7 @@ def main() -> None:
     mix = np.tanh(1.2 * mix / max(1e-9, np.max(np.abs(mix)))) # gentle glue
     mix *= 10 ** (-1 / 20) / max(1e-9, np.max(np.abs(mix)))
 
-    out = HERE / 'build' / 'music.wav'
+    out = BUILD / 'music.wav'
     sf.write(out, mix.astype(np.float32), SR, subtype='PCM_16')
     print(f'music: {out} ({total:.2f} s, {BPM} BPM, drop at {drop:.2f} s)')
 
