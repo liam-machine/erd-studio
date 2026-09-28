@@ -77,7 +77,7 @@ scenes:
       - id: x_stale
         beat: stale
         pause: 0.3
-        caption: So the map slowly | {stops being true}.
+        caption: So the map slowly {stops being true}, | and people make decisions | on the wrong picture.
 
   - id: ai
     module: simple/ai
@@ -88,7 +88,7 @@ scenes:
     lines:
       - id: x_ai
         beat: ai
-        caption: I wanted {AI} to help build it all.
+        caption: I'm a data engineer, | and I wanted {AI} to help build it all.
       - id: x_guess
         beat: guess
         caption: But it could read the code, | not the map. | So it had to {guess}.
@@ -195,4 +195,4 @@ scenes:
         say: ERD Studio. Free, with the source on GitHub.
       - id: e_cta
         beat: cta
-        caption: Search ERD Studio in VS Code. | Link in the comments.
+        caption: Know a data team? | {Send them this.} | Link in the comments.

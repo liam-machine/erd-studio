@@ -1,0 +1,143 @@
+1
+00:00:00,350 --> 00:00:03,239
+For decades, we've built the data model backwards.
+
+2
+00:00:03,289 --> 00:00:05,859
+Here's the fix, and why your AI needs it.
+
+3
+00:00:06,309 --> 00:00:09,990
+We draw the logical model for business users, in a separate tool.
+
+4
+00:00:10,040 --> 00:00:12,245
+Developers work backwards from the picture,
+
+5
+00:00:12,295 --> 00:00:16,459
+so the design drifts from the warehouse, and nobody trusts the diagram.
+
+6
+00:00:16,909 --> 00:00:19,303
+Then I tried to vibe code data engineering.
+
+7
+00:00:19,353 --> 00:00:23,441
+My AI could read every line of SQL, but it couldn't see the design.
+
+8
+00:00:23,491 --> 00:00:26,237
+What's the grain? Which keys? It had to guess.
+
+9
+00:00:26,687 --> 00:00:30,223
+So flip it. Build the logical model for developers first,
+
+10
+00:00:30,273 --> 00:00:33,353
+and save it in the repo, right next to the SQL.
+
+11
+00:00:33,803 --> 00:00:38,587
+Each table is one small YAML file, with its grain, columns, types and keys.
+
+12
+00:00:38,637 --> 00:00:42,298
+A domain file groups the tables and says how they join.
+
+13
+00:00:42,748 --> 00:00:47,205
+ERD Studio draws those files as a diagram, inside VS Code.
+
+14
+00:00:47,255 --> 00:00:49,623
+Edit either one, and the other updates.
+
+15
+00:00:50,073 --> 00:00:52,910
+Click View File, and there's the JSON underneath.
+
+16
+00:00:52,960 --> 00:00:57,798
+ERD Studio just renders that file, in one simple, documented format.
+
+17
+00:00:57,848 --> 00:01:01,475
+Reopen it with ERD Studio, and it's a diagram again.
+
+18
+00:01:01,925 --> 00:01:04,218
+Logical is the design: what you mean.
+
+19
+00:01:04,268 --> 00:01:08,793
+Physical is what dbt actually builds, read straight from your project.
+
+20
+00:01:09,243 --> 00:01:10,436
+Now the best part.
+
+21
+00:01:10,486 --> 00:01:11,461
+Press Diff.
+
+22
+00:01:11,511 --> 00:01:14,885
+A renamed column, a wrong type, a missing relationship.
+
+23
+00:01:14,935 --> 00:01:17,838
+Every mismatch lights up before it ships.
+
+24
+00:01:18,288 --> 00:01:22,356
+The design change and the SQL change go in the same pull request.
+
+25
+00:01:22,406 --> 00:01:25,362
+Reviewed together. Tracked together. Shipped together.
+
+26
+00:01:25,412 --> 00:01:29,201
+It's just common sense. Why did this take us decades to figure out?
+
+27
+00:01:29,251 --> 00:01:32,938
+And your AI reads the model before it writes a single line.
+
+28
+00:01:33,388 --> 00:01:35,233
+And the business doesn't lose a thing.
+
+29
+00:01:35,283 --> 00:01:39,407
+ERD Studio for Confluence renders the same files on a page.
+
+30
+00:01:39,457 --> 00:01:41,576
+No GitHub account needed.
+
+31
+00:01:42,026 --> 00:01:45,520
+Not on dbt? Use it for your logical model today.
+
+32
+00:01:45,570 --> 00:01:47,956
+Support for more tools is on the way.
+
+33
+00:01:48,406 --> 00:01:50,446
+And since the launch, it's taking off.
+
+34
+00:01:50,496 --> 00:01:51,766
+Come and see why.
+
+35
+00:01:53,906 --> 00:01:57,137
+ERD Studio. Free, with the source on GitHub.
+
+36
+00:01:57,187 --> 00:02:01,110
+Search ERD Studio in VS Code. Link in the comments.

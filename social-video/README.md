@@ -1,8 +1,18 @@
-# LinkedIn explainer video
+# LinkedIn explainer videos
 
-Source and render pipeline for a ~99 s, 1080×1350 (4:5) feed video: *"We've built data models
-backwards for decades."* Nothing here ships: `.vscodeignore` excludes `social-video/**`, and no
-build, tsconfig or test run refers to it.
+Source and render pipeline for two 1080×1350 (4:5) feed videos telling the same story. Nothing
+here ships: `.vscodeignore` excludes `social-video/**`, `deploy.yml` ignores it (a change here
+never publishes a release), and no build, tsconfig or test run refers to it.
+
+| Cut | `VARIANT` | Script / scenes | Audience | Length |
+|---|---|---|---|---|
+| **pro** | `pro` (default) | `script.yaml`, `SCENES.md`, `player/scenes/*.js` | data engineers: logical vs physical, dbt, YAML/JSON, Diff, PRs | ~121 s |
+| **simple** | `simple` | `script.simple.yaml`, `SCENES.simple.md`, `player/scenes/simple/*.js` | anyone: no jargon, one analogy (blueprints in a different city to the building site) | ~85 s |
+
+`VARIANT` selects the script, the build folder (`build/` or `build-simple/`) and the output
+names (`erd-studio-explainer[-simple].*`). Both cuts share the player, `lib.js`, the voice, the
+music, and the `stars` and `endCard` scenes (a script can pass `props`, e.g. the end card's
+tagline). The finished renders are committed in `renders/` (see below).
 
 It is the getting-started video's pipeline (same Kokoro `af_heart` voice, same synthesised
 underscore `music/synth_music.py`, same pure `render(t)` player captured frame by frame with
@@ -30,12 +40,13 @@ Prerequisites are the same as the getting-started video (ffmpeg 7 with libx264, 
 
 ```bash
 cd social-video
-npm run all        # tts → timeline → music → capture → encode
-npm run qa         # build/qa/contact.png + per-scene stills, and the A/V onset check
+npm run all        # pro cut: tts → timeline → music → capture → encode
+npm run all:simple # the plain-language cut (VARIANT=simple)
+npm run qa         # build/qa/contact.png + per-scene stills, and the A/V onset check (qa:simple too)
 npm run preview    # http://127.0.0.1:4173/social-video/player/index.html?preview=1  (?t=42.5 freezes a frame, &guides=1 shows the stage box)
 ```
 
-Outputs, in `out/` (gitignored):
+Outputs, in `out/` (gitignored; `-simple` for the plain cut):
 
 | File | Use |
 |---|---|
@@ -43,6 +54,13 @@ Outputs, in `out/` (gitignored):
 | `erd-studio-explainer-thumb.jpg` | frame 0, the hook — set it as the video thumbnail |
 | `erd-studio-explainer-end.jpg` | the end card, an alternative thumbnail |
 | `erd-studio-explainer.srt` | captions, only if you also want LinkedIn's own caption track (the video already has them burned in, so normally skip it) |
+
+## Committed renders
+
+`renders/` holds the finished upload files for both cuts (mp4, thumbnail, end frame, srt) so
+they live with the repo. They are ~15 MB each and git keeps every version for ever, so replace
+them only for a render you mean to post, not for every tweak (`cp out/erd-studio-explainer*
+renders/`).
 
 ## Licences
 

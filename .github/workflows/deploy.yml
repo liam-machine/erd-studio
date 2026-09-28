@@ -12,6 +12,7 @@ on:
       - 'docs/**'
       - 'test/fixtures/**'
       - '.planning/**'
+      - 'social-video/**'
 
 concurrency:
   group: deploy-main
