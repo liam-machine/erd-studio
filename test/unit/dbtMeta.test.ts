@@ -74,6 +74,29 @@ describe('YmlParserService meta', () => {
   });
 });
 
+describe('YmlParserService meta — anchors, aliases and merge keys', () => {
+  it('resolves them as dbt does', async () => {
+    const data = await new YmlParserService().loadYmlData(makeProject({
+      'models/marts/_models.yml': `version: 2
+models:
+  - name: dim_customer
+    meta: &shared
+      owner: &team crm-team
+      backup_contact: *team
+  - name: dim_region
+    meta: *shared
+  - name: fct_order
+    meta:
+      <<: *shared
+      owner: sales-analytics
+`,
+    }));
+    expect(data.models.get('dim_customer')!.meta).toEqual({ owner: 'crm-team', backup_contact: 'crm-team' });
+    expect(data.models.get('dim_region')!.meta).toEqual({ owner: 'crm-team', backup_contact: 'crm-team' });
+    expect(data.models.get('fct_order')!.meta).toEqual({ owner: 'sales-analytics', backup_contact: 'crm-team' });
+  });
+});
+
 describe('extractManifestData meta', () => {
   it('reads node and column meta, config.meta winning per key', () => {
     const result = extractManifestData({

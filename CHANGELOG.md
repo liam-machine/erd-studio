@@ -11,7 +11,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 ## Unreleased
 
 ### Added
-- **Your team's metadata list, for AI assistants** ([#95](https://github.com/liam-machine/erd-studio/issues/95)). The setup guide (`/erd-studio-setup`) now notices when your dbt models already record metadata such as `owner` or `pii`, offers once to copy it onto your diagram, and saves the keys as a short list in `.erd-studio/modelling-approach.md`. From then on every AI assistant uses the same key names (asking for a "data owner" fills in `owner`), copies the values from dbt instead of guessing them, and leaves out a key dbt has no value for. You can also list keys that people fill in themselves, which assistants leave alone. The AI helper files move to v23, so you will be offered a one-time update.
+- **Your team's metadata list, for AI assistants** ([#95](https://github.com/liam-machine/erd-studio/issues/95)). The setup guide (`/erd-studio-setup`) now notices when your dbt models already record metadata such as `owner` or `pii`, offers once to copy it onto your diagram, and saves the keys as a short list in `.erd-studio/modelling-approach.md`. From then on every AI assistant uses the same key names (asking for a "data owner" fills in `owner`), copies the values from dbt instead of guessing them, and leaves out a key dbt has no value for. You can also list keys that people fill in themselves, which assistants leave alone. You'll be offered a one-time update of the AI helper files.
 - `erd-studio inventory` reports each model's and column's dbt `meta:`, and a project-wide summary of the keys in `conventions.meta`.
 
 ### Changed

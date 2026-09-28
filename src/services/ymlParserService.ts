@@ -16,8 +16,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseDocument, isSeq, isMap } from 'yaml';
-import type { YAMLMap, YAMLSeq } from 'yaml';
+import { parseDocument, isSeq, isMap, isNode } from 'yaml';
+import type { Document, YAMLMap, YAMLSeq } from 'yaml';
 
 import type {
   YmlColumn,
@@ -368,7 +368,9 @@ export class YmlParserService {
     compositeUniqueGroups: Map<string, string[][]>,
   ): void {
     const raw = fs.readFileSync(filePath, 'utf-8');
-    const doc = parseDocument(raw);
+    // `merge`: dbt reads YAML 1.1, where `<<: *anchor` merges a map. Only
+    // conversions through the document (meta) see it; `get()` lookups do not.
+    const doc = parseDocument(raw, { merge: true });
 
     const modelsNode = doc.get('models');
     if (!isSeq(modelsNode)) {
@@ -380,6 +382,7 @@ export class YmlParserService {
         continue;
       }
       this.extractModel(
+        doc,
         item as YAMLMap,
         filePath,
         models,
@@ -394,6 +397,7 @@ export class YmlParserService {
    * Extract a single model entry from a parsed YAML model node.
    */
   private extractModel(
+    doc: Document,
     modelNode: YAMLMap,
     filePath: string,
     models: Map<string, YmlModelInfo>,
@@ -423,7 +427,7 @@ export class YmlParserService {
           continue;
         }
 
-        const colMeta = this.extractMeta(col);
+        const colMeta = this.extractMeta(doc, col);
         columns.push({
           name: colName,
           description: this.getString(col, 'description'),
@@ -445,7 +449,7 @@ export class YmlParserService {
     // Extract model-level tests (unique_combination_of_columns)
     this.extractModelLevelTests(name, modelNode, compositeUniqueGroups);
 
-    const meta = this.extractMeta(modelNode);
+    const meta = this.extractMeta(doc, modelNode);
     models.set(name, {
       name,
       description,
@@ -734,18 +738,23 @@ export class YmlParserService {
    * `config: meta:` (where dbt 1.10 moved it), the config winning per key as
    * dbt merges them. Read for the CLI inventory only; the physical stage never
    * shows or compares it.
+   *
+   * Converted through the document, so anchors, aliases (a whole `meta: *shared`
+   * too) and `<<:` merge keys resolve as dbt reads them; an alias bomb past the
+   * library's alias limit throws and reads as no meta.
    */
-  private extractMeta(node: YAMLMap): Meta | undefined {
+  private extractMeta(doc: Document, node: YAMLMap): Meta | undefined {
     const plain = (value: unknown): unknown => {
-      if (!isMap(value)) { return undefined; }
+      if (!isNode(value)) { return undefined; }
       try {
-        return (value as YAMLMap).toJSON();
+        return value.toJS(doc);
       } catch {
-        return undefined; // an alias the detached node cannot resolve
+        return undefined;
       }
     };
-    const configNode = node.get('config');
-    return readMeta(plain(node.get('meta')), isMap(configNode) ? plain((configNode as YAMLMap).get('meta')) : undefined);
+    const config = plain(node.get('config'));
+    const configMeta = config && typeof config === 'object' ? (config as Record<string, unknown>).meta : undefined;
+    return readMeta(plain(node.get('meta')), configMeta);
   }
 
   /** Get a string value from a YAML map, defaulting to ''. */

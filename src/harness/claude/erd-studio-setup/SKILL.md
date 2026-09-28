@@ -280,11 +280,12 @@ Explain two terms, one line each:
   as silver or gold. It can be changed later.
 
 Then propose **one concrete default** the user can accept with "yes". Pick it like this:
-- If the user named an area, use the models whose names or folders match it.
+- If the user named an area, use the models whose names or folders match it, plus the models in
+  their `clusters` entry (connected by relationship tests), up to 15.
 - Otherwise use the largest `clusters` entry (models connected by dbt relationship tests),
   trimmed to at most 15 models, or else the biggest folder.
-- Use the most common `suggestedLayer` among those models; if it is `null`, use `core`.
-- Name the domain after the business area in lowercase, e.g. `orders` or `customer-360`.
+- Use their most common `suggestedLayer` (`null` → `core`); name the domain after the area in
+  lowercase, e.g. `orders` or `customer-360`.
 
 > "Let's start with **orders** (9 models, including `fct_order` and `dim_customer`) in the
 > **gold** layer — layers are just folders for organising diagrams, you can change them later.
@@ -311,9 +312,9 @@ Data Vault, One Big Table, Activity Schema, Inmon / 3NF). `conventions` reports 
 evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-approaches.md` now
 (section 4's table has the wording for every case).
 
-- **If `.erd-studio/modelling-approach.md` has a Technique line**, read it and confirm in one line:
-  "I'll follow your saved approach: Kimball dimensional modelling — say 'change it' to update."
-  Do not re-detect. On "change it", ask them to describe it and follow the last bullets below.
+- **If `.erd-studio/modelling-approach.md` describes a style** (more than a `## Metadata` list),
+  confirm it in one line: "I'll follow your saved approach: Kimball dimensional modelling — say
+  'change it' to update." Do not re-detect. On "change it", ask them to describe it (last bullets).
 - **A table shape detected, `shape.confidence` strong** → one plain sentence with the evidence
   (and the layering, if found) and a yes default, alone in its message:
 
@@ -358,11 +359,11 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
    `references/modelling-approaches.md` section 5 shows: the technique, the user's words quoted
    verbatim, the evidence it was detected from, the rules, how each maps to ERD Studio fields,
    the sources you used and today's date. Tell them in one line: "Saved your modelling approach
-   to `.erd-studio/modelling-approach.md` — future AI edits will follow it." Then **metadata**:
-   read `references/metadata.md` and follow sections 2–4 (one offer, then the saved list).
+   to `.erd-studio/modelling-approach.md` — future AI edits will follow it."
 4. Say "Reading the full details of the models you picked," and run `inventory --models <the
    comma-separated names>`. Its `relationships` are exactly the lines the diff will expect for
-   this set of models — which is why you ask for exactly the chosen models.
+   this set of models — which is why you ask for exactly the chosen models. Then **metadata**, on
+   every route, with or without a style: read `references/metadata.md`, follow sections 2–4.
 5. **Check for a thin project.** If most chosen models have `columnCount` 0, or their
    `provenance.columns` is only `file`, say "dbt doesn't list these columns anywhere yet, so ERD
    Studio can only see that the tables exist", then offer, in this order: (1) the catalog
@@ -445,15 +446,14 @@ changes in the logical model; never rename a model; never edit dbt files.
 - Suggest next steps:
   - **quick start or enrich, first:** "Want me to apply your team's modelling style — keys,
     grain, SCD? That's the next step." (default yes). On a yes: Stage 3b, then the approach's
-    design fields (Stage 4 steps 1–3 and step 6's design fields) on this domain's models — for
+    design fields (Stage 4 steps 1–3 and step 6's design fields; metadata is settled) — for
     models not written this session, after one "Add these?" — then Stage 5 with its review and
     this summary again. No style found and none described: stop, the mirror is complete;
   - if the catalog was skipped: generating it (Stage 2) fills in exact column types;
-  - no metadata list yet: the optional offer in `references/metadata.md` section 6;
+  - any metadata next step `references/metadata.md` asks for (sections 3, 5 and 6);
   - fill in any descriptions marked "(draft)" and the blanks on the "to confirm" list;
-  - another business area: run `/erd-studio-setup` again (safe to re-run — existing models are
-    kept and the saved approach is reused), or draft it with **Draw from dbt…** and run this
-    again to enrich it;
+  - another business area: run `/erd-studio-setup` again (safe — existing models are kept, the
+    saved approach reused), or draft it with **Draw from dbt…** and run this again to enrich it;
   - after changing dbt, run `dbt parse` and click **⊕ Diff** on the canvas;
   - future logical ↔ dbt changes can go through the canvas: **⊕ Diff** → **⊕ Sync** → **Apply
     Changes** writes a sync plan the schema skill's SYNC.md guide carries out (with a target

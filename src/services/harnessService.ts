@@ -338,20 +338,22 @@ columns:
       classification: confidential
 \`\`\`
 
-- ERD Studio **never compares, diffs or syncs \`meta\` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's \`meta:\`.
+- ERD Studio **never compares, diffs or syncs \`meta\` with dbt** — it is not part of the physical stage, discrepancy reports or sync plans, and does not need to match the dbt model's \`meta:\`. (Assistants may copy it from dbt by hand, only as the team's metadata list below says.)
 - The canvas shows it in the Detail panel and when the user hovers a model's name or a column; top-level text values can be edited in the panel, nested maps, lists, booleans and \`null\` are shown read-only.
-- **Keep every existing entry** when you edit a model file — including keys that are not on the team's list — and never move keys between the model and its columns. Never invent metadata.
+- **Keep every existing entry** when you edit a model file — including keys that are not on the team's list, values the user typed in, and values dbt no longer records — and never move keys between the model and its columns. Never invent metadata.
 
 #### The team's metadata list
 
 If \`.erd-studio/modelling-approach.md\` has a \`## Metadata\` section, it lists the \`meta\` keys this team records, as a table: **Key**, **On** (models, columns or both), **Values**, and **Source** (\`dbt\` or \`the team\`). Read it before creating or editing a model, and follow it:
 
-- **Use its key names exactly.** When the user describes a key in other words ("data owner", "does it hold personal data?"), use the listed key (\`owner\`, \`pii\`), never a new spelling, and put it where **On** says. Use the listed values and the same kind of value (text, \`true\` / \`false\`, a list).
-- **Source \`dbt\`: copy it, never type it.** The value comes from the dbt model's own \`meta:\` — in its schema \`.yml\` (\`meta:\` and \`config: meta:\`, the \`config\` one winning per key; a column's are under that column), or \`~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json\` (\`models[].meta\`, \`columns[].meta\`) when that helper is installed. Copy it whenever you create a logical model or add a column from dbt (including from a sync plan), and bring a copied value up to date when you edit that model and dbt's has changed. Copy the value exactly — \`true\` unquoted, a list as a list. When dbt has no value, leave the key out: never guess and never write a placeholder.
-- **Source \`the team\`: leave it to people.** Never fill it in yourself unless the user gives you the value. After creating a model, say in one line which of these keys it still lacks.
-- **A key that is not on the list:** add it when the user asks, then offer once to add it to the list.
+- **Use its key names exactly.** When the user describes a key in other words ("data owner", "does it hold personal data?"), use the listed key (\`owner\`, \`pii\`), never a new spelling, and put it where **On** says. When **Values** names a fixed set, use one of those values; an example in **Values** is never a default. Keep the kind of value (text, \`true\` / \`false\`, a list).
+- **Source \`dbt\`: copy it, never type it.** The value comes from the dbt model's own \`meta:\` — best from \`~/.erd-studio-cli/bin/erd-studio inventory --models <name> --json\` (\`models[].meta\`, \`columns[].meta\`, already merged as dbt merges them, including project-wide \`+meta\` from \`dbt_project.yml\`) when that helper is installed, else from the model's schema \`.yml\` (\`meta:\` and \`config: meta:\`, the \`config\` one winning per key; a column's are under that column) and the \`+meta\` entries in \`dbt_project.yml\`. Copy it whenever you create a logical model or add a column from dbt, including from a sync plan. \`true\` / \`false\` stay unquoted and a list stays a list; numbers may be written quoted or not (ERD Studio reads \`24\` and \`"24"\` the same). When dbt has no value (or \`null\`), leave the key out: never guess and never write a placeholder.
+  - When you are already reading that dbt model and the model file's value for a listed \`dbt\` key differs from dbt's, say so in one line and ask before changing it — the difference may be deliberate.
+  - When the user gives a value for a \`dbt\` key ("its owner is finance-team"), write it, say that dbt does not record it, and offer to add it to the dbt model's \`meta:\` too so the two agree — never edit dbt files unasked. When they ask for a \`dbt\` key that dbt has no value for and give none, say so and ask for the value.
+- **Source \`the team\`: leave it to people.** Never fill it in yourself unless the user gives you the value. After creating models, say in one line which of them still lack these keys (one line for a whole batch or sync plan).
+- **A key that is not on the list:** add it when the user asks, then offer once to add it to the list (Source \`the team\`, or \`dbt\` when dbt records it). Keys the list names under **Left out** (another tool's settings) are never copied from dbt.
 
-Without that section, add or change only the keys the user asks for, and never copy dbt's \`meta:\` unasked.
+Without that section, add or change only the keys the user asks for, and never copy dbt's \`meta:\` unasked. Ask for a value you were not given; never make one up.
 
 ---
 
@@ -582,7 +584,7 @@ and no \`catalog.json\` to observe the real one. It resolves exactly like
 
 | Action | What to do |
 |--------|-----------|
-| \`add-to-logical\` | Add model name to domain JSON \`logical.models[]\` + create the model file from manifest data — \`logical-models/{layer}/{name}.yml\` (the plan's \`layer\`) when the project uses layer folders, else \`logical-models/{name}.yml\` — unless a file for that name already exists in any folder. Copy the dbt \`meta\` keys the team's metadata list names (the schema skill's "The team's metadata list") |
+| \`add-to-logical\` | Add model name to domain JSON \`logical.models[]\` + create the model file from manifest data — \`logical-models/{layer}/{name}.yml\` (the plan's \`layer\`) when the project uses layer folders, else \`logical-models/{name}.yml\` — unless a file for that name already exists in any folder. Copy the dbt \`meta\` keys the team's metadata list names, reading them from the schema yml or \`erd-studio inventory\`, not from the manifest (the schema skill's "The team's metadata list") |
 | \`remove-from-logical\` | Remove model name from domain JSON \`logical.models[]\` + remove related relationships from \`logical.relationships[]\` |
 | \`add-column-to-logical\` | Add column to the model's yml (\`modelContext[name].logicalModelPath\`) columns array, with the dbt column \`meta\` keys the team's metadata list names |
 | \`remove-column-from-logical\` | Remove column from the model's yml (\`logicalModelPath\`) |
