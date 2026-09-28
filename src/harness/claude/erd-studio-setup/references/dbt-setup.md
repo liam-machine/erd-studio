@@ -32,6 +32,17 @@ own terminal.
 | `dbt-fusion 2.0.0-…` or `dbt 2.x.y` | `fusion-v2` | dbt Fusion, the newer engine (a single program, not Python). |
 | `dbt Cloud CLI - 0.40.14 (…)` | `cloud-cli` | The dbt platform CLI. Commands run on dbt's servers. |
 
+What to tell the user, by flavour (Stage 1):
+
+- **`fusion-v2`** — this is dbt's new engine (dbt Fusion). Everything works; the column types
+  come from `dbt compile --write-catalog` instead of `dbt docs generate`.
+- **`cloud-cli`** — this is the dbt platform CLI: it runs the project on dbt's servers and signs
+  in with `dbt_cloud.yml`, not `profiles.yml`, so the files ERD Studio reads may not appear on
+  this machine. Offer two routes: carry on from the project files alone (the default), or
+  install dbt Core in a local environment (section 2).
+- **`unknown`** — dbt answered in a way you did not recognise: show the first line of
+  `rawVersionOutput`, and treat it like Core.
+
 ## 2. Installing dbt
 
 Ask which warehouse they use first — the adapter depends on it. If they do not know, or just want

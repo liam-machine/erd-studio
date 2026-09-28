@@ -1,0 +1,157 @@
+# LinkedIn cut: "from dbt project to diagram in a minute" (VARIANT=onboard). How the first run
+# works after the onboarding release: the Get Started walkthrough, Draw from dbt (no AI), the
+# auto-laid-out canvas, Physical + Compare, enriching with an AI assistant, the Codespaces
+# sample for people without a dbt project, and teammates finding committed diagrams.
+#
+# Audience: analytics / data engineers who use dbt. dbt, marts, tests, keys and grain are fine
+# words here. Format: exactly as script.yaml (see its header). Scenes live in
+# player/scenes/onboard/, except `endCard`, which is shared (same beat names).
+
+title: ERD Studio — your dbt project, drawn in a minute
+maxDuration: 80
+
+voice:
+  engine: kokoro
+  kokoro: af_heart      # same voice as the other cuts and the getting-started video
+  speed: 1.06
+  say: Karen
+  sayRate: 175
+
+timing:
+  lead: 0.35
+  gap: 0.2
+  tail: 0.45
+  fade: 0.25
+
+chapters: ["INSTALL", "DRAW", "CHECK", "ENRICH", "EVERYONE"]
+
+scenes:
+  - id: hook
+    module: onboard/hook
+    chapter: 0
+    minDur: 4.5
+    accent: blue
+    headline: ["Your dbt project,", "{drawn in a minute}."]
+    lines:
+      - id: o_minute
+        beat: minute
+        caption: Your dbt project, | as a diagram, | in {under a minute}.
+      - id: o_noai
+        beat: noai
+        caption: No setup. | {No AI required.}
+
+  - id: install
+    module: onboard/install
+    chapter: 1
+    minDur: 6
+    accent: blue
+    headline: ["Install it. A guide", "{opens by itself}."]
+    lines:
+      - id: o_install
+        beat: install
+        caption: Install ERD Studio for VS Code, | and open your dbt project.
+      - id: o_guide
+        beat: guide
+        caption: A short {Get started} guide | opens by itself.
+
+  - id: draw
+    module: onboard/draw
+    chapter: 2
+    minDur: 7
+    accent: blue
+    headline: ["Click {Draw from dbt}.", "Pick a folder."]
+    lines:
+      - id: o_click
+        beat: click
+        caption: Click {Draw from dbt}.
+      - id: o_pick
+        beat: pick
+        caption: Pick a folder, | like your {marts}.
+
+  - id: canvas
+    module: onboard/canvas
+    chapter: 2
+    minDur: 8
+    accent: blue
+    headline: ["Your models and tests,", "{laid out for you}."]
+    lines:
+      - id: o_copies
+        beat: copies
+        caption: It reads your models | and your relationship tests,
+      - id: o_layout
+        beat: layout
+        caption: and {lays out} the diagram for you. | Nothing to drag.
+
+  - id: check
+    module: onboard/check
+    chapter: 3
+    minDur: 8
+    accent: green
+    headline: ["See what dbt", "{really built}."]
+    lines:
+      - id: o_physical
+        beat: physical
+        caption: Switch to {Physical} | to see what dbt really built,
+      - id: o_compare
+        beat: compare
+        caption: and {Compare} to check | your design still matches dbt.
+
+  - id: enrich
+    module: onboard/enrich
+    chapter: 4
+    minDur: 9
+    accent: blue
+    headline: ["Then let your AI", "{fill in the why}."]
+    lines:
+      - id: o_ask
+        beat: ask
+        caption: Then ask your AI assistant | to {enrich it}.
+      - id: o_keys
+        beat: keys
+        caption: Keys, grain, | and the {reason} behind every table,
+      - id: o_repo
+        beat: repo
+        caption: saved as plain files | {next to your code}.
+
+  - id: sample
+    module: onboard/sample
+    chapter: 5
+    minDur: 7
+    accent: green
+    headline: ["No dbt project?", "{Try it in your browser}."]
+    lines:
+      - id: o_nodbt
+        beat: nodbt
+        caption: No dbt project? | Open the sample | in {GitHub Codespaces}.
+        say: No dbt project? Open the sample in GitHub Codespaces.
+      - id: o_nothing
+        beat: nothing
+        caption: "{Nothing to install.}"
+
+  - id: team
+    module: onboard/team
+    chapter: 5
+    minDur: 7
+    accent: green
+    headline: ["Your team sees it", "{when they open the repo}."]
+    lines:
+      - id: o_team
+        beat: team
+        caption: And when a teammate opens the repo, | the diagrams are {already there}.
+
+  - id: end
+    module: endCard
+    chapter: 0
+    minDur: 6
+    accent: green
+    headline: null
+    props:
+      tagline: ["Your dbt project, ", "drawn in a minute."]
+    lines:
+      - id: e_name
+        beat: name
+        caption: ERD Studio for VS Code. | {Free}, with the {source on GitHub}.
+        say: ERD Studio for VS Code. Free, with the source on GitHub.
+      - id: e_cta
+        beat: cta
+        caption: Try it on your project. | {Link in the comments.}

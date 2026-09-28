@@ -31,7 +31,7 @@ import {
 /** Fixed destinations for `openExternal`. The webview names one; it never sends a URL. */
 export type GettingStartedExternalTarget =
   | 'claudeCodeDocs' | 'copilotDocs' | 'codexDocs' | 'geminiCliDocs' | 'cursorDocs'
-  | 'videoOnline' | 'dbtInstallDocs' | 'sampleRepo';
+  | 'videoOnline' | 'dbtInstallDocs' | 'sampleRepo' | 'sampleCodespaces';
 
 /**
  * The public sample dbt project (`erdStudio.trySampleProject`): a Kimball
@@ -41,6 +41,17 @@ export type GettingStartedExternalTarget =
  */
 export const SAMPLE_REPO_URL = 'https://github.com/liam-machine/erd-studio-sample';
 export const SAMPLE_REPO_CLONE_URL = `${SAMPLE_REPO_URL}.git`;
+/** The same sample opened in a GitHub Codespace (its devcontainer installs dbt and ERD Studio). */
+export const SAMPLE_CODESPACES_URL = 'https://codespaces.new/liam-machine/erd-studio-sample?quickstart=1';
+/**
+ * Whether the panel offers the Codespaces button. Off until the sample repo's
+ * devcontainer and diagram are on its `main`: before that the link starts a
+ * bare Codespace with no ERD Studio, no dbt and no diagram. The release order
+ * is: publish this extension (the devcontainer installs the Marketplace build,
+ * and the sample's README names Draw from dbt), merge the sample branch, then
+ * flip this and restore the walkthrough / README links in a follow-up release.
+ */
+export const SAMPLE_CODESPACES_LIVE = false;
 
 export const GETTING_STARTED_EXTERNAL_URLS: Readonly<Record<GettingStartedExternalTarget, string>> = {
   claudeCodeDocs: 'https://docs.claude.com/en/docs/claude-code/setup',
@@ -53,6 +64,7 @@ export const GETTING_STARTED_EXTERNAL_URLS: Readonly<Record<GettingStartedExtern
   videoOnline: 'https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4',
   dbtInstallDocs: 'https://docs.getdbt.com/docs/core/installation-overview',
   sampleRepo: SAMPLE_REPO_URL,
+  sampleCodespaces: SAMPLE_CODESPACES_URL,
 };
 
 /** Where each assistant's "get it" link in step 1 goes (a fixed target, never a URL from the webview). */
@@ -81,6 +93,8 @@ export type GettingStartedToHost =
   | { type: 'openCopilotChat' }
   /** Open a domain canvas, or create the first one. */
   | { type: 'openDomain' }
+  /** Runs `erdStudio.drawFromDbt` (pick a dbt folder, get a laid-out logical draft). No payload, no AI. */
+  | { type: 'drawFromDbt' }
   | { type: 'openExternal'; target: GettingStartedExternalTarget }
   /** Runs `erdStudio.trySampleProject` (confirm, then clone the fixed sample repo). No payload. */
   | { type: 'trySample' }
@@ -93,8 +107,8 @@ export type GettingStartedToHostType = GettingStartedToHost['type'];
 
 /** Every host-bound type, for the validator and the "every type is handled" test. */
 export const GETTING_STARTED_TO_HOST_TYPES: readonly GettingStartedToHostType[] = [
-  'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'openDomain', 'openExternal',
-  'trySample', 'openFolder', 'videoError',
+  'ready', 'refreshStatus', 'setupAiHelper', 'copyPrompt', 'openClaude', 'openCopilotChat', 'openDomain', 'drawFromDbt',
+  'openExternal', 'trySample', 'openFolder', 'videoError',
 ];
 
 /** How Claude Code was found. `cli` wins when both are present (it can take the prompt as an argument). */
@@ -128,6 +142,25 @@ export interface GettingStartedStatus {
    * `null` when the workspace folder IS the dbt root (the common case).
    */
   project: { name: string; relativePath: string | null } | null;
+  /**
+   * What ERD Studio can see of the dbt project, for the one line above the
+   * cards. Added by the panel host from `GettingStartedDeps.getProjectSummary`;
+   * absent (or null) when there is no project or it could not be worked out.
+   */
+  summary?: ProjectSummary | null;
+}
+
+/** The dbt layer convention the Welcome panel names (`detectConventions().layering.style`, minus 'none'). */
+export type SummaryLayering = 'medallion' | 'dbt-layered';
+
+export interface ProjectSummary {
+  /** dbt models ERD Studio can draw (yml ∪ manifest, minus disabled), or null when unknown. */
+  modelCount: number | null;
+  layering: SummaryLayering | null;
+  /** `absent` is known (no manifest.json); `unknown` means it was not checked. */
+  manifest: { state: 'present'; ageDays: number } | { state: 'absent' } | { state: 'unknown' };
+  /** `formatProjectSummary()` of the fields above — the text the panel shows. Empty when there is nothing to say. */
+  line: string;
 }
 
 /** One group of written files, explained in a sentence a beginner can follow. */
@@ -160,6 +193,7 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
     case 'openClaude':
     case 'openCopilotChat':
     case 'openDomain':
+    case 'drawFromDbt':
     case 'trySample':
     case 'openFolder':
       return true;
@@ -182,6 +216,29 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
 // ---------------------------------------------------------------------------
 
 export const SETUP_PROMPT = '/erd-studio-setup';
+
+/**
+ * "Found 42 dbt models · medallion layout · manifest 3 days old" — each part
+ * only when it is known. Model counts, layering and manifest age are all
+ * cheap, local facts; nothing here names a model or a path.
+ */
+export function formatProjectSummary(s: Omit<ProjectSummary, 'line'>): string {
+  const parts: string[] = [];
+  if (s.modelCount !== null) {
+    parts.push(s.modelCount === 0
+      ? 'No documented dbt models found yet'
+      : `Found ${s.modelCount} dbt model${s.modelCount === 1 ? '' : 's'}`);
+  }
+  if (s.layering === 'medallion') { parts.push('medallion layout'); }
+  if (s.layering === 'dbt-layered') { parts.push('staging \u2192 marts layout'); }
+  if (s.manifest.state === 'absent') {
+    parts.push('no manifest yet');
+  } else if (s.manifest.state === 'present') {
+    const d = Math.max(0, Math.floor(s.manifest.ageDays));
+    parts.push(d === 0 ? 'manifest from today' : `manifest ${d} day${d === 1 ? '' : 's'} old`);
+  }
+  return parts.join(' \u00b7 ');
+}
 
 /**
  * The step card's one-word state, judged over the skill folders setup would
@@ -347,6 +404,8 @@ export interface GettingStartedHtmlInput {
   posterUri: string | null;
   cues: ReadonlyArray<{ start: number; end: number; text: string }>;
   transcript: string;
+  /** Offer "Open in Codespaces" on the sample card. Defaults to `SAMPLE_CODESPACES_LIVE`. */
+  codespaces?: boolean;
 }
 
 export function buildGettingStartedCsp(cspSource: string, nonce: string): string {
@@ -543,6 +602,11 @@ body {
 .gs-sample__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--vscode-foreground); }
 .gs-sample__text { margin: 0 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
 .gs-sample-link { margin: 0 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.gs-sample__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.gs-sample__note { font-size: 12px; color: var(--vscode-descriptionForeground); }
+.gs-summary { margin: 26px 0 0; font-size: 13px; color: var(--vscode-foreground); }
+.gs-section-intro { margin: -6px 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
+.gs-steps + .gs-section-title { margin-top: 26px; }
 .gs-footer {
   display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; margin-top: 28px; padding-top: 14px;
   border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, rgba(127, 127, 127, .3)));
@@ -662,6 +726,18 @@ const SCRIPT = `
     return el;
   }
 
+  // Cards are numbered in the order they show, so hiding one never leaves a gap.
+  function numberSteps() {
+    var steps = document.querySelectorAll('.gs-step');
+    var n = 0;
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i].hidden) { continue; }
+      n += 1;
+      var num = steps[i].querySelector('.gs-step__num');
+      if (num) { num.textContent = String(n); }
+    }
+  }
+
   function names(ids) {
     var out = [];
     for (var i = 0; i < data.assistants.length; i++) {
@@ -687,14 +763,21 @@ const SCRIPT = `
     if (later) { later.hidden = s.assistants.length > 0; }
     // An assistant but no guide installed yet: hide the launch rows, or "Open
     // Claude Code" would start /erd-studio-setup in a project without the skill.
-    var start = setState('start', found === 'none' ? 'none' : s.helper === 'missing' ? 'notready' : 'some');
-    var canvas = setState('canvas', s.domainCount > 0 ? 'some' : 'none');
-    if (canvas) { canvas.setAttribute('data-done', s.domainCount > 0 ? 'true' : 'false'); }
+    setState('start', found === 'none' ? 'none' : s.helper === 'missing' ? 'notready' : 'some');
+    var start = $('.gs-step[data-step="start"]');
+    // A diagram first: "Open your diagrams" leads once there is one, else Draw from dbt does.
+    var open = setState('open', s.domainCount > 0 ? 'some' : 'none');
+    if (open) { open.hidden = s.domainCount === 0; }
+    setState('draw', s.domainCount > 0 ? 'more' : 'first');
+    var summary = $('.gs-summary');
+    var line = s.hasProject && s.summary && s.summary.line ? s.summary.line : '';
+    if (summary) { summary.textContent = line; summary.hidden = line === ''; }
+    numberSteps();
     var btns = document.querySelectorAll('[data-action="setupAiHelper"]');
     for (var j = 0; j < btns.length; j++) { btns[j].disabled = false; }
     text('.gs-setup-label', s.helper === 'ready' ? 'Reinstall my AI helper'
       : s.helper === 'update' ? 'Update my AI helper' : 'Set up my AI helper');
-    text('.gs-domain-count', s.domainCount === 1 ? 'You have 1 domain.' : 'You have ' + s.domainCount + ' domains.');
+    text('.gs-domain-count', s.domainCount === 1 ? 'You have 1 diagram.' : 'You have ' + s.domainCount + ' diagrams.');
     var p = s.project;
     var nested = !!(p && p.relativePath);
     text('.gs-project-name', p ? p.name : '');
@@ -775,6 +858,10 @@ function launchRow(id: AiAssistantId): string {
  */
 export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string {
   const { cspSource, nonce, videoUri, posterUri } = input;
+  const codespacesButton = (input.codespaces ?? SAMPLE_CODESPACES_LIVE)
+    ? `<button class="gs-btn" type="button" data-action="openExternal" data-target="sampleCodespaces">${ICON_EXTERNAL}Open in Codespaces</button>
+      <span class="gs-sample__note">Runs in your browser &mdash; nothing to install.</span>`
+    : '';
   const n = escapeHtml(nonce);
   const poster = posterUri ? ` poster="${escapeHtml(posterUri)}"` : '';
   const player = videoUri
@@ -831,15 +918,50 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
   <section class="gs-sample" aria-label="Try the sample project">
     <h2 class="gs-sample__title">No dbt project yet? Try the sample</h2>
     <p class="gs-sample__text">A small Kimball-style dbt project with fake coffee-shop data &mdash; runs on your computer, no account needed.</p>
-    <button class="gs-btn gs-btn--primary" type="button" data-action="trySample">Try the sample project</button>
+    <div class="gs-sample__actions">
+      <button class="gs-btn gs-btn--primary" type="button" data-action="trySample">Try the sample project</button>
+      ${codespacesButton}
+    </div>
   </section>
 
   <div class="gs-steps-wrap">
-    <h2 class="gs-section-title">Get set up</h2>
+    <p class="gs-summary" role="status" hidden></p>
+    <h2 class="gs-section-title">Your diagram</h2>
     <p class="gs-sample-link"><button class="gs-link" type="button" data-action="trySample">New to this? Try it on the sample project first</button></p>
     <div class="gs-steps">
-      <section class="gs-step" data-step="assistant" data-state="loading">
+      <section class="gs-step" data-step="open" data-state="loading" hidden>
         <span class="gs-step__num">1</span>
+        <div class="gs-step__body">
+          <h3 class="gs-step__title">Open your diagrams</h3>
+          <p class="gs-step__text"><span class="gs-domain-count"></span> Open one to see your diagram, and switch between Logical and Physical.</p>
+          <div class="gs-step__actions">
+            <button class="gs-btn gs-btn--primary" type="button" data-action="openDomain">Open your diagrams</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="gs-step" data-step="draw" data-state="loading">
+        <span class="gs-step__num">1</span>
+        <div class="gs-step__body">
+          <h3 class="gs-step__title" data-when="first">Draw your dbt project &mdash; no AI needed</h3>
+          <h3 class="gs-step__title" data-when="more" hidden>Draw another area from dbt</h3>
+          <p class="gs-step__text">Copies your dbt models and tests into a diagram you can edit. Pick a folder, and it opens laid out.</p>
+          <div class="gs-step__actions" data-when="first">
+            <button class="gs-btn gs-btn--primary" type="button" data-action="drawFromDbt">Draw from dbt</button>
+          </div>
+          <div class="gs-step__actions" data-when="more" hidden>
+            <button class="gs-btn" type="button" data-action="drawFromDbt">Draw from dbt</button>
+          </div>
+          <p class="gs-step__hint" data-when="first">Rather start empty? <button class="gs-link" type="button" data-action="openDomain">Create a blank diagram</button></p>
+        </div>
+      </section>
+    </div>
+
+    <h2 class="gs-section-title">Enrich with your AI assistant (optional)</h2>
+    <p class="gs-section-intro">Your assistant adds what dbt doesn't record: keys, grain, rationale and your team's modelling style.</p>
+    <div class="gs-steps">
+      <section class="gs-step" data-step="assistant" data-state="loading">
+        <span class="gs-step__num">2</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Your AI assistant</h3>
           <p class="gs-step__text" data-when="found" hidden>The guided setup runs inside your AI coding assistant. Found on this computer:</p>
@@ -857,7 +979,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
       </section>
 
       <section class="gs-step" data-step="helper" data-state="loading">
-        <span class="gs-step__num">2</span>
+        <span class="gs-step__num">3</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Set up my AI helper</h3>
           <p class="gs-step__text" data-when="missing ready update unmanaged" hidden>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for <strong class="gs-helper-for"></strong><span class="gs-helper-later" hidden> (so it's ready whichever you install)</span>, plus a small checking tool your assistant uses behind the scenes.</p>
@@ -872,32 +994,17 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
       </section>
 
       <section class="gs-step" data-step="start" data-state="loading">
-        <span class="gs-step__num">3</span>
+        <span class="gs-step__num">4</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Start the guided setup</h3>
-          <p class="gs-step__text" data-when="some none notready" hidden>Your assistant checks your dbt setup, works out how your project is modelled and checks with you, builds your logical model and checks it against dbt, explaining each step.</p>
+          <p class="gs-step__text" data-when="some none notready" hidden>Your assistant checks your dbt setup, fills in keys, grain and rationale, works out how your project is modelled and checks with you, then checks the result against dbt, explaining each step.</p>
           <div class="gs-launch" data-when="some" hidden>
             ${launchRows}
           </div>
-          <p class="gs-step__hint" data-when="none" hidden>Install an assistant (step 1) and press Re-check to see exactly what to type.</p>
-          <p class="gs-step__hint" data-when="notready" hidden>Do step 2 first: <strong>Set up my AI helper</strong> installs the guide your assistant runs.</p>
+          <p class="gs-step__hint" data-when="none" hidden>Install an assistant (see Your AI assistant above) and press Re-check to see exactly what to type.</p>
+          <p class="gs-step__hint" data-when="notready" hidden>First press <strong>Set up my AI helper</strong> above: it installs the guide your assistant runs.</p>
           <p class="gs-step__hint" data-when="some" hidden>Start your assistant in your dbt project folder: <code class="gs-project-path"></code><span class="gs-nested-hint" hidden>. It's a subfolder here: start a terminal assistant in that folder (Claude Code's Copy includes the <code>cd</code>), or open that folder itself (File &rarr; Open Folder&hellip;) for a chat panel inside the editor.</span></p>
           <p class="gs-step__hint" data-when="some" hidden>Guide not showing up? Restart your assistant from <code class="gs-project-name"></code>.</p>
-        </div>
-      </section>
-
-      <section class="gs-step" data-step="canvas" data-state="loading">
-        <span class="gs-step__num">4</span>
-        <div class="gs-step__body">
-          <h3 class="gs-step__title">Open the canvas</h3>
-          <p class="gs-step__text" data-when="some" hidden><span class="gs-domain-count"></span> Open one to see your diagram, and switch between Logical and Physical.</p>
-          <p class="gs-step__text" data-when="none" hidden>The guided setup creates your first domain for you, or you can start one by hand.</p>
-          <div class="gs-step__actions" data-when="some" hidden>
-            <button class="gs-btn" type="button" data-action="openDomain">Open a domain</button>
-          </div>
-          <div class="gs-step__actions" data-when="none" hidden>
-            <button class="gs-btn" type="button" data-action="openDomain">Create your first domain</button>
-          </div>
         </div>
       </section>
     </div>

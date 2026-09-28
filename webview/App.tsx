@@ -50,6 +50,7 @@ import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddE
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
+import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
@@ -534,6 +535,8 @@ function EditorCanvas() {
         proOptions={{ hideAttribution: true }}
       >
         <CanvasBackdrop />
+        {/* "This diagram is empty" card — logical stage, zero models only. */}
+        <EmptyCanvas />
         <Toolbar
           nodes={nodes}
           edges={edges}

@@ -48,6 +48,9 @@ packages/**
 .claude/**
 data engineer plugin/**
 
+# media/ otherwise ships: the icons, media/onboarding/ (Welcome video + poster)
+# and media/walkthrough/*.svg (the Get Started walkthrough's step images).
+#
 # Media referenced only by README.md. vsce rewrites the README's relative links
 # to absolute github.com URLs when packaging, so a bundled copy is never read —
 # it would just be dead weight in every install.

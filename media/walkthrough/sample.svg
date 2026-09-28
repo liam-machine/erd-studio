@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 300" width="480" height="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <style>
+    .ew-bg{fill:var(--vscode-editor-background,#1e1e1e)}
+    .ew-card{fill:var(--vscode-editorWidget-background,#252526);stroke:var(--vscode-panel-border,#555555);stroke-width:1.5}
+    .ew-fg{fill:var(--vscode-foreground,#cccccc)}
+    .ew-muted{fill:var(--vscode-descriptionForeground,#999999)}
+    .ew-link{fill:var(--vscode-textLink-foreground,#3794ff)}
+    .ew-folder{fill:var(--vscode-textLink-foreground,#3794ff);fill-opacity:0.18;stroke:var(--vscode-textLink-foreground,#3794ff);stroke-width:1.5}
+  </style>
+  <!-- sample project folder -->
+  <g transform="translate(24 60)">
+    <path d="M0 14a6 6 0 0 1 6-6h40l10 10h70a6 6 0 0 1 6 6v134a6 6 0 0 1-6 6H6a6 6 0 0 1-6-6z" class="ew-folder"/>
+    <text x="14" y="44" font-size="12" font-weight="600" class="ew-fg">sample</text>
+    <g font-size="10" class="ew-muted">
+      <text x="14" y="70">models/</text>
+      <text x="14" y="90">seeds/</text>
+      <text x="14" y="110">target/</text>
+      <text x="14" y="130">.erd-studio/</text>
+    </g>
+    <circle cx="112" cy="126" r="4" fill="#60a5fa"/>
+  </g>
+  <!-- arrow -->
+  <path d="M170 150 H200" stroke="#60a5fa" stroke-width="2" stroke-linecap="round"/>
+  <path d="M196 144 L204 150 L196 156" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- star schema -->
+  <rect x="214" y="24" width="244" height="252" rx="10" class="ew-bg" stroke="var(--vscode-panel-border,#555555)" stroke-width="1"/>
+  <g fill="none" stroke="#60a5fa" stroke-width="1.5">
+    <path d="M336 150 L268 70"/>
+    <path d="M336 150 L404 70"/>
+    <path d="M336 150 L268 230"/>
+    <path d="M336 150 L404 230"/>
+  </g>
+  <g font-size="9" font-weight="600" class="ew-fg">
+    <g transform="translate(290 128)">
+      <rect width="92" height="44" rx="4" class="ew-card" stroke="#60a5fa" stroke-width="2"/>
+      <path d="M0 4a4 4 0 0 1 4-4h84a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">fct_orders</text>
+      <rect x="8" y="24" width="56" height="4" rx="2" class="ew-muted"/>
+      <rect x="8" y="33" width="42" height="4" rx="2" class="ew-muted"/>
+    </g>
+    <g transform="translate(224 50)">
+      <rect width="88" height="36" rx="4" class="ew-card"/>
+      <path d="M0 4a4 4 0 0 1 4-4h80a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">dim_customer</text>
+      <rect x="8" y="24" width="48" height="4" rx="2" class="ew-muted"/>
+    </g>
+    <g transform="translate(360 50)">
+      <rect width="88" height="36" rx="4" class="ew-card"/>
+      <path d="M0 4a4 4 0 0 1 4-4h80a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">dim_product</text>
+      <rect x="8" y="24" width="54" height="4" rx="2" class="ew-muted"/>
+    </g>
+    <g transform="translate(224 214)">
+      <rect width="88" height="36" rx="4" class="ew-card"/>
+      <path d="M0 4a4 4 0 0 1 4-4h80a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">dim_date</text>
+      <rect x="8" y="24" width="40" height="4" rx="2" class="ew-muted"/>
+    </g>
+    <g transform="translate(360 214)">
+      <rect width="88" height="36" rx="4" class="ew-card"/>
+      <path d="M0 4a4 4 0 0 1 4-4h80a4 4 0 0 1 4 4v12H0z" fill="#60a5fa" fill-opacity="0.3"/>
+      <text x="8" y="11">dim_store</text>
+      <rect x="8" y="24" width="50" height="4" rx="2" class="ew-muted"/>
+    </g>
+  </g>
+</svg>

@@ -12,7 +12,12 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE, modelFolderForDomain } from '../../src/providers/SemanticEditorProvider';
+import {
+  SemanticEditorProvider,
+  PHYSICAL_READ_ONLY_MESSAGE,
+  describeSkippedDbtModels,
+  modelFolderForDomain,
+} from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
@@ -23,6 +28,7 @@ import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 import { hostErrorLog } from '../../src/services/feedbackService';
+import { telemetry } from '../../src/services/telemetryService';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1144,5 +1150,164 @@ describe('layer folders in the edit pipeline (issue #76)', () => {
     await waitForError(panel, /already exists in the model library/);
     expect(lastError(panel)).toContain('(logical-models/gold/fct_sale.yml)');
     expect(fs.existsSync(path.join(lib(), 'dim_task.yml'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Add models from dbt (the empty canvas's batch add)
+// ---------------------------------------------------------------------------
+
+describe('addModelsFromDbt', () => {
+  const lib = () => path.join(root, '.erd-studio', 'logical-models');
+  const SILVER_MODELS = ['dim_customer', 'dim_project', 'dim_task', 'fct_order', 'fct_sale'];
+
+  /** Answer the scope QuickPick with the `folder:<folder>` scope. */
+  function pickFolder(folder: string) {
+    return vi.spyOn(vscode.window, 'showQuickPick').mockImplementationOnce(async (items: any) => {
+      const list = await items;
+      return list.find((i: any) => i.scope?.id === `folder:${folder}`);
+    });
+  }
+
+  async function openEmptyDomain(layer: string, domain: string) {
+    const file = path.join(root, '.erd-studio', layer, `${domain}.json`);
+    fs.writeFileSync(file, JSON.stringify({
+      schemaVersion: 5,
+      domain,
+      layer,
+      description: '',
+      logical: { models: [], relationships: [] },
+      viewConfig: { positions: {} },
+    }, null, 2) + '\n');
+    const built = buildProvider(root);
+    const doc = makeDoc(file);
+    const panel = vscode.createMockWebviewPanel();
+    await built.provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      panel as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    return { ...built, doc, panel, file };
+  }
+
+  const lastLoaded = (panel: MockPanel) => posted(panel).filter((m) => m.type === 'domainLoaded').at(-1) as any;
+
+  it('records emptyCanvas when a logical canvas opens on a domain with no models', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    await openEmptyDomain('gold', 'reporting');
+    expect(feature).toHaveBeenCalledWith('emptyCanvas');
+  });
+
+  it('does not record emptyCanvas for a domain with models', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    await openShowcase(root);
+    expect(feature).not.toHaveBeenCalledWith('emptyCanvas');
+  });
+
+  it('fills an empty domain in one edit, seeds missing library files and asks for an auto layout', async () => {
+    fs.unlinkSync(path.join(lib(), 'fct_sale.yml'));
+    const feature = vi.spyOn(telemetry, 'feature');
+    const { panel, doc } = await openEmptyDomain('gold', 'reporting');
+    const edits = applyEditSpy.mock.calls.length;
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+    pickFolder('silver');
+
+    panel._simulateMessage({ type: 'addModelsFromDbt' });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    expect(lastError(panel)).toBeUndefined();
+    expect(applyEditSpy.mock.calls.length).toBe(edits + 1);
+    const onDisk = JSON.parse(doc.getText());
+    expect([...onDisk.logical.models].sort()).toEqual(SILVER_MODELS);
+    const rels = onDisk.logical.relationships.map((r: any) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`).sort();
+    expect(rels).toEqual([
+      'dim_task.project_key->dim_project.project_key',
+      'dim_task.task_key->fct_sale.amount',
+      'fct_order.customer_key->dim_customer.customer_key',
+      'fct_order.project_key->dim_project.project_key',
+      'fct_sale.sale_id->dim_project.project_key',
+    ]);
+    // Still a fresh layout: no stored position, so the webview runs ELK.
+    for (const name of SILVER_MODELS) expect(onDisk.viewConfig.positions?.[name]).toBeUndefined();
+    expect(lastLoaded(panel).autoLayout).toBe(true);
+    // Only the model missing from the library was seeded (flat library → top level).
+    expect(fs.existsSync(path.join(lib(), 'fct_sale.yml'))).toBe(true);
+    expect(feature).toHaveBeenCalledWith('addFromDbt');
+  });
+
+  it('places new models beside existing ones in a domain that already has models', async () => {
+    const { panel, doc } = await openShowcase(root);
+    const edits = applyEditSpy.mock.calls.length;
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+    const before = JSON.parse(doc.getText());
+    const spy = pickFolder('silver');
+
+    panel._simulateMessage({ type: 'addModelsFromDbt', payload: {} });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+
+    // Models already in showcase are not offered.
+    const offered = (await spy.mock.calls[0][0] as any[]).find((i) => i.scope?.id === 'folder:silver');
+    expect(offered.scope.modelNames).toEqual(['fct_sale']);
+    expect(applyEditSpy.mock.calls.length).toBe(edits + 1);
+    const after = JSON.parse(doc.getText());
+    expect(after.logical.models).toEqual([...before.logical.models, 'fct_sale']);
+    expect(after.viewConfig.positions.fct_sale).toEqual({ x: expect.any(Number), y: expect.any(Number) });
+    expect(lastLoaded(panel).autoLayout).toBeUndefined();
+    const added = after.logical.relationships.slice(before.logical.relationships.length);
+    expect(added.every((r: any) => r.fromModel === 'fct_sale' || r.toModel === 'fct_sale')).toBe(true);
+  });
+
+  it('writes nothing when the picker is cancelled', async () => {
+    const { panel, file } = await openShowcase(root);
+    const before = fs.readFileSync(file, 'utf-8');
+    const edits = applyEditSpy.mock.calls.length;
+    const spy = vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValueOnce(undefined as any);
+
+    panel._simulateMessage({ type: 'addModelsFromDbt' });
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(applyEditSpy.mock.calls.length).toBe(edits);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('rejects a payload that carries data', async () => {
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({ type: 'addModelsFromDbt', payload: { modelNames: ['fct_sale'] } });
+    await waitForError(panel, /takes no payload/);
+  });
+
+  it('is refused on the physical stage', async () => {
+    const { panel, file } = await openShowcase(root);
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    const before = fs.readFileSync(file, 'utf-8');
+    const spy = vi.spyOn(vscode.window, 'showQuickPick');
+
+    panel._simulateMessage({ type: 'addModelsFromDbt' });
+    await waitForError(panel, new RegExp(PHYSICAL_READ_ONLY_MESSAGE.slice(0, 30)));
+    expect(spy).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+  });
+});
+
+describe('describeSkippedDbtModels', () => {
+  it('lists only the reasons worth telling the user', () => {
+    expect(describeSkippedDbtModels([
+      { name: 'a', reason: 'duplicate' },
+      { name: 'b', reason: 'already-in-domain' },
+    ])).toBe('');
+    expect(describeSkippedDbtModels([
+      { name: 'x', reason: 'not-found' },
+      { name: 'y', reason: 'disabled' },
+    ])).toBe('Left out: x (not found in dbt), y (disabled in dbt).');
+  });
+
+  it('caps the list at five names', () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({ name: `m${i}`, reason: 'over-limit' as const }));
+    expect(describeSkippedDbtModels(many)).toMatch(/and 2 more\.$/);
   });
 });

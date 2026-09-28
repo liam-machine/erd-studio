@@ -1,7 +1,8 @@
 /**
  * GettingStartedPanel — the "Welcome to ERD Studio" webview panel: the
- * getting-started video, then four step cards (your AI assistant, set up the
- * AI helper, start the guided setup, open the canvas).
+ * getting-started video, a one-line project summary, then a diagram first
+ * (Open your diagrams, or Draw from dbt — no AI needed) and the optional AI
+ * cards (your AI assistant, set up the AI helper, start the guided setup).
  *
  * A singleton, independent of the domain canvas: it has its own protocol
  * (`src/types/gettingStarted.ts`) and its own self-contained HTML — no React
@@ -29,12 +30,14 @@ import {
   SETUP_PROMPT,
   buildGettingStartedHtml,
   describeWrittenFiles,
+  formatProjectSummary,
   isGettingStartedToHost,
   setupReadyMessage,
   type ClaudeAvailability,
   type GettingStartedStatus,
   type GettingStartedToHost,
   type GettingStartedToWebview,
+  type ProjectSummary,
   type SetupOutcome,
 } from '../types/gettingStarted';
 import { GETTING_STARTED_CUES, GETTING_STARTED_TRANSCRIPT } from '../types/gettingStartedTranscript';
@@ -48,8 +51,14 @@ import {
 } from '../types/aiAssistants';
 import type { CliLauncherInstallResult, CliLauncherOptions } from '../services/cliLauncherService';
 import { telemetry } from '../services/telemetryService';
+import type { DraftModelEntry } from '../services/dbtDraft';
+import type { ManifestData } from '../types/manifest';
+import { normaliseName } from '../services/nameUtils';
+import { detectConventions, type ConventionModel } from '../cli/conventions';
 
 export const GETTING_STARTED_VIEW_TYPE = 'erdStudio.gettingStarted';
+/** The no-AI first diagram (`extension.ts`): the Welcome panel's lead button runs it. */
+export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 export const GETTING_STARTED_TITLE = 'Welcome to ERD Studio';
 
 /** Shipped media, relative to the extension root (spec addendum V4/V5). */
@@ -118,6 +127,48 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
     await vscode.env.openExternal(vscode.Uri.parse(SAMPLE_REPO_URL));
   }
   return 'fallback';
+}
+
+// ---------------------------------------------------------------------------
+// Project summary ("Found 42 dbt models · medallion layout · manifest 3 days old")
+// ---------------------------------------------------------------------------
+
+export interface ProjectSummaryInput {
+  /** `listDraftModels()` — the dbt models Draw from dbt can offer (yml ∪ manifest, minus disabled). */
+  models: readonly DraftModelEntry[];
+  /** For each model's schema (a medallion schema token counts as a layer). */
+  manifest?: ManifestData;
+  /** `readManifestMtime()`: null when there is no manifest.json; undefined when it was not checked. */
+  manifestMtime?: number | null;
+  now: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The Welcome panel's one-line picture of the project, from data the host
+ * already holds: no dbt run, no spawn, no file read here. Layering comes from
+ * the CLI's `detectConventions()` over folders, schemas and name prefixes
+ * only — the shape half needs columns and is not worth it for one line.
+ */
+export function computeProjectSummary(input: ProjectSummaryInput): ProjectSummary {
+  const schemaOf = new Map<string, string>();
+  for (const m of input.manifest?.models.values() ?? []) { schemaOf.set(normaliseName(m.name), m.schema ?? ''); }
+  const models: ConventionModel[] = input.models.map((m) => ({
+    name: m.name,
+    kind: 'model',
+    folder: m.folder ? m.folder.split('/').filter(Boolean) : [],
+    schema: schemaOf.get(normaliseName(m.name)) ?? '',
+    columnCount: 0,
+  }));
+  const style = models.length > 0 ? detectConventions({ models, packages: [], snapshots: [] }).layering.style : 'none';
+  const manifest: ProjectSummary['manifest'] = input.manifestMtime === undefined
+    ? { state: 'unknown' }
+    : input.manifestMtime === null
+      ? { state: 'absent' }
+      : { state: 'present', ageDays: Math.max(0, Math.floor((input.now - input.manifestMtime) / DAY_MS)) };
+  const fields = { modelCount: input.models.length, layering: style === 'none' ? null : style, manifest };
+  return { ...fields, line: formatProjectSummary(fields) };
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +392,7 @@ export const COPILOT_CHAT_OPEN_COMMAND = 'workbench.action.chat.open';
 
 /** Shown when a launch button is pressed before step 2 has installed the guide. */
 export const HELPER_FIRST_MESSAGE =
-  'Do step 2 first: Set up my AI helper installs the guide your assistant runs.';
+  'Set up your AI helper first: it installs the guide your assistant runs.';
 export const SETUP_HELPER_ACTION = 'Set Up My AI Helper';
 
 export const COPILOT_CHAT_OPENED_MESSAGE =
@@ -507,6 +558,11 @@ export interface GettingStartedDeps {
   workspaceFolder?: string | null;
   /** Open a domain canvas, or start the first one. */
   openCanvas(): Promise<void>;
+  /**
+   * The one-line project summary (`computeProjectSummary`). Optional: without
+   * it, or when it throws, the line is simply not shown.
+   */
+  getProjectSummary?(): Promise<ProjectSummary | null>;
 }
 
 export class GettingStartedPanel {
@@ -515,6 +571,10 @@ export class GettingStartedPanel {
 
   private deps: GettingStartedDeps;
   private readonly disposables: vscode.Disposable[] = [];
+  /** Bumped by every postStatus; a call a newer one has overtaken posts nothing more. */
+  private statusSeq = 0;
+  /** Setups in flight from this panel; no status is posted meanwhile (it would re-enable the button). */
+  private setupsRunning = 0;
 
   /** Open the panel, or reveal it (with fresh deps and status) when it is already open. */
   static createOrShow(context: vscode.ExtensionContext, deps: GettingStartedDeps): GettingStartedPanel {
@@ -579,11 +639,48 @@ export class GettingStartedPanel {
   }
 
   async postStatus(): Promise<void> {
+    const seq = ++this.statusSeq;
+    // A status render re-enables the setup button; while a setup runs, the
+    // fresh status postSetupResult sends when it ends is the one that counts.
+    const current = (): boolean => seq === this.statusSeq && this.setupsRunning === 0;
     try {
-      this.post({ type: 'status', payload: await this.deps.getStatus() });
+      const status = await this.deps.getStatus();
+      if (!current()) { return; }
+      // The cards go out at once; the summary line can need a manifest parse
+      // (seconds on a large project), so it follows in a second status when
+      // there is one, rather than holding the whole panel back. That second
+      // message is dropped if a newer postStatus (or a setup) started while
+      // the summary was being worked out — its `status` would be stale.
+      this.post({ type: 'status', payload: { ...status, summary: null } });
+      if (!status.hasProject) { return; }
+      const summary = await this.projectSummary();
+      if (summary && current()) { this.post({ type: 'status', payload: { ...status, summary } }); }
     } catch (err) {
       console.error('[GettingStarted] Status check failed:', err);
     }
+  }
+
+  /** A summary that cannot be worked out is left off the page, never an error. */
+  private async projectSummary(): Promise<ProjectSummary | null> {
+    if (!this.deps.getProjectSummary) { return null; }
+    try {
+      return await this.deps.getProjectSummary();
+    } catch (err) {
+      console.warn('[GettingStarted] Project summary unavailable:', err);
+      return null;
+    }
+  }
+
+  /** Run the setup from this panel, holding status posts back until it ends. */
+  private async runSetupFromPanel(): Promise<void> {
+    this.setupsRunning++;
+    let outcome: SetupOutcome;
+    try {
+      outcome = await this.deps.runSetup();
+    } finally {
+      this.setupsRunning--;
+    }
+    await this.postSetupResult(outcome);
   }
 
   /** Show a setup outcome (from the panel's button or the palette command) and refresh the cards. */
@@ -607,7 +704,7 @@ export class GettingStartedPanel {
     if (helper !== 'missing') { return true; }
     const pick = await vscode.window.showInformationMessage(HELPER_FIRST_MESSAGE, SETUP_HELPER_ACTION);
     if (pick === SETUP_HELPER_ACTION) {
-      await this.postSetupResult(await this.deps.runSetup());
+      await this.runSetupFromPanel();
     }
     return false;
   }
@@ -625,7 +722,7 @@ export class GettingStartedPanel {
         await this.postStatus();
         break;
       case 'setupAiHelper':
-        await this.postSetupResult(await this.deps.runSetup());
+        await this.runSetupFromPanel();
         break;
       case 'copyPrompt':
         await vscode.env.clipboard.writeText(this.deps.clipboardText(msg.assistant ?? 'claude'));
@@ -642,6 +739,11 @@ export class GettingStartedPanel {
         break;
       case 'openDomain':
         await this.deps.openCanvas();
+        break;
+      case 'drawFromDbt':
+        await vscode.commands.executeCommand(DRAW_FROM_DBT_COMMAND);
+        // The draft opens in its own tab; this one should now lead with "Open your diagrams".
+        await this.postStatus();
         break;
       case 'openExternal':
         await vscode.env.openExternal(vscode.Uri.parse(GETTING_STARTED_EXTERNAL_URLS[msg.target]));

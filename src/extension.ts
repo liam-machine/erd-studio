@@ -49,10 +49,14 @@ import {
   SETUP_CANCELLED_MESSAGE,
   TRY_SAMPLE_COMMAND,
   trySampleProject,
+  computeProjectSummary,
   type GettingStartedDeps,
 } from './providers/GettingStartedPanel';
+import { listDraftModels } from './services/dbtDraft';
+import { readManifestMtime } from './services/manifestStaleness';
 import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
 import { assistantInfo } from './types/aiAssistants';
+import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -90,6 +94,34 @@ export const GETTING_STARTED_PENDING_KEY = 'erdStudio.gettingStartedPending';
  * (typically the sample project the no-project panel offered).
  */
 export const GETTING_STARTED_NO_PROJECT_SHOWN_KEY = 'erdStudio.gettingStartedShownNoProject';
+
+/**
+ * The contributed walkthrough (package.json `contributes.walkthroughs`), as
+ * `workbench.action.openWalkthrough` names it: `<publisher>.<name>#<id>`.
+ */
+export const WALKTHROUGH_ID = 'liamwynne.erd-studio#erdStudio.getStarted';
+
+/**
+ * workspaceState: the one-time "This project has N ERD Studio diagrams"
+ * notice has been shown in this workspace.
+ */
+export const DIAGRAMS_NUDGE_SHOWN_KEY = 'erdStudio.diagramsNudgeShown';
+
+/** Status bar item id (also the id users see in "Hide 'ERD Studio diagrams'"). */
+export const DIAGRAMS_STATUS_ID = 'erdStudio.diagrams';
+
+/**
+ * Open the Get Started walkthrough. A host without the command (a fork, an
+ * older build) gets the Welcome panel instead.
+ */
+async function openWalkthrough(fallback: () => void): Promise<void> {
+  try {
+    await vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH_ID, false);
+  } catch (err) {
+    console.warn('[ERD Studio] Could not open the walkthrough, showing the Welcome panel instead:', err);
+    fallback();
+  }
+}
 
 /**
  * One automatic open per extension host, even if activation runs twice. Two
@@ -280,6 +312,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.showGettingStarted',
   'erdStudio.trySampleProject',
   'erdStudio.setupAiHelper',
+  'erdStudio.drawFromDbt',
   'erdStudio.setFeedbackApiKey',
   'erdStudio.clearFeedbackApiKey',
   'erdStudio.refreshMyReports',
@@ -349,6 +382,36 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
 // ---------------------------------------------------------------------------
 // Shared helper functions
 // ---------------------------------------------------------------------------
+
+/**
+ * Modification times closer together than this are treated as one checkout:
+ * git keeps no mtimes, so a fresh clone stamps every file within moments and
+ * "the newest" would only be checkout order.
+ */
+export const SAME_CHECKOUT_WINDOW_MS = 5_000;
+
+/**
+ * The domain whose file changed last (the only one, when there is one);
+ * undefined for none. When every file's mtime falls within
+ * `SAME_CHECKOUT_WINDOW_MS` — a fresh clone — the first domain in list (tree)
+ * order is returned instead of an arbitrary checkout-order pick.
+ */
+export function mostRecentlyModified(domains: readonly DomainSummary[]): DomainSummary | undefined {
+  let best: DomainSummary | undefined;
+  let bestTime = -Infinity;
+  let oldest = Infinity;
+  for (const d of domains) {
+    let time = 0;
+    try { time = fs.statSync(d.filePath).mtimeMs; } catch { /* unreadable: oldest */ }
+    oldest = Math.min(oldest, time);
+    if (best === undefined || time > bestTime) {
+      best = d;
+      bestTime = time;
+    }
+  }
+  if (domains.length > 1 && bestTime - oldest < SAME_CHECKOUT_WINDOW_MS) { return domains[0]; }
+  return best;
+}
 
 function findMatchingTabs(fileUri: vscode.Uri): vscode.Tab[] {
   const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
@@ -600,20 +663,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // welcome buttons explain the problem instead of "command not found".
     registerFallbackCommands(context);
     // A fresh install first activated without a dbt project (usually by
-    // clicking the ERD Studio icon) still starts on the Welcome panel: it
-    // plays the video, offers the sample project and says how to open one.
+    // clicking the ERD Studio icon) still starts on the Get Started
+    // walkthrough: the video, the sample project and how to open one.
     const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
     if (pending && !context.globalState.get<boolean>(GETTING_STARTED_NO_PROJECT_SHOWN_KEY) && !gettingStartedAutoOpened) {
       gettingStartedAutoOpened = true;
       await context.globalState.update(GETTING_STARTED_NO_PROJECT_SHOWN_KEY, true);
-      GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps());
-      return; // the panel explains the missing project; no warning toast on top
+      await openWalkthrough(() => GettingStartedPanel.createOrShow(context, noProjectGettingStartedDeps()));
     }
-    void vscode.window.showWarningMessage(NO_PROJECT_MESSAGE, 'Open Settings').then(choice => {
-      if (choice === 'Open Settings') {
-        void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
-      }
-    });
+    // No toast for the ordinary case: a window without dbt_project.yml is
+    // normal (the extension activates on any of its commands), and the
+    // sidebar's welcome view already says how to open a project. An explicit
+    // erdStudio.projectPath that points nowhere is a mistake, though, and is
+    // still reported.
+    if (projectResolution.invalidSetting !== undefined) {
+      void vscode.window.showWarningMessage(
+        `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" does not contain dbt_project.yml.`,
+        'Open Settings',
+      ).then(choice => {
+        if (choice === 'Open Settings') {
+          void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
+        }
+      });
+    }
     return;
   }
 
@@ -800,11 +872,53 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // the extension itself creates it (createDomain, addLayer, setup), so the
   // "+ Add Layer" / "Install Harness" buttons appear without a window reload.
   const fullSemanticDirPath = path.join(workspaceRoot, semanticDir);
+
+  // "ERD N" in the status bar while the project has diagrams: one click from
+  // any file back to a canvas. Kept current by refreshContextKeys(), which
+  // every create / delete / external-change path already calls.
+  const diagramsStatus = vscode.window.createStatusBarItem(DIAGRAMS_STATUS_ID, vscode.StatusBarAlignment.Left, -100);
+  diagramsStatus.name = 'ERD Studio diagrams';
+  diagramsStatus.tooltip = 'Open an ERD Studio diagram';
+  diagramsStatus.command = 'erdStudio.openDomain';
+  context.subscriptions.push(diagramsStatus);
+  const refreshDiagramsStatus = (): void => {
+    const count = domainService.listDomains(workspaceRoot, semanticDir).length;
+    if (count === 0) {
+      diagramsStatus.hide();
+      return;
+    }
+    diagramsStatus.text = `$(type-hierarchy) ERD ${count}`;
+    diagramsStatus.show();
+  };
+
   const refreshContextKeys = (): void => {
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasSemanticDir', fs.existsSync(fullSemanticDirPath));
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir', logicalModelService.dirExists());
+    refreshDiagramsStatus();
   };
   refreshContextKeys();
+
+  // "Open a domain" (Welcome panel, status bar, palette): straight in when
+  // there is one, a pick when there are several, the create flow when none.
+  const openCanvas = async (): Promise<void> => {
+    const domains = domainService.listDomains(workspaceRoot, semanticDir);
+    if (domains.length === 0) {
+      await vscode.commands.executeCommand(
+        fs.existsSync(fullSemanticDirPath) ? 'erdStudio.createDomain' : 'erdStudio.setupSemanticDirectory',
+      );
+      return;
+    }
+    let target = domains[0];
+    if (domains.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        domains.map((d) => ({ label: d.domain, description: d.layer, summary: d })),
+        { placeHolder: 'Open which domain?' },
+      );
+      if (!picked) { return; }
+      target = picked.summary;
+    }
+    await vscode.commands.executeCommand('erdStudio.openDomain', target.filePath);
+  };
   telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), domainService.listDomains(workspaceRoot, semanticDir).length);
 
   // Surface a broken layers.json once per distinct error. LayerService falls
@@ -1300,7 +1414,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(node.filePath));
     }),
-    vscode.commands.registerCommand('erdStudio.openDomain', async (filePath: string, stage?: Stage) => {
+    vscode.commands.registerCommand('erdStudio.openDomain', async (filePath?: string, stage?: Stage) => {
+      // From the palette or the status bar there is no file: ask which.
+      if (typeof filePath !== 'string' || !filePath) {
+        await openCanvas();
+        return;
+      }
       const fileUri = vscode.Uri.file(filePath);
       await vscode.commands.executeCommand(
         'vscode.openWith',
@@ -1310,6 +1429,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (stage === 'physical') {
         editorProvider.switchStageForUri(fileUri, 'physical');
       }
+    }),
+    vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async () => {
+      const existingDomains = () => domainService.listDomains(workspaceRoot, semanticDir);
+      await drawFromDbt({
+        workspaceRoot,
+        semanticDir,
+        modelPaths: dbtConfig.modelPaths,
+        layerService,
+        domainService,
+        logicalModelService,
+        loadDbt: async () => {
+          const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
+          const manifest = await manifestService.loadManifest(workspaceRoot);
+          return { ymlData, manifest: manifestService.isMissing ? undefined : manifest };
+        },
+        validateDomainName: (value, layer) => validateDomainSlug(value, layer, existingDomains()),
+        onWritten: ({ domainPath, modelNames }) => {
+          // Every file was recorded as an own write, so the watchers stay
+          // quiet; issue their refreshes here, as createDomain does.
+          layerService.invalidateCache();
+          treeProvider.invalidateDomain(domainPath);
+          treeProvider.refresh();
+          if (modelNames.length > 0) { modelLibraryProvider.refresh(); }
+          // A new model file may be one an open diagram already references
+          // (a placeholder until now); the model watcher skipped the own write.
+          for (const name of modelNames) { void editorProvider.refreshDomainsReferencingModel(name); }
+          layerDecorationProvider.refresh();
+          decorationProvider.refresh();
+          refreshContextKeys();
+          selectorsService.scheduleRegenerate();
+        },
+      });
     }),
     vscode.commands.registerCommand(
       'erdStudio.createDomain',
@@ -1466,6 +1617,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
 
         treeProvider.refresh();
+        refreshDiagramsStatus();
         selectorsService.scheduleRegenerate();
       },
     ),
@@ -2136,28 +2288,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return outcome;
   };
 
-  // "Open a domain" from the panel: straight in when there is one, a pick when
-  // there are several, and the create flow when there are none yet.
-  const openCanvas = async (): Promise<void> => {
-    const domains = domainService.listDomains(workspaceRoot, semanticDir);
-    if (domains.length === 0) {
-      await vscode.commands.executeCommand(
-        fs.existsSync(fullSemanticDirPath) ? 'erdStudio.createDomain' : 'erdStudio.setupSemanticDirectory',
-      );
-      return;
-    }
-    let target = domains[0];
-    if (domains.length > 1) {
-      const picked = await vscode.window.showQuickPick(
-        domains.map((d) => ({ label: d.domain, description: d.layer, summary: d })),
-        { placeHolder: 'Open which domain?' },
-      );
-      if (!picked) { return; }
-      target = picked.summary;
-    }
-    await vscode.commands.executeCommand('erdStudio.openDomain', target.filePath);
-  };
-
   gettingStartedDeps = {
     workspaceRoot,
     semanticDir,
@@ -2166,6 +2296,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     clipboardText: setupClipboardText,
     workspaceFolder: projectWorkspaceFolder,
     openCanvas,
+    // One text line above the Welcome panel's cards ("12 dbt models · medallion
+    // layout · manifest 2 days old"). Reads what the canvas already caches;
+    // a missing manifest is fine and is reported as such, never an error.
+    getProjectSummary: async () => {
+      const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
+      const loaded = await manifestService.loadManifest(workspaceRoot);
+      const manifest = manifestService.isMissing ? undefined : loaded;
+      return computeProjectSummary({
+        models: listDraftModels({ ymlData, manifest, projectRoot: workspaceRoot, modelPaths: dbtConfig.modelPaths }),
+        manifest,
+        manifestMtime: readManifestMtime(workspaceRoot, dbtConfig),
+        now: Date.now(),
+      });
+    },
   };
 
   context.subscriptions.push(
@@ -2203,11 +2347,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // First run (spec C.5, addendum P4). A fresh install opens the Welcome panel
-  // once per machine and skips this run's harness QuickPick (the panel offers
-  // the one-click setup instead); an upgrader gets one non-modal notice. The
-  // "shown" flag is written BEFORE the panel opens so a crash cannot loop.
+  // First run (spec C.5, addendum P4). A fresh install opens the Get Started
+  // walkthrough once per machine (the Welcome panel where the host has no
+  // walkthrough command) and skips this run's harness QuickPick (the
+  // walkthrough offers Draw from dbt and the one-click setup instead); an
+  // upgrader gets one non-modal notice. The "shown" flag is written BEFORE the
+  // walkthrough opens so a crash cannot loop.
   let suppressHarnessQuickPick = false;
+  let firstRunNoticeShown = false;
   {
     const pending = context.globalState.get<boolean>(GETTING_STARTED_PENDING_KEY) === true;
     const shown = context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY) === true;
@@ -2216,12 +2363,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       suppressHarnessQuickPick = true;
       await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
       await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
-      GettingStartedPanel.createOrShow(context, gettingStartedDeps);
+      const deps = gettingStartedDeps;
+      await openWalkthrough(() => GettingStartedPanel.createOrShow(context, deps));
     } else if (pending && shown) {
       // Another window got there first.
       await context.globalState.update(GETTING_STARTED_PENDING_KEY, undefined);
     } else if (!pending && !shown) {
       await context.globalState.update(GETTING_STARTED_SHOWN_KEY, true);
+      firstRunNoticeShown = true;
       void vscode.window.showInformationMessage(
         'ERD Studio: new short getting-started video and a guided setup for your AI assistant ' +
           '(Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor).',
@@ -2236,6 +2385,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // AI coding harness — prompt to update stale files; offer install once per
   // workspace when none are present. Never overwrite anything silently:
   // harness files (AGENTS.md in particular) can hold user content.
+  let harnessPromptShown = false;
   {
     const harnessService = new HarnessService(semanticDir);
     const existing = harnessService.detectExisting(workspaceRoot);
@@ -2243,6 +2393,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const staleTargets = harnessService.detectStale(workspaceRoot);
 
     if (staleTargets.length > 0) {
+      harnessPromptShown = true;
       const names = staleTargets.map(t => t.label.replace(/\$\([^)]+\)\s*/g, '')).join(', ');
       void vscode.window.showWarningMessage(
         `ERD Studio: ${staleTargets.length} AI coding harness file(s) outdated (${names}). Update to v${HARNESS_VERSION}?`,
@@ -2276,8 +2427,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ) {
       // No harnesses installed — offer the QuickPick once per workspace, not
       // on every window open. The command stays available in the palette.
+      harnessPromptShown = true;
       void context.workspaceState.update(HARNESS_INSTALL_PROMPTED_KEY, true);
       void vscode.commands.executeCommand('erdStudio.installCodingHarness');
+    }
+  }
+
+  // Existing diagrams, once per workspace: a teammate's clone already holds
+  // .erd-studio/ domains the user may never have seen. Not on the walkthrough
+  // run, beside the upgrade notice or beside either harness prompt above (one
+  // prompt at a time; the flag stays unset, so it comes next time), and not
+  // when a canvas is already open.
+  // Writes nothing to the workspace.
+  if (
+    !suppressHarnessQuickPick &&
+    !firstRunNoticeShown &&
+    !harnessPromptShown &&
+    !context.workspaceState.get<boolean>(DIAGRAMS_NUDGE_SHOWN_KEY) &&
+    !hasOpenDomainCanvas()
+  ) {
+    const domains = domainService.listDomains(workspaceRoot, semanticDir);
+    const latest = mostRecentlyModified(domains);
+    if (latest) {
+      await context.workspaceState.update(DIAGRAMS_NUDGE_SHOWN_KEY, true);
+      const open = `Open ${latest.domain}`;
+      void vscode.window.showInformationMessage(
+        `This project has ${domains.length} ERD Studio diagram${domains.length === 1 ? '' : 's'}.`,
+        open,
+        'Not now',
+      ).then((choice) => {
+        if (choice === open) { void vscode.commands.executeCommand('erdStudio.openDomain', latest.filePath); }
+      });
     }
   }
 

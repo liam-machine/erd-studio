@@ -121,6 +121,19 @@ import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
+import {
+  buildDbtDraft,
+  dbtTestsOf,
+  listDraftModels,
+  listDraftScopes,
+  markDraftKeys,
+  relationshipsForAddedModels,
+  seedModelFromDbt,
+  type DraftSkipped,
+} from '../services/dbtDraft';
+import { pickDraftScope } from './dbtDraftPicker';
+import { readDbtProjectConfig } from '../services/dbtProjectConfig';
+import { normaliseName } from '../services/nameUtils';
 
 /**
  * Backoff between re-reads of a domain file that read as empty or truncated.
@@ -164,6 +177,28 @@ interface ModelFileSave {
    * the new path instead of being regenerated from scratch.
    */
   fromName?: string;
+}
+
+/** Why a chosen dbt model was left out of a batch add, in words. */
+const DRAFT_SKIP_WORDS: Partial<Record<DraftSkipped['reason'], string>> = {
+  'invalid-name': 'name cannot be used as a file name',
+  'not-found': 'not found in dbt',
+  disabled: 'disabled in dbt',
+  'over-limit': 'over the limit for one add',
+};
+
+/**
+ * One sentence naming the chosen models a batch "Add models from dbt" left
+ * out, or `''` when nothing worth mentioning was. Duplicates and models
+ * already in the domain are the expected case and are not listed.
+ */
+export function describeSkippedDbtModels(skipped: readonly DraftSkipped[]): string {
+  const parts = skipped
+    .filter((s) => DRAFT_SKIP_WORDS[s.reason])
+    .map((s) => `${s.name} (${DRAFT_SKIP_WORDS[s.reason]})`);
+  if (parts.length === 0) return '';
+  const shown = parts.slice(0, 5).join(', ');
+  return `Left out: ${shown}${parts.length > 5 ? ` and ${parts.length - 5} more` : ''}.`;
 }
 
 /**
@@ -248,6 +283,7 @@ import {
   validateModelName,
   validateModelAliasPayload,
   validateAnnotationPositions,
+  validateAddModelsFromDbtPayload,
   validateAnnotationUpdate,
   validateModelNameSafety,
   validatePoint,
@@ -939,6 +975,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               await this.queueEdit(panelKey, () =>
                 this.handleAddExistingModel(document, webviewPanel.webview, payload, activeStage));
             }
+            break;
+          }
+          case 'addModelsFromDbt': {
+            // Logical only: not in NON_MUTATION_TYPES, so the physical guard
+            // above has already refused it there. The QuickPick runs outside
+            // the edit queue (it can stay open for a while); the edit itself
+            // is queued and re-reads the document.
+            const payloadError = validateAddModelsFromDbtPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add models from dbt: ${payloadError}` } });
+              break;
+            }
+            await this.handleAddModelsFromDbt(document, webviewPanel.webview, panelKey);
             break;
           }
           case 'refreshManifest': {
@@ -1779,7 +1828,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           welcomeDismissed,
           ...(autoLayout ? { autoLayout: true } : {}),
         });
-        if (options.persistPositions) this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
+        if (options.persistPositions) {
+          this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
+          if (displayDomain.models.length === 0) telemetry.feature('emptyCanvas');
+        }
         if (autoLayout) telemetry.feature('autoLayout');
       }
       // A payload went out, so the next failure is news again.
@@ -3222,62 +3274,43 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
 
         // Seed the logical model from yml (primary) or the manifest (fallback)
-        // when it is not in the library yet. The file is NOT written here — it
-        // rides in the same WorkspaceEdit as the domain change below, so a
-        // rejected edit leaves no orphan yml behind and one undo removes both.
+        // when it is not in the library yet — the same seeding Draw from dbt
+        // uses (`seedModelFromDbt`). The file is NOT written here — it rides
+        // in the same WorkspaceEdit as the domain change below, so a rejected
+        // edit leaves no orphan yml behind and one undo removes both.
+        const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+        const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
         let seededModel: import('../types/semantic').SemanticModel | undefined;
         if (!this.logicalModelService.modelExists(payload.modelName)) {
-          const seedYmlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
-          const ymlModel = seedYmlData.models.get(payload.modelName);
-          if (ymlModel) {
-            seededModel = this.logicalModelService.ymlToSemanticModel(ymlModel);
-          } else {
-            const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
-            const manifestModel = manifest.models.get(payload.modelName);
-            if (manifestModel) {
-              seededModel = this.logicalModelService.manifestToSemanticModel(manifestModel);
-            }
-          }
-          if (!seededModel) {
+          const seed = seedModelFromDbt(payload.modelName, ymlData, manifest);
+          if (!seed) {
             webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found in .yml files, manifest, or logical-models/.` } });
             return;
           }
+          seededModel = { ...seed, name: payload.modelName };
         }
 
-        // Add name reference + position + auto-relationships to domain
-        // Use yml relationship tests as primary, fall back to manifest
-        const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
-        await this.manifestService.loadManifest(this.workspaceRoot);
-        const manifestRelTests = this.manifestService.getRelationshipTests();
-        const relationshipTests = ymlData.relationshipTests.length > 0
-          ? ymlData.relationshipTests
-          : manifestRelTests;
+        // Relationships from the yml and manifest relationship tests together,
+        // with cardinality from the unique tests (one-to-one when both ends
+        // are unique), limited to edges whose other end is in this domain.
+        const tests = dbtTestsOf(ymlData, manifest);
+        const existingRelationships = (section.relationships ?? []) as Relationship[];
+        const added = relationshipsForAddedModels(
+          modelNames,
+          [payload.modelName],
+          tests.relationshipTests,
+          tests.unique,
+          existingRelationships,
+        );
+        if (seededModel) seededModel = markDraftKeys(seededModel, tests.unique, added);
 
         const success = await this.applyDomainEdit(
           document,
           (sec, p) => {
             const names = (sec.models ?? []) as string[];
             names.push(payload.modelName);
-
-            // Auto-create relationships from manifest tests
-            const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
-            const allNames = new Set(names);
-            for (const test of relationshipTests) {
-              if (test.fromModel !== payload.modelName && test.toModel !== payload.modelName) continue;
-              if (!allNames.has(test.fromModel) || !allNames.has(test.toModel)) continue;
-              const alreadyExists = relationships.some(
-                (r) => r.fromModel === test.fromModel && r.fromColumn === test.fromColumn &&
-                        r.toModel === test.toModel && r.toColumn === test.toColumn,
-              );
-              if (!alreadyExists) {
-                relationships.push({
-                  fromModel: test.fromModel, fromColumn: test.fromColumn,
-                  toModel: test.toModel, toColumn: test.toColumn,
-                  cardinality: 'many-to-one',
-                });
-              }
-            }
-            sec.relationships = relationships;
+            sec.models = names;
+            sec.relationships = [...((sec.relationships ?? []) as Relationship[]), ...added];
 
             // Add position
             const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
@@ -3393,6 +3426,153 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add existing model failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add model: ${message}` } });
+    }
+  }
+
+  /**
+   * "Add models from dbt" — the empty canvas's primary action, a batch version
+   * of Add Existing Model. Asks which dbt models with the Draw from dbt picker
+   * (models already in the domain left out), seeds the ones the library lacks
+   * from dbt's yml / manifest and adds names, relationships and new library
+   * files in ONE `applyDomainEdit` — one save, one refresh, one undo step.
+   *
+   * An empty domain is left with no stored position for any model, so it is
+   * a fresh layout: the refresh carries `autoLayout: true` and the webview
+   * runs the same ELK layout as the Layout button. A domain that already has
+   * models gets host placement for the new ones instead.
+   *
+   * Cancelling the picker writes and posts nothing.
+   */
+  private async handleAddModelsFromDbt(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    panelKey: string,
+  ): Promise<void> {
+    try {
+      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      if (!this.isDomainV5(parsed)) {
+        this.post(webview, {
+          type: 'error',
+          payload: { message: 'Adding models from dbt needs the central model store. Run "ERD Studio: Migrate Domains to Central Model Store" first.' },
+        });
+        return;
+      }
+      const inDomain = (this.getStageSection(parsed, 'logical').models ?? []) as string[];
+
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const source = {
+        ymlData,
+        manifest,
+        projectRoot: this.workspaceRoot,
+        modelPaths: readDbtProjectConfig(this.workspaceRoot).modelPaths,
+        layerIds: this.layerService.getValidLayerIds(),
+      };
+      const models = listDraftModels(source);
+      if (models.length === 0) {
+        void vscode.window.showInformationMessage(
+          'No dbt models with columns were found. Describe your models in a schema .yml, or run dbt parse, then try again.',
+        );
+        return;
+      }
+      const excluded = new Set(inDomain.map(normaliseName));
+      if (models.every((m) => excluded.has(normaliseName(m.name)))) {
+        void vscode.window.showInformationMessage('Every dbt model is already in this diagram.');
+        return;
+      }
+
+      const pick = await pickDraftScope(listDraftScopes(source), {
+        models,
+        excludeNames: inDomain,
+        title: 'Add models from dbt',
+      });
+      if (!pick) return;
+
+      await this.queueEdit(panelKey, () =>
+        this.applyDbtModels(document, webview, pick.modelNames, ymlData, manifest));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Add models from dbt failed: ${message}`);
+      this.post(webview, { type: 'error', payload: { message: `Failed to add models from dbt: ${message}` } });
+    }
+  }
+
+  /** The queued half of {@link handleAddModelsFromDbt}: build the draft against the current document and write it. */
+  private async applyDbtModels(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    modelNames: readonly string[],
+    ymlData: YmlData,
+    manifest: ManifestData,
+  ): Promise<void> {
+    try {
+      // Re-read inside the queue: an edit may have landed while the picker was open.
+      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      const section = this.getStageSection(parsed, 'logical');
+      const existingNames = (section.models ?? []) as string[];
+      const draft = buildDbtDraft({
+        modelNames,
+        ymlData,
+        manifest,
+        libraryHas: (name) => this.logicalModelService.modelExists(name),
+        existingModelNames: existingNames,
+        existingRelationships: (section.relationships ?? []) as Relationship[],
+      });
+      const skippedNote = describeSkippedDbtModels(draft.skipped);
+      if (draft.modelNames.length === 0) {
+        this.post(webview, {
+          type: 'error',
+          payload: { message: `No models were added from dbt.${skippedNote ? ` ${skippedNote}` : ''}` },
+        });
+        return;
+      }
+
+      await this.applyDomainEdit(
+        document,
+        (sec, p) => {
+          const names = (sec.models ?? []) as string[];
+          const wasEmpty = names.length === 0;
+          names.push(...draft.modelNames);
+          sec.models = names;
+          const relationships = [...((sec.relationships ?? []) as Relationship[]), ...draft.relationships];
+          sec.relationships = relationships;
+
+          const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
+          const positions = { ...((vc.positions ?? {}) as Record<string, NodePosition>) };
+          if (wasEmpty) {
+            // Keep it a fresh layout (isFreshLayout): no stored position for
+            // any model, so the refresh asks the webview for an ELK layout.
+            for (const name of draft.modelNames) delete positions[name];
+            if (vc.positions !== undefined) vc.positions = positions;
+          } else {
+            vc.positions = {
+              ...positions,
+              ...computeNewModelPositions({ newModels: draft.modelNames, relationships, existingPositions: positions }),
+            };
+          }
+          p.viewConfig = vc;
+        },
+        {
+          webview,
+          stage: 'logical',
+          errorLabel: 'Failed to add models from dbt.',
+          ...(draft.newModels.length > 0 ? { modelFiles: { save: draft.newModels.map((model) => ({ model })) } } : {}),
+          onSuccess: () => {
+            telemetry.feature('addFromDbt');
+            this.selectorsService.scheduleRegenerate();
+            if (skippedNote) {
+              const added = draft.modelNames.length;
+              void vscode.window.showInformationMessage(
+                `Added ${added} model${added === 1 ? '' : 's'} from dbt. ${skippedNote}`,
+              );
+            }
+          },
+        },
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SemanticEditorProvider] Add models from dbt failed: ${message}`);
+      this.post(webview, { type: 'error', payload: { message: `Failed to add models from dbt: ${message}` } });
     }
   }
 

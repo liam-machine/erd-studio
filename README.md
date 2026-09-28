@@ -5,32 +5,44 @@
 <h1 align="center">ERD Studio</h1>
 
 <p align="center">
-  <strong>Your data model, in your repo.</strong><br />
-  Design visually. Build with AI. Review alongside your code.
-</p>
-
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/version-short/liamwynne.erd-studio.svg" alt="VS Marketplace Version" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/installs-short/liamwynne.erd-studio.svg" alt="Installs" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/rating-short/liamwynne.erd-studio.svg" alt="Rating" /></a>
-  <a href="https://open-vsx.org/extension/liamwynne/erd-studio"><img src="https://img.shields.io/open-vsx/v/liamwynne/erd-studio?label=Open%20VSX&color=a60ee5" alt="Open VSX Version" /></a>
-  <a href="https://open-vsx.org/extension/liamwynne/erd-studio"><img src="https://img.shields.io/open-vsx/dt/liamwynne/erd-studio?label=Open%20VSX%20downloads&color=a60ee5" alt="Open VSX Downloads" /></a>
-  <a href="https://github.com/liam-machine/erd-studio"><img src="https://img.shields.io/github/stars/liam-machine/erd-studio?style=flat&logo=github&label=Star&color=0078d4" alt="GitHub stars" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Shield-0078d4" alt="License: PolyForm Shield 1.0.0" /></a>
-</p>
-
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><strong>Install for VS Code</strong></a> &bull; <a href="https://open-vsx.org/extension/liamwynne/erd-studio"><strong>Open VSX</strong></a> (VSCodium, Cursor, Windsurf) &bull; Free to use, source available
+  <strong>Your dbt data model, in your repo.</strong><br />
+  Draw it from dbt in a minute. Design visually. Review it alongside your code.
 </p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio open in VS Code, showing four views of the same star schema. Logical stage: dim_customer, dim_date, dim_project and dim_task around the fct_order and fct_task_event facts, each dimension showing a PK surrogate key and an NK business key. Detail panel: dim_customer's columns, role and relationships opened for editing. Physical stage: the same diagram in green, built from the dbt project with the warehouse's own column types. Discrepancy overlay: columns that exist only in the design struck through against those only in the warehouse." />
 </p>
 
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/badge/Install%20in%20VS%20Code-0e639c?style=for-the-badge" alt="Install in VS Code" /></a>
+  <a href="https://github.com/liam-machine/erd-studio-sample"><img src="https://img.shields.io/badge/Try%20the%20sample%20project-0e639c?style=for-the-badge" alt="Try the sample dbt project" /></a>
+  <a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4"><img src="https://img.shields.io/badge/Watch%20the%202--min%20tour-0e639c?style=for-the-badge" alt="Watch the 2-minute tour" /></a>
+</p>
+
+<p align="center">
+  <strong>Have a dbt project?</strong> Install, open it, and run <strong>Draw from dbt</strong> — a diagram in under a minute, no AI needed.<br />
+  <strong>No dbt project?</strong> <a href="https://github.com/liam-machine/erd-studio-sample">Try the sample project</a>.
+</p>
+
+<p align="center">
+  <sub>Reading on your phone? <a href="https://github.com/liam-machine/erd-studio">★ Star the repo</a> or <a href="mailto:?subject=Try%20ERD%20Studio%20for%20dbt&amp;body=https%3A%2F%2Fgithub.com%2Fliam-machine%2Ferd-studio">email yourself the link</a>.</sub>
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/version-short/liamwynne.erd-studio.svg" alt="VS Marketplace Version" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://vsmarketplacebadges.dev/installs-short/liamwynne.erd-studio.svg" alt="Installs" /></a>
+  <a href="https://open-vsx.org/extension/liamwynne/erd-studio"><img src="https://img.shields.io/open-vsx/v/liamwynne/erd-studio?label=Open%20VSX&color=a60ee5" alt="Open VSX Version" /></a>
+</p>
+
+<p align="center">
+  Also on <a href="https://open-vsx.org/extension/liamwynne/erd-studio">Open VSX</a> for VSCodium, Cursor and Windsurf &bull; Free to use, source available under the <a href="https://github.com/liam-machine/erd-studio/blob/main/LICENSE">PolyForm Shield License</a>
+</p>
+
 ERD Studio brings visual data modelling into VS Code. Keep your diagrams and design decisions in your code repo, give your AI assistant the context to build from them, and review design changes alongside the SQL.
 
 ## Why use ERD Studio?
 
+- **Start from the dbt project you have.** **Draw from dbt** turns your existing models into a first diagram in under a minute, with no AI and no setup.
 - **Give AI a design to build from.** Capture grain, keys, relationships, and the reasoning behind them. Your assistant can use that context to draft dbt models and tests.
 - **Review the model before the SQL.** Design on the canvas or ask your AI to propose a schema, then inspect and refine it visually.
 - **See where design and dbt disagree.** Compare your logical model with your dbt schema and manifest. Missing columns, type differences, and relationship mismatches appear on the canvas. Generate a sync plan for your assistant to apply the changes you choose.
@@ -43,7 +55,7 @@ Traditional ERD tools such as [erwin](https://bookshelf.erwin.com/bookshelf/publ
 
 The whole logical model is just two kinds of file: **one YAML per model, one JSON per diagram.** ERD Studio reads them and renders the canvas.
 
-![Your data model lives in the repo; the canvas is a view over it. Left: the VS Code Explorer for a dbt project. Its .erd-studio folder, marked design, holds one YAML per logical model and one JSON per diagram, next to the models and target folders, marked code and warehouse, where fct_order.sql is modified. The design files render and save as the ERD Studio Logical canvas, in blue: dim_customer joined one to many to fct_order, which has order_total. The dbt project derives the read-only Physical canvas, in green, never written to disk. Comparing the two finds two differences: order_amt is highlighted as only in the warehouse and order_total struck through as logical only, because the column was renamed in the SQL but not the design. The fix is a one-line change to fct_order.yml in the same pull request.](media/readme-workflow.png)
+![Your data model lives in the repo; the canvas is a view over it. Left: the VS Code Explorer for a dbt project. Its .erd-studio folder, marked design, holds one YAML per logical model and one JSON per diagram, next to the models and target folders, marked code and warehouse, where fct_order.sql is modified. The design files render and save as the ERD Studio Logical canvas, in blue: dim_customer joined one to many to fct_order, which has order_total. The dbt project derives the read-only Physical canvas, in green, never written to disk. Comparing the two finds two differences: order_amt is highlighted as only in the warehouse and order_total struck through as logical only, because the column was renamed in the SQL but not the design. The fix is a one-line change to fct_order.yml in the same pull request.](https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/readme-workflow.png)
 
 Edit on the canvas and those same files update. Edit them yourself or with AI and the canvas updates. Models are shared across diagrams, and everything stays in Git. No ERD Studio account, database, or server required.
 
@@ -61,11 +73,21 @@ Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logi
 
 <a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="640" alt="Getting-started video: a short tour from a dbt project to a checked ERD with your AI assistant. Click to watch." /></a>
 
-**New to ERD Studio?** [Watch the short getting-started video](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4). After you install, ERD Studio opens a **Welcome** tab the first time you use it, with the same video and a short setup checklist. Open it again any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
+**Your first diagram, no AI needed:**
 
-**No dbt project yet?** Try the [ERD Studio sample project](https://github.com/liam-machine/erd-studio-sample): a small Kimball-style dbt project with fake coffee-shop data that runs on your computer (DuckDB, no account needed). It ships its dbt artifacts, so both the Logical and Physical views work without installing dbt. Run **ERD Studio: Try the Sample Project** (also on the Welcome tab) and VS Code clones it to a folder you choose and offers to open it, or use **Code → Download ZIP** on GitHub and open the unzipped folder.
+1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) and open your dbt project in VS Code. On a first install the **Get started with ERD Studio** walkthrough opens and takes you through the next steps.
+2. Run **Draw from dbt**, from the walkthrough or the Command Palette (**ERD Studio: Draw from dbt…**). ERD Studio copies your dbt models into a logical draft and opens it, laid out automatically.
+3. Edit the draft on the canvas, and switch between **Logical** and **Physical** to compare your design with what dbt has.
 
-**Quickest route, with your AI assistant:** click **Set Up My AI Helper** on the Welcome tab, or run **ERD Studio: Set Up My AI Helper**. It installs a guided setup for the AI assistants it finds on your computer, then shows exactly what to type in each. Start your assistant in your dbt project folder and:
+The draft is a starting point for your design: it is saved as ordinary ERD Studio files you can change, and the Physical view is still read from dbt every time, never saved. An empty diagram offers an **Add models from dbt** button that does the same for one diagram, and the **ERD** count in the status bar (for example **ERD 3**) takes you back to your diagrams at any time.
+
+**New to ERD Studio?** [Watch the short getting-started video](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4). The **Welcome** tab has the same video and a short checklist. Open it any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
+
+**No dbt project yet?** Use the [ERD Studio sample project](https://github.com/liam-machine/erd-studio-sample) on your own computer: a small Kimball-style dbt project with fake coffee-shop data (DuckDB, no account needed). It ships its dbt artifacts, so both the Logical and Physical views work without installing dbt. Run **ERD Studio: Try the Sample Project** (also on the Welcome tab) and VS Code clones it to a folder you choose and offers to open it, or use **Code → Download ZIP** on GitHub and open the unzipped folder.
+
+### Add the detail with your AI assistant
+
+Once you have a diagram, your AI assistant can fill in what dbt does not record: grain, keys, the reasoning behind each design choice, and the modelling style your team follows. Click **Set Up My AI Helper** on the Welcome tab, or run **ERD Studio: Set Up My AI Helper**. It installs a guided setup for the AI assistants it finds on your computer, then shows exactly what to type in each. Start your assistant in your dbt project folder and:
 
 | Assistant | Type |
 |---|---|
@@ -87,12 +109,11 @@ It uses a small read-only `erd-studio` helper that ERD Studio installs in `~/.er
 
 The guide is an [Agent Skill](https://agentskills.io): Claude Code reads it from `.claude/skills/`, and GitHub Copilot, Codex, Gemini CLI and Cursor read the copy in `.agents/skills/`. It has been tested end to end with Claude Code; the other four read the same skill from the open standard's folder.
 
-**Or step by step:**
+**Or design from scratch:**
 
-1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) and open your project in VS Code.
-2. Click the **ERD Studio** icon in the Activity Bar, choose **Set Up ERD Studio**, and follow the prompts to create your first domain (a diagram).
-3. Design models on the canvas, or add existing dbt models. If you use dbt, switch between **Logical** and **Physical** to compare your design with it.
-4. To work with AI, run **ERD Studio: Install AI Coding Harness** from the Command Palette. It adds project instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini, or Codex's `AGENTS.md`.
+1. Click the **ERD Studio** icon in the Activity Bar, choose **Set Up ERD Studio**, and follow the prompts to create your first domain (a diagram).
+2. Design models on the canvas, or add existing dbt models. If you use dbt, switch between **Logical** and **Physical** to compare your design with it.
+3. To work with AI, run **ERD Studio: Install AI Coding Harness** from the Command Palette. It adds project instructions for Claude Code, the Agent Skills folder (GitHub Copilot, Codex, Gemini CLI, Cursor), GitHub Copilot's instructions file, Gemini, or Codex's `AGENTS.md`.
 
 Then try asking your assistant:
 
@@ -136,10 +157,10 @@ ERD Studio sends one small, anonymous usage report a day, so the author can see 
 | `stages`, `schemaFormats` | Which stages were viewed (`logical`, `physical`) and which diagram file formats were opened (`v5`, `v4`) |
 | `modelCount` | The largest diagram opened, as a range: `none`, `1-10`, `11-50`, `51+` |
 | `manifest`, `catalog` | Whether dbt's `manifest.json` was `ok`, `missing` or `stale`, and whether a `catalog.json` was present |
-| `features` | How often each of a fixed list of features was used (capped at 100 each): the physical stage, compare, sync plan, Execute with Claude, dbt compile, notes, auto layout, adding a model, adding a relationship, installing each AI harness, migrating to v5, and opening Send Feedback |
+| `features` | How often each of a fixed list of features was used (capped at 100 each): the physical stage, compare, sync plan, Execute with Claude, dbt compile, notes, auto layout, adding a model, adding a relationship, installing each AI harness, migrating to v5, opening Send Feedback, `drawFromDbt` (drawing a diagram with Draw from dbt), `addFromDbt` (adding models with the empty diagram's Add models from dbt button) and `emptyCanvas` (an empty diagram being opened) |
 | `errors` | How often each of a fixed list of error kinds happened (capped at 100 each): manifest missing / malformed / timed out, catalog unreadable, diagram failed to load, model file failed to parse, invalid `layers.json`, edit rejected by VS Code, migration failed, other |
 
-The full list of properties is also in [`telemetry.json`](telemetry.json).
+The full list of properties is also in [`telemetry.json`](https://github.com/liam-machine/erd-studio/blob/main/telemetry.json).
 
 **Where it goes.** An HTTPS request to `erd-studio-telemetry.w2solutions.ai`, a Cloudflare Worker run by the extension author. The Worker checks every field against the lists above and stores only those fields. It does not store your IP address, user agent or any other request header. Individual reports are deleted after 90 days; after that only daily totals are kept, with no install IDs.
 
@@ -152,9 +173,9 @@ Turning telemetry off also throws away anything already counted for that day. A 
 
 **Seeing what is sent.** Reports go through VS Code's own telemetry logger. Run **Developer: Set Log Level…**, set the telemetry log to **Trace**, then open the **Output** panel and choose **Extension Telemetry**: each report appears there as it is sent. VS Code's `--telemetry` command-line flag also lists every event ERD Studio declares.
 
-[File format reference](docs/semantic-domain-json-reference.md) · [Release notes](CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
+[File format reference](https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md) · [Release notes](https://github.com/liam-machine/erd-studio/blob/main/CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
 
-Free to use under the [PolyForm Shield License 1.0.0](LICENSE): use it, modify it and share it, at home or at work, for any purpose except offering a product that competes with ERD Studio. The source is public; only the author may sell it or relicense it.
+Free to use under the [PolyForm Shield License 1.0.0](https://github.com/liam-machine/erd-studio/blob/main/LICENSE): use it, modify it and share it, at home or at work, for any purpose except offering a product that competes with ERD Studio. The source is public; only the author may sell it or relicense it.
 
 ## Star history
 

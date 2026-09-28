@@ -334,6 +334,18 @@ export interface AddExistingModelMessage {
 }
 
 /**
+ * Add several models from the dbt project to the open domain in one step (the
+ * empty canvas's "Add models from dbt"). No payload: the host asks which models
+ * with a QuickPick, seeds the new ones from dbt's yml / manifest and writes
+ * everything in one edit (one undo step). Logical stage only — it is not on
+ * the physical allowlist.
+ */
+export interface AddModelsFromDbtMessage {
+  type: 'addModelsFromDbt';
+  payload?: Record<string, never>;
+}
+
+/**
  * Request to update node positions on the canvas.
  * Positions are debounced and merged into viewConfig.positions.
  *
@@ -642,6 +654,7 @@ export type WebviewMessage =
   | UpdateRelationshipMessage
   | EditRelationshipMessage
   | AddExistingModelMessage
+  | AddModelsFromDbtMessage
   | UpdatePositionsMessage
   | RefreshManifestMessage
   | UndoMessage
