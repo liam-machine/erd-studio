@@ -15,6 +15,7 @@ on:
       - '.planning/**'
       - '.github/**'
       - 'social-video/**'
+      - '.claude/**'
 
 concurrency:
   group: deploy-main
