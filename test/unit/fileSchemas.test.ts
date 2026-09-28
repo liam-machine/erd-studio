@@ -70,19 +70,19 @@ const LAYER = 'packages/core/src/types/layer.ts';
 
 describe('schemas match the TypeScript types', () => {
   it.each([
-    ['logical model', () => modelSchema, 'SemanticModel', SEMANTIC],
-    ['model column', () => modelSchema.definitions.column, 'ColumnDef', SEMANTIC],
-    ['rationale', () => modelSchema.definitions.rationale, 'Rationale', SEMANTIC],
-    ['template', () => templateSchema, 'ModelTemplate', SEMANTIC],
-    ['template column', () => templateSchema.definitions.column, 'ColumnDef', SEMANTIC],
-    ['domain', () => domainSchema, 'UnifiedDomainV5', SEMANTIC],
-    ['relationship', () => domainSchema.definitions.relationship, 'Relationship', SEMANTIC],
-    ['viewConfig', () => domainSchema.definitions.viewConfig, 'ViewConfig', SEMANTIC],
-    ['position', () => domainSchema.definitions.position, 'NodePosition', SEMANTIC],
-    ['annotation', () => domainSchema.definitions.annotation, 'Annotation', SEMANTIC],
-    ['layers file', () => layersSchema, 'LayersConfigFile', LAYER],
-    ['layer', () => layersSchema.definitions.layer, 'LayerConfig', LAYER],
-  ] as const)('%s declares exactly the fields of %s', (_label, node, iface, file) => {
+    ['logical model', 'SemanticModel', SEMANTIC, () => modelSchema],
+    ['model column', 'ColumnDef', SEMANTIC, () => modelSchema.definitions.column],
+    ['rationale', 'Rationale', SEMANTIC, () => modelSchema.definitions.rationale],
+    ['template', 'ModelTemplate', SEMANTIC, () => templateSchema],
+    ['template column', 'ColumnDef', SEMANTIC, () => templateSchema.definitions.column],
+    ['domain', 'UnifiedDomainV5', SEMANTIC, () => domainSchema],
+    ['relationship', 'Relationship', SEMANTIC, () => domainSchema.definitions.relationship],
+    ['viewConfig', 'ViewConfig', SEMANTIC, () => domainSchema.definitions.viewConfig],
+    ['position', 'NodePosition', SEMANTIC, () => domainSchema.definitions.position],
+    ['annotation', 'Annotation', SEMANTIC, () => domainSchema.definitions.annotation],
+    ['layers file', 'LayersConfigFile', LAYER, () => layersSchema],
+    ['layer', 'LayerConfig', LAYER, () => layersSchema.definitions.layer],
+  ] as const)('%s declares exactly the fields of %s', (_label, iface, file, node) => {
     expect(schemaKeys(node())).toEqual(interfaceKeys(file, iface));
   });
 
