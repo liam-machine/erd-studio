@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.0 — 2026-09-28
 
 ### Added
 - **Metadata on models and columns** (#95). Record structured details such as owner, source system or lineage as a `meta:` block in a model's file — the same shape as dbt's `meta:` — on the model or on any column. The Detail panel shows it in a new **Metadata** section and in each expanded column, where you can add, edit and remove text values; nested values, lists and yes/no values are shown read-only, to edit in the file. Only the entry you change is rewritten — comments and everything else in the file stay as they are. ERD Studio never compares this metadata with dbt. The AI helper files are updated to know about it, so you will be offered a one-time update.
