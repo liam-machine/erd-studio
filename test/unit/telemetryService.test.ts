@@ -200,10 +200,10 @@ describe('TelemetryService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('keeps one install id for 30 days, then mints a new random one', async () => {
+  it('keeps one install id for good — it is never rotated', async () => {
     startService();
     const ids: string[] = [];
-    for (const day of ['2026-09-24', '2026-10-10', '2026-10-23', '2026-10-24']) {
+    for (const day of ['2026-09-24', '2026-10-24', '2027-01-10', '2027-09-30']) {
       vi.setSystemTime(new Date(`${day}T10:00:00Z`));
       services[services.length - 1].rollover();
       useToday();
@@ -212,11 +212,90 @@ describe('TelemetryService', () => {
       await vi.advanceTimersByTimeAsync(0);
       ids.push(sentBodies().at(-1)!.installId);
     }
-    // Minted at the first send (2026-09-25); the send on 10-24 is 29 days on, 10-25 is 30.
-    expect(ids[0]).toBe(ids[1]);
-    expect(ids[1]).toBe(ids[2]);
-    expect(ids[3]).not.toBe(ids[2]);
-    expect(ids.every(id => UUID_V4.test(id))).toBe(true);
+    expect(new Set(ids).size).toBe(1);
+    expect(ids[0]).toMatch(UUID_V4);
+  });
+
+  it('keeps an id minted by an older build that rotated it', async () => {
+    const context = makeContext();
+    const old = { id: '6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f', createdDay: '2026-01-01' };
+    await context.globalState.update('erdStudio.telemetry.install', old);
+    startService(context);
+    useToday();
+    vi.setSystemTime(new Date('2026-09-25T01:00:00Z'));
+    await vi.advanceTimersByTimeAsync(HOUR);
+    expect(sentBodies()[0].installId).toBe(old.id);
+  });
+
+  it('sends the editor app, remote kind and a dev flag from the extension mode', async () => {
+    const appName = mock.env.appName;
+    mock.env.appName = 'Cursor';
+    mock.env.remoteName = 'wsl';
+    try {
+      const context = mock.createMockExtensionContext({
+        storageRoot: path.join(os.tmpdir(), 'erd-telemetry-test'),
+        extensionRoot: path.join(os.tmpdir(), 'erd-telemetry-test'),
+        packageJSON: { version: '1.4.0' },
+        extensionMode: mock.ExtensionMode.Development,
+      }) as unknown as vscode.ExtensionContext;
+      startService(context);
+      useToday();
+      vi.setSystemTime(new Date('2026-09-25T01:00:00Z'));
+      await vi.advanceTimersByTimeAsync(HOUR);
+      expect(sentBodies()[0]).toMatchObject({ host: 'cursor', remote: 'wsl', dev: true });
+    } finally {
+      mock.env.appName = appName;
+      mock.env.remoteName = undefined;
+    }
+  });
+
+  it('labels a day with the version that counted it, not the one sending it', async () => {
+    const { context } = startService();
+    useToday();
+    services[0].dispose();
+    services = [];
+    // The extension updated overnight: the next activation runs 1.5.0.
+    (context.extension as { packageJSON: unknown }).packageJSON = { version: '1.5.0' };
+    vi.setSystemTime(new Date('2026-09-25T09:00:00Z'));
+    startService(context);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentBodies()[0]).toMatchObject({ day: '2026-09-24', extVersion: '1.4.0' });
+  });
+
+  it('sends retention buckets counted on the device, never the dates', async () => {
+    startService();
+    for (const day of ['2026-09-20', '2026-09-22', '2026-09-24']) {
+      vi.setSystemTime(new Date(`${day}T10:00:00Z`));
+      services[0].rollover();
+      telemetry.activation('project_found', true, 1);
+      if (day !== '2026-09-22') telemetry.canvasOpened('logical', 'v5', 3);
+    }
+    vi.setSystemTime(new Date('2026-09-25T01:00:00Z'));
+    await vi.advanceTimersByTimeAsync(HOUR);
+    const body = sentBodies().at(-1)!;
+    expect(body).toMatchObject({ day: '2026-09-24', activeDays28: '2-3', canvasDays28: '2-3', firstCanvas: '0' });
+    // Earlier days' own heartbeats carry their day; this one never lists the others.
+    expect(JSON.stringify(body)).not.toMatch(/2026-09-2[02]/);
+  });
+
+  it('records detected assistants and installed harnesses', async () => {
+    startService();
+    useToday();
+    telemetry.assistants(['copilot', 'claude']);
+    telemetry.harnesses(['claude']);
+    vi.setSystemTime(new Date('2026-09-25T01:00:00Z'));
+    await vi.advanceTimersByTimeAsync(HOUR);
+    expect(sentBodies()[0]).toMatchObject({ assistants: ['claude', 'copilot'], harnesses: ['claude'] });
+  });
+
+  it('forgets the retention days when telemetry is switched off', async () => {
+    const { context } = startService();
+    useToday();
+    expect(context.globalState.get('erdStudio.telemetry.activeDays')).toEqual(['2026-09-24']);
+    mock._setMockTelemetryEnabled(false);
+    expect(context.globalState.get('erdStudio.telemetry.activeDays')).toBeUndefined();
+    expect(context.globalState.get('erdStudio.telemetry.canvasDays')).toBeUndefined();
+    expect(context.globalState.get('erdStudio.telemetry.firstCanvasDay')).toBeUndefined();
   });
 
   it('never uses vscode.env.machineId', async () => {

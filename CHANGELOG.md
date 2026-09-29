@@ -8,6 +8,15 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+- **Usage telemetry now keeps one install ID per VS Code profile.** It used to be replaced every 30 days, which made it impossible to tell whether anyone came back. It is still a random ID made up by ERD Studio, never VS Code's machine ID, and switching telemetry off still stops everything.
+- Usage telemetry now also says which editor you use (VS Code, Cursor, Windsurf, VSCodium… from a fixed list), whether it runs locally or over SSH / WSL / a container / Codespaces, which AI assistants are on the machine and which ERD Studio AI helper files the project has, on how many of the last 28 days ERD Studio and a diagram were used (counted on your machine; the dates are never sent), how long until the first diagram, which kinds of diagram edit are made, how long auto layout takes, whether a diagram was created in ERD Studio or appeared from outside (e.g. written by an AI assistant), and the getting-started steps. Still no names, paths or messages; every value is from a fixed list or a range. See the README's Telemetry section.
+
+### Fixed
+- A day's usage report is now labelled with the ERD Studio version that was running that day, not the one running when the report is sent the next day.
+
 ## 1.6.2 — 2026-09-29
 
 ### Fixed

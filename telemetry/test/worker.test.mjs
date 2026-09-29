@@ -21,7 +21,15 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
+import { readFileSync } from 'node:fs';
+
 import worker from '../src/index.js';
+
+/** The Worker's FEATURES list, read from its source (it is not exported). */
+const WORKER_FEATURES = [
+  ...(/const FEATURES = \[([\s\S]*?)\];/.exec(readFileSync(new URL('../src/index.js', import.meta.url), 'utf8'))?.[1] ?? '')
+    .matchAll(/'([A-Za-z0-9]+)'/g),
+].map((m) => m[1]);
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -223,18 +231,18 @@ describe('routing', () => {
 // ---------------------------------------------------------------------------
 
 describe('body size', () => {
-  it('accepts a body of exactly 2048 bytes', async () => {
+  it('accepts a body of exactly 4096 bytes', async () => {
     const base = JSON.stringify(heartbeat());
     // Pad with an unknown key (dropped) to hit the cap exactly.
-    const padding = 2048 - base.length - ',"pad":""'.length;
+    const padding = 4096 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
-    assert.equal(new TextEncoder().encode(body).byteLength, 2048);
+    assert.equal(new TextEncoder().encode(body).byteLength, 4096);
     assert.equal((await post(body)).status, 204);
   });
 
-  it('413s a body of 2049 bytes', async () => {
+  it('413s a body of 4097 bytes', async () => {
     const base = JSON.stringify(heartbeat());
-    const padding = 2049 - base.length - ',"pad":""'.length;
+    const padding = 4097 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
     const { status, env } = await post(body);
     assert.equal(status, 413);
@@ -248,7 +256,7 @@ describe('body size', () => {
 
   it('counts the stream rather than trusting a missing Content-Length', async () => {
     const env = makeEnv();
-    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(3000), '"}']), env);
+    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(5000), '"}']), env);
     assert.equal(response.status, 413);
     assert.equal(env.DB.statements.length, 0);
   });
@@ -374,7 +382,7 @@ describe('validation — acceptance and normalisation', () => {
     const flat = JSON.stringify(params);
     assert.ok(!flat.includes('secret-laptop'));
     assert.ok(!flat.includes('10.0.0.1'));
-    assert.equal(params.length, 19);
+    assert.equal(params.length, 27);
   });
 
   it('drops unknown feature and error keys, and zero counts', async () => {
@@ -452,7 +460,70 @@ describe('validation — acceptance and normalisation', () => {
       1,
       '{"physicalStage":2,"compare":1}',
       '{"manifestMissing":1}',
+      // The 1.6.3 fields, absent from an older client's body, are stored NULL.
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Optional fields (extension 1.6.3+)
+// ---------------------------------------------------------------------------
+
+const NEW_FIELDS = {
+  host: 'cursor',
+  remote: 'wsl',
+  dev: false,
+  assistants: ['gemini', 'claude', 'claude'],
+  harnesses: ['agents', 'claude'],
+  activeDays28: '4-7',
+  canvasDays28: '2-3',
+  firstCanvas: '0',
+};
+
+describe('optional 1.6.3 fields', () => {
+  it('binds them after errors, arrays in canonical order', async () => {
+    const params = await storedParams(heartbeat(NEW_FIELDS));
+    assert.deepEqual(params.slice(19), ['cursor', 'wsl', 0, '["claude","gemini"]', '["claude","agents"]', '4-7', '2-3', '0']);
+  });
+
+  it('stores dev as 1 and accepts empty arrays and never', async () => {
+    const params = await storedParams(heartbeat({ ...NEW_FIELDS, dev: true, assistants: [], harnesses: [], firstCanvas: 'never' }));
+    assert.deepEqual(params.slice(19), ['cursor', 'wsl', 1, '[]', '[]', '4-7', '2-3', 'never']);
+  });
+
+  for (const [field, value] of [
+    ['host', 'Visual Studio Code'],
+    ['host', 'notepad'],
+    ['remote', 'ssh-remote'],
+    ['dev', 'yes'],
+    ['assistants', ['claude', 'chatgpt']],
+    ['assistants', 'claude'],
+    ['harnesses', ['cursor']],
+    ['activeDays28', '29'],
+    ['canvasDays28', 3],
+    ['firstCanvas', 'later'],
+  ]) {
+    it(`refuses ${field} = ${JSON.stringify(value)} with 400 and no write`, async () => {
+      const env = makeEnv();
+      const response = await post(heartbeat({ ...NEW_FIELDS, [field]: value }), env);
+      assert.equal(response.status, 400);
+      assert.equal(env.DB.statements.length, 0);
+    });
+  }
+
+  it('accepts a body carrying every feature key at once', async () => {
+    const features = Object.fromEntries(WORKER_FEATURES.map((key) => [key, 100]));
+    const env = makeEnv();
+    const response = await post(heartbeat({ ...NEW_FIELDS, features }), env);
+    assert.equal(response.status, 204);
   });
 });
 

@@ -10,7 +10,8 @@
  *                         addExistingModel, updatePositions, switchStage,
  *                         toggleDiscrepancy, requestFeedbackContext,
  *                         analyzeFeedback, setFeedbackProvider, submitFeedback,
- *                         copyFeedbackReport, openFeedbackLink
+ *                         copyFeedbackReport, openFeedbackLink,
+ *                         layoutFinished (usage telemetry only)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -383,6 +384,16 @@ export interface RefreshManifestMessage {
 }
 
 /**
+ * An auto layout finished (`ok: true`) or failed in the webview, after `ms`
+ * milliseconds. Usage telemetry only: the host buckets the time into a
+ * feature key and writes nothing, so it is allowed on the physical stage.
+ */
+export interface LayoutFinishedMessage {
+  type: 'layoutFinished';
+  payload: { ms: number; ok: boolean };
+}
+
+/**
  * Request to undo the last edit operation.
  * Executes VS Code's native undo command on the document.
  */
@@ -720,7 +731,8 @@ export type WebviewMessage =
   | UpdateAnnotationMessage
   | RemoveAnnotationMessage
   | RemoveAnnotationsMessage
-  | OpenModelFileMessage;
+  | OpenModelFileMessage
+  | LayoutFinishedMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types

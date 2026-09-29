@@ -216,8 +216,22 @@ export enum ProgressLocation {
 /** Mirrors `vscode.version`. */
 export const version = '1.85.0-mock';
 
+export enum UIKind {
+  Desktop = 1,
+  Web = 2,
+}
+
+export enum ExtensionMode {
+  Production = 1,
+  Development = 2,
+  Test = 3,
+}
+
 export const env = {
   appName: 'Visual Studio Code',
+  /** `undefined` when the window is local. */
+  remoteName: undefined as string | undefined,
+  uiKind: UIKind.Desktop,
   /** Resolves true (browser opened); spy on it to assert the URL a bug report opens. */
   openExternal: async (_target: unknown): Promise<boolean> => true,
   clipboard: {
@@ -1061,6 +1075,7 @@ export interface MockExtensionContextOptions {
   packageJSON?: unknown;
   globalStateSeed?: Iterable<readonly [string, unknown]>;
   workspaceStateSeed?: Iterable<readonly [string, unknown]>;
+  extensionMode?: ExtensionMode;
 }
 
 /**
@@ -1072,6 +1087,7 @@ export function createMockExtensionContext(options: MockExtensionContextOptions)
   return {
     subscriptions: [] as Array<{ dispose: () => void }>,
     extension: { packageJSON: options.packageJSON ?? { version: '0.0.0-test' } },
+    extensionMode: options.extensionMode ?? ExtensionMode.Production,
     extensionUri: Uri.file(options.extensionRoot),
     globalStorageUri: Uri.file(`${options.storageRoot}/.global-storage`),
     globalState: createMockMemento(options.globalStateSeed),

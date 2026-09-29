@@ -14,8 +14,23 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  ASSISTANTS,
   ERROR_CODES,
   FEATURES,
+  HARNESSES,
+  HOSTS,
+  REMOTES,
+  RETENTION_WINDOW_DAYS,
+  firstCanvasBucket,
+  hostBucket,
+  layoutFeature,
+  recentDaysBucket,
+  recentDaysCount,
+  recordAssistants,
+  recordHarnesses,
+  rememberDay,
+  remoteBucket,
+  stampEnv,
   MAX_ACTIVATIONS,
   MAX_CANVAS_OPENS,
   MAX_COUNTER,
@@ -187,6 +202,45 @@ describe('buildHeartbeat', () => {
       catalog: true,
       features: { compare: 2 },
       errors: { manifestMalformed: 1 },
+      host: 'other',
+      remote: 'local',
+      dev: false,
+      assistants: [],
+      harnesses: [],
+      activeDays28: '0',
+      canvasDays28: '0',
+      firstCanvas: 'never',
+    });
+  });
+
+  it('sends the stamped environment, detected assistants, harnesses and retention buckets', () => {
+    let s = emptyCounters('2026-09-24');
+    s = recordActivation(s, { outcome: 'project_found', hasSemanticDir: true, domainCount: 2 });
+    s = stampEnv(s, { extVersion: '1.6.3', vscodeVersion: '1.105.0', host: 'cursor', remote: 'wsl', dev: false });
+    s = recordAssistants(s, ['gemini', 'claude']);
+    s = recordHarnesses(s, ['agents']);
+    const body = buildHeartbeat(s, {
+      ...ENV,
+      // Running a newer build when the heartbeat goes out: the day keeps the version that counted it.
+      extVersion: '1.7.0',
+      vscodeVersion: '1.106.1',
+      host: 'vscode',
+      activeDays: ['2026-08-20', '2026-09-10', '2026-09-20', '2026-09-24', '2026-09-25'],
+      canvasDays: ['2026-09-24'],
+      firstCanvasDay: '2026-09-24',
+    });
+    expect(body).toMatchObject({
+      extVersion: '1.6.3',
+      vscodeMajor: '1.105',
+      host: 'cursor',
+      remote: 'wsl',
+      dev: false,
+      assistants: ['claude', 'gemini'],
+      harnesses: ['agents'],
+      // 08-20 is outside the 28 days ending 09-24, and 09-25 is after it.
+      activeDays28: '2-3',
+      canvasDays28: '1',
+      firstCanvas: '8-30',
     });
   });
 
@@ -228,11 +282,13 @@ describe('buildHeartbeat', () => {
     });
   });
 
-  it('stays well under the 2 KB body limit with every counter set', () => {
+  it('stays under the Worker\'s 4 KB body limit with every counter and list set', () => {
     let s = recordActivation(emptyCounters('2026-09-24'), { outcome: 'project_found', hasSemanticDir: true, domainCount: 99 });
     for (const f of FEATURES) s = repeat(s, 150, x => recordFeature(x, f));
     for (const e of ERROR_CODES) s = repeat(s, 150, x => recordError(x, e));
-    expect(JSON.stringify(buildHeartbeat(s, ENV)).length).toBeLessThan(2048);
+    s = recordHarnesses(recordAssistants(s, ASSISTANTS), HARNESSES);
+    s = stampEnv(s, { extVersion: '10.10.10', vscodeVersion: '1.999.9', host: 'vscodeInsiders', remote: 'codespaces', dev: true });
+    expect(JSON.stringify(buildHeartbeat(s, ENV)).length).toBeLessThan(4096);
   });
 });
 
@@ -261,6 +317,9 @@ describe('nothing identifying reaches the heartbeat', () => {
       s = recordCatalog(s, sneak);
       s = recordFeature(s, sneak as TelemetryFeature);
       s = recordError(s, sneak as TelemetryErrorCode);
+      s = recordAssistants(s, [sneak]);
+      s = recordHarnesses(s, [sneak]);
+      s = stampEnv(s, { extVersion: secret, vscodeVersion: secret, host: hostBucket(secret), remote: remoteBucket(secret, false), dev: false });
     }
     // Stored state must also survive an env that carries junk around the id.
     const json = JSON.stringify(buildHeartbeat(s, { ...ENV, extVersion: `1.4.0 ${SECRETS[6]}`, vscodeVersion: `1.104 ${SECRETS[0]}` }));
@@ -288,6 +347,20 @@ describe('allowlists agree with the Worker', () => {
 
   it('ERROR_CODES matches the Worker key for key, in order', () => {
     expect(workerList('ERROR_CODES')).toEqual([...ERROR_CODES]);
+  });
+
+  it('the host, remote, assistant and harness values match the Worker', () => {
+    const workerSet = (name: string): string[] => {
+      const match = worker.match(new RegExp(`const ${name} = new Set\\(\\[([^\\]]*)\\]`));
+      expect(match, `${name} not found in telemetry/src/index.js`).not.toBeNull();
+      return [...match![1].matchAll(/'([A-Za-z0-9-+]+)'/g)].map(m => m[1]);
+    };
+    expect(workerSet('HOST_VALUES')).toEqual([...HOSTS]);
+    expect(workerSet('REMOTE_VALUES')).toEqual([...REMOTES]);
+    expect(workerSet('RECENT_DAYS_VALUES')).toEqual(['0', '1', '2-3', '4-7', '8-14', '15-28']);
+    expect(workerSet('FIRST_CANVAS_VALUES')).toEqual(['never', '0', '1-7', '8-30', '31-90', '90+']);
+    expect(workerList('ASSISTANTS')).toEqual([...ASSISTANTS]);
+    expect(workerList('HARNESSES')).toEqual([...HARNESSES]);
   });
 
   it('counts the onboarding flows', () => {
@@ -358,5 +431,92 @@ describe('recordFeatureOnce', () => {
   it('returns the same state when already counted', () => {
     const s = recordFeatureOnce(emptyCounters('2026-09-24'), 'harnessPresent');
     expect(recordFeatureOnce(s, 'harnessPresent')).toBe(s);
+  });
+});
+
+describe('environment, assistants and retention (1.6.3)', () => {
+  it('maps editor app names to a fixed host id', () => {
+    expect(hostBucket('Visual Studio Code')).toBe('vscode');
+    expect(hostBucket('Visual Studio Code - Insiders')).toBe('vscodeInsiders');
+    expect(hostBucket('Cursor')).toBe('cursor');
+    expect(hostBucket('Windsurf')).toBe('windsurf');
+    expect(hostBucket('Windsurf - Next')).toBe('windsurf');
+    expect(hostBucket('VSCodium')).toBe('vscodium');
+    expect(hostBucket('Trae')).toBe('trae');
+    expect(hostBucket('Kiro')).toBe('kiro');
+    expect(hostBucket('Positron')).toBe('positron');
+    expect(hostBucket('Antigravity')).toBe('antigravity');
+    expect(hostBucket('Jane\'s Private Editor')).toBe('other');
+    expect(hostBucket('')).toBe('other');
+  });
+
+  it('maps remote names to a fixed remote kind', () => {
+    expect(remoteBucket(undefined, false)).toBe('local');
+    expect(remoteBucket(undefined, true)).toBe('web');
+    expect(remoteBucket('ssh-remote', false)).toBe('ssh');
+    expect(remoteBucket('wsl', false)).toBe('wsl');
+    expect(remoteBucket('dev-container', false)).toBe('container');
+    expect(remoteBucket('attached-container', false)).toBe('container');
+    expect(remoteBucket('codespaces', true)).toBe('codespaces');
+    expect(remoteBucket('tunnel', false)).toBe('other');
+  });
+
+  it('buckets recent-day counts', () => {
+    expect([0, 1, 2, 3, 4, 7, 8, 14, 15, 28].map(recentDaysBucket))
+      .toEqual(['0', '1', '2-3', '2-3', '4-7', '4-7', '8-14', '8-14', '15-28', '15-28']);
+  });
+
+  it('remembers only the window of days, sorted and without duplicates', () => {
+    let days: string[] = [];
+    for (const d of ['2026-09-01', '2026-09-20', '2026-09-20', '2026-09-10']) days = rememberDay(days, d);
+    expect(days).toEqual(['2026-09-01', '2026-09-10', '2026-09-20']);
+    // 2026-10-15 is 44 days after 09-01 and 25 after 09-20.
+    expect(rememberDay(days, '2026-10-15')).toEqual(['2026-09-20', '2026-10-15']);
+    expect(rememberDay(['not a day', '2026-10-15'], '2026-10-15')).toEqual(['2026-10-15']);
+    expect(RETENTION_WINDOW_DAYS).toBe(28);
+  });
+
+  it('counts days in the 28 days ending on the reported day', () => {
+    const days = ['2026-08-27', '2026-08-28', '2026-09-24', '2026-09-25'];
+    // 08-28 is 27 days before 09-24 (inside), 08-27 is 28 (outside), 09-25 is after.
+    expect(recentDaysCount(days, '2026-09-24')).toBe(2);
+    expect(recentDaysCount(undefined, '2026-09-24')).toBe(0);
+  });
+
+  it('buckets the days to the first canvas, or never', () => {
+    expect(firstCanvasBucket('2026-09-01', null, '2026-09-24')).toBe('never');
+    expect(firstCanvasBucket('2026-09-01', '2026-09-01', '2026-09-24')).toBe('0');
+    expect(firstCanvasBucket('2026-09-01', '2026-09-05', '2026-09-24')).toBe('1-7');
+    // A first canvas after the reported day had not happened yet on that day.
+    expect(firstCanvasBucket('2026-09-01', '2026-09-25', '2026-09-24')).toBe('never');
+  });
+
+  it('keeps the dev flag once set for the day, and carries env, assistants and harnesses over', () => {
+    const env = { extVersion: '1.6.3', vscodeVersion: '1.105.0', host: 'vscode' as const, remote: 'local' as const };
+    let s = stampEnv(emptyCounters('2026-09-24'), { ...env, dev: true });
+    s = stampEnv(s, { ...env, dev: false });
+    expect(s.env?.dev).toBe(true);
+    s = recordHarnesses(recordAssistants(s, ['copilot']), ['copilot']);
+    const next = nextDay(s, '2026-09-25');
+    expect(next.env).toEqual(s.env);
+    expect(next.assistants).toEqual(['copilot']);
+    expect(next.harnesses).toEqual(['copilot']);
+  });
+
+  it('unions assistants and harnesses in a fixed order and returns stamped state unchanged', () => {
+    let s = recordAssistants(emptyCounters('2026-09-24'), ['cursor']);
+    s = recordAssistants(s, ['claude', 'cursor']);
+    expect(s.assistants).toEqual(['claude', 'cursor']);
+    const env = { extVersion: '1.6.3', vscodeVersion: '1.105.0', host: 'vscode' as const, remote: 'local' as const, dev: false };
+    const stamped = stampEnv(s, env);
+    expect(stampEnv(stamped, env)).toBe(stamped);
+  });
+
+  it('buckets layout durations into feature keys', () => {
+    expect(layoutFeature(120, true)).toBe('layoutUnder1s');
+    expect(layoutFeature(1000, true)).toBe('layout1to5s');
+    expect(layoutFeature(5000, true)).toBe('layout1to5s');
+    expect(layoutFeature(5001, true)).toBe('layoutOver5s');
+    expect(layoutFeature(10, false)).toBe('layoutFailed');
   });
 });

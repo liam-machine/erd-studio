@@ -562,6 +562,13 @@ export function validateOpenModelFilePayload(value: unknown): string | null {
   return validateModelNameSafety((value as { modelName?: unknown }).modelName);
 }
 
+/** `layoutFinished` (usage telemetry only): a non-negative finite duration and a boolean. */
+export function validateLayoutFinishedPayload(value: unknown): value is { ms: number; ok: boolean } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { ms, ok } = value as { ms?: unknown; ok?: unknown };
+  return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof ok === 'boolean';
+}
+
 // ---------------------------------------------------------------------------
 // Numbers / positions
 // ---------------------------------------------------------------------------
