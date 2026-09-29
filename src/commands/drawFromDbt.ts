@@ -82,6 +82,8 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
     { location: vscode.ProgressLocation.Notification, title: 'Reading your dbt project…' },
     () => deps.loadDbt(),
   );
+  // #113: no manifest (never compiled, or removed) — `loadDbt` passes undefined then.
+  if (!manifest) { telemetry.featureOnce('manifestMissingDraw'); }
 
   const layerIds = layerService.getValidLayerIds();
   const source = { ymlData, manifest, projectRoot: workspaceRoot, modelPaths: deps.modelPaths, layerIds };

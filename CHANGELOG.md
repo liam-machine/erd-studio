@@ -19,9 +19,11 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Added
 - **Run dbt parse** button on the Physical stage notice and on the "no dbt manifest" warnings, for a project dbt hasn't been run in yet. It needs no warehouse connection (only a working dbt profile), uses the dbt the extension finds, and asks before running one from the project's own virtual environment.
+- **The Logical stage now offers Run dbt parse too** ([#113](https://github.com/liam-machine/erd-studio/issues/113)). When dbt hasn't parsed the project yet, a slim strip above the diagram says so and has the button, and it goes away by itself once the manifest appears. Close it with × and it stays closed for that project.
 
 ### Changed
 - Usage telemetry: a missing dbt manifest is no longer counted as an error (it's the normal state before `dbt parse`), model-file errors carry a fixed reason (read, indentation, value, structure, duplicate key), and the heartbeat notes whether ERD Studio's AI helper files are installed and whether Run dbt parse was used. No names, paths or messages are sent. See the README's Telemetry section.
+- Usage telemetry also notes where people meet a missing dbt manifest and why it's missing (no target folder, a custom `target-path` as a yes/no only, no dbt found), whether a manifest appeared after Run dbt parse, and whether the new hint was closed. A model file that breaks again after being fixed is counted and reported once per session, not every time. Still no names, paths or messages.
 
 ## 1.6.1 — 2026-09-29
 

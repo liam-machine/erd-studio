@@ -1,0 +1,72 @@
+/**
+ * ManifestHint styles — the logical stage's "Run dbt parse" strip (#113),
+ * laid out exactly like PhysicalSourceNotice so the two read as one family.
+ *
+ * A strip above the flow area, not an overlay — it must never cover a node.
+ * Theme tokens only (webview/styles/theme.css); no literal colours.
+ */
+
+.manifest-hint {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.manifest-hint__icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.manifest-hint__text {
+  flex: 1;
+}
+
+.manifest-hint__hint {
+  opacity: 0.85;
+}
+
+.manifest-hint__action {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 2px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.manifest-hint__action:hover {
+  background: var(--button-hover-bg);
+}
+
+.manifest-hint__action:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+
+.manifest-hint__dismiss {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.manifest-hint__dismiss:hover {
+  opacity: 1;
+}

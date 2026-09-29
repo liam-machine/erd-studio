@@ -42,6 +42,22 @@ export const FEATURES = [
   // Once per day at most (recordFeatureOnce): an ERD Studio AI harness file
   // is installed in the open project. A presence flag, not a usage count.
   'harnessPresent',
+  // #113 — where a missing manifest is met (once per day each, featureOnce).
+  'manifestMissingCanvas',
+  'manifestMissingPhysical',
+  'manifestMissingDraw',
+  'manifestMissingWelcome',
+  'manifestMissingRefresh',
+  // #113 — why it is missing (once per day each; booleans only, never a path).
+  'manifestNoTargetDir',
+  'manifestCustomTargetPath',
+  'manifestNoDbtFound',
+  // #113 — a manifest.json appeared after being missing: within 10 minutes of
+  // a Run dbt parse launch, or otherwise.
+  'manifestAfterParse',
+  'manifestAppeared',
+  // #113 — the Logical-stage missing-manifest hint was dismissed.
+  'manifestHintDismissed',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

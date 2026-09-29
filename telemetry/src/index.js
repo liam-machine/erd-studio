@@ -117,6 +117,17 @@ const FEATURES = [
   'emptyCanvas',
   'dbtParse',
   'harnessPresent',
+  'manifestMissingCanvas',
+  'manifestMissingPhysical',
+  'manifestMissingDraw',
+  'manifestMissingWelcome',
+  'manifestMissingRefresh',
+  'manifestNoTargetDir',
+  'manifestCustomTargetPath',
+  'manifestNoDbtFound',
+  'manifestAfterParse',
+  'manifestAppeared',
+  'manifestHintDismissed',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
