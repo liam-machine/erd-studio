@@ -1,6 +1,6 @@
 # Getting-started video
 
-Source and render pipeline for the short getting-started tour (at most 140 s, `maxDuration` in `script.yaml`; the product copy calls it "short", never "2-minute", since it runs a little over two minutes) that the **Welcome to ERD Studio** panel plays. Nothing in this folder ships: `.vscodeignore` excludes `video/**`, and nothing in `esbuild.js`, the tsconfigs or the root vitest run refers to it. The pipeline writes three committed outputs:
+Source and render pipeline for the one-minute getting-started tour (at most 65 s, `maxDuration` in `script.yaml`; the current render is 60.2 s) that the **Welcome to ERD Studio** panel plays and the README links to. It is hyper-focused on the no-AI first run: install, the **Get started with ERD Studio** walkthrough, **Draw from dbt**, the laid-out Logical diagram, Physical and Diff, then one optional line on the AI helper and one on the sample project. The walkthrough's "watch" step and the sidebar welcome views call it a "one-minute" video; keep `maxDuration` at 65 s or reword them. Nothing in this folder ships: `.vscodeignore` excludes `video/**`, and nothing in `esbuild.js`, the tsconfigs or the root vitest run refers to it. The pipeline writes three committed outputs (plus the README thumbnail, see [Thumbnail](#readme-thumbnail)):
 
 | Output | Used by |
 |---|---|
@@ -25,24 +25,26 @@ Style reference: `/Users/liamwynne/GIT/LIAM/erd-studio/docs/assets/erd-studio-li
 cd video
 npm run all        # tts → timeline → music → capture → encode (also writes build/getting-started-share.mp4)
 npm run qa         # contact sheet + per-scene stills in build/qa/, and the A/V onset check
-npm test           # pipeline self-tests (node:test), incl. that the Welcome-panel mocks (helper and
-                   # sample scenes, incl. the "Try the sample" card, link and confirm dialog), the sample
-                   # scene's other two entry points (the sidebar welcome-view link and the Command Palette
-                   # title, both read from package.json) and the modelling scene (detect-and-confirm) use
-                   # the real copy from src/types/gettingStarted.ts, src/providers/GettingStartedPanel.ts,
-                   # package.json and the setup skill's SKILL.md (reword any of them, and the video must
-                   # be re-rendered)
+npm test           # pipeline self-tests (node:test), incl. that every mock uses the real product copy:
+                   # the extension listing and the walkthrough (package.json), the Draw from dbt
+                   # QuickPick, progress and name box (src/commands/drawFromDbt.ts,
+                   # src/providers/dbtDraftPicker.ts), the toolbar, detail panel and discrepancy panel
+                   # (webview/, packages/renderer), the setup command and the enrich route's opening
+                   # line (src/types/aiAssistants.ts, the setup skill's SKILL.md) and the sample confirm
+                   # (src/providers/GettingStartedPanel.ts). Reword any of them and the video must be
+                   # re-rendered.
+npm run thumbnail  # docs/assets/getting-started-play.jpg, the README's play-button image
 ```
 
 | Step | Command | What it does |
 |---|---|---|
 | tts | `uv run tts.py` | Voices each `lines[].say` (or `caption`) from `script.yaml` into `build/voice/<id>.wav`. A line is re-voiced only when its text, voice, speed or engine changed. |
-| timeline | `node build-timeline.mjs` | Lays the scenes out from the **measured** clip durations, then writes `build/timeline.json`, `build/narration.wav` (two-pass loudnorm to −16 LUFS / −1.5 dBTP, 48 kHz mono), `getting-started.vtt` and `src/types/gettingStartedTranscript.ts`. It fails if the total is over `maxDuration` (140 s). |
-| music | `uv run music.py` | Writes the background track, `build/music.wav`, trimmed to the timeline, faded in (0.5 s) and out (4 s), and levelled to −14.5 LUFS. The source, in order: a `music/background.{m4a,mp3,wav,flac}` file if one exists (only ever music you are licensed to redistribute publicly); otherwise `music/synth_music.py`, the maintainer's original "demo audio kit" underscore (part 1: warm ambient, D major, 96 BPM; numpy/scipy; deterministic), which it runs into `build/music_raw.wav`; otherwise its own built-in synth: an upbeat 120 BPM electronic track in A minor — kick, claps, hats, pumping supersaw pad, offbeat bass, plucky arp with echo — arranged on `build/timeline.json` (beat drops on the first scene cut, arp enters with the AI assistants, breakdown under the modelling scene, impacts on "checks its own work" and the end card). `encode.sh` mixes it at one steady level about 12 dB under the voice (−28 vs −16 LUFS; no ducking, so it never pumps between lines), with a gentle compressor to even out the track's own sections, then normalises the mix to −16 LUFS. Delete `build/music.wav` for a voice-only render. |
+| timeline | `node build-timeline.mjs` | Lays the scenes out from the **measured** clip durations, then writes `build/timeline.json`, `build/narration.wav` (two-pass loudnorm to −16 LUFS / −1.5 dBTP, 48 kHz mono), `getting-started.vtt` and `src/types/gettingStartedTranscript.ts`. It fails if the total is over `maxDuration` (65 s). |
+| music | `uv run music.py` | Writes the background track, `build/music.wav`, trimmed to the timeline, faded in (0.5 s) and out (4 s), and levelled to −14.5 LUFS. The source, in order: a `music/background.{m4a,mp3,wav,flac}` file if one exists (only ever music you are licensed to redistribute publicly); otherwise `music/synth_music.py`, the maintainer's original "demo audio kit" underscore (part 1: warm ambient, D major, 96 BPM; numpy/scipy; deterministic), which it runs into `build/music_raw.wav`; otherwise its own built-in synth: an upbeat 120 BPM electronic track in A minor — kick, claps, hats, pumping supersaw pad, offbeat bass, plucky arp with echo — arranged on `build/timeline.json` (beat drops on the first scene cut, arp enters with the canvas, an impact on the switch to Physical, breakdown under the AI-helper scene, a final hit on the end card). `encode.sh` mixes it at one steady level about 12 dB under the voice (−28 vs −16 LUFS; no ducking, so it never pumps between lines), with a gentle compressor to even out the track's own sections, then normalises the mix to −16 LUFS. Delete `build/music.wav` for a voice-only render. |
 | capture | `node capture.mjs [--draft] [--jobs N] [--scale 0.6667]` | Renders every frame of `player/` at 1920×1080 and 30 fps and pipes it into a lossless master, `build/master.mkv`. `render(t)` is pure, so `--jobs` renders ranges in parallel and concatenates them. `--draft` pipes JPEG q95 instead of PNG. `--stills 3.2,41` writes single frames to `build/stills/`. |
 | encode | `bash encode.sh` | Produces the mp4 and the poster, then asserts them with ffprobe (see *Size budget and checks*). `--placeholder` makes a 2-second test pattern through the same path. |
 
-The timeline rules are that a scene starts where the previous one ends, and its first line starts `timing.lead` (0.45 s) into it. Every later line starts `timing.gap` (0.25 s) after the one before, or after the line's own `pause` if it sets one. A scene lasts `max(minDur, lastLineEnd + tail)`. Each line's `beat` becomes `beats.<name> = { t, end }` in scene-local seconds, and the scene modules key every animation off those values. That means editing a line and re-running `tts` and `timeline` moves the visuals with the voice. Some beats sit a fixed offset after a line starts so they land on a particular word, for example the Diff button lighting up on "…the Diff button". Those offsets are commented in the scene module. If you reword a line, check them with `npm run preview`.
+The timeline rules are that a scene starts where the previous one ends, and its first line starts `timing.lead` (0.45 s) into it. Every later line starts `timing.gap` (0.25 s) after the one before, or after the line's own `pause` if it sets one. A scene lasts `max(minDur, lastLineEnd + tail)`. Each line's `beat` becomes `beats.<name> = { t, end }` in scene-local seconds, and the scene modules key every animation off those values. That means editing a line and re-running `tts` and `timeline` moves the visuals with the voice. Some beats sit a fixed offset after a line starts so they land on a particular word, for example the pointer clicking Draw from dbt on "…Draw from dbt". Those offsets are commented in the scene module. If you reword a line, check them with `npm run preview`.
 
 ### Preview
 
@@ -53,7 +55,7 @@ npm run preview    # serves the repo root on 127.0.0.1:4173
 - `http://127.0.0.1:4173/video/player/index.html?preview=1` plays the narration and drives `t` from `audio.currentTime`. Click to play or pause, and use ←/→ to seek 5 s.
 - `…/index.html?t=42.5` freezes on one frame.
 
-The player is plain ES modules. `main.js` owns the persistent chrome (kicker, headline, chapter bar). Each `player/scenes/<module>.js` exports `render(localT, { beats, dur })` and returns HTML. `lib.js` holds the shared pieces: the node card, the canvas toolbar, edges, the pointer and the easing helpers. There are no CSS transitions, `@keyframes`, timers or randomness anywhere, and `npm test` enforces that.
+The player is plain ES modules. `main.js` owns the persistent chrome (kicker, headline, chapter bar). Each `player/scenes/<module>.js` exports `render(localT, { beats, dur })` and returns HTML. `lib.js` holds the shared pieces: the node card, the canvas toolbar, edges, the pointer and the easing helpers. `editor.js` holds the VS Code window every scene plays in: the activity bar and Explorer, the walkthrough page (with the real `media/walkthrough/*.svg` images, fetched once and inlined so they use the video's fonts), the orders canvas the canvas, design and physical scenes share, the QuickPick shell, and the product copy the tests check. There are no CSS transitions, `@keyframes`, timers or randomness anywhere, and `npm test` enforces that.
 
 ## Voice
 
@@ -80,17 +82,20 @@ Captions show the real text. When the voice needs something different, the line'
 | SQL | "S-Q-L" | none needed |
 | AI | "A-I" | none needed. Do **not** write "A I", which reads as "a eye". |
 | `/erd-studio-setup` | "erdstudiosetup" | `slash ERD studio setup` |
-| modelling (AU caption) | | `modeling`, since the voice is en-US |
 
 To check a new word, run `from kokoro_onnx.tokenizer import Tokenizer` and `Tokenizer(...).phonemize("word", "en-us")`.
 
 ## Size budget and checks
 
 - **Codec:** MP4 container, **H.264** High profile, yuv420p, `+faststart`, with **MP3** audio (64 kbps, mono, 44.1 kHz): the audio codec VS Code's webview guide documents for video. VS Code's bundled ffmpeg has **no AAC decoder**, so AAC audio plays silently. Opus-in-MP4 shipped first and a user heard no voice, so stay on MP3. Never switch the audio to AAC.
-- **Ceiling: 8 MB** (8 MiB) for the mp4, and 140 s for the timeline. `encode.sh` tries CRF 20, then 22, 24 and 26, and fails if the file is still over. The GOP is 150 frames (5 s). The content is mostly static UI, and the longer GOP roughly halves the size at the same CRF compared with 2 s keyframes. The current render is about 7.94 MiB (8.33 MB, 137.9 s) at CRF 20, close to the ceiling: a longer or busier render will fall through to CRF 22. The ceiling was 7 MiB until the sample-project scene took the video past 120 s; CRF 20 is kept rather than dropping to 22 for the extra 15 s.
+- **Ceiling: 8 MB** (8 MiB) for the mp4, and 65 s for the timeline. `encode.sh` tries CRF 20, then 22, 24 and 26, and fails if the file is still over. The GOP is 150 frames (5 s). The content is mostly static UI, and the longer GOP roughly halves the size at the same CRF compared with 2 s keyframes. The current render is about 4.4 MiB (4.64 MB, 60.2 s) at CRF 20, well under the ceiling.
 - `encode.sh` asserts: `h264` / `High` / `yuv420p`, `mp3` / 44100 / mono, size ≤ 8 MB, duration within 0.25 s of the timeline, the moov atom before mdat, and a 1280×720 JPEG poster.
-- `test/unit/gettingStartedMedia.test.ts` (root vitest) re-checks the shipped files: only two files in `media/onboarding/`, ≤ 8 MB, cues ending by 140 s, faststart, an MP3 track (esds object type 0x6B, not AAC), a JPEG poster, and well-formed cues.
+- `test/unit/gettingStartedMedia.test.ts` (root vitest) re-checks the shipped files: only two files in `media/onboarding/`, ≤ 8 MB, cues ending by 65 s, faststart, an MP3 track (esds object type 0x6B, not AAC), a JPEG poster, and well-formed cues.
 - The poster is the end card 1.5 s in, once every element has landed.
+
+## README thumbnail
+
+`npm run thumbnail` (`thumbnail.mjs`) renders `docs/assets/getting-started-play.jpg`, the image the README links to the video with: 1280×720 JPEG, under 300 KB (the script lowers the quality until it fits, and fails if it cannot). The page is `player/thumbnail.html`: the canvas scene's last frame, drawn by the same scene module, scaled up, softened and dimmed behind a large play button dead centre, the headline "Get started in N seconds" (the timeline's total rounded to the nearest 5 s) and a duration pill with the real m:ss, both read from `build/timeline.json`. Run it after every render that changes the length or the canvas, and look at the result.
 
 ## Licences
 

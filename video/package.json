@@ -13,6 +13,7 @@
     "capture:draft": "node capture.mjs --draft",
     "encode": "bash encode.sh",
     "qa": "bash qa.sh",
+    "thumbnail": "node thumbnail.mjs",
     "test": "node --test test/pipeline.test.mjs",
     "all": "npm run tts && npm run timeline && npm run music && npm run capture && npm run encode"
   },

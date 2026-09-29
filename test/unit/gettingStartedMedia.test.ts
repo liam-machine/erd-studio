@@ -22,7 +22,7 @@ describe('getting-started captions', () => {
       expect(cue.text.length).toBeLessThanOrEqual(84);
       prevEnd = cue.end;
     }
-    expect(prevEnd).toBeLessThanOrEqual(140); // video/script.yaml maxDuration
+    expect(prevEnd).toBeLessThanOrEqual(65); // video/script.yaml maxDuration
   });
 
   it('transcript carries every cue, in order', () => {

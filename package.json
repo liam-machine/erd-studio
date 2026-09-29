@@ -309,12 +309,12 @@
     "viewsWelcome": [
       {
         "view": "erdStudio.domainTree",
-        "contents": "No dbt project in this folder yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA 2-minute video, a sample project to try, and how to open your own.",
+        "contents": "No dbt project in this folder yet.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video, a sample project to try, and how to open your own.",
         "when": "!erdStudio.hasDbtProject"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nThen, optionally, a 2-minute video on how your AI assistant adds keys, grain and your modelling style.",
+        "contents": "No diagrams yet.\n\n[Draw from dbt](command:erdStudio.drawFromDbt)\n\nDraws your dbt models and their relationships on a canvas. No AI needed.\n\n[Get started](command:erdStudio.showGettingStarted)\n\nA one-minute video: drawing your project, exploring it, and optionally adding keys and grain with your AI assistant.",
         "when": "erdStudio.hasDbtProject"
       },
       {
@@ -335,8 +335,8 @@
         "steps": [
           {
             "id": "watch",
-            "title": "See the AI-guided setup",
-            "description": "A two-minute video: your AI assistant designs a model with ERD Studio, and the canvas compares the design with what dbt built. You can also skip AI entirely: Draw from dbt (a later step) draws your project as it is.\n[Watch the video](command:erdStudio.showGettingStarted)",
+            "title": "Watch the one-minute tour",
+            "description": "A one-minute video: draw your dbt project with Draw from dbt, explore the diagram, and compare it with what dbt built. No AI needed.\n[Watch the video](command:erdStudio.showGettingStarted)",
             "media": {
               "svg": "media/walkthrough/watch.svg",
               "altText": "A video player showing a small ERD diagram."

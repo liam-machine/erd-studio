@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!--
+  README thumbnail for the getting-started video (docs/assets/getting-started-play.jpg), rendered by
+  ../thumbnail.mjs. The background is the video's own laid-out diagram (the canvas scene's last
+  frame, drawn by the same scene module), dimmed and softened so the play button and the headline
+  read. The duration comes from build/timeline.json, so it always matches the render.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ERD Studio — getting-started thumbnail</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .bg { position: absolute; inset: 0; transform-origin: 50% 57%; transform: scale(1.32); filter: blur(1.6px) saturate(1.15) brightness(.85); }
+    .shade { position: absolute; inset: 0; background:
+      radial-gradient(ellipse 820px 440px at 50% 52%, rgba(10,12,16,.30), rgba(10,12,16,.5) 70%, rgba(10,12,16,.75) 100%),
+      linear-gradient(180deg, rgba(10,12,16,.9) 0%, rgba(10,12,16,.35) 30%, rgba(10,12,16,.25) 70%, rgba(10,12,16,.9) 100%); }
+    .title { position: absolute; left: 0; right: 0; top: 96px; text-align: center; font-size: 92px; font-weight: 800; letter-spacing: -.03em; color: var(--text); text-shadow: 0 6px 30px #000c; white-space: nowrap; }
+    .title em { font-style: normal; color: var(--blue); }
+    .sub { position: absolute; left: 0; right: 0; top: 780px; text-align: center; font-size: 44px; font-weight: 700; color: var(--text); text-shadow: 0 4px 24px #000d; white-space: nowrap; }
+    .sub span { color: var(--green); }
+    .play { position: absolute; left: 50%; top: 50%; width: 250px; height: 250px; margin: -125px 0 0 -125px; border-radius: 50%;
+      background: rgba(255,255,255,.96); box-shadow: 0 0 0 16px rgba(255,255,255,.16), 0 0 0 34px rgba(92,162,248,.14), 0 24px 70px #000c; display: flex; align-items: center; justify-content: center; }
+    .brand { position: absolute; left: 60px; bottom: 52px; display: flex; align-items: center; gap: 18px; font-size: 38px; font-weight: 800; letter-spacing: -.02em; color: var(--text); }
+    .pill { position: absolute; right: 60px; bottom: 58px; display: flex; align-items: center; gap: 14px; padding: 14px 26px; border-radius: 16px; background: rgba(0,0,0,.72); border: 1px solid #ffffff22; color: #fff; font-size: 36px; font-weight: 700; font-feature-settings: 'tnum'; }
+  </style>
+</head>
+<body>
+  <div class="bg" id="bg"></div>
+  <div class="shade"></div>
+  <div class="title" id="title"></div>
+  <div class="play"><svg width="116" height="116" viewBox="0 0 24 24" style="margin-left:14px"><path d="M6 3.8v16.4a1 1 0 0 0 1.5.86l13.2-8.2a1 1 0 0 0 0-1.72L7.5 2.94A1 1 0 0 0 6 3.8z" fill="#111317"/></svg></div>
+  <div class="sub">Draw your dbt project — <span>no AI needed</span></div>
+  <div class="brand"><img src="/media/icon.png" width="64" height="64" style="border-radius:14px">ERD Studio</div>
+  <div class="pill" id="pill"></div>
+  <script type="module">
+    const timeline = await (await fetch('/video/build/timeline.json', { cache: 'no-store' })).json();
+    const sc = timeline.scenes.find((s) => s.module === 'canvas');
+    const scene = (await import('./scenes/canvas.js')).default;
+    document.getElementById('bg').innerHTML = scene.render(sc.dur - 0.05, { beats: sc.beats, dur: sc.dur, t: sc.start + sc.dur, scene: sc });
+    // Honest numbers: the headline rounds to the nearest 5 s, the pill is the real m:ss.
+    const secs = Math.round(timeline.total);
+    const headline = Math.round(timeline.total / 5) * 5;
+    document.getElementById('title').innerHTML = `Get started in <em>${headline} seconds</em>`;
+    document.getElementById('pill').innerHTML = `<svg width="26" height="26" viewBox="0 0 24 24"><path d="M6 3.8v16.4l14-8.2z" fill="#fff"/></svg>${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    await document.fonts.ready;
+    window.__ready = true;
+  </script>
+</body>
+</html>
