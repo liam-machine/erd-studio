@@ -8,6 +8,11 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+- The anonymous daily usage report now also counts where the getting-started steps (Draw from dbt, Add models from dbt, the sample project, Set Up My AI Helper, opening Claude Code or Copilot Chat) are stopped part-way or hit an error. Still fixed keys only — never names, paths or messages; every field is listed in `telemetry.json`.
+
 ## 1.6.3 — 2026-09-29
 
 ### Changed

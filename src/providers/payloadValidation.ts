@@ -562,11 +562,12 @@ export function validateOpenModelFilePayload(value: unknown): string | null {
   return validateModelNameSafety((value as { modelName?: unknown }).modelName);
 }
 
-/** `layoutFinished` (usage telemetry only): a non-negative finite duration and a boolean. */
-export function validateLayoutFinishedPayload(value: unknown): value is { ms: number; ok: boolean } {
+/** `layoutFinished` (usage telemetry only): a non-negative finite duration, a boolean and an optional `firstOpen` boolean. */
+export function validateLayoutFinishedPayload(value: unknown): value is { ms: number; ok: boolean; firstOpen?: boolean } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const { ms, ok } = value as { ms?: unknown; ok?: unknown };
-  return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof ok === 'boolean';
+  const { ms, ok, firstOpen } = value as { ms?: unknown; ok?: unknown; firstOpen?: unknown };
+  return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof ok === 'boolean'
+    && (firstOpen === undefined || typeof firstOpen === 'boolean');
 }
 
 // ---------------------------------------------------------------------------

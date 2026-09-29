@@ -74,8 +74,19 @@ export interface DrawFromDbtResult {
 /**
  * Run the flow. Resolves undefined when the user cancels, when there is
  * nothing to draw, or when a write fails (each case has already said so).
+ * Anything that throws is counted and rethrown.
  */
 export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult | undefined> {
+  telemetry.feature('drawStarted');
+  try {
+    return await runDrawFromDbt(deps);
+  } catch (err) {
+    telemetry.error('drawFromDbtFailed');
+    throw err;
+  }
+}
+
+async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, domainService, logicalModelService } = deps;
 
   const { ymlData, manifest } = await vscode.window.withProgress(
@@ -89,16 +100,18 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
   const source = { ymlData, manifest, projectRoot: workspaceRoot, modelPaths: deps.modelPaths, layerIds };
   const models = listDraftModels(source);
   if (models.length === 0) {
+    telemetry.feature('drawNoModels');
     void vscode.window.showInformationMessage(NO_DBT_MODELS_MESSAGE);
     return undefined;
   }
   const pick = await pickDraftScope(listDraftScopes(source), { models, title: TITLE });
-  if (!pick) { return undefined; }
+  if (!pick) { telemetry.feature('drawCancelScope'); return undefined; }
 
   // Layer: the one the dbt folder names (marts → gold, …) when it is a layer
   // here; otherwise ask, unless there is only one to choose.
   const creatable = layerService.getCreatableLayers();
   if (creatable.length === 0) {
+    telemetry.feature('drawNoLayers');
     void vscode.window.showErrorMessage('No layers are configured for new diagrams. Add a layer first.');
     return undefined;
   }
@@ -109,7 +122,7 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
       creatable.map((l) => ({ label: l.label, description: l.id === l.label.toLowerCase() ? undefined : l.id, id: l.id })),
       { title: TITLE, placeHolder: 'Which layer is this diagram for?', ignoreFocusOut: true },
     );
-    if (!choice) { return undefined; }
+    if (!choice) { telemetry.feature('drawCancelLayer'); return undefined; }
     layer = choice.id;
   }
   const layerLabel = creatable.find((l) => l.id === layer)?.label ?? layer;
@@ -124,7 +137,7 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
     ignoreFocusOut: true,
     validateInput: (value: string) => deps.validateDomainName(value, chosenLayer),
   });
-  if (!name) { return undefined; }
+  if (!name) { telemetry.feature('drawCancelName'); return undefined; }
   const slug = name.trim();
 
   const draft = buildDbtDraft({
@@ -134,6 +147,7 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
     libraryHas: (n) => logicalModelService.modelExists(n),
   });
   if (draft.modelNames.length === 0) {
+    telemetry.feature('drawNothingDrawable');
     void vscode.window.showWarningMessage(`${TITLE}: none of the chosen models could be drawn. ${describeSkipped(draft.skipped)}`);
     return undefined;
   }
@@ -178,6 +192,7 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
       try { logicalModelService.deleteModel(modelName); } catch { /* best effort */ }
     }
     const exists = err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST';
+    if (!exists) { telemetry.error('drawWriteFailed'); }
     const msg = exists
       ? `A diagram named "${slug}" already exists in the ${layerLabel} layer.`
       : `${TITLE} could not write the diagram: ${err instanceof Error ? err.message : String(err)}`;
