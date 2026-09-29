@@ -145,6 +145,45 @@ export interface SemanticModel {
 }
 
 /**
+ * The placeholder a host puts in a stage's `models` for a model whose file
+ * exists but could not be read. Runtime-only: `loadError` is never written to
+ * a model file, which is why it is not a field of {@link SemanticModel} (the
+ * on-disk shape).
+ */
+export interface UnreadableModelPlaceholder extends SemanticModel {
+  loadError: ModelLoadError;
+}
+
+/** The load error carried by an {@link UnreadableModelPlaceholder}, if `model` is one. */
+export function modelLoadErrorOf(model: SemanticModel): ModelLoadError | undefined {
+  const candidate = (model as Partial<UnreadableModelPlaceholder>).loadError;
+  return candidate && typeof candidate === 'object' ? candidate : undefined;
+}
+
+/**
+ * Why a model file that exists could not be read. A fixed set derived from
+ * the YAML parser's error code (never its message), so it is safe to branch on
+ * in the UI and to count in usage telemetry.
+ */
+export type ModelLoadErrorKind =
+  | 'read'
+  | 'yamlIndent'
+  | 'yamlScalar'
+  | 'yamlStructure'
+  | 'yamlDuplicateKey'
+  | 'yamlOther';
+
+/**
+ * A model file that exists but is broken, as the canvas shows it. Carries no
+ * parser message (which may quote the file) — only the kind and the position.
+ */
+export interface ModelLoadError {
+  kind: ModelLoadErrorKind;
+  /** 1-based line of the error, when the parser reported one. */
+  line?: number;
+}
+
+/**
  * A model definition used when creating new models via addModel message.
  */
 export interface DesignModel {

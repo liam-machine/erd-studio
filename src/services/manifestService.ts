@@ -37,7 +37,7 @@ export const DEFAULT_PARSE_TIMEOUT_MS = 120_000;
  */
 export class ManifestMissingError extends Error {
   constructor(public readonly manifestPath: string) {
-    super(`manifest.json not found at ${manifestPath}. Run "dbt compile" to generate it.`);
+    super(`manifest.json not found at ${manifestPath}. Run "dbt parse" to generate it.`);
     this.name = 'ManifestMissingError';
   }
 }

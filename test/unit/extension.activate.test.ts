@@ -1166,7 +1166,7 @@ describe('erdStudio.drawFromDbt', () => {
     await vscode.commands.executeCommand('erdStudio.drawFromDbt');
 
     expect(quickPick).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith(expect.stringContaining('dbt parse'));
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('columns:'));
   });
 });
 

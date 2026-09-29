@@ -702,6 +702,70 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     });
   });
 
+  describe('model file with a YAML error (#110)', () => {
+    /** Break fct_order.yml: an unquoted ": " inside a value on line 3. */
+    function breakFctOrder(): string {
+      const file = h.logicalModelService.findModelFile('fct_order')!;
+      fs.writeFileSync(file, 'name: fct_order\ndescription: Orders\ncolumns: [\n  - name: x\n  bad: indent\n');
+      return file;
+    }
+
+    function spyOpen() {
+      const doc = { lineCount: 10, uri: vscode.Uri.file('/x') };
+      const open = vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue(doc as never);
+      const show = vi.spyOn(vscode.window, 'showTextDocument').mockResolvedValue(undefined as never);
+      return { open, show };
+    }
+
+    it('openModelFile is allowed on the physical stage and opens the file at the error line', async () => {
+      const file = breakFctOrder();
+      const expected = h.logicalModelService.getModelFileError('fct_order');
+      expect(expected?.line).toBeTypeOf('number');
+      const { open, show } = spyOpen();
+
+      await h.send({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+      await h.send({ type: 'openModelFile', payload: { modelName: 'fct_order' } });
+
+      expect(h.errors()).toEqual([]);
+      expect(_appliedEdits).toHaveLength(0);
+      expect((open.mock.calls[0][0] as { fsPath: string }).fsPath).toBe(file);
+      const options = show.mock.calls[0][1] as { selection: { start: { line: number; character: number } } };
+      expect(options.selection.start.line).toBe(expected!.line! - 1);
+    });
+
+    it('openModelFile rejects an unsafe name and writes nothing', async () => {
+      const { open } = spyOpen();
+      await h.send({ type: 'openModelFile', payload: { modelName: '../escape' } });
+      expect(h.errors()).toEqual(['Failed to open model file: Model name cannot contain path separators.']);
+      expect(open).not.toHaveBeenCalled();
+    });
+
+    it('an edit names the YAML error instead of "not found"', async () => {
+      breakFctOrder();
+      const line = h.logicalModelService.getModelFileError('fct_order')!.line;
+      await h.send({ type: 'updateModelDescription', payload: { modelName: 'fct_order', description: 'x' } });
+      const errors = [...h.errors()];
+      await h.send({ type: 'renameModel', payload: { oldName: 'fct_order', newName: 'fct_orders' } });
+      errors.push(...h.errors());
+
+      expect(errors).toHaveLength(2);
+      for (const e of errors) {
+        expect(e).toContain(`Can't edit "fct_order": its file has a YAML error on line ${line}.`);
+        expect(e).not.toContain('not found');
+      }
+    });
+
+    it('the domain payload carries loadError for the broken model', async () => {
+      breakFctOrder();
+      await h.send({ type: 'ready' });
+      const loaded = (h.panel._postedMessages as Array<{ type: string; payload?: { models?: Array<{ name: string; loadError?: unknown }> } }>)
+        .filter((m) => m.type === 'domainLoaded')
+        .pop();
+      const broken = loaded!.payload!.models!.find((m) => m.name === 'fct_order');
+      expect(broken?.loadError).toMatchObject({ kind: expect.any(String), line: expect.any(Number) });
+    });
+  });
+
   describe('duplicate model files', () => {
     it('warns once, naming both files, when the domain uses a name two files define', async () => {
       // fct_order sits at the top level (it wins); a silver/ copy is ignored.

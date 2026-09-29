@@ -40,7 +40,11 @@
         "name": "broken",
         "schema": "",
         "description": "",
-        "columns": []
+        "columns": [],
+        "loadError": {
+          "kind": "yamlIndent",
+          "line": 5
+        }
       },
       {
         "name": "nameless",

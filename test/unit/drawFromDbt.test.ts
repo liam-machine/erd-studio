@@ -36,6 +36,8 @@ describe('describeDraftNotice', () => {
 });
 
 it('the empty-project message says how to get models', () => {
-  expect(NO_DBT_MODELS_MESSAGE).toContain('dbt parse');
+  expect(NO_DBT_MODELS_MESSAGE).toContain('columns:');
   expect(NO_DBT_MODELS_MESSAGE).toContain('.yml');
+  // Running dbt adds no columns the yml lacks (#110), so it must not be the advice.
+  expect(NO_DBT_MODELS_MESSAGE).not.toContain('dbt parse');
 });

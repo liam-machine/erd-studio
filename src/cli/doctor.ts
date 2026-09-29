@@ -337,7 +337,13 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       name: identity.name,
       profile: identity.profile,
       modelPaths: ctx.dbtConfig.modelPaths,
-      targetPath: ctx.dbtConfig.targetPath,
+      // An absolute target-path (or DBT_TARGET_PATH) is shown relative to the
+      // project when inside it, else as its redacted shape — never a home path.
+      targetPath: path.isAbsolute(ctx.dbtConfig.targetPath)
+        ? (relPath(ctx.root, ctx.dbtConfig.targetPath).startsWith('..')
+          ? redactPaths(ctx.dbtConfig.targetPath)
+          : relPath(ctx.root, ctx.dbtConfig.targetPath))
+        : ctx.dbtConfig.targetPath,
     },
     dbt: {
       found: found !== null,

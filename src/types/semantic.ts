@@ -12,6 +12,9 @@ export type {
   ModelRole,
   Rationale,
   SemanticModel,
+  ModelLoadError,
+  ModelLoadErrorKind,
+  UnreadableModelPlaceholder,
   DesignModel,
   Cardinality,
   Relationship,
@@ -37,4 +40,5 @@ export {
   describeUnsupportedDomainFormat,
   getRawDomainModelNames,
   isDomainV5,
+  modelLoadErrorOf,
 } from '@erd-studio/core';

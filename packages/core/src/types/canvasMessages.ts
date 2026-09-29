@@ -248,6 +248,18 @@ export interface RemoveAnnotationMessage {
   };
 }
 
+/**
+ * Request to open a model's `logical-models` file in a text editor, with the
+ * cursor on its load error when it has one. Writes nothing — the node posts
+ * it from the "Open file" button shown on a model whose file is broken.
+ */
+export interface OpenModelFileMessage {
+  type: 'openModelFile';
+  payload: {
+    modelName: string;
+  };
+}
+
 /** Union of every edit message the canvas components can post to their host. */
 export type CanvasEditMessage =
   | AddColumnMessage
@@ -266,4 +278,5 @@ export type CanvasEditMessage =
   | UpdateModelRoleMessage
   | ReorderColumnsMessage
   | UpdateAnnotationMessage
-  | RemoveAnnotationMessage;
+  | RemoveAnnotationMessage
+  | OpenModelFileMessage;

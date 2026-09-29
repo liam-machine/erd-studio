@@ -7,7 +7,7 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { AnnotationColor, Cardinality, Layer, Meta, ModelRole, Stage } from '@erd-studio/core';
+import type { AnnotationColor, Cardinality, Layer, Meta, ModelLoadError, ModelRole, Stage } from '@erd-studio/core';
 import type { LayerConfig } from '@erd-studio/core';
 import type { ModelDiscrepancy } from '@erd-studio/core';
 import type { PhysicalProvenance } from '@erd-studio/core';
@@ -98,6 +98,11 @@ export type ModelNodeData = {
    * off the logical canvas without a stage check.
    */
   provenance?: PhysicalProvenance;
+  /**
+   * The model's file exists but could not be read (logical stage only): the
+   * node shows the error and an "Open file" button instead of "No columns".
+   */
+  loadError?: ModelLoadError;
   /** Whether this model is in stub display mode (PK/NK columns only). */
   isStub: boolean;
   /** Per-model discrepancy data when a cross-stage comparison report is active. */

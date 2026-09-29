@@ -13,7 +13,7 @@
  *                         schema mutations (addModel … removeRelationships),
  *                         canvas metadata (updatePositions, *Annotation*),
  *                         sync flow (toggleDiscrepancy, generateSyncPlan,
- *                         runDbtCompile, launchClaudeSync),
+ *                         runDbtCompile, runDbtParse, launchClaudeSync),
  *                         feedback (requestFeedbackContext, analyzeFeedback,
  *                         submitFeedback, copyFeedbackReport,
  *                         openFeedbackLink),
@@ -69,6 +69,8 @@ import {
 import { computeDomainDiff } from '../services/stageDiff';
 import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
 import { findVenvActivate } from '../services/dbtEnv';
+import { runDbtParse } from '../commands/runDbtParse';
+import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -105,6 +107,7 @@ import type {
   CopyFeedbackReportMessage,
   ErrorMessage,
   OpenFeedbackLinkMessage,
+  OpenModelFileMessage,
   SetFeedbackProviderMessage,
   OpenFeedbackMessage,
   RelationshipKey,
@@ -121,6 +124,7 @@ import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
+import { openModelFileAt } from '../commands/openModelFile';
 import {
   buildDbtDraft,
   dbtTestsOf,
@@ -285,6 +289,7 @@ import {
   validateMetaPayload,
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
+  validateOpenModelFilePayload,
   validateAnnotationUpdate,
   validateModelNameSafety,
   validatePoint,
@@ -782,11 +787,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
           'refreshManifest', 'dismissWelcome',
-          'viewFile', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
+          'viewFile', 'generateSyncPlan', 'runDbtCompile', 'runDbtParse', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'removeAnnotations',
           'requestReload', 'openGettingStarted',
           'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
           'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
+          'openModelFile',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -998,6 +1004,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'viewFile': {
             await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+            break;
+          }
+          case 'openModelFile': {
+            // Writes nothing, so it is on the physical allowlist.
+            const payload = (message as OpenModelFileMessage).payload;
+            const payloadError = validateOpenModelFilePayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to open model file: ${payloadError}` } });
+              break;
+            }
+            await this.handleOpenModelFile(payload.modelName, webviewPanel.webview);
             break;
           }
           // --- Feedback dialog -------------------------------------------
@@ -1289,6 +1306,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             await this.handleRunDbtCompile();
             break;
           }
+          case 'runDbtParse': {
+            // Records the `dbtParse` feature itself; the manifest watcher
+            // refreshes this canvas once manifest.json appears.
+            await runDbtParse(this.workspaceRoot);
+            break;
+          }
           case 'launchClaudeSync': {
             telemetry.feature('launchClaude');
             await this.handleLaunchClaudeSync();
@@ -1442,6 +1465,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Throws if the model is not in the library (callers' catch blocks surface it).
    * Returns false when the WorkspaceEdit was rejected — callers must report that.
    */
+  /**
+   * Open a model's `logical-models` file in a text editor, with the cursor on
+   * its load error when it has one.
+   */
+  private async handleOpenModelFile(modelName: string, webview: vscode.Webview): Promise<void> {
+    const filePath = this.logicalModelService.findModelFile(modelName.trim());
+    if (!filePath) {
+      this.post(webview, { type: 'error', payload: { message: `Model "${modelName}" not found in logical-models/.` } });
+      return;
+    }
+    const error = this.logicalModelService.getModelFileError(modelName.trim());
+    await openModelFileAt(filePath, error?.line, error?.column);
+  }
+
+  /**
+   * Why a model cannot be edited: its file has a YAML error (the file exists
+   * but is broken), else the old "not found" wording.
+   */
+  private modelUnavailableMessage(modelName: string): string {
+    const error = this.logicalModelService.getModelFileError(modelName);
+    if (error) {
+      return error.kind === 'read'
+        ? `Can't edit "${modelName}": its file could not be read.`
+        : `Can't edit "${modelName}": its file has a YAML error${error.line !== undefined ? ` on line ${error.line}` : ''}.`;
+    }
+    return `Model "${modelName}" not found in logical-models/.`;
+  }
+
   private async applyModelEdit(
     document: vscode.TextDocument,
     webview: vscode.Webview,
@@ -1451,7 +1502,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<boolean> {
     const model = this.logicalModelService.getModel(modelName);
     if (!model) {
-      throw new Error(`Model "${modelName}" not found in logical-models/.`);
+      throw new Error(this.modelUnavailableMessage(modelName));
     }
 
     modelMutator(model);
@@ -2731,7 +2782,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
         const existingModel = this.logicalModelService.getModel(payload.oldName);
         if (!existingModel) {
-          webview.postMessage({ type: 'error', payload: { message: `Model "${payload.oldName}" not found in logical-models/.` } });
+          webview.postMessage({ type: 'error', payload: { message: this.modelUnavailableMessage(payload.oldName) } });
           return;
         }
         const renamedModel: import('../types/semantic').SemanticModel = { ...existingModel, name: trimmedNew };
@@ -3503,9 +3554,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       };
       const models = listDraftModels(source);
       if (models.length === 0) {
-        void vscode.window.showInformationMessage(
-          'No dbt models with columns were found. Describe your models in a schema .yml, or run dbt parse, then try again.',
-        );
+        void vscode.window.showInformationMessage(NO_DBT_MODELS_MESSAGE);
         return;
       }
       const excluded = new Set(inDomain.map(normaliseName));

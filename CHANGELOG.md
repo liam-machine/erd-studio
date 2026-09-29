@@ -8,6 +8,21 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+- **A model file with a YAML mistake no longer looks empty or "not found"** ([#110](https://github.com/liam-machine/erd-studio/issues/110)). The diagram now says `YAML error on line 3 — ERD Studio can't read this file.` on that model, with an **Open file** button that jumps to the line, and you get one notice per broken file with a tip for the usual cause (text containing `: ` that needs quotes, tabs, a key written twice). Editing such a model says why it can't be edited instead of claiming the file is missing.
+- **`erd-studio diff` and `doctor` report broken model YAML** with the file and line, as one fix. Previously `diff` asked your AI assistant to add every dbt column to a file it could not read, so the assistant kept editing a file that stayed broken.
+- **AI assistants are told when to quote YAML values.** The schema and setup guides now say to double-quote descriptions, grains and data types, and when it's required. You'll be offered a one-time update of the AI helper files.
+- A `target-path` that is absolute or uses `{{ env_var(...) }}`, and the `DBT_TARGET_PATH` variable, are now honoured instead of silently reading `target/`.
+- Draw from dbt's "no models" message no longer tells you to run `dbt parse` (it adds no columns); it says to list `columns:` in your schema .yml files.
+
+### Added
+- **Run dbt parse** button on the Physical stage notice and on the "no dbt manifest" warnings, for a project dbt hasn't been run in yet. It needs no warehouse connection (only a working dbt profile), uses the dbt the extension finds, and asks before running one from the project's own virtual environment.
+
+### Changed
+- Usage telemetry: a missing dbt manifest is no longer counted as an error (it's the normal state before `dbt parse`), model-file errors carry a fixed reason (read, indentation, value, structure, duplicate key), and the heartbeat notes whether ERD Studio's AI helper files are installed and whether Run dbt parse was used. No names, paths or messages are sent. See the README's Telemetry section.
+
 ## 1.6.1 — 2026-09-29
 
 ### Added

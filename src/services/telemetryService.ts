@@ -32,6 +32,7 @@ import {
   recordCatalog,
   recordError,
   recordFeature,
+  recordFeatureOnce,
   recordManifest,
   recordStage,
   utcDay,
@@ -238,6 +239,10 @@ export const telemetry = {
   },
   feature(feature: TelemetryFeature): void {
     active?.update(s => recordFeature(s, feature));
+  },
+  /** Count `feature` at most once per day (a presence flag). */
+  featureOnce(feature: TelemetryFeature): void {
+    active?.update(s => recordFeatureOnce(s, feature));
   },
   error(code: TelemetryErrorCode): void {
     active?.update(s => recordError(s, code));

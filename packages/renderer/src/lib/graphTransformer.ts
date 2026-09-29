@@ -211,6 +211,7 @@ export function transformDomain(
         // spreads `...data` and never recomputes it, so memoised nodes are
         // untouched. Never derive it inside an overlay pass.
         ...(model.provenance ? { provenance: model.provenance } : {}),
+        ...(model.loadError ? { loadError: model.loadError } : {}),
         ...(disc ? { discrepancy: disc } : {}),
         ...(disc && options?.discrepancyReport ? {
           discrepancySourceStage: options.discrepancyReport.sourceStage,

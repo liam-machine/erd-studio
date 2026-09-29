@@ -16,7 +16,8 @@ import * as path from 'path';
 import { Document, parseDocument, isAlias, isMap, isPair, isScalar, isSeq } from 'yaml';
 import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
 
-import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, parseLogicalModelText } from '@erd-studio/core';
+import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
+import type { ModelLoadErrorKind } from '@erd-studio/core';
 import type { ColumnDef, SemanticModel } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
@@ -55,13 +56,7 @@ const MODEL_FOLDER_PATTERN = /^[a-z][a-z0-9_-]*$/;
  * the `yaml` library's own error code (never the message text), so it is safe
  * to count in usage telemetry and to branch on in the UI.
  */
-export type ModelFileErrorKind =
-  | 'read'
-  | 'yamlIndent'
-  | 'yamlScalar'
-  | 'yamlStructure'
-  | 'yamlDuplicateKey'
-  | 'yamlOther';
+export type ModelFileErrorKind = ModelLoadErrorKind;
 
 /**
  * A model file that exists but cannot be read or parsed. `message` is the
@@ -79,39 +74,11 @@ export interface ModelFileError {
   message: string;
 }
 
-const YAML_ERROR_KINDS: Record<string, ModelFileErrorKind> = {
-  TAB_AS_INDENT: 'yamlIndent',
-  BAD_INDENT: 'yamlIndent',
-  BAD_SCALAR_START: 'yamlScalar',
-  BLOCK_AS_IMPLICIT_KEY: 'yamlScalar',
-  UNEXPECTED_TOKEN: 'yamlScalar',
-  MISSING_CHAR: 'yamlScalar',
-  BAD_ALIAS: 'yamlScalar',
-  BLOCK_IN_FLOW: 'yamlScalar',
-  MULTIPLE_DOCS: 'yamlStructure',
-  MULTILINE_IMPLICIT_KEY: 'yamlStructure',
-  DUPLICATE_KEY: 'yamlDuplicateKey',
-};
-
 /** Describe a failure thrown while reading or parsing a model file. */
 export function describeModelFileError(name: string, filePath: string, err: unknown): ModelFileError {
   const message = err instanceof Error ? err.message : String(err);
-  const e = err as { code?: unknown; linePos?: Array<{ line: number; col: number }> } | null;
-  const code = e && typeof e.code === 'string' ? e.code : undefined;
-  const pos = e && Array.isArray(e.linePos) ? e.linePos[0] : undefined;
-  // A Node fs error carries a code too (ENOENT, EACCES, EBUSY) — those are reads.
-  const isFsError = code !== undefined && /^E[A-Z]+$/.test(code);
-  const kind: ModelFileErrorKind = isFsError || code === undefined
-    ? (isFsError ? 'read' : 'yamlOther')
-    : (YAML_ERROR_KINDS[code] ?? 'yamlOther');
-  return {
-    name,
-    filePath,
-    kind,
-    ...(pos ? { line: pos.line, column: pos.col } : {}),
-    ...(code !== undefined && !isFsError ? { code } : {}),
-    message,
-  };
+  // The classification is core's, so the extension and loadDisplayDomain agree.
+  return { name, filePath, ...classifyModelLoadError(err), message };
 }
 
 export interface ModelFileEntry {
@@ -303,12 +270,13 @@ export class LogicalModelService {
       this.failedPaths.delete(filePath);
       return model;
     } catch (err) {
-      console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
       const error = describeModelFileError(name, filePath, err);
-      // Once per broken file, not once per canvas refresh that re-reads it.
+      // Once per broken file, not once per canvas refresh that re-reads it
+      // (nor for getModelFileError's own re-read).
       const known = this.failedPaths.has(filePath);
       this.failedPaths.set(filePath, error);
       if (!known) {
+        console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
         this.onParseFailure?.(error);
       }
       return null;

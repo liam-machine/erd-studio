@@ -56,6 +56,7 @@ import type {
   ReorderColumnsMessage,
   UpdateAnnotationMessage,
   RemoveAnnotationMessage,
+  OpenModelFileMessage,
 } from '@erd-studio/core';
 
 // The edit messages the shared canvas components post live in
@@ -82,6 +83,7 @@ export type {
   ReorderColumnsMessage,
   UpdateAnnotationMessage,
   RemoveAnnotationMessage,
+  OpenModelFileMessage,
   CanvasEditMessage,
 } from '@erd-studio/core';
 
@@ -601,6 +603,15 @@ export interface RunDbtCompileMessage {
 }
 
 /**
+ * Request the extension to run `dbt parse` in a VS Code terminal — the
+ * physical stage's "Run dbt parse" button when there is no manifest.json.
+ * Writes no domain data, so it is on the physical-stage allowlist.
+ */
+export interface RunDbtParseMessage {
+  type: 'runDbtParse';
+}
+
+/**
  * Request the extension to launch Claude Code in a terminal to execute the sync plan.
  */
 export interface LaunchClaudeSyncMessage {
@@ -682,11 +693,13 @@ export type WebviewMessage =
   | OpenGettingStartedMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage
+  | RunDbtParseMessage
   | LaunchClaudeSyncMessage
   | AddAnnotationMessage
   | UpdateAnnotationMessage
   | RemoveAnnotationMessage
-  | RemoveAnnotationsMessage;
+  | RemoveAnnotationsMessage
+  | OpenModelFileMessage;
 
 // ---------------------------------------------------------------------------
 // Utility types
