@@ -1,5 +1,7 @@
 /**
- * Finding the dbt project ERD Studio opens (#82).
+ * Finding the dbt project ERD Studio opens (#82) — or, when
+ * `erdStudio.projectPath` names a folder without dbt_project.yml (#111), that
+ * plain folder.
  *
  * A window holds exactly one project: every service is built at activation
  * from the root chosen here. A workspace can contain several dbt projects —
@@ -29,6 +31,14 @@ const DBT_SEARCH_MAX_DEPTH = 3;
 export function hasDbtProjectFile(dir: string): boolean {
   try {
     return fs.statSync(path.join(dir, 'dbt_project.yml')).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isDirectory(dir: string): boolean {
+  try {
+    return fs.statSync(dir).isDirectory();
   } catch {
     return false;
   }
@@ -110,7 +120,7 @@ export interface DbtProjectResolution {
   candidates: string[];
   /** Where auto-detection alone would land — what the picker's "Auto-detect" row means. */
   autoRoot: string | undefined;
-  /** A non-empty `projectPath` that does not contain dbt_project.yml (surfaced to the user). */
+  /** A non-empty `projectPath` that is not an existing folder (surfaced to the user). */
   invalidSetting?: string;
 }
 
@@ -119,7 +129,7 @@ export interface DbtProjectResolution {
  * also feeds the picker and the `hasMultipleDbtProjects` context key.
  *
  * `projectPath` may be absolute or relative to any workspace folder (the
- * first folder that resolves wins). `picked` is honoured only while it is
+ * first folder that resolves wins), and need not be a dbt project (#111). `picked` is honoured only while it is
  * still one of the workspace's dbt projects, so a removed folder quietly
  * falls back to auto-detection.
  */
@@ -137,7 +147,12 @@ export function resolveDbtProject(
     const tries = path.isAbsolute(configured)
       ? [configured]
       : folderPaths.map(folder => path.resolve(folder, configured));
-    const hit = tries.find(hasDbtProjectFile);
+    // A dbt project first, so a relative path that is a dbt project under one
+    // workspace folder beats a plain folder of the same name under another.
+    // Any folder is accepted after that (#111): ERD Studio keeps its data
+    // wherever the setting points, and without dbt_project.yml it simply has
+    // no manifest to compare against.
+    const hit = tries.find(hasDbtProjectFile) ?? tries.find(isDirectory);
     if (hit) { return { root: hit, source: 'setting', candidates, autoRoot }; }
     invalidSetting = configured;
   }
@@ -164,13 +179,16 @@ export function resolveDbtProjectRoot(
 }
 
 /**
- * The dbt project a file belongs to: the nearest ancestor directory holding
- * dbt_project.yml, or undefined when there is none.
+ * The project a file belongs to: the nearest ancestor directory holding
+ * dbt_project.yml, or undefined when there is none. Passing the open
+ * project's root as `stopAt` makes that root count as a project too, so a
+ * root without dbt_project.yml (#111) owns its files even when it sits
+ * inside a dbt repository, while a dbt project nested below it still does not.
  */
-export function findOwningDbtProject(filePath: string): string | undefined {
+export function findOwningDbtProject(filePath: string, stopAt?: string): string | undefined {
   let dir = path.dirname(path.resolve(filePath));
   for (;;) {
-    if (hasDbtProjectFile(dir)) { return dir; }
+    if (hasDbtProjectFile(dir) || (stopAt !== undefined && samePath(dir, stopAt))) { return dir; }
     const parent = path.dirname(dir);
     if (parent === dir) { return undefined; }
     dir = parent;

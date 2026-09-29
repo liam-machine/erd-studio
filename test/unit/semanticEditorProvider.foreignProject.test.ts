@@ -109,3 +109,26 @@ describe('opening a domain file from another dbt project', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 });
+
+describe('a project folder without dbt_project.yml (#111)', () => {
+  function standaloneIn(dir: string): string {
+    fs.cpSync(path.join(FIXTURE_ROOT, '.erd-studio'), path.join(dir, '.erd-studio'), { recursive: true });
+    return dir;
+  }
+
+  it('opens its own domain files, also when it sits inside a dbt repository', async () => {
+    const standalone = standaloneIn(path.join(active, 'docs', 'erd'));
+    const panel = await openIn(buildProvider(standalone), path.join(standalone, '.erd-studio', 'silver', 'showcase.json'));
+
+    expect(panel.webview.options).toMatchObject({ enableScripts: true });
+    expect(panel.webview.html).not.toContain('belongs to the');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a domain file from a real dbt project elsewhere', async () => {
+    const standalone = standaloneIn(path.join(root, 'diagrams'));
+    const panel = await openIn(buildProvider(standalone), path.join(other, '.erd-studio', 'silver', 'showcase.json'));
+
+    expect(panel.webview.html).toContain('belongs to the <code>datamodels</code> dbt project');
+  });
+});

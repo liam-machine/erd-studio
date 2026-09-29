@@ -18,6 +18,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - Draw from dbt's "no models" message no longer tells you to run `dbt parse` (it adds no columns); it says to list `columns:` in your schema .yml files.
 
 ### Added
+- **Use ERD Studio without dbt** ([#111](https://github.com/liam-machine/erd-studio/issues/111)). `erdStudio.projectPath` can now point at any folder, not only one with a `dbt_project.yml`. ERD Studio keeps its `.erd-studio` data there and the logical diagram works as usual. There's just no dbt manifest to compare against, so the "Run dbt parse" hint stays hidden. A folder like that can also sit inside a dbt repository. With the setting empty, ERD Studio finds your dbt project exactly as before.
 - **Run dbt parse** button on the Physical stage notice and on the "no dbt manifest" warnings, for a project dbt hasn't been run in yet. It needs no warehouse connection (only a working dbt profile), uses the dbt the extension finds, and asks before running one from the project's own virtual environment.
 - **The Logical stage now offers Run dbt parse too** ([#113](https://github.com/liam-machine/erd-studio/issues/113)). When dbt hasn't parsed the project yet, a slim strip above the diagram says so and has the button, and it goes away by itself once the manifest appears. Close it with × and it stays closed for that project.
 

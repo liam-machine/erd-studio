@@ -127,6 +127,10 @@ To choose another project, click that row, or run **ERD Studio: Select dbt Proje
 
 To choose the project for everyone who opens the workspace, set `erdStudio.projectPath` in the workspace settings. That is the `settings` block of the `.code-workspace` file, or `.vscode/settings.json` for a single folder. Use a relative path so the setting works on every machine. ERD Studio tries it against each workspace folder in turn, so in a multi-root workspace whose folders sit side by side, `../datamodels` points at the `datamodels` folder. The setting takes priority over the picker. In a multi-root workspace ERD Studio reads it from the workspace level only: a value in one folder's own `.vscode/settings.json` is ignored.
 
+### Diagrams without dbt
+
+ERD Studio doesn't need a dbt project. Set `erdStudio.projectPath` to any folder, and ERD Studio keeps its `.erd-studio` data there, whether or not the folder has a `dbt_project.yml`. You can design logical models, relationships and notes as usual. Without dbt there is no manifest to compare against, so the Physical stage stays empty. When the setting is empty, ERD Studio looks for a dbt project as before.
+
 If you open a diagram that belongs to a different dbt project than the one ERD Studio has open, ERD Studio doesn't draw it against the wrong project's data. It offers to switch projects instead.
 
 ### Editing the files by hand
