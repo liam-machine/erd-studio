@@ -29,7 +29,7 @@ These are the REAL UI labels (check them against the code named, and use the cod
 wording if it differs):
 - Walkthrough (package.json `contributes.walkthroughs`, id `erdStudio.getStarted`): title
   **"Get started with ERD Studio"**, description "Draw your dbt project as an ERD in a minute, then enrich it with your AI
-  assistant.", steps in order: "See the AI-guided setup", "No dbt project? Try the sample", "Open
+  assistant.", steps in order: "Watch the one-minute tour", "No dbt project? Try the sample", "Open
   your dbt project", "Draw your dbt project — no AI needed" (button **Draw from dbt**), "Enrich it
   with your AI assistant" (button **Set Up My AI Helper**). It appears in VS Code's Welcome editor: a left column of step rows
   (a circle that fills when done, the title, the open step expanded with its description and a

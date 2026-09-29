@@ -1,36 +1,37 @@
-// 1 · From your dbt project to a data model: a dbt file tree whose model files fly into
-// three logical ERD nodes, which then connect.
+// 1 · The hook: "Your dbt project, as a diagram, in about a minute. / No AI, and nothing to
+// configure." A dbt file tree whose model files fly into three ERD nodes, which then connect;
+// on `noai` three plain claims land top right, above the canvas.
 import { appear, appIcon, card, easeInOut, edge, ICON, lerp, node, nodeHeight, rowY, seg, COLORS } from '../lib.js';
 
 const TREE = [
-  { d: 0, icon: 'folder', label: 'my_dbt_project', open: true },
+  { d: 0, icon: 'folder', label: 'jaffle-shop', open: true },
   { d: 1, icon: 'folder', label: 'models', open: true },
   { d: 2, icon: 'folder', label: 'staging', open: true },
   { d: 3, icon: 'file', label: 'stg_customers.sql' },
   { d: 3, icon: 'file', label: 'stg_orders.sql' },
   { d: 2, icon: 'folder', label: 'marts', open: true },
-  { d: 3, icon: 'file', label: 'dim_customer.sql', fly: 0 },
-  { d: 3, icon: 'file', label: 'fct_order.sql', fly: 1 },
-  { d: 3, icon: 'file', label: 'dim_product.sql', fly: 2 },
+  { d: 3, icon: 'file', label: 'dim_customers.sql', fly: 0 },
+  { d: 3, icon: 'file', label: 'fct_orders.sql', fly: 1 },
+  { d: 3, icon: 'file', label: 'dim_products.sql', fly: 2 },
   { d: 3, icon: 'file', label: 'schema.yml', yml: true },
   { d: 1, icon: 'file', label: 'dbt_project.yml', yml: true },
 ];
 const TREE_X = 96, TREE_Y = 322, TREE_W = 560, ROW = 44, ROW0 = TREE_Y + 64 + 26;
 
 const CANVAS = { x: 704, y: 322, w: 1120, h: 600 };
-const W = 330;
+const W = 350;
 const NODES = [
-  { name: 'dim_customer', x: CANVAS.x + 44, y: CANVAS.y + 92, grain: 'One row per customer',
-    cols: [{ key: 'PK', name: 'customer_key', type: 'INT' }, { name: 'email', type: 'VARCHAR' }, { name: 'segment', type: 'VARCHAR' }] },
-  { name: 'fct_order', x: CANVAS.x + 395, y: CANVAS.y + 222, grain: 'One row per order',
-    cols: [{ key: 'PK', name: 'order_id', type: 'INT' }, { key: 'FK', name: 'customer_key', type: 'INT' }, { key: 'FK', name: 'product_id', type: 'INT' }, { name: 'order_total', type: 'DECIMAL' }] },
-  { name: 'dim_product', x: CANVAS.x + 746, y: CANVAS.y + 92, grain: 'One row per product',
-    cols: [{ key: 'PK', name: 'product_id', type: 'INT' }, { name: 'category', type: 'VARCHAR' }, { name: 'price', type: 'DECIMAL' }] },
+  { name: 'dim_customers', x: CANVAS.x + 20, y: CANVAS.y + 92,
+    cols: [{ key: 'PK', name: 'customer_id', type: 'VARCHAR' }, { name: 'customer_name', type: 'VARCHAR' }, { name: 'first_ordered_at', type: 'DATE' }] },
+  { name: 'fct_orders', x: CANVAS.x + 385, y: CANVAS.y + 222,
+    cols: [{ key: 'PK', name: 'order_id', type: 'VARCHAR' }, { key: 'FK', name: 'customer_id', type: 'VARCHAR' }, { key: 'FK', name: 'product_id', type: 'VARCHAR' }, { name: 'order_total', type: 'DECIMAL' }] },
+  { name: 'dim_products', x: CANVAS.x + 750, y: CANVAS.y + 92,
+    cols: [{ key: 'PK', name: 'product_id', type: 'VARCHAR' }, { name: 'product_name', type: 'VARCHAR' }, { name: 'product_price', type: 'DECIMAL' }] },
 ];
 
 export default {
   render(t, { beats }) {
-    const flyAt = (k) => beats.turn.t + 0.35 + k * 0.42;
+    const flyAt = (k) => beats.minute.t + 0.9 + k * 0.38;   // from "…as a diagram"
     const FLY = 0.62;
 
     // Explorer tree
@@ -51,12 +52,12 @@ export default {
     // Canvas + nodes
     const canvas = card({ x: CANVAS.x, y: CANVAS.y, w: CANVAS.w, h: CANVAS.h, tabs: [{ label: 'orders.json', on: true }], crumb: '.erd-studio › gold › orders.json', bodyCls: 'grid-bg', style: appear(t, 0.2) });
 
-    // While the voice says "Welcome to ERD Studio", the empty canvas carries the app mark.
+    // Until the first model lands, the empty canvas carries the app mark.
     const markOut = 1 - seg(t, flyAt(0), flyAt(0) + 0.4);
     const mark = markOut > 0
       ? `<div class="abs" style="left:${CANVAS.x}px;top:${CANVAS.y + 64}px;width:${CANVAS.w}px;height:${CANVAS.h - 64}px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;opacity:${markOut.toFixed(3)}">
-          <div style="${appear(t, beats.welcome.t, { dy: 12, dur: 0.5 })}">${appIcon(132)}</div>
-          <div style="font-size:52px;font-weight:800;letter-spacing:-.03em;${appear(t, beats.welcome.t + 0.2, { dy: 12, dur: 0.5 })}">ERD Studio</div></div>`
+          <div style="${appear(t, beats.minute.t - 0.25, { dy: 12, dur: 0.5 })}">${appIcon(132)}</div>
+          <div style="font-size:52px;font-weight:800;letter-spacing:-.03em;${appear(t, beats.minute.t - 0.05, { dy: 12, dur: 0.5 })}">ERD Studio</div></div>`
       : '';
     let nodes = mark, chips = '';
     NODES.forEach((n, k) => {
@@ -71,17 +72,24 @@ export default {
         chips += `<div class="abs pill" style="left:${x}px;top:${y}px;background:#1b2a40;color:#cfe3ff;border:2px solid var(--logical);box-shadow:0 10px 30px #000a;opacity:${Math.min(1, p * 6, (1 - p) * 4).toFixed(2)}">${ICON.table({ size: 20 })}${n.name}</div>`;
       }
       const landed = t0 + FLY - 0.12;
-      if (t >= landed) nodes += node({ x: n.x, y: n.y, w: W, name: n.name, grain: n.grain, cols: n.cols, style: appear(t, landed, { dur: 0.35, dy: 10 }) });
+      if (t >= landed) nodes += node({ x: n.x, y: n.y, w: W, name: n.name, cols: n.cols, style: appear(t, landed, { dur: 0.35, dy: 10 }) });
     });
 
     // Edges once all three nodes are down
     const eAt = flyAt(2) + FLY + 0.1;
     const f = NODES[1];
-    const c1y = f.y + rowY(1), c2y = f.y + rowY(2);
+    const c1y = f.y + rowY(1, false), c2y = f.y + rowY(2, false);
     const dc = NODES[0], dp = NODES[2];
-    const e1 = edge([[dc.x + 60, dc.y + nodeHeight(3)], [dc.x + 60, c1y], [f.x, c1y]], { progress: seg(t, eAt, eAt + 0.55), one: [dc.x + 72, dc.y + nodeHeight(3) + 26], many: [f.x - 26, c1y - 6] });
-    const e2 = edge([[dp.x + W - 60, dp.y + nodeHeight(3)], [dp.x + W - 60, c2y], [f.x + W, c2y]], { progress: seg(t, eAt + 0.2, eAt + 0.75), one: [dp.x + W - 50, dp.y + nodeHeight(3) + 26], many: [f.x + W + 10, c2y - 6] });
+    const e1 = edge([[dc.x + 60, dc.y + nodeHeight(3, false)], [dc.x + 60, c1y], [f.x, c1y]], { progress: seg(t, eAt, eAt + 0.55), one: [dc.x + 72, dc.y + nodeHeight(3, false) + 26], many: [f.x - 26, c1y - 6] });
+    const e2 = edge([[dp.x + W - 60, dp.y + nodeHeight(3, false)], [dp.x + W - 60, c2y], [f.x + W, c2y]], { progress: seg(t, eAt + 0.2, eAt + 0.75), one: [dp.x + W - 50, dp.y + nodeHeight(3, false) + 26], many: [f.x + W + 10, c2y - 6] });
 
-    return `${tree}${rows}${canvas}${e1}${e2}${nodes}${chips}`;
+    // "No AI, and nothing to configure." — three claims, top right above the canvas
+    // "…in about a minute" (+2.3 s into the first line), then "No AI" and "nothing to configure"
+    const claims = [['About a minute', beats.minute.t + 2.3], ['No AI needed', beats.noai.t + 0.1], ['Nothing to configure', beats.noai.t + 0.9]]
+      .map(([label, at]) => `<span class="pill" style="font-size:26px;padding:12px 24px;background:#13301f;border:2px solid #1f6b3a;color:#dff7e8;${appear(t, at, { dy: 10 })}"><span style="color:var(--green);display:flex">${ICON.check({ size: 24 })}</span>${label}</span>`)
+      .join('');
+    const pills = `<div class="abs" style="right:96px;top:236px;display:flex;gap:16px">${claims}</div>`;
+
+    return `${tree}${rows}${canvas}${e1}${e2}${nodes}${chips}${pills}`;
   },
 };

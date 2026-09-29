@@ -5,7 +5,7 @@
 // for its own content: `render(localT, ctx) -> string`, ctx = { beats, dur, t }.
 import { clamp, seg, easeOut, lerp, mix, ACCENT } from './lib.js';
 
-const MODULES = ['intro', 'twoWays', 'helper', 'claude', 'checks', 'noDbt', 'areas', 'modelling', 'writes', 'verify', 'explore', 'sample', 'endCard'];
+const MODULES = ['hook', 'install', 'draw', 'canvas', 'design', 'physical', 'enrich', 'sample', 'endCard'];
 const scenesByName = Object.fromEntries(
   await Promise.all(MODULES.map(async (m) => [m, (await import(`./scenes/${m}.js`)).default])),
 );

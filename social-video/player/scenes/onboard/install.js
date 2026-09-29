@@ -25,7 +25,7 @@ export const WT = {
   title: 'Get started with ERD Studio',
   description: 'Draw your dbt project as an ERD in a minute, then enrich it with your AI assistant.',
   steps: [
-    { id: 'watch', title: 'See the AI-guided setup' },
+    { id: 'watch', title: 'Watch the one-minute tour' },
     { id: 'sample', title: 'No dbt project? Try the sample' },
     { id: 'openProject', title: 'Open your dbt project' },
     {

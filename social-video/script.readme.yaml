@@ -1,0 +1,210 @@
+# README cut: "How ERD Studio works" (VARIANT=readme). The pro explainer (script.yaml) re-cut
+# for the project README rather than a LinkedIn feed: same scenes, voice, music and look, with
+# the social-only material removed — the Confluence scene (not a public product), the
+# "not on dbt?" scene (the extension needs a dbt project to open), the launch-traction scene
+# and "link in the comments". The end card points at the Extensions view instead.
+#
+# Format: exactly as script.yaml (see its header). Every scene module is the pro cut's
+# (player/scenes/*.js); `endCard` takes props for its tagline and link line.
+
+title: How ERD Studio works
+maxDuration: 110
+
+voice:
+  engine: kokoro        # kokoro | say
+  kokoro: af_heart      # same voice as the getting-started video
+  speed: 1.06          # a touch brisker than the getting-started video: social pacing
+  say: Karen
+  sayRate: 175
+
+timing:
+  lead: 0.35
+  gap: 0.2
+  tail: 0.45
+  fade: 0.25
+
+chapters: ["WHY", "FLIP", "HOW", "DIFF", "SHIP"]
+
+scenes:
+  - id: hook
+    module: hook
+    chapter: 0
+    minDur: 4.5
+    accent: amber
+    headline: ["We've built data models", "{backwards} for decades."]
+    lines:
+      - id: h_backwards
+        beat: backwards
+        caption: For decades, we've built | the data model {backwards}.
+      - id: h_loop
+        beat: loop
+        caption: Here's the fix, and why your {AI} needs it.
+
+  - id: problem
+    module: problem
+    chapter: 1
+    minDur: 9
+    accent: amber
+    headline: ["Drawn for the business.", "{Invisible} to the code."]
+    lines:
+      - id: p_drawn
+        beat: drawn
+        caption: We draw the logical model for {business users}, in a separate tool.
+      - id: p_back
+        beat: back
+        caption: Developers work backwards from the picture,
+      - id: p_drift
+        beat: drift
+        caption: so the design {drifts} | from the warehouse, | and nobody trusts the diagram.
+
+  - id: ai
+    module: ai
+    chapter: 1
+    minDur: 8
+    accent: blue
+    headline: ["I wanted to vibe code", "{data engineering}."]
+    lines:
+      - id: a_vibe
+        beat: vibe
+        caption: Then I tried to {vibe code} | data engineering.
+      - id: a_blind
+        beat: blind
+        caption: My AI could read | every line of SQL, | but it couldn't see the {design}.
+      - id: a_guess
+        beat: guess
+        caption: What's the grain? | Which keys? | It had to {guess}.
+
+  - id: flip
+    module: flip
+    chapter: 2
+    minDur: 7
+    accent: green
+    headline: ["So flip it.", "Put the model {in the repo}."]
+    lines:
+      - id: f_flip
+        beat: flip
+        caption: So flip it. | Build the logical model | for {developers first},
+      - id: f_repo
+        beat: repo
+        caption: and save it {in the repo}, right next to the SQL.
+
+  - id: yaml
+    module: yaml
+    chapter: 3
+    minDur: 8.5
+    accent: blue
+    headline: ["One table,", "{one YAML file}."]
+    lines:
+      - id: y_file
+        beat: file
+        caption: Each table is | one small {YAML} file,
+      - id: y_fields
+        beat: fields
+        caption: with its {grain}, columns, | types and {keys}.
+      - id: y_domain
+        beat: domain
+        caption: A {domain} file groups the tables | and says how they join.
+
+  - id: canvas
+    module: canvas
+    chapter: 3
+    minDur: 7
+    accent: blue
+    headline: ["The files become", "a {diagram}."]
+    lines:
+      - id: c_draw
+        beat: draw
+        caption: ERD Studio draws those files as a {diagram}, inside VS Code.
+      - id: c_sync
+        beat: sync
+        caption: Edit either one, and the other {updates}.
+
+  - id: view
+    module: view
+    chapter: 3
+    minDur: 9
+    accent: blue
+    headline: ["No magic.", "{It's just a file}."]
+    lines:
+      - id: v_click
+        beat: click
+        caption: Click {View File}, | and there's the JSON underneath.
+      - id: v_format
+        beat: format
+        caption: ERD Studio just {renders} that file, | in one simple, documented format.
+      - id: v_back
+        beat: back
+        pause: 0.3
+        caption: Reopen it with ERD Studio, | and it's a {diagram} again.
+
+  - id: physical
+    module: physical
+    chapter: 3
+    minDur: 6.5
+    accent: green
+    headline: ["Logical is what you mean.", "Physical is {what you built}."]
+    lines:
+      - id: ph_logical
+        beat: logical
+        caption: "{Logical} is the design: what you mean."
+      - id: ph_physical
+        beat: physical
+        caption: "{Physical} is what dbt | actually builds, | read straight from your project."
+
+  - id: diff
+    module: diff
+    chapter: 4
+    minDur: 9
+    accent: amber
+    headline: ["Press Diff.", "Watch the {drift} light up."]
+    lines:
+      - id: d_best
+        beat: best
+        caption: Now the best part.
+      - id: d_press
+        beat: press
+        pause: 0.15
+        caption: Press {Diff}.
+      - id: d_lights
+        beat: lights
+        pause: 0.3
+        caption: A renamed column, | a wrong type, | a missing relationship. | Every mismatch {lights up} | before it ships.
+
+  - id: pr
+    module: pr
+    chapter: 5
+    minDur: 8.5
+    accent: green
+    headline: ["Design and SQL.", "{One pull request}."]
+    lines:
+      - id: pr_same
+        beat: same
+        caption: The design change | and the SQL change | go in the {same pull request}.
+      - id: pr_review
+        beat: review
+        caption: Reviewed together. | Tracked together. | {Shipped} together.
+      - id: pr_sense
+        beat: sense
+        pause: 0.4
+        caption: It's just common sense. | Why did this take us {decades} | to figure out?
+      - id: pr_ai
+        beat: ai
+        pause: 0.3
+        caption: And your {AI} reads the model | before it writes a single line.
+
+  - id: end
+    module: endCard
+    chapter: 0
+    minDur: 6
+    accent: green
+    headline: null
+    props:
+      link: { text: Also on Open VSX, chevron: false }
+    lines:
+      - id: e_name
+        beat: name
+        caption: ERD Studio for VS Code. | {Free}, with the {source on GitHub}.
+        say: ERD Studio for VS Code. Free, with the source on GitHub.
+      - id: e_cta_readme
+        beat: cta
+        caption: Search {ERD Studio} | in the VS Code Extensions view.

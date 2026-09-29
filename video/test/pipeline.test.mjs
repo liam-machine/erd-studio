@@ -88,7 +88,7 @@ test('script.yaml: unique ids, every scene module exists, every beat a module re
 
 test('player code has no CSS transitions, keyframes, timers or randomness (frames must be pure)', () => {
   const dir = join(HERE, '..', 'player');
-  const files = ['style.css', 'lib.js', 'main.js', ...readdirSync(join(dir, 'scenes')).map((f) => `scenes/${f}`)];
+  const files = ['style.css', 'lib.js', 'main.js', 'editor.js', ...readdirSync(join(dir, 'scenes')).map((f) => `scenes/${f}`)];
   for (const f of files) {
     const code = readFileSync(join(dir, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     const hit = code.match(/@keyframes|transition\s*:|Math\.random|setTimeout|setInterval|Date\.now/);
@@ -96,126 +96,134 @@ test('player code has no CSS transitions, keyframes, timers or randomness (frame
   }
 });
 
-// The video shows the product's own words. When the Welcome panel or the setup skill is
-// reworded, these fail so the mock is updated (and re-rendered) with it.
+// The video shows the product's own words. When the walkthrough, the Draw from dbt command, the
+// canvas or the setup skill is reworded, these fail so the mock is updated (and re-rendered) with it.
 const REPO = join(HERE, '..', '..');
 const flat = (s) => s.replace(/\s+/g, ' ');
+const read = (...p) => readFileSync(join(REPO, ...p), 'utf8');
+const pkg = JSON.parse(read('package.json'));
+const sceneSrc = (m) => readFileSync(join(HERE, '..', 'player', 'scenes', `${m}.js`), 'utf8');
 
-test('the Welcome-panel mock uses the real panel copy (src/types/gettingStarted.ts)', async () => {
-  const panel = flat(readFileSync(join(REPO, 'src', 'types', 'gettingStarted.ts'), 'utf8'));
-  const helperSrc = readFileSync(join(HERE, '..', 'player', 'scenes', 'helper.js'), 'utf8');
-  const { READY, GROUPS } = await import('../player/scenes/helper.js');
-  assert.ok(READY.startsWith('AI helper ready for Claude Code, GitHub Copilot, Codex, Gemini CLI and Cursor. '));
-  assert.ok(panel.includes(READY.replace(/^AI helper ready for [^.]*\. /, '')), 'setupReadyMessage([]) tail');
-  for (const [title, why] of GROUPS) {
-    assert.ok(panel.includes(title), `group title: ${title}`);
-    assert.ok(panel.includes(why), `group text: ${why}`);
+// editor.js fetches the walkthrough images at import time; give it the real files.
+globalThis.fetch = async (url) => ({ text: async () => read(...String(url).replace(/^\//, '').split('/')) });
+const editor = await import('../player/editor.js');
+
+test('scene order: hook, install, draw, canvas, design, physical, enrich, sample, end card; at most 65 s', () => {
+  assert.deepEqual(script.scenes.map((s) => s.module), ['hook', 'install', 'draw', 'canvas', 'design', 'physical', 'enrich', 'sample', 'endCard']);
+  assert.ok(script.maxDuration <= 65);
+  const mods = readdirSync(join(HERE, '..', 'player', 'scenes')).map((f) => f.replace(/\.js$/, ''));
+  assert.deepEqual(mods.sort(), script.scenes.map((s) => s.module).sort(), 'no unused scene modules');
+});
+
+test('the extension listing and the walkthrough mock use the real package.json copy', () => {
+  const { EXTENSION, WALKTHROUGH } = editor;
+  assert.equal(EXTENSION.name, pkg.displayName);
+  assert.equal(EXTENSION.publisher, pkg.publisher);
+  assert.equal(EXTENSION.description, pkg.description);
+  const wt = pkg.contributes.walkthroughs.find((w) => w.id === 'erdStudio.getStarted');
+  assert.equal(WALKTHROUGH.title, wt.title);
+  assert.equal(WALKTHROUGH.description, wt.description);
+  assert.deepEqual(WALKTHROUGH.steps.map((s) => s.id), wt.steps.map((s) => s.id));
+  for (const step of WALKTHROUGH.steps) {
+    const real = wt.steps.find((s) => s.id === step.id);
+    assert.equal(step.title, real.title, `step title ${step.id}`);
+    assert.equal(`media/walkthrough/${step.svg}.svg`, real.media.svg, `step image ${step.id}`);
+    if (step.text) {
+      // "<text>\n[<button>](command:…)": VS Code draws a link on its own line as a button.
+      const [text, link] = real.description.split('\n');
+      assert.equal(step.text, text, `step text ${step.id}`);
+      assert.equal(step.button, link.match(/^\[([^\]]+)\]\(command:/)[1], `step button ${step.id}`);
+    }
   }
-  for (const s of [
-    'Your AI assistant', 'Set up my AI helper', 'Start the guided setup', 'Open the canvas', 'Get Claude Code', 'Re-check',
-    'The guided setup runs inside an AI coding assistant, and none was found on this computer. Install one, then press Re-check. Claude Code is recommended: it\'s the one the guide is tested with.',
-    "guide and ERD Studio's file-format rules for", "(so it's ready whichever you install)", ', plus a small checking tool your assistant uses behind the scenes.',
-    'Your assistant checks your dbt setup, works out how your project is modelled and checks with you, builds your logical model and checks it against dbt, explaining each step.',
-    'Install an assistant (step 1) and press Re-check to see exactly what to type.',
-    'The guided setup creates your first domain for you, or you can start one by hand.', 'Create your first domain', 'Reinstall my AI helper',
-  ]) {
-    assert.ok(panel.includes(s), `panel copy: ${s}`);
-    assert.ok(flat(helperSrc).includes(s), `helper.js copy: ${s}`);
-  }
+  const draw = wt.steps.find((s) => s.id === 'draw');
+  assert.match(draw.description, /\(command:erdStudio\.drawFromDbt\)/);
+  const cmd = (id) => pkg.contributes.commands.find((c) => c.command === id);
+  assert.equal(editor.WALKTHROUGH.steps.find((s) => s.id === 'enrich').button, cmd('erdStudio.setupAiHelper').title);
 });
 
-test('the Gemini CLI hint shows the sentence the panel copies (GEMINI_SETUP_SENTENCE)', async () => {
-  const src = readFileSync(join(REPO, 'src', 'types', 'aiAssistants.ts'), 'utf8');
-  const { GEMINI_SENTENCE } = await import('../player/scenes/claude.js');
-  assert.ok(src.includes(`GEMINI_SETUP_SENTENCE = '${GEMINI_SENTENCE}'`), GEMINI_SENTENCE);
+test('the watch step and its image state the real length of this video', () => {
+  const wt = pkg.contributes.walkthroughs.find((w) => w.id === 'erdStudio.getStarted');
+  const watch = wt.steps.find((s) => s.id === 'watch');
+  assert.match(watch.title + watch.description, /one-minute/);
+  assert.ok(script.maxDuration <= 65, 'a one-minute video');
+  assert.match(read('media', 'walkthrough', 'watch.svg'), />1:0\d</);
 });
 
-test('the areas scene proposes one area the way the skill does (SKILL.md Stage 3a)', () => {
-  const skill = flat(readFileSync(join(REPO, 'src', 'harness', 'claude', 'erd-studio-setup', 'SKILL.md'), 'utf8'));
-  const areas = readFileSync(join(HERE, '..', 'player', 'scenes', 'areas.js'), 'utf8');
-  assert.ok(skill.includes("Let's start with **orders**"), 'skill proposes one default');
-  assert.ok(areas.includes("Let's start with <b style=\"color:var(--text)\">orders</b>"), 'scene proposes one default');
-  assert.ok(!/Creating domain/.test(areas), 'the domain file is written in Stage 4, after the modelling step');
+test('the Draw from dbt mock uses the command\'s real copy', () => {
+  const { DRAW_PICK } = editor;
+  const cmd = read('src', 'commands', 'drawFromDbt.ts');
+  const picker = read('src', 'providers', 'dbtDraftPicker.ts');
+  assert.ok(cmd.includes(`const TITLE = '${DRAW_PICK.title}';`), 'QuickPick title');
+  assert.ok(cmd.includes(`title: '${DRAW_PICK.progress}'`), 'progress notification');
+  assert.ok(cmd.includes('prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`'));
+  assert.equal(DRAW_PICK.namePrompt, 'Name the diagram. It is saved in the Gold layer.');
+  assert.ok(picker.includes(`placeHolder: '${DRAW_PICK.placeholder}'`), 'placeholder');
+  assert.ok(picker.includes(`CHOOSE_MODELS_LABEL = '$(checklist) ${DRAW_PICK.choose.label}'`), 'Choose models row');
+  assert.ok(picker.includes('description: `pick up to ${limit} of ${models.length}`'));
+  const limit = read('src', 'services', 'dbtDraft.ts').match(/DRAFT_MODEL_LIMIT = (\d+);/)[1];
+  const all = DRAW_PICK.rows.reduce((n, r) => n + Number(r.description.split(' ')[0]), 0);
+  assert.equal(DRAW_PICK.choose.description, `pick up to ${limit} of ${all}`);
+  // Each folder row: "N models" and the first names (up to four), matching the canvas.
+  for (const r of DRAW_PICK.rows) assert.equal(r.detail.split(', ').length, Number(r.description.split(' ')[0]));
+  assert.deepEqual(DRAW_PICK.rows[0].detail.split(', ').sort(), editor.MODELS.map((m) => m.name).sort(), 'marts = the canvas');
+  assert.ok(pkg.contributes.commands.some((c) => c.command === 'erdStudio.drawFromDbt' && c.title === 'Draw from dbt…'));
 });
 
-test('the modelling-style scene detects and confirms in the skill\'s own words (SKILL.md Stage 3b)', async () => {
-  const raw = readFileSync(join(REPO, 'src', 'harness', 'claude', 'erd-studio-setup', 'SKILL.md'), 'utf8');
-  const stage = raw.slice(raw.indexOf('### 3b.'), raw.indexOf('## Stage 4'));
-  assert.ok(stage.startsWith('### 3b.'), 'Stage 3b found');
-  const skill = flat(stage.replace(/^\s*> ?/gm, ''));
-  // The confident-detection sentence: the first quote under "A table shape detected".
-  const confirm = skill.slice(skill.indexOf('A table shape detected')).match(/"([^"]+)"/)?.[1];
-  // The lookup narration, 'narrate it ("…")', and the playback opener.
-  const lookup = skill.match(/narrate it \("([^"]+)"\)/)?.[1];
-  const playback = skill.match(/"(Here's how I'll apply that:)/)?.[1];
-  assert.ok(confirm && lookup && playback, 'sentences found in SKILL.md');
-  const { CONFIRM, LOOKUP, PLAYBACK } = await import('../player/scenes/modelling.js');
-  assert.equal(CONFIRM, confirm, 'confirmation sentence');
-  assert.equal(LOOKUP, lookup, 'lookup narration');
-  assert.equal(PLAYBACK, playback, 'playback');
-  assert.ok(skill.includes('.erd-studio/modelling-approach.md'), 'saved file');
-  const scene = readFileSync(join(HERE, '..', 'player', 'scenes', 'modelling.js'), 'utf8');
-  assert.ok(scene.includes('.erd-studio/modelling-approach.md'), 'scene shows the saved file');
-  assert.ok(!/How does your team like to model/.test(scene), 'never asks cold');
+test('the canvas mocks use the webview\'s own words', async () => {
+  const toolbar = read('webview', 'components', 'Toolbar', 'Toolbar.tsx');
+  const { DIFF_TOOLTIP, DISC } = await import('../player/scenes/physical.js');
+  assert.ok(toolbar.includes(`'${DIFF_TOOLTIP}'`), 'Diff tooltip');
+  assert.ok(toolbar.includes("'⊕ Diff'") && toolbar.includes("'⊘ Diff'"));
+  assert.ok(toolbar.includes('Layout'), 'Layout button');
+  const disc = read('webview', 'components', 'DiscrepancyPanel', 'DiscrepancyPanel.tsx');
+  for (const s of [`>${DISC.allMatched}<`, `>${DISC.current}<`, `>${DISC.target}<`, `>${DISC.vs}<`, `>${DISC.matched}<`]) assert.ok(disc.includes(s), s);
+  const tabs = read('webview', 'components', 'Toolbar', 'StageTabs.tsx');
+  assert.ok(tabs.includes("label: 'Logical'") && tabs.includes("label: 'Physical'"));
+
+  const { PANEL } = await import('../player/scenes/design.js');
+  const cols = read('packages', 'renderer', 'src', 'components', 'DetailPanel', 'ColumnEditor.tsx');
+  const panel = read('packages', 'renderer', 'src', 'components', 'DetailPanel', 'DetailPanel.tsx');
+  assert.ok(cols.includes('Columns ({columns.length})'));
+  assert.equal(PANEL.columns, `Columns (${editor.MODELS[1].cols.length})`);
+  assert.ok(panel.includes('Relationships ({totalRelationships})'));
+  assert.equal(PANEL.relationships, `Relationships (${PANEL.rels.length})`);
+  const semantic = read('packages', 'core', 'src', 'types', 'semantic.ts');
+  for (const r of PANEL.rels) assert.ok(semantic.includes(`'${r.card}'`), r.card);
 });
 
-test('the sample scene, the helper scene\'s sample link and the end card use the real "Try the sample" copy', async () => {
-  // HTML entities in the panel template become the characters the webview renders.
-  const panel = flat(readFileSync(join(REPO, 'src', 'types', 'gettingStarted.ts'), 'utf8'))
-    .replace(/&mdash;/g, '—').replace(/&rarr;/g, '→').replace(/&#9654;/g, '▶');
-  const sample = await import('../player/scenes/sample.js');
-  const { NO_PROJECT, SAMPLE_TITLE, SAMPLE_TEXT, SAMPLE_BUTTON, CONFIRM, DOWNLOAD } = sample;
-  assert.ok(panel.includes(`<p class="gs-noproject">${NO_PROJECT[0]}<code>${NO_PROJECT[1]}</code>${NO_PROJECT[2]}</p>`), 'no-project note');
-  assert.ok(panel.includes(`<h2 class="gs-sample__title">${SAMPLE_TITLE}</h2>`), 'sample card title');
-  assert.ok(panel.includes(`<p class="gs-sample__text">${SAMPLE_TEXT}</p>`), 'sample card text');
-  assert.ok(panel.includes(`data-action="trySample">${SAMPLE_BUTTON}</button>`), 'sample card button');
+test('the enrich scene types the real setup command and replies in the skill\'s words', async () => {
+  const { PROMPT, REPLY } = await import('../player/scenes/enrich.js');
+  const assistants = read('src', 'types', 'aiAssistants.ts');
+  assert.ok(assistants.includes(`'${PROMPT}'`), 'setup prompt');
+  const skill = flat(read('src', 'harness', 'claude', 'erd-studio-setup', 'SKILL.md'));
+  const said = REPLY.replace(/<\/?b>/g, '**').replace('(4 models)', '(8 models)');
+  assert.ok(skill.includes(said), 'the enrich route\'s opening line');
+  const line = script.scenes.find((s) => s.module === 'enrich').lines.find((l) => l.beat === 'setup');
+  assert.ok(line.caption.includes(PROMPT) && line.caption.includes(editor.WALKTHROUGH.steps.at(-1).button));
+});
 
-  const { SAMPLE_LINK_TEXT } = await import('../player/scenes/helper.js');
-  assert.ok(panel.includes(`data-action="trySample">${SAMPLE_LINK_TEXT}</button>`), 'with-project sample link');
-
-  // SAMPLE_CONFIRM_MESSAGE is a concatenation of string literals in GettingStartedPanel.ts.
-  const host = readFileSync(join(REPO, 'src', 'providers', 'GettingStartedPanel.ts'), 'utf8');
+test('the sample scene uses the real confirm message', async () => {
+  const { CONFIRM, DOWNLOAD } = await import('../player/scenes/sample.js');
+  const host = read('src', 'providers', 'GettingStartedPanel.ts');
   const expr = host.match(/SAMPLE_CONFIRM_MESSAGE =\s*((?:"[^"]*"|'[^']*')(?:\s*\+\s*(?:"[^"]*"|'[^']*'))*);/)?.[1];
   assert.ok(expr, 'SAMPLE_CONFIRM_MESSAGE found');
   assert.equal(CONFIRM, new Function(`return ${expr};`)(), 'confirm message');
   assert.ok(host.includes(`SAMPLE_DOWNLOAD_ACTION = '${DOWNLOAD}'`), 'Download action');
-
-  // The sample scene comes last, just before the end card; the end card no longer mentions it.
-  const mods = script.scenes.map((s) => s.module);
-  assert.deepEqual(mods.slice(-3), ['explore', 'sample', 'endCard'], 'scene order');
-  const end = readFileSync(join(HERE, '..', 'player', 'scenes', 'endCard.js'), 'utf8');
-  assert.ok(!end.includes(SAMPLE_BUTTON) && !/sample/i.test(end.replace(/^\s*\/\/.*$/gm, '')), 'end card has no sample line');
-  const endLines = script.scenes.find((s) => s.module === 'endCard').lines.map((l) => l.caption).join(' ');
-  assert.doesNotMatch(endLines, /sample/i);
+  assert.ok(sceneSrc('sample').includes("open: 'sample'"), 'shows the walkthrough\'s sample step');
 });
 
-test('the sample scene shows the three real entry points (package.json + gettingStarted.ts)', async () => {
-  const pkg = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'));
-  const { SIDEBAR, SIDEBAR_LINK, PALETTE_CATEGORY, PALETTE_TITLE, SAMPLE_TITLE, SAMPLE_BUTTON } = await import('../player/scenes/sample.js');
+test('the end card names the real steps', async () => {
+  const { STEPS } = await import('../player/scenes/endCard.js');
+  const wt = pkg.contributes.walkthroughs.find((w) => w.id === 'erdStudio.getStarted');
+  assert.equal(STEPS[0], `Install ${pkg.displayName}`);
+  assert.equal(STEPS[1], wt.steps.find((s) => s.id === 'openProject').title);
+  assert.equal(STEPS[2], editor.WALKTHROUGH.steps.find((s) => s.id === 'draw').button);
+});
 
-  // 1 · the Welcome panel card (checked verbatim above); the scene draws its title and button.
-  const src = readFileSync(join(HERE, '..', 'player', 'scenes', 'sample.js'), 'utf8');
-  assert.ok(src.includes('${SAMPLE_TITLE}') && src.includes('${SAMPLE_BUTTON}') && SAMPLE_TITLE && SAMPLE_BUTTON);
-
-  // 2 · the ERD Studio sidebar: the domain tree's welcome view. The scene shows its tail as
-  // VS Code renders it: a line that is only a command link is a button, the rest are paragraphs.
-  const welcome = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.contents.includes('erdStudio.trySampleProject'));
-  assert.ok(welcome, 'domain tree welcome view links trySampleProject');
-  const paras = welcome.contents.split('\n\n').map((p) => {
-    const m = p.match(/^\[([^\]]+)\]\(command:[^)]+\)$/);
-    return m ? [m[1]] : p;
-  });
-  const tail = paras.slice(paras.length - SIDEBAR.length);
-  assert.deepEqual(SIDEBAR, tail, 'sidebar welcome view tail, verbatim');
-  assert.ok(welcome.contents.includes(`[${SIDEBAR_LINK}](command:erdStudio.trySampleProject)`), 'sidebar link text');
-  assert.deepEqual(SIDEBAR.at(-2), [SIDEBAR_LINK], 'the sample link is the last button');
-
-  // 3 · the Command Palette: "<category>: <title>" of erdStudio.trySampleProject.
-  const cmd = pkg.contributes.commands.find((c) => c.command === 'erdStudio.trySampleProject');
-  assert.ok(cmd, 'command contributed');
-  assert.equal(PALETTE_CATEGORY, cmd.category);
-  assert.equal(PALETTE_TITLE, cmd.title);
-  assert.ok(src.includes('${PALETTE_CATEGORY}: ${label}') && src.includes('PALETTE_TITLE.slice('), 'palette row renders category: title');
-  const pal = script.scenes.find((s) => s.module === 'sample').lines.find((l) => l.beat === 'palette');
-  assert.ok(pal.caption.includes(`${cmd.category}: ${cmd.title}`), 'narration names the palette entry');
+test('nothing calls ERD Studio open source (the licence is PolyForm Shield: source-available)', () => {
+  assert.match(read('LICENSE'), /PolyForm Shield/);
+  const dir = join(HERE, '..', 'player');
+  const files = ['thumbnail.html', 'editor.js', ...readdirSync(join(dir, 'scenes')).map((f) => `scenes/${f}`)];
+  for (const f of files) assert.doesNotMatch(readFileSync(join(dir, f), 'utf8'), /open[ -]source/i, f);
+  assert.doesNotMatch(JSON.stringify(script), /open[ -]source/i, 'script.yaml');
 });
