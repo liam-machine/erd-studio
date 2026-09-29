@@ -466,6 +466,25 @@ describe('LogicalModelService', () => {
       expect(service.getModel('broken')).toBeNull();
       expect(service.listModels()).toHaveLength(0);
     });
+
+    it('reports a file broken → fixed → broken once per session, while the live error follows the file (#113)', () => {
+      const reported: string[] = [];
+      service.onParseFailure = (e) => reported.push(e.name);
+
+      writeModelFile('flaky', 'name: flaky\ncolumns: [unclosed\n');
+      expect(service.getModelFileError('flaky')).not.toBeNull();
+      expect(service.getModel('flaky')).toBeNull();
+
+      writeModelFile('flaky', 'name: flaky\ndescription: fixed now, a longer file\n');
+      expect(service.getModelFileError('flaky')).toBeNull();
+      expect(service.getModel('flaky')).not.toBeNull();
+
+      writeModelFile('flaky', 'name: flaky\ncolumns: [still unclosed\n');
+      expect(service.getModelFileError('flaky')).not.toBeNull();
+      expect(service.getModel('flaky')).toBeNull();
+
+      expect(reported).toEqual(['flaky']);
+    });
   });
 
   describe('reads fixture files', () => {

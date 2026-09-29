@@ -120,14 +120,18 @@ export class LogicalModelService {
   private readonly cache = new Map<string, CachedModel>();
 
   /**
-   * Told when a model file exists but cannot be read or parsed, once per file
-   * until it reads cleanly again. The extension host counts these for usage
-   * telemetry and warns the user; other callers (the MCP server, the CLI)
-   * leave it unset and ask {@link getModelFileError} instead.
+   * Told when a model file exists but cannot be read or parsed — at most
+   * **once per file path per session** (#113), even if the file is fixed and
+   * breaks again (an AI assistant's edit loop does exactly that). The
+   * extension host counts these for usage telemetry and warns the user; other
+   * callers (the MCP server, the CLI) leave it unset and ask
+   * {@link getModelFileError}, which always reflects the live state.
    */
   onParseFailure?: (error: ModelFileError) => void;
   /** The last failure per file path, until the file reads cleanly again. */
   private readonly failedPaths = new Map<string, ModelFileError>();
+  /** Paths already reported to {@link onParseFailure}; never cleared in a session. */
+  private readonly reportedPaths = new Set<string>();
 
   constructor(
     workspaceRoot: string,
@@ -277,7 +281,10 @@ export class LogicalModelService {
       this.failedPaths.set(filePath, error);
       if (!known) {
         console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
-        this.onParseFailure?.(error);
+        if (!this.reportedPaths.has(filePath)) {
+          this.reportedPaths.add(filePath);
+          this.onParseFailure?.(error);
+        }
       }
       return null;
     }

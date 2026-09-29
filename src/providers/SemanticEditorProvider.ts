@@ -18,7 +18,7 @@
  *                         submitFeedback, copyFeedbackReport,
  *                         openFeedbackLink),
  *                         viewFile, requestReload, dismissWelcome,
- *                         openGettingStarted
+ *                         dismissManifestHint, openGettingStarted
  *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
  *                         requestId), discrepancyReport, manifestStaleness,
  *                         syncPlanGenerated, openFeedback, feedbackContext,
@@ -290,6 +290,7 @@ import {
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
   validateOpenModelFilePayload,
+  validateDismissManifestHintPayload,
   validateAnnotationUpdate,
   validateModelNameSafety,
   validatePoint,
@@ -307,6 +308,12 @@ import { sameName } from '../types/naming';
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
+
+/**
+ * workspaceState key: the user closed the logical stage's "Run dbt parse" hint
+ * (#113). Per workspace, so another project with no manifest still gets it.
+ */
+export const MANIFEST_HINT_DISMISSED_KEY = 'erdStudio.manifestHintDismissed';
 
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
 export const PHYSICAL_READ_ONLY_MESSAGE = 'Physical stage is read-only. Switch to the Logical stage to make changes.';
@@ -824,6 +831,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'dismissWelcome':
             await this.context.globalState.update('welcomeDismissed', true);
             break;
+          case 'dismissManifestHint': {
+            // The webview has already hidden the hint; persisting it is all
+            // that is left, so no domain is re-sent.
+            const payloadError = validateDismissManifestHintPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await this.context.workspaceState?.update(MANIFEST_HINT_DISMISSED_KEY, true);
+            telemetry.featureOnce('manifestHintDismissed');
+            break;
+          }
           case 'openGettingStarted':
             // No payload to validate. Writes nothing, so it is on the physical allowlist.
             await vscode.commands.executeCommand('erdStudio.showGettingStarted');
@@ -1891,6 +1910,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           payload: displayDomain,
           welcomeDismissed,
           ...(autoLayout ? { autoLayout: true } : {}),
+          ...this.manifestHintFlag(),
         });
         if (options.persistPositions) {
           this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
@@ -1909,6 +1929,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /**
+   * `{ manifestMissing: true }` for a logical payload when dbt has not written
+   * a manifest yet and this workspace has not dismissed the hint (#113), else
+   * nothing. Call only after `loadManifest`, which is what sets `isMissing`,
+   * and only for logical payloads.
+   */
+  private manifestHintFlag(): { manifestMissing?: true } {
+    if (!this.manifestService.isMissing) return {};
+    if (this.context.workspaceState?.get<boolean>(MANIFEST_HINT_DISMISSED_KEY)) return {};
+    return { manifestMissing: true };
+  }
+
   /** Usage telemetry for a canvas's first load: only the stage, format and counts. */
   private recordCanvasOpen(document: vscode.TextDocument, stage: Stage, modelCount: number, hasCatalog: boolean): void {
     let format: 'v4' | 'v5' = 'v5';
@@ -1919,6 +1951,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     telemetry.canvasOpened(stage, format, modelCount);
     telemetry.manifest(this.manifestService.isMissing ? 'missing' : this.manifestService.isStale ? 'stale' : 'ok');
+    // #113: where a missing manifest is met (once per day).
+    if (this.manifestService.isMissing) {
+      telemetry.featureOnce(stage === 'logical' ? 'manifestMissingCanvas' : 'manifestMissingPhysical');
+    }
     telemetry.catalog(hasCatalog);
   }
 
@@ -3977,11 +4013,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           physicalDomain.layerConfig = layerConfig;
         }
         this.post(webview, { type: 'stageData', payload: physicalDomain, ...reply });
+        // #113: where a missing manifest is met (once per day).
+        if (this.manifestService.isMissing) telemetry.featureOnce('manifestMissingPhysical');
       } else {
         // Logical — extract from unified file
         const domain = this.domainService.getDomainStage(document.uri.fsPath);
         const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
-        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply });
+        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag() });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

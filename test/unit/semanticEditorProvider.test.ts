@@ -15,6 +15,7 @@ import * as vscode from 'vscode';
 import {
   SemanticEditorProvider,
   PHYSICAL_READ_ONLY_MESSAGE,
+  MANIFEST_HINT_DISMISSED_KEY,
   describeSkippedDbtModels,
   modelFolderForDomain,
 } from '../../src/providers/SemanticEditorProvider';
@@ -89,6 +90,7 @@ function buildProvider(root: string) {
     globalStorageUri: vscode.Uri.file(path.join(root, '.global-storage')),
     extension: { packageJSON: { version: '0.0.0-test' } },
     globalState: { get: () => true, update: async () => {} },
+    workspaceState: vscode.createMockMemento(),
     secrets: vscode.createMockSecretStorage(),
     subscriptions: [],
   } as unknown as import('vscode').ExtensionContext;
@@ -104,7 +106,7 @@ function buildProvider(root: string) {
     selectorsService,
     logicalModelService,
   );
-  return { provider, logicalModelService };
+  return { provider, logicalModelService, context };
 }
 
 const posted = (panel: MockPanel) => panel._postedMessages as Posted[];
@@ -765,6 +767,69 @@ describe('runDbtParse (#110)', () => {
     expect(terminal._sentText).toEqual(['dbt parse']);
     expect(feature).toHaveBeenCalledWith('dbtParse');
     expect(lastError(panel)).not.toBe(PHYSICAL_READ_ONLY_MESSAGE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #113 — the logical stage's "Run dbt parse" hint
+// ---------------------------------------------------------------------------
+
+describe('manifestMissing hint (#113)', () => {
+  const removeManifest = () => fs.rmSync(path.join(root, 'target', 'manifest.json'), { force: true });
+  const lastOf = (panel: MockPanel, type: string) => posted(panel).filter((m) => m.type === type).at(-1) as
+    | (Posted & { manifestMissing?: boolean })
+    | undefined;
+
+  it('flags a logical domainLoaded when manifest.json is missing', async () => {
+    removeManifest();
+    const { panel } = await openShowcase(root);
+    expect(lastOf(panel, 'domainLoaded')?.manifestMissing).toBe(true);
+  });
+
+  it('does not flag it when the manifest is present', async () => {
+    const { panel } = await openShowcase(root);
+    expect(lastOf(panel, 'domainLoaded')).not.toHaveProperty('manifestMissing');
+  });
+
+  it('does not flag it once the workspace has dismissed the hint', async () => {
+    removeManifest();
+    const { panel, context } = await openShowcase(root, { sendReady: false });
+    await context.workspaceState.update(MANIFEST_HINT_DISMISSED_KEY, true);
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    expect(lastOf(panel, 'domainLoaded')).not.toHaveProperty('manifestMissing');
+  });
+
+  it('flags logical stageData but never physical stageData', async () => {
+    removeManifest();
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    expect(lastOf(panel, 'stageData')).not.toHaveProperty('manifestMissing');
+
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'logical', requestId: 2 } });
+    await waitForType(panel, 'stageData', 2);
+    expect(lastOf(panel, 'stageData')).toMatchObject({ requestId: 2, manifestMissing: true });
+  });
+
+  it('dismissManifestHint persists in workspaceState, records the feature and re-sends nothing', async () => {
+    removeManifest();
+    const { panel, context } = await openShowcase(root);
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    const before = types(panel).length;
+
+    panel._simulateMessage({ type: 'dismissManifestHint' });
+
+    await vi.waitFor(() => expect(context.workspaceState.get(MANIFEST_HINT_DISMISSED_KEY)).toBe(true));
+    expect(featureOnce).toHaveBeenCalledWith('manifestHintDismissed');
+    expect(types(panel).slice(before)).toEqual([]);
+  });
+
+  it('refuses a dismissManifestHint carrying a payload', async () => {
+    const { panel, context } = await openShowcase(root);
+    panel._simulateMessage({ type: 'dismissManifestHint', payload: { forever: true } });
+    await waitForError(panel, /takes no payload/);
+    expect(context.workspaceState.get(MANIFEST_HINT_DISMISSED_KEY)).toBeUndefined();
   });
 });
 

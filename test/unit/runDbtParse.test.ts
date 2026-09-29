@@ -9,7 +9,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
-import { dbtParseLaunch, DBT_INSTALL_ACTION, DBT_NOT_FOUND_MESSAGE, runDbtParse } from '../../src/commands/runDbtParse';
+import {
+  _resetDbtParseLaunchForTests,
+  dbtParseLaunch,
+  DBT_INSTALL_ACTION,
+  DBT_NOT_FOUND_MESSAGE,
+  getLastDbtParseLaunchAt,
+  runDbtParse,
+} from '../../src/commands/runDbtParse';
 import { MANIFEST_FAILURE_CODES, manifestFailureCode } from '../../src/extension';
 import type { DbtCandidate } from '../../src/services/dbtEnv';
 import { GETTING_STARTED_EXTERNAL_URLS } from '../../src/types/gettingStarted';
@@ -113,5 +120,32 @@ describe('manifest telemetry (#110)', () => {
   it('malformed and timed-out manifests still are', () => {
     expect(manifestFailureCode('malformed')).toBe('manifestMalformed');
     expect(manifestFailureCode('timeout')).toBe('manifestTimeout');
+  });
+});
+
+describe('Run dbt parse launch timestamp (#113)', () => {
+  beforeEach(() => _resetDbtParseLaunchForTests());
+
+  it('is recorded when the terminal actually launches', async () => {
+    const before = Date.now();
+    await runDbtParse(ROOT, { candidates: () => [onPath], isTrusted: () => true });
+    expect(getLastDbtParseLaunchAt()).toBeGreaterThanOrEqual(before);
+  });
+
+  it('is recorded for a terminal that runs dbt as its own process', async () => {
+    await runDbtParse(ROOT, { candidates: () => [shim], isTrusted: () => true });
+    expect(getLastDbtParseLaunchAt()).toBeTypeOf('number');
+  });
+
+  it('is not recorded when no dbt is found', async () => {
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await runDbtParse(ROOT, { candidates: () => [], isTrusted: () => true });
+    expect(getLastDbtParseLaunchAt()).toBeUndefined();
+  });
+
+  it('is not recorded when the venv prompt is dismissed', async () => {
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined as never);
+    await runDbtParse(ROOT, { candidates: () => [venv], isTrusted: () => true, venvActivate: () => 'act' });
+    expect(getLastDbtParseLaunchAt()).toBeUndefined();
   });
 });

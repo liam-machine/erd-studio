@@ -50,6 +50,7 @@ import { AddExistingModelDialog } from './components/AddExistingModelDialog/AddE
 import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
+import { ManifestHint } from './components/Canvas/ManifestHint';
 import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
@@ -202,6 +203,9 @@ function EditorCanvas() {
           // Set on a fresh domain (no stored positions), cleared by every other
           // payload — a later load without the flag cancels a pending layout.
           useEditorStore.getState().setPendingAutoLayout(msg.autoLayout === true);
+          // Follows every payload: one without the flag (dbt has since run)
+          // hides the logical "Run dbt parse" hint.
+          useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
           if (!msg.welcomeDismissed) {
             useEditorStore.getState().setWelcomeModalOpen(true);
           }
@@ -213,6 +217,7 @@ function EditorCanvas() {
           applyDomainPayload(msg.payload);
           // Stage replies never ask for the first-open layout.
           useEditorStore.getState().setPendingAutoLayout(false);
+          useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
           break;
         case 'discrepancyReport':
           setDiscrepancyReport(msg.payload);
@@ -504,6 +509,8 @@ function EditorCanvas() {
       {/* "dbt has not been compiled" strip. Renders nothing on the logical
           stage or when any dbt artifact was found. */}
       <PhysicalSourceNotice />
+      {/* Logical-stage "Run dbt parse" hint (#113) — no manifest.json yet. */}
+      <ManifestHint />
 
       <ReactFlow
         // flex basis 0 rather than the default height:100%, so the notice's

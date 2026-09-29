@@ -19,6 +19,7 @@ import {
   findDuplicateNames,
   validateAddModelsFromDbtPayload,
   validateOpenModelFilePayload,
+  validateDismissManifestHintPayload,
 } from '../../src/providers/payloadValidation';
 import { MODEL_NAME_PATTERN } from '../../src/types/naming';
 
@@ -259,6 +260,17 @@ describe('validateAddModelsFromDbtPayload', () => {
 
   it.each([null, 'x', 3, [], { modelNames: ['a'] }])('rejects %j', (value) => {
     expect(validateAddModelsFromDbtPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
+describe('validateDismissManifestHintPayload (#113)', () => {
+  it('accepts no payload or an empty object', () => {
+    expect(validateDismissManifestHintPayload(undefined)).toBeNull();
+    expect(validateDismissManifestHintPayload({})).toBeNull();
+  });
+
+  it.each([null, 'x', 3, [], { forever: true }])('rejects %j', (value) => {
+    expect(validateDismissManifestHintPayload(value)).toMatch(/takes no payload/);
   });
 });
 

@@ -110,6 +110,14 @@ export interface DomainLoadedMessage {
    * "do nothing" — partially positioned domains keep the host's placement.
    */
   autoLayout?: boolean;
+  /**
+   * Logical stage only (#113): the dbt project has no `manifest.json` yet and
+   * this workspace has not dismissed the hint. The webview shows the "Run dbt
+   * parse" strip while a logical payload carries it; a payload without it
+   * (the manifest watcher's refresh once dbt has run) hides it. Never set on a
+   * physical payload — the physical stage has its own notice.
+   */
+  manifestMissing?: boolean;
 }
 
 /**
@@ -146,6 +154,8 @@ export interface StageDataMessage {
   type: 'stageData';
   payload: DisplayDomain;
   requestId?: number;
+  /** Same contract as `DomainLoadedMessage.manifestMissing`. */
+  manifestMissing?: boolean;
 }
 
 /**
@@ -419,6 +429,16 @@ export interface DismissWelcomeMessage {
 }
 
 /**
+ * The user closed the logical stage's "Run dbt parse" hint (#113). No payload.
+ * The host persists it in workspaceState so the hint never returns for this
+ * project; the webview hides it at once without waiting for a reply. Not on
+ * the physical allowlist — the hint only renders on the logical stage.
+ */
+export interface DismissManifestHintMessage {
+  type: 'dismissManifestHint';
+}
+
+/**
  * Request to open the underlying JSON file in VS Code's default text editor.
  */
 export interface ViewFileMessage {
@@ -654,6 +674,7 @@ export interface RemoveAnnotationsMessage {
 export type WebviewMessage =
   | ReadyMessage
   | DismissWelcomeMessage
+  | DismissManifestHintMessage
   | AddModelMessage
   | AddColumnMessage
   | RemoveColumnMessage

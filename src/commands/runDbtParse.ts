@@ -63,6 +63,24 @@ export function dbtParseLaunch(candidate: DbtCandidate, activate: string | null)
 }
 
 /**
+ * When Run dbt parse last actually opened its terminal (ms since epoch), in
+ * memory for this session only. Read by the manifest watcher to tell a
+ * manifest the button produced (`manifestAfterParse`) from one that appeared
+ * some other way (#113). Never persisted, never sent.
+ */
+let lastDbtParseLaunchAt: number | undefined;
+
+/** The last Run dbt parse terminal launch this session, or undefined. */
+export function getLastDbtParseLaunchAt(): number | undefined {
+  return lastDbtParseLaunchAt;
+}
+
+/** Test seam: forget the last launch. */
+export function _resetDbtParseLaunchForTests(): void {
+  lastDbtParseLaunchAt = undefined;
+}
+
+/**
  * Run `dbt parse` in a terminal in `root`. Resolves false when dbt was not
  * found, or the user declined the venv prompt; true once the terminal runs.
  */
@@ -114,5 +132,6 @@ export async function runDbtParse(root: string, deps: RunDbtParseDeps = {}): Pro
     });
     terminal.show();
   }
+  lastDbtParseLaunchAt = Date.now();
   return true;
 }
