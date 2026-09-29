@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.3 — 2026-09-29
 
 ### Changed
 - **Usage telemetry now keeps one install ID per VS Code profile.** It used to be replaced every 30 days, which made it impossible to tell whether anyone came back. It is still a random ID made up by ERD Studio, never VS Code's machine ID, and switching telemetry off still stops everything.
