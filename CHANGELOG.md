@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.2 — 2026-09-29
 
 ### Fixed
 - **A model file with a YAML mistake no longer looks empty or "not found"** ([#110](https://github.com/liam-machine/erd-studio/issues/110)). The diagram now says `YAML error on line 3 — ERD Studio can't read this file.` on that model, with an **Open file** button that jumps to the line, and you get one notice per broken file with a tip for the usual cause (text containing `: ` that needs quotes, tabs, a key written twice). Editing such a model says why it can't be edited instead of claiming the file is missing.
