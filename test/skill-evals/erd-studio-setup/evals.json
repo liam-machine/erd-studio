@@ -438,6 +438,60 @@
         "Runs the conformance review after the clean diff with keep-in-sync as the default"
       ],
       "harness": "claude-code"
+    },
+    {
+      "id": 23,
+      "name": "metadata-offer-quick-start",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder and target/catalog.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Add dbt metadata to the schema yml: `meta: {owner: crm-team}` on dim_customer, `config: {meta: {owner: sales-analytics}}` on fct_order and fct_sale, `meta: {pii: true}` on dim_customer's email column, and on fct_sale a Lightdash-style `meta: {dimension: {type: number, label: Amount}}` on one column. Run `dbt parse` (or keep target/manifest.json and rely on the yml).",
+      "prompt": "/erd-studio-setup orders",
+      "expected_output": "The quick start offers dbt's metadata once, just before writing model files, with real counts and a yes default; on 'yes' it saves a metadata list (no Technique line) and copies the exact values, leaving the Lightdash settings out.",
+      "files": [],
+      "expectations": [
+        "Says nothing about metadata before the business area is agreed",
+        "After `inventory --models` and before writing any model file, offers the metadata in one message, alone, with a plain definition, naming `owner` and `pii` with their counts across the chosen models and a yes default",
+        "Names the Lightdash `dimension` key as left out, in a few words",
+        "On 'yes', writes .erd-studio/modelling-approach.md holding only a title and a `## Metadata` table (owner on models, pii on columns, Source `dbt`) with a 'Left out: `dimension`' line",
+        "Every model file it writes carries exactly dbt's values (owner: crm-team on dim_customer, sales-analytics on the facts, pii: true on email, unquoted) and no owner key on models dbt has none for",
+        "No model file contains the `dimension` key",
+        "The final `erd-studio diff` for the new domain exits 0 (clean)",
+        "On 'yes' to the style offer after the canvas, still detects and confirms the style (the metadata-only file is not treated as an agreed approach) and keeps the `## Metadata` section when it writes the approach"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 24,
+      "name": "metadata-saved-list-enrich",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder and target/catalog.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed. Add dbt metadata to the schema yml: `meta: {owner: crm-team}` on dim_customer, `config: {meta: {owner: sales-analytics}}` on fct_order and fct_sale, `meta: {pii: true}` on dim_customer's email column, and on fct_sale a Lightdash-style `meta: {dimension: {type: number, label: Amount}}` on one column. Run `dbt parse` (or keep target/manifest.json and rely on the yml). Then create .erd-studio/ with one domain drafted by 'ERD Studio: Draw from dbt…' on the silver models, and write .erd-studio/modelling-approach.md with only '# Modelling approach' and a `## Metadata` table listing `owner` (models, Source dbt) and `steward` (models, Source the team). Hand-add `meta: {tier: gold}` to one drafted model file. Snapshot .erd-studio/.",
+      "prompt": "/erd-studio-setup",
+      "expected_output": "The enrich route follows the saved list without asking again: owner is copied from dbt as part of the single 'Add these?', steward is never filled in, the hand-written tier key is kept, and pii (dbt has it, the list does not) is offered once as an addition to the list.",
+      "files": [],
+      "expectations": [
+        "Does not ask whether to copy the metadata; says in one line it will follow the saved list",
+        "Includes the owner values in the single 'Add these?' list of drafts, and writes them only on a yes",
+        "Never writes a `steward` value; after writing, says in one line which models still lack it",
+        "The hand-added `tier: gold` entry is still in its model file after the run",
+        "Offers, as one Stage 6 next step, to add `pii` (recorded by dbt, not on the list) to the metadata list",
+        "No column name, dataType, description or relationship in the drafted files changes (compare with the snapshot)",
+        "The final `erd-studio diff` for the domain exits 0 (clean)"
+      ],
+      "harness": "claude-code"
+    },
+    {
+      "id": 25,
+      "name": "metadata-none-in-dbt",
+      "fixture": "test/fixtures/dbt-project",
+      "setup": "Copy the fixture to a temp dir and delete its .erd-studio/ folder and target/catalog.json. Stub dbt Core 1.9 on PATH; minimal profiles.yml with profile 'test'. Helper installed.",
+      "prompt": "/erd-studio-setup orders",
+      "expected_output": "With no dbt metadata the quick start never mentions metadata before the canvas, and offers starting a metadata list only as one optional next step.",
+      "files": [],
+      "expectations": [
+        "Does not mention metadata before the hand-over to the canvas",
+        "Writes no `meta` key into any model file and no `## Metadata` section",
+        "Stage 6's next steps include one optional line offering to record keys such as owner or source system as the team's metadata list"
+      ],
+      "harness": "claude-code"
     }
   ]
 }

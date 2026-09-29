@@ -120,3 +120,38 @@
 .column-tooltip__value {
   font-size: 13px;
 }
+
+/* -----------------------------------------------------------------------
+   Metadata (`meta:`) — keys are the user's own, so shown as written
+   ----------------------------------------------------------------------- */
+
+/* A two-column grid, so every value starts at the same x whatever the key length. */
+.column-tooltip__meta {
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+  display: grid;
+  grid-template-columns: minmax(52px, max-content) minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 4px;
+}
+
+.column-tooltip__meta > .column-tooltip__label {
+  grid-column: 1 / -1;
+}
+
+.column-tooltip__meta .column-tooltip__row {
+  display: contents;
+}
+
+.column-tooltip__details + .column-tooltip__meta {
+  margin-top: 6px;
+}
+
+.column-tooltip__meta-key {
+  max-width: 190px;
+  /* break-word, not anywhere: see .hover-tip__label in HoverTip.css. */
+  overflow-wrap: break-word;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #888);
+}

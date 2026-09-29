@@ -116,11 +116,16 @@ export function formatInventory(r: InventoryResult, p: Paint): string {
   if (r.skipped.length > 0) {
     lines.push(p.dim(`  skipped: ${r.skipped.map((s) => `${s.name} (${s.reason})`).join(', ')}`));
   }
-  const { layering, shape, history } = r.conventions;
+  const { layering, shape, history, meta } = r.conventions;
   lines.push('', 'Conventions:');
   lines.push(`  layering: ${layering.style}${layering.layers.length ? ` (${layering.layers.join(' → ')})` : ''}`);
   lines.push(`  shape: ${shape.style}${shape.style === 'none' ? '' : ` (${shape.confidence}; from ${shape.sources.join(', ')})`}`);
   for (const e of [...layering.evidence, ...shape.evidence]) { lines.push(p.dim(`    ${e}`)); }
   if (history.snapshots.length > 0) { lines.push(`  snapshots: ${history.snapshots.join(', ')}`); }
+  if (meta.modelsWithMeta > 0) {
+    lines.push(`  meta: on ${meta.modelsWithMeta} of ${plural(meta.totalModels, 'model')}`);
+    if (meta.models.length > 0) { lines.push(p.dim(`    models: ${meta.models.map((k) => `${k.key} (${k.count})`).join(', ')}`)); }
+    if (meta.columns.length > 0) { lines.push(p.dim(`    columns: ${meta.columns.map((k) => `${k.key} (${k.count})`).join(', ')}`)); }
+  }
   return lines.join('\n') + '\n';
 }

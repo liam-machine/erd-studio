@@ -132,6 +132,27 @@ describe('transformDomain nodes', () => {
     // shipping a placeholder the chip would have to special-case.
     expect(nodeById(result, 'dim_customer').data).not.toHaveProperty('provenance');
   });
+
+  it('carries model and column meta for the hover cards, and drops an empty map', () => {
+    const result = transformDomain(domain({
+      models: [
+        model('dim_customer', {
+          meta: { owner: 'crm-team' },
+          columns: [
+            column('customer_id', { meta: { source: 'CRM' } }),
+            column('email', { meta: {} }),
+          ],
+        }),
+        model('dim_region', { meta: {} }),
+      ],
+    }));
+
+    const dim = nodeById(result, 'dim_customer').data;
+    expect(dim.meta).toEqual({ owner: 'crm-team' });
+    expect(dim.columns[0].meta).toEqual({ source: 'CRM' });
+    expect(dim.columns[1]).not.toHaveProperty('meta');
+    expect(nodeById(result, 'dim_region').data).not.toHaveProperty('meta');
+  });
 });
 
 describe('transformDomain edges', () => {

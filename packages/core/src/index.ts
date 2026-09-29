@@ -24,11 +24,11 @@ export {
   parseLogicalModelText,
   isSafeModelName,
   isValidModelAlias,
-  setMetaEntry,
   MODEL_ALIAS_MAX_LENGTH,
   MODEL_ALIAS_RULE,
   type ParseLogicalModelOptions,
 } from './logicalModel.js';
 export * from './layers.js';
+export * from './meta.js';
 export * from './displayDomain.js';
 export * from './loadDisplayDomain.js';

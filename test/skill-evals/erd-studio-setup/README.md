@@ -49,6 +49,9 @@ style offer after the canvas; eval 7 states its style up front and takes the ful
 | 20 | quick-start-first-canvas | `dbt-project` minus `.erd-studio/` and `catalog.json` | The default route: Draw from dbt named once, parse only, no style question or catalog before the canvas, clean diff, then the style step and the catalog offered as next steps |
 | 21 | enrich-draw-from-dbt-draft | `dbt-project` with one domain drafted by **Draw from dbt…** | Enrich route: the draft is not rebuilt; grain / keys / roles / rationale proposed once ("Add these?"), no column or relationship touched, clean diff, style offered next |
 | 22 | full-setup-on-request | `dbt-project` minus `.erd-studio/` and `catalog.json` | "The full setup" on request: catalog offered in Stage 2, style confirmed and saved before any model file, conformance review |
+| 23 | metadata-offer-quick-start | `dbt-project` minus `.erd-studio/` and `catalog.json`, with `owner` / `pii` (and a Lightdash `dimension`) added to its schema yml `meta:` | dbt's metadata offered once before the first model file, with counts; the list saved with no Technique line; exact values copied; tool settings left out; the style step still detects the style |
+| 24 | metadata-saved-list-enrich | as 23, plus a Draw from dbt draft and a saved metadata list (`owner` from dbt, `steward` for people) | The saved list is followed without asking: `owner` copied inside the one "Add these?", `steward` never filled, a hand-written key kept, a new dbt key offered for the list once |
+| 25 | metadata-none-in-dbt | `dbt-project` minus `.erd-studio/` and `catalog.json` | No dbt metadata: never mentioned before the canvas, nothing written, one optional next step offers starting a list |
 
 ## Running them
 

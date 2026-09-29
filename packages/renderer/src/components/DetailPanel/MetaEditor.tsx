@@ -8,8 +8,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Meta, MetaValue } from '@erd-studio/core';
+import type { Meta } from '@erd-studio/core';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
+import { formatMetaValue } from '../../lib/metaFormat';
+
+export { formatMetaValue };
 
 interface MetaEditorProps {
   modelName: string;
@@ -19,15 +22,6 @@ interface MetaEditorProps {
   readOnly?: boolean;
   /** Smaller layout for a column row. */
   compact?: boolean;
-}
-
-/** A value as one line of text: nested values in a compact YAML-flow style. */
-export function formatMetaValue(value: MetaValue): string {
-  if (value === null) return '—';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) return `[${value.map(formatMetaValue).join(', ')}]`;
-  return `{ ${Object.entries(value).map(([k, v]) => `${k}: ${formatMetaValue(v)}`).join(', ')} }`;
 }
 
 const hasKey = (meta: Meta | undefined, key: string): boolean =>

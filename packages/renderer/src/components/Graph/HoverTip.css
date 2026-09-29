@@ -28,3 +28,28 @@
 .hover-tip--visible {
   opacity: 1;
 }
+
+/* Label/value rows under the text (a model's `meta:` entries): a two-column
+   grid, so every value starts at the same x whatever the key length. */
+.hover-tip__rows {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
+  display: grid;
+  grid-template-columns: minmax(52px, max-content) minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 3px;
+}
+
+.hover-tip__row {
+  display: contents;
+}
+
+.hover-tip__label {
+  max-width: 190px;
+  /* break-word, not anywhere: `anywhere` shrinks the min-content width, so the
+     shrink-to-fit card came out narrow and split `source_system` mid-word. */
+  overflow-wrap: break-word;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-descriptionForeground, #888);
+}

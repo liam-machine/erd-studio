@@ -243,6 +243,7 @@ describe('inventory conventions', () => {
       layering: { style: 'none', evidence: [], layers: [] },
       shape: { style: 'none', confidence: 'weak', evidence: [], alternatives: [], sources: [] },
       history: { snapshots: [] },
+      meta: { totalModels: 3, modelsWithMeta: 0, models: [], columns: [] },
     });
     expect(r.models.every((m) => m.suggestedLayer === null)).toBe(true);
   });

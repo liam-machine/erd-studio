@@ -60,6 +60,7 @@ describe('harnessAssets', () => {
       'references/dbt-explained.md',
       'references/dbt-setup.md',
       'references/modelling-approaches.md',
+      'references/metadata.md',
       'references/building-the-model.md',
       'references/verify-and-fix.md',
       'references/troubleshooting.md',

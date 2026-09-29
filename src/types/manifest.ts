@@ -6,11 +6,15 @@
  * We extract and index by the short model name for convenient lookup.
  */
 
+import type { Meta } from './semantic';
+
 /** Column metadata from a dbt manifest node. */
 export interface ManifestColumn {
   name: string;
   data_type: string | null;
   description: string;
+  /** dbt `meta` (merged with `config.meta`), when non-empty. CLI inventory only. */
+  meta?: Meta;
 }
 
 /**
@@ -50,6 +54,8 @@ export interface ManifestModelInfo {
   description: string;
   /** Column definitions from dbt */
   columns: ManifestColumn[];
+  /** dbt `meta` (merged with `config.meta`), when non-empty. CLI inventory only. */
+  meta?: Meta;
   /** Original file path from manifest (e.g., "models/silver/dim_customer.sql") */
   originalFilePath?: string;
   /** dbt model version (only set for versioned models, e.g. `model.proj.name.v2`) */

@@ -93,6 +93,7 @@ For each `InventoryModel` in the `inventory --models` output:
 | `columns[].description` | `columns[].description`; if empty, a short draft ending in "(draft)" when the meaning is obvious from the name, else `""` |
 | `columns[].isPrimaryKey: true` | The column in `keyCandidates.unique` when there is exactly one. With several, prefer the one named like `<entity>_id` for the model (`order_id` for `fct_order`). With none, every column of the first `keyCandidates.compositeUnique` group |
 | `columns[].isForeignKey: true` | Every column listed in `foreignKeys` |
+| `meta`, `columns[].meta` | Only with a team metadata list: its `dbt` keys from `meta` / `columns[].meta` — `references/metadata.md` section 5 |
 
 dbt does not know `grain`, `modelRole`, `rationale`, `scdType`, `additiveType` or `isNaturalKey`.
 They come from the **modelling approach** agreed in Stage 3, applied as

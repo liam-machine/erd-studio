@@ -29,6 +29,7 @@ import { KeyBadge } from '../common/KeyBadge';
 import { DataTypeSelect } from '../common/DataTypeSelect';
 import { ColumnTooltip, hasTooltipContent } from './ColumnTooltip';
 import { useHoverTip } from './HoverTip';
+import { metaRows } from '../../lib/metaFormat';
 import { STAGE_HEX } from '../../lib/stageColors';
 import { getDataTypeColor } from '../../lib/dataTypeColors';
 import {
@@ -540,7 +541,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ---------------------------------------------------------------------------
 
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, label, stage, layer, layerConfig, schema, columns, grain, dimmed, readOnly, isGhost, ghostReason, provenance, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, label, stage, layer, layerConfig, schema, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const send = useSend();
   const viewer = useIsViewer();
@@ -618,12 +619,14 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
   // so the header uses the same portal hover card the column rows use.
   // An aliased model reads as its table name; the tip says which model it is.
   const title = label ? `${label} (model ${modelName})` : modelName;
+  const modelMeta = useMemo(() => metaRows(meta), [meta]);
   const nameTip = useHoverTip<HTMLSpanElement>(
     ghostReason
       ? `${title} \u2014 ${GHOST_REASON_TITLE[ghostReason]}`
       : isDiscExtra
         ? `${title} \u2014 only in ${discrepancySourceStage ?? 'this stage'}, not in ${discrepancyTargetStage ?? 'the stage being compared'}`
         : title,
+    modelMeta,
   );
   const sourceTip = useHoverTip<HTMLSpanElement>(
     provenance ? sourceTitle(provenance, columns) : '',

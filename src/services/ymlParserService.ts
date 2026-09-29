@@ -16,8 +16,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseDocument, isSeq, isMap } from 'yaml';
-import type { YAMLMap, YAMLSeq } from 'yaml';
+import { parseDocument, isSeq, isMap, isNode } from 'yaml';
+import type { Document, YAMLMap, YAMLSeq } from 'yaml';
 
 import type {
   YmlColumn,
@@ -26,6 +26,7 @@ import type {
   YmlRelationshipTest,
   YmlResourceDoc,
 } from '../types/ymlData';
+import { readMeta, type Meta } from '@erd-studio/core';
 import { normaliseName, parseRefModelName } from './nameUtils';
 import { defaultDbtProjectConfig, type DbtProjectConfig } from './dbtProjectConfig';
 
@@ -367,7 +368,9 @@ export class YmlParserService {
     compositeUniqueGroups: Map<string, string[][]>,
   ): void {
     const raw = fs.readFileSync(filePath, 'utf-8');
-    const doc = parseDocument(raw);
+    // `merge`: dbt reads YAML 1.1, where `<<: *anchor` merges a map. Only
+    // conversions through the document (meta) see it; `get()` lookups do not.
+    const doc = parseDocument(raw, { merge: true });
 
     const modelsNode = doc.get('models');
     if (!isSeq(modelsNode)) {
@@ -379,6 +382,7 @@ export class YmlParserService {
         continue;
       }
       this.extractModel(
+        doc,
         item as YAMLMap,
         filePath,
         models,
@@ -393,6 +397,7 @@ export class YmlParserService {
    * Extract a single model entry from a parsed YAML model node.
    */
   private extractModel(
+    doc: Document,
     modelNode: YAMLMap,
     filePath: string,
     models: Map<string, YmlModelInfo>,
@@ -422,10 +427,12 @@ export class YmlParserService {
           continue;
         }
 
+        const colMeta = this.extractMeta(doc, col);
         columns.push({
           name: colName,
           description: this.getString(col, 'description'),
           dataType: this.getStringOrNull(col, 'data_type'),
+          ...(colMeta ? { meta: colMeta } : {}),
         });
 
         // Extract tests on this column
@@ -442,12 +449,14 @@ export class YmlParserService {
     // Extract model-level tests (unique_combination_of_columns)
     this.extractModelLevelTests(name, modelNode, compositeUniqueGroups);
 
+    const meta = this.extractMeta(doc, modelNode);
     models.set(name, {
       name,
       description,
       columns,
       filePath,
       tags,
+      ...(meta ? { meta } : {}),
     });
   }
 
@@ -722,6 +731,30 @@ export class YmlParserService {
     return (tagsNode as YAMLSeq).items
       .map((item) => this.resolveScalar(item))
       .filter((s): s is string => typeof s === 'string');
+  }
+
+  /**
+   * A model's or column's dbt `meta:` — the top-level key merged with
+   * `config: meta:` (where dbt 1.10 moved it), the config winning per key as
+   * dbt merges them. Read for the CLI inventory only; the physical stage never
+   * shows or compares it.
+   *
+   * Converted through the document, so anchors, aliases (a whole `meta: *shared`
+   * too) and `<<:` merge keys resolve as dbt reads them; an alias bomb past the
+   * library's alias limit throws and reads as no meta.
+   */
+  private extractMeta(doc: Document, node: YAMLMap): Meta | undefined {
+    const plain = (value: unknown): unknown => {
+      if (!isNode(value)) { return undefined; }
+      try {
+        return value.toJS(doc);
+      } catch {
+        return undefined;
+      }
+    };
+    const config = plain(node.get('config'));
+    const configMeta = config && typeof config === 'object' ? (config as Record<string, unknown>).meta : undefined;
+    return readMeta(plain(node.get('meta')), configMeta);
   }
 
   /** Get a string value from a YAML map, defaulting to ''. */
