@@ -18,6 +18,7 @@ import type { Cardinality, UnifiedDomain } from '../types/semantic';
 import { detectDomainFormat } from '../types/semantic';
 import type { SyncPlan } from '../types/syncPlan';
 import { DomainFileError } from '../services/domainService';
+import type { ModelFileError, ModelFileErrorKind } from '../services/logicalModelService';
 import { computeDomainDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
@@ -25,7 +26,7 @@ import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, t
 export type FixKind =
   | 'add-column' | 'remove-column' | 'set-type'
   | 'add-relationship' | 'remove-relationship' | 'set-cardinality'
-  | 'resolve-phantom';
+  | 'resolve-phantom' | 'fix-model-yaml';
 
 export interface Fix {
   severity: 'blocking' | 'advisory';
@@ -38,7 +39,58 @@ export interface Fix {
   from?: string;
   to?: string;
   relationship?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality?: Cardinality };
+  /** fix-model-yaml: where the parser stopped (1-based). */
+  line?: number;
   explain: string;
+}
+
+/**
+ * A model file that exists but cannot be read or parsed. The model loads as
+ * an empty placeholder, so every column difference reported against it would
+ * be noise — the file has to be fixed first.
+ */
+export interface UnreadableModelFile {
+  name: string;
+  /** Project-relative, forward slashes. */
+  file: string;
+  kind: ModelFileErrorKind;
+  line?: number;
+  column?: number;
+  /** The `yaml` library's error code, e.g. `BLOCK_AS_IMPLICIT_KEY`. */
+  code?: string;
+  /** The parser's own message (may quote the file; never an absolute path). */
+  message: string;
+}
+
+/** One-line advice per failure kind, for the fix text and the human output. */
+export const MODEL_YAML_HINTS: Record<ModelFileErrorKind, string> = {
+  yamlScalar: 'wrap the value in double quotes',
+  yamlIndent: 'indent with spaces, never tabs',
+  yamlDuplicateKey: 'a key appears twice — keep one',
+  yamlStructure: 'one YAML document per file — remove any `---` separator or code fence',
+  yamlOther: 'check the YAML syntax there',
+  read: 'the file could not be read — check it exists and is readable',
+};
+
+/** A {@link ModelFileError} as the CLI reports it: project-relative, redacted. */
+export function toUnreadableModelFile(root: string, err: ModelFileError): UnreadableModelFile {
+  const file = relPath(root, err.filePath);
+  return {
+    name: err.name,
+    file,
+    kind: err.kind,
+    ...(err.line !== undefined ? { line: err.line } : {}),
+    ...(err.column !== undefined ? { column: err.column } : {}),
+    ...(err.code !== undefined ? { code: err.code } : {}),
+    message: redactPaths(err.message.split(err.filePath).join(file)),
+  };
+}
+
+/** `fct_order.yml line 4: YAML error (BLOCK_AS_IMPLICIT_KEY) — wrap the value in double quotes`. */
+export function describeUnreadable(u: UnreadableModelFile): string {
+  const where = `${path.posix.basename(u.file)}${u.line !== undefined ? ` line ${u.line}` : ''}`;
+  const what = u.kind === 'read' ? 'could not be read' : `YAML error${u.code ? ` (${u.code})` : ''}`;
+  return u.kind === 'read' ? `${where}: ${MODEL_YAML_HINTS.read}` : `${where}: ${what} — ${MODEL_YAML_HINTS[u.kind]}`;
 }
 
 export interface DomainDiff {
@@ -57,6 +109,12 @@ export interface DomainDiff {
   phantoms: Array<{ name: string; reason: 'absent' | 'disabled' }>;
   /** Names the domain references that have no logical-models yml (rendered as placeholders). */
   missingModelFiles: string[];
+  /**
+   * Model files that exist but do not parse. Each gets one blocking
+   * `fix-model-yaml` fix in place of its column fixes, so the domain is never
+   * clean until they read.
+   */
+  unreadableModelFiles: UnreadableModelFile[];
   /**
    * Models dbt has but lists no columns for (only the source file proves they
    * exist). `compare()` calls them matched with no column rows, so a clean
@@ -132,6 +190,7 @@ export function fixesFromPlan(
   domainFile: string,
   semanticDir: string,
   phantoms: DomainDiff['phantoms'],
+  unreadable: UnreadableModelFile[] = [],
 ): Fix[] {
   const ymlFile = (model: string): string =>
     plan.modelContext[model]?.logicalModelPath ?? `${semanticDir}/logical-models/${model}.yml`;
@@ -140,9 +199,13 @@ export function fixesFromPlan(
   // and edge: from the logical side compare() reports it 'extra' with every
   // column 'extra', and each of those would be answered by that one question.
   const phantomNames = new Set(phantoms.map((p) => p.name));
+  // A model whose file does not parse loads with no columns, so every dbt
+  // column would read as "add it" — to a file the assistant cannot edit
+  // safely until it parses. One fix-model-yaml replaces them all.
+  const unreadableNames = new Set(unreadable.map((u) => u.name));
 
   for (const c of plan.columns) {
-    if (phantomNames.has(c.modelName)) { continue; }
+    if (phantomNames.has(c.modelName) || unreadableNames.has(c.modelName)) { continue; }
     const logicalType = c.sourceDataType ?? '';
     const physicalType = c.resolvedDataType ?? '';
     const where = `${c.modelName}.${c.columnName}`;
@@ -219,6 +282,14 @@ export function fixesFromPlan(
         : `dbt has no model called ${p.name} — ask whether it is a typo for a real model, or should be removed from this domain.`,
     });
   }
+  for (const u of unreadable) {
+    fixes.push({
+      severity: 'blocking', kind: 'fix-model-yaml', model: u.name, file: u.file,
+      ...(u.line !== undefined ? { line: u.line } : {}),
+      explain: `${describeUnreadable(u)}. Fix this file before anything else — until it parses, `
+        + 'ERD Studio sees the model as empty and every other difference for it is meaningless.',
+    });
+  }
   // A model-level resolution would only arise for a model compare() did not
   // hide; surface it as a phantom question rather than dropping it silently.
   for (const m of plan.models) {
@@ -259,6 +330,7 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
       counts: { blocking: 0, advisory: 0, matchedModels: 0, matchedColumns: 0, matchedRelationships: 0 },
       phantoms: [],
       missingModelFiles: [],
+      unreadableModelFiles: [],
       modelsWithoutColumns: [],
       fixes: [],
       needsMigration: true,
@@ -293,7 +365,8 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
     layer: unified.layer,
     modelFolder: (name) => ctx.logicalModelService.modelFolder(name),
   });
-  const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms);
+  const unreadableModelFiles = unreadableModels(ctx, unified);
+  const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles);
   const blocking = fixes.filter((f) => f.severity === 'blocking').length;
   const advisory = fixes.length - blocking;
 
@@ -309,6 +382,7 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
     },
     phantoms,
     missingModelFiles: missingModelFiles(ctx, unified),
+    unreadableModelFiles,
     modelsWithoutColumns,
     fixes,
     report,
@@ -320,6 +394,15 @@ function missingModelFiles(ctx: CliContext, unified: UnifiedDomain): string[] {
   return unified.logical.models
     .map((m) => m.name)
     .filter((name) => !ctx.logicalModelService.modelExists(name));
+}
+
+function unreadableModels(ctx: CliContext, unified: UnifiedDomain): UnreadableModelFile[] {
+  const out: UnreadableModelFile[] = [];
+  for (const m of unified.logical.models) {
+    const err = ctx.logicalModelService.getModelFileError(m.name);
+    if (err) { out.push(toUnreadableModelFile(ctx.root, err)); }
+  }
+  return out;
 }
 
 /**
@@ -360,6 +443,7 @@ export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResul
           counts: { blocking: 0, advisory: 0, matchedModels: 0, matchedColumns: 0, matchedRelationships: 0 },
           phantoms: [],
           missingModelFiles: [],
+          unreadableModelFiles: [],
           modelsWithoutColumns: [],
           fixes: [],
           error: describeDomainError(ctx, summary.filePath, err),

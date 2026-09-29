@@ -43,10 +43,11 @@ import {
   type CliContext,
   type Envelope,
 } from './context';
+import { MODEL_YAML_HINTS, toUnreadableModelFile, type UnreadableModelFile } from './diff';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
-  | 'migrate-v5' | 'update-harness' | 'ready';
+  | 'fix-model-yaml' | 'migrate-v5' | 'update-harness' | 'ready';
 
 export interface NextStep {
   id: NextStepId;
@@ -91,6 +92,8 @@ export interface DoctorResult extends Envelope {
     domains: number;
     logicalModels: number;
     domainFormatIssues: Array<{ file: string; format: 'v4' | 'hybrid' | 'legacy' }>;
+    /** Library model files that exist but do not parse (shadowed duplicates are never read, so never listed). */
+    unreadableModelFiles: UnreadableModelFile[];
   };
   harness: { schemaSkill: FileState; setupSkill: FileState; version: string };
   nextSteps: NextStep[];
@@ -145,7 +148,7 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   const semanticRoot = path.join(ctx.root, ctx.semanticDir);
   const exists = fs.existsSync(semanticRoot);
   if (!exists) {
-    return { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [] };
+    return { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [] };
   }
   const domains = ctx.domainService.listDomains(ctx.root, ctx.semanticDir);
   const issues: DoctorResult['erd']['domainFormatIssues'] = [];
@@ -157,12 +160,19 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
       // Unreadable / invalid JSON is not a format issue; `diff --all` names it.
     }
   }
+  const unreadable: UnreadableModelFile[] = [];
+  for (const entry of ctx.logicalModelService.listModelFiles()) {
+    if (entry.shadowedBy) { continue; }
+    const err = ctx.logicalModelService.getModelFileError(entry.name);
+    if (err) { unreadable.push(toUnreadableModelFile(ctx.root, err)); }
+  }
   return {
     semanticDirExists: true,
     layers: ctx.layerService.getValidLayerIds(),
     domains: domains.length,
     logicalModels: ctx.logicalModelService.listModelNames().length,
     domainFormatIssues: issues,
+    unreadableModelFiles: unreadable,
   };
 }
 
@@ -233,6 +243,17 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: dbt.commands.catalog,
     });
   }
+  if (r.erd.unreadableModelFiles.length > 0) {
+    const list = r.erd.unreadableModelFiles.map((u) =>
+      `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${MODEL_YAML_HINTS[u.kind]}`);
+    steps.push({
+      id: 'fix-model-yaml',
+      title: `Fix ${r.erd.unreadableModelFiles.length === 1 ? 'a model file that does' : `${r.erd.unreadableModelFiles.length} model files that do`} not parse`,
+      why: `${list.join('; ')}. `
+        + 'ERD Studio shows these models as empty until they parse; fix them before anything else.',
+      command: null,
+    });
+  }
   if (r.erd.domainFormatIssues.length > 0) {
     steps.push({
       id: 'migrate-v5',
@@ -277,7 +298,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
         catalog: { status: 'missing', path: 'target/catalog.json', modifiedAt: null, nodes: null },
       },
       projectFiles: { schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 },
-      erd: { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [] },
+      erd: { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [] },
       harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion },
     };
     return { ...base, nextSteps: [] };
