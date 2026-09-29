@@ -15,7 +15,11 @@
     "qa": "bash qa.sh",
     "all": "npm run tts && npm run timeline && npm run music && npm run capture && npm run encode",
     "all:simple": "VARIANT=simple npm run all",
-    "qa:simple": "VARIANT=simple npm run qa"
+    "qa:simple": "VARIANT=simple npm run qa",
+    "all:readme": "VARIANT=readme npm run all",
+    "qa:readme": "VARIANT=readme npm run qa",
+    "thumb:readme": "VARIANT=readme node thumb.mjs",
+    "readme": "npm run all:readme && cp out/erd-studio-explainer-readme.mp4 ../docs/assets/how-it-works.mp4 && npm run thumb:readme"
   },
   "devDependencies": {
     "playwright": "1.63.0",
