@@ -50,8 +50,8 @@ your behalf:
    numbers only; the tests capture every log line and search it for canaries.
 
 If you change what is collected, change the contract in the extension, this
-Worker, `schema.sql`, the extension README's telemetry section and the local
-archive together.
+Worker, `schema.sql`, the extension's `telemetry.json` and the local archive
+together.
 
 ---
 
