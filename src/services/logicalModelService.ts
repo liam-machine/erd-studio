@@ -50,6 +50,70 @@ const STRINGIFY_OPTIONS = { lineWidth: 0 } as const;
 const MODEL_FOLDER_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
 /** One model file found in the library. */
+/**
+ * Why a model file that exists could not be read. A fixed set, derived from
+ * the `yaml` library's own error code (never the message text), so it is safe
+ * to count in usage telemetry and to branch on in the UI.
+ */
+export type ModelFileErrorKind =
+  | 'read'
+  | 'yamlIndent'
+  | 'yamlScalar'
+  | 'yamlStructure'
+  | 'yamlDuplicateKey'
+  | 'yamlOther';
+
+/**
+ * A model file that exists but cannot be read or parsed. `message` is the
+ * parser's own text and may quote the file — show it locally, never send it.
+ */
+export interface ModelFileError {
+  name: string;
+  filePath: string;
+  kind: ModelFileErrorKind;
+  /** 1-based, when the parser reported a position. */
+  line?: number;
+  column?: number;
+  /** The `yaml` library's error code, e.g. `BLOCK_AS_IMPLICIT_KEY`. */
+  code?: string;
+  message: string;
+}
+
+const YAML_ERROR_KINDS: Record<string, ModelFileErrorKind> = {
+  TAB_AS_INDENT: 'yamlIndent',
+  BAD_INDENT: 'yamlIndent',
+  BAD_SCALAR_START: 'yamlScalar',
+  BLOCK_AS_IMPLICIT_KEY: 'yamlScalar',
+  UNEXPECTED_TOKEN: 'yamlScalar',
+  MISSING_CHAR: 'yamlScalar',
+  BAD_ALIAS: 'yamlScalar',
+  BLOCK_IN_FLOW: 'yamlScalar',
+  MULTIPLE_DOCS: 'yamlStructure',
+  MULTILINE_IMPLICIT_KEY: 'yamlStructure',
+  DUPLICATE_KEY: 'yamlDuplicateKey',
+};
+
+/** Describe a failure thrown while reading or parsing a model file. */
+export function describeModelFileError(name: string, filePath: string, err: unknown): ModelFileError {
+  const message = err instanceof Error ? err.message : String(err);
+  const e = err as { code?: unknown; linePos?: Array<{ line: number; col: number }> } | null;
+  const code = e && typeof e.code === 'string' ? e.code : undefined;
+  const pos = e && Array.isArray(e.linePos) ? e.linePos[0] : undefined;
+  // A Node fs error carries a code too (ENOENT, EACCES, EBUSY) — those are reads.
+  const isFsError = code !== undefined && /^E[A-Z]+$/.test(code);
+  const kind: ModelFileErrorKind = isFsError || code === undefined
+    ? (isFsError ? 'read' : 'yamlOther')
+    : (YAML_ERROR_KINDS[code] ?? 'yamlOther');
+  return {
+    name,
+    filePath,
+    kind,
+    ...(pos ? { line: pos.line, column: pos.col } : {}),
+    ...(code !== undefined && !isFsError ? { code } : {}),
+    message,
+  };
+}
+
 export interface ModelFileEntry {
   /** Model name (the file stem). */
   readonly name: string;
@@ -91,10 +155,12 @@ export class LogicalModelService {
   /**
    * Told when a model file exists but cannot be read or parsed, once per file
    * until it reads cleanly again. The extension host counts these for usage
-   * telemetry; other callers (the MCP server, the CLI) leave it unset.
+   * telemetry and warns the user; other callers (the MCP server, the CLI)
+   * leave it unset and ask {@link getModelFileError} instead.
    */
-  onParseFailure?: () => void;
-  private readonly failedPaths = new Set<string>();
+  onParseFailure?: (error: ModelFileError) => void;
+  /** The last failure per file path, until the file reads cleanly again. */
+  private readonly failedPaths = new Map<string, ModelFileError>();
 
   constructor(
     workspaceRoot: string,
@@ -238,13 +304,29 @@ export class LogicalModelService {
       return model;
     } catch (err) {
       console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
+      const error = describeModelFileError(name, filePath, err);
       // Once per broken file, not once per canvas refresh that re-reads it.
-      if (!this.failedPaths.has(filePath)) {
-        this.failedPaths.add(filePath);
-        this.onParseFailure?.();
+      const known = this.failedPaths.has(filePath);
+      this.failedPaths.set(filePath, error);
+      if (!known) {
+        this.onParseFailure?.(error);
       }
       return null;
     }
+  }
+
+  /**
+   * Why `name`'s file could not be read, or null when it reads cleanly, is
+   * missing, or its name is unsafe. Reads the file (through the cache), so the
+   * answer is current — a file fixed since the last read reports null.
+   */
+  getModelFileError(name: string): ModelFileError | null {
+    const filePath = this.resolveModelPath(name);
+    if (filePath === null || !fs.existsSync(filePath)) {
+      return null;
+    }
+    this.getModel(name);
+    return this.failedPaths.get(filePath) ?? null;
   }
 
   /**
