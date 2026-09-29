@@ -385,12 +385,14 @@ export interface RefreshManifestMessage {
 
 /**
  * An auto layout finished (`ok: true`) or failed in the webview, after `ms`
- * milliseconds. Usage telemetry only: the host buckets the time into a
- * feature key and writes nothing, so it is allowed on the physical stage.
+ * milliseconds. `firstOpen` marks the layout the host asked for on a fresh
+ * diagram (`domainLoaded.autoLayout`) rather than one the user started.
+ * Usage telemetry only: the host buckets the time into a feature key and
+ * writes nothing, so it is allowed on the physical stage.
  */
 export interface LayoutFinishedMessage {
   type: 'layoutFinished';
-  payload: { ms: number; ok: boolean };
+  payload: { ms: number; ok: boolean; firstOpen?: boolean };
 }
 
 /**

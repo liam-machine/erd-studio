@@ -102,6 +102,10 @@ npx wrangler d1 execute erd-studio-telemetry --remote --file migrations/0002_hos
 npm test && npm run deploy
 ```
 
+The same order applies to a release that only adds `features` or `errors`
+keys (no migration then): `npm test && npm run deploy` here first, because
+an older Worker drops every key it does not list.
+
 Deploy the Worker **before** the extension release that sends the new fields.
 An older Worker would still accept the new heartbeats (it drops unknown
 top-level and feature keys) but the new data would be lost, and the body cap
@@ -157,6 +161,10 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 # Feature adoption (features is a JSON object of counts)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT j.key AS feature, COUNT(*) AS installs, SUM(j.value) AS uses FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-7 days') GROUP BY j.key ORDER BY installs DESC"
+
+# Errors by extension version (e.g. the getting-started failures after a release)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.ext_version, j.key AS code, COUNT(*) AS installs, SUM(j.value) AS total FROM heartbeats h, json_each(h.errors) j WHERE h.day >= date('now','-14 days') AND COALESCE(h.dev, 0) = 0 GROUP BY h.ext_version, j.key ORDER BY h.ext_version DESC, installs DESC"
 ```
 
 Prefer aggregates. There is rarely a reason to look at individual rows, and

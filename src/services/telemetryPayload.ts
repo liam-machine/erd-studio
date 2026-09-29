@@ -91,6 +91,43 @@ export const FEATURES = [
   // The generic Agent Skills target (.agents/skills/), installed for Copilot,
   // Codex, Gemini CLI or Cursor.
   'harnessInstallAgents',
+  // Getting-started funnel: where a new user stops, and the routes taken.
+  // User choices and project states only — anything that broke is an ERROR_CODE.
+  // Draw from dbt (the command, also reached from the Welcome panel and the walkthrough).
+  'drawStarted',
+  'drawNoModels',
+  'drawNoLayers',
+  'drawCancelScope',
+  'drawCancelLayer',
+  'drawCancelName',
+  'drawNothingDrawable',
+  // Add models from dbt on a canvas (the empty-canvas card and the toolbar).
+  'addFromDbtStarted',
+  'addFromDbtNeedsV5',
+  'addFromDbtNoModels',
+  'addFromDbtAllPresent',
+  'addFromDbtCancelled',
+  'addFromDbtNothingDrawable',
+  // Try the Sample Project.
+  'trySampleCancelled',
+  'trySampleNoGit',
+  // Set Up My AI Helper: a hand-written skill was in the way, and the Replace /
+  // Keep mine modal was dismissed.
+  'setupHelperConflict',
+  'setupHelperCancelled',
+  // An assistant launch button was pressed before the helper was set up.
+  'helperFirstPrompt',
+  // Which route Open Claude Code took, or that its confirm was dismissed.
+  'openClaudeCli',
+  'openClaudeExtension',
+  'openClaudeNotFound',
+  'openClaudeCancelled',
+  // Open Copilot Chat: no chat command (docs opened instead), or only the bare open worked.
+  'copilotChatNotFound',
+  'copilotChatNoArgs',
+  // Welcome panel buttons that lead to a diagram.
+  'welcomeDrawFromDbt',
+  'welcomeOpenDiagram',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -117,6 +154,36 @@ export const ERROR_CODES = [
   'modelFileYamlStructure',
   'modelFileYamlDuplicateKey',
   'modelFileYamlOther',
+  // Getting started: each one means something broke on a new user's path.
+  // The walkthrough command threw (the Welcome panel opened instead).
+  'walkthroughFailed',
+  // Draw from dbt threw, or could not write the diagram.
+  'drawFromDbtFailed',
+  'drawWriteFailed',
+  // Add models from dbt on a canvas threw (a rejected edit is `editRejected`).
+  'addFromDbtFailed',
+  // An auto layout failed in the webview; `firstLayoutFailed` is the subset
+  // that was the first-open layout of a fresh diagram.
+  'layoutFailed',
+  'firstLayoutFailed',
+  // git.clone of the sample project threw (the GitHub page was offered instead).
+  'sampleCloneFailed',
+  // Set Up My AI Helper: the skill install failed, the launcher install failed,
+  // the launcher's VS Code runtime check failed, or the flow threw.
+  'setupHarnessFailed',
+  'launcherInstallFailed',
+  'launcherRuntimeUnverified',
+  'setupFailed',
+  // Open Claude Code: the extension is installed but none of the known open
+  // commands exists, or the one found threw.
+  'claudeOpenCommandMissing',
+  'claudeOpenFailed',
+  // Open Copilot Chat: the chat command exists but both ways of opening it threw.
+  'copilotChatOpenFailed',
+  // A Welcome panel message handler or status check threw.
+  'welcomePanelFailed',
+  // erdStudio.projectPath names a folder with no dbt_project.yml.
+  'projectPathInvalid',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

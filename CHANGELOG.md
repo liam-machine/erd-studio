@@ -8,6 +8,11 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+- The anonymous daily usage report now also counts where the getting-started steps stop or fail, so they can be fixed: whether Draw from dbt, Add models from dbt, Try the Sample Project, Set Up My AI Helper and Open Claude Code / Copilot Chat were closed part-way or found nothing to work with, and whether one of them — or the walkthrough, the Welcome panel, a new diagram's first auto layout or an `erdStudio.projectPath` setting — hit an error. As before, these are counts of fixed keys only: never names, paths or messages. See the README's Telemetry section.
+
 ## 1.6.3 — 2026-09-29
 
 ### Changed

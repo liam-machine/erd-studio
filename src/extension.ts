@@ -128,6 +128,7 @@ async function openWalkthrough(fallback: () => void): Promise<void> {
     await vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH_ID, false);
     telemetry.feature('walkthroughOpened');
   } catch (err) {
+    telemetry.error('walkthroughFailed');
     console.warn('[ERD Studio] Could not open the walkthrough, showing the Welcome panel instead:', err);
     fallback();
   }
@@ -743,6 +744,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // erdStudio.projectPath that points nowhere is a mistake, though, and is
     // still reported.
     if (projectResolution.invalidSetting !== undefined) {
+      telemetry.error('projectPathInvalid');
       void vscode.window.showWarningMessage(
         `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" is not a folder.`,
         'Open Settings',
@@ -766,6 +768,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
 
   if (projectResolution.invalidSetting !== undefined) {
+    telemetry.error('projectPathInvalid');
     // Visible, not just a console line: a projectPath copied from someone
     // else's machine otherwise looks like the setting being ignored.
     void vscode.window.showWarningMessage(
