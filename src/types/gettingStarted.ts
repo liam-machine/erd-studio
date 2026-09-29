@@ -101,7 +101,11 @@ export type GettingStartedToHost =
   /** No project: VS Code's own folder picker (`vscode.openFolder` with no URI). No payload. */
   | { type: 'openFolder' }
   /** Logged only; the webview has already switched to the poster fallback. */
-  | { type: 'videoError'; code: number };
+  | { type: 'videoError'; code: number }
+  /** The video reached its half-way point or its end, once each per panel. Counted by usage telemetry only. */
+  | { type: 'videoProgress'; milestone: VideoMilestone };
+
+export type VideoMilestone = 'half' | 'end';
 
 export type GettingStartedToHostType = GettingStartedToHost['type'];
 
@@ -206,6 +210,10 @@ export function isGettingStartedToHost(value: unknown): value is GettingStartedT
         && Object.prototype.hasOwnProperty.call(GETTING_STARTED_EXTERNAL_URLS, msg.target);
     case 'videoError':
       return typeof msg.code === 'number' && Number.isFinite(msg.code);
+    case 'videoProgress': {
+      const milestone = (value as { milestone?: unknown }).milestone;
+      return milestone === 'half' || milestone === 'end';
+    }
     default:
       return false;
   }
@@ -686,6 +694,21 @@ const SCRIPT = `
     });
     video.addEventListener('volumechange', function () {
       sound.hidden = !video.muted && video.volume > 0;
+    });
+
+    // Usage telemetry: how far the video is watched, once per milestone.
+    var reachedHalf = false;
+    var reachedEnd = false;
+    video.addEventListener('timeupdate', function () {
+      if (!reachedHalf && video.duration > 0 && video.currentTime >= video.duration / 2) {
+        reachedHalf = true;
+        post({ type: 'videoProgress', milestone: 'half' });
+      }
+    });
+    video.addEventListener('ended', function () {
+      if (reachedEnd) { return; }
+      reachedEnd = true;
+      post({ type: 'videoProgress', milestone: 'end' });
     });
   }
 

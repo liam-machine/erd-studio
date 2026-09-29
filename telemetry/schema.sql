@@ -26,6 +26,16 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   catalog INTEGER NOT NULL,
   features TEXT NOT NULL,        -- JSON object
   errors TEXT NOT NULL,          -- JSON object
+  -- Added for extension 1.6.3 (migrations/0002_host_assistants_retention.sql).
+  -- NULL on rows from older clients.
+  host TEXT,
+  remote TEXT,
+  dev INTEGER,
+  assistants TEXT,               -- JSON array
+  harnesses TEXT,                -- JSON array
+  active_days_28 TEXT,
+  canvas_days_28 TEXT,
+  first_canvas TEXT,
   PRIMARY KEY (install_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_heartbeats_day ON heartbeats(day);

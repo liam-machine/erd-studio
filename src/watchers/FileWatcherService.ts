@@ -89,7 +89,8 @@ export class FileWatcherService implements vscode.Disposable {
   // Event emitters (private — fire events internally)
   private readonly _onManifestChanged = new vscode.EventEmitter<void>();
   private readonly _onCatalogChanged = new vscode.EventEmitter<void>();
-  private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
+  /** `created` is true when the file was created (not changed) and is a `{layer}/{domain}.json`. */
+  private readonly _onSemanticFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri; created?: boolean }>();
   private readonly _onSemanticFileDeleted = new vscode.EventEmitter<{ uris: vscode.Uri[] }>();
   private readonly _onLayerConfigChanged = new vscode.EventEmitter<void>();
   private readonly _onLogicalModelChanged = new vscode.EventEmitter<{ uri: vscode.Uri; modelName: string }>();
@@ -201,19 +202,25 @@ export class FileWatcherService implements vscode.Disposable {
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
-    const handleChange = (uri: vscode.Uri) => {
-      if (classifySemanticPath(this.semanticRoot, uri.fsPath) === 'layer-config') {
+    // A create stays a create until the debounce fires, even if a change
+    // event for the same file arrives in between.
+    const createdPending = new Set<string>();
+    const handleChange = (uri: vscode.Uri, created = false) => {
+      const kind = classifySemanticPath(this.semanticRoot, uri.fsPath);
+      if (kind === 'layer-config') {
         this.handleLayerConfigEvent(uri);
         return;
       }
+      if (created && kind === 'domain') { createdPending.add(uri.toString()); }
       // Per-file debounce key allows parallel updates to different files
       this.debounce(`semantic:${uri.toString()}`, () => {
+        const wasCreated = createdPending.delete(uri.toString());
         if (this.ownWriteTracker.consume(uri.fsPath)) {
           console.log(`[FileWatcherService] Ignoring own write: ${uri.fsPath}`);
           return;
         }
         console.log(`[FileWatcherService] Semantic file changed: ${uri.fsPath}`);
-        this.safeFireEvent(() => this._onSemanticFileChanged.fire({ uri }));
+        this.safeFireEvent(() => this._onSemanticFileChanged.fire(wasCreated ? { uri, created: true } : { uri }));
       });
     };
 
@@ -243,8 +250,8 @@ export class FileWatcherService implements vscode.Disposable {
     };
 
     // Track event subscriptions for disposal
-    this.subscriptions.push(watcher.onDidChange(handleChange));
-    this.subscriptions.push(watcher.onDidCreate(handleChange));
+    this.subscriptions.push(watcher.onDidChange((uri) => handleChange(uri)));
+    this.subscriptions.push(watcher.onDidCreate((uri) => handleChange(uri, true)));
     this.subscriptions.push(watcher.onDidDelete(handleDelete));
 
     this.watchers.push(watcher);

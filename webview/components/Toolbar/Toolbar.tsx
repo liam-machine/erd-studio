@@ -427,6 +427,11 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     }
 
     setIsLayouting(true);
+    const startedAt = performance.now();
+    const reportLayout = (ok: boolean) => {
+      const done: WebviewMessage = { type: 'layoutFinished', payload: { ms: Math.round(performance.now() - startedAt), ok } };
+      vscode.postMessage(done);
+    };
 
     try {
       const sp = SPACING_PRESETS[spacingPreset];
@@ -469,8 +474,10 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         payload: { positions },
       };
       vscode.postMessage(message);
+      reportLayout(true);
       setLayoutDirty(false);
     } catch (err) {
+      reportLayout(false);
       console.error('[Toolbar] Auto layout failed:', err);
       const detail = err instanceof Error ? err.message : String(err);
       setToastMessage(`Auto layout failed: ${detail}`);

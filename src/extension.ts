@@ -126,6 +126,7 @@ export const DIAGRAMS_STATUS_ID = 'erdStudio.diagrams';
 async function openWalkthrough(fallback: () => void): Promise<void> {
   try {
     await vscode.commands.executeCommand('workbench.action.openWalkthrough', WALKTHROUGH_ID, false);
+    telemetry.feature('walkthroughOpened');
   } catch (err) {
     console.warn('[ERD Studio] Could not open the walkthrough, showing the Welcome panel instead:', err);
     fallback();
@@ -321,13 +322,34 @@ export function recordManifestMissingReasons(
   } catch { /* telemetry must never break a manifest load */ }
 }
 
-/** The generic Agent Skills target has no feature key of its own and is not counted. */
-const HARNESS_INSTALL_FEATURES: Partial<Record<HarnessTarget['id'], TelemetryFeature>> = {
+const HARNESS_INSTALL_FEATURES: Record<HarnessTarget['id'], TelemetryFeature> = {
   claude: 'harnessInstallClaude',
+  agents: 'harnessInstallAgents',
   copilot: 'harnessInstallCopilot',
   gemini: 'harnessInstallGemini',
   codex: 'harnessInstallCodex',
 };
+
+/**
+ * Domain files ERD Studio itself is about to create outside the own-write
+ * tracker (createDomain, renameDomain), so the watcher's create event for them
+ * is not counted as `domainCreatedExternal`. Entries are removed when the event
+ * arrives.
+ */
+const domainsCreatedHere = new Set<string>();
+
+/**
+ * Usage telemetry: which AI assistants this machine has. Deferred so the PATH
+ * scan never sits on the activation path; it reads the file system only and
+ * never runs an assistant.
+ */
+function recordDetectedAssistants(): void {
+  setTimeout(() => {
+    try {
+      telemetry.assistants(detectAiAssistants());
+    } catch { /* telemetry must never break activation */ }
+  }, 0);
+}
 
 function recordHarnessInstalls(results: HarnessInstallResult[]): void {
   for (const r of results) {
@@ -691,7 +713,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // "Try the Sample Project" is for people with no dbt project yet, so it must
   // work in any window: confirm, then clone the fixed public sample repo.
   context.subscriptions.push(
-    vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, async () => { await trySampleProject(); }),
+    vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, async () => {
+      if (await trySampleProject() !== 'cancelled') { telemetry.feature('trySample'); }
+    }),
   );
 
   const projectResolution = resolveWorkspaceProject(context);
@@ -700,6 +724,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', Boolean(workspaceRoot));
   if (!workspaceRoot) {
     telemetry.activation('no_project', false, 0);
+    recordDetectedAssistants();
     // Register stub commands / editor so palette entries and the sidebar
     // welcome buttons explain the problem instead of "command not found".
     registerFallbackCommands(context);
@@ -978,6 +1003,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await vscode.commands.executeCommand('erdStudio.openDomain', target.filePath);
   };
   telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), domainService.listDomains(workspaceRoot, semanticDir).length);
+  recordDetectedAssistants();
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the
@@ -1083,7 +1109,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // Semantic file changed externally → refresh tree view + model library
-  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri }) => {
+  const semanticChangedSubscription = fileWatcherService.onSemanticFileChanged(({ uri, created }) => {
+    // A domain file ERD Studio did not write appeared: an AI assistant, a hand
+    // edit or a git pull. createDomain / renameDomain write outside the own-write
+    // tracker, so they mark their paths in domainsCreatedHere instead.
+    if (created && !domainsCreatedHere.delete(uri.fsPath)) { telemetry.feature('domainCreatedExternal'); }
     treeProvider.invalidateDomain(uri.fsPath);
     treeProvider.refresh();
     modelLibraryProvider.refresh();
@@ -1623,8 +1653,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         };
 
         try {
+          domainsCreatedHere.add(filePath);
           fs.writeFileSync(filePath, JSON.stringify(domainData, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
+          telemetry.feature('domainCreated');
         } catch (err) {
+          domainsCreatedHere.delete(filePath);
           if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
             void vscode.window.showErrorMessage(`Domain "${slug}" already exists in the ${layer} layer`);
             return;
@@ -1741,6 +1774,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const newFileUri = vscode.Uri.file(newFilePath);
 
         const edit = new vscode.WorkspaceEdit();
+        domainsCreatedHere.add(newFilePath);
         edit.createFile(newFileUri, { overwrite: false, ignoreIfExists: false });
         edit.insert(newFileUri, new vscode.Position(0, 0), renamedContent);
         edit.deleteFile(oldFileUri, { ignoreIfNotExists: false });
@@ -2468,9 +2502,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Only the primary files detectExisting already found are read; a
     // hand-written file with no marker does not count.
     try {
-      const managed = HARNESS_TARGETS.some(target => existing.get(target.id) &&
+      const managed = HARNESS_TARGETS.filter(target => existing.get(target.id) &&
         extractHarnessVersion(fs.readFileSync(path.join(workspaceRoot, target.relativePath), 'utf-8')) !== null);
-      if (managed) { telemetry.featureOnce('harnessPresent'); }
+      if (managed.length > 0) { telemetry.featureOnce('harnessPresent'); }
+      telemetry.harnesses(managed.map(target => target.id));
     } catch { /* telemetry must never break activation */ }
 
     if (staleTargets.length > 0) {

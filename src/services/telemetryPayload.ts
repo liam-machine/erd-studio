@@ -58,6 +58,39 @@ export const FEATURES = [
   'manifestAppeared',
   // #113 — the Logical-stage missing-manifest hint was dismissed.
   'manifestHintDismissed',
+  // Canvas edit requests, one per accepted message, by kind (EDIT_FEATURES).
+  'editModel',
+  'editColumn',
+  'editKey',
+  'editDetails',
+  'editRelationship',
+  'editLayout',
+  'editAnnotation',
+  'editUndo',
+  // How long an auto layout took in the webview, or that it failed.
+  'layoutUnder1s',
+  'layout1to5s',
+  'layoutOver5s',
+  'layoutFailed',
+  // Where diagrams come from: the New Domain command, or a domain file that
+  // appeared on disk without ERD Studio writing it (an AI assistant, a hand
+  // edit, a git pull).
+  'domainCreated',
+  'domainCreatedExternal',
+  // Onboarding steps.
+  'walkthroughOpened',
+  'gettingStartedOpened',
+  'videoHalf',
+  'videoEnded',
+  'videoError',
+  'trySample',
+  'setupAiHelper',
+  'copyPrompt',
+  'openClaude',
+  'openCopilotChat',
+  // The generic Agent Skills target (.agents/skills/), installed for Copilot,
+  // Codex, Gemini CLI or Cursor.
+  'harnessInstallAgents',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -104,8 +137,43 @@ export const MAX_COUNTER = 100;
 /** The Worker refuses a day older than this, so a heartbeat for one is not sent. */
 export const MAX_HEARTBEAT_AGE_DAYS = 7;
 
-/** How long one random install id lives before it is replaced. */
-export const INSTALL_ID_TTL_DAYS = 30;
+/** How far back the on-device retention counts look, in days (including the reported day). */
+export const RETENTION_WINDOW_DAYS = 28;
+
+/**
+ * The editor app the extension runs in, from `vscode.env.appName`. A fixed
+ * list: an app not named here is `other`, never its name.
+ */
+export const HOSTS = [
+  'vscode',
+  'vscodeInsiders',
+  'cursor',
+  'windsurf',
+  'vscodium',
+  'trae',
+  'kiro',
+  'positron',
+  'antigravity',
+  'other',
+] as const;
+export type TelemetryHost = (typeof HOSTS)[number];
+
+/** Where the extension host runs: `vscode.env.remoteName`, or `web` for vscode.dev-style hosts. */
+export const REMOTES = ['local', 'ssh', 'wsl', 'container', 'codespaces', 'web', 'other'] as const;
+export type TelemetryRemote = (typeof REMOTES)[number];
+
+/** AI assistants, in `AI_ASSISTANTS` order (`src/types/aiAssistants.ts`). */
+export const ASSISTANTS = ['claude', 'copilot', 'codex', 'gemini', 'cursor'] as const;
+export type TelemetryAssistant = (typeof ASSISTANTS)[number];
+
+/** ERD Studio harness targets, as `HARNESS_TARGETS` ids. */
+export const HARNESSES = ['claude', 'agents', 'copilot', 'gemini', 'codex'] as const;
+export type TelemetryHarness = (typeof HARNESSES)[number];
+
+/** How many of the last {@link RETENTION_WINDOW_DAYS} days something happened on. */
+export type RecentDaysBucket = '0' | '1' | '2-3' | '4-7' | '8-14' | '15-28';
+/** Days from first activation to the first canvas open, or `never` (yet). */
+export type FirstCanvasBucket = TenureBucket | 'never';
 
 /** Everything counted for one UTC day, as kept in globalState. */
 export interface DailyCounters {
@@ -124,6 +192,26 @@ export interface DailyCounters {
   catalog: boolean;
   features: Partial<Record<TelemetryFeature, number>>;
   errors: Partial<Record<TelemetryErrorCode, number>>;
+  /**
+   * The running environment, stamped on every update ({@link stampEnv}) so the
+   * day is labelled with the version that counted it, not the one running when
+   * the heartbeat goes out the next day. Absent in counters from older builds.
+   */
+  env?: CounterEnv;
+  /** AI assistants detected on this machine today (union). */
+  assistants?: TelemetryAssistant[];
+  /** ERD Studio harness targets installed and version-marked in the open project today (union). */
+  harnesses?: TelemetryHarness[];
+}
+
+/** The per-day environment facts, as stamped by {@link stampEnv}. */
+export interface CounterEnv {
+  extVersion: string;
+  vscodeVersion: string;
+  host: TelemetryHost;
+  remote: TelemetryRemote;
+  /** Any update today came from an Extension Development Host or a test run. */
+  dev: boolean;
 }
 
 /** What the extension host knows about itself, supplied at send time. */
@@ -136,6 +224,16 @@ export interface HeartbeatEnv {
   platform: string;
   /** The UTC day of first activation (`YYYY-MM-DD`). */
   firstSeenDay: string;
+  /** Recent UTC days with an activation — kept on the device, never sent as dates. */
+  activeDays?: string[];
+  /** Recent UTC days with a canvas open — kept on the device, never sent as dates. */
+  canvasDays?: string[];
+  /** The UTC day a canvas was first opened, if ever. */
+  firstCanvasDay?: string | null;
+  /** Fallback when the counters carry no stamped environment (older stored state). */
+  host?: TelemetryHost;
+  remote?: TelemetryRemote;
+  dev?: boolean;
 }
 
 /** The exact request body POSTed to `/v1/heartbeat`. */
@@ -159,6 +257,14 @@ export interface HeartbeatBody {
   catalog: boolean;
   features: Partial<Record<TelemetryFeature, number>>;
   errors: Partial<Record<TelemetryErrorCode, number>>;
+  host: TelemetryHost;
+  remote: TelemetryRemote;
+  dev: boolean;
+  assistants: TelemetryAssistant[];
+  harnesses: TelemetryHarness[];
+  activeDays28: RecentDaysBucket;
+  canvasDays28: RecentDaysBucket;
+  firstCanvas: FirstCanvasBucket;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +308,68 @@ export function modelCountBucket(count: number): ModelCountBucket {
 }
 
 const MODEL_COUNT_ORDER: readonly ModelCountBucket[] = ['none', '1-10', '11-50', '51+'];
+
+export function recentDaysBucket(count: number): RecentDaysBucket {
+  if (count <= 0) return '0';
+  if (count === 1) return '1';
+  if (count <= 3) return '2-3';
+  if (count <= 7) return '4-7';
+  if (count <= 14) return '8-14';
+  return '15-28';
+}
+
+/** `vscode.env.appName` → a fixed host id. Order matters: Insiders before stable. */
+export function hostBucket(appName: string): TelemetryHost {
+  const name = appName.toLowerCase();
+  if (name.includes('cursor')) return 'cursor';
+  if (name.includes('windsurf')) return 'windsurf';
+  if (name.includes('vscodium')) return 'vscodium';
+  if (name.includes('trae')) return 'trae';
+  if (name.includes('kiro')) return 'kiro';
+  if (name.includes('positron')) return 'positron';
+  if (name.includes('antigravity')) return 'antigravity';
+  if (name.includes('visual studio code')) return name.includes('insiders') ? 'vscodeInsiders' : 'vscode';
+  return 'other';
+}
+
+/** `vscode.env.remoteName` (undefined when local) and whether the UI is the web one. */
+export function remoteBucket(remoteName: string | undefined, isWeb: boolean): TelemetryRemote {
+  if (!remoteName) return isWeb ? 'web' : 'local';
+  if (remoteName === 'ssh-remote') return 'ssh';
+  if (remoteName === 'wsl') return 'wsl';
+  if (remoteName === 'dev-container' || remoteName === 'attached-container') return 'container';
+  if (remoteName === 'codespaces') return 'codespaces';
+  return 'other';
+}
+
+/**
+ * `days` plus `day`, dropping days more than {@link RETENTION_WINDOW_DAYS} days
+ * before `day`, sorted and without duplicates. The dates stay on the device; only the
+ * count ({@link recentDaysCount}) is sent.
+ */
+export function rememberDay(days: readonly string[] | undefined, day: string): string[] {
+  // Only days that have aged out are dropped; a later day (the clock moved
+  // back) is kept, and recentDaysCount ignores it until it is in the window.
+  const kept = new Set((days ?? []).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && daysBetween(d, day) < RETENTION_WINDOW_DAYS));
+  kept.add(day);
+  return [...kept].sort();
+}
+
+/** How many of `days` fall in the {@link RETENTION_WINDOW_DAYS} days ending on `day`. */
+export function recentDaysCount(days: readonly string[] | undefined, day: string): number {
+  return new Set((days ?? []).filter(d => inWindow(d, day))).size;
+}
+
+function inWindow(d: string, day: string): boolean {
+  const age = daysBetween(d, day);
+  return age >= 0 && age < RETENTION_WINDOW_DAYS;
+}
+
+/** Days from first activation to the first canvas, as of `day`. */
+export function firstCanvasBucket(firstSeenDay: string, firstCanvasDay: string | null | undefined, day: string): FirstCanvasBucket {
+  if (!firstCanvasDay || daysBetween(firstCanvasDay, day) < 0) return 'never';
+  return tenureBucket(daysBetween(firstSeenDay, firstCanvasDay));
+}
 
 export function osBucket(platform: string): TelemetryOs {
   return platform === 'darwin' || platform === 'win32' || platform === 'linux' ? platform : 'other';
@@ -250,7 +418,39 @@ export function nextDay(prev: DailyCounters, day: string): DailyCounters {
     activation: prev.activation,
     hasSemanticDir: prev.hasSemanticDir,
     domainCount: prev.domainCount,
+    ...(prev.env ? { env: prev.env } : {}),
+    ...(prev.assistants ? { assistants: prev.assistants } : {}),
+    ...(prev.harnesses ? { harnesses: prev.harnesses } : {}),
   };
+}
+
+/**
+ * Label the day with the environment doing the counting. `dev` sticks for the
+ * day once set, so a mixed day (a dev host and the everyday window sharing one
+ * install) is flagged rather than passed off as ordinary use.
+ */
+export function stampEnv(state: DailyCounters, env: CounterEnv): DailyCounters {
+  const dev = env.dev || state.env?.dev === true;
+  const same = state.env
+    && state.env.extVersion === env.extVersion
+    && state.env.vscodeVersion === env.vscodeVersion
+    && state.env.host === env.host
+    && state.env.remote === env.remote
+    && state.env.dev === dev;
+  return same ? state : { ...state, env: { ...env, dev } };
+}
+
+export function recordAssistants(state: DailyCounters, found: readonly TelemetryAssistant[]): DailyCounters {
+  return { ...state, assistants: unionIn(state.assistants, found, ASSISTANTS) };
+}
+
+export function recordHarnesses(state: DailyCounters, found: readonly TelemetryHarness[]): DailyCounters {
+  return { ...state, harnesses: unionIn(state.harnesses, found, HARNESSES) };
+}
+
+/** `a ∪ b`, restricted to `order` and in its order. */
+function unionIn<T extends string>(a: readonly T[] | undefined, b: readonly T[], order: readonly T[]): T[] {
+  return order.filter(v => a?.includes(v) || b.includes(v));
 }
 
 export function recordActivation(
@@ -316,6 +516,14 @@ export function modelFileErrorCode(kind: ModelLoadErrorKind): TelemetryErrorCode
   return MODEL_FILE_ERROR_CODES[kind] ?? 'modelFileYamlOther';
 }
 
+/** The feature key for an auto layout that took `ms` milliseconds, or failed. */
+export function layoutFeature(ms: number, ok: boolean): TelemetryFeature {
+  if (!ok) return 'layoutFailed';
+  if (ms < 1000) return 'layoutUnder1s';
+  if (ms <= 5000) return 'layout1to5s';
+  return 'layoutOver5s';
+}
+
 export function recordError(state: DailyCounters, code: TelemetryErrorCode): DailyCounters {
   return { ...state, errors: bump(state.errors, code) };
 }
@@ -356,12 +564,13 @@ export function heartbeatDue(state: DailyCounters, today: string): boolean {
  * from an older build, say — can never reach the wire.
  */
 export function buildHeartbeat(state: DailyCounters, env: HeartbeatEnv): HeartbeatBody {
+  const stamped = state.env;
   return {
     v: HEARTBEAT_VERSION,
     installId: env.installId,
     day: state.day,
-    extVersion: extVersion(env.extVersion),
-    vscodeMajor: vscodeMajor(env.vscodeVersion),
+    extVersion: extVersion(stamped?.extVersion ?? env.extVersion),
+    vscodeMajor: vscodeMajor(stamped?.vscodeVersion ?? env.vscodeVersion),
     os: osBucket(env.platform),
     tenure: tenureBucket(daysBetween(env.firstSeenDay, state.day)),
     activation: pick(state.activation, ['project_found', 'no_project'], 'no_project'),
@@ -376,6 +585,14 @@ export function buildHeartbeat(state: DailyCounters, env: HeartbeatEnv): Heartbe
     catalog: state.catalog === true,
     features: allowedCounts(state.features, FEATURES),
     errors: allowedCounts(state.errors, ERROR_CODES),
+    host: pick(stamped?.host ?? env.host, HOSTS, 'other'),
+    remote: pick(stamped?.remote ?? env.remote, REMOTES, 'local'),
+    dev: (stamped?.dev ?? env.dev) === true,
+    assistants: ASSISTANTS.filter(a => state.assistants?.includes(a)),
+    harnesses: HARNESSES.filter(h => state.harnesses?.includes(h)),
+    activeDays28: recentDaysBucket(recentDaysCount(env.activeDays, state.day)),
+    canvasDays28: recentDaysBucket(recentDaysCount(env.canvasDays, state.day)),
+    firstCanvas: firstCanvasBucket(env.firstSeenDay, env.firstCanvasDay, state.day),
   };
 }
 
