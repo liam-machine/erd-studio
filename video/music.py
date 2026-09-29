@@ -13,11 +13,11 @@ electronic track in A minor (Am - F - C - G): four-on-the-floor kick, claps, 16t
 pumping supersaw pad, a driving offbeat bass and a plucky arpeggio with echo. It follows
 build/timeline.json so the energy lands on the story:
 
-  intro     filtered pad + riser, then the beat drops as the first scene cuts in
-  claude    the arpeggio enters when the AI assistants appear
-  modelling breakdown (no kick) while the assistant "thinks", riser into the next scene
-  writes    full drop again as the model is written
-  verify    impact on "checks its own work"
+  hook      filtered pad + riser, then the beat drops as the first scene cuts in
+  canvas    the arpeggio enters as the diagram lays itself out
+  physical  impact on the switch to Physical
+  enrich    breakdown (no kick) under the optional AI step, riser into the next scene
+  sample    full drop again
   end       final hit, the chord rings out
 
 Deterministic: the same timeline always produces the same file. encode.sh ducks it under the
@@ -175,11 +175,11 @@ def main() -> None:
         from_supplied(supplied, total)
         return
     starts = {s['id']: s['start'] for s in tl['scenes']}
-    drop = starts.get('two-ways', 6.7)
-    arp_in = starts.get('claude', 26.6)
-    brk_a, brk_b = starts.get('modelling', 67.9), starts.get('writes', 81.3)
-    verify = starts.get('verify', 90.1)
-    end = starts.get('end', 110.6)
+    drop = starts.get('install', 6.4)
+    arp_in = starts.get('canvas', 18.9)
+    brk_a, brk_b = starts.get('enrich', 40.5), starts.get('sample', 49.8)
+    verify = starts.get('physical', 33.3)
+    end = starts.get('end', 54.7)
 
     grid0 = drop - BAR * np.floor(drop / BAR)  # a downbeat lands exactly on the drop
     n = int((total + 3) * SR)
@@ -250,7 +250,7 @@ def main() -> None:
     add(fx, verify, impact(), 0.40)
     add(fx, end, impact(), 0.55)
     for sid, t0 in starts.items():  # a soft whoosh on every other scene change
-        if sid not in ('intro', 'two-ways', 'writes', 'verify', 'end') and t0 > 1:
+        if sid not in ('hook', 'install', 'sample', 'physical', 'end') and t0 > 1:
             add(fx, t0 - 0.6, riser(0.6), 0.12)
 
     # Intro: the pad starts muffled and opens up into the drop.

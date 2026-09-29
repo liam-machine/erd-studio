@@ -15,6 +15,11 @@ describe('layoutFinished payload', () => {
     expect(validateLayoutFinishedPayload({ ms: 1234.5, ok: false })).toBe(true);
   });
 
+  it('accepts an optional firstOpen boolean', () => {
+    expect(validateLayoutFinishedPayload({ ms: 10, ok: false, firstOpen: true })).toBe(true);
+    expect(validateLayoutFinishedPayload({ ms: 10, ok: true, firstOpen: false })).toBe(true);
+  });
+
   it.each([
     undefined,
     null,
@@ -25,6 +30,7 @@ describe('layoutFinished payload', () => {
     { ms: '12', ok: true },
     { ms: 12, ok: 'yes' },
     { ms: 12 },
+    { ms: 12, ok: false, firstOpen: 'yes' },
   ])('refuses %j', (payload) => {
     expect(validateLayoutFinishedPayload(payload)).toBe(false);
   });

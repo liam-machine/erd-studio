@@ -96,6 +96,7 @@ svg { display: block; }
 .tb__tab--physical { background: #15803d; color: #fff; font-weight: 600; }
 .tb__diff { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 10px; color: var(--text-2); border: 1px solid var(--card-border); }
 .tb__diff--amber { background: var(--amber); color: #1a1405; font-weight: 700; border-color: var(--amber); }
+.tb__diff--busy { background: #1b2a40; color: #cfe3ff; border-color: #2d4a70; }
 .tb__diff--green { background: var(--green); color: #06210f; font-weight: 700; border-color: var(--green); }
 
 /* ---------- chat / terminal rows ---------- */

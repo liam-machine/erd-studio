@@ -3,6 +3,8 @@
 // name: icon, "ERD Studio", sub-line, then the three pills on "Free, with the source on GitHub".
 // cta:  the brand block eases up, a VS Code-style Extensions search types "ERD Studio" and the
 //       result row appears, then "Link in the comments" with a down chevron. All landed by cta+1.5.
+//       A cut can replace that line (`props.link: { text, chevron }`; the README cut says where
+//       else it is published and drops the chevron).
 import { appear, appIcon, caret, easeInOut, ICON, lerp, seg, typed } from '../lib.js';
 
 const QUERY = 'ERD Studio';
@@ -13,6 +15,7 @@ export default {
   render(t, { beats, scene }) {
     // Tagline: [plain, highlighted]. A cut can override it (script `props.tagline`).
     const [tagA, tagB] = scene?.props?.tagline ?? ['The logical model, ', 'in your repo.'];
+    const link = { text: 'Link in the comments', chevron: true, ...scene?.props?.link };
     const name = beats.name.t, cta = beats.cta.t;
     // The brand block starts centred in the frame and eases up to make room for the CTA.
     const lift = easeInOut(seg(t, cta - 0.05, cta + 0.45));
@@ -55,12 +58,12 @@ export default {
           <div style="font-size:24px;color:var(--text-2);line-height:1.25">${tagA}${tagB.replace(/\.$/, '')}</div></div>
           <span style="display:inline-flex;align-items:center;height:48px;padding:0 24px;border-radius:8px;background:#0e639c;color:#fff;font-size:24px;font-weight:700">Install</span></div></div>`;
 
-      // "Link in the comments" + chevron
+      // "Link in the comments" + chevron (or the cut's own line)
       const linkAt = resAt + 0.2;           // ≈ cta+1.25: everything has landed by cta+1.5
       const bob = t >= linkAt + 0.4 ? 5 * Math.sin((t - linkAt - 0.4) * Math.PI * 1.2) : 0;
       html += `<div class="abs" style="left:0;right:0;top:972px;display:flex;flex-direction:column;align-items:center;gap:6px;${appear(t, linkAt, { dy: 12 })}">
-        <div style="font-size:38px;font-weight:800;letter-spacing:-.01em;white-space:nowrap">Link in the comments</div>
-        <div style="color:var(--green);transform:translateY(${bob.toFixed(1)}px)">${ICON.chevDown({ size: 46, sw: 3 })}</div></div>`;
+        <div style="font-size:38px;font-weight:800;letter-spacing:-.01em;white-space:nowrap">${link.text}</div>
+        ${link.chevron ? `<div style="color:var(--green);transform:translateY(${bob.toFixed(1)}px)">${ICON.chevDown({ size: 46, sw: 3 })}</div>` : ''}</div>`;
     }
     return html;
   },

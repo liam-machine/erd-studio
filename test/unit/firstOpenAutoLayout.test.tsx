@@ -123,6 +123,8 @@ describe('first-open auto layout (Toolbar + store)', () => {
 
     await vi.waitFor(() => expect(updatePositionsPosts()).toHaveLength(1));
     expect(mockRunElkLayout).toHaveBeenCalledTimes(1);
+    expect(mockVsCode.postMessage.mock.calls.find(([m]) => m?.type === 'layoutFinished')?.[0].payload)
+      .toMatchObject({ ok: true, firstOpen: true });
     expect(updatePositionsPosts()[0][0].payload.positions).toEqual({
       model_a: { x: 10, y: 20 },
       model_b: { x: 300, y: 20 },
@@ -152,6 +154,10 @@ describe('first-open auto layout (Toolbar + store)', () => {
     await vi.waitFor(() => expect(useEditorStore.getState().toastMessage).toMatch(/Auto layout failed: boom/));
     expect(mockRunElkLayout).toHaveBeenCalledTimes(1);
     expect(updatePositionsPosts()).toHaveLength(0);
+    // The host counts it as a failed first-open layout (usage telemetry).
+    const finished = mockVsCode.postMessage.mock.calls.filter(([m]) => m?.type === 'layoutFinished');
+    expect(finished).toHaveLength(1);
+    expect(finished[0][0].payload).toMatchObject({ ok: false, firstOpen: true });
     consoleSpy.mockRestore();
   });
 });

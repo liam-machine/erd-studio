@@ -1072,7 +1072,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'layoutFinished': {
             // Usage telemetry only; writes nothing, so it is on the physical allowlist.
             const payload = (message as { payload?: unknown }).payload;
-            if (validateLayoutFinishedPayload(payload)) telemetry.feature(layoutFeature(payload.ms, payload.ok));
+            if (validateLayoutFinishedPayload(payload)) {
+              telemetry.feature(layoutFeature(payload.ms, payload.ok));
+              if (!payload.ok) {
+                telemetry.error('layoutFailed');
+                if (payload.firstOpen) telemetry.error('firstLayoutFailed');
+              }
+            }
             break;
           }
           case 'openModelFile': {
@@ -3620,9 +3626,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     panelKey: string,
   ): Promise<void> {
+    telemetry.feature('addFromDbtStarted');
     try {
       const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
       if (!this.isDomainV5(parsed)) {
+        telemetry.feature('addFromDbtNeedsV5');
         this.post(webview, {
           type: 'error',
           payload: { message: 'Adding models from dbt needs the central model store. Run "ERD Studio: Migrate Domains to Central Model Store" first.' },
@@ -3642,11 +3650,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       };
       const models = listDraftModels(source);
       if (models.length === 0) {
+        telemetry.feature('addFromDbtNoModels');
         void vscode.window.showInformationMessage(NO_DBT_MODELS_MESSAGE);
         return;
       }
       const excluded = new Set(inDomain.map(normaliseName));
       if (models.every((m) => excluded.has(normaliseName(m.name)))) {
+        telemetry.feature('addFromDbtAllPresent');
         void vscode.window.showInformationMessage('Every dbt model is already in this diagram.');
         return;
       }
@@ -3656,13 +3666,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         excludeNames: inDomain,
         title: 'Add models from dbt',
       });
-      if (!pick) return;
+      if (!pick) { telemetry.feature('addFromDbtCancelled'); return; }
 
       await this.queueEdit(panelKey, () =>
         this.applyDbtModels(document, webview, pick.modelNames, ymlData, manifest));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add models from dbt failed: ${message}`);
+      telemetry.error('addFromDbtFailed');
       this.post(webview, { type: 'error', payload: { message: `Failed to add models from dbt: ${message}` } });
     }
   }
@@ -3690,6 +3701,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       });
       const skippedNote = describeSkippedDbtModels(draft.skipped);
       if (draft.modelNames.length === 0) {
+        telemetry.feature('addFromDbtNothingDrawable');
         this.post(webview, {
           type: 'error',
           payload: { message: `No models were added from dbt.${skippedNote ? ` ${skippedNote}` : ''}` },
@@ -3742,6 +3754,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add models from dbt failed: ${message}`);
+      telemetry.error('addFromDbtFailed');
       this.post(webview, { type: 'error', payload: { message: `Failed to add models from dbt: ${message}` } });
     }
   }

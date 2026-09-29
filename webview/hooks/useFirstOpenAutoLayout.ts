@@ -30,7 +30,7 @@ interface NodeLike {
 }
 
 export function useFirstOpenAutoLayout(
-  runLayout: () => Promise<void> | void,
+  runLayout: (firstOpen: boolean) => Promise<void> | void,
   domain: DisplayDomain | null,
   nodes: readonly NodeLike[],
   isLayouting: boolean,
@@ -51,7 +51,7 @@ export function useFirstOpenAutoLayout(
     }
     setPendingAutoLayout(false);
     inFlight.current = true;
-    Promise.resolve(runLayout())
+    Promise.resolve(runLayout(true))
       .catch((err) => console.error('[useFirstOpenAutoLayout] auto layout failed:', err))
       .finally(() => {
         inFlight.current = false;

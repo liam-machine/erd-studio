@@ -1389,6 +1389,19 @@ describe('addModelsFromDbt', () => {
     expect(lastError(panel)).toBeUndefined();
   });
 
+  it('counts the start and a cancelled picker as features, never as an error', async () => {
+    const { panel } = await openShowcase(root);
+    const feature = vi.spyOn(telemetry, 'feature');
+    const error = vi.spyOn(telemetry, 'error');
+    const spy = vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValueOnce(undefined as any);
+
+    panel._simulateMessage({ type: 'addModelsFromDbt' });
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+    await vi.waitFor(() => expect(feature).toHaveBeenCalledWith('addFromDbtCancelled'));
+    expect(feature).toHaveBeenCalledWith('addFromDbtStarted');
+    expect(error).not.toHaveBeenCalled();
+  });
+
   it('rejects a payload that carries data', async () => {
     const { panel } = await openShowcase(root);
     panel._simulateMessage({ type: 'addModelsFromDbt', payload: { modelNames: ['fct_sale'] } });
@@ -1406,6 +1419,29 @@ describe('addModelsFromDbt', () => {
     await waitForError(panel, new RegExp(PHYSICAL_READ_ONLY_MESSAGE.slice(0, 30)));
     expect(spy).not.toHaveBeenCalled();
     expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+  });
+});
+
+describe('layoutFinished telemetry', () => {
+  it('counts a failed layout as an error, and a failed first-open layout as both errors', async () => {
+    const { panel } = await openShowcase(root);
+    const error = vi.spyOn(telemetry, 'error');
+    const feature = vi.spyOn(telemetry, 'feature');
+
+    panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 12, ok: false } });
+    await vi.waitFor(() => expect(error).toHaveBeenCalledWith('layoutFailed'));
+    expect(error).not.toHaveBeenCalledWith('firstLayoutFailed');
+    expect(feature).toHaveBeenCalledWith('layoutFailed');
+
+    error.mockClear();
+    panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 12, ok: false, firstOpen: true } });
+    await vi.waitFor(() => expect(error).toHaveBeenCalledWith('firstLayoutFailed'));
+    expect(error).toHaveBeenCalledWith('layoutFailed');
+
+    error.mockClear();
+    panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 12, ok: true, firstOpen: true } });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(error).not.toHaveBeenCalled();
   });
 });
 

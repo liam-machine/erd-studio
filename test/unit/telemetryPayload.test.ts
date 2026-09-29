@@ -372,6 +372,25 @@ describe('allowlists agree with the Worker', () => {
     expect(buildHeartbeat(s, ENV).features).toEqual({ drawFromDbt: 1, addFromDbt: 2, emptyCanvas: 1 });
   });
 
+  it('counts the getting-started funnel and its failures in separate lists', () => {
+    let s = emptyCounters('2026-09-24');
+    s = recordFeature(s, 'drawStarted');
+    s = recordFeature(s, 'drawCancelScope');
+    s = recordFeature(s, 'setupHelperCancelled');
+    s = recordError(s, 'layoutFailed');
+    s = recordError(s, 'firstLayoutFailed');
+    s = recordError(s, 'launcherRuntimeUnverified');
+    const body = buildHeartbeat(s, ENV);
+    expect(body.features).toEqual({ drawStarted: 1, drawCancelScope: 1, setupHelperCancelled: 1 });
+    expect(body.errors).toEqual({ layoutFailed: 1, firstLayoutFailed: 1, launcherRuntimeUnverified: 1 });
+  });
+
+  it('keeps user cancels out of the error codes, so an error always means something broke', () => {
+    for (const code of ERROR_CODES) expect(code).not.toMatch(/Cancel|NoModels|NotFound|NoGit/);
+    // `layoutFailed` predates the split and stays a feature too (the layout-time bucket).
+    expect(FEATURES.filter(f => /Failed$/.test(f))).toEqual(['layoutFailed']);
+  });
+
   it('telemetry.json documents every feature key', () => {
     const doc = fs.readFileSync(path.join(__dirname, '../../telemetry.json'), 'utf8');
     for (const f of FEATURES) expect(doc).toContain(f);

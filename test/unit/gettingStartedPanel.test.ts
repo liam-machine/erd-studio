@@ -68,6 +68,7 @@ import {
 import { GETTING_STARTED_CUES } from '../../src/types/gettingStartedTranscript';
 import { HARNESS_VERSION, HarnessService, extractHarnessVersion } from '../../src/services/harnessService';
 import type { RecommendedInstallResult } from '../../src/types/harness';
+import { telemetry } from '../../src/services/telemetryService';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 
@@ -1331,5 +1332,124 @@ describe('canvas openGettingStarted', () => {
     const errors = (panel._postedMessages as Array<{ type: string; payload?: { message?: string } }>)
       .filter((m) => m.type === 'error');
     expect(errors.map((e) => e.payload?.message)).not.toContain(PHYSICAL_READ_ONLY_MESSAGE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Getting-started telemetry: cancels and routes are features, breakage is an error
+// ---------------------------------------------------------------------------
+
+describe('getting-started telemetry', () => {
+  const spies = () => ({ feature: vi.spyOn(telemetry, 'feature'), error: vi.spyOn(telemetry, 'error') });
+  const keys = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map((c) => c[0]);
+
+  it('setup: a dismissed Replace / Keep mine modal is a conflict and a cancel, not an error', async () => {
+    const { feature, error } = spies();
+    const { deps } = setupDeps({
+      results: [{ status: 'needs-confirmation', unmanaged: ['x'], filesWritten: [], targets: ['claude'] }],
+      confirmReplace: vi.fn(async () => undefined),
+    });
+    await runSetupAiHelper(deps);
+    expect(keys(feature)).toEqual(['setupHelperConflict', 'setupHelperCancelled']);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('setup: a harness failure, a launcher failure and a throw are errors', async () => {
+    const { error } = spies();
+    await runSetupAiHelper(setupDeps({
+      results: [{ status: 'failed', unmanaged: [], filesWritten: [], targets: ['claude'], error: 'disk full' }],
+    }).deps);
+    expect(keys(error)).toEqual(['setupHarnessFailed']);
+
+    error.mockClear();
+    await runSetupAiHelper(setupDeps({ launcherOk: false }).deps);
+    expect(keys(error)).toEqual(['launcherRuntimeUnverified', 'launcherInstallFailed']);
+
+    error.mockClear();
+    const { deps } = setupDeps();
+    deps.harness.installRecommended = () => { throw new Error('boom'); };
+    await runSetupAiHelper(deps);
+    expect(keys(error)).toEqual(['setupFailed']);
+  });
+
+  it('setup: a clean run records no error', async () => {
+    const { feature, error } = spies();
+    await runSetupAiHelper(setupDeps().deps);
+    expect(error).not.toHaveBeenCalled();
+    expect(keys(feature)).toContain('setupAiHelper');
+  });
+
+  it('Open Claude Code: records the route, and a dismissed confirm as a cancel', async () => {
+    const { feature, error } = spies();
+    await openClaudeCode({ dbtRoot: '/w', clipboardText: SETUP_PROMPT });
+    expect(keys(feature)).toEqual(['openClaudeNotFound']);
+
+    feature.mockClear();
+    fakeClaudeOnPath();
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    await openClaudeCode({ dbtRoot: '/w', clipboardText: SETUP_PROMPT });
+    expect(keys(feature)).toEqual(['openClaudeCancelled']);
+
+    feature.mockClear();
+    info.mockResolvedValue('Open Terminal' as never);
+    await openClaudeCode({ dbtRoot: '/w', clipboardText: SETUP_PROMPT });
+    expect(keys(feature)).toEqual(['openClaudeCli']);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('Open Claude Code: the extension with no known open command, or one that throws, is an error', async () => {
+    vscode._setMockExtensions(['anthropic.claude-code']);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { feature, error } = spies();
+    await openClaudeCode({ dbtRoot: '/w', clipboardText: SETUP_PROMPT });
+    expect(keys(feature)).toEqual(['openClaudeExtension']);
+    expect(keys(error)).toEqual(['claudeOpenCommandMissing']);
+
+    error.mockClear();
+    vscode.commands.registerCommand('claude-vscode.sidebar.open', () => { throw new Error('nope'); });
+    await openClaudeCode({ dbtRoot: '/w', clipboardText: SETUP_PROMPT });
+    expect(keys(error)).toEqual(['claudeOpenFailed']);
+  });
+
+  it('Open Copilot Chat: no chat command is a route; the bare-open fallback is a route; both throwing is an error', async () => {
+    const { feature, error } = spies();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await openCopilotChat({ dbtRoot: '/w', workspaceFolder: '/w' });
+    expect(keys(feature)).toEqual(['copilotChatNotFound']);
+
+    feature.mockClear();
+    vscode.commands.registerCommand(COPILOT_CHAT_OPEN_COMMAND, (...args: unknown[]) => {
+      if (args.length > 0) { throw new Error('bad args'); }
+    });
+    await openCopilotChat({ dbtRoot: '/w', workspaceFolder: '/w' });
+    expect(keys(feature)).toEqual(['copilotChatNoArgs']);
+    expect(error).not.toHaveBeenCalled();
+
+    vscode._resetRegisteredCommands();
+    vscode.commands.registerCommand(COPILOT_CHAT_OPEN_COMMAND, () => { throw new Error('broken'); });
+    await openCopilotChat({ dbtRoot: '/w', workspaceFolder: '/w' });
+    expect(keys(error)).toEqual(['copilotChatOpenFailed']);
+  });
+
+  it('Try the sample: cancel and no Git are features; a failed clone is an error', async () => {
+    const { feature, error } = spies();
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    await trySampleProject();
+    expect(keys(feature)).toEqual(['trySampleCancelled']);
+
+    feature.mockClear();
+    info.mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never).mockResolvedValueOnce(undefined);
+    await trySampleProject();
+    expect(keys(feature)).toEqual(['trySampleNoGit']);
+    expect(error).not.toHaveBeenCalled();
+
+    vscode._setMockExtensions(['vscode.git']);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vscode.commands.registerCommand('git.clone', () => { throw new Error('git not found'); });
+    info.mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never).mockResolvedValueOnce(undefined);
+    await trySampleProject();
+    expect(keys(error)).toEqual(['sampleCloneFailed']);
   });
 });
