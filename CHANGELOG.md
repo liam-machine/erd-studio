@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.1 — 2026-09-29
 
 ### Added
 - **Your team's metadata list, for AI assistants** ([#95](https://github.com/liam-machine/erd-studio/issues/95)). The setup guide (`/erd-studio-setup`) now notices when your dbt models already record metadata such as `owner` or `pii`, offers once to copy it onto your diagram, and saves the keys as a short list in `.erd-studio/modelling-approach.md`. From then on every AI assistant uses the same key names (asking for a "data owner" fills in `owner`), copies the values from dbt instead of guessing them, and leaves out a key dbt has no value for. You can also list keys that people fill in themselves, which assistants leave alone. You'll be offered a one-time update of the AI helper files.
