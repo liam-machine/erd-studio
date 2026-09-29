@@ -800,6 +800,13 @@ describe('manifestMissing hint (#113)', () => {
     expect(lastOf(panel, 'domainLoaded')).not.toHaveProperty('manifestMissing');
   });
 
+  it('does not flag it in a project folder without dbt_project.yml (#111)', async () => {
+    removeManifest();
+    fs.rmSync(path.join(root, 'dbt_project.yml'));
+    const { panel } = await openShowcase(root);
+    expect(lastOf(panel, 'domainLoaded')).not.toHaveProperty('manifestMissing');
+  });
+
   it('flags logical stageData but never physical stageData', async () => {
     removeManifest();
     const { panel } = await openShowcase(root);

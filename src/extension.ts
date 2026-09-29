@@ -338,7 +338,7 @@ function recordHarnessInstalls(results: HarnessInstallResult[]): void {
 
 const NO_PROJECT_MESSAGE =
   'ERD Studio: No dbt project found. Open a folder containing dbt_project.yml, ' +
-  'or set erdStudio.projectPath to the dbt project folder.';
+  'or set erdStudio.projectPath to the folder that holds your diagrams (it need not be a dbt project).';
 
 /**
  * Commands added after the `dbtSemantic.*` → `erdStudio.*` rename. They never
@@ -719,7 +719,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // still reported.
     if (projectResolution.invalidSetting !== undefined) {
       void vscode.window.showWarningMessage(
-        `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" does not contain dbt_project.yml.`,
+        `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" is not a folder.`,
         'Open Settings',
       ).then(choice => {
         if (choice === 'Open Settings') {
@@ -744,7 +744,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Visible, not just a console line: a projectPath copied from someone
     // else's machine otherwise looks like the setting being ignored.
     void vscode.window.showWarningMessage(
-      `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" does not contain dbt_project.yml, ` +
+      `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" is not a folder, ` +
         `so ERD Studio opened ${path.basename(workspaceRoot)} instead.`,
       'Open Settings',
     ).then(choice => {

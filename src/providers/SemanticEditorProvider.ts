@@ -101,7 +101,7 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
-import { findOwningDbtProject, samePath } from '../services/projectDiscovery';
+import { findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
 import type {
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
@@ -684,7 +684,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * this project's own.
    */
   private foreignProjectOf(filePath: string): string | undefined | null {
-    const owner = findOwningDbtProject(filePath);
+    const owner = findOwningDbtProject(filePath, this.workspaceRoot);
     if (owner) { return samePath(owner, this.workspaceRoot) ? null : owner; }
     const rel = path.relative(this.workspaceRoot, filePath);
     return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? null : undefined;
@@ -1937,6 +1937,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private manifestHintFlag(): { manifestMissing?: true } {
     if (!this.manifestService.isMissing) return {};
+    // A folder that is not a dbt project (#111) will never have a manifest.
+    if (!hasDbtProjectFile(this.workspaceRoot)) return {};
     if (this.context.workspaceState?.get<boolean>(MANIFEST_HINT_DISMISSED_KEY)) return {};
     return { manifestMissing: true };
   }

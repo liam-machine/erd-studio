@@ -151,7 +151,7 @@ describe('activate() without a dbt project', () => {
     vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: '/nowhere/analytics' });
     await activate(context);
     expect(warn).toHaveBeenCalledWith(
-      'ERD Studio: erdStudio.projectPath "/nowhere/analytics" does not contain dbt_project.yml.',
+      'ERD Studio: erdStudio.projectPath "/nowhere/analytics" is not a folder.',
       'Open Settings',
     );
   });
@@ -786,7 +786,7 @@ describe('Select dbt Project… (#82)', () => {
     await activate(context);
 
     expect(warn).toHaveBeenCalledWith(
-      'ERD Studio: erdStudio.projectPath "/Users/someone-else/datamodels" does not contain dbt_project.yml, so ERD Studio opened a instead.',
+      'ERD Studio: erdStudio.projectPath "/Users/someone-else/datamodels" is not a folder, so ERD Studio opened a instead.',
       'Open Settings',
     );
   });
