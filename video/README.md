@@ -6,6 +6,7 @@ Source and render pipeline for the one-minute getting-started tour (at most 65 s
 |---|---|
 | `media/onboarding/getting-started.mp4` | the Welcome panel's `<video>` (ships) |
 | `media/onboarding/getting-started-poster.jpg` | the poster and the "can't play here" fallback (ships) |
+| `docs/assets/getting-started.mp4` | the README's link: the same video with **AAC** audio, because Safari and QuickTime play MP3-in-MP4 silently (not shipped; `docs/**` is excluded from the VSIX) |
 | `src/types/gettingStartedTranscript.ts` | `GETTING_STARTED_CUES` (the panel adds them as `VTTCue`s) and `GETTING_STARTED_TRANSCRIPT` (the **Transcript** section). Generated; do not edit by hand. |
 
 `video/getting-started.vtt` is the same captions as WebVTT, kept as a source artefact for review and for uploading next to the video elsewhere. It is not shipped.
@@ -23,7 +24,7 @@ Style reference: `/Users/liamwynne/GIT/LIAM/erd-studio/docs/assets/erd-studio-li
 
 ```bash
 cd video
-npm run all        # tts → timeline → music → capture → encode (also writes build/getting-started-share.mp4)
+npm run all        # tts → timeline → music → capture → encode (also writes the AAC copy, build/getting-started-share.mp4 → docs/assets/getting-started.mp4)
 npm run qa         # contact sheet + per-scene stills in build/qa/, and the A/V onset check
 npm test           # pipeline self-tests (node:test), incl. that every mock uses the real product copy:
                    # the extension listing and the walkthrough (package.json), the Draw from dbt

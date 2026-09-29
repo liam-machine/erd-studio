@@ -76,4 +76,7 @@ if [[ "${1:-}" != "--placeholder" ]]; then
   ffmpeg -v error -y -i "$MP4" -i "${AUDIO_IN:-build/narration.wav}" -map 0:v -map 1:a -c:v copy \
     -c:a aac -b:a 128k -ac 1 -ar 48000 -movflags +faststart -shortest build/getting-started-share.mp4
   echo "ok: build/getting-started-share.mp4 (AAC copy for QuickTime and sharing; not shipped)"
+  # The README links this copy, not the MP3 one: Safari and QuickTime play MP3-in-MP4 silently.
+  cp build/getting-started-share.mp4 ../docs/assets/getting-started.mp4
+  echo "ok: docs/assets/getting-started.mp4 (the README's copy; AAC)"
 fi
