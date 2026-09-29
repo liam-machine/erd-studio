@@ -175,6 +175,46 @@ describe('diff', () => {
   });
 });
 
+describe('diff over a model file that does not parse', () => {
+  const BROKEN = 'name: fct_task_event\ndescription: Status: one of a, b\ncolumns: []\n';
+
+  it('reports it once, as a blocking fix-model-yaml, instead of add-column fixes', async () => {
+    const root = copyProject();
+    const yml = path.join(root, '.erd-studio/logical-models/fct_task_event.yml');
+    fs.writeFileSync(yml, BROKEN);
+
+    const r = await run(['diff', '--domain', '.erd-studio/silver/showcase.json', '--json'], root);
+    expect(r.code).toBe(1);
+    const d = (JSON.parse(r.out) as DiffResult).domains[0];
+    expect(d.clean).toBe(false);
+    expect(d.unreadableModelFiles).toEqual([expect.objectContaining({
+      name: 'fct_task_event',
+      file: '.erd-studio/logical-models/fct_task_event.yml',
+      line: 2,
+      code: 'BLOCK_AS_IMPLICIT_KEY',
+      kind: 'yamlScalar',
+    })]);
+    const forModel = d.fixes.filter((f) => f.model === 'fct_task_event');
+    expect(forModel.filter((f) => ['add-column', 'remove-column', 'set-type'].includes(f.kind))).toEqual([]);
+    const yamlFixes = d.fixes.filter((f) => f.kind === 'fix-model-yaml');
+    expect(yamlFixes).toEqual([expect.objectContaining({
+      severity: 'blocking', model: 'fct_task_event', file: '.erd-studio/logical-models/fct_task_event.yml', line: 2,
+    })]);
+    expect(d.counts.blocking).toBe(d.fixes.filter((f) => f.severity === 'blocking').length);
+    expect(JSON.stringify([d.unreadableModelFiles, d.fixes])).not.toContain(root);
+
+    const human = await run(['diff', '--domain', '.erd-studio/silver/showcase.json'], root);
+    expect(human.out).toContain('✗ fct_task_event.yml line 2: YAML error (BLOCK_AS_IMPLICIT_KEY) — wrap the value in double quotes');
+  });
+
+  it('a readable library reports no unreadable files', async () => {
+    const ctx = await buildCliContext({ project: PROJECT, semanticDir: '.erd-studio' });
+    const d = runDiff(ctx, { domains: ['.erd-studio/silver/showcase.json'] }).result.domains[0];
+    expect(d.unreadableModelFiles).toEqual([]);
+    expect(d.fixes.some((f) => f.kind === 'fix-model-yaml')).toBe(false);
+  });
+});
+
 describe('fixesFromPlan', () => {
   const plan: SyncPlan = {
     generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',

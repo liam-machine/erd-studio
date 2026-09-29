@@ -133,6 +133,14 @@ describe('transformDomain nodes', () => {
     expect(nodeById(result, 'dim_customer').data).not.toHaveProperty('provenance');
   });
 
+  it('carries a model file load error onto node data, and only when the host set it (#110)', () => {
+    const result = transformDomain(domain({
+      models: [model('dim_broken', { columns: [], loadError: { kind: 'yamlScalar', line: 4 } }), model('dim_customer')],
+    }));
+    expect(nodeById(result, 'dim_broken').data.loadError).toEqual({ kind: 'yamlScalar', line: 4 });
+    expect(nodeById(result, 'dim_customer').data).not.toHaveProperty('loadError');
+  });
+
   it('carries model and column meta for the hover cards, and drops an empty map', () => {
     const result = transformDomain(domain({
       models: [

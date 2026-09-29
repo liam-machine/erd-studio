@@ -115,10 +115,26 @@ const FEATURES = [
   'drawFromDbt',
   'addFromDbt',
   'emptyCanvas',
+  'dbtParse',
+  'harnessPresent',
+  'manifestMissingCanvas',
+  'manifestMissingPhysical',
+  'manifestMissingDraw',
+  'manifestMissingWelcome',
+  'manifestMissingRefresh',
+  'manifestNoTargetDir',
+  'manifestCustomTargetPath',
+  'manifestNoDbtFound',
+  'manifestAfterParse',
+  'manifestAppeared',
+  'manifestHintDismissed',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
 const ERROR_CODES = [
+  // No longer recorded since 1.6.2 (#110): a missing manifest is the normal
+  // state of a fresh clone, already reported by the canvas-open `manifest`
+  // field. Kept for older clients and so the list order never shifts.
   'manifestMissing',
   'manifestMalformed',
   'manifestTimeout',
@@ -129,6 +145,12 @@ const ERROR_CODES = [
   'editRejected',
   'migrationFailed',
   'other',
+  'modelFileRead',
+  'modelFileYamlIndent',
+  'modelFileYamlScalar',
+  'modelFileYamlStructure',
+  'modelFileYamlDuplicateKey',
+  'modelFileYamlOther',
 ];
 
 /**

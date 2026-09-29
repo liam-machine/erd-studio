@@ -7,7 +7,7 @@
  * directly from its data source.
  */
 
-import type { Cardinality, Layer, Meta, ModelRole, ModelTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
+import type { Cardinality, Layer, Meta, ModelLoadError, ModelRole, ModelTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
 import type { LayerConfig } from './layer.js';
 
 // ---------------------------------------------------------------------------
@@ -118,6 +118,11 @@ export interface DisplayModel {
   missingReason?: 'absent' | 'disabled';
   /** Where the physical columns and types came from (physical stage only). */
   provenance?: PhysicalProvenance;
+  /**
+   * The model's file exists but could not be read (logical stage only): the
+   * node shows the error instead of an empty column list.
+   */
+  loadError?: ModelLoadError;
 }
 
 // ---------------------------------------------------------------------------

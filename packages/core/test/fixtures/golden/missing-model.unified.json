@@ -29,7 +29,11 @@
       },
       {
         "name": "broken",
-        "columns": []
+        "columns": [],
+        "loadError": {
+          "kind": "yamlIndent",
+          "line": 5
+        }
       },
       {
         "name": "nameless",

@@ -15,6 +15,7 @@ import * as vscode from 'vscode';
 import {
   SemanticEditorProvider,
   PHYSICAL_READ_ONLY_MESSAGE,
+  MANIFEST_HINT_DISMISSED_KEY,
   describeSkippedDbtModels,
   modelFolderForDomain,
 } from '../../src/providers/SemanticEditorProvider';
@@ -89,6 +90,7 @@ function buildProvider(root: string) {
     globalStorageUri: vscode.Uri.file(path.join(root, '.global-storage')),
     extension: { packageJSON: { version: '0.0.0-test' } },
     globalState: { get: () => true, update: async () => {} },
+    workspaceState: vscode.createMockMemento(),
     secrets: vscode.createMockSecretStorage(),
     subscriptions: [],
   } as unknown as import('vscode').ExtensionContext;
@@ -104,7 +106,7 @@ function buildProvider(root: string) {
     selectorsService,
     logicalModelService,
   );
-  return { provider, logicalModelService };
+  return { provider, logicalModelService, context };
 }
 
 const posted = (panel: MockPanel) => panel._postedMessages as Posted[];
@@ -722,6 +724,119 @@ describe('launchClaudeSync (H36)', () => {
     terminal.dispose();
     await expect(vi.advanceTimersByTimeAsync(2000)).resolves.not.toThrow();
     expect(terminal._sentText).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #110 — Run dbt parse from the physical stage
+// ---------------------------------------------------------------------------
+
+describe('runDbtParse (#110)', () => {
+  const savedEnv = { PATH: process.env.PATH, VIRTUAL_ENV: process.env.VIRTUAL_ENV, CONDA_PREFIX: process.env.CONDA_PREFIX };
+  let binDir: string;
+
+  beforeEach(() => {
+    // A fake `dbt` alone on PATH, so the test never depends on this machine.
+    binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-dbt-bin-'));
+    const dbt = path.join(binDir, process.platform === 'win32' ? 'dbt.exe' : 'dbt');
+    fs.writeFileSync(dbt, '#!/bin/sh\n');
+    fs.chmodSync(dbt, 0o755);
+    process.env.PATH = binDir;
+    delete process.env.VIRTUAL_ENV;
+    delete process.env.CONDA_PREFIX;
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) { delete process.env[k]; } else { process.env[k] = v; }
+    }
+    fs.rmSync(binDir, { recursive: true, force: true });
+  });
+
+  it('is allowed on the physical stage and opens a terminal running dbt parse in the project root', async () => {
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    const feature = vi.spyOn(telemetry, 'feature');
+
+    panel._simulateMessage({ type: 'runDbtParse' });
+
+    await vi.waitFor(() => expect(vscode.window.terminals).toHaveLength(1));
+    const terminal = vscode.window.terminals[0];
+    expect(terminal._options).toMatchObject({ name: 'dbt parse', cwd: root });
+    expect(terminal._sentText).toEqual(['dbt parse']);
+    expect(feature).toHaveBeenCalledWith('dbtParse');
+    expect(lastError(panel)).not.toBe(PHYSICAL_READ_ONLY_MESSAGE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #113 — the logical stage's "Run dbt parse" hint
+// ---------------------------------------------------------------------------
+
+describe('manifestMissing hint (#113)', () => {
+  const removeManifest = () => fs.rmSync(path.join(root, 'target', 'manifest.json'), { force: true });
+  const lastOf = (panel: MockPanel, type: string) => posted(panel).filter((m) => m.type === type).at(-1) as
+    | (Posted & { manifestMissing?: boolean })
+    | undefined;
+
+  it('flags a logical domainLoaded when manifest.json is missing', async () => {
+    removeManifest();
+    const { panel } = await openShowcase(root);
+    expect(lastOf(panel, 'domainLoaded')?.manifestMissing).toBe(true);
+  });
+
+  it('does not flag it when the manifest is present', async () => {
+    const { panel } = await openShowcase(root);
+    expect(lastOf(panel, 'domainLoaded')).not.toHaveProperty('manifestMissing');
+  });
+
+  it('does not flag it once the workspace has dismissed the hint', async () => {
+    removeManifest();
+    const { panel, context } = await openShowcase(root, { sendReady: false });
+    await context.workspaceState.update(MANIFEST_HINT_DISMISSED_KEY, true);
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    expect(lastOf(panel, 'domainLoaded')).not.toHaveProperty('manifestMissing');
+  });
+
+  it('does not flag it in a project folder without dbt_project.yml (#111)', async () => {
+    removeManifest();
+    fs.rmSync(path.join(root, 'dbt_project.yml'));
+    const { panel } = await openShowcase(root);
+    expect(lastOf(panel, 'domainLoaded')).not.toHaveProperty('manifestMissing');
+  });
+
+  it('flags logical stageData but never physical stageData', async () => {
+    removeManifest();
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    expect(lastOf(panel, 'stageData')).not.toHaveProperty('manifestMissing');
+
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'logical', requestId: 2 } });
+    await waitForType(panel, 'stageData', 2);
+    expect(lastOf(panel, 'stageData')).toMatchObject({ requestId: 2, manifestMissing: true });
+  });
+
+  it('dismissManifestHint persists in workspaceState, records the feature and re-sends nothing', async () => {
+    removeManifest();
+    const { panel, context } = await openShowcase(root);
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    const before = types(panel).length;
+
+    panel._simulateMessage({ type: 'dismissManifestHint' });
+
+    await vi.waitFor(() => expect(context.workspaceState.get(MANIFEST_HINT_DISMISSED_KEY)).toBe(true));
+    expect(featureOnce).toHaveBeenCalledWith('manifestHintDismissed');
+    expect(types(panel).slice(before)).toEqual([]);
+  });
+
+  it('refuses a dismissManifestHint carrying a payload', async () => {
+    const { panel, context } = await openShowcase(root);
+    panel._simulateMessage({ type: 'dismissManifestHint', payload: { forever: true } });
+    await waitForError(panel, /takes no payload/);
+    expect(context.workspaceState.get(MANIFEST_HINT_DISMISSED_KEY)).toBeUndefined();
   });
 });
 

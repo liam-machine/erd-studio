@@ -63,7 +63,7 @@ describe('resolveDbtProjectRoot', () => {
     expect(resolveDbtProjectRoot([root], nested)).toBe(nested);
   });
 
-  it('falls back to auto-detection when projectPath does not contain dbt_project.yml', () => {
+  it('falls back to auto-detection when projectPath is not a folder', () => {
     makeDbtProject('.');
     expect(resolveDbtProjectRoot([root], 'missing')).toBe(root);
   });

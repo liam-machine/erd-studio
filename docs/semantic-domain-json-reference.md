@@ -96,13 +96,13 @@ Never produce hybrid or legacy files. When adding a model to a domain, add its *
 ```yaml
 name: dim_customer
 schema: silver
-description: Customer master data for all sales channels
-grain: One row per customer
+description: "Customer master data for all sales channels"
+grain: "One row per customer"
 modelRole: conformed-dim
 rationale:
-  purpose: Central customer entity shared across sales, marketing, and support
-  roleChoice: Conformed dimension because customer data is referenced by multiple business areas
-  scdStrategy: SCD1 for mutable attributes; customer_code and customer_id never change
+  purpose: "Central customer entity shared across sales, marketing, and support"
+  roleChoice: "Conformed dimension because customer data is referenced by multiple business areas"
+  scdStrategy: "SCD1 for mutable attributes; customer_code and customer_id never change"
 meta:
   owner: crm-team
   lineage:
@@ -110,18 +110,18 @@ meta:
     refreshed: daily
 columns:
   - name: customer_id
-    dataType: INTEGER
-    description: Surrogate key
+    dataType: "INTEGER"
+    description: "Surrogate key"
     isPrimaryKey: true
     scdType: 0
   - name: customer_code
-    dataType: STRING
-    description: Business identifier from the source system
+    dataType: "STRING"
+    description: "Business identifier from the source system"
     isNaturalKey: true
     scdType: 0
   - name: email
-    dataType: STRING
-    description: Primary email address
+    dataType: "STRING"
+    description: "Primary email address"
     scdType: 1
     meta:
       pii: true
@@ -140,6 +140,8 @@ columns:
 | `meta` | map | No | Free-form, dbt-style metadata (owner, source system, lineage…). See [Metadata](#metadata-meta). Omit entirely if empty. |
 
 Models are defined once and can be referenced from several domains. Editing a model from any domain canvas updates the shared YAML.
+
+**YAML quoting.** A model file that does not parse loads as an empty placeholder (the canvas warns; `erd-studio doctor` and `erd-studio diff` report it as a blocking `fix-model-yaml` with the file and line). Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes (escape an inner `"` as `\"`), or use a `|` block for multi-line text. Always quote a value that contains `: ` or ` #`, or starts with any of `` ` @ * & ! % [ { - | > ' " ``. Indent with spaces, never tabs. One YAML document per file: no `---` separators, no markdown code fences, no `{{ doc() }}` — paste the text itself. (A byte-order mark and CRLF line endings are fine.)
 
 ### Column Definition (ColumnDef)
 
@@ -487,35 +489,35 @@ File: `.erd-studio/logical-models/silver/fct_order_line.yml`
 ```yaml
 name: fct_order_line
 schema: silver
-description: Order line items capturing each product sold in a transaction
-grain: One row per order line item
+description: "Order line items capturing each product sold in a transaction"
+grain: "One row per order line item"
 modelRole: transaction-fact
 rationale:
-  purpose: Core transactional fact for revenue, volume, and margin analysis
-  measures: line_amount and quantity are additive; unit_price is non-additive
+  purpose: "Core transactional fact for revenue, volume, and margin analysis"
+  measures: "line_amount and quantity are additive; unit_price is non-additive"
 columns:
   - name: order_line_id
-    dataType: INTEGER
-    description: Surrogate key
+    dataType: "INTEGER"
+    description: "Surrogate key"
     isPrimaryKey: true
   - name: customer_id
-    dataType: INTEGER
-    description: FK to dim_customer
+    dataType: "INTEGER"
+    description: "FK to dim_customer"
     isForeignKey: true
   - name: product_id
-    dataType: INTEGER
-    description: FK to dim_product
+    dataType: "INTEGER"
+    description: "FK to dim_product"
     isForeignKey: true
   - name: quantity
-    dataType: INTEGER
-    description: Units ordered
+    dataType: "INTEGER"
+    description: "Units ordered"
     additiveType: additive
   - name: unit_price
-    dataType: DECIMAL(18,2)
-    description: Price per unit at time of sale
+    dataType: "DECIMAL(18,2)"
+    description: "Price per unit at time of sale"
     additiveType: non-additive
   - name: line_amount
-    dataType: DECIMAL(18,2)
-    description: Net line total
+    dataType: "DECIMAL(18,2)"
+    description: "Net line total"
     additiveType: additive
 ```

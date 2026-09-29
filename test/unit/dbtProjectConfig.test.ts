@@ -7,6 +7,8 @@ import {
   readDbtProjectConfig,
   resolveManifestPath,
   resolveCatalogPath,
+  resolveTargetPath,
+  manifestDisplayPath,
   modelPathsGlob,
   sourcePathsGlob,
   defaultDbtProjectConfig,
@@ -70,9 +72,9 @@ describe('dbtProjectConfig', () => {
     );
   });
 
-  it('ignores absolute, traversal, empty and non-string entries', () => {
-    write('target-path: /abs/target\nmodel-paths: ["../outside", "", 42, "ok_models"]\n');
-    expect(readDbtProjectConfig(tmpDir)).toEqual(config({ modelPaths: ['ok_models'] }));
+  it('ignores absolute, traversal, empty and non-string model-paths entries', () => {
+    write('target-path: ../outside\nmodel-paths: ["/abs/models", "../outside", "", 42, "ok_models"]\n');
+    expect(readDbtProjectConfig(tmpDir, { env: {} })).toEqual(config({ modelPaths: ['ok_models'] }));
   });
 
   it('returns defaults on malformed YAML', () => {
@@ -138,5 +140,68 @@ describe('dbtProjectConfig', () => {
 
   it('sourcePathsGlob falls back to dbt defaults for any empty list', () => {
     expect(sourcePathsGlob(config({ seedPaths: [], snapshotPaths: [] }))).toBe('{models,seeds,snapshots}');
+  });
+
+  describe('target-path resolution (#110)', () => {
+    const abs = path.join(os.tmpdir(), 'dbt-artifacts');
+
+    it('keeps an absolute target-path as it is', () => {
+      write(`target-path: "${abs.replace(/\\/g, '/')}"\n`);
+      const cfg = readDbtProjectConfig(tmpDir, { env: {} });
+      expect(path.resolve(cfg.targetPath)).toBe(path.resolve(abs));
+      expect(resolveManifestPath(tmpDir, cfg)).toBe(path.join(path.resolve(abs), 'manifest.json'));
+      expect(resolveCatalogPath(tmpDir, cfg)).toBe(path.join(path.resolve(abs), 'catalog.json'));
+    });
+
+    it('leaves a relative target-path relative', () => {
+      write('target-path: build\n');
+      expect(readDbtProjectConfig(tmpDir, { env: {} }).targetPath).toBe('build');
+    });
+
+    it('DBT_TARGET_PATH beats target-path, relative to the project root', () => {
+      write('target-path: build\n');
+      const cfg = readDbtProjectConfig(tmpDir, { env: { DBT_TARGET_PATH: 'env_target' } });
+      expect(cfg.targetPath).toBe('env_target');
+      expect(resolveManifestPath(tmpDir, cfg)).toBe(path.join(tmpDir, 'env_target', 'manifest.json'));
+    });
+
+    it('DBT_TARGET_PATH can be absolute, and applies with no dbt_project.yml', () => {
+      const cfg = readDbtProjectConfig(tmpDir, { env: { DBT_TARGET_PATH: abs } });
+      expect(resolveManifestPath(tmpDir, cfg)).toBe(path.join(path.resolve(abs), 'manifest.json'));
+    });
+
+    it('resolves {{ env_var() }} from the environment when set', () => {
+      write(`target-path: "{{ env_var('MY_TARGET', 'fallback') }}"\n`);
+      expect(readDbtProjectConfig(tmpDir, { env: { MY_TARGET: 'from_env' } }).targetPath).toBe('from_env');
+    });
+
+    it('uses the env_var() default when the variable is unset', () => {
+      write(`target-path: "{{ env_var('MY_TARGET', 'fallback') }}"\n`);
+      expect(readDbtProjectConfig(tmpDir, { env: {} }).targetPath).toBe('fallback');
+      write('target-path: \'{{ env_var("MY_TARGET", "dq_default") }}\'\n');
+      expect(readDbtProjectConfig(tmpDir, { env: {} }).targetPath).toBe('dq_default');
+    });
+
+    it('falls back to target for env_var() with no default and the variable unset', () => {
+      write(`target-path: "{{ env_var('MY_TARGET') }}"\n`);
+      expect(readDbtProjectConfig(tmpDir, { env: {} }).targetPath).toBe('target');
+      expect(readDbtProjectConfig(tmpDir, { env: { MY_TARGET: 'set' } }).targetPath).toBe('set');
+    });
+
+    it('falls back to target for any other Jinja', () => {
+      write(`target-path: "{{ var('t') }}/x"\n`);
+      expect(readDbtProjectConfig(tmpDir, { env: {} }).targetPath).toBe('target');
+      expect(resolveTargetPath('{{ target.name }}', {})).toBe('target');
+    });
+
+    it('does not change model-paths handling', () => {
+      write('target-path: /abs\nmodel-paths: ["/abs/models", "ok"]\n');
+      expect(readDbtProjectConfig(tmpDir, { env: {} }).modelPaths).toEqual(['ok']);
+    });
+
+    it('manifestDisplayPath never shows an absolute path', () => {
+      expect(manifestDisplayPath('/proj', config({ targetPath: 'build' }))).toBe('build/manifest.json');
+      expect(manifestDisplayPath('/proj', config({ targetPath: '/elsewhere/t' }))).toBe('manifest.json');
+    });
   });
 });

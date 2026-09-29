@@ -6,6 +6,8 @@ import {
   NON_DOMAIN_DIRS,
   VALID_CARDINALITIES,
   buildUnifiedDomain,
+  classifyModelLoadError,
+  describeModelLoadError,
   parseDomainJson,
   resolveDomainLayer,
   toLogicalStage,
@@ -14,6 +16,7 @@ import {
   type LayerLookup,
 } from '../../src/domain';
 import type { SemanticModel, UnifiedDomain } from '../../src/types/semantic';
+import { toDisplayDomain } from '../../src/displayDomain';
 
 const FILE = '/proj/.erd-studio/silver/sales.json';
 
@@ -258,6 +261,46 @@ describe('buildUnifiedDomain', () => {
     expect(u.logical.models).toEqual([dimA, { name: 'gone', columns: [] }, dimA]);
     expect(getModel.mock.calls.map((c) => c[0])).toEqual(['dim_a', 'gone', 'dim_a']);
     expect(warn).toHaveBeenCalledWith('Model "gone" not found in logical-models/');
+  });
+
+  it('names a known load error in the warning and carries it on the placeholder (#110)', () => {
+    const warn = vi.fn();
+    const getModelError = vi.fn((name: string) => (name === 'broken' ? { kind: 'yamlScalar' as const, line: 4 } : null));
+    const u = build(
+      { schemaVersion: 5, logical: { models: ['broken', 'gone'] } },
+      { getModel: () => null, getModelError, warn },
+    );
+    expect(u.logical.models).toEqual([
+      { name: 'broken', columns: [], loadError: { kind: 'yamlScalar', line: 4 } },
+      { name: 'gone', columns: [] },
+    ]);
+    expect(warn.mock.calls.map((c) => c[0])).toEqual([
+      'Model "broken": logical-models file has a YAML error on line 4',
+      'Model "gone" not found in logical-models/',
+    ]);
+    expect(warn.mock.calls.map((c) => c[0]).join('\n')).not.toContain('"broken" not found');
+
+    // toDisplayDomain passes it through to the node.
+    const display = toDisplayDomain(toLogicalStage(u), { viewConfig: {}, layerConfig: undefined, readOnly: false });
+    expect(display.models.map((m) => m.loadError)).toEqual([{ kind: 'yamlScalar', line: 4 }, undefined]);
+  });
+
+  it('never asks getModelError about a model getModel resolved', () => {
+    const getModelError = vi.fn(() => ({ kind: 'yamlOther' as const }));
+    build(
+      { schemaVersion: 5, logical: { models: ['dim_a'] } },
+      { getModel: (name) => ({ name, columns: [] }), getModelError },
+    );
+    expect(getModelError).not.toHaveBeenCalled();
+  });
+
+  it('classifies parser errors by code and position only', () => {
+    expect(classifyModelLoadError(Object.assign(new Error('x'), { code: 'TAB_AS_INDENT', linePos: [{ line: 3, col: 1 }] })))
+      .toEqual({ kind: 'yamlIndent', line: 3, column: 1, code: 'TAB_AS_INDENT' });
+    expect(classifyModelLoadError(Object.assign(new Error('x'), { code: 'EACCES' }))).toEqual({ kind: 'read' });
+    expect(classifyModelLoadError(new Error('no code'))).toEqual({ kind: 'yamlOther' });
+    expect(describeModelLoadError({ kind: 'read' })).toBe('logical-models file could not be read');
+    expect(describeModelLoadError({ kind: 'yamlDuplicateKey' })).toBe('logical-models file has a YAML error');
   });
 
   it('makes silent placeholders for every v5 reference when there is no getModel', () => {

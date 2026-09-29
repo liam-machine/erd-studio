@@ -1,11 +1,12 @@
 /**
- * PhysicalSourceNotice styles.
+ * ManifestHint styles — the logical stage's "Run dbt parse" strip (#113),
+ * laid out exactly like PhysicalSourceNotice so the two read as one family.
  *
  * A strip above the flow area, not an overlay — it must never cover a node.
  * Theme tokens only (webview/styles/theme.css); no literal colours.
  */
 
-.physical-source-notice {
+.manifest-hint {
   flex-shrink: 0;
   display: flex;
   align-items: baseline;
@@ -18,20 +19,20 @@
   line-height: 1.4;
 }
 
-.physical-source-notice__icon {
+.manifest-hint__icon {
   flex-shrink: 0;
   font-size: 13px;
 }
 
-.physical-source-notice__text {
+.manifest-hint__text {
   flex: 1;
 }
 
-.physical-source-notice__hint {
+.manifest-hint__hint {
   opacity: 0.85;
 }
 
-.physical-source-notice__action {
+.manifest-hint__action {
   flex-shrink: 0;
   align-self: center;
   padding: 2px 10px;
@@ -44,21 +45,17 @@
   cursor: pointer;
 }
 
-.physical-source-notice__action:hover {
+.manifest-hint__action:hover {
   background: var(--button-hover-bg);
 }
 
-.physical-source-notice__action:focus-visible {
+.manifest-hint__action:focus-visible {
   outline: 1px solid var(--focus-border);
   outline-offset: 1px;
 }
 
-.physical-source-notice__text code {
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-}
 
-.physical-source-notice__dismiss {
+.manifest-hint__dismiss {
   flex-shrink: 0;
   padding: 0 4px;
   border: none;
@@ -70,6 +67,6 @@
   opacity: 0.7;
 }
 
-.physical-source-notice__dismiss:hover {
+.manifest-hint__dismiss:hover {
   opacity: 1;
 }

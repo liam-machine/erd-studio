@@ -503,7 +503,7 @@
         "erdStudio.projectPath": {
           "type": "string",
           "default": "",
-          "description": "Path to dbt project root (auto-detected from workspace). Changing this requires a window reload."
+          "markdownDescription": "Folder that holds your ERD Studio data (`erdStudio.semanticDir` is created inside it). Usually a dbt project root, and auto-detected from the workspace when empty — but any folder works, with or without `dbt_project.yml`; without one there is no dbt manifest to compare against. Absolute, or relative to a workspace folder. Changing this requires a window reload."
         },
         "erdStudio.semanticDir": {
           "type": "string",
@@ -616,8 +616,8 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
-    "@erd-studio/core": "0.1.0",
-    "@erd-studio/renderer": "0.1.0",
+    "@erd-studio/core": "0.1.1",
+    "@erd-studio/renderer": "0.1.1",
     "@xyflow/react": "^12.4.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",

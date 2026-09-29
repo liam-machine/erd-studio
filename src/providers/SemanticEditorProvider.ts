@@ -13,12 +13,12 @@
  *                         schema mutations (addModel … removeRelationships),
  *                         canvas metadata (updatePositions, *Annotation*),
  *                         sync flow (toggleDiscrepancy, generateSyncPlan,
- *                         runDbtCompile, launchClaudeSync),
+ *                         runDbtCompile, runDbtParse, launchClaudeSync),
  *                         feedback (requestFeedbackContext, analyzeFeedback,
  *                         submitFeedback, copyFeedbackReport,
  *                         openFeedbackLink),
  *                         viewFile, requestReload, dismissWelcome,
- *                         openGettingStarted
+ *                         dismissManifestHint, openGettingStarted
  *   Extension → Webview:  domainLoaded, stageData (echoes switchStage
  *                         requestId), discrepancyReport, manifestStaleness,
  *                         syncPlanGenerated, openFeedback, feedbackContext,
@@ -69,6 +69,8 @@ import {
 import { computeDomainDiff } from '../services/stageDiff';
 import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
 import { findVenvActivate } from '../services/dbtEnv';
+import { runDbtParse } from '../commands/runDbtParse';
+import { NO_DBT_MODELS_MESSAGE } from '../commands/drawFromDbt';
 import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
@@ -99,12 +101,13 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
-import { findOwningDbtProject, samePath } from '../services/projectDiscovery';
+import { findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
 import type {
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
   ErrorMessage,
   OpenFeedbackLinkMessage,
+  OpenModelFileMessage,
   SetFeedbackProviderMessage,
   OpenFeedbackMessage,
   RelationshipKey,
@@ -121,6 +124,7 @@ import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
+import { openModelFileAt } from '../commands/openModelFile';
 import {
   buildDbtDraft,
   dbtTestsOf,
@@ -285,6 +289,8 @@ import {
   validateMetaPayload,
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
+  validateOpenModelFilePayload,
+  validateDismissManifestHintPayload,
   validateAnnotationUpdate,
   validateModelNameSafety,
   validatePoint,
@@ -302,6 +308,12 @@ import { sameName } from '../types/naming';
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
+
+/**
+ * workspaceState key: the user closed the logical stage's "Run dbt parse" hint
+ * (#113). Per workspace, so another project with no manifest still gets it.
+ */
+export const MANIFEST_HINT_DISMISSED_KEY = 'erdStudio.manifestHintDismissed';
 
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
 export const PHYSICAL_READ_ONLY_MESSAGE = 'Physical stage is read-only. Switch to the Logical stage to make changes.';
@@ -672,7 +684,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * this project's own.
    */
   private foreignProjectOf(filePath: string): string | undefined | null {
-    const owner = findOwningDbtProject(filePath);
+    const owner = findOwningDbtProject(filePath, this.workspaceRoot);
     if (owner) { return samePath(owner, this.workspaceRoot) ? null : owner; }
     const rel = path.relative(this.workspaceRoot, filePath);
     return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? null : undefined;
@@ -782,11 +794,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const NON_MUTATION_TYPES = new Set([
           'ready', 'updatePositions', 'switchStage', 'toggleDiscrepancy',
           'refreshManifest', 'dismissWelcome',
-          'viewFile', 'generateSyncPlan', 'runDbtCompile', 'launchClaudeSync',
+          'viewFile', 'generateSyncPlan', 'runDbtCompile', 'runDbtParse', 'launchClaudeSync',
           'addAnnotation', 'updateAnnotation', 'removeAnnotation', 'removeAnnotations',
           'requestReload', 'openGettingStarted',
           'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
           'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
+          'openModelFile',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
@@ -818,6 +831,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           case 'dismissWelcome':
             await this.context.globalState.update('welcomeDismissed', true);
             break;
+          case 'dismissManifestHint': {
+            // The webview has already hidden the hint; persisting it is all
+            // that is left, so no domain is re-sent.
+            const payloadError = validateDismissManifestHintPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await this.context.workspaceState?.update(MANIFEST_HINT_DISMISSED_KEY, true);
+            telemetry.featureOnce('manifestHintDismissed');
+            break;
+          }
           case 'openGettingStarted':
             // No payload to validate. Writes nothing, so it is on the physical allowlist.
             await vscode.commands.executeCommand('erdStudio.showGettingStarted');
@@ -998,6 +1023,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'viewFile': {
             await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+            break;
+          }
+          case 'openModelFile': {
+            // Writes nothing, so it is on the physical allowlist.
+            const payload = (message as OpenModelFileMessage).payload;
+            const payloadError = validateOpenModelFilePayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to open model file: ${payloadError}` } });
+              break;
+            }
+            await this.handleOpenModelFile(payload.modelName, webviewPanel.webview);
             break;
           }
           // --- Feedback dialog -------------------------------------------
@@ -1289,6 +1325,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             await this.handleRunDbtCompile();
             break;
           }
+          case 'runDbtParse': {
+            // Records the `dbtParse` feature itself; the manifest watcher
+            // refreshes this canvas once manifest.json appears.
+            await runDbtParse(this.workspaceRoot);
+            break;
+          }
           case 'launchClaudeSync': {
             telemetry.feature('launchClaude');
             await this.handleLaunchClaudeSync();
@@ -1442,6 +1484,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Throws if the model is not in the library (callers' catch blocks surface it).
    * Returns false when the WorkspaceEdit was rejected — callers must report that.
    */
+  /**
+   * Open a model's `logical-models` file in a text editor, with the cursor on
+   * its load error when it has one.
+   */
+  private async handleOpenModelFile(modelName: string, webview: vscode.Webview): Promise<void> {
+    const filePath = this.logicalModelService.findModelFile(modelName.trim());
+    if (!filePath) {
+      this.post(webview, { type: 'error', payload: { message: `Model "${modelName}" not found in logical-models/.` } });
+      return;
+    }
+    const error = this.logicalModelService.getModelFileError(modelName.trim());
+    await openModelFileAt(filePath, error?.line, error?.column);
+  }
+
+  /**
+   * Why a model cannot be edited: its file has a YAML error (the file exists
+   * but is broken), else the old "not found" wording.
+   */
+  private modelUnavailableMessage(modelName: string): string {
+    const error = this.logicalModelService.getModelFileError(modelName);
+    if (error) {
+      return error.kind === 'read'
+        ? `Can't edit "${modelName}": its file could not be read.`
+        : `Can't edit "${modelName}": its file has a YAML error${error.line !== undefined ? ` on line ${error.line}` : ''}.`;
+    }
+    return `Model "${modelName}" not found in logical-models/.`;
+  }
+
   private async applyModelEdit(
     document: vscode.TextDocument,
     webview: vscode.Webview,
@@ -1451,7 +1521,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<boolean> {
     const model = this.logicalModelService.getModel(modelName);
     if (!model) {
-      throw new Error(`Model "${modelName}" not found in logical-models/.`);
+      throw new Error(this.modelUnavailableMessage(modelName));
     }
 
     modelMutator(model);
@@ -1840,6 +1910,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           payload: displayDomain,
           welcomeDismissed,
           ...(autoLayout ? { autoLayout: true } : {}),
+          ...this.manifestHintFlag(),
         });
         if (options.persistPositions) {
           this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
@@ -1858,6 +1929,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /**
+   * `{ manifestMissing: true }` for a logical payload when dbt has not written
+   * a manifest yet and this workspace has not dismissed the hint (#113), else
+   * nothing. Call only after `loadManifest`, which is what sets `isMissing`,
+   * and only for logical payloads.
+   */
+  private manifestHintFlag(): { manifestMissing?: true } {
+    if (!this.manifestService.isMissing) return {};
+    // A folder that is not a dbt project (#111) will never have a manifest.
+    if (!hasDbtProjectFile(this.workspaceRoot)) return {};
+    if (this.context.workspaceState?.get<boolean>(MANIFEST_HINT_DISMISSED_KEY)) return {};
+    return { manifestMissing: true };
+  }
+
   /** Usage telemetry for a canvas's first load: only the stage, format and counts. */
   private recordCanvasOpen(document: vscode.TextDocument, stage: Stage, modelCount: number, hasCatalog: boolean): void {
     let format: 'v4' | 'v5' = 'v5';
@@ -1868,6 +1953,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     telemetry.canvasOpened(stage, format, modelCount);
     telemetry.manifest(this.manifestService.isMissing ? 'missing' : this.manifestService.isStale ? 'stale' : 'ok');
+    // #113: where a missing manifest is met (once per day).
+    if (this.manifestService.isMissing) {
+      telemetry.featureOnce(stage === 'logical' ? 'manifestMissingCanvas' : 'manifestMissingPhysical');
+    }
     telemetry.catalog(hasCatalog);
   }
 
@@ -2731,7 +2820,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
         const existingModel = this.logicalModelService.getModel(payload.oldName);
         if (!existingModel) {
-          webview.postMessage({ type: 'error', payload: { message: `Model "${payload.oldName}" not found in logical-models/.` } });
+          webview.postMessage({ type: 'error', payload: { message: this.modelUnavailableMessage(payload.oldName) } });
           return;
         }
         const renamedModel: import('../types/semantic').SemanticModel = { ...existingModel, name: trimmedNew };
@@ -3503,9 +3592,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       };
       const models = listDraftModels(source);
       if (models.length === 0) {
-        void vscode.window.showInformationMessage(
-          'No dbt models with columns were found. Describe your models in a schema .yml, or run dbt parse, then try again.',
-        );
+        void vscode.window.showInformationMessage(NO_DBT_MODELS_MESSAGE);
         return;
       }
       const excluded = new Set(inDomain.map(normaliseName));
@@ -3928,11 +4015,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           physicalDomain.layerConfig = layerConfig;
         }
         this.post(webview, { type: 'stageData', payload: physicalDomain, ...reply });
+        // #113: where a missing manifest is met (once per day).
+        if (this.manifestService.isMissing) telemetry.featureOnce('manifestMissingPhysical');
       } else {
         // Logical — extract from unified file
         const domain = this.domainService.getDomainStage(document.uri.fsPath);
         const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
-        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply });
+        this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag() });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

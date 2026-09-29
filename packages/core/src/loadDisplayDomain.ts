@@ -25,12 +25,13 @@
  */
 
 import type { DisplayDomain } from './types/display.js';
-import type { DomainFormat, NodePosition, SemanticModel } from './types/semantic.js';
+import type { DomainFormat, ModelLoadError, NodePosition, SemanticModel } from './types/semantic.js';
 import type { LayerConfig } from './types/layer.js';
 import {
   DomainFileError,
   DomainValidationError,
   buildUnifiedDomain,
+  classifyModelLoadError,
   parseDomainJson,
   resolveDomainLayer,
   toLogicalStage,
@@ -38,7 +39,7 @@ import {
   type LayerLookup,
 } from './domain.js';
 import { LAYERS_CONFIG_FILE, parseLayersText } from './layers.js';
-import { LOGICAL_MODELS_DIR, isSafeModelName, parseLogicalModelTextWithUsage } from './logicalModel.js';
+import { LOGICAL_MODELS_DIR, YamlCharLimitError, YamlNodeLimitError, isSafeModelName, parseLogicalModelTextWithUsage } from './logicalModel.js';
 import { computeMissingPositions, toDisplayDomain } from './displayDomain.js';
 import { checkLimit } from './limits.js';
 
@@ -362,6 +363,7 @@ function buildDisplayDomain(
       }
       return copyPlain(entry.model);
     },
+    getModelError: (name) => parsed.get(name)?.loadError ?? null,
     warn,
   });
 
@@ -426,6 +428,8 @@ interface ParsedModel {
   model: SemanticModel | null;
   /** How many listings of the model get a copy; the rest are placeholders. */
   copies: number;
+  /** Set when the file exists but fails to parse (never for a budget refusal). */
+  loadError?: ModelLoadError;
 }
 
 const NO_MODEL: ParsedModel = { model: null, copies: 0 };
@@ -452,6 +456,10 @@ function parseModel(
     return { model, copies: Math.min(fits(maxNodes, nodes), fits(maxChars, chars)) };
   } catch (err) {
     warn(`Failed to read model "${name}": ${err instanceof Error ? err.message : String(err)}`);
-    return NO_MODEL;
+    if (err instanceof YamlNodeLimitError || err instanceof YamlCharLimitError) {
+      return NO_MODEL;
+    }
+    const { kind, line } = classifyModelLoadError(err);
+    return { ...NO_MODEL, loadError: { kind, ...(line !== undefined ? { line } : {}) } };
   }
 }

@@ -14,6 +14,8 @@
  * together, and bump `HEARTBEAT_VERSION` when a field changes meaning.
  */
 
+import type { ModelLoadErrorKind } from '@erd-studio/core';
+
 export const HEARTBEAT_VERSION = 1;
 
 /** Features whose use is counted. The Worker drops any key not in this list. */
@@ -36,11 +38,34 @@ export const FEATURES = [
   'drawFromDbt',
   'addFromDbt',
   'emptyCanvas',
+  'dbtParse',
+  // Once per day at most (recordFeatureOnce): an ERD Studio AI harness file
+  // is installed in the open project. A presence flag, not a usage count.
+  'harnessPresent',
+  // #113 — where a missing manifest is met (once per day each, featureOnce).
+  'manifestMissingCanvas',
+  'manifestMissingPhysical',
+  'manifestMissingDraw',
+  'manifestMissingWelcome',
+  'manifestMissingRefresh',
+  // #113 — why it is missing (once per day each; booleans only, never a path).
+  'manifestNoTargetDir',
+  'manifestCustomTargetPath',
+  'manifestNoDbtFound',
+  // #113 — a manifest.json appeared after being missing: within 10 minutes of
+  // a Run dbt parse launch, or otherwise.
+  'manifestAfterParse',
+  'manifestAppeared',
+  // #113 — the Logical-stage missing-manifest hint was dismissed.
+  'manifestHintDismissed',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
 /** Failure classes that are counted. Anything else is `other`. */
 export const ERROR_CODES = [
+  // No longer recorded since 1.6.2 (#110): a missing manifest is the normal
+  // state of a fresh clone, already reported by the canvas-open `manifest`
+  // field. Kept for older clients and so the list order never shifts.
   'manifestMissing',
   'manifestMalformed',
   'manifestTimeout',
@@ -51,6 +76,14 @@ export const ERROR_CODES = [
   'editRejected',
   'migrationFailed',
   'other',
+  // Why a logical-models file failed (#110), recorded beside `modelFileParse`,
+  // which stays the total. One per ModelFileErrorKind, via modelFileErrorCode().
+  'modelFileRead',
+  'modelFileYamlIndent',
+  'modelFileYamlScalar',
+  'modelFileYamlStructure',
+  'modelFileYamlDuplicateKey',
+  'modelFileYamlOther',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
@@ -262,6 +295,25 @@ export function recordCatalog(state: DailyCounters, present: boolean): DailyCoun
 
 export function recordFeature(state: DailyCounters, feature: TelemetryFeature): DailyCounters {
   return { ...state, features: bump(state.features, feature) };
+}
+
+/** Count `feature` at most once for the day — a presence flag, not a usage count. */
+export function recordFeatureOnce(state: DailyCounters, feature: TelemetryFeature): DailyCounters {
+  return state.features[feature] ? state : recordFeature(state, feature);
+}
+
+const MODEL_FILE_ERROR_CODES: Record<ModelLoadErrorKind, TelemetryErrorCode> = {
+  read: 'modelFileRead',
+  yamlIndent: 'modelFileYamlIndent',
+  yamlScalar: 'modelFileYamlScalar',
+  yamlStructure: 'modelFileYamlStructure',
+  yamlDuplicateKey: 'modelFileYamlDuplicateKey',
+  yamlOther: 'modelFileYamlOther',
+};
+
+/** The error sub-code counted for a model-file failure of `kind`; recorded alongside `modelFileParse`. */
+export function modelFileErrorCode(kind: ModelLoadErrorKind): TelemetryErrorCode {
+  return MODEL_FILE_ERROR_CODES[kind] ?? 'modelFileYamlOther';
 }
 
 export function recordError(state: DailyCounters, code: TelemetryErrorCode): DailyCounters {

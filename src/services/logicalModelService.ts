@@ -16,7 +16,8 @@ import * as path from 'path';
 import { Document, parseDocument, isAlias, isMap, isPair, isScalar, isSeq } from 'yaml';
 import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
 
-import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, parseLogicalModelText } from '@erd-studio/core';
+import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
+import type { ModelLoadErrorKind } from '@erd-studio/core';
 import type { ColumnDef, SemanticModel } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
@@ -50,6 +51,36 @@ const STRINGIFY_OPTIONS = { lineWidth: 0 } as const;
 const MODEL_FOLDER_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
 /** One model file found in the library. */
+/**
+ * Why a model file that exists could not be read. A fixed set, derived from
+ * the `yaml` library's own error code (never the message text), so it is safe
+ * to count in usage telemetry and to branch on in the UI.
+ */
+export type ModelFileErrorKind = ModelLoadErrorKind;
+
+/**
+ * A model file that exists but cannot be read or parsed. `message` is the
+ * parser's own text and may quote the file — show it locally, never send it.
+ */
+export interface ModelFileError {
+  name: string;
+  filePath: string;
+  kind: ModelFileErrorKind;
+  /** 1-based, when the parser reported a position. */
+  line?: number;
+  column?: number;
+  /** The `yaml` library's error code, e.g. `BLOCK_AS_IMPLICIT_KEY`. */
+  code?: string;
+  message: string;
+}
+
+/** Describe a failure thrown while reading or parsing a model file. */
+export function describeModelFileError(name: string, filePath: string, err: unknown): ModelFileError {
+  const message = err instanceof Error ? err.message : String(err);
+  // The classification is core's, so the extension and loadDisplayDomain agree.
+  return { name, filePath, ...classifyModelLoadError(err), message };
+}
+
 export interface ModelFileEntry {
   /** Model name (the file stem). */
   readonly name: string;
@@ -89,12 +120,18 @@ export class LogicalModelService {
   private readonly cache = new Map<string, CachedModel>();
 
   /**
-   * Told when a model file exists but cannot be read or parsed, once per file
-   * until it reads cleanly again. The extension host counts these for usage
-   * telemetry; other callers (the MCP server, the CLI) leave it unset.
+   * Told when a model file exists but cannot be read or parsed — at most
+   * **once per file path per session** (#113), even if the file is fixed and
+   * breaks again (an AI assistant's edit loop does exactly that). The
+   * extension host counts these for usage telemetry and warns the user; other
+   * callers (the MCP server, the CLI) leave it unset and ask
+   * {@link getModelFileError}, which always reflects the live state.
    */
-  onParseFailure?: () => void;
-  private readonly failedPaths = new Set<string>();
+  onParseFailure?: (error: ModelFileError) => void;
+  /** The last failure per file path, until the file reads cleanly again. */
+  private readonly failedPaths = new Map<string, ModelFileError>();
+  /** Paths already reported to {@link onParseFailure}; never cleared in a session. */
+  private readonly reportedPaths = new Set<string>();
 
   constructor(
     workspaceRoot: string,
@@ -237,14 +274,34 @@ export class LogicalModelService {
       this.failedPaths.delete(filePath);
       return model;
     } catch (err) {
-      console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
-      // Once per broken file, not once per canvas refresh that re-reads it.
-      if (!this.failedPaths.has(filePath)) {
-        this.failedPaths.add(filePath);
-        this.onParseFailure?.();
+      const error = describeModelFileError(name, filePath, err);
+      // Once per broken file, not once per canvas refresh that re-reads it
+      // (nor for getModelFileError's own re-read).
+      const known = this.failedPaths.has(filePath);
+      this.failedPaths.set(filePath, error);
+      if (!known) {
+        console.error(`[LogicalModelService] Failed to read model "${name}":`, err);
+        if (!this.reportedPaths.has(filePath)) {
+          this.reportedPaths.add(filePath);
+          this.onParseFailure?.(error);
+        }
       }
       return null;
     }
+  }
+
+  /**
+   * Why `name`'s file could not be read, or null when it reads cleanly, is
+   * missing, or its name is unsafe. Reads the file (through the cache), so the
+   * answer is current — a file fixed since the last read reports null.
+   */
+  getModelFileError(name: string): ModelFileError | null {
+    const filePath = this.resolveModelPath(name);
+    if (filePath === null || !fs.existsSync(filePath)) {
+      return null;
+    }
+    this.getModel(name);
+    return this.failedPaths.get(filePath) ?? null;
   }
 
   /**

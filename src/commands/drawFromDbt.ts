@@ -41,10 +41,14 @@ export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 
 const TITLE = 'Draw from dbt';
 
-/** Shown when neither the schema yml nor the manifest yields a model with columns. */
+/**
+ * Shown when no model has columns to draw. `listDraftModels` takes a model's
+ * columns from its schema yml, else the manifest — which is a compiled copy
+ * of the same yml, so running dbt adds none. catalog.json is not read here.
+ */
 export const NO_DBT_MODELS_MESSAGE =
-  'ERD Studio found no dbt models with columns to draw. It reads the columns in your schema .yml files and in ' +
-  'dbt\'s manifest. Run "dbt parse" in this project to write the manifest, then try again.';
+  'No dbt models with columns found. Draw from dbt reads the columns listed in your schema .yml files — ' +
+  'add columns: to your models there, then try again.';
 
 export interface DrawFromDbtDeps {
   workspaceRoot: string;
@@ -78,6 +82,8 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
     { location: vscode.ProgressLocation.Notification, title: 'Reading your dbt project…' },
     () => deps.loadDbt(),
   );
+  // #113: no manifest (never compiled, or removed) — `loadDbt` passes undefined then.
+  if (!manifest) { telemetry.featureOnce('manifestMissingDraw'); }
 
   const layerIds = layerService.getValidLayerIds();
   const source = { ymlData, manifest, projectRoot: workspaceRoot, modelPaths: deps.modelPaths, layerIds };

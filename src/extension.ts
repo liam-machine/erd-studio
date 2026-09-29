@@ -23,7 +23,14 @@ import { hasErdStudioData, resolveDbtProject, samePath, type DbtProjectResolutio
 import { YmlParserService } from './services/ymlParserService';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
-import { readDbtProjectConfig } from './services/dbtProjectConfig';
+import { manifestDisplayPath, readDbtProjectConfig, type DbtProjectConfig } from './services/dbtProjectConfig';
+import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
+import {
+  manifestAppearanceFeature,
+  manifestMissingReasons,
+  type ManifestMissingReason,
+  type ManifestMissingReasonDeps,
+} from './services/manifestMissingReasons';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { describeOrganizePlan, planOrganizeByLayer, type DomainModelUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, planDuplicateFix, repointDomainModel, suggestDuplicateName, type DomainReference } from './services/duplicateModelResolver';
@@ -35,6 +42,8 @@ import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnaly
 import { ReportTrackingService } from './services/reportTrackingService';
 import { TelemetryService, telemetry } from './services/telemetryService';
 import type { TelemetryErrorCode, TelemetryFeature } from './services/telemetryPayload';
+import { modelFileErrorCode } from './services/telemetryPayload';
+import { notifyModelFileError } from './commands/openModelFile';
 import { MyReportsTreeProvider, type MyReportNode } from './providers/MyReportsTreeProvider';
 import type { FeedbackKind } from './types/feedback';
 import { CliLauncherService, type CliLauncherOptions } from './services/cliLauncherService';
@@ -274,11 +283,43 @@ async function selectDbtProject(
   await vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
 
-const MANIFEST_FAILURE_CODES: Record<ManifestLoadFailure, TelemetryErrorCode> = {
-  missing: 'manifestMissing',
+/**
+ * Manifest failures counted as errors. `missing` is deliberately absent
+ * (#110): no manifest.json is the normal state of a fresh clone before
+ * `dbt parse`, and canvas opens already report it in the `manifest` field.
+ */
+export const MANIFEST_FAILURE_CODES: Partial<Record<ManifestLoadFailure, TelemetryErrorCode>> = {
   malformed: 'manifestMalformed',
   timeout: 'manifestTimeout',
 };
+
+/** The telemetry error a manifest load failure records, or null when it is not an error. */
+export function manifestFailureCode(failure: ManifestLoadFailure): TelemetryErrorCode | null {
+  return MANIFEST_FAILURE_CODES[failure] ?? null;
+}
+
+/** One once-per-day feature per reason a manifest is missing (#113). Booleans only, never a path. */
+export const MANIFEST_MISSING_REASON_FEATURES: Record<ManifestMissingReason, TelemetryFeature> = {
+  noTargetDir: 'manifestNoTargetDir',
+  customTargetPath: 'manifestCustomTargetPath',
+  noDbtFound: 'manifestNoDbtFound',
+};
+
+/**
+ * Record why the manifest is missing (#113) — called from ManifestService's
+ * `missing` load failure. Stat-only (never spawns dbt) and never throws.
+ */
+export function recordManifestMissingReasons(
+  root: string,
+  dbtConfig: DbtProjectConfig,
+  deps?: ManifestMissingReasonDeps,
+): void {
+  try {
+    for (const reason of manifestMissingReasons(root, dbtConfig, deps)) {
+      telemetry.featureOnce(MANIFEST_MISSING_REASON_FEATURES[reason]);
+    }
+  } catch { /* telemetry must never break a manifest load */ }
+}
 
 /** The generic Agent Skills target has no feature key of its own and is not counted. */
 const HARNESS_INSTALL_FEATURES: Partial<Record<HarnessTarget['id'], TelemetryFeature>> = {
@@ -297,7 +338,7 @@ function recordHarnessInstalls(results: HarnessInstallResult[]): void {
 
 const NO_PROJECT_MESSAGE =
   'ERD Studio: No dbt project found. Open a folder containing dbt_project.yml, ' +
-  'or set erdStudio.projectPath to the dbt project folder.';
+  'or set erdStudio.projectPath to the folder that holds your diagrams (it need not be a dbt project).';
 
 /**
  * Commands added after the `dbtSemantic.*` → `erdStudio.*` rename. They never
@@ -678,7 +719,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // still reported.
     if (projectResolution.invalidSetting !== undefined) {
       void vscode.window.showWarningMessage(
-        `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" does not contain dbt_project.yml.`,
+        `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" is not a folder.`,
         'Open Settings',
       ).then(choice => {
         if (choice === 'Open Settings') {
@@ -703,7 +744,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Visible, not just a console line: a projectPath copied from someone
     // else's machine otherwise looks like the setting being ignored.
     void vscode.window.showWarningMessage(
-      `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" does not contain dbt_project.yml, ` +
+      `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" is not a folder, ` +
         `so ERD Studio opened ${path.basename(workspaceRoot)} instead.`,
       'Open Settings',
     ).then(choice => {
@@ -738,9 +779,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const layerService = new LayerService(workspaceRoot, semanticDir);
   const domainService = new DomainService(layerService);
   const logicalModelService = new LogicalModelService(workspaceRoot, semanticDir);
-  logicalModelService.onParseFailure = () => telemetry.error('modelFileParse');
+  logicalModelService.onParseFailure = (error) => {
+    // Fixed keys only — `error.message` may quote the file and never leaves the machine.
+    telemetry.error('modelFileParse');
+    telemetry.error(modelFileErrorCode(error.kind));
+    // Once per broken file per session (the service never re-reports a path, #113).
+    notifyModelFileError(error);
+  };
   domainService.setLogicalModelService(logicalModelService);
-  const manifestService = new ManifestService({ dbtConfig, onLoadFailure: f => telemetry.error(MANIFEST_FAILURE_CODES[f]) });
+  // Set once a manifest's (re)appearance has been counted, cleared when it is
+  // seen missing again, so a manifest with no canvas to reload it (isMissing
+  // then stays true) is not counted again on every later change (#113).
+  let manifestAppearanceCounted = false;
+  const manifestService = new ManifestService({ dbtConfig, onLoadFailure: f => {
+    const code = manifestFailureCode(f);
+    if (code) { telemetry.error(code); }
+    if (f === 'missing') {
+      manifestAppearanceCounted = false;
+      recordManifestMissingReasons(workspaceRoot, dbtConfig);
+    }
+  } });
   const ymlParserService = new YmlParserService({ dbtConfig });
   // target/catalog.json — present only after `dbt docs generate`, and the only
   // source of the types the warehouse actually has. Shares the one dbtConfig
@@ -956,7 +1014,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const manifestChangedSubscription = fileWatcherService.onManifestChanged(
     async () => {
       const gen = ++manifestChangeGen;
+      // isMissing reflects the last load, before this change (#113).
+      const wasMissing = manifestService.isMissing;
       manifestService.invalidate();
+      if (!manifestAppearanceCounted) {
+        let existsNow = false;
+        try { existsNow = fs.existsSync(manifestService.getManifestPath(workspaceRoot)); } catch { /* treat as absent */ }
+        const appeared = manifestAppearanceFeature(wasMissing, existsNow, getLastDbtParseLaunchAt(), Date.now());
+        if (appeared) {
+          manifestAppearanceCounted = true;
+          telemetry.feature(appeared);
+        }
+      }
       await editorProvider.refreshAllOpenDomains();
 
       // Superseded by a newer file-change event during the await
@@ -965,10 +1034,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (manifestService.isMissing) {
         // Definitive (dbt clean / target removed) — no retry, no stale data.
         void vscode.window.showWarningMessage(
-          `dbt manifest removed (${dbtConfig.targetPath}/manifest.json). ` +
+          `dbt manifest removed (${manifestDisplayPath(workspaceRoot, dbtConfig)}). ` +
             'Models and relationships still come from your schema .yml files. ' +
-            'Run dbt compile for declared types, or dbt docs generate for warehouse types.',
-        );
+            'Run dbt parse to write it again (needs a working dbt profile), or dbt docs generate for warehouse types.',
+          RUN_DBT_PARSE_ACTION,
+        ).then(pick => { if (pick === RUN_DBT_PARSE_ACTION) { void runDbtParse(workspaceRoot); } });
         return;
       }
 
@@ -1703,11 +1773,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           await ymlParserService.loadYmlData(workspaceRoot);
           await editorProvider.refreshAllOpenDomains();
           if (manifestService.isMissing) {
+            telemetry.featureOnce('manifestMissingRefresh');
             void vscode.window.showWarningMessage(
-              `manifest.json not found at ${dbtConfig.targetPath}/manifest.json. ` +
+              `No dbt manifest yet (${manifestDisplayPath(workspaceRoot, dbtConfig)}) — dbt hasn't been run in this project. ` +
                 'Models and relationships still come from your schema .yml files. ' +
-                'Run dbt compile for declared types, or dbt docs generate for warehouse types.',
-            );
+                'Run dbt parse to read columns and tests (needs a working dbt profile), or dbt docs generate for warehouse types.',
+              RUN_DBT_PARSE_ACTION,
+            ).then(pick => { if (pick === RUN_DBT_PARSE_ACTION) { void runDbtParse(workspaceRoot); } });
           } else if (manifestService.isStale) {
             void vscode.window.showWarningMessage(
               'dbt manifest could not be parsed (it may be mid-write) — graphs show the last good data. Try again shortly.',
@@ -2303,6 +2375,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
       const loaded = await manifestService.loadManifest(workspaceRoot);
       const manifest = manifestService.isMissing ? undefined : loaded;
+      if (manifestService.isMissing) { telemetry.featureOnce('manifestMissingWelcome'); }
       return computeProjectSummary({
         models: listDraftModels({ ymlData, manifest, projectRoot: workspaceRoot, modelPaths: dbtConfig.modelPaths }),
         manifest,
@@ -2391,6 +2464,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const existing = harnessService.detectExisting(workspaceRoot);
     const installedCount = [...existing.values()].filter(Boolean).length;
     const staleTargets = harnessService.detectStale(workspaceRoot);
+    // Usage telemetry: a managed (version-marked) harness file is present.
+    // Only the primary files detectExisting already found are read; a
+    // hand-written file with no marker does not count.
+    try {
+      const managed = HARNESS_TARGETS.some(target => existing.get(target.id) &&
+        extractHarnessVersion(fs.readFileSync(path.join(workspaceRoot, target.relativePath), 'utf-8')) !== null);
+      if (managed) { telemetry.featureOnce('harnessPresent'); }
+    } catch { /* telemetry must never break activation */ }
 
     if (staleTargets.length > 0) {
       harnessPromptShown = true;

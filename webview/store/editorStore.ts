@@ -142,6 +142,15 @@ export interface EditorState extends CanvasState {
    * compiled after a reload, the notice should come back.
    */
   physicalSourceNoticeDismissed: boolean;
+  /**
+   * The last logical payload carried `manifestMissing` (#113): dbt has not
+   * written a manifest.json and the workspace has not dismissed the hint.
+   * Follows every `domainLoaded` / `stageData` — deliberately NOT touched by
+   * `setDomain`, which also runs locally after a drag.
+   */
+  manifestMissing: boolean;
+  /** The user closed the "Run dbt parse" hint; the host persists it too. */
+  manifestHintDismissed: boolean;
 }
 
 export interface EditorActions extends CanvasActions {
@@ -160,6 +169,10 @@ export interface EditorActions extends CanvasActions {
   setAddExistingModelDialogOpen: (open: boolean) => void;
   /** Hide the physical-source notice for the rest of this session. */
   dismissPhysicalSourceNotice: () => void;
+  /** Store the `manifestMissing` flag of the latest host payload. */
+  setManifestMissing: (missing: boolean) => void;
+  /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
+  dismissManifestHint: () => void;
   setError: (error: string | null, kind?: ErrorMessage['payload']['kind']) => void;
   setTemplates: (templates: ModelTemplate[]) => void;
   setManifestModels: (models: ManifestModelPreview[]) => void;
@@ -271,6 +284,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   canvasMode: 'pan',
   toastMessage: null,
   physicalSourceNoticeDismissed: false,
+  manifestMissing: false,
+  manifestHintDismissed: false,
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -284,6 +299,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   clearFkDialogEditData: () => set({ fkDialogEditData: null }),
   setAddExistingModelDialogOpen: (open) => set({ addExistingModelDialogOpen: open }),
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
+  setManifestMissing: (missing) => set({ manifestMissing: missing }),
+  dismissManifestHint: () => set({ manifestHintDismissed: true }),
   setError: (error, kind) => set({ error, errorKind: error === null ? null : (kind ?? null) }),
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),

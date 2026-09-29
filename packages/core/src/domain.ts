@@ -12,11 +12,14 @@ import type {
   Cardinality,
   DomainFormat,
   Layer,
+  ModelLoadError,
+  ModelLoadErrorKind,
   NodePosition,
   Relationship,
   SemanticDomain,
   SemanticModel,
   StageData,
+  UnreadableModelPlaceholder,
   UnifiedDomain,
   ViewConfig,
   Annotation,
@@ -195,6 +198,13 @@ export interface BuildUnifiedDomainContext {
    * every reference becomes a placeholder without a warning.
    */
   getModel?: (name: string) => SemanticModel | null;
+  /**
+   * Asked only when `getModel` returned null: why that model's file, if it
+   * exists, could not be read. A non-null answer is attached to the
+   * placeholder as `loadError` and names the error in the warning instead of
+   * reporting the model as missing.
+   */
+  getModelError?: (name: string) => ModelLoadError | null;
   /** Receives repair warnings (dropped entries, defaulted values). Defaults to console.warn. */
   warn?: (message: string) => void;
 }
@@ -235,7 +245,7 @@ export function buildUnifiedDomain(
     layer,
     description: typeof obj.description === 'string' ? obj.description : '',
     ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
-    logical: parseStageData(obj.logical, format, filePath, ctx.getModel, warn) ?? { ...emptyStage },
+    logical: parseStageData(obj.logical, format, filePath, ctx.getModel, ctx.getModelError, warn) ?? { ...emptyStage },
     ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
     viewConfig: globalViewConfig,
   };
@@ -275,6 +285,7 @@ function parseStageData(
   format: DomainFormat,
   filePath: string,
   getModel: ((name: string) => SemanticModel | null) | undefined,
+  getModelError: ((name: string) => ModelLoadError | null) | undefined,
   warn: (message: string) => void,
 ): StageData | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -297,8 +308,15 @@ function parseStageData(
           models.push(model);
         } else {
           // Broken reference — create a placeholder so the UI can show an error
-          warn(`Model "${name}" not found in logical-models/`);
-          models.push({ name, columns: [] });
+          const loadError = getModelError?.(name) ?? null;
+          if (loadError) {
+            warn(`Model "${name}": ${describeModelLoadError(loadError)}`);
+            const placeholder: UnreadableModelPlaceholder = { name, columns: [], loadError: { ...loadError } };
+            models.push(placeholder);
+          } else {
+            warn(`Model "${name}" not found in logical-models/`);
+            models.push({ name, columns: [] });
+          }
         }
       }
     } else {
@@ -320,6 +338,56 @@ function parseStageData(
   }
 
   return { models, relationships };
+}
+
+/** The YAML parser's error codes, grouped into the kinds the UI and telemetry use. */
+const YAML_ERROR_KINDS: Readonly<Record<string, ModelLoadErrorKind>> = {
+  TAB_AS_INDENT: 'yamlIndent',
+  BAD_INDENT: 'yamlIndent',
+  BAD_SCALAR_START: 'yamlScalar',
+  BLOCK_AS_IMPLICIT_KEY: 'yamlScalar',
+  UNEXPECTED_TOKEN: 'yamlScalar',
+  MISSING_CHAR: 'yamlScalar',
+  BAD_ALIAS: 'yamlScalar',
+  BLOCK_IN_FLOW: 'yamlScalar',
+  MULTIPLE_DOCS: 'yamlStructure',
+  MULTILINE_IMPLICIT_KEY: 'yamlStructure',
+  DUPLICATE_KEY: 'yamlDuplicateKey',
+};
+
+/**
+ * Classify an error thrown while reading or parsing a model file, from its
+ * `code` and `linePos` only (never the message, which may quote the file). A
+ * Node fs code (`ENOENT`, `EACCES`, …) is a `read`; a YAML code maps through
+ * the table above; anything else is `yamlOther`.
+ */
+export function classifyModelLoadError(err: unknown): ModelLoadError & { column?: number; code?: string } {
+  const e = err as { code?: unknown; linePos?: Array<{ line: number; col: number }> } | null;
+  const code = e && typeof e.code === 'string' ? e.code : undefined;
+  const pos = e && Array.isArray(e.linePos) ? e.linePos[0] : undefined;
+  const isFsError = code !== undefined && /^E[A-Z]+$/.test(code);
+  const kind: ModelLoadErrorKind = isFsError
+    ? 'read'
+    : (code !== undefined ? (YAML_ERROR_KINDS[code] ?? 'yamlOther') : 'yamlOther');
+  return {
+    kind,
+    ...(pos ? { line: pos.line, column: pos.col } : {}),
+    ...(code !== undefined && !isFsError ? { code } : {}),
+  };
+}
+
+/**
+ * One plain phrase for a model file that exists but cannot be read, e.g.
+ * `logical-models file has a YAML error on line 4`. Built from the kind and
+ * line only, so it never quotes the file.
+ */
+export function describeModelLoadError(error: ModelLoadError): string {
+  if (error.kind === 'read') {
+    return 'logical-models file could not be read';
+  }
+  return error.line !== undefined
+    ? `logical-models file has a YAML error on line ${error.line}`
+    : 'logical-models file has a YAML error';
 }
 
 /**

@@ -18,6 +18,8 @@ import {
   validatePositions,
   findDuplicateNames,
   validateAddModelsFromDbtPayload,
+  validateOpenModelFilePayload,
+  validateDismissManifestHintPayload,
 } from '../../src/providers/payloadValidation';
 import { MODEL_NAME_PATTERN } from '../../src/types/naming';
 
@@ -258,5 +260,36 @@ describe('validateAddModelsFromDbtPayload', () => {
 
   it.each([null, 'x', 3, [], { modelNames: ['a'] }])('rejects %j', (value) => {
     expect(validateAddModelsFromDbtPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
+describe('validateDismissManifestHintPayload (#113)', () => {
+  it('accepts no payload or an empty object', () => {
+    expect(validateDismissManifestHintPayload(undefined)).toBeNull();
+    expect(validateDismissManifestHintPayload({})).toBeNull();
+  });
+
+  it.each([null, 'x', 3, [], { forever: true }])('rejects %j', (value) => {
+    expect(validateDismissManifestHintPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
+describe('validateOpenModelFilePayload', () => {
+  it('accepts a path-safe model name, including one dbt allows but the authoring rule does not', () => {
+    expect(validateOpenModelFilePayload({ modelName: 'dim_customer' })).toBeNull();
+    expect(validateOpenModelFilePayload({ modelName: 'Stg_Orders' })).toBeNull();
+  });
+
+  it.each([
+    [undefined, /needs a model name/],
+    [null, /needs a model name/],
+    ['dim_customer', /needs a model name/],
+    [[], /needs a model name/],
+    [{}, /required/],
+    [{ modelName: '' }, /empty/],
+    [{ modelName: '../etc/passwd' }, /path separators/],
+    [{ modelName: 'C:evil' }, /file system path/],
+  ])('rejects %j', (value, message) => {
+    expect(validateOpenModelFilePayload(value)).toMatch(message);
   });
 });

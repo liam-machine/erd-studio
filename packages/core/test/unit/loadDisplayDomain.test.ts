@@ -430,6 +430,9 @@ describe('loadDisplayDomain', () => {
     ).result;
     expect(Date.now() - started).toBeLessThan(2_000);
     expect(domain.models.map((m) => [m.name, m.columns.length])).toEqual([['bomb', 0], ['broken', 0], ['fine', 1]]);
+    // A budget refusal is not a broken file; a YAML error is, with its line.
+    expect(domain.models.map((m) => m.loadError?.kind)).toEqual([undefined, 'yamlIndent', undefined]);
+    expect(domain.models[1].loadError?.line).toBeTypeOf('number');
   });
 
   it('shows a model whose aliases expand past maxYamlChars as a placeholder, keeping the result small', async () => {

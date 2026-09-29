@@ -15,7 +15,12 @@ import * as path from 'path';
 import { parse as parseYaml } from 'yaml';
 
 export interface DbtProjectConfig {
-  /** Directory dbt writes artifacts to (relative to the project root). Default `target`. */
+  /**
+   * Directory dbt writes artifacts to — relative to the project root, or
+   * absolute when `DBT_TARGET_PATH` / `target-path` / its `env_var()` names an
+   * absolute folder. Default `target`. Join it with `path.resolve`, never
+   * `path.join`, so an absolute value is honoured.
+   */
   targetPath: string;
   /** Directories dbt reads models (and their schema .yml files) from. Default `['models']`. */
   modelPaths: string[];
@@ -60,6 +65,59 @@ function normaliseRelativePath(value: unknown): string | null {
   return p;
 }
 
+/** Environment `readDbtProjectConfig` resolves `DBT_TARGET_PATH` and `env_var()` from. */
+export interface DbtProjectConfigOptions {
+  env?: NodeJS.ProcessEnv;
+}
+
+/** `{{ env_var('NAME') }}` / `{{ env_var("NAME", "default") }}` — the whole value, nothing around it. */
+const ENV_VAR_JINJA = /^\{\{\s*env_var\(\s*(['"])([^'"]+)\1\s*(?:,\s*(['"])([^'"]*)\3\s*)?\)\s*\}\}$/;
+
+/**
+ * A target folder as dbt would use it: trimmed, forward slashes, no leading
+ * `./` or trailing slash. An absolute value stays absolute; null for an empty
+ * value or a relative one that climbs out of the project with `..`.
+ */
+function normaliseTargetPath(value: string): string | null {
+  let p = value.trim().replace(/\\/g, '/');
+  if (!p) { return null; }
+  if (path.isAbsolute(p) || path.win32.isAbsolute(p)) {
+    return p.length > 1 ? p.replace(/\/+$/, '') || '/' : p;
+  }
+  return normaliseRelativePath(p);
+}
+
+/**
+ * Resolve where dbt writes its artifacts, in dbt's own precedence:
+ * `DBT_TARGET_PATH` (absolute, or relative to the project root) beats
+ * `target-path`; an absolute `target-path` is used as it is; a
+ * `{{ env_var('X') }}` / `{{ env_var('X', 'default') }}` value is the
+ * variable's value when set, else the default; any other Jinja (`{{`) cannot
+ * be evaluated here and falls back to `target`, as does anything invalid.
+ */
+export function resolveTargetPath(value: unknown, env: NodeJS.ProcessEnv = process.env): string {
+  const fromEnv = env.DBT_TARGET_PATH;
+  if (typeof fromEnv === 'string' && fromEnv.trim()) {
+    const p = normaliseTargetPath(fromEnv);
+    if (p) { return p; }
+  }
+  if (typeof value !== 'string') { return DEFAULT_TARGET_PATH; }
+  let raw = value.trim();
+  const jinja = ENV_VAR_JINJA.exec(raw);
+  if (jinja) {
+    const set = env[jinja[2]];
+    if (typeof set === 'string' && set.trim()) {
+      raw = set;
+    } else if (jinja[4] !== undefined) {
+      raw = jinja[4];
+    } else {
+      return DEFAULT_TARGET_PATH;
+    }
+  }
+  if (raw.includes('{{')) { return DEFAULT_TARGET_PATH; }
+  return normaliseTargetPath(raw) ?? DEFAULT_TARGET_PATH;
+}
+
 function readPathList(value: unknown): string[] {
   const raw = Array.isArray(value) ? value : [value];
   const out: string[] = [];
@@ -77,8 +135,11 @@ function readPathList(value: unknown): string[] {
  * or missing/invalid keys fall back to dbt's defaults so callers never
  * need to handle an error.
  */
-export function readDbtProjectConfig(projectRoot: string): DbtProjectConfig {
+export function readDbtProjectConfig(projectRoot: string, options: DbtProjectConfigOptions = {}): DbtProjectConfig {
+  const env = options.env ?? process.env;
   const config = defaultDbtProjectConfig();
+  // DBT_TARGET_PATH applies even when dbt_project.yml is missing or broken.
+  config.targetPath = resolveTargetPath(undefined, env);
 
   let raw: string;
   try {
@@ -98,10 +159,7 @@ export function readDbtProjectConfig(projectRoot: string): DbtProjectConfig {
   }
   const map = doc as Record<string, unknown>;
 
-  const targetPath = normaliseRelativePath(map['target-path']);
-  if (targetPath) {
-    config.targetPath = targetPath;
-  }
+  config.targetPath = resolveTargetPath(map['target-path'], env);
 
   // `source-paths` is the pre-dbt-1.0 name for `model-paths`.
   const modelPaths = readPathList(map['model-paths'] ?? map['source-paths']);
@@ -125,7 +183,7 @@ export function readDbtProjectConfig(projectRoot: string): DbtProjectConfig {
 
 /** Absolute path of `manifest.json` for the given project and config. */
 export function resolveManifestPath(projectRoot: string, config: DbtProjectConfig): string {
-  return path.join(projectRoot, config.targetPath, 'manifest.json');
+  return path.join(resolveTargetDir(projectRoot, config), 'manifest.json');
 }
 
 /**
@@ -135,7 +193,23 @@ export function resolveManifestPath(projectRoot: string, config: DbtProjectConfi
  * `target-path`) stay in one place.
  */
 export function resolveCatalogPath(projectRoot: string, config: DbtProjectConfig): string {
-  return path.join(projectRoot, config.targetPath, 'catalog.json');
+  return path.join(resolveTargetDir(projectRoot, config), 'catalog.json');
+}
+
+/** Absolute artifact directory — `path.resolve`, so an absolute `targetPath` is kept. */
+export function resolveTargetDir(projectRoot: string, config: DbtProjectConfig): string {
+  return path.resolve(projectRoot, config.targetPath);
+}
+
+/**
+ * `{target}/manifest.json` as a user should read it: project-relative with
+ * forward slashes when the target folder is inside the project, else just
+ * `manifest.json` — never an absolute path in a message.
+ */
+export function manifestDisplayPath(projectRoot: string, config: DbtProjectConfig): string {
+  const rel = path.relative(projectRoot, resolveManifestPath(projectRoot, config));
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) { return 'manifest.json'; }
+  return rel.replace(/\\/g, '/');
 }
 
 /**
