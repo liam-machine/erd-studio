@@ -1,6 +1,6 @@
 {
   "name": "@erd-studio/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ERD Studio domain model: types and the pure raw-files -> DisplayDomain pipeline.",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {

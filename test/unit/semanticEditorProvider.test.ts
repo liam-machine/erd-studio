@@ -726,6 +726,49 @@ describe('launchClaudeSync (H36)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// #110 — Run dbt parse from the physical stage
+// ---------------------------------------------------------------------------
+
+describe('runDbtParse (#110)', () => {
+  const savedEnv = { PATH: process.env.PATH, VIRTUAL_ENV: process.env.VIRTUAL_ENV, CONDA_PREFIX: process.env.CONDA_PREFIX };
+  let binDir: string;
+
+  beforeEach(() => {
+    // A fake `dbt` alone on PATH, so the test never depends on this machine.
+    binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-dbt-bin-'));
+    const dbt = path.join(binDir, process.platform === 'win32' ? 'dbt.exe' : 'dbt');
+    fs.writeFileSync(dbt, '#!/bin/sh\n');
+    fs.chmodSync(dbt, 0o755);
+    process.env.PATH = binDir;
+    delete process.env.VIRTUAL_ENV;
+    delete process.env.CONDA_PREFIX;
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) { delete process.env[k]; } else { process.env[k] = v; }
+    }
+    fs.rmSync(binDir, { recursive: true, force: true });
+  });
+
+  it('is allowed on the physical stage and opens a terminal running dbt parse in the project root', async () => {
+    const { panel } = await openShowcase(root);
+    panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await waitForType(panel, 'stageData');
+    const feature = vi.spyOn(telemetry, 'feature');
+
+    panel._simulateMessage({ type: 'runDbtParse' });
+
+    await vi.waitFor(() => expect(vscode.window.terminals).toHaveLength(1));
+    const terminal = vscode.window.terminals[0];
+    expect(terminal._options).toMatchObject({ name: 'dbt parse', cwd: root });
+    expect(terminal._sentText).toEqual(['dbt parse']);
+    expect(feature).toHaveBeenCalledWith('dbtParse');
+    expect(lastError(panel)).not.toBe(PHYSICAL_READ_ONLY_MESSAGE);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // H21 — message boundary: unknown types are logged, handler failures reported
 // ---------------------------------------------------------------------------
 

@@ -134,31 +134,35 @@ Model definitions live in `.erd-studio/logical-models/{model_name}.yml` or `.erd
 ```yaml
 name: dim_customer
 schema: silver
-description: Customer master data
-grain: One row per customer
+description: "Customer master data. Status: one of active, closed"
+grain: "One row per customer"
 modelRole: conformed-dim
 rationale:
-  purpose: Customer master data for cross-domain joins
-  roleChoice: Conformed dimension shared across domains
+  purpose: "Customer master data for cross-domain joins"
+  roleChoice: "Conformed dimension shared across domains"
 meta:
   owner: crm-team
   source_system: salesforce
 columns:
   - name: customer_id
-    dataType: INT
-    description: Surrogate key
+    dataType: "INT"
+    description: "Surrogate key"
     isPrimaryKey: true
     scdType: 0
   - name: email
-    dataType: VARCHAR
-    description: Email address
+    dataType: "VARCHAR"
+    description: "Email address"
     isNaturalKey: true
     scdType: 1
   - name: full_name
-    dataType: VARCHAR
-    description: Customer display name
+    dataType: "VARCHAR"
+    description: |
+      Customer display name.
+      Built from first_name and last_name.
     scdType: 2
 ```
+
+**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes (escape an inner `"` as `\"`), or use a `|` block for multi-line text. Always quote a value that contains `: ` or ` #`, or starts with any of `` ` @ * & ! % [ { - | > ' " ``. Indent with spaces, never tabs. One YAML document per file: no `---` separators, no markdown code fences, no `{{ doc() }}` — paste the text itself. `erd-studio doctor` and `erd-studio diff` report a file that does not parse as `fix-model-yaml` with its line — fix that before anything else.
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -211,8 +215,8 @@ meta:
     refreshed: daily
 columns:
   - name: email
-    dataType: VARCHAR
-    description: Email address
+    dataType: "VARCHAR"
+    description: "Email address"
     meta:
       pii: true
       classification: confidential
@@ -394,4 +398,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 23 -->
+<!-- erd-studio-harness: 24 -->

@@ -535,6 +535,19 @@ export function validateAddModelsFromDbtPayload(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Validate an `openModelFile` payload: `{ modelName }`. The name is held to
+ * the path-safety rule rather than the authoring pattern, because a model
+ * added from dbt may carry a name dbt allows (uppercase, digit-leading) and
+ * its broken file must still be openable.
+ */
+export function validateOpenModelFilePayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Open model file needs a model name.';
+  }
+  return validateModelNameSafety((value as { modelName?: unknown }).modelName);
+}
+
 // ---------------------------------------------------------------------------
 // Numbers / positions
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 {
   "name": "@erd-studio/renderer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ERD Studio's React Flow canvas: the entity-relationship diagram renderer shared by the VS Code extension, with a read-only viewer mode.",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -46,7 +46,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@erd-studio/core": "0.1.0",
+    "@erd-studio/core": "0.1.1",
     "zustand": "^5.0.0"
   },
   "peerDependencies": {

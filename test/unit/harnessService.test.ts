@@ -16,7 +16,7 @@ import {
   findCodexRegion,
   mergeCodexContent,
 } from '../../src/services/harnessService';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, parseDocument } from 'yaml';
 import {
   AGENT_SKILL_FRONTMATTER_KEYS,
   AGENTS_SETUP_SKILL_DIR,
@@ -778,8 +778,30 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 23 (the team\'s metadata list in modelling-approach.md)', () => {
-      expect(HARNESS_VERSION).toBe('23');
+    it('is 24 (the YAML quoting rule for model files)', () => {
+      expect(HARNESS_VERSION).toBe('24');
+    });
+
+    it('states the YAML quoting rule, and every model example in the schema guide parses', () => {
+      service.install(tmpDir, CLAUDE, true);
+      const skill = read(tmpDir, '.claude/skills/erd-studio/SKILL.md');
+      expect(skill).toContain('Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes');
+      expect(skill).toContain('`` ` @ * & ! % [ { - | > \' " ``');
+      expect(skill).toContain('Indent with spaces, never tabs.');
+      expect(skill).toContain('no `---` separators, no markdown code fences, no `{{ doc() }}`');
+      expect(skill).toContain('fix-model-yaml');
+
+      const blocks = [...skill.matchAll(/```yaml\n([\s\S]*?)```/g)].map((m) => m[1]);
+      const models = blocks.filter((b) => /^name: /m.test(b) || /^columns:/m.test(b) || /^meta:/m.test(b));
+      expect(models.length).toBeGreaterThanOrEqual(2);
+      for (const block of blocks) {
+        const doc = parseDocument(block);
+        expect(doc.errors.map((e) => e.code), block).toEqual([]);
+      }
+      // The main example quotes its text and keeps a value that would break unquoted.
+      const main = parseYaml(models[0]) as { description: string; columns: Array<{ dataType: unknown }> };
+      expect(main.description).toContain('Status: ');
+      expect(main.columns.every((c) => typeof c.dataType === 'string')).toBe(true);
     });
 
     it('tells every assistant to follow the team\'s metadata list, copying dbt keys and never guessing', () => {

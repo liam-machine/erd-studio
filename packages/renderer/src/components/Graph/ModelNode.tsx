@@ -17,7 +17,7 @@
 import { memo, useCallback, useMemo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelFlowNode, ModelNodeData, ColumnDisplay } from '../../types/graph';
-import type { Stage } from '@erd-studio/core';
+import type { ModelLoadError, Stage } from '@erd-studio/core';
 import type { ColumnDiscrepancy } from '@erd-studio/core';
 import type { PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
 import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
@@ -540,8 +540,18 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
 // ModelNode Component
 // ---------------------------------------------------------------------------
 
+/** The node's one line for a model file that exists but cannot be read. */
+function describeLoadError(error: ModelLoadError): string {
+  if (error.kind === 'read') {
+    return "ERD Studio can't read this file.";
+  }
+  return error.line !== undefined
+    ? `YAML error on line ${error.line} — ERD Studio can't read this file.`
+    : "YAML error — ERD Studio can't read this file.";
+}
+
 function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
-  const { modelName, label, stage, layer, layerConfig, schema, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, label, stage, layer, layerConfig, schema, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   const send = useSend();
   const viewer = useIsViewer();
@@ -755,9 +765,25 @@ function ModelNodeComponent({ data, selected }: NodeProps<ModelFlowNode>) {
           </>
         )}
 
-        {columns.length === 0 && !missingColumns.length && (
+        {columns.length === 0 && !missingColumns.length && (loadError ? (
+          <div className="model-node__load-error" role="alert">
+            <span className="model-node__load-error-text">{describeLoadError(loadError)}</span>
+            {!viewer && (
+              <button
+                type="button"
+                className="model-node__load-error-open nodrag"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  send({ type: 'openModelFile', payload: { modelName } });
+                }}
+              >
+                Open file
+              </button>
+            )}
+          </div>
+        ) : (
           <div className="model-node__empty">No columns</div>
-        )}
+        ))}
       </div>
 
       {/* Footer */}

@@ -26,6 +26,7 @@ import {
   extVersion,
   heartbeatDue,
   modelCountBucket,
+  modelFileErrorCode,
   nextDay,
   osBucket,
   recordActivation,
@@ -33,6 +34,7 @@ import {
   recordCatalog,
   recordError,
   recordFeature,
+  recordFeatureOnce,
   recordManifest,
   recordStage,
   tenureBucket,
@@ -300,5 +302,61 @@ describe('allowlists agree with the Worker', () => {
   it('telemetry.json documents every feature key', () => {
     const doc = fs.readFileSync(path.join(__dirname, '../../telemetry.json'), 'utf8');
     for (const f of FEATURES) expect(doc).toContain(f);
+  });
+
+  it('telemetry.json documents every error key', () => {
+    const doc = fs.readFileSync(path.join(__dirname, '../../telemetry.json'), 'utf8');
+    for (const e of ERROR_CODES) expect(doc).toContain(e);
+  });
+});
+
+describe('model file failure sub-codes (#110)', () => {
+  it('maps every ModelFileErrorKind to its own listed error code', () => {
+    const kinds = ['read', 'yamlIndent', 'yamlScalar', 'yamlStructure', 'yamlDuplicateKey', 'yamlOther'] as const;
+    const codes = kinds.map(modelFileErrorCode);
+    expect(codes).toEqual([
+      'modelFileRead',
+      'modelFileYamlIndent',
+      'modelFileYamlScalar',
+      'modelFileYamlStructure',
+      'modelFileYamlDuplicateKey',
+      'modelFileYamlOther',
+    ]);
+    for (const code of codes) expect(ERROR_CODES).toContain(code);
+  });
+
+  it('appends the sub-codes after `other`, so no existing index moves', () => {
+    const other = ERROR_CODES.indexOf('other');
+    expect(ERROR_CODES.slice(other + 1, other + 7)).toEqual([
+      'modelFileRead',
+      'modelFileYamlIndent',
+      'modelFileYamlScalar',
+      'modelFileYamlStructure',
+      'modelFileYamlDuplicateKey',
+      'modelFileYamlOther',
+    ]);
+  });
+
+  it('counts the sub-code alongside the modelFileParse total', () => {
+    let s = emptyCounters('2026-09-24');
+    for (const kind of ['yamlScalar', 'yamlScalar', 'yamlIndent'] as const) {
+      s = recordError(s, 'modelFileParse');
+      s = recordError(s, modelFileErrorCode(kind));
+    }
+    expect(buildHeartbeat(s, ENV).errors).toEqual({ modelFileParse: 3, modelFileYamlScalar: 2, modelFileYamlIndent: 1 });
+  });
+});
+
+describe('recordFeatureOnce', () => {
+  it('counts a presence flag at most once per day', () => {
+    let s = emptyCounters('2026-09-24');
+    s = repeat(s, 5, x => recordFeatureOnce(x, 'harnessPresent'));
+    expect(s.features.harnessPresent).toBe(1);
+    expect(nextDay(s, '2026-09-25').features.harnessPresent).toBeUndefined();
+  });
+
+  it('returns the same state when already counted', () => {
+    const s = recordFeatureOnce(emptyCounters('2026-09-24'), 'harnessPresent');
+    expect(recordFeatureOnce(s, 'harnessPresent')).toBe(s);
   });
 });

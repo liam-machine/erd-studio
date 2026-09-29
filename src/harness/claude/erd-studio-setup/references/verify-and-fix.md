@@ -45,6 +45,7 @@ Per domain (`domains[i]`):
 | `counts.matchedModels` / `matchedColumns` / `matchedRelationships` | What matched — use these in the success line |
 | `phantoms[]` | Models in the diagram that dbt does not have: `reason` is `absent` (not in the project at all) or `disabled` (dbt has it switched off). They are left out of the comparison |
 | `missingModelFiles[]` | Names in `logical.models` with no model file (at the top of `logical-models/` or in any folder) |
+| `unreadableModelFiles[]` | Model files that exist but are not valid YAML: `name`, `file`, `line`, `code` (e.g. `BLOCK_AS_IMPLICIT_KEY`), `kind`, `message`. ERD Studio sees these models as empty, so each gets one `fix-model-yaml` fix instead of its column fixes |
 | `fixes[]` | What to change, already sorted: blocking first, then by model and column |
 | `report` | The raw comparison — you rarely need it |
 | `plan` | The same content as a canvas sync plan, with dbt as the source of truth everywhere |
@@ -65,7 +66,8 @@ Each fix:
 
 | kind | Edit |
 |---|---|
-| `add-column` | Append `{ name, dataType, description }` to `columns` in `logical-models/<model>.yml`. `dataType` is `to` (the dbt type); if that is empty, use the SQL cast or `STRING` and add it to "types to confirm". Description from the inventory, or a draft ending in "(draft)" |
+| `fix-model-yaml` | **Fix these first.** The file at `file` does not parse (`line` says where). Almost always an unquoted value: wrap it in double quotes (see the quoting rule in building-the-model.md). A tab → spaces; a key twice → keep one; `---` or a code fence → remove it. Re-run the diff before any other fix — until the file parses, every other difference for that model is noise |
+| `add-column` | Append `{ name, dataType, description }` to `columns` in `logical-models/<model>.yml`. `dataType` is `to` (the dbt type), in double quotes; if that is empty, use the SQL cast or `STRING` and add it to "types to confirm". Description: the inventory's text copied verbatim **inside double quotes** (escape any inner `"` as `\"`), or a draft ending in "(draft)" |
 | `remove-column` | Delete the column from the yml, **and** delete any relationship in the domain JSON whose `fromModel`/`fromColumn` or `toModel`/`toColumn` names it |
 | `set-type` | Set the column's `dataType` to `to` |
 | `add-relationship` | Append `relationship` (with its `cardinality`) to `logical.relationships` in the domain JSON, then set `isForeignKey: true` on the `fromColumn` in the from-model's yml if it is not already |
@@ -120,9 +122,11 @@ types yet. Generating the catalog (Stage 2) will fill them in."
 ## 4. The loop
 
 1. Run the diff.
-2. Apply or ask about the fixes, following section 3.
-3. Run the diff again.
-4. Repeat — **at most 3 rounds.** Each round should shrink the list; if it does not, something
+2. Fix every `fix-model-yaml` first, then run the diff again — the other fixes for that model
+   only mean something once its file parses.
+3. Apply or ask about the fixes, following section 3.
+4. Run the diff again.
+5. Repeat — **at most 3 rounds.** Each round should shrink the list; if it does not, something
    is off that edits will not solve (a stale manifest, a model dbt disables, a case the rules do
    not cover). Stop, list what remains using each fix's `explain`, and suggest opening the domain
    and clicking **⊕ Diff** in the canvas toolbar to look at it together.

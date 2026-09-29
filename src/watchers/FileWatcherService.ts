@@ -39,6 +39,7 @@ import { LAYERS_CONFIG_FILE } from '../services/layerService';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
 import {
   readDbtProjectConfig,
+  resolveTargetDir,
   sourcePathsGlob,
   type DbtProjectConfig,
 } from '../services/dbtProjectConfig';
@@ -160,10 +161,11 @@ export class FileWatcherService implements vscode.Disposable {
    * artifact was written last swallow the other.
    */
   private setupArtifactWatcher(): void {
-    const pattern = new vscode.RelativePattern(
-      this.workspaceRoot,
-      `${this.dbtConfig.targetPath}/{manifest.json,catalog.json}`,
-    );
+    // `targetPath` may be absolute (DBT_TARGET_PATH, or an absolute /
+    // env_var() target-path): then watch that folder itself.
+    const pattern = path.isAbsolute(this.dbtConfig.targetPath)
+      ? new vscode.RelativePattern(resolveTargetDir(this.workspaceRoot, this.dbtConfig), '{manifest.json,catalog.json}')
+      : new vscode.RelativePattern(this.workspaceRoot, `${this.dbtConfig.targetPath}/{manifest.json,catalog.json}`);
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
     const handleChange = (uri: vscode.Uri) => {

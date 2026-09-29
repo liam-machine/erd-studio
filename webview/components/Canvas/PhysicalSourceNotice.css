@@ -27,6 +27,32 @@
   flex: 1;
 }
 
+.physical-source-notice__hint {
+  opacity: 0.85;
+}
+
+.physical-source-notice__action {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 2px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.physical-source-notice__action:hover {
+  background: var(--button-hover-bg);
+}
+
+.physical-source-notice__action:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
 .physical-source-notice__text code {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;

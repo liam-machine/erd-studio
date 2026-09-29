@@ -95,6 +95,23 @@ For each `InventoryModel` in the `inventory --models` output:
 | `columns[].isForeignKey: true` | Every column listed in `foreignKeys` |
 | `meta`, `columns[].meta` | Only with a team metadata list: its `dbt` keys from `meta` / `columns[].meta` — `references/metadata.md` section 5 |
 
+### Quote every text value
+
+The file must be valid YAML, or ERD Studio shows the model as empty and the diff cannot compare
+it. dbt descriptions often contain `: ` or start with a backtick, so copy them verbatim **inside
+double quotes**:
+
+- Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes (escape an
+  inner `"` as `\"`), or use a `|` block for multi-line text.
+- Always quote a value that contains `: ` or ` #`, or starts with any of
+  `` ` @ * & ! % [ { - | > ' " ``.
+- Indent with spaces, never tabs.
+- One YAML document per file: no `---` separators, no markdown code fences, no `{{ doc() }}` —
+  paste the text itself.
+
+After writing model files, run `doctor` (or the Stage 5 `diff`): a `fix-model-yaml` entry names
+the file and line that does not parse. Fix it before anything else.
+
 dbt does not know `grain`, `modelRole`, `rationale`, `scdType`, `additiveType` or `isNaturalKey`.
 They come from the **modelling approach** agreed in Stage 3, applied as
 `references/modelling-approaches.md` section 2 describes — and only to models created this
@@ -184,34 +201,34 @@ The agreed approach is Kimball. You write `logical-models/gold/fct_order.yml` (`
 
 ```yaml
 name: fct_order
-description: One row per order (draft)
-grain: One row per order
+description: "One row per order (draft)"
+grain: "One row per order"
 modelRole: transaction-fact
 rationale:
-  design: Kimball transaction fact, per .erd-studio/modelling-approach.md
+  design: "Kimball transaction fact, per .erd-studio/modelling-approach.md"
 columns:
   - name: order_id
-    dataType: INT
-    description: Order identifier
+    dataType: "INT"
+    description: "Order identifier"
     isPrimaryKey: true
   - name: customer_id
-    dataType: INT
-    description: The customer who placed the order (draft)
+    dataType: "INT"
+    description: "The customer who placed the order (draft)"
     isForeignKey: true
   - name: product_id
-    dataType: INT
-    description: The product ordered (draft)
+    dataType: "INT"
+    description: "The product ordered (draft)"
     isForeignKey: true
   - name: order_total
-    dataType: DECIMAL(18,2)
-    description: Order value (draft)
+    dataType: "DECIMAL(18,2)"
+    description: "Order value (draft)"
     additiveType: additive
 ```
 
 `dim_customer.yml` gets `customer_id` with both `isPrimaryKey: true` and `isNaturalKey: true` —
 it is the source system's business key, and doubles as the primary key because the dimension has
 no surrogate key (a gap the Stage 5 review raises if the approach wants surrogate keys) —
-`modelRole: conformed-dim` and `grain: One row per customer`. `email` is left unflagged, since the
+`modelRole: conformed-dim` and `grain: "One row per customer"`. `email` is left unflagged, since the
 approach does not name it a business key. `segment` is written as
 `STRING` (no cast in the SQL) and added to "types to confirm". The model is not built from a dbt
 snapshot and has no validity dates, so its attributes get `scdType: 1` — if the approach wants

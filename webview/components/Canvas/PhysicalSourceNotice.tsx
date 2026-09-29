@@ -16,12 +16,18 @@
  * misconception is the whole reason this stage was rebuilt. Compiling buys the
  * resolved schema name; only `dbt docs generate` reaches the warehouse.
  *
+ * What it does offer is **Run dbt parse** (#110): parse needs no warehouse
+ * (only a working profile) and writes the manifest this stage reads columns
+ * and tests from. The host runs it in a terminal and the manifest watcher
+ * refreshes the canvas, at which point this strip goes away by itself.
+ *
  * Dismissal is session-only (see the store) — if dbt still has not been run
  * after a reload, the notice comes back.
  */
 
 import React from 'react';
 
+import { useSend } from '../../hooks/useMessageBus';
 import { useEditorStore } from '../../store/editorStore';
 import './PhysicalSourceNotice.css';
 
@@ -29,6 +35,7 @@ export const PhysicalSourceNotice: React.FC = () => {
   const domain = useEditorStore((s) => s.domain);
   const dismissed = useEditorStore((s) => s.physicalSourceNoticeDismissed);
   const dismiss = useEditorStore((s) => s.dismissPhysicalSourceNotice);
+  const send = useSend();
 
   const sources = domain?.physicalSources;
   // `sources` is undefined on the logical stage and on any payload from an
@@ -40,11 +47,21 @@ export const PhysicalSourceNotice: React.FC = () => {
     <div className="physical-source-notice" role="status">
       <span className="physical-source-notice__icon" aria-hidden="true">&#9432;</span>
       <span className="physical-source-notice__text">
-        No compiled dbt artifacts found — models, columns and relationships come from your
-        schema .yml files, so types show only where those declare <code>data_type:</code>.
-        Run <code>dbt docs generate</code> for real warehouse types, or{' '}
-        <code>dbt compile</code> for schema names.
+        <span className="physical-source-notice__lead">
+          dbt hasn&apos;t been run in this project yet, so ERD Studio can&apos;t read your models&apos;
+          columns and tests.
+        </span>{' '}
+        <span className="physical-source-notice__hint">
+          Needs a working dbt profile. For real column types, run <code>dbt docs generate</code> afterwards.
+        </span>
       </span>
+      <button
+        type="button"
+        className="physical-source-notice__action"
+        onClick={() => send({ type: 'runDbtParse' })}
+      >
+        Run dbt parse
+      </button>
       <button
         type="button"
         className="physical-source-notice__dismiss"

@@ -233,6 +233,40 @@ describe('doctor', () => {
 });
 
 describe('doctor via main', () => {
+  it('reports a model file that does not parse, with its line, and a fix-model-yaml next step', async () => {
+    const root = copyFixture('dbt-project');
+    fs.writeFileSync(
+      path.join(root, '.erd-studio/logical-models/fct_task_event.yml'),
+      'name: fct_task_event\ndescription: Status: one of a, b\ncolumns: []\n',
+    );
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.unreadableModelFiles).toEqual([expect.objectContaining({
+      name: 'fct_task_event',
+      file: '.erd-studio/logical-models/fct_task_event.yml',
+      line: 2,
+      code: 'BLOCK_AS_IMPLICIT_KEY',
+      kind: 'yamlScalar',
+    })]);
+    const step = r.nextSteps.find((s) => s.id === 'fix-model-yaml');
+    expect(step).toBeDefined();
+    expect(step!.why).toContain('.erd-studio/logical-models/fct_task_event.yml:2');
+    expect(step!.why).not.toContain(root);
+
+    let out = '';
+    const code = await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: root,
+      env: cleanEnv,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('fct_task_event.yml line 2: YAML error (BLOCK_AS_IMPLICIT_KEY)');
+
+    const clean = await runDoctor({ project: path.join(FIXTURES, 'dbt-project'), semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(clean.erd.unreadableModelFiles).toEqual([]);
+    expect(clean.nextSteps.some((s) => s.id === 'fix-model-yaml')).toBe(false);
+  });
+
   it('prints JSON and exits 0, also for a folder with no project', async () => {
     let out = '';
     const io = { stdout: { write: (s: string) => { out += s; } }, stderr: { write: () => undefined }, cwd: tmp, env: cleanEnv };

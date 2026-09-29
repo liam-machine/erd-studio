@@ -111,8 +111,7 @@ user to type a command that belongs to a different one.
 - **Approvals.** Every assistant asks before it changes a file or runs a command unless the user
   has allowed it. Tell the user once, in Stage 4, in words that fit their assistant, and say that
   approving is expected. Describe only buttons you are sure your assistant has.
-- **Shell.** Your commands may run in bash, zsh, Git Bash or PowerShell. On Windows, see the
-  helper's Windows route below.
+- **Shell.** bash, zsh, Git Bash or PowerShell; on Windows, see the helper's Windows route below.
 - **A file your reading tool refuses as ignored** (Gemini CLI skips files `.gitignore` matches):
   read it with a shell command instead — `cat <file>`, or `Get-Content <file>` in PowerShell.
 
@@ -158,8 +157,7 @@ if doctor reports `project.found: false`, ask which folder holds it and pass `--
   mean the helper is looking in the wrong folder: the ERD Studio folder is set by the
   `erdStudio.semanticDir` setting, which the helper cannot read — ask the user for it and pass
   it with `--semantic-dir`. Never report that as a match.
-- For `diff`, exit code 1 is **not** a failure — it means "differences found", which is exactly
-  what Stage 5 is for.
+- For `diff`, exit code 1 is **not** a failure — it means "differences found" (Stage 5's job).
 - On Windows, if the shell cannot run the file above (PowerShell always cannot), use
   `~/.erd-studio-cli/bin/erd-studio.cmd` (in PowerShell: `& "$HOME\.erd-studio-cli\bin\erd-studio.cmd" …`).
   Tell the user which route you are using.
@@ -374,9 +372,9 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
 6. Write the files by following `references/building-the-model.md`:
    - `layers.json`, only if it is missing or lacks the chosen layer;
    - one model file per model **not** already in the library (which folder: see that file) — columns,
-     types and descriptions copied from the inventory, never invented — **plus the approach's
-     design fields** (`modelRole`, `grain`, `scdType`, `additiveType`, `isNaturalKey`,
-     `rationale`), following `references/modelling-approaches.md` section 2 (with no agreed
+     types and descriptions copied from the inventory (text in double quotes), never invented —
+     **plus the approach's design fields** (`modelRole`, `grain`, `scdType`, `additiveType`,
+     `isNaturalKey`, `rationale`), following `references/modelling-approaches.md` section 2 (with no agreed
      style, only what section 4 allows), **plus the metadata list's values from dbt**
      (`references/metadata.md` section 5). The approach never renames, adds or removes a column
      or a relationship: those come from dbt, and the diff checks them;
@@ -384,7 +382,8 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
      inventory `relationships` exactly.
    Models that already have a model file (in any folder) are **referenced by name, never rewritten** —
    they may be someone's careful design and other domains may share them.
-7. Keep a list, **created this session**, of every model yml you wrote (Stage 5 needs it).
+7. Keep a list, **created this session**, of every model yml you wrote (Stage 5 needs it). Then
+   run `doctor` and fix each `fix-model-yaml` file:line it lists first (usually a value to quote).
 8. Tell the user what you wrote in one or two lines ("Wrote 8 model files and the `orders`
    diagram, marking 2 facts and 6 dimensions the Kimball way"), not file by file.
 
@@ -413,6 +412,7 @@ Then loop, following `references/verify-and-fix.md`, which maps every fix to its
 - **`phantoms`** — models in the diagram that dbt does not have. Always ask (unless the backlog
   lists it as intentional): usually a typo or a model not built yet. Offer to rename it to the
   real dbt name or remove it from this domain. Never delete a model file under `logical-models/`.
+- **`fix-model-yaml`** first, always — the file does not parse; fix that line, re-run the diff.
 - **`needsMigration`** — older file format; suggest **ERD Studio: Migrate to v5**, skip it now.
 - Re-run the diff after each round of edits. **Stop after 3 rounds.** List what remains using
   each fix's `explain` text and suggest looking at it together with **⊕ Diff** on the canvas.

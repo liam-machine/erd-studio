@@ -195,6 +195,14 @@ export class DomainService {
       getModel: this.logicalModelService
         ? (name) => this.logicalModelService!.getModel(name)
         : undefined,
+      getModelError: this.logicalModelService
+        ? (name) => {
+          const error = this.logicalModelService!.getModelFileError(name);
+          return error
+            ? { kind: error.kind, ...(error.line !== undefined ? { line: error.line } : {}) }
+            : null;
+        }
+        : undefined,
       warn: (message) => console.warn(`[DomainService] ${message}`),
     });
   }
