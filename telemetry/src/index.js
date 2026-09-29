@@ -25,7 +25,8 @@
  *     them reaches the SQL parameters.
  *   - **No free text.** Every stored value is an enum, a bucket, a bounded
  *     integer, a date, a version string matched by a strict regex, or the
- *     install id — a random UUID the extension rotates every 30 days.
+ *     install id — a random UUID the extension mints once per VS Code profile
+ *     (until 1.6.x it was replaced every 30 days).
  *   - **Unknown keys are dropped**, top-level and inside `features` / `errors`,
  *     so a newer extension that sends a field this Worker has never heard of
  *     still lands, minus that field — and an arbitrary client cannot use an
@@ -60,8 +61,8 @@
 /** The one path this Worker serves. */
 const ROUTE = '/v1/heartbeat';
 
-/** Largest body accepted. A real heartbeat is a few hundred bytes. */
-const MAX_BODY_BYTES = 2048;
+/** Largest body accepted. A real heartbeat is under a kilobyte; every feature key at once is about 2 KB. */
+const MAX_BODY_BYTES = 4096;
 
 /** A heartbeat may describe a day at most this many days before it is received. */
 const MAX_DAY_AGE_DAYS = 7;
@@ -72,7 +73,7 @@ const RETENTION_DAYS = 90;
 /** The telemetry contract version this Worker understands. */
 const CONTRACT_VERSION = 1;
 
-/** Random UUID v4 — the only identifier stored, rotated client-side every 30 days. */
+/** Random UUID v4 — the only identifier stored, minted once per VS Code profile. */
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const SEMVER = /^\d+\.\d+\.\d+$/;
@@ -90,6 +91,18 @@ const ACTIVATION_VALUES = new Set(['project_found', 'no_project']);
 const DOMAIN_COUNT_VALUES = new Set(['0', '1-3', '4-10', '10+']);
 const MODEL_COUNT_VALUES = new Set(['none', '1-10', '11-50', '51+']);
 const MANIFEST_VALUES = new Set(['ok', 'missing', 'stale', 'unknown']);
+
+// Optional fields (extension 1.6.3+). An older client omits them and the row
+// stores NULL; a present field with a bad value is still a 400.
+const HOST_VALUES = new Set([
+  'vscode', 'vscodeInsiders', 'cursor', 'windsurf', 'vscodium', 'trae', 'kiro', 'positron', 'antigravity', 'other',
+]);
+const REMOTE_VALUES = new Set(['local', 'ssh', 'wsl', 'container', 'codespaces', 'web', 'other']);
+const RECENT_DAYS_VALUES = new Set(['0', '1', '2-3', '4-7', '8-14', '15-28']);
+const FIRST_CANVAS_VALUES = new Set(['never', '0', '1-7', '8-30', '31-90', '90+']);
+/** Stored in this order, like STAGES. */
+const ASSISTANTS = ['claude', 'copilot', 'codex', 'gemini', 'cursor'];
+const HARNESSES = ['claude', 'agents', 'copilot', 'gemini', 'codex'];
 
 /** Array fields keep this order when stored, whatever order the client sent. */
 const STAGES = ['logical', 'physical'];
@@ -128,6 +141,31 @@ const FEATURES = [
   'manifestAfterParse',
   'manifestAppeared',
   'manifestHintDismissed',
+  'editModel',
+  'editColumn',
+  'editKey',
+  'editDetails',
+  'editRelationship',
+  'editLayout',
+  'editAnnotation',
+  'editUndo',
+  'layoutUnder1s',
+  'layout1to5s',
+  'layoutOver5s',
+  'layoutFailed',
+  'domainCreated',
+  'domainCreatedExternal',
+  'walkthroughOpened',
+  'gettingStartedOpened',
+  'videoHalf',
+  'videoEnded',
+  'videoError',
+  'trySample',
+  'setupAiHelper',
+  'copyPrompt',
+  'openClaude',
+  'openCopilotChat',
+  'harnessInstallAgents',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -161,8 +199,10 @@ const ERROR_CODES = [
 const UPSERT_SQL = `INSERT INTO heartbeats (
   install_id, day, received_day, ext_version, vscode_major, os, tenure, activation,
   has_semantic_dir, domain_count, activations, canvas_opens, stages, schema_formats,
-  model_count, manifest, catalog, features, errors
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+  model_count, manifest, catalog, features, errors,
+  host, remote, dev, assistants, harnesses, active_days_28, canvas_days_28, first_canvas
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
 ON CONFLICT(install_id, day) DO UPDATE SET
   received_day = excluded.received_day,
   ext_version = excluded.ext_version,
@@ -180,7 +220,15 @@ ON CONFLICT(install_id, day) DO UPDATE SET
   manifest = excluded.manifest,
   catalog = excluded.catalog,
   features = excluded.features,
-  errors = excluded.errors`;
+  errors = excluded.errors,
+  host = excluded.host,
+  remote = excluded.remote,
+  dev = excluded.dev,
+  assistants = excluded.assistants,
+  harnesses = excluded.harnesses,
+  active_days_28 = excluded.active_days_28,
+  canvas_days_28 = excluded.canvas_days_28,
+  first_canvas = excluded.first_canvas`;
 
 const RETENTION_SQL = `DELETE FROM heartbeats WHERE received_day < date('now', '-${RETENTION_DAYS} days')`;
 
@@ -281,6 +329,14 @@ async function handleHeartbeat(request, env) {
       heartbeat.catalog ? 1 : 0,
       JSON.stringify(heartbeat.features),
       JSON.stringify(heartbeat.errors),
+      heartbeat.host,
+      heartbeat.remote,
+      heartbeat.dev === null ? null : heartbeat.dev ? 1 : 0,
+      heartbeat.assistants === null ? null : JSON.stringify(heartbeat.assistants),
+      heartbeat.harnesses === null ? null : JSON.stringify(heartbeat.harnesses),
+      heartbeat.activeDays28,
+      heartbeat.canvasDays28,
+      heartbeat.firstCanvas,
     )
     .run();
 
@@ -297,8 +353,9 @@ async function handleHeartbeat(request, env) {
  * invalid. Unknown keys are ignored — the result is built only from the fields
  * named here, so nothing the client adds can reach the row.
  *
- * `features` and `errors` may be omitted (an idle day has neither); every other
- * field is required.
+ * `features` and `errors` may be omitted (an idle day has neither), and so may
+ * the fields added in extension 1.6.3 (`host` … `firstCanvas`, stored NULL when
+ * absent); every other field is required.
  *
  * @param {unknown} raw
  * @param {number} now epoch ms, for the day-window check
@@ -332,6 +389,17 @@ function validateHeartbeat(raw, now) {
   const errors = countsOf(b.errors, ERROR_CODES);
   if (!features || !errors) return null;
 
+  const host = optionalOneOf(b.host, HOST_VALUES);
+  const remote = optionalOneOf(b.remote, REMOTE_VALUES);
+  const activeDays28 = optionalOneOf(b.activeDays28, RECENT_DAYS_VALUES);
+  const canvasDays28 = optionalOneOf(b.canvasDays28, RECENT_DAYS_VALUES);
+  const firstCanvas = optionalOneOf(b.firstCanvas, FIRST_CANVAS_VALUES);
+  if ([host, remote, activeDays28, canvasDays28, firstCanvas].includes(INVALID)) return null;
+  if (b.dev !== undefined && typeof b.dev !== 'boolean') return null;
+  const assistants = b.assistants === undefined ? null : subsetOf(b.assistants, ASSISTANTS);
+  const harnesses = b.harnesses === undefined ? null : subsetOf(b.harnesses, HARNESSES);
+  if ((b.assistants !== undefined && !assistants) || (b.harnesses !== undefined && !harnesses)) return null;
+
   return {
     // Lower-cased so one install cannot appear as two rows by changing case.
     installId: b.installId.toLowerCase(),
@@ -352,7 +420,30 @@ function validateHeartbeat(raw, now) {
     catalog: b.catalog,
     features,
     errors,
+    host: /** @type {string | null} */ (host),
+    remote: /** @type {string | null} */ (remote),
+    dev: typeof b.dev === 'boolean' ? b.dev : null,
+    assistants,
+    harnesses,
+    activeDays28: /** @type {string | null} */ (activeDays28),
+    canvasDays28: /** @type {string | null} */ (canvasDays28),
+    firstCanvas: /** @type {string | null} */ (firstCanvas),
   };
+}
+
+/** Marks an optional field that is present but invalid. */
+const INVALID = Symbol('invalid');
+
+/**
+ * `null` when absent, the value when it is one of `allowed`, else {@link INVALID}.
+ *
+ * @param {unknown} value
+ * @param {Set<string>} allowed
+ * @returns {string | null | typeof INVALID}
+ */
+function optionalOneOf(value, allowed) {
+  if (value === undefined) return null;
+  return isOneOf(value, allowed) ? value : INVALID;
 }
 
 /**
@@ -605,6 +696,14 @@ function errorName(err) {
  * @property {boolean} catalog
  * @property {Record<string, number>} features
  * @property {Record<string, number>} errors
+ * @property {string | null} host
+ * @property {string | null} remote
+ * @property {boolean | null} dev
+ * @property {string[] | null} assistants
+ * @property {string[] | null} harnesses
+ * @property {string | null} activeDays28
+ * @property {string | null} canvasDays28
+ * @property {string | null} firstCanvas
  */
 
 /**

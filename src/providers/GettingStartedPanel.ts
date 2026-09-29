@@ -515,6 +515,7 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
     }
     filesWritten.push(...result.filesWritten);
     if (result.status !== 'unchanged' && result.targets.includes('claude')) telemetry.feature('harnessInstallClaude');
+    if (result.status !== 'unchanged' && result.targets.includes('agents')) telemetry.feature('harnessInstallAgents');
 
     const launched = await deps.launcher.install(deps.launcherOptions);
     filesWritten.push(...launched.filesWritten.map((p) => displayLauncherPath(p, deps.launcherOptions.homeDir)));
@@ -526,6 +527,7 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
           'Your assistant can still check your model through the canvas, just less exactly.',
       };
     }
+    telemetry.feature('setupAiHelper');
     return {
       ok: true,
       filesWritten,
@@ -593,6 +595,7 @@ export class GettingStartedPanel {
       { enableScripts: true, localResourceRoots: [mediaRoot], retainContextWhenHidden: false },
     );
     panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.png');
+    telemetry.feature('gettingStartedOpened');
     GettingStartedPanel.current = new GettingStartedPanel(panel, context.extensionUri, deps);
     return GettingStartedPanel.current;
   }
@@ -725,14 +728,17 @@ export class GettingStartedPanel {
         await this.runSetupFromPanel();
         break;
       case 'copyPrompt':
+        telemetry.feature('copyPrompt');
         await vscode.env.clipboard.writeText(this.deps.clipboardText(msg.assistant ?? 'claude'));
         break;
       case 'openClaude':
+        telemetry.feature('openClaude');
         if (this.deps.workspaceRoot && await this.helperInstalledOrOffer()) {
           await openClaudeCode({ dbtRoot: this.deps.workspaceRoot, clipboardText: this.deps.clipboardText('claude') });
         }
         break;
       case 'openCopilotChat':
+        telemetry.feature('openCopilotChat');
         if (await this.helperInstalledOrOffer()) {
           await openCopilotChat({ dbtRoot: this.deps.workspaceRoot, workspaceFolder: this.deps.workspaceFolder ?? null });
         }
@@ -755,7 +761,11 @@ export class GettingStartedPanel {
         await vscode.commands.executeCommand('vscode.openFolder');
         break;
       case 'videoError':
+        telemetry.feature('videoError');
         console.warn(`[GettingStarted] Video could not play here (code ${msg.code}); showing the poster fallback.`);
+        break;
+      case 'videoProgress':
+        telemetry.feature(msg.milestone === 'half' ? 'videoHalf' : 'videoEnded');
         break;
       default: {
         const unhandled: never = msg;

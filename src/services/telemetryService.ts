@@ -21,10 +21,14 @@ import * as vscode from 'vscode';
 import { getErdStudioSetting } from './configService';
 import { safeBaseUrl } from './feedbackAnalysisService';
 import {
-  INSTALL_ID_TTL_DAYS,
   buildHeartbeat,
-  daysBetween,
   emptyCounters,
+  hostBucket,
+  rememberDay,
+  remoteBucket,
+  stampEnv,
+  recordAssistants,
+  recordHarnesses,
   heartbeatDue,
   nextDay,
   recordActivation,
@@ -37,6 +41,7 @@ import {
   recordStage,
   utcDay,
   type ActivationOutcome,
+  type CounterEnv,
   type DailyCounters,
   type HeartbeatBody,
   type ManifestState,
@@ -44,6 +49,8 @@ import {
   type TelemetryFeature,
   type TelemetrySchemaFormat,
   type TelemetryStage,
+  type TelemetryAssistant,
+  type TelemetryHarness,
 } from './telemetryPayload';
 
 /** Where heartbeats go. Served by the Worker in `telemetry/`. */
@@ -54,6 +61,10 @@ export const TELEMETRY_ENABLED_SETTING = 'telemetry.enabled';
 const COUNTERS_KEY = 'erdStudio.telemetry.counters';
 const INSTALL_KEY = 'erdStudio.telemetry.install';
 const FIRST_SEEN_KEY = 'erdStudio.telemetry.firstSeenDay';
+/** Recent UTC days with an activation / a canvas open. Dates stay on the device; only counts are sent. */
+const ACTIVE_DAYS_KEY = 'erdStudio.telemetry.activeDays';
+const CANVAS_DAYS_KEY = 'erdStudio.telemetry.canvasDays';
+const FIRST_CANVAS_KEY = 'erdStudio.telemetry.firstCanvasDay';
 
 const HEARTBEAT_EVENT = 'heartbeat';
 const ROLLOVER_INTERVAL_MS = 60 * 60 * 1000;
@@ -61,7 +72,7 @@ const SEND_TIMEOUT_MS = 5_000;
 
 interface StoredInstall {
   id: string;
-  /** UTC day the id was minted; it is replaced {@link INSTALL_ID_TTL_DAYS} later. */
+  /** UTC day the id was minted. Informational: the id is never replaced. */
   createdDay: string;
 }
 
@@ -90,8 +101,17 @@ export class TelemetryService implements vscode.Disposable {
    * {@link buildHeartbeat} produced rather than whatever arrives through it.
    */
   private outgoing: HeartbeatBody | null = null;
+  /** The running environment, stamped onto the day's counters on every update. */
+  private readonly env: CounterEnv;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.env = {
+      extVersion: String(context.extension?.packageJSON?.version ?? ''),
+      vscodeVersion: vscode.version,
+      host: hostBucket(vscode.env.appName ?? ''),
+      remote: remoteBucket(vscode.env.remoteName, vscode.env.uiKind === vscode.UIKind.Web),
+      dev: context.extensionMode !== undefined && context.extensionMode !== vscode.ExtensionMode.Production,
+    };
     this.logger = vscode.env.createTelemetryLogger(
       {
         sendEventData: (eventName) => {
@@ -148,17 +168,34 @@ export class TelemetryService implements vscode.Disposable {
     if (!this.enabled()) return;
     this.rollover();
     const state = this.context.globalState.get<DailyCounters>(COUNTERS_KEY) ?? emptyCounters(utcDay(new Date()));
-    void this.context.globalState.update(COUNTERS_KEY, reducer(state));
+    void this.context.globalState.update(COUNTERS_KEY, stampEnv(reducer(state), this.env));
+  }
+
+  /** Remember that today had an activation (`active`) or a canvas open (`canvas`). */
+  markDay(kind: 'active' | 'canvas'): void {
+    if (!this.enabled()) return;
+    const today = utcDay(new Date());
+    const key = kind === 'active' ? ACTIVE_DAYS_KEY : CANVAS_DAYS_KEY;
+    void this.context.globalState.update(key, rememberDay(this.context.globalState.get<string[]>(key), today));
+    if (kind === 'canvas' && !this.context.globalState.get<string>(FIRST_CANVAS_KEY)) {
+      void this.context.globalState.update(FIRST_CANVAS_KEY, today);
+    }
   }
 
   private send(state: DailyCounters, today: string): void {
     if (!telemetryEndpoint()) return;
     this.outgoing = buildHeartbeat(state, {
       installId: this.installId(today),
-      extVersion: String(this.context.extension.packageJSON?.version ?? ''),
-      vscodeVersion: vscode.version,
+      extVersion: this.env.extVersion,
+      vscodeVersion: this.env.vscodeVersion,
       platform: process.platform,
       firstSeenDay: this.firstSeenDay(state.day),
+      activeDays: this.context.globalState.get<string[]>(ACTIVE_DAYS_KEY),
+      canvasDays: this.context.globalState.get<string[]>(CANVAS_DAYS_KEY),
+      firstCanvasDay: this.context.globalState.get<string>(FIRST_CANVAS_KEY) ?? null,
+      host: this.env.host,
+      remote: this.env.remote,
+      dev: this.env.dev,
     });
     // The sender takes `outgoing` and clears it. If the logger declines
     // (telemetry level below usage) it stays until the next day's send
@@ -166,10 +203,14 @@ export class TelemetryService implements vscode.Disposable {
     this.logger.logUsage(HEARTBEAT_EVENT, { ...this.outgoing });
   }
 
-  /** A random id, never `vscode.env.machineId`, replaced every 30 days. */
+  /**
+   * A random id, never `vscode.env.machineId`, minted once per VS Code profile
+   * and kept for good (it used to be replaced every 30 days). Switching
+   * telemetry off does not clear it; nothing is sent while it is off.
+   */
   private installId(today: string): string {
     const stored = this.context.globalState.get<StoredInstall>(INSTALL_KEY);
-    if (stored?.id && daysBetween(stored.createdDay, today) < INSTALL_ID_TTL_DAYS) return stored.id;
+    if (stored?.id) return stored.id;
     const fresh: StoredInstall = { id: randomUUID(), createdDay: today };
     void this.context.globalState.update(INSTALL_KEY, fresh);
     return fresh.id;
@@ -192,6 +233,9 @@ export class TelemetryService implements vscode.Disposable {
 
   private discard(): void {
     void this.context.globalState.update(COUNTERS_KEY, emptyCounters(utcDay(new Date())));
+    void this.context.globalState.update(ACTIVE_DAYS_KEY, undefined);
+    void this.context.globalState.update(CANVAS_DAYS_KEY, undefined);
+    void this.context.globalState.update(FIRST_CANVAS_KEY, undefined);
   }
 }
 
@@ -224,9 +268,19 @@ let active: TelemetryService | undefined;
 export const telemetry = {
   activation(outcome: ActivationOutcome, hasSemanticDir: boolean, domainCount: number): void {
     active?.update(s => recordActivation(s, { outcome, hasSemanticDir, domainCount }));
+    active?.markDay('active');
   },
   canvasOpened(stage: TelemetryStage, format: TelemetrySchemaFormat, modelCount: number): void {
     active?.update(s => recordCanvasOpen(s, { stage, format, modelCount }));
+    active?.markDay('canvas');
+  },
+  /** AI assistants detected on this machine (`detectAssistants()` ids). */
+  assistants(found: readonly TelemetryAssistant[]): void {
+    active?.update(s => recordAssistants(s, found));
+  },
+  /** ERD Studio harness targets installed, version-marked, in the open project. */
+  harnesses(found: readonly TelemetryHarness[]): void {
+    active?.update(s => recordHarnesses(s, found));
   },
   stage(stage: TelemetryStage): void {
     active?.update(s => recordStage(s, stage));

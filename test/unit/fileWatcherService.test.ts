@@ -247,6 +247,32 @@ describe('FileWatcherService', () => {
       semanticWatcher._simulateCreate(uri);
       vi.advanceTimersByTime(300);
 
+      expect(listener).toHaveBeenCalledWith({ uri, created: true });
+    });
+
+    it('keeps a create a create when a change for the same file follows within the debounce', () => {
+      const listener = vi.fn();
+      service.onSemanticFileChanged(listener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/gold/new-domain.json');
+      semanticWatcher._simulateCreate(uri);
+      semanticWatcher._simulateChange(uri);
+      vi.advanceTimersByTime(300);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith({ uri, created: true });
+    });
+
+    it('does not flag a created file that is not a domain', () => {
+      const listener = vi.fn();
+      service.onSemanticFileChanged(listener);
+
+      const semanticWatcher = _mockFileWatchers[1];
+      const uri = vscode.Uri.file('/test/workspace/.erd-studio/templates/star.json');
+      semanticWatcher._simulateCreate(uri);
+      vi.advanceTimersByTime(300);
+
       expect(listener).toHaveBeenCalledWith({ uri });
     });
 

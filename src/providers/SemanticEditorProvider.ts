@@ -124,6 +124,7 @@ import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
+import { layoutFeature, type TelemetryFeature } from '../services/telemetryPayload';
 import { openModelFileAt } from '../commands/openModelFile';
 import {
   buildDbtDraft,
@@ -290,6 +291,7 @@ import {
   validateAnnotationPositions,
   validateAddModelsFromDbtPayload,
   validateOpenModelFilePayload,
+  validateLayoutFinishedPayload,
   validateDismissManifestHintPayload,
   validateAnnotationUpdate,
   validateModelNameSafety,
@@ -317,6 +319,44 @@ export const MANIFEST_HINT_DISMISSED_KEY = 'erdStudio.manifestHintDismissed';
 
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
 export const PHYSICAL_READ_ONLY_MESSAGE = 'Physical stage is read-only. Switch to the Logical stage to make changes.';
+
+
+/**
+ * Usage telemetry: which kind of canvas edit each webview message asks for.
+ * Counted once per accepted request (after the physical-stage guard), whether
+ * or not the edit then changes anything.
+ */
+const EDIT_FEATURES: Partial<Record<string, TelemetryFeature>> = {
+  addModel: 'editModel',
+  addExistingModel: 'editModel',
+  addModelsFromDbt: 'editModel',
+  renameModel: 'editModel',
+  removeModel: 'editModel',
+  removeModels: 'editModel',
+  addColumn: 'editColumn',
+  removeColumn: 'editColumn',
+  updateColumn: 'editColumn',
+  reorderColumns: 'editColumn',
+  toggleColumnKey: 'editKey',
+  updateModelDescription: 'editDetails',
+  updateModelGrain: 'editDetails',
+  updateModelAlias: 'editDetails',
+  updateModelRole: 'editDetails',
+  updateModelRationale: 'editDetails',
+  updateMeta: 'editDetails',
+  addRelationship: 'editRelationship',
+  updateRelationship: 'editRelationship',
+  editRelationship: 'editRelationship',
+  removeRelationship: 'editRelationship',
+  removeRelationships: 'editRelationship',
+  updatePositions: 'editLayout',
+  addAnnotation: 'editAnnotation',
+  updateAnnotation: 'editAnnotation',
+  removeAnnotation: 'editAnnotation',
+  removeAnnotations: 'editAnnotation',
+  undo: 'editUndo',
+  redo: 'editUndo',
+};
 
 export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
@@ -799,13 +839,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'requestReload', 'openGettingStarted',
           'requestFeedbackContext', 'analyzeFeedback', 'setFeedbackProvider',
           'submitFeedback', 'copyFeedbackReport', 'openFeedbackLink',
-          'openModelFile',
+          'openModelFile', 'layoutFinished',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           console.warn(`[SemanticEditorProvider] Dropped "${message.type}" while viewing physical stage`);
           this.post(webviewPanel.webview, { type: 'error', payload: { message: PHYSICAL_READ_ONLY_MESSAGE } });
           return;
         }
+
+        // Usage telemetry: one edit request of this kind (EDIT_FEATURES).
+        const editFeature = EDIT_FEATURES[message.type];
+        if (editFeature) telemetry.feature(editFeature);
 
         // Mutations always target the logical stage (physical is already guarded above)
         const activeStage = 'logical' as const;
@@ -1023,6 +1067,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'viewFile': {
             await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+            break;
+          }
+          case 'layoutFinished': {
+            // Usage telemetry only; writes nothing, so it is on the physical allowlist.
+            const payload = (message as { payload?: unknown }).payload;
+            if (validateLayoutFinishedPayload(payload)) telemetry.feature(layoutFeature(payload.ms, payload.ok));
             break;
           }
           case 'openModelFile': {
