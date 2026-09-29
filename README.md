@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/icon.png" width="128" height="128" alt="ERD Studio" />
+  <a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="820" alt="Play the getting-started video (1:00): install ERD Studio, open your dbt project, click Draw from dbt and get a laid-out diagram of your models, no AI needed. Click to watch." /></a>
+</p>
+
+<p align="center">
+  <sub>▶ <strong>Get started in 60 seconds</strong> — click to watch. Want the technical tour? <a href="#how-it-works">See how it works (1:42)</a>.</sub>
 </p>
 
 <h1 align="center">ERD Studio</h1>
@@ -10,13 +14,8 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio open in VS Code, showing four views of the same star schema. Logical stage: dim_customer, dim_date, dim_project and dim_task around the fct_order and fct_task_event facts, each dimension showing a PK surrogate key and an NK business key. Detail panel: dim_customer's columns, role and relationships opened for editing. Physical stage: the same diagram in green, built from the dbt project with the warehouse's own column types. Discrepancy overlay: columns that exist only in the design struck through against those only in the warehouse." />
-</p>
-
-<p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio"><img src="https://img.shields.io/badge/Install%20in%20VS%20Code-0e639c?style=for-the-badge" alt="Install in VS Code" /></a>
   <a href="https://github.com/liam-machine/erd-studio-sample"><img src="https://img.shields.io/badge/Try%20the%20sample%20project-0e639c?style=for-the-badge" alt="Try the sample dbt project" /></a>
-  <a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4"><img src="https://img.shields.io/badge/Watch%20the%202--min%20tour-0e639c?style=for-the-badge" alt="Watch the 2-minute tour" /></a>
 </p>
 
 <p align="center">
@@ -40,6 +39,10 @@
 
 ERD Studio brings visual data modelling into VS Code. Keep your diagrams and design decisions in your code repo, give your AI assistant the context to build from them, and review design changes alongside the SQL.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/demo.gif" width="800" alt="ERD Studio open in VS Code, showing four views of the same star schema. Logical stage: dim_customer, dim_date, dim_project and dim_task around the fct_order and fct_task_event facts, each dimension showing a PK surrogate key and an NK business key. Detail panel: dim_customer's columns, role and relationships opened for editing. Physical stage: the same diagram in green, built from the dbt project with the warehouse's own column types. Discrepancy overlay: columns that exist only in the design struck through against those only in the warehouse." />
+</p>
+
 ## Why use ERD Studio?
 
 - **Start from the dbt project you have.** **Draw from dbt** turns your existing models into a first diagram in under a minute, with no AI and no setup.
@@ -52,6 +55,11 @@ ERD Studio brings visual data modelling into VS Code. Keep your diagrams and des
 Traditional ERD tools such as [erwin](https://bookshelf.erwin.com/bookshelf/public_html/2019R2/Content/User%20Guides/Navigator%20Edition%20Online%20Help/Open_a_model_or_submodel_from_the_mart.html) store models in application-specific files or a separate modelling repository. ERD Studio's plain files fit directly into your branches, pull requests, and AI workflow. **Less setup, fewer handoffs, and no export step to give your AI the design.**
 
 ## How it works
+
+<table align="center"><tr>
+<td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/how-it-works.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/how-it-works-play.jpg" width="300" alt="Play the How ERD Studio works video (1:42): why the logical model belongs in the repo, the YAML and JSON files behind the canvas, Logical versus Physical, and how Compare lights up every mismatch before it ships." /></a></td>
+<td><strong>The technical tour (1:42).</strong> Why the design belongs next to the SQL, the two kinds of file behind every diagram, how the Logical design and the Physical view of your dbt project are compared, and why your AI assistant writes better dbt when it can read the model first.</td>
+</tr></table>
 
 The whole logical model is just two kinds of file: **one YAML per model, one JSON per diagram.** ERD Studio reads them and renders the canvas.
 
@@ -71,8 +79,6 @@ dbt is the only stack ERD Studio can read today. If you model somewhere else, [c
 
 Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logical-only setup](#not-using-dbt)). The Physical view needs nothing beyond your dbt schema YAMLs, and gets richer once `manifest.json` and `catalog.json` exist.
 
-<a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="640" alt="Getting-started video: a short tour from a dbt project to a checked ERD with your AI assistant. Click to watch." /></a>
-
 **Your first diagram, no AI needed:**
 
 1. [Install ERD Studio](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio) and open your dbt project in VS Code. On a first install the **Get started with ERD Studio** walkthrough opens and takes you through the next steps.
@@ -81,7 +87,7 @@ Requires **VS Code 1.85+** and a project containing `dbt_project.yml` (see [logi
 
 The draft is a starting point for your design: it is saved as ordinary ERD Studio files you can change, and the Physical view is still read from dbt every time, never saved. An empty diagram offers an **Add models from dbt** button that does the same for one diagram, and the **ERD** count in the status bar (for example **ERD 3**) takes you back to your diagrams at any time.
 
-**New to ERD Studio?** [Watch the short getting-started video](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4). The **Welcome** tab has the same video and a short checklist. Open it any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
+**Prefer to watch first?** The [getting-started video](https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/media/onboarding/getting-started.mp4) (1:00) shows these three steps. The **Welcome** tab has the same video and a short checklist. Open it any time with **Get started** in the ERD Studio sidebar (or its ▶ button), or **ERD Studio: Watch Getting Started Video**.
 
 **No dbt project yet?** Use the [ERD Studio sample project](https://github.com/liam-machine/erd-studio-sample) on your own computer: a small Kimball-style dbt project with fake coffee-shop data (DuckDB, no account needed). It ships its dbt artifacts, so both the Logical and Physical views work without installing dbt. Run **ERD Studio: Try the Sample Project** (also on the Welcome tab) and VS Code clones it to a folder you choose and offers to open it, or use **Code → Download ZIP** on GitHub and open the unzipped folder.
 
@@ -144,53 +150,6 @@ Use ERD Studio for your **logical models**: design tables, relationships, and bu
 For now, add a `dbt_project.yml` file containing `name: logical_models` to your project root and reload VS Code. The extension still uses that file to recognise the project; no dbt build or warehouse connection is needed for logical modelling.
 
 Physical comparison needs dbt, so the canvas stays on the Logical stage — everything else works unchanged.
-
-## Telemetry
-
-ERD Studio sends one small, anonymous usage report a day, so the author can see which features get used and which errors people hit. It never contains model, column, domain or project names, file paths, file contents, error messages or anything you typed.
-
-**What is sent.** For the previous UTC day, if you used ERD Studio that day:
-
-| Field | What it holds |
-|---|---|
-| `v` | The report format version (`1`) |
-| `installId` | A random ID, made up by ERD Studio the first time it runs in a VS Code profile, and kept. It is not VS Code's machine ID and is not derived from anything about you or your machine. (Until 1.6.2 it was replaced every 30 days.) |
-| `day` | The UTC date the counts describe |
-| `extVersion`, `vscodeMajor`, `os` | ERD Studio version (the one that did the counting), VS Code version (major.minor only), and `darwin` / `win32` / `linux` / `other` |
-| `host` | Which editor, from a fixed list: `vscode`, `vscodeInsiders`, `cursor`, `windsurf`, `vscodium`, `trae`, `kiro`, `positron`, `antigravity` or `other` |
-| `remote` | Where the extension runs: `local`, `ssh`, `wsl`, `container`, `codespaces`, `web` or `other` — never a host name |
-| `dev` | Whether the day included an Extension Development Host or test run (so the author's own testing can be left out) |
-| `assistants` | Which AI assistants are on the machine, from `claude`, `copilot`, `codex`, `gemini`, `cursor`. Found the same way the Welcome panel finds them — installed VS Code extensions, the editor's name and command names on `PATH` — and nothing is run |
-| `harnesses` | Which ERD Studio AI helper files are installed in the open project: `claude`, `agents`, `copilot`, `gemini`, `codex` |
-| `activeDays28`, `canvasDays28` | On how many of the last 28 days ERD Studio started, and a diagram was opened, as a range: `0`, `1`, `2-3`, `4-7`, `8-14`, `15-28`. Counted on your machine; the dates themselves are never sent |
-| `firstCanvas` | How long after ERD Studio first ran the first diagram was opened, as a range like `tenure`, or `never` |
-| `tenure` | Days since ERD Studio first ran, as a range: `0`, `1-7`, `8-30`, `31-90`, `90+` |
-| `activation` | Whether a dbt project was found (`project_found` / `no_project`) |
-| `hasSemanticDir` | Whether the project has an `.erd-studio` folder |
-| `domainCount` | Number of diagrams, as a range: `0`, `1-3`, `4-10`, `10+` |
-| `activations`, `canvasOpens` | How many times ERD Studio started and a diagram was opened (capped at 50 and 200) |
-| `stages`, `schemaFormats` | Which stages were viewed (`logical`, `physical`) and which diagram file formats were opened (`v5`, `v4`) |
-| `modelCount` | The largest diagram opened, as a range: `none`, `1-10`, `11-50`, `51+` |
-| `manifest`, `catalog` | Whether dbt's `manifest.json` was `ok`, `missing` or `stale`, and whether a `catalog.json` was present |
-| `features` | How often each of a fixed list of features was used (capped at 100 each): the physical stage, compare, sync plan, Execute with Claude, dbt compile, notes, auto layout, adding a model, adding a relationship, installing each AI harness, migrating to v5, opening Send Feedback, `drawFromDbt` (drawing a diagram with Draw from dbt), `addFromDbt` (adding models with the empty diagram's Add models from dbt button), `emptyCanvas` (an empty diagram being opened), `dbtParse` (clicking Run dbt parse) `harnessPresent` (at most once a day: the open project has an ERD Studio AI helper file installed); at most once a day each, where a missing dbt `manifest.json` was met — `manifestMissingCanvas` (opening a Logical diagram), `manifestMissingPhysical` (the Physical stage), `manifestMissingDraw` (Draw from dbt), `manifestMissingWelcome` (the Welcome panel), `manifestMissingRefresh` (Refresh Manifest) — and why: `manifestNoTargetDir` (the dbt artifact folder does not exist), `manifestCustomTargetPath` (a yes/no only: `target-path` is not the default `target` — the path itself is never sent), `manifestNoDbtFound` (no dbt executable was found; dbt is never run to check); `manifestAfterParse` (a missing manifest appeared within 10 minutes of Run dbt parse opening its terminal), `manifestAppeared` (it appeared some other way) and `manifestHintDismissed` (the Logical-stage missing-manifest hint was dismissed); diagram edits by kind — `editModel`, `editColumn`, `editKey`, `editDetails` (description, grain, alias, role, rationale), `editRelationship`, `editLayout`, `editAnnotation`, `editUndo`; how long auto layout took — `layoutUnder1s`, `layout1to5s`, `layoutOver5s`, `layoutFailed`; where diagrams come from — `domainCreated` (New Domain) and `domainCreatedExternal` (a diagram file appeared that ERD Studio did not write, e.g. from your AI assistant or git); and the getting-started steps — `walkthroughOpened`, `gettingStartedOpened`, `videoHalf`, `videoEnded`, `videoError`, `trySample`, `setupAiHelper`, `copyPrompt`, `openClaude`, `openCopilotChat`, `harnessInstallAgents` |
-| `errors` | How often each of a fixed list of error kinds happened (capped at 100 each): manifest malformed / timed out, catalog unreadable, diagram failed to load, model file failed to parse — plus which kind of failure it was (`modelFileRead`: couldn't be read, `modelFileYamlIndent`: indentation or tabs, `modelFileYamlScalar`: unquoted text, e.g. containing `: `, `modelFileYamlStructure`: more than one document, `modelFileYamlDuplicateKey`: a key given twice, `modelFileYamlOther`) — invalid `layers.json`, edit rejected by VS Code, migration failed, other. A missing manifest is not counted as an error (since 1.6.2) — it is the normal state before dbt has run, and the `manifest` field above already says so |
-
-The full list of properties is also in [`telemetry.json`](https://github.com/liam-machine/erd-studio/blob/main/telemetry.json).
-
-**Where it goes.** An HTTPS request to `erd-studio-telemetry.w2solutions.ai`, a Cloudflare Worker run by the extension author. The Worker checks every field against the lists above and stores only those fields. It does not store your IP address, user agent or any other request header. Individual reports are deleted after 90 days; after that only daily totals are kept, with no install IDs.
-
-**Turning it off.** Either setting stops it completely:
-
-- VS Code's own `telemetry.telemetryLevel` set to `off` (ERD Studio also respects `error` and `crash`, which send no usage data), or
-- `erdStudio.telemetry.enabled` set to `false`. This setting can only turn telemetry off, never on, and only your user settings count — a repository's `.vscode/settings.json` cannot change it.
-
-Turning telemetry off also throws away anything already counted for that day, and the record of recent active days. A failed send is dropped, never retried.
-
-**Seeing what is sent.** Reports go through VS Code's own telemetry logger. Run **Developer: Set Log Level…**, set the telemetry log to **Trace**, then open the **Output** panel and choose **Extension Telemetry**: each report appears there as it is sent. VS Code's `--telemetry` command-line flag also lists every event ERD Studio declares.
-
-[File format reference](https://github.com/liam-machine/erd-studio/blob/main/docs/semantic-domain-json-reference.md) · [Release notes](https://github.com/liam-machine/erd-studio/blob/main/CHANGELOG.md) · [Send feedback](https://github.com/liam-machine/erd-studio/issues) · [Contribute on GitHub](https://github.com/liam-machine/erd-studio)
-
-Free to use under the [PolyForm Shield License 1.0.0](https://github.com/liam-machine/erd-studio/blob/main/LICENSE): use it, modify it and share it, at home or at work, for any purpose except offering a product that competes with ERD Studio. The source is public; only the author may sell it or relicense it.
 
 ## Star history
 
