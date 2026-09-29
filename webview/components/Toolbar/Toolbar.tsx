@@ -421,7 +421,7 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
 
   // --- Auto Layout handlers ------------------------------------------------
 
-  const runLayout = useCallback(async () => {
+  const runLayout = useCallback(async (firstOpen = false) => {
     if (!domain || nodes.length === 0 || isLayouting) {
       return;
     }
@@ -429,7 +429,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     setIsLayouting(true);
     const startedAt = performance.now();
     const reportLayout = (ok: boolean) => {
-      const done: WebviewMessage = { type: 'layoutFinished', payload: { ms: Math.round(performance.now() - startedAt), ok } };
+      const ms = Math.round(performance.now() - startedAt);
+      const done: WebviewMessage = { type: 'layoutFinished', payload: firstOpen ? { ms, ok, firstOpen } : { ms, ok } };
       vscode.postMessage(done);
     };
 

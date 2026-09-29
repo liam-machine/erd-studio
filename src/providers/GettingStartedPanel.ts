@@ -111,15 +111,21 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
     { modal: true },
     SAMPLE_DOWNLOAD_ACTION,
   );
-  if (choice !== SAMPLE_DOWNLOAD_ACTION) { return 'cancelled'; }
+  if (choice !== SAMPLE_DOWNLOAD_ACTION) {
+    telemetry.feature('trySampleCancelled');
+    return 'cancelled';
+  }
 
   if (vscode.extensions.getExtension(GIT_EXTENSION_ID)) {
     try {
       await vscode.commands.executeCommand('git.clone', SAMPLE_REPO_CLONE_URL);
       return 'cloned';
     } catch (err) {
+      telemetry.error('sampleCloneFailed');
       console.warn('[ERD Studio] git.clone of the sample project failed; offering the GitHub page instead:', err);
     }
+  } else {
+    telemetry.feature('trySampleNoGit');
   }
 
   const pick = await vscode.window.showInformationMessage(SAMPLE_FALLBACK_MESSAGE, SAMPLE_OPEN_ON_GITHUB_ACTION);
@@ -328,7 +334,8 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
       },
       OPEN,
     );
-    if (choice !== OPEN) { return; }
+    if (choice !== OPEN) { telemetry.feature('openClaudeCancelled'); return; }
+    telemetry.feature('openClaudeCli');
     // Git Bash on Windows would otherwise rewrite "/erd-studio-setup" into a path.
     const env = { MSYS_NO_PATHCONV: '1' };
     if (launch.kind === 'process') {
@@ -345,6 +352,7 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
   }
 
   if (availability === 'extension') {
+    telemetry.feature('openClaudeExtension');
     // The extension's chat takes the prompt itself, never a `cd … && claude` line.
     await vscode.env.clipboard.writeText(SETUP_PROMPT);
     const available = new Set(await vscode.commands.getCommands(true));
@@ -353,8 +361,12 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
       try {
         await vscode.commands.executeCommand(open);
       } catch (err) {
+        telemetry.error('claudeOpenFailed');
         console.warn('[GettingStarted] Could not open Claude Code:', err);
       }
+    } else {
+      // CLAUDE_CODE_OPEN_COMMANDS are best guesses: this says they have gone stale.
+      telemetry.error('claudeOpenCommandMissing');
     }
     const lead = `${open ? 'Claude Code is open.' : 'Open Claude Code from its icon in the sidebar.'} ` +
       `Paste ${SETUP_PROMPT} (it's on your clipboard) and press Enter. `;
@@ -380,6 +392,7 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
     return;
   }
 
+  telemetry.feature('openClaudeNotFound');
   await vscode.env.openExternal(vscode.Uri.parse(GETTING_STARTED_EXTERNAL_URLS.claudeCodeDocs));
 }
 
@@ -410,6 +423,7 @@ export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceF
   await vscode.env.clipboard.writeText(SETUP_PROMPT);
   const available = new Set(await vscode.commands.getCommands(true));
   if (!available.has(COPILOT_CHAT_OPEN_COMMAND)) {
+    telemetry.feature('copilotChatNotFound');
     await vscode.env.openExternal(vscode.Uri.parse(GETTING_STARTED_EXTERNAL_URLS.copilotDocs));
     return;
   }
@@ -418,7 +432,9 @@ export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceF
   } catch {
     try {
       await vscode.commands.executeCommand(COPILOT_CHAT_OPEN_COMMAND);
+      telemetry.feature('copilotChatNoArgs');
     } catch (err) {
+      telemetry.error('copilotChatOpenFailed');
       console.warn('[GettingStarted] Could not open Copilot Chat:', err);
     }
   }
@@ -498,8 +514,10 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
   try {
     let result = deps.harness.installRecommended(deps.root, { replaceUnmanaged: false, assistants });
     if (result.status === 'needs-confirmation') {
+      telemetry.feature('setupHelperConflict');
       const choice = await deps.confirmReplace(result.unmanaged, recommendedSkillTargets(assistants));
       if (choice === undefined) {
+        telemetry.feature('setupHelperCancelled');
         return { ok: false, filesWritten: [], message: SETUP_CANCELLED_MESSAGE };
       }
       result = choice === 'replace'
@@ -507,6 +525,7 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
         : deps.harness.installRecommended(deps.root, { replaceUnmanaged: false, keepUnmanaged: true, assistants });
     }
     if (result.status === 'failed' || result.status === 'needs-confirmation') {
+      telemetry.error('setupHarnessFailed');
       return {
         ok: false,
         filesWritten: result.filesWritten,
@@ -519,7 +538,11 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
 
     const launched = await deps.launcher.install(deps.launcherOptions);
     filesWritten.push(...launched.filesWritten.map((p) => displayLauncherPath(p, deps.launcherOptions.homeDir)));
+    // Not fatal on its own (a node >= 18 on PATH still runs the shim), but it
+    // means VS Code's own runtime could not run a script on this machine.
+    if (!launched.runtimeVerified) telemetry.error('launcherRuntimeUnverified');
     if (!launched.ok) {
+      telemetry.error('launcherInstallFailed');
       return {
         ok: false,
         filesWritten,
@@ -536,6 +559,7 @@ export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOu
         : setupReadyMessage(assistants),
     };
   } catch (err) {
+    telemetry.error('setupFailed');
     return {
       ok: false,
       filesWritten,
@@ -615,6 +639,7 @@ export class GettingStartedPanel {
     this.disposables.push(
       panel.webview.onDidReceiveMessage((message: unknown) => {
         void this.handleMessage(message).catch((err) => {
+          telemetry.error('welcomePanelFailed');
           console.error('[GettingStarted] Message handler failed:', err);
         });
       }),
@@ -659,6 +684,7 @@ export class GettingStartedPanel {
       const summary = await this.projectSummary();
       if (summary && current()) { this.post({ type: 'status', payload: { ...status, summary } }); }
     } catch (err) {
+      telemetry.error('welcomePanelFailed');
       console.error('[GettingStarted] Status check failed:', err);
     }
   }
@@ -705,6 +731,7 @@ export class GettingStartedPanel {
       return true;
     }
     if (helper !== 'missing') { return true; }
+    telemetry.feature('helperFirstPrompt');
     const pick = await vscode.window.showInformationMessage(HELPER_FIRST_MESSAGE, SETUP_HELPER_ACTION);
     if (pick === SETUP_HELPER_ACTION) {
       await this.runSetupFromPanel();
@@ -744,9 +771,11 @@ export class GettingStartedPanel {
         }
         break;
       case 'openDomain':
+        telemetry.feature('welcomeOpenDiagram');
         await this.deps.openCanvas();
         break;
       case 'drawFromDbt':
+        telemetry.feature('welcomeDrawFromDbt');
         await vscode.commands.executeCommand(DRAW_FROM_DBT_COMMAND);
         // The draft opens in its own tab; this one should now lead with "Open your diagrams".
         await this.postStatus();

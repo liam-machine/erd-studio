@@ -22,8 +22,8 @@ npm scripts at the repo root may come to depend on it.
 ## Read this before you deploy it
 
 Running this Worker means holding data about other people's use of the
-extension. Keep these promises — the extension's README makes them to users on
-your behalf:
+extension. Keep these promises — the extension makes them to users on your
+behalf (its `telemetry.json` lists every field):
 
 1. **Store only the validated body fields.** A row is the fields in
    `schema.sql`, every one of them an enum, a bucket, a bounded integer, a date,
@@ -50,8 +50,8 @@ your behalf:
    numbers only; the tests capture every log line and search it for canaries.
 
 If you change what is collected, change the contract in the extension, this
-Worker, `schema.sql`, the extension README's telemetry section and the local
-archive together.
+Worker, `schema.sql`, the extension's `telemetry.json` and the local archive
+together.
 
 ---
 
@@ -101,6 +101,10 @@ every insert with a 503):
 npx wrangler d1 execute erd-studio-telemetry --remote --file migrations/0002_host_assistants_retention.sql
 npm test && npm run deploy
 ```
+
+The same order applies to a release that only adds `features` or `errors`
+keys (no migration then): `npm test && npm run deploy` here first, because
+an older Worker drops every key it does not list.
 
 Deploy the Worker **before** the extension release that sends the new fields.
 An older Worker would still accept the new heartbeats (it drops unknown
@@ -157,6 +161,10 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 # Feature adoption (features is a JSON object of counts)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT j.key AS feature, COUNT(*) AS installs, SUM(j.value) AS uses FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-7 days') GROUP BY j.key ORDER BY installs DESC"
+
+# Errors by extension version (e.g. the getting-started failures after a release)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.ext_version, j.key AS code, COUNT(*) AS installs, SUM(j.value) AS total FROM heartbeats h, json_each(h.errors) j WHERE h.day >= date('now','-14 days') AND COALESCE(h.dev, 0) = 0 GROUP BY h.ext_version, j.key ORDER BY h.ext_version DESC, installs DESC"
 ```
 
 Prefer aggregates. There is rarely a reason to look at individual rows, and

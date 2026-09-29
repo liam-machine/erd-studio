@@ -12,6 +12,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Changed
 - **A new one-minute getting-started video.** The Welcome tab and the **Get started with ERD Studio** walkthrough now play a 60-second tour of the quick start: install, open your dbt project, **Draw from dbt**, look around the diagram, switch to **Physical**, and where to go next (the AI helper, or the sample project). It replaces the two-minute tour of the AI-guided setup.
+- The anonymous daily usage report now also counts where the getting-started steps (Draw from dbt, Add models from dbt, the sample project, Set Up My AI Helper, opening Claude Code or Copilot Chat) are stopped part-way or hit an error. Still fixed keys only — never names, paths or messages; every field is listed in `telemetry.json`.
 
 ## 1.6.3 — 2026-09-29
 
