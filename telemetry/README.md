@@ -22,8 +22,8 @@ npm scripts at the repo root may come to depend on it.
 ## Read this before you deploy it
 
 Running this Worker means holding data about other people's use of the
-extension. Keep these promises — the extension's README makes them to users on
-your behalf:
+extension. Keep these promises — the extension makes them to users on your
+behalf (its `telemetry.json` lists every field):
 
 1. **Store only the validated body fields.** A row is the fields in
    `schema.sql`, every one of them an enum, a bucket, a bounded integer, a date,
