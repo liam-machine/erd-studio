@@ -1,4 +1,4 @@
-// 9 · End card: icon, name, the promise, the three steps as chips, "free & open source" and where
+// 9 · End card: icon, name, the promise, the three steps as chips, "free, source on GitHub" and where
 // to find it. Everything is on screen within ~1 s so the poster (end-card start + 1.5 s) is complete.
 import { appear, appIcon, ICON } from '../lib.js';
 import { EXTENSION, WALKTHROUGH } from '../editor.js';
@@ -18,7 +18,7 @@ export default {
       <div class="abs" style="left:0;right:0;top:492px;text-align:center;font-size:42px;font-weight:700;letter-spacing:-.01em;color:var(--text);${appear(t, 0.3)}">Your dbt project, <span style="color:var(--text-2)">drawn in a minute.</span></div>
       <div class="abs" style="left:0;right:0;top:600px;display:flex;justify-content:center;align-items:center;gap:22px">
         ${chip(a, false, 0.45)}${arrow(0.5)}${chip(b, false, 0.55)}${arrow(0.6)}${chip(c, true, 0.65)}</div>
-      <div class="abs" style="left:0;right:0;top:744px;text-align:center;font-size:32px;font-weight:600;${appear(t, 0.8)}"><span style="color:var(--green);font-weight:700">Free &amp; open source</span><span style="color:var(--text-2)"> · VS Code extension · no AI needed</span></div>
+      <div class="abs" style="left:0;right:0;top:744px;text-align:center;font-size:32px;font-weight:600;${appear(t, 0.8)}"><span style="color:var(--green);font-weight:700">Free</span><span style="color:var(--text-2)"> · source on GitHub</span><span style="color:var(--text-2)"> · VS Code extension · no AI needed</span></div>
       <div class="abs" style="left:0;right:0;top:808px;text-align:center;font-size:26px;color:var(--text-2);${appear(t, 0.9)}">Search the Extensions view for <span style="color:var(--text);font-weight:600">${EXTENSION.name}</span>, then follow <span style="color:var(--text);font-weight:600">${WALKTHROUGH.title}</span></div>`;
   },
 };

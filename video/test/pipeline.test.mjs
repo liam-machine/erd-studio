@@ -219,3 +219,11 @@ test('the end card names the real steps', async () => {
   assert.equal(STEPS[1], wt.steps.find((s) => s.id === 'openProject').title);
   assert.equal(STEPS[2], editor.WALKTHROUGH.steps.find((s) => s.id === 'draw').button);
 });
+
+test('nothing calls ERD Studio open source (the licence is PolyForm Shield: source-available)', () => {
+  assert.match(read('LICENSE'), /PolyForm Shield/);
+  const dir = join(HERE, '..', 'player');
+  const files = ['thumbnail.html', 'editor.js', ...readdirSync(join(dir, 'scenes')).map((f) => `scenes/${f}`)];
+  for (const f of files) assert.doesNotMatch(readFileSync(join(dir, f), 'utf8'), /open[ -]source/i, f);
+  assert.doesNotMatch(JSON.stringify(script), /open[ -]source/i, 'script.yaml');
+});
