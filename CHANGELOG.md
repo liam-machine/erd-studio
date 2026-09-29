@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.4 — 2026-09-29
 
 ### Changed
 - **A new one-minute getting-started video.** The Welcome tab and the **Get started with ERD Studio** walkthrough now play a 60-second tour of the quick start: install, open your dbt project, **Draw from dbt**, look around the diagram, switch to **Physical**, and where to go next (the AI helper, or the sample project). It replaces the two-minute tour of the AI-guided setup.
