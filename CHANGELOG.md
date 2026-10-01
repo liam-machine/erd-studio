@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.5 — 2026-10-01
 
 ### Fixed
 - **Try the Sample Project on a machine without Git** (common on Windows) now goes straight to a **Download ZIP** button instead of failing a clone first. VS Code's Git extension is always installed, but without Git itself it has no clone command. The notice also names the folder the ZIP actually unzips to (`erd-studio-sample-main`).
