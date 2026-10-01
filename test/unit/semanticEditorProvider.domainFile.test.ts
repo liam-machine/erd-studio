@@ -17,8 +17,10 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
-import { DomainService } from '../../src/services/domainService';
+import { DomainValidationError } from '@erd-studio/core';
+import { classifyDomainLoadFailure, SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { DomainFileError, DomainService } from '../../src/services/domainService';
+import { telemetry } from '../../src/services/telemetryService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import { ManifestService } from '../../src/services/manifestService';
@@ -161,6 +163,44 @@ describe('a domain file caught mid-write', () => {
     expect(types(panel)).not.toContain('domainLoaded');
   });
 
+  it('re-reads a file another process has locked (Windows EBUSY) and loads it once the lock clears', async () => {
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    // What a Windows sharing violation looks like by the time it reaches the
+    // provider: the file exists, but this read of it failed.
+    const real = DomainService.prototype.getDomain;
+    let locked = 2;
+    vi.spyOn(DomainService.prototype, 'getDomain').mockImplementation(function (this: DomainService, p: string) {
+      if (p === file && locked-- > 0) {
+        throw new DomainFileError('unreadable', p, `Failed to read domain file: EBUSY: resource busy or locked, open '${p}'`);
+      }
+      return real.call(this, p);
+    });
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(
+      () => expect(types(panel)).toContain('domainLoaded'),
+      { timeout: 4000, interval: 20 },
+    );
+    expect(errors(panel)).toHaveLength(0);
+    expect(locked).toBeLessThan(0);
+  });
+
+  it('reports a file that stays unreadable once the retries run out', async () => {
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    vi.spyOn(DomainService.prototype, 'getDomain').mockImplementation((p: string) => {
+      throw new DomainFileError('unreadable', p, 'Failed to read domain file: EACCES: permission denied');
+    });
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 20 });
+    expect(errors(panel)[0].payload.message).toContain('EACCES');
+    expect(DomainService.prototype.getDomain).toHaveBeenCalledTimes(4);
+  });
+
   it('does not stall on a structurally invalid file — no retry, one error', async () => {
     const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
     // Parses fine; it is simply not a domain. Re-reading cannot change that,
@@ -236,5 +276,43 @@ describe('an error the user is already looking at', () => {
     // reply would leave the canvas showing "Loading domain…" for ever.
     panel._simulateMessage({ type: 'ready' });
     await vi.waitFor(() => expect(errors(panel)).toHaveLength(2), { timeout: 4000, interval: 20 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('domainLoad telemetry carries a fixed reason', () => {
+  it('classifies each kind of failure without reading its message', () => {
+    expect(classifyDomainLoadFailure(new DomainFileError('missing', '/x.json', 'gone'))).toBe('missing');
+    expect(classifyDomainLoadFailure(new DomainFileError('unreadable', '/x.json', 'EBUSY'))).toBe('unreadable');
+    expect(classifyDomainLoadFailure(new DomainFileError('empty', '/x.json', 'empty'))).toBe('json');
+    expect(classifyDomainLoadFailure(new DomainFileError('invalid-json', '/x.json', 'bad'))).toBe('json');
+    expect(classifyDomainLoadFailure(new DomainValidationError('no schemaVersion'))).toBe('invalid');
+    expect(classifyDomainLoadFailure(new TypeError("Cannot read properties of undefined (reading 'x')"))).toBe('internal');
+    expect(classifyDomainLoadFailure('a string')).toBe('internal');
+  });
+
+  it('records domainLoad and its reason once per distinct error', async () => {
+    const error = vi.spyOn(telemetry, 'error');
+    const file = path.join(root, '.erd-studio', 'silver', 'showcase.json');
+    fs.writeFileSync(file, JSON.stringify({ nope: true }));
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    expect(error.mock.calls.map((c) => c[0])).toEqual(['domainLoad', 'domainLoadInvalid']);
+  });
+
+  it('records a template opened as a canvas as notDomain', async () => {
+    const error = vi.spyOn(telemetry, 'error');
+    const templates = fs.readdirSync(path.join(root, '.erd-studio', 'templates')).filter((f) => f.endsWith('.json'));
+    const file = path.join(root, '.erd-studio', 'templates', templates[0]);
+
+    const { panel } = await open(root, file);
+    panel._simulateMessage({ type: 'ready' });
+
+    await vi.waitFor(() => expect(errors(panel)).toHaveLength(1), { timeout: 4000, interval: 10 });
+    expect(error.mock.calls.map((c) => c[0])).toEqual(['domainLoad', 'domainLoadNotDomain']);
   });
 });
