@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { stringify as toYaml } from 'yaml';
+import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { relationshipKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
 import { fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
@@ -241,6 +242,14 @@ describe('fixesFromPlan', () => {
     expect(fixes.filter((f) => f.kind === 'resolve-phantom')).toHaveLength(1);
     expect(fixes[fixes.length - 1].severity).toBe('advisory');
   });
+
+  it('names the from-model yml for a relationship stored in the model library (#126)', () => {
+    const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
+      inLibrary: new Set([relationshipKey({ fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' })]),
+      addToLibrary: true,
+    });
+    expect(fixes.find((f) => f.kind === 'set-cardinality')).toMatchObject({ file: '.erd-studio/logical-models/f.yml' });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -249,7 +258,14 @@ describe('fixesFromPlan', () => {
 // ---------------------------------------------------------------------------
 
 /** What the skill's "building-the-model" recipe writes, done mechanically. */
-function writeModelFromInventory(root: string, inventory: InventoryResult, layer: string, domain: string): string {
+function writeModelFromInventory(
+  root: string,
+  inventory: InventoryResult,
+  layer: string,
+  domain: string,
+  /** Where the relationships go: the domain file, or each from-model's yml (#126, the default for a first diagram). */
+  home: 'domain' | 'library' = 'domain',
+): string {
   const semantic = path.join(root, '.erd-studio');
   fs.mkdirSync(path.join(semantic, 'logical-models'), { recursive: true });
   for (const m of inventory.models) {
@@ -265,6 +281,13 @@ function writeModelFromInventory(root: string, inventory: InventoryResult, layer
         ...(pk.has(c.name) ? { isPrimaryKey: true } : {}),
         ...(fk.has(c.name) ? { isForeignKey: true } : {}),
       })),
+      ...(home === 'library' && inventory.relationships.some((r) => r.fromModel === m.name)
+        ? {
+            relationships: inventory.relationships
+              .filter((r) => r.fromModel === m.name)
+              .map(({ fromModel: _from, ...rest }) => rest),
+          }
+        : {}),
     };
     fs.writeFileSync(path.join(semantic, 'logical-models', `${m.name}.yml`), toYaml(doc));
   }
@@ -275,7 +298,7 @@ function writeModelFromInventory(root: string, inventory: InventoryResult, layer
     domain,
     layer,
     description: 'Built from inventory',
-    logical: { models: inventory.models.map((m) => m.name), relationships: inventory.relationships },
+    logical: { models: inventory.models.map((m) => m.name), relationships: home === 'domain' ? inventory.relationships : [] },
     viewConfig: {},
   }, null, 2));
   return file;
@@ -324,6 +347,38 @@ describe('end to end: inventory → logical model → diff exits 0', () => {
       kind: 'add-relationship',
       severity: 'blocking',
       relationship: dropped,
+    }));
+  });
+});
+
+describe('end to end, relationships in the model library (#126): inventory → logical model → diff exits 0', () => {
+  it('dbt-project', async () => {
+    const root = copyProject('dbt-project');
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    const models = ['fct_order', 'dim_customer', 'dim_project', 'dim_task', 'fct_task_event', 'fct_sale', 'dim_region', 'dim_date'];
+    const inventory = JSON.parse((await run(['inventory', '--models', models.join(','), '--json'], root)).out) as InventoryResult;
+
+    const file = writeModelFromInventory(root, inventory, 'silver', 'orders', 'library');
+    expect(JSON.parse(fs.readFileSync(file, 'utf-8')).logical.relationships).toEqual([]);
+
+    const diff = await run(['diff', '--domain', path.relative(root, file), '--json'], root);
+    const d = (JSON.parse(diff.out) as DiffResult).domains[0];
+    expect(d.fixes.filter((f) => f.severity === 'blocking')).toEqual([]);
+    expect(diff.code).toBe(0);
+    expect(d.counts.matchedRelationships).toBe(inventory.relationships.length);
+
+    // Drift in the library is caught, and the fix names the model file, not the domain.
+    const dropped = inventory.relationships[0];
+    const ymlPath = path.join(root, '.erd-studio', 'logical-models', `${dropped.fromModel}.yml`);
+    const yml = parseYaml(fs.readFileSync(ymlPath, 'utf-8')) as { relationships: unknown[] };
+    yml.relationships = yml.relationships.filter((r) => (r as { toModel: string }).toModel !== dropped.toModel
+      || (r as { fromColumn: string }).fromColumn !== dropped.fromColumn);
+    fs.writeFileSync(ymlPath, toYaml(yml));
+    const drift = await run(['diff', '--domain', path.relative(root, file), '--json'], root);
+    expect(drift.code).toBe(1);
+    expect(JSON.parse(drift.out).domains[0].fixes).toContainEqual(expect.objectContaining({
+      kind: 'add-relationship',
+      file: `.erd-studio/logical-models/${dropped.fromModel}.yml`,
     }));
   });
 });

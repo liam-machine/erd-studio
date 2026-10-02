@@ -10,7 +10,7 @@
 import { parseDocument, isAlias, isMap, isPair, isScalar, isSeq, visit } from 'yaml';
 import type { Alias, Document, Node, Pair } from 'yaml';
 
-import type { ColumnDef, SemanticModel } from './types/semantic.js';
+import type { Cardinality, ColumnDef, ModelRelationship, SemanticModel } from './types/semantic.js';
 import { readMeta } from './meta.js';
 import { checkLimit } from './limits.js';
 
@@ -77,6 +77,7 @@ interface YamlModel {
   rationale?: Record<string, string>;
   meta?: unknown;
   columns?: YamlColumn[];
+  relationships?: unknown;
 }
 
 interface YamlColumn {
@@ -374,5 +375,36 @@ function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
       });
   }
 
+  const relationships = readRelationships(raw.relationships);
+  if (relationships.length > 0) model.relationships = relationships;
+
   return model;
+}
+
+const CARDINALITIES: ReadonlySet<string> = new Set<Cardinality>(['many-to-one', 'one-to-one', 'one-to-many', 'many-to-many']);
+
+/**
+ * A model file's `relationships:` list (issue #126). An entry without the three
+ * string endpoints is skipped; an unrecognised cardinality reads as
+ * many-to-one, as it does in a domain file.
+ */
+function readRelationships(value: unknown): ModelRelationship[] {
+  if (!Array.isArray(value)) return [];
+  const relationships: ModelRelationship[] = [];
+  for (const entry of value) {
+    const r = entry as Record<string, unknown> | null;
+    if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
+    const { fromColumn, toModel, toColumn, cardinality } = r;
+    if (typeof fromColumn !== 'string' || typeof toModel !== 'string' || typeof toColumn !== 'string') continue;
+    if (!fromColumn || !toModel || !toColumn) continue;
+    relationships.push({
+      fromColumn,
+      toModel,
+      toColumn,
+      cardinality: typeof cardinality === 'string' && CARDINALITIES.has(cardinality)
+        ? cardinality as Cardinality
+        : 'many-to-one',
+    });
+  }
+  return relationships;
 }

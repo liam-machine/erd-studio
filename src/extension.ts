@@ -66,6 +66,7 @@ import { readManifestMtime } from './services/manifestStaleness';
 import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
 import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
+import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -384,6 +385,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.organizeModelLibrary',
   'erdStudio.selectDbtProject',
   'erdStudio.resolveDuplicateModel',
+  'erdStudio.moveRelationshipsToLibrary',
 ]);
 
 /**
@@ -1510,6 +1512,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         (domainDocs.length ? ` Repointed ${domainDocs.length} domain${domainDocs.length === 1 ? '' : 's'}.` : ''),
       );
     }),
+    // Store every domain file's relationships once, in their from-models'
+    // library files (#126). The opt-in for a project that keeps them per domain.
+    vscode.commands.registerCommand('erdStudio.moveRelationshipsToLibrary', () =>
+      moveRelationshipsToLibrary({
+        workspaceRoot,
+        semanticDir,
+        domainService,
+        logicalModelService,
+        onWritten: async (domainPaths) => {
+          for (const domainPath of domainPaths) treeProvider.invalidateDomain(domainPath);
+          modelLibraryProvider.refresh();
+          treeProvider.refresh();
+          selectorsService.scheduleRegenerate();
+          await editorProvider.refreshAllOpenDomains();
+        },
+      })),
     vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: ModelLibraryNode | undefined) => {
       if (!node || node.type !== 'model') {
         void vscode.window.showErrorMessage('Reveal in Explorer: No model selected. Right-click a model in the Model Library.');

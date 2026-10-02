@@ -57,7 +57,7 @@ Each fix:
 | `severity` | `blocking` — must be fixed or explained for a clean result. `advisory` — dbt has no type for this column yet; not drift you can fix in ERD Studio |
 | `kind` | What to do (section 2) |
 | `model`, `column` | Where |
-| `file` | The file to edit, relative to the project folder: the model's yml under `logical-models/` (its real folder, when the library is grouped by layer) or the domain JSON |
+| `file` | The file to edit, relative to the project folder: the model's yml under `logical-models/` (its real folder, when the library is grouped by layer) or the domain JSON. For a relationship it is wherever that relationship is defined — the from-model's yml when it is stored in the model library |
 | `from`, `to` | Current logical value and the dbt value, for types and cardinalities. **Write `to`** |
 | `relationship` | The connection, for relationship fixes |
 | `explain` | One plain-English sentence — use it when describing the fix to the user |
@@ -68,12 +68,12 @@ Each fix:
 |---|---|
 | `fix-model-yaml` | **Fix these first.** The file at `file` does not parse (`line` says where). Almost always an unquoted value: wrap it in double quotes (see the quoting rule in building-the-model.md). A tab → spaces; a key twice → keep one; `---` or a code fence → remove it. Re-run the diff before any other fix — until the file parses, every other difference for that model is noise |
 | `add-column` | Append `{ name, dataType, description }` to `columns` in `logical-models/<model>.yml`. `dataType` is `to` (the dbt type), in double quotes; if that is empty, use the SQL cast or `STRING` and add it to "types to confirm". Description: the inventory's text copied verbatim **inside double quotes** (escape any inner `"` as `\"`), or a draft ending in "(draft)" |
-| `remove-column` | Delete the column from the yml, **and** delete any relationship in the domain JSON whose `fromModel`/`fromColumn` or `toModel`/`toColumn` names it |
+| `remove-column` | Delete the column from the yml, **and** delete every relationship that names it: in the domain JSON (`fromModel`/`fromColumn` or `toModel`/`toColumn`), in this model's own `relationships:` (`fromColumn`), and in any other model yml's `relationships:` that points at it (`toModel`/`toColumn`) |
 | `set-type` | Set the column's `dataType` to `to` |
-| `add-relationship` | Append `relationship` (with its `cardinality`) to `logical.relationships` in the domain JSON, then set `isForeignKey: true` on the `fromColumn` in the from-model's yml if it is not already |
-| `remove-relationship` | Remove the matching entry from `logical.relationships`. This is always a question first — see section 3 |
-| `set-cardinality` | Set `cardinality` on the matching relationship in the domain JSON to `to` |
-| `resolve-phantom` | Always a question: rename it in `logical.models` (and its relationships) to the real dbt model name, or remove it from this domain. **Never** delete its `logical-models/*.yml` — other domains may use it |
+| `add-relationship` | Add `relationship` (with its `cardinality`) where the project keeps relationships — the from-model's yml `relationships:` (without `fromModel`) or `logical.relationships` in the domain JSON, by the `/erd-studio` skill's "Where relationships live" — then set `isForeignKey: true` on the `fromColumn` in the from-model's yml if it is not already |
+| `remove-relationship` | Remove the matching entry from wherever it is defined — the from-model's yml `relationships:` or `logical.relationships`. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 |
+| `set-cardinality` | Set `cardinality` on the matching relationship to `to`, in the file `file` names — the from-model's yml `relationships:` or the domain JSON. A yml change shows in every diagram holding both models |
+| `resolve-phantom` | Always a question: rename it in `logical.models` (and its relationships — in the domain JSON and in any model yml's `relationships:` whose `toModel` names it) to the real dbt model name, or remove it from this domain. **Never** delete its `logical-models/*.yml` — other domains may use it |
 
 For `missingModelFiles`: if the model exists in dbt, write its yml from `inventory --models
 <name>` (building-the-model.md). If it does not, treat it like a phantom and ask.
@@ -227,6 +227,7 @@ best-effort and less exact than ERD Studio's own check.
 
 For each model: read its dbt schema yml (and the manifest's node, if `target/manifest.json`
 exists), list its columns and `data_type:` values, and compare them with the logical yml by name,
-ignoring case. Compare `relationships` tests between two models in the domain with
-`logical.relationships`. Fix the logical side as in section 2, and recommend opening the canvas
+ignoring case. Compare `relationships` tests between two models in the domain with the
+relationships the domain draws: its own `logical.relationships` plus every model yml
+`relationships:` entry whose two models are both in the domain. Fix the logical side as in section 2, and recommend opening the canvas
 and clicking **⊕ Diff** as soon as they can.

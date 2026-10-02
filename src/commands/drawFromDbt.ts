@@ -28,6 +28,7 @@ import {
   type DraftSkipped,
 } from '../services/dbtDraft';
 import { pickDraftScope } from '../providers/dbtDraftPicker';
+import { routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
 import { ownWrites } from '../services/ownWriteTracker';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { telemetry } from '../services/telemetryService';
@@ -56,8 +57,8 @@ export interface DrawFromDbtDeps {
   /** `model-paths` from dbt_project.yml. */
   modelPaths: readonly string[];
   layerService: Pick<LayerService, 'getValidLayerIds' | 'getCreatableLayers' | 'getAllLayers' | 'saveConfig'>;
-  domainService: Pick<DomainService, 'listDomains'>;
-  logicalModelService: Pick<LogicalModelService, 'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel'>;
+  domainService: Pick<DomainService, 'listDomains' | 'countDomainFileRelationships'>;
+  logicalModelService: Pick<LogicalModelService, 'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel'>;
   /** Schema yml and manifest; either may be undefined (no yml, never compiled). */
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
@@ -172,6 +173,14 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     // otherwise read as "flat" after one top-level write. A flat library stays
     // flat; one already grouped by layer gets this layer's folder.
     const folder = logicalModelService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
+    // Relationships go to their from-models' library files when the project
+    // keeps them there (#126) — decided, like the folder, before any write.
+    const routed = usesLibraryRelationships(
+      logicalModelService.listModels(),
+      domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
+    )
+      ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
+      : { kept: draft.relationships, changed: [] };
     for (const model of draft.newModels) {
       logicalModelService.saveModel(model, folder);
       written.push(model.name);
@@ -182,10 +191,14 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
       layer: chosenLayer,
       description: `Drawn from dbt: ${pick.scope.label}.`,
       modelNames: draft.modelNames,
-      relationships: draft.relationships,
+      relationships: routed.kept,
     });
     fs.writeFileSync(domainPath, serializeDraftDomainDocument(doc), { encoding: 'utf-8', flag: 'wx' });
     ownWrites.recordWrite(domainPath);
+    // Existing library models that gained a relationship, once the diagram is on disk.
+    for (const model of routed.changed) {
+      if (!draft.newModels.includes(model)) logicalModelService.saveModel(model);
+    }
   } catch (err) {
     // Leave no orphan model files behind a domain that was never written.
     for (const modelName of written) {

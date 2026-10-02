@@ -180,6 +180,11 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "erdStudio.moveRelationshipsToLibrary",
+        "title": "Move Relationships to Model Library",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.resolveDuplicateModel",
         "title": "Give Duplicate Model Its Own Name…",
         "category": "ERD Studio",
@@ -461,6 +466,11 @@
           "group": "navigation@0"
         },
         {
+          "command": "erdStudio.moveRelationshipsToLibrary",
+          "when": "view == erdStudio.modelLibrary",
+          "group": "1_organise@1"
+        },
+        {
           "command": "erdStudio.drawFromDbt",
           "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject",
           "group": "navigation@0"
@@ -616,7 +626,7 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
-    "@erd-studio/core": "0.1.1",
+    "@erd-studio/core": "0.1.2",
     "@erd-studio/renderer": "0.1.1",
     "@xyflow/react": "^12.4.0",
     "elkjs": "^0.9.3",

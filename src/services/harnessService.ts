@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '24';
+export const HARNESS_VERSION = '25';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -135,7 +135,7 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
 
 const SCHEMA_CONTENT = `# ERD Studio — AI Data Modeling Guide
 
-ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and define relationships and layout.
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and hold the layout. Relationships are defined once, in the from-model's YAML, and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see \`Where relationships live\`).
 
 ## Architecture Overview
 
@@ -149,7 +149,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 │   └── gold/
 │       └── fct_sale.yml
 ├── silver/
-│   ├── customer-360.json     ← Domain file (model references + relationships + layout)
+│   ├── customer-360.json     ← Domain file (model references + layout; relationships only in per-domain projects)
 │   └── orders.json
 └── gold/
     └── reporting.json
@@ -207,7 +207,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`
 | \`modelFolder\` | No | Filter for "Add Existing Model" dialog (e.g. \`models/silver\`) |
 | \`stubColumns\` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
 | \`logical.models\` | Yes | Array of model name strings (references to \`logical-models/*.yml\` or \`logical-models/{folder}/*.yml\`) |
-| \`logical.relationships\` | Yes | Array of relationship objects |
+| \`logical.relationships\` | Yes | Array of relationship objects — \`[]\` when the project keeps relationships in the model YAML (see "Where relationships live") |
 | \`viewConfig\` | Yes | Root-level view settings. The extension auto-assigns positions for new models; a new domain written with \`viewConfig: {}\` (no positions at all) is auto-arranged with the canvas's auto layout the first time it opens |
 
 **viewConfig** must be at the root level, not inside \`logical\`. It stores node positions keyed by model name, and optional canvas annotations (build notes):
@@ -237,11 +237,11 @@ Annotations are temporary build notes — visible on the canvas while constructi
 | Change column type, PK/FK/NK flags, SCD type | the model's \`.yml\` |
 | Change grain, modelRole, description, rationale, meta | the model's \`.yml\` |
 | Add a model to a domain diagram | Domain \`.json\` → add name to \`logical.models[]\` AND, if no file for that name exists in any folder, create it — \`logical-models/{layer}/{name}.yml\` (the domain's layer) when the project uses layer folders, else \`logical-models/{name}.yml\` |
-| Remove a model from a domain | Domain \`.json\` → remove name from \`logical.models[]\` AND remove its relationships from \`logical.relationships[]\` |
-| Add/remove/edit a relationship | Domain \`.json\` → \`logical.relationships[]\` |
+| Remove a model from a domain | Domain \`.json\` → remove name from \`logical.models[]\` AND remove its relationships from \`logical.relationships[]\` (relationships in model YAML stay — the domain just stops drawing them) |
+| Add/remove/edit a relationship | The from-model's \`.yml\` → \`relationships:\` when the project keeps relationships in the model library, else domain \`.json\` → \`logical.relationships[]\` — see "Where relationships live" |
 | Change layout positions | Domain \`.json\` → \`viewConfig.positions\` |
 
-> **Common mistake:** Editing the \`.yml\` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the \`.yml\` AND adding the name string to the domain \`.json\`. Similarly, relationships are ONLY stored in the domain \`.json\`, never in the \`.yml\`.
+> **Common mistake:** Editing the \`.yml\` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the \`.yml\` AND adding the name string to the domain \`.json\`. A relationship is stored in exactly one place — the from-model's \`.yml\` or the domain \`.json\`, never both (see \`Where relationships live\`).
 
 ---
 
@@ -295,6 +295,7 @@ columns:
 | \`columns\` | No | Array of column definitions |
 | \`rationale\` | No | Design rationale object (omit if empty) |
 | \`meta\` | No | Free-form metadata map (see "Metadata" below) |
+| \`relationships\` | No | Relationships leaving this model, shared by every domain (see "Where relationships live") |
 
 ### modelRole Values
 
@@ -450,6 +451,23 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 
 **Direction:** \`fromModel\` is always the FK side, \`toModel\` is the PK side. FK column names should match the PK column name of the referenced table.
 
+### Where relationships live
+
+A relationship is defined **once** for the whole project, in the YAML of its \`fromModel\` (the FK side), under \`relationships:\` — the same fields without \`fromModel\`, which is the file's own model. Every domain whose \`logical.models\` holds both ends draws it; a domain missing either end does not. Changing it changes every diagram that shows it.
+
+\`\`\`yaml
+# logical-models/gold/fct_orders.yml
+name: fct_orders
+columns: [...]
+relationships:
+  - fromColumn: customer_id
+    toModel: dim_customer
+    toColumn: customer_id
+    cardinality: many-to-one
+\`\`\`
+
+**Which to use:** put new relationships in the model YAML when **any** model file already has a \`relationships:\` list, or **no** domain file has a \`logical.relationships\` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's \`logical.relationships[]\`, and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same relationship in both places; if they disagree, the model YAML wins.
+
 ---
 
 ## Naming Conventions
@@ -593,9 +611,9 @@ and no \`catalog.json\` to observe the real one. It resolves exactly like
 | \`add-column-to-logical\` | Add column to the model's yml (\`modelContext[name].logicalModelPath\`) columns array, with the dbt column \`meta\` keys the team's metadata list names |
 | \`remove-column-from-logical\` | Remove column from the model's yml (\`logicalModelPath\`) |
 | \`update-type-in-logical\` | Update column \`dataType\` in the model's yml (\`logicalModelPath\`) to the value in \`resolvedDataType\` |
-| \`add-relationship-to-logical\` | Add relationship object to domain JSON \`logical.relationships[]\` using the fromModel/fromColumn/toModel/toColumn from the action |
-| \`remove-relationship-from-logical\` | Remove the matching relationship from domain JSON \`logical.relationships[]\` |
-| \`update-cardinality-in-logical\` | Update \`cardinality\` field on matching relationship in domain JSON to \`targetCardinality\` |
+| \`add-relationship-to-logical\` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action) where the project keeps relationships — the from-model's YAML \`relationships:\` or domain JSON \`logical.relationships[]\` (see "Where relationships live") |
+| \`remove-relationship-from-logical\` | Remove the matching relationship from wherever it is defined — the from-model's YAML \`relationships:\` or domain JSON \`logical.relationships[]\` |
+| \`update-cardinality-in-logical\` | Update \`cardinality\` on the matching relationship, wherever it is defined, to \`targetCardinality\` |
 
 ### Physical-side actions (edit dbt project files)
 
@@ -640,7 +658,7 @@ models:
 
 - **Preserve viewConfig.positions**: Never clear or overwrite layout positions in domain JSON
 - **Match existing patterns**: When editing dbt YAML, follow the formatting and test patterns already present in the file
-- **Cascade deletions**: When removing a model from logical, also remove any relationships referencing it
+- **Cascade deletions**: When removing a model from a domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a model or column, update every model YAML \`relationships:\` entry that points at it
 - **Column ordering**: When adding columns to logical-models YAML, append to the end of the columns array`;
 
 // ---------------------------------------------------------------------------
@@ -749,7 +767,7 @@ function generateGeminiStyleguide(): string {
 1. **Schema version** must be \`5\`
 2. **Required sections**: \`logical\` and \`viewConfig\` must both be present at root level
 3. **Model names** must follow naming conventions: \`dim_\`, \`fct_\`, \`ref_\`, or \`brg_\` prefixes
-4. **Relationships**: \`fromModel\` is always the FK side, \`toModel\` is the PK side
+4. **Relationships**: \`fromModel\` is always the FK side, \`toModel\` is the PK side; each relationship is defined in exactly one place — the from-model's YAML \`relationships:\` or a domain's \`logical.relationships\`
 5. **Logical columns** must have \`dataType\` and \`description\`
 6. **viewConfig** must be at root level (not inside the logical section)
 7. **Boolean key flags** (\`isPrimaryKey\`, \`isForeignKey\`, \`isNaturalKey\`) should only be present when \`true\`

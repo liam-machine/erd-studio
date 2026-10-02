@@ -121,7 +121,7 @@ import type { DisplayDomain } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignModel, Meta, Stage } from '../types/semantic';
 import type { UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import type { GroundTruth } from '../types/syncPlan';
-import type { NodePosition, Relationship, UnifiedDomain } from '../types/semantic';
+import type { NodePosition, Relationship, SemanticModel, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
 import { layoutFeature, type TelemetryFeature } from '../services/telemetryPayload';
@@ -137,6 +137,18 @@ import {
   type DraftSkipped,
 } from '../services/dbtDraft';
 import { pickDraftScope } from './dbtDraftPicker';
+import { readDomainRelationships } from '../commands/moveRelationshipsToLibrary';
+import {
+  hasLibraryRelationship,
+  removeColumnRelationships,
+  removeLibraryRelationships,
+  renameColumnInRelationships,
+  renameModelInRelationships,
+  routeToLibrary,
+  sharedRelationshipCount,
+  upsertLibraryRelationship,
+  usesLibraryRelationships,
+} from '../services/libraryRelationships';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
 import { normaliseName } from '../services/nameUtils';
 
@@ -317,6 +329,12 @@ import { sameName } from '../types/naming';
  */
 export const MANIFEST_HINT_DISMISSED_KEY = 'erdStudio.manifestHintDismissed';
 
+/**
+ * workspaceState key: "Don't Ask Again" on the offer to move a project's
+ * relationships into the model library (#126). Per workspace.
+ */
+export const RELATIONSHIP_MOVE_DECLINED_KEY = 'erdStudio.relationshipMoveDeclined';
+
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
 export const PHYSICAL_READ_ONLY_MESSAGE = 'Physical stage is read-only. Switch to the Logical stage to make changes.';
 
@@ -365,6 +383,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Keyed by document URI to support concurrent edits to multiple open domains.
    */
   private readonly pendingUpdates = new Map<string, boolean>();
+  /** The move-to-library offer is made at most once per session (#126). */
+  private relationshipMoveOffered = false;
 
   /**
    * The last load failure posted to each panel, so an error the user is
@@ -864,6 +884,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // The initial load is the one refresh path allowed to persist
             // auto-computed positions for models that lack them.
             await this.sendDomainData(document, webviewPanel.webview, panelKey, { persistPositions: true });
+            void this.maybeOfferRelationshipMove();
             break;
           case 'requestReload':
             // Webview detected it was orphaned (e.g. extension update before
@@ -1568,12 +1589,78 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return `Model "${modelName}" not found in logical-models/.`;
   }
 
+  /**
+   * Whether this project keeps relationships in the model library (#126) —
+   * see `usesLibraryRelationships` for the opt-in rule.
+   */
+  private relationshipsInLibrary(models: readonly SemanticModel[]): boolean {
+    const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.logicalModelService.getModelsDir()));
+    return usesLibraryRelationships(models, this.domainService.countDomainFileRelationships(this.workspaceRoot, semanticDir));
+  }
+
+  /**
+   * Relationships an add-models edit would put in this domain file, sent to
+   * their from-models' library files instead when the project keeps them
+   * there (#126). `newModels` are the models the same edit creates.
+   */
+  private routeAddedRelationships(
+    added: readonly Relationship[],
+    newModels: readonly SemanticModel[],
+  ): { kept: Relationship[]; saves: SemanticModel[] } {
+    if (added.length === 0 || !this.relationshipsInLibrary(this.logicalModelService.listModels())) {
+      return { kept: [...added], saves: [...newModels] };
+    }
+    const { kept, changed } = routeToLibrary(added, newModels, (name) => this.logicalModelService.getModel(name));
+    const saves = [...newModels, ...changed.filter((m) => !newModels.includes(m))];
+    return { kept, saves };
+  }
+
+  /**
+   * Offer an existing project the move to shared relationships (#126): once a
+   * session, never after "Don't Ask Again", and only where it helps — the
+   * project still keeps relationships per diagram, and at least one of them
+   * has its two models together in more than one diagram. Writes nothing; the
+   * command it opens explains the move and asks before changing a file.
+   */
+  private async maybeOfferRelationshipMove(): Promise<void> {
+    if (this.relationshipMoveOffered) return;
+    this.relationshipMoveOffered = true;
+    try {
+      if (this.context.workspaceState?.get<boolean>(RELATIONSHIP_MOVE_DECLINED_KEY)) return;
+      if (this.relationshipsInLibrary(this.logicalModelService.listModels())) return;
+      const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.logicalModelService.getModelsDir()));
+      const shared = sharedRelationshipCount(readDomainRelationships(this.domainService, this.workspaceRoot, semanticDir));
+      if (shared === 0) return;
+      const choice = await vscode.window.showInformationMessage(
+        `Relationships can now be defined once and shared. ${shared === 1 ? '1 relationship here is' : `${shared} relationships here are`} ` +
+        'kept as a separate copy in each diagram that shows it. Move them to the model library so each is defined once?',
+        'Review the Move…',
+        'Not Now',
+        "Don't Ask Again",
+      );
+      if (choice === 'Review the Move…') {
+        await vscode.commands.executeCommand('erdStudio.moveRelationshipsToLibrary');
+      } else if (choice === "Don't Ask Again") {
+        await this.context.workspaceState?.update(RELATIONSHIP_MOVE_DECLINED_KEY, true);
+      }
+    } catch (err) {
+      console.warn('[SemanticEditorProvider] Relationship move offer skipped:', err);
+    }
+  }
+
+  /** Every library model except `exclude`, fresh copies an edit may change. */
+  private otherLibraryModels(exclude: string): SemanticModel[] {
+    return this.logicalModelService.listModels().filter((m) => !sameName(m.name, exclude));
+  }
+
   private async applyModelEdit(
     document: vscode.TextDocument,
     webview: vscode.Webview,
     modelName: string,
     modelMutator: (model: import('../types/semantic').SemanticModel) => void,
     domainMutator?: (section: Record<string, unknown>, parsed: Record<string, unknown>) => void,
+    /** Other library models changed alongside (relationships pointing at this one). */
+    alsoSave: readonly SemanticModel[] = [],
   ): Promise<boolean> {
     const model = this.logicalModelService.getModel(modelName);
     if (!model) {
@@ -1589,7 +1676,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return this.applyDomainEdit(
       document,
       domainMutator ?? (() => { /* no domain change */ }),
-      { refreshWebview: true, webview, stage: 'logical', modelFiles: { save: [{ model }] } },
+      {
+        refreshWebview: true,
+        webview,
+        stage: 'logical',
+        modelFiles: { save: [{ model }, ...alsoSave.map((other) => ({ model: other }))] },
+      },
     );
   }
 
@@ -2489,7 +2581,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // Metadata is edited by `updateMeta` only; a column edit carries it across.
             ...(existing.meta ? { meta: existing.meta } : {}),
           } as ColumnDef;
-        }, domainMutator);
+          if (columnRenamed) {
+            renameColumnInRelationships([model], payload.modelName, payload.oldColumnName, payload.column.name);
+          }
+        }, domainMutator, columnRenamed
+          // Library relationships in other models that point at the renamed column (#126).
+          ? renameColumnInRelationships(
+            this.otherLibraryModels(payload.modelName), payload.modelName, payload.oldColumnName, payload.column.name)
+          : []);
         if (!ok) {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to update column.' } });
         }
@@ -2587,6 +2686,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             const idx = columns.findIndex((c) => c.name === payload.columnName);
             if (idx === -1) return;
             columns.splice(idx, 1);
+            removeColumnRelationships([model], payload.modelName, payload.columnName);
           },
           (sec) => {
             const rels = (sec.relationships ?? []) as Array<Record<string, unknown>>;
@@ -2594,6 +2694,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               (rel) => !relationshipReferencesColumn(rel, payload.modelName, payload.columnName),
             );
           },
+          // Library relationships in other models that point at the removed column (#126).
+          removeColumnRelationships(this.otherLibraryModels(payload.modelName), payload.modelName, payload.columnName),
         );
         if (!ok) {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to remove column.' } });
@@ -2782,6 +2884,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      if (await this.writeLibraryRelationship(document, webview, null, payload, 'add')) return;
       const success = await this.applyDomainEdit(
         document,
         (section) => {
@@ -2817,6 +2920,72 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       console.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${message}` } });
     }
+  }
+
+  /**
+   * Add, re-cardinalise or re-key a relationship in the model library (#126),
+   * when this domain is v5 and the project keeps relationships there. The
+   * relationship is written once, to its from-model's file, and any copy in
+   * this domain file is taken out — editing a relationship a domain file
+   * still holds is how it moves into the library. Every other open domain
+   * holding both ends is refreshed by `applyDomainEdit`.
+   *
+   * Returns false, having done nothing, when the edit belongs in the domain
+   * file instead (v4, or a project that keeps relationships per domain and
+   * whose library holds none). Throws with a plain message otherwise.
+   */
+  private async writeLibraryRelationship(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    original: RelationshipKey | null,
+    next: Relationship,
+    action: 'add' | 'update' | 'edit',
+  ): Promise<boolean> {
+    const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+    if (!this.isDomainV5(parsed)) return false;
+    const models = this.logicalModelService.listModels();
+    if (!this.relationshipsInLibrary(models)) return false;
+
+    const sameEnds = (a: RelationshipKey, b: RelationshipKey): boolean =>
+      a.fromModel === b.fromModel && a.fromColumn === b.fromColumn &&
+      a.toModel === b.toModel && a.toColumn === b.toColumn;
+    const section = this.getStageSection(parsed, 'logical');
+    const domainRels = (section.relationships ?? []) as RelationshipKey[];
+    const changed = new Map<string, SemanticModel>();
+
+    if (original) {
+      const inDomain = domainRels.some((rel) => sameEnds(rel, original));
+      const removed = removeLibraryRelationships(models, [original]);
+      if (!inDomain && removed.length === 0) throw new Error('Relationship not found.');
+      for (const model of removed) changed.set(model.name, model);
+    }
+    const rekeyed = !original || !sameEnds(original, next);
+    if (rekeyed) {
+      const taken = domainRels.some((rel) => sameEnds(rel, next))
+        || models.some((m) => sameName(m.name, next.fromModel) && hasLibraryRelationship(m, next));
+      if (taken) {
+        throw new Error(action === 'add' ? 'This relationship already exists.' : 'A relationship with this key already exists.');
+      }
+    }
+
+    const fromModel = models.find((m) => m.name === next.fromModel);
+    if (!fromModel) throw new Error(this.modelUnavailableMessage(next.fromModel));
+    upsertLibraryRelationship(fromModel, next);
+    changed.set(fromModel.name, fromModel);
+
+    const success = await this.applyDomainEdit(
+      document,
+      (sec) => {
+        const rels = (sec.relationships ?? []) as RelationshipKey[];
+        const kept = rels.filter((rel) => !sameEnds(rel, next) && !(original && sameEnds(rel, original)));
+        if (kept.length !== rels.length) sec.relationships = kept;
+      },
+      { webview, stage: 'logical', modelFiles: { save: [...changed.values()].map((model) => ({ model })) } },
+    );
+    if (!success) {
+      webview.postMessage({ type: 'error', payload: { message: `Failed to ${action} relationship.` } });
+    }
+    return true;
   }
 
   private async handleRenameModel(
@@ -2880,6 +3049,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           return;
         }
         const renamedModel: import('../types/semantic').SemanticModel = { ...existingModel, name: trimmedNew };
+        // Library relationships that point at the model — its own self-references
+        // and every other model's — follow the rename (#126).
+        renameModelInRelationships([renamedModel], payload.oldName, trimmedNew);
+        const pointingAtIt = renameModelInRelationships(
+          this.otherLibraryModels(payload.oldName), payload.oldName, trimmedNew);
 
         // Update domain (model reference name, relationships, positions) and
         // create-new + delete-old yml in one WorkspaceEdit so the rename is atomic
@@ -2911,7 +3085,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // fromName carries the OLD file's YAML document (comments, key
             // order, unknown keys) across to the new path — see
             // LogicalModelService.serializeModel.
-            modelFiles: { save: [{ model: renamedModel, fromName: payload.oldName }], delete: [payload.oldName] },
+            modelFiles: {
+              save: [
+                { model: renamedModel, fromName: payload.oldName },
+                ...pointingAtIt.map((model) => ({ model })),
+              ],
+              delete: [payload.oldName],
+            },
           },
         );
 
@@ -3138,6 +3318,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const label = keys.length === 1 ? 'relationship' : 'relationships';
 
     try {
+      // A relationship stored in the model library is removed there, which
+      // takes it off every domain that shows it (#126).
+      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      const fromLibrary = this.isDomainV5(parsed)
+        ? removeLibraryRelationships(this.logicalModelService.listModels(), keys)
+        : [];
       await this.applyDomainEdit(
         document,
         (section) => {
@@ -3151,12 +3337,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 rel.toColumn === k.toColumn,
             );
           const remaining = relationships.filter((rel) => !matches(rel));
-          if (remaining.length === relationships.length) {
+          if (remaining.length === relationships.length && fromLibrary.length === 0) {
             throw new Error('Relationship not found.');
           }
           section.relationships = remaining;
         },
-        { webview, stage, errorLabel: `Failed to remove ${label}.` },
+        {
+          webview,
+          stage,
+          errorLabel: `Failed to remove ${label}.`,
+          ...(fromLibrary.length > 0 ? { modelFiles: { save: fromLibrary.map((model) => ({ model })) } } : {}),
+        },
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -3172,6 +3363,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      if (await this.writeLibraryRelationship(document, webview, payload, payload, 'update')) return;
       const success = await this.applyDomainEdit(
         document,
         (section) => {
@@ -3211,6 +3403,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
+      const original = {
+        fromModel: payload.originalFromModel,
+        fromColumn: payload.originalFromColumn,
+        toModel: payload.originalToModel,
+        toColumn: payload.originalToColumn,
+      };
+      if (await this.writeLibraryRelationship(document, webview, original, payload, 'edit')) return;
       const success = await this.applyDomainEdit(
         document,
         (section) => {
@@ -3481,6 +3680,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           existingRelationships,
         );
         if (seededModel) seededModel = markDraftKeys(seededModel, tests.unique, added);
+        const routed = this.routeAddedRelationships(added, seededModel ? [seededModel] : []);
 
         const success = await this.applyDomainEdit(
           document,
@@ -3488,7 +3688,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             const names = (sec.models ?? []) as string[];
             names.push(payload.modelName);
             sec.models = names;
-            sec.relationships = [...((sec.relationships ?? []) as Relationship[]), ...added];
+            if (routed.kept.length > 0) {
+              sec.relationships = [...((sec.relationships ?? []) as Relationship[]), ...routed.kept];
+            }
 
             // Add position
             const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
@@ -3501,7 +3703,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             refreshWebview: true,
             webview,
             stage,
-            ...(seededModel ? { modelFiles: { save: [{ model: seededModel }] } } : {}),
+            ...(routed.saves.length > 0 ? { modelFiles: { save: routed.saves.map((model) => ({ model })) } } : {}),
           },
         );
 
@@ -3709,6 +3911,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
+      const routed = this.routeAddedRelationships(draft.relationships, draft.newModels);
       await this.applyDomainEdit(
         document,
         (sec, p) => {
@@ -3716,8 +3919,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           const wasEmpty = names.length === 0;
           names.push(...draft.modelNames);
           sec.models = names;
-          const relationships = [...((sec.relationships ?? []) as Relationship[]), ...draft.relationships];
-          sec.relationships = relationships;
+          if (routed.kept.length > 0) {
+            sec.relationships = [...((sec.relationships ?? []) as Relationship[]), ...routed.kept];
+          }
+          // Placement sees every edge the domain will draw, wherever it is stored.
+          const relationships = [...((sec.relationships ?? []) as Relationship[]), ...draft.relationships.filter((r) => !routed.kept.includes(r))];
 
           const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
           const positions = { ...((vc.positions ?? {}) as Record<string, NodePosition>) };
@@ -3738,7 +3944,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           webview,
           stage: 'logical',
           errorLabel: 'Failed to add models from dbt.',
-          ...(draft.newModels.length > 0 ? { modelFiles: { save: draft.newModels.map((model) => ({ model })) } } : {}),
+          ...(routed.saves.length > 0 ? { modelFiles: { save: routed.saves.map((model) => ({ model })) } } : {}),
           onSuccess: () => {
             telemetry.feature('addFromDbt');
             this.selectorsService.scheduleRegenerate();

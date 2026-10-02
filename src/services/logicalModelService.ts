@@ -97,7 +97,7 @@ export interface ModelFileEntry {
 }
 
 /** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
-const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns'] as const;
+const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns', 'relationships'] as const;
 const COLUMN_KEYS = [
   'name', 'dataType', 'description',
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
@@ -766,6 +766,10 @@ export class LogicalModelService {
         this.syncColumns(doc, existing, value as Record<string, unknown>[]);
         continue;
       }
+      if (key === 'relationships' && isSeq(existing) && this.sameMetaValue(doc, existing, value)) {
+        // Unchanged: leave the list (and its comments and flow style) alone.
+        continue;
+      }
       if (key === 'meta' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {
         this.syncMeta(doc, existing, value as Record<string, unknown>);
         continue;
@@ -939,6 +943,15 @@ export class LogicalModelService {
         if (col.meta && Object.keys(col.meta).length > 0) yamlCol.meta = col.meta;
         return yamlCol;
       });
+    }
+
+    if (model.relationships && model.relationships.length > 0) {
+      obj.relationships = model.relationships.map((rel) => ({
+        fromColumn: rel.fromColumn,
+        toModel: rel.toModel,
+        toColumn: rel.toColumn,
+        cardinality: rel.cardinality,
+      }));
     }
 
     return obj;

@@ -158,10 +158,7 @@ nothing else — a drafted extra column would show up as drift.
   "modelFolder": "models/marts",
   "logical": {
     "models": ["fct_order", "dim_customer", "dim_product"],
-    "relationships": [
-      { "fromModel": "fct_order", "fromColumn": "customer_id", "toModel": "dim_customer", "toColumn": "customer_id", "cardinality": "many-to-one" },
-      { "fromModel": "fct_order", "fromColumn": "product_id", "toModel": "dim_product", "toColumn": "product_id", "cardinality": "many-to-one" }
-    ]
+    "relationships": []
   },
   "viewConfig": {}
 }
@@ -171,9 +168,21 @@ nothing else — a drafted extra column would show up as drift.
 - `layer` matches the parent folder.
 - `modelFolder` is optional: the common folder of the chosen models' files, if there is one.
 - `logical.models` is the chosen names, including already-modelled ones.
-- `logical.relationships` is the inventory's `relationships` array, **copied verbatim** —
+- The relationships are the inventory's `relationships` array, **copied verbatim** —
   including `cardinality`. Do not add connections you inferred from column names: a connection
   dbt does not test would be drift. Offer those as dbt tests in Stage 6 instead.
+- **Where they go** follows the `/erd-studio` skill's "Where relationships live":
+  - **In the model library** — when any model file already has a `relationships:` list, or no
+    domain file has a `logical.relationships` entry (always true for a first diagram). Write each
+    one into its `fromModel`'s yml under `relationships:` — the same fields without `fromModel`,
+    as in the worked example below — and leave `"relationships": []` in the domain JSON, as
+    above. Every diagram holding both models then draws it, and it is defined once.
+  - **Per domain** — otherwise: the project's diagrams already keep their own. Put each one in
+    the domain JSON's `logical.relationships` with all five fields (`fromModel`, `fromColumn`,
+    `toModel`, `toColumn`, `cardinality`).
+  - Never write one in both places, and never move existing relationships from one place to the
+    other yourself — that is the user's choice, made with **ERD Studio: Move Relationships to
+    Model Library**, which explains the move and lets them settle conflicts.
 - `viewConfig: {}` (no positions) makes ERD Studio auto-arrange the diagram with its auto layout
   the first time the domain is opened, and save the result. Do not write positions yourself;
   the user can re-run the layout any time with **Layout** in the canvas toolbar or Shift+L.
@@ -181,8 +190,8 @@ nothing else — a drafted extra column would show up as drift.
   them.
 
 If the domain file already exists (a re-run), add new names to `logical.models` and new
-relationships to `logical.relationships`, and never touch `viewConfig.positions` — that is the
-user's layout.
+relationships where the project keeps them (skip any already defined in the model library), and
+never touch `viewConfig.positions` — that is the user's layout.
 
 ## Worked example
 
@@ -223,7 +232,20 @@ columns:
     dataType: "DECIMAL(18,2)"
     description: "Order value (draft)"
     additiveType: additive
+relationships:
+  - fromColumn: customer_id
+    toModel: dim_customer
+    toColumn: customer_id
+    cardinality: many-to-one
+  - fromColumn: product_id
+    toModel: dim_product
+    toColumn: product_id
+    cardinality: many-to-one
 ```
+
+The two relationships go in `fct_order.yml` because `fct_order` holds the foreign keys — this is
+a first diagram, so the library is where relationships live. In a project that keeps them per
+domain, leave this list out and put both in the domain JSON's `logical.relationships` instead.
 
 `dim_customer.yml` gets `customer_id` with both `isPrimaryKey: true` and `isNaturalKey: true` —
 it is the source system's business key, and doubles as the primary key because the dimension has
@@ -233,7 +255,8 @@ approach does not name it a business key. `segment` is written as
 `STRING` (no cast in the SQL) and added to "types to confirm". The model is not built from a dbt
 snapshot and has no validity dates, so its attributes get `scdType: 1` — if the approach wants
 history, that gap goes in the Stage 5 review, not into a `scdType: 2` dbt does not deliver.
-`dim_product.yml` follows the same pattern. Then the domain JSON above.
+`dim_product.yml` follows the same pattern, with no `relationships:` (nothing leaves it). Then the
+domain JSON above, with `"relationships": []`.
 
 ## Names ERD Studio cannot use
 
@@ -246,4 +269,7 @@ include them; tell the user in one line which were skipped and why.
 Lines are drawn only between models in the **same** domain. When a dimension such as
 `dim_customer` belongs to several business areas, add its name to each domain's
 `logical.models`. There is still only one `dim_customer.yml`, shared by all of them — editing it
-from any domain changes it everywhere.
+from any domain changes it everywhere. The same goes for a relationship stored in a model's
+yml: every domain that holds both of its models draws it, so adding `dim_customer` to a second
+domain alongside `fct_order` brings the `fct_order → dim_customer` line with it — do not add it
+again.
