@@ -149,7 +149,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 │   └── gold/
 │       └── fct_sale.yml
 ├── silver/
-│   ├── customer-360.json     ← Domain file (model references + relationships + layout)
+│   ├── customer-360.json     ← Domain file (model references + layout; relationships only in per-domain projects)
 │   └── orders.json
 └── gold/
     └── reporting.json
@@ -207,7 +207,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in \`
 | \`modelFolder\` | No | Filter for "Add Existing Model" dialog (e.g. \`models/silver\`) |
 | \`stubColumns\` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
 | \`logical.models\` | Yes | Array of model name strings (references to \`logical-models/*.yml\` or \`logical-models/{folder}/*.yml\`) |
-| \`logical.relationships\` | Yes | Array of relationship objects |
+| \`logical.relationships\` | Yes | Array of relationship objects — \`[]\` when the project keeps relationships in the model YAML (see "Where relationships live") |
 | \`viewConfig\` | Yes | Root-level view settings. The extension auto-assigns positions for new models; a new domain written with \`viewConfig: {}\` (no positions at all) is auto-arranged with the canvas's auto layout the first time it opens |
 
 **viewConfig** must be at the root level, not inside \`logical\`. It stores node positions keyed by model name, and optional canvas annotations (build notes):
@@ -767,7 +767,7 @@ function generateGeminiStyleguide(): string {
 1. **Schema version** must be \`5\`
 2. **Required sections**: \`logical\` and \`viewConfig\` must both be present at root level
 3. **Model names** must follow naming conventions: \`dim_\`, \`fct_\`, \`ref_\`, or \`brg_\` prefixes
-4. **Relationships**: \`fromModel\` is always the FK side, \`toModel\` is the PK side
+4. **Relationships**: \`fromModel\` is always the FK side, \`toModel\` is the PK side; each relationship is defined in exactly one place — the from-model's YAML \`relationships:\` or a domain's \`logical.relationships\`
 5. **Logical columns** must have \`dataType\` and \`description\`
 6. **viewConfig** must be at root level (not inside the logical section)
 7. **Boolean key flags** (\`isPrimaryKey\`, \`isForeignKey\`, \`isNaturalKey\`) should only be present when \`true\`

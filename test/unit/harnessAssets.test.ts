@@ -347,3 +347,24 @@ describe('installed skill frontmatter stays within the Agent Skills limits', () 
     }
   }
 });
+
+describe('setup skill: where relationships go (#126)', () => {
+  const ref = (name: string): string =>
+    fs.readFileSync(path.join(__dirname, '../../src/harness/claude/erd-studio-setup/references', name), 'utf-8');
+
+  it('builds a first diagram with relationships in the from-model yml, not the domain file', () => {
+    const building = ref('building-the-model.md');
+    expect(building).toContain('"relationships": []');
+    expect(building).toMatch(/additiveType: additive\nrelationships:\n {2}- fromColumn: customer_id\n {4}toModel: dim_customer/);
+    expect(building).toContain('never move existing relationships from one place to the');
+    expect(building).not.toMatch(/"relationships": \[\n\s+\{ "fromModel"/);
+  });
+
+  it('fixes a relationship wherever it is defined', () => {
+    const fix = ref('verify-and-fix.md');
+    for (const kind of ['remove-column', 'set-cardinality', 'resolve-phantom']) {
+      const row = fix.split('\n').find((l) => l.startsWith(`| \`${kind}\``)) ?? '';
+      expect(row, kind).toMatch(/relationships:/);
+    }
+  });
+});

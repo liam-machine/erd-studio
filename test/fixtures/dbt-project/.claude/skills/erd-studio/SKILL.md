@@ -29,7 +29,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 │   └── gold/
 │       └── fct_sale.yml
 ├── silver/
-│   ├── customer-360.json     ← Domain file (model references + relationships + layout)
+│   ├── customer-360.json     ← Domain file (model references + layout; relationships only in per-domain projects)
 │   └── orders.json
 └── gold/
     └── reporting.json
@@ -87,7 +87,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `l
 | `modelFolder` | No | Filter for "Add Existing Model" dialog (e.g. `models/silver`) |
 | `stubColumns` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
 | `logical.models` | Yes | Array of model name strings (references to `logical-models/*.yml` or `logical-models/{folder}/*.yml`) |
-| `logical.relationships` | Yes | Array of relationship objects |
+| `logical.relationships` | Yes | Array of relationship objects — `[]` when the project keeps relationships in the model YAML (see "Where relationships live") |
 | `viewConfig` | Yes | Root-level view settings. The extension auto-assigns positions for new models; a new domain written with `viewConfig: {}` (no positions at all) is auto-arranged with the canvas's auto layout the first time it opens |
 
 **viewConfig** must be at the root level, not inside `logical`. It stores node positions keyed by model name, and optional canvas annotations (build notes):
