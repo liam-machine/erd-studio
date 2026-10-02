@@ -27,6 +27,7 @@ import {
   GETTING_STARTED_EXTERNAL_URLS,
   SAMPLE_REPO_CLONE_URL,
   SAMPLE_REPO_URL,
+  SAMPLE_REPO_ZIP_URL,
   SETUP_PROMPT,
   buildGettingStartedHtml,
   describeWrittenFiles,
@@ -92,18 +93,37 @@ export const SAMPLE_CONFIRM_MESSAGE =
   "github.com/liam-machine/erd-studio-sample (about 1 MB). You'll choose where to save it.";
 export const SAMPLE_DOWNLOAD_ACTION = 'Download';
 export const SAMPLE_OPEN_ON_GITHUB_ACTION = 'Open on GitHub';
+export const SAMPLE_DOWNLOAD_ZIP_ACTION = 'Download ZIP';
 export const SAMPLE_FALLBACK_MESSAGE =
-  "Git isn't available here, so get the sample from GitHub instead: Code \u2192 Download ZIP. " +
-  'Unzip it, then File \u2192 Open Folder\u2026 and pick the erd-studio-sample folder.';
+  "Git isn't available here, so get the sample as a ZIP instead (Download ZIP below, or Code \u2192 Download ZIP on GitHub). " +
+  'Unzip it, then File \u2192 Open Folder\u2026 and pick the erd-studio-sample-main folder.';
 
 export type TrySampleOutcome = 'cancelled' | 'cloned' | 'fallback';
 
 /**
+ * Whether `git.clone` can run. The Git extension is built in, so it is always
+ * *there* — but when no Git binary is installed (common on Windows) or
+ * `git.enabled` is false it never creates its model, never registers its
+ * commands, and `git.clone` throws "command not found". Activating it first
+ * waits out the model's start-up, so a Git that does exist is not missed.
+ */
+async function gitCloneAvailable(): Promise<boolean> {
+  const git = vscode.extensions.getExtension(GIT_EXTENSION_ID);
+  if (!git) return false;
+  try {
+    await git.activate?.();
+  } catch {
+    return false;
+  }
+  return (await vscode.commands.getCommands(true)).includes('git.clone');
+}
+
+/**
  * Confirm, then hand the fixed sample repo URL to VS Code's built-in
  * `git.clone` — which asks where to save it and offers to open it. Without
- * the Git extension (or when the clone command throws) the user is pointed at
- * the GitHub page, whose Download ZIP needs nothing installed. The URL is a
- * constant (`SAMPLE_REPO_CLONE_URL` / `SAMPLE_REPO_URL`), never an argument.
+ * a usable Git (or when the clone command throws) the user is offered the
+ * sample as a ZIP, which needs nothing installed. The URL is a
+ * constant (`SAMPLE_REPO_CLONE_URL` / `SAMPLE_REPO_ZIP_URL` / `SAMPLE_REPO_URL`), never an argument.
  */
 export async function trySampleProject(): Promise<TrySampleOutcome> {
   const choice = await vscode.window.showInformationMessage(
@@ -116,7 +136,7 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
     return 'cancelled';
   }
 
-  if (vscode.extensions.getExtension(GIT_EXTENSION_ID)) {
+  if (await gitCloneAvailable()) {
     try {
       await vscode.commands.executeCommand('git.clone', SAMPLE_REPO_CLONE_URL);
       return 'cloned';
@@ -128,8 +148,14 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
     telemetry.feature('trySampleNoGit');
   }
 
-  const pick = await vscode.window.showInformationMessage(SAMPLE_FALLBACK_MESSAGE, SAMPLE_OPEN_ON_GITHUB_ACTION);
-  if (pick === SAMPLE_OPEN_ON_GITHUB_ACTION) {
+  const pick = await vscode.window.showInformationMessage(
+    SAMPLE_FALLBACK_MESSAGE,
+    SAMPLE_DOWNLOAD_ZIP_ACTION,
+    SAMPLE_OPEN_ON_GITHUB_ACTION,
+  );
+  if (pick === SAMPLE_DOWNLOAD_ZIP_ACTION) {
+    await vscode.env.openExternal(vscode.Uri.parse(SAMPLE_REPO_ZIP_URL));
+  } else if (pick === SAMPLE_OPEN_ON_GITHUB_ACTION) {
     await vscode.env.openExternal(vscode.Uri.parse(SAMPLE_REPO_URL));
   }
   return 'fallback';

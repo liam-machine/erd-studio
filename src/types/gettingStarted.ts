@@ -41,6 +41,8 @@ export type GettingStartedExternalTarget =
  */
 export const SAMPLE_REPO_URL = 'https://github.com/liam-machine/erd-studio-sample';
 export const SAMPLE_REPO_CLONE_URL = `${SAMPLE_REPO_URL}.git`;
+/** GitHub's archive of the sample's `main` — unzips to `erd-studio-sample-main/`. */
+export const SAMPLE_REPO_ZIP_URL = `${SAMPLE_REPO_URL}/archive/refs/heads/main.zip`;
 /** The same sample opened in a GitHub Codespace (its devcontainer installs dbt and ERD Studio). */
 export const SAMPLE_CODESPACES_URL = 'https://codespaces.new/liam-machine/erd-studio-sample?quickstart=1';
 /**

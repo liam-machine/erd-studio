@@ -20,6 +20,13 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 ### Changed
 - Teammates on an earlier ERD Studio version keep the new key intact when they edit a model, but they do not see relationships stored in the model library until they update.
 
+## 1.6.5 — 2026-10-01
+
+### Fixed
+- **Try the Sample Project on a machine without Git** (common on Windows) now goes straight to a **Download ZIP** button instead of failing a clone first. VS Code's Git extension is always installed, but without Git itself it has no clone command. The notice also names the folder the ZIP actually unzips to (`erd-studio-sample-main`).
+- **A diagram no longer fails to open when another program has the file open at that moment.** On Windows, a read that overlaps a write by an AI assistant, git, dbt, a virus scanner or OneDrive fails briefly. The canvas now re-reads the file, as it already did for a half-written one, rather than showing an error.
+- The anonymous daily usage report now says why a diagram failed to load (not a domain file, file missing, unreadable, not valid JSON, not a valid domain, or an internal error), next to the existing total. These are fixed keys only, never messages or paths, and every field is listed in `telemetry.json`.
+
 ## 1.6.4 — 2026-09-29
 
 ### Changed

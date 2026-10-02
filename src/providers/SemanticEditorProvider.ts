@@ -77,7 +77,7 @@ import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
-import { computeMissingPositions, setMetaEntry, toDisplayDomain } from '@erd-studio/core';
+import { computeMissingPositions, DomainValidationError, setMetaEntry, toDisplayDomain } from '@erd-studio/core';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import {
@@ -124,7 +124,7 @@ import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, SemanticModel, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
-import { layoutFeature, type TelemetryFeature } from '../services/telemetryPayload';
+import { domainLoadErrorCode, layoutFeature, type DomainLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
 import { openModelFileAt } from '../commands/openModelFile';
 import {
   buildDbtDraft,
@@ -159,6 +159,30 @@ import { normaliseName } from '../services/nameUtils';
  * which really is broken still says so while the user is still looking.
  */
 const DOMAIN_READ_RETRY_DELAYS_MS = [150, 350, 700];
+
+/**
+ * A domain read worth retrying: core's transient failures (an empty or
+ * truncated file — something is writing it right now) plus a file that exists
+ * but cannot be read. On Windows a read that overlaps another process's write
+ * (an AI assistant, git, dbt, a virus scanner, OneDrive) fails with a sharing
+ * violation — EBUSY / EPERM / EACCES — that clears in milliseconds; failing
+ * the canvas on the first one leaves an error over a file that is fine. A
+ * genuinely unreadable file costs the same ~1.2 s of retries, then reports.
+ */
+function isRetryableDomainRead(err: unknown): err is DomainFileError {
+  return err instanceof DomainFileError && (err.transient || err.reason === 'unreadable');
+}
+
+/** The fixed telemetry reason for a canvas load failure — never its message. */
+export function classifyDomainLoadFailure(err: unknown): DomainLoadFailure {
+  if (err instanceof DomainFileError) {
+    if (err.reason === 'missing') return 'missing';
+    if (err.reason === 'unreadable') return 'unreadable';
+    return 'json';
+  }
+  if (err instanceof DomainValidationError) return 'invalid';
+  return 'internal';
+}
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -2004,7 +2028,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           `domains live in ${path.basename(path.dirname(path.dirname(document.uri.fsPath)))}/{layer}/{domain}.json. ` +
           `Open it as text to edit it.`,
         kind: 'not-a-domain',
-      });
+      }, undefined, 'notDomain');
       return;
     }
 
@@ -2073,7 +2097,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.postLoadError(webview, errorKey, {
         message,
         ...(err instanceof DomainFileError ? { kind: 'domain-file' as const } : {}),
-      }, err);
+      }, err, classifyDomainLoadFailure(err));
     }
   }
 
@@ -2128,7 +2152,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return this.domainService.getDomain(filePath);
       } catch (err) {
         const last = attempt >= DOMAIN_READ_RETRY_DELAYS_MS.length;
-        if (last || !(err instanceof DomainFileError) || !err.transient) {
+        if (last || !isRetryableDomainRead(err)) {
           throw err;
         }
         console.warn(
@@ -2153,13 +2177,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     errorKey: string,
     payload: ErrorMessage['payload'],
-    err?: unknown,
+    err: unknown,
+    failure: DomainLoadFailure,
   ): void {
     if (this.lastLoadError.get(errorKey) === payload.message) {
       return;
     }
     this.lastLoadError.set(errorKey, payload.message);
     telemetry.error('domainLoad');
+    telemetry.error(domainLoadErrorCode(failure));
     hostErrorLog.record('sendDomainData', err ?? payload.message);
     console.error(`[SemanticEditorProvider] Failed to load domain: ${payload.message}`);
     this.post(webview, { type: 'error', payload });
