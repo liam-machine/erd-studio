@@ -103,7 +103,7 @@ export async function moveRelationshipsToLibrary(deps: MoveRelationshipsDeps): P
         ...conflict.definitions.map((d) => ({
           label: d.cardinality,
           description: `as in ${d.domains.join(', ')}`,
-          detail: `Every diagram with ${fromModel} and ${toModel} draws it ${d.cardinality}.`,
+          detail: `Saved once in ${fileOf(fromModel)}; every diagram with ${fromModel} and ${toModel} draws it ${d.cardinality}.`,
           cardinality: d.cardinality as Cardinality | undefined,
         })),
         {

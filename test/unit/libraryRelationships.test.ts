@@ -152,6 +152,13 @@ describe('settling a conflict (#126)', () => {
     expect(detail).toContain('• logical-models/gold/fct_order.yml — fct_order.order_date_key → dim_date.date_key');
     expect(detail).toMatch(/Conflicts: 1 relationship is drawn differently.*Next you pick the cardinality to keep/s);
   });
+
+  it('says where a conflicting relationship will go, even when it is the only one', () => {
+    const plan = conflicted();
+    const detail = describeMovePlan(plan, (m) => `logical-models/${m}.yml`);
+    expect(detail).toContain('• logical-models/fct_order.yml — fct_order.customer_key → dim_customer.customer_key');
+    expect(detail).toContain('(2 diagrams)');
+  });
 });
 
 describe('sharedRelationshipCount — what the offer to move is about', () => {

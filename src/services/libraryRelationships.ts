@@ -327,18 +327,20 @@ export function describeMovePlan(plan: MoveToLibraryPlan, fileOf: (model: string
     'every diagram that holds both models draws it. A change made in one diagram shows in all of them.',
   ];
 
-  const byFile = new Map<string, Relationship[]>();
-  for (const rel of plan.toLibrary) {
+  // Where each relationship will live — a conflict too, once its cardinality is picked.
+  const byFile = new Map<string, RelationshipEnds[]>();
+  for (const rel of [...plan.toLibrary, ...plan.conflicts.map((c) => c.relationship)]) {
     const file = fileOf(rel.fromModel);
     byFile.set(file, [...(byFile.get(file) ?? []), rel]);
   }
-  if (byFile.size > 0 || plan.removeFromDomains.size > 0) {
+  const diagrams = new Set([...plan.removeFromDomains.keys(), ...plan.conflicts.flatMap((c) => c.definitions.flatMap((d) => d.domains))]);
+  if (byFile.size > 0) {
     lines.push('', 'Where: in the file of the model that holds the foreign key, under "relationships:".');
     for (const [file, rels] of [...byFile].slice(0, 6)) {
       lines.push(`• ${file} — ${rels.slice(0, 2).map(describeEnds).join(', ')}${rels.length > 2 ? ` and ${rels.length - 2} more` : ''}`);
     }
     if (byFile.size > 6) lines.push(`• …and ${byFile.size - 6} more model files`);
-    lines.push(`They are taken out of ${plural(plan.removeFromDomains.size, 'diagram file')}.`);
+    lines.push(`Each is then taken out of the diagram files that held a copy (${plural(diagrams.size, 'diagram')}).`);
   }
 
   if (plan.conflicts.length > 0) {
