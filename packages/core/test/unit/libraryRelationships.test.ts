@@ -32,7 +32,7 @@ function relationshipsOf(models: string[], own: Relationship[] = [], warn = vi.f
     filePath: 'silver/d.json',
     domainNameFallback: 'd',
     parentDirName: 'silver',
-    layers: { hasLayer: () => true },
+    layers: { hasLayer: () => true, getValidLayerIds: () => ['silver'] },
     getModel: (name) => structuredClone(LIBRARY[name] ?? null),
     warn,
   }).logical.relationships;
