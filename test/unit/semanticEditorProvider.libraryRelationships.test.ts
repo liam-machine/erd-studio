@@ -141,6 +141,13 @@ describe('relationships stored once in the model library (#126)', () => {
   describe('a project whose domain files hold no relationships (the default)', () => {
     beforeEach(async () => { h = await createHarness(); });
 
+    it('is never offered the move — there is nothing per diagram to move', async () => {
+      const info = vi.spyOn(vscode.window, 'showInformationMessage');
+      await (await h.open('orders')).send({ type: 'ready' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(info.mock.calls.some(([text]) => String(text).startsWith('Relationships can now be defined once'))).toBe(false);
+    });
+
     it('stores a new relationship in the from-model file, not the domain file, in one WorkspaceEdit', async () => {
       const orders = await h.open('orders');
       await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
@@ -222,6 +229,19 @@ describe('relationships stored once in the model library (#126)', () => {
       fromModel: 'fct_order', fromColumn: 'order_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one',
     };
     beforeEach(async () => { h = await createHarness([DATE_EDGE]); });
+
+    it('is offered the move once, when a canvas opens, because the relationship could be shared', async () => {
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Review the Move…' as never);
+      const run = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+      await (await h.open('orders')).send({ type: 'ready' });
+      await (await h.open('reporting')).send({ type: 'ready' });
+      await vi.waitFor(() => expect(run).toHaveBeenCalledWith('erdStudio.moveRelationshipsToLibrary'));
+
+      const offers = info.mock.calls.filter(([text]) => String(text).startsWith('Relationships can now be defined once'));
+      expect(offers).toHaveLength(1);
+      expect(offers[0][0]).toContain('1 relationship here is kept as a separate copy in each diagram');
+      expect(offers[0].slice(1)).toEqual(['Review the Move…', 'Not Now', "Don't Ask Again"]);
+    });
 
     it('carries on writing new relationships to the domain file until it opts in', async () => {
       const orders = await h.open('orders');

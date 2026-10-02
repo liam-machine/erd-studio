@@ -203,7 +203,7 @@ export interface MoveToLibraryPlan {
    * (by ends) — every entry whose relationship moves.
    */
   removeFromDomains: Map<string, Set<string>>;
-  /** Defined with different cardinalities: left where they are, for the user to settle. */
+  /** Defined with different cardinalities: the user picks one (`resolveConflict`) or leaves them in place. */
   conflicts: RelationshipConflict[];
   /** From-model has no library file (or cannot be read): left in the domain file. */
   skippedNoModel: Relationship[];
@@ -212,8 +212,8 @@ export interface MoveToLibraryPlan {
 /**
  * Plan "Move Relationships to Model Library": every relationship in a v5
  * domain file goes to its from-model's library file, once, unless the domain
- * files disagree about its cardinality — those are reported and left alone,
- * never settled by picking one. A relationship the library already defines is
+ * files disagree about its cardinality — those are `conflicts`, which only the
+ * user settles (`resolveConflict` with their pick), never this code. A relationship the library already defines is
  * taken out of the domain file; its cardinality is the library's, which every
  * domain already shows.
  */
@@ -262,25 +262,90 @@ export function planMoveToLibrary(
   return plan;
 }
 
+/**
+ * Settle a conflict the way the user picked: the relationship goes to the
+ * library with `cardinality`, and every domain file's copy is taken out, so
+ * each diagram now draws the one definition. Returns the plan unchanged for a
+ * conflict it does not hold.
+ */
+export function resolveConflict(
+  plan: MoveToLibraryPlan,
+  conflict: RelationshipConflict,
+  cardinality: Relationship['cardinality'],
+): MoveToLibraryPlan {
+  if (!plan.conflicts.includes(conflict)) return plan;
+  const key = relationshipKey(conflict.relationship);
+  const removeFromDomains = new Map([...plan.removeFromDomains].map(([label, keys]) => [label, new Set(keys)]));
+  for (const domain of conflict.definitions.flatMap((d) => d.domains)) {
+    const keys = removeFromDomains.get(domain) ?? new Set<string>();
+    keys.add(key);
+    removeFromDomains.set(domain, keys);
+  }
+  return {
+    ...plan,
+    toLibrary: [...plan.toLibrary, { ...conflict.relationship, cardinality }],
+    removeFromDomains,
+    conflicts: plan.conflicts.filter((c) => c !== conflict),
+  };
+}
+
+/**
+ * How many relationships kept in domain files are worth sharing: those whose
+ * two models sit together in more than one domain, each of which needs its own
+ * copy today (whether it has drawn one or not). What the "move to the model
+ * library" offer counts, and the reason it is made at all.
+ */
+export function sharedRelationshipCount(
+  domains: ReadonlyArray<{ models: readonly string[]; relationships: readonly Relationship[] }>,
+): number {
+  const lowerModels = domains.map((d) => new Set(d.models.map((m) => m.toLowerCase())));
+  const keys = new Set<string>();
+  for (const domain of domains) {
+    for (const rel of domain.relationships) {
+      const holders = lowerModels.filter((models) =>
+        models.has(rel.fromModel.toLowerCase()) && models.has(rel.toModel.toLowerCase())).length;
+      if (holders > 1) keys.add(relationshipKey(rel));
+    }
+  }
+  return keys.size;
+}
+
 const describeEnds = (rel: RelationshipEnds): string =>
   `${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn}`;
 
-/** The modal's detail for "Move Relationships to Model Library". */
-export function describeMovePlan(plan: MoveToLibraryPlan): string {
-  const lines: string[] = [];
-  const domainCount = plan.removeFromDomains.size;
-  if (plan.toLibrary.length > 0 || domainCount > 0) {
-    lines.push(
-      `${plan.toLibrary.length} relationship${plan.toLibrary.length === 1 ? '' : 's'} will be stored once, in the ` +
-      `from-model's file under logical-models/, and taken out of ${domainCount} domain file${domainCount === 1 ? '' : 's'}. ` +
-      'Every diagram that holds both models then draws the same relationship, and a change made in one shows in all of them.',
-    );
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The modal's detail for "Move Relationships to Model Library": why the move
+ * helps, where each relationship will live (`fileOf` names a model's file,
+ * e.g. `logical-models/fct_order.yml`), and what happens to conflicts.
+ */
+export function describeMovePlan(plan: MoveToLibraryPlan, fileOf: (model: string) => string = (m) => `logical-models/${m}.yml`): string {
+  const lines: string[] = [
+    'Why: today each diagram keeps its own copy of a relationship, so two diagrams can draw the same link ' +
+    'differently, and a new diagram has to draw it again. After the move each relationship is defined once, and ' +
+    'every diagram that holds both models draws it. A change made in one diagram shows in all of them.',
+  ];
+
+  const byFile = new Map<string, Relationship[]>();
+  for (const rel of plan.toLibrary) {
+    const file = fileOf(rel.fromModel);
+    byFile.set(file, [...(byFile.get(file) ?? []), rel]);
   }
+  if (byFile.size > 0 || plan.removeFromDomains.size > 0) {
+    lines.push('', 'Where: in the file of the model that holds the foreign key, under "relationships:".');
+    for (const [file, rels] of [...byFile].slice(0, 6)) {
+      lines.push(`• ${file} — ${rels.slice(0, 2).map(describeEnds).join(', ')}${rels.length > 2 ? ` and ${rels.length - 2} more` : ''}`);
+    }
+    if (byFile.size > 6) lines.push(`• …and ${byFile.size - 6} more model files`);
+    lines.push(`They are taken out of ${plural(plan.removeFromDomains.size, 'diagram file')}.`);
+  }
+
   if (plan.conflicts.length > 0) {
     lines.push(
       '',
-      `${plan.conflicts.length} relationship${plan.conflicts.length === 1 ? ' is' : 's are'} defined differently in different diagrams ` +
-      'and will stay where they are. Change one on the canvas to the cardinality you want — that makes it the shared one:',
+      `Conflicts: ${plural(plan.conflicts.length, 'relationship is', 'relationships are')} drawn differently in different ` +
+      'diagrams. Next you pick the cardinality to keep for each — or leave it as it is in each diagram for now:',
     );
     for (const conflict of plan.conflicts.slice(0, 5)) {
       const uses = conflict.definitions.map((d) => `${d.cardinality} in ${d.domains.join(', ')}`).join('; ');
@@ -291,10 +356,10 @@ export function describeMovePlan(plan: MoveToLibraryPlan): string {
   if (plan.skippedNoModel.length > 0) {
     lines.push(
       '',
-      `${plan.skippedNoModel.length} relationship${plan.skippedNoModel.length === 1 ? '' : 's'} start at a model with no ` +
-      'readable file in logical-models/ and will stay in their domain files.',
+      `${plural(plan.skippedNoModel.length, 'relationship starts', 'relationships start')} at a model with no readable ` +
+      'file in logical-models/ and will stay in the diagram files.',
     );
   }
-  lines.push('', 'Teammates on an ERD Studio version before this one will not see relationships stored in the model library.');
+  lines.push('', 'Teammates on an older ERD Studio version will not see relationships stored in the model library until they update.');
   return lines.join('\n');
 }

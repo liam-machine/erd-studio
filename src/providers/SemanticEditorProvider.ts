@@ -137,6 +137,7 @@ import {
   type DraftSkipped,
 } from '../services/dbtDraft';
 import { pickDraftScope } from './dbtDraftPicker';
+import { readDomainRelationships } from '../commands/moveRelationshipsToLibrary';
 import {
   hasLibraryRelationship,
   removeColumnRelationships,
@@ -144,6 +145,7 @@ import {
   renameColumnInRelationships,
   renameModelInRelationships,
   routeToLibrary,
+  sharedRelationshipCount,
   upsertLibraryRelationship,
   usesLibraryRelationships,
 } from '../services/libraryRelationships';
@@ -327,6 +329,12 @@ import { sameName } from '../types/naming';
  */
 export const MANIFEST_HINT_DISMISSED_KEY = 'erdStudio.manifestHintDismissed';
 
+/**
+ * workspaceState key: "Don't Ask Again" on the offer to move a project's
+ * relationships into the model library (#126). Per workspace.
+ */
+export const RELATIONSHIP_MOVE_DECLINED_KEY = 'erdStudio.relationshipMoveDeclined';
+
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
 export const PHYSICAL_READ_ONLY_MESSAGE = 'Physical stage is read-only. Switch to the Logical stage to make changes.';
 
@@ -375,6 +383,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Keyed by document URI to support concurrent edits to multiple open domains.
    */
   private readonly pendingUpdates = new Map<string, boolean>();
+  /** The move-to-library offer is made at most once per session (#126). */
+  private relationshipMoveOffered = false;
 
   /**
    * The last load failure posted to each panel, so an error the user is
@@ -874,6 +884,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // The initial load is the one refresh path allowed to persist
             // auto-computed positions for models that lack them.
             await this.sendDomainData(document, webviewPanel.webview, panelKey, { persistPositions: true });
+            void this.maybeOfferRelationshipMove();
             break;
           case 'requestReload':
             // Webview detected it was orphaned (e.g. extension update before
@@ -1602,6 +1613,39 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const { kept, changed } = routeToLibrary(added, newModels, (name) => this.logicalModelService.getModel(name));
     const saves = [...newModels, ...changed.filter((m) => !newModels.includes(m))];
     return { kept, saves };
+  }
+
+  /**
+   * Offer an existing project the move to shared relationships (#126): once a
+   * session, never after "Don't Ask Again", and only where it helps — the
+   * project still keeps relationships per diagram, and at least one of them
+   * has its two models together in more than one diagram. Writes nothing; the
+   * command it opens explains the move and asks before changing a file.
+   */
+  private async maybeOfferRelationshipMove(): Promise<void> {
+    if (this.relationshipMoveOffered) return;
+    this.relationshipMoveOffered = true;
+    try {
+      if (this.context.workspaceState?.get<boolean>(RELATIONSHIP_MOVE_DECLINED_KEY)) return;
+      if (this.relationshipsInLibrary(this.logicalModelService.listModels())) return;
+      const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.logicalModelService.getModelsDir()));
+      const shared = sharedRelationshipCount(readDomainRelationships(this.domainService, this.workspaceRoot, semanticDir));
+      if (shared === 0) return;
+      const choice = await vscode.window.showInformationMessage(
+        `Relationships can now be defined once and shared. ${shared === 1 ? '1 relationship here is' : `${shared} relationships here are`} ` +
+        'kept as a separate copy in each diagram that shows it. Move them to the model library so each is defined once?',
+        'Review the Move…',
+        'Not Now',
+        "Don't Ask Again",
+      );
+      if (choice === 'Review the Move…') {
+        await vscode.commands.executeCommand('erdStudio.moveRelationshipsToLibrary');
+      } else if (choice === "Don't Ask Again") {
+        await this.context.workspaceState?.update(RELATIONSHIP_MOVE_DECLINED_KEY, true);
+      }
+    } catch (err) {
+      console.warn('[SemanticEditorProvider] Relationship move offer skipped:', err);
+    }
   }
 
   /** Every library model except `exclude`, fresh copies an edit may change. */

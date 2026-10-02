@@ -7,6 +7,8 @@ import {
   describeMovePlan,
   planMoveToLibrary,
   removeColumnRelationships,
+  resolveConflict,
+  sharedRelationshipCount,
   renameColumnInRelationships,
   renameModelInRelationships,
   routeToLibrary,
@@ -118,5 +120,51 @@ describe('LogicalModelService writes relationships', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('settling a conflict (#126)', () => {
+  const lookup = (name: string): SemanticModel | null => (name === 'fct_order' ? fct() : null);
+  const conflicted = () => planMoveToLibrary(
+    [{ label: 'gold/orders', relationships: [REL] }, { label: 'gold/reporting', relationships: [{ ...REL, cardinality: 'one-to-one' }] }],
+    lookup,
+  );
+
+  it('moves the picked cardinality to the library and takes every diagram\'s copy out', () => {
+    const plan = conflicted();
+    const settled = resolveConflict(plan, plan.conflicts[0], 'one-to-one');
+    expect(settled.conflicts).toEqual([]);
+    expect(settled.toLibrary).toEqual([{ ...REL, cardinality: 'one-to-one' }]);
+    expect([...settled.removeFromDomains.keys()].sort()).toEqual(['gold/orders', 'gold/reporting']);
+    expect(plan.conflicts).toHaveLength(1); // the original plan is untouched
+  });
+
+  it('explains why, where each relationship goes, and that conflicts are picked next', () => {
+    const plan = planMoveToLibrary(
+      [
+        { label: 'gold/orders', relationships: [REL, { ...REL, fromColumn: 'order_date_key', toModel: 'dim_date', toColumn: 'date_key' }] },
+        { label: 'gold/reporting', relationships: [{ ...REL, cardinality: 'one-to-one' }] },
+      ],
+      lookup,
+    );
+    const detail = describeMovePlan(plan, (m) => `logical-models/gold/${m}.yml`);
+    expect(detail).toMatch(/^Why: today each diagram keeps its own copy/);
+    expect(detail).toContain('• logical-models/gold/fct_order.yml — fct_order.order_date_key → dim_date.date_key');
+    expect(detail).toMatch(/Conflicts: 1 relationship is drawn differently.*Next you pick the cardinality to keep/s);
+  });
+});
+
+describe('sharedRelationshipCount — what the offer to move is about', () => {
+  it('counts a relationship whose two models sit together in more than one diagram, drawn there or not', () => {
+    expect(sharedRelationshipCount([
+      { models: ['fct_order', 'dim_customer'], relationships: [REL] },
+      { models: ['fct_order', 'dim_customer', 'dim_date'], relationships: [] },
+    ])).toBe(1);
+  });
+  it('is zero when every relationship lives in one diagram only', () => {
+    expect(sharedRelationshipCount([
+      { models: ['fct_order', 'dim_customer'], relationships: [REL] },
+      { models: ['fct_order', 'dim_date'], relationships: [] },
+    ])).toBe(0);
   });
 });
