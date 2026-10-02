@@ -4,7 +4,7 @@
 
 ## File Layout
 
-ERD Studio uses a **central model store**. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level or one folder down); domain JSON files reference models **by name** and hold relationships and layout.
+ERD Studio uses a **central model store**. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level or one folder down); domain JSON files reference models **by name** and hold the layout. Relationships are defined once in the from-model's YAML and drawn by every domain holding both models — or, in a project that keeps them per domain, in each domain JSON (see [Where relationships live](#where-relationships-live)).
 
 ```
 .erd-studio/
@@ -138,6 +138,7 @@ columns:
 | `columns` | array | No | Array of `ColumnDef`. |
 | `rationale` | object | No | Design rationale. Omit entirely if empty. |
 | `meta` | map | No | Free-form, dbt-style metadata (owner, source system, lineage…). See [Metadata](#metadata-meta). Omit entirely if empty. |
+| `relationships` | array | No | Relationships leaving this model: `Relationship` objects without `fromModel` (it is this model). Shared by every domain holding both ends. See [Where relationships live](#where-relationships-live). Omit entirely if empty. |
 
 Models are defined once and can be referenced from several domains. Editing a model from any domain canvas updates the shared YAML.
 
@@ -195,9 +196,9 @@ Optional map on a model and on any column, named after and shaped like dbt's `me
 - **AI assistants** keep every existing entry. With a team metadata list (a `## Metadata` section in `modelling-approach.md`, above) they follow it; without one they add or change only the keys the user asks for and never copy dbt's `meta:` unasked.
 - **dbt's own `meta:`** is read only by `erd-studio inventory` — `models[].meta` / `columns[].meta` (the schema yml over the manifest per key, and `config: meta:` over `meta:`, as dbt merges them) plus the project-wide `conventions.meta` summary of keys, counts, kinds and examples — so the setup guide can offer to carry it across. The physical stage still never shows or compares it.
 
-## Relationships (`logical.relationships`)
+## Relationships
 
-Relationships are stored **only** in the domain JSON, never in the YAML.
+A relationship is stored in exactly one place: its from-model's YAML (`relationships:`) or a domain JSON (`logical.relationships`). See [Where relationships live](#where-relationships-live).
 
 ```jsonc
 {
@@ -222,6 +223,29 @@ Relationships are stored **only** in the domain JSON, never in the YAML.
 **Direction convention:** `fromModel` holds the FK, `toModel` holds the PK.
 
 Entries missing any of the four string endpoints are dropped on read with a console warning; an unrecognised `cardinality` falls back to `many-to-one`.
+
+### Where relationships live
+
+**In the model library (the default for a new project, issue #126).** A relationship is written once, into the YAML of its `fromModel`, with the same fields minus `fromModel`:
+
+```yaml
+# logical-models/gold/fct_order_line.yml
+name: fct_order_line
+columns: [...]
+relationships:
+  - fromColumn: customer_id
+    toModel: dim_customer
+    toColumn: customer_id
+    cardinality: many-to-one
+```
+
+Every domain whose `logical.models` holds both `fct_order_line` and `dim_customer` draws it; a domain missing either does not. Editing it on any canvas changes every diagram that shows it, and deleting it deletes it everywhere. Renaming a model or column, or removing a column, rewrites the entries in other model files that point at it. Removing a model from one domain leaves its relationships in the library.
+
+**Per domain.** A project whose domain files already hold relationships keeps adding them there, so teammates on a version before this one go on seeing every edge. It opts in with **ERD Studio: Move Relationships to Model Library**: every v5 domain's relationships are stored once in their from-models' YAML and taken out of the domain files, in one undoable edit. Opening a diagram in such a project offers the move (once a session, with **Don't Ask Again**) when at least one relationship's two models sit together in more than one diagram. Before writing, the command explains why and where each relationship goes; a relationship the domains define with different cardinalities is a **conflict**, and the user picks the cardinality every diagram will use (naming the diagrams behind each) or leaves it in the domain files for a later run.
+
+**Which one applies** is decided by what is on disk, like layer folders: the library is used once **any** model file holds a `relationships:` list, or when **no** domain file holds a `logical.relationships` entry.
+
+**Reading.** A domain draws its own `logical.relationships` first, in order, then the library relationships between its models. When both define the same endpoints (ignoring case) it is drawn once, with the library's cardinality, and a warning names the disagreement.
 
 ## View Config (`viewConfig`)
 
@@ -258,7 +282,7 @@ Persisted UI layout state. Safe to leave as `{}` — the extension auto-position
 | Change grain, modelRole, description, rationale, meta | the model's yml |
 | Add a model to a domain diagram | Domain `.json` → append the name to `logical.models` **and**, if no file for the name exists in any folder, create `logical-models/{layer}/{name}.yml` for the domain's layer |
 | Remove a model from a domain | Domain `.json` → remove the name from `logical.models` and its relationships from `logical.relationships` |
-| Add/remove/edit a relationship | Domain `.json` → `logical.relationships` |
+| Add/remove/edit a relationship | The from-model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships` |
 | Rename a domain | Rewrite `domain` in the raw JSON and rename the file; never re-serialise a resolved domain (that inlines model bodies and produces a hybrid file) |
 
 ## Layers File (`.erd-studio/layers.json`)
@@ -416,7 +440,7 @@ AI Helper**) is read-only. `erd-studio diff --domain .erd-studio/{layer}/{domain
 or `--all`, builds both stages exactly as described above and runs the same comparison
 as the canvas, because both call the same code. It reports each difference as a fix
 that brings the logical side in line with dbt, naming the file to change: the model's
-`logical-models/{name}.yml` for columns and types, the domain file for relationships. It exits `0` when there are no blocking differences and `1` when there are.
+`logical-models/{name}.yml` for columns and types, and for relationships the from-model's yml or the domain file, wherever the project keeps them. It exits `0` when there are no blocking differences and `1` when there are.
 A column that dbt has no type for yet is advisory, not blocking, unless you pass
 `--strict`. `erd-studio inventory --models a,b --json` prints the physical shape of the
 named models, as a starting point for new model files. The `/erd-studio-setup` Claude Code

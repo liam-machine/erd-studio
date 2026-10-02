@@ -69,9 +69,9 @@ and no `catalog.json` to observe the real one. It resolves exactly like
 | `add-column-to-logical` | Add column to the model's yml (`modelContext[name].logicalModelPath`) columns array, with the dbt column `meta` keys the team's metadata list names |
 | `remove-column-from-logical` | Remove column from the model's yml (`logicalModelPath`) |
 | `update-type-in-logical` | Update column `dataType` in the model's yml (`logicalModelPath`) to the value in `resolvedDataType` |
-| `add-relationship-to-logical` | Add relationship object to domain JSON `logical.relationships[]` using the fromModel/fromColumn/toModel/toColumn from the action |
-| `remove-relationship-from-logical` | Remove the matching relationship from domain JSON `logical.relationships[]` |
-| `update-cardinality-in-logical` | Update `cardinality` field on matching relationship in domain JSON to `targetCardinality` |
+| `add-relationship-to-logical` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action) where the project keeps relationships — the from-model's YAML `relationships:` or domain JSON `logical.relationships[]` (see "Where relationships live") |
+| `remove-relationship-from-logical` | Remove the matching relationship from wherever it is defined — the from-model's YAML `relationships:` or domain JSON `logical.relationships[]` |
+| `update-cardinality-in-logical` | Update `cardinality` on the matching relationship, wherever it is defined, to `targetCardinality` |
 
 ### Physical-side actions (edit dbt project files)
 
@@ -116,7 +116,7 @@ models:
 
 - **Preserve viewConfig.positions**: Never clear or overwrite layout positions in domain JSON
 - **Match existing patterns**: When editing dbt YAML, follow the formatting and test patterns already present in the file
-- **Cascade deletions**: When removing a model from logical, also remove any relationships referencing it
+- **Cascade deletions**: When removing a model from a domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a model or column, update every model YAML `relationships:` entry that points at it
 - **Column ordering**: When adding columns to logical-models YAML, append to the end of the columns array
 
-<!-- erd-studio-harness: 24 -->
+<!-- erd-studio-harness: 25 -->

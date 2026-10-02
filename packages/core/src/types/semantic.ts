@@ -142,6 +142,12 @@ export interface SemanticModel {
   modelRole?: ModelRole;
   /** Free-form structured metadata (dbt-style `meta:`). */
   meta?: Meta;
+  /**
+   * Relationships that leave this model, stored once in its library file
+   * (issue #126) so every domain holding both ends draws the same edge. Read
+   * from `logical-models/*.yml` only — never from inline v4 models.
+   */
+  relationships?: ModelRelationship[];
 }
 
 /**
@@ -214,6 +220,12 @@ export interface Relationship {
   toColumn: string;
   cardinality: Cardinality;
 }
+
+/**
+ * A relationship as stored in its from-model's library file: the same fields
+ * as {@link Relationship} without `fromModel`, which is the file's own model.
+ */
+export type ModelRelationship = Omit<Relationship, 'fromModel'>;
 
 // ---------------------------------------------------------------------------
 // View configuration

@@ -86,6 +86,12 @@ describe('schemas match the TypeScript types', () => {
     expect(schemaKeys(node())).toEqual(interfaceKeys(file, iface));
   });
 
+  it('a model file relationship declares the fields of Relationship without fromModel (ModelRelationship)', () => {
+    expect(schemaKeys(modelSchema.definitions.relationship)).toEqual(
+      interfaceKeys(SEMANTIC, 'Relationship').filter((key) => key !== 'fromModel'),
+    );
+  });
+
   it('logical stage declares StageDataV5 plus the deprecated stage-level viewConfig the reader still honours', () => {
     expect(schemaKeys(domainSchema.properties.logical)).toEqual(
       [...interfaceKeys(SEMANTIC, 'StageDataV5'), 'viewConfig'].sort(),

@@ -50,6 +50,13 @@
     },
     "meta": {
       "$ref": "#/definitions/meta"
+    },
+    "relationships": {
+      "type": "array",
+      "description": "Relationships that leave this model, defined once for the whole project: every domain that holds both this model and toModel draws the edge. The same fields as a domain file's relationship, without fromModel (it is this model).",
+      "items": {
+        "$ref": "#/definitions/relationship"
+      }
     }
   },
   "definitions": {
@@ -173,6 +180,43 @@
       "type": "object",
       "description": "Structured metadata — owner, source system, lineage, anything your team records — in the shape of dbt's `meta:`. Free-form: values may be text, numbers, true/false, lists or nested maps. The canvas shows it in the Detail panel and edits top-level text values; ERD Studio never compares it with dbt.",
       "additionalProperties": true
+    },
+    "relationship": {
+      "type": "object",
+      "required": [
+        "fromColumn",
+        "toModel",
+        "toColumn",
+        "cardinality"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fromColumn": {
+          "type": "string",
+          "minLength": 1,
+          "description": "FK column on this model."
+        },
+        "toModel": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Referenced model (PK side)."
+        },
+        "toColumn": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Referenced PK column on toModel."
+        },
+        "cardinality": {
+          "type": "string",
+          "description": "Relationship cardinality, read from fromModel to toModel.",
+          "enum": [
+            "many-to-one",
+            "one-to-one",
+            "one-to-many",
+            "many-to-many"
+          ]
+        }
+      }
     }
   }
 }

@@ -15,7 +15,7 @@ description: >-
 
 # ERD Studio — AI Data Modeling Guide
 
-ERD Studio uses a **central model store** architecture. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and define relationships and layout.
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and hold the layout. Relationships are defined once, in the from-model's YAML, and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see `Where relationships live`).
 
 ## Architecture Overview
 
@@ -29,7 +29,7 @@ ERD Studio uses a **central model store** architecture. Model definitions are YA
 │   └── gold/
 │       └── fct_sale.yml
 ├── silver/
-│   ├── customer-360.json     ← Domain file (model references + relationships + layout)
+│   ├── customer-360.json     ← Domain file (model references + layout; relationships only in per-domain projects)
 │   └── orders.json
 └── gold/
     └── reporting.json
@@ -87,7 +87,7 @@ The **Model Library** panel in the ERD Studio sidebar shows all YAML files in `l
 | `modelFolder` | No | Filter for "Add Existing Model" dialog (e.g. `models/silver`) |
 | `stubColumns` | No | Model names whose physical-only columns are suppressed in sync comparison. Use for conformed dimensions and reference tables included only to anchor relationships — they define a few key columns (PK/NK) but not the full physical column set. Missing-column discrepancies are hidden; extra and type-mismatch discrepancies on defined columns still surface. |
 | `logical.models` | Yes | Array of model name strings (references to `logical-models/*.yml` or `logical-models/{folder}/*.yml`) |
-| `logical.relationships` | Yes | Array of relationship objects |
+| `logical.relationships` | Yes | Array of relationship objects — `[]` when the project keeps relationships in the model YAML (see "Where relationships live") |
 | `viewConfig` | Yes | Root-level view settings. The extension auto-assigns positions for new models; a new domain written with `viewConfig: {}` (no positions at all) is auto-arranged with the canvas's auto layout the first time it opens |
 
 **viewConfig** must be at the root level, not inside `logical`. It stores node positions keyed by model name, and optional canvas annotations (build notes):
@@ -117,11 +117,11 @@ Annotations are temporary build notes — visible on the canvas while constructi
 | Change column type, PK/FK/NK flags, SCD type | the model's `.yml` |
 | Change grain, modelRole, description, rationale, meta | the model's `.yml` |
 | Add a model to a domain diagram | Domain `.json` → add name to `logical.models[]` AND, if no file for that name exists in any folder, create it — `logical-models/{layer}/{name}.yml` (the domain's layer) when the project uses layer folders, else `logical-models/{name}.yml` |
-| Remove a model from a domain | Domain `.json` → remove name from `logical.models[]` AND remove its relationships from `logical.relationships[]` |
-| Add/remove/edit a relationship | Domain `.json` → `logical.relationships[]` |
+| Remove a model from a domain | Domain `.json` → remove name from `logical.models[]` AND remove its relationships from `logical.relationships[]` (relationships in model YAML stay — the domain just stops drawing them) |
+| Add/remove/edit a relationship | The from-model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships[]` — see "Where relationships live" |
 | Change layout positions | Domain `.json` → `viewConfig.positions` |
 
-> **Common mistake:** Editing the `.yml` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the `.yml` AND adding the name string to the domain `.json`. Similarly, relationships are ONLY stored in the domain `.json`, never in the `.yml`.
+> **Common mistake:** Editing the `.yml` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the `.yml` AND adding the name string to the domain `.json`. A relationship is stored in exactly one place — the from-model's `.yml` or the domain `.json`, never both (see `Where relationships live`).
 
 ---
 
@@ -175,6 +175,7 @@ columns:
 | `columns` | No | Array of column definitions |
 | `rationale` | No | Design rationale object (omit if empty) |
 | `meta` | No | Free-form metadata map (see "Metadata" below) |
+| `relationships` | No | Relationships leaving this model, shared by every domain (see "Where relationships live") |
 
 ### modelRole Values
 
@@ -330,6 +331,23 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 
 **Direction:** `fromModel` is always the FK side, `toModel` is the PK side. FK column names should match the PK column name of the referenced table.
 
+### Where relationships live
+
+A relationship is defined **once** for the whole project, in the YAML of its `fromModel` (the FK side), under `relationships:` — the same fields without `fromModel`, which is the file's own model. Every domain whose `logical.models` holds both ends draws it; a domain missing either end does not. Changing it changes every diagram that shows it.
+
+```yaml
+# logical-models/gold/fct_orders.yml
+name: fct_orders
+columns: [...]
+relationships:
+  - fromColumn: customer_id
+    toModel: dim_customer
+    toColumn: customer_id
+    cardinality: many-to-one
+```
+
+**Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` list, or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]`, and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same relationship in both places; if they disagree, the model YAML wins.
+
 ---
 
 ## Naming Conventions
@@ -398,4 +416,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 24 -->
+<!-- erd-studio-harness: 25 -->
