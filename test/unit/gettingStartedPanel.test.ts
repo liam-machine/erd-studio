@@ -1255,8 +1255,9 @@ describe('trySampleProject', () => {
 
     await expect(trySampleProject()).resolves.toBe('fallback');
     expect(clone).not.toHaveBeenCalled();
-    expect(info).toHaveBeenLastCalledWith(SAMPLE_FALLBACK_MESSAGE, 'Open on GitHub');
+    expect(info).toHaveBeenLastCalledWith(SAMPLE_FALLBACK_MESSAGE, 'Download ZIP', 'Open on GitHub');
     expect(SAMPLE_FALLBACK_MESSAGE).toContain('Download ZIP');
+    expect(SAMPLE_FALLBACK_MESSAGE).toContain('erd-studio-sample-main');
     expect(SAMPLE_FALLBACK_MESSAGE).toContain('Open Folder');
     expect(open).toHaveBeenCalledTimes(1);
     expect(String(open.mock.calls[0][0])).toBe('https://github.com/liam-machine/erd-studio-sample');
@@ -1272,8 +1273,25 @@ describe('trySampleProject', () => {
     const open = vi.spyOn(vscode.env, 'openExternal');
 
     await expect(trySampleProject()).resolves.toBe('fallback');
-    expect(info).toHaveBeenLastCalledWith(SAMPLE_FALLBACK_MESSAGE, 'Open on GitHub');
+    expect(info).toHaveBeenLastCalledWith(SAMPLE_FALLBACK_MESSAGE, 'Download ZIP', 'Open on GitHub');
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('treats the built-in Git extension without a git.clone command as no Git (Git not installed)', async () => {
+    // VS Code's Git extension is always present; with no git binary it never
+    // registers its commands, so `git.clone` would throw "command not found".
+    vscode._setMockExtensions(['vscode.git']);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const execute = vi.spyOn(vscode.commands, 'executeCommand');
+    vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never)
+      .mockResolvedValueOnce('Download ZIP' as never);
+    const open = vi.spyOn(vscode.env, 'openExternal');
+
+    await expect(trySampleProject()).resolves.toBe('fallback');
+    expect(execute).not.toHaveBeenCalledWith('git.clone', expect.anything());
+    expect(warn).not.toHaveBeenCalled();
+    expect(String(open.mock.calls[0][0])).toBe('https://github.com/liam-machine/erd-studio-sample/archive/refs/heads/main.zip');
   });
 });
 
@@ -1431,6 +1449,17 @@ describe('getting-started telemetry', () => {
     vscode.commands.registerCommand(COPILOT_CHAT_OPEN_COMMAND, () => { throw new Error('broken'); });
     await openCopilotChat({ dbtRoot: '/w', workspaceFolder: '/w' });
     expect(keys(error)).toEqual(['copilotChatOpenFailed']);
+  });
+
+  it('Try the sample: Git not installed (no git.clone command) is trySampleNoGit, not a failed clone', async () => {
+    const { feature, error } = spies();
+    vscode._setMockExtensions(['vscode.git']);
+    vi.spyOn(vscode.window, 'showInformationMessage')
+      .mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never)
+      .mockResolvedValueOnce(undefined);
+    await trySampleProject();
+    expect(keys(feature)).toEqual(['trySampleNoGit']);
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('Try the sample: cancel and no Git are features; a failed clone is an error', async () => {

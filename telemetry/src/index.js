@@ -233,6 +233,12 @@ const ERROR_CODES = [
   'copilotChatOpenFailed',
   'welcomePanelFailed',
   'projectPathInvalid',
+  'domainLoadNotDomain',
+  'domainLoadMissing',
+  'domainLoadUnreadable',
+  'domainLoadJson',
+  'domainLoadInvalid',
+  'domainLoadInternal',
 ];
 
 /**

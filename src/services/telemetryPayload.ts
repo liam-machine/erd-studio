@@ -184,6 +184,14 @@ export const ERROR_CODES = [
   'welcomePanelFailed',
   // erdStudio.projectPath names a folder with no dbt_project.yml.
   'projectPathInvalid',
+  // Why a canvas failed to load, recorded beside `domainLoad`, which stays the
+  // total. One per DomainLoadFailure, via domainLoadErrorCode().
+  'domainLoadNotDomain',
+  'domainLoadMissing',
+  'domainLoadUnreadable',
+  'domainLoadJson',
+  'domainLoadInvalid',
+  'domainLoadInternal',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
@@ -581,6 +589,27 @@ const MODEL_FILE_ERROR_CODES: Record<ModelLoadErrorKind, TelemetryErrorCode> = {
 /** The error sub-code counted for a model-file failure of `kind`; recorded alongside `modelFileParse`. */
 export function modelFileErrorCode(kind: ModelLoadErrorKind): TelemetryErrorCode {
   return MODEL_FILE_ERROR_CODES[kind] ?? 'modelFileYamlOther';
+}
+
+/**
+ * Why a canvas could not load its domain: not a domain path, the file is gone
+ * or cannot be read, its text is not JSON (or empty), it is JSON that fails
+ * validation (schema version, format, layer), or anything else threw.
+ */
+export type DomainLoadFailure = 'notDomain' | 'missing' | 'unreadable' | 'json' | 'invalid' | 'internal';
+
+const DOMAIN_LOAD_ERROR_CODES: Record<DomainLoadFailure, TelemetryErrorCode> = {
+  notDomain: 'domainLoadNotDomain',
+  missing: 'domainLoadMissing',
+  unreadable: 'domainLoadUnreadable',
+  json: 'domainLoadJson',
+  invalid: 'domainLoadInvalid',
+  internal: 'domainLoadInternal',
+};
+
+/** The error sub-code counted for a canvas load failure of `kind`; recorded alongside `domainLoad`. */
+export function domainLoadErrorCode(kind: DomainLoadFailure): TelemetryErrorCode {
+  return DOMAIN_LOAD_ERROR_CODES[kind] ?? 'domainLoadInternal';
 }
 
 /** The feature key for an auto layout that took `ms` milliseconds, or failed. */
