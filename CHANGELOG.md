@@ -8,6 +8,16 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+- **Define a relationship once, use it in every diagram** ([#126](https://github.com/liam-machine/erd-studio/issues/126)). A relationship can now live in its from-model's file in `logical-models/`, under `relationships:`, instead of in each diagram. Every diagram that holds both models draws it, and a diagram missing either one does not. Change its cardinality on any canvas and every diagram shows the change; delete it and it is gone from all of them. Renaming a model or column, or removing a column, keeps these relationships pointing at the right place, and **Draw from dbt** / **Add models from dbt** store the relationships they find there too.
+- **New projects get this by default**: when no diagram keeps relationships of its own, new ones go to the model library. A project whose diagrams already hold relationships carries on as before until you run **ERD Studio: Move Relationships to Model Library** (also in the Model Library view's `…` menu). It stores each relationship once and takes it out of the diagrams in one undoable step. If two diagrams define the same relationship with different cardinalities, it lists them and leaves them where they are: change one on the canvas and that becomes the shared definition.
+- `erd-studio diff` names the model file, not the diagram, for a relationship stored there. The AI helper files (harness v25) and the JSON schema for model files describe the new `relationships:` key.
+
+### Changed
+- Teammates on an earlier ERD Studio version keep the new key intact when they edit a model, but they do not see relationships stored in the model library until they update.
+
 ## 1.6.4 — 2026-09-29
 
 ### Changed

@@ -70,8 +70,8 @@ Each fix:
 | `add-column` | Append `{ name, dataType, description }` to `columns` in `logical-models/<model>.yml`. `dataType` is `to` (the dbt type), in double quotes; if that is empty, use the SQL cast or `STRING` and add it to "types to confirm". Description: the inventory's text copied verbatim **inside double quotes** (escape any inner `"` as `\"`), or a draft ending in "(draft)" |
 | `remove-column` | Delete the column from the yml, **and** delete any relationship in the domain JSON whose `fromModel`/`fromColumn` or `toModel`/`toColumn` names it |
 | `set-type` | Set the column's `dataType` to `to` |
-| `add-relationship` | Append `relationship` (with its `cardinality`) to `logical.relationships` in the domain JSON, then set `isForeignKey: true` on the `fromColumn` in the from-model's yml if it is not already |
-| `remove-relationship` | Remove the matching entry from `logical.relationships`. This is always a question first — see section 3 |
+| `add-relationship` | Add `relationship` (with its `cardinality`) where the project keeps relationships — the from-model's yml `relationships:` (without `fromModel`) or `logical.relationships` in the domain JSON, by the `/erd-studio` skill's "Where relationships live" — then set `isForeignKey: true` on the `fromColumn` in the from-model's yml if it is not already |
+| `remove-relationship` | Remove the matching entry from wherever it is defined — the from-model's yml `relationships:` or `logical.relationships`. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 |
 | `set-cardinality` | Set `cardinality` on the matching relationship in the domain JSON to `to` |
 | `resolve-phantom` | Always a question: rename it in `logical.models` (and its relationships) to the real dbt model name, or remove it from this domain. **Never** delete its `logical-models/*.yml` — other domains may use it |
 

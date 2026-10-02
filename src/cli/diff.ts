@@ -19,6 +19,8 @@ import { detectDomainFormat } from '../types/semantic';
 import type { SyncPlan } from '../types/syncPlan';
 import { DomainFileError } from '../services/domainService';
 import type { ModelFileError, ModelFileErrorKind } from '../services/logicalModelService';
+import { libraryRelationshipsOf, usesLibraryRelationships } from '../services/libraryRelationships';
+import { relationshipKey } from '@erd-studio/core';
 import { computeDomainDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
@@ -178,6 +180,14 @@ function sortFixes(fixes: Fix[]): Fix[] {
     || a.kind.localeCompare(b.kind));
 }
 
+/** Where a domain's relationships are defined, so a relationship fix names the right file. */
+export interface RelationshipHome {
+  /** `relationshipKey`s of the relationships this domain draws from model yml files. */
+  inLibrary: ReadonlySet<string>;
+  /** Whether a new relationship goes to the from-model's yml (`usesLibraryRelationships`). */
+  addToLibrary: boolean;
+}
+
 /**
  * Re-read a physical-truth sync plan as edits to the logical model. Every
  * plan resolution becomes exactly one fix, except those about a phantom,
@@ -191,9 +201,17 @@ export function fixesFromPlan(
   semanticDir: string,
   phantoms: DomainDiff['phantoms'],
   unreadable: UnreadableModelFile[] = [],
+  relationshipHome: RelationshipHome = { inLibrary: new Set(), addToLibrary: false },
 ): Fix[] {
   const ymlFile = (model: string): string =>
     plan.modelContext[model]?.logicalModelPath ?? `${semanticDir}/logical-models/${model}.yml`;
+  // A relationship is fixed where it is defined (#126): the from-model's yml
+  // when the library holds it, else the domain file. A new one goes where the
+  // project keeps relationships.
+  const relationshipFile = (r: Parameters<typeof relationshipKey>[0], adding: boolean): string =>
+    (adding ? relationshipHome.addToLibrary : relationshipHome.inLibrary.has(relationshipKey(r)))
+      ? ymlFile(r.fromModel)
+      : domainFile;
   const fixes: Fix[] = [];
   // A phantom is one question (rename it or drop it), not one fix per column
   // and edge: from the logical side compare() reports it 'extra' with every
@@ -249,21 +267,21 @@ export function fixesFromPlan(
     switch (r.action) {
       case 'add-relationship-to-logical':
         fixes.push({
-          severity: 'blocking', kind: 'add-relationship', model: r.fromModel, column: r.fromColumn, file: domainFile,
+          severity: 'blocking', kind: 'add-relationship', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, true),
           relationship: { ...rel, ...(r.targetCardinality ? { cardinality: r.targetCardinality } : {}) },
           explain: `dbt tests the link ${link}, but the logical model does not draw it — add the relationship.`,
         });
         break;
       case 'remove-relationship-from-logical':
         fixes.push({
-          severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file: domainFile,
+          severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, false),
           relationship: { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) },
           explain: `The logical model draws ${link}, but dbt has no relationships test for it — remove it, or add the test to dbt.`,
         });
         break;
       case 'update-cardinality-in-logical':
         fixes.push({
-          severity: 'blocking', kind: 'set-cardinality', model: r.fromModel, column: r.fromColumn, file: domainFile,
+          severity: 'blocking', kind: 'set-cardinality', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, false),
           from: r.sourceCardinality, to: r.targetCardinality,
           relationship: { ...rel, ...(r.targetCardinality ? { cardinality: r.targetCardinality } : {}) },
           explain: `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — change it to ${r.targetCardinality}.`,
@@ -366,7 +384,14 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
     modelFolder: (name) => ctx.logicalModelService.modelFolder(name),
   });
   const unreadableModelFiles = unreadableModels(ctx, unified);
-  const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles);
+  const relationshipHome: RelationshipHome = {
+    inLibrary: new Set(unified.logical.models.flatMap(libraryRelationshipsOf).map(relationshipKey)),
+    addToLibrary: usesLibraryRelationships(
+      ctx.logicalModelService.listModels(),
+      ctx.domainService.countDomainFileRelationships(ctx.root, ctx.semanticDir),
+    ),
+  };
+  const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles, relationshipHome);
   const blocking = fixes.filter((f) => f.severity === 'blocking').length;
   const advisory = fixes.length - blocking;
 

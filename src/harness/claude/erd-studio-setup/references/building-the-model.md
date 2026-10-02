@@ -171,9 +171,15 @@ nothing else — a drafted extra column would show up as drift.
 - `layer` matches the parent folder.
 - `modelFolder` is optional: the common folder of the chosen models' files, if there is one.
 - `logical.models` is the chosen names, including already-modelled ones.
-- `logical.relationships` is the inventory's `relationships` array, **copied verbatim** —
+- The relationships are the inventory's `relationships` array, **copied verbatim** —
   including `cardinality`. Do not add connections you inferred from column names: a connection
   dbt does not test would be drift. Offer those as dbt tests in Stage 6 instead.
+- **Where they go** follows the `/erd-studio` skill's "Where relationships live". When any model
+  file already has a `relationships:` list, or no domain file has a `logical.relationships`
+  entry (a first diagram), write each one into its `fromModel`'s yml under `relationships:` —
+  the same fields without `fromModel` — and leave `logical.relationships: []`. Every diagram
+  holding both models then draws it. Otherwise the project keeps them per domain: put them in
+  `logical.relationships` as shown above. Never write one in both places.
 - `viewConfig: {}` (no positions) makes ERD Studio auto-arrange the diagram with its auto layout
   the first time the domain is opened, and save the result. Do not write positions yourself;
   the user can re-run the layout any time with **Layout** in the canvas toolbar or Shift+L.
@@ -181,8 +187,8 @@ nothing else — a drafted extra column would show up as drift.
   them.
 
 If the domain file already exists (a re-run), add new names to `logical.models` and new
-relationships to `logical.relationships`, and never touch `viewConfig.positions` — that is the
-user's layout.
+relationships where the project keeps them, and never touch `viewConfig.positions` — that is
+the user's layout.
 
 ## Worked example
 

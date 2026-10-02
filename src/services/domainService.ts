@@ -164,6 +164,26 @@ export class DomainService {
   }
 
   /**
+   * How many relationships the project's domain files hold between them
+   * (`logical.relationships` entries, read raw). Zero means no domain keeps
+   * its own, which is what makes the model library the default home for new
+   * ones (#126, `usesLibraryRelationships`). Unreadable files count as none.
+   */
+  countDomainFileRelationships(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): number {
+    let count = 0;
+    for (const summary of this.listDomains(projectPath, semanticDir)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as { logical?: { relationships?: unknown } } | null;
+        const relationships = raw?.logical?.relationships;
+        if (Array.isArray(relationships)) count += relationships.length;
+      } catch {
+        // Nothing we could keep in step with.
+      }
+    }
+    return count;
+  }
+
+  /**
    * Read and parse a domain JSON file, returning a UnifiedDomain.
    *
    * Every failure before validation is raised as a `DomainFileError` so

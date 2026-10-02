@@ -778,8 +778,15 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 24 (the YAML quoting rule for model files)', () => {
-      expect(HARNESS_VERSION).toBe('24');
+    it('is 25 (relationships defined once in model files, #126)', () => {
+      expect(HARNESS_VERSION).toBe('25');
+    });
+
+    it('tells assistants where relationships live and how to choose', () => {
+      const SCHEMA_CONTENT = service.generateContent('claude');
+      expect(SCHEMA_CONTENT).toContain('### Where relationships live');
+      expect(SCHEMA_CONTENT).toMatch(/\*\*any\*\* model file already has a `relationships:` list, or \*\*no\*\* domain file has a `logical\.relationships` entry/);
+      expect(SCHEMA_CONTENT).not.toContain('relationships are ONLY stored in the domain');
     });
 
     it('states the YAML quoting rule, and every model example in the schema guide parses', () => {

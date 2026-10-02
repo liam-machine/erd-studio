@@ -18,6 +18,7 @@ export type {
   DesignModel,
   Cardinality,
   Relationship,
+  ModelRelationship,
   NodePosition,
   LayoutOptions,
   AnnotationColor,

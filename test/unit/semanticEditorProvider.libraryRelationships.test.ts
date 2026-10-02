@@ -1,0 +1,247 @@
+/**
+ * Relationships defined once in the model library (issue #126).
+ *
+ * A relationship lives in its from-model's logical-models/*.yml, and every
+ * domain holding both ends draws it. New relationships go there by default
+ * for a project whose domain files hold none; a project that keeps them per
+ * domain carries on doing so until it opts in (the library holds one).
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as vscode from 'vscode';
+
+import {
+  createMockWebviewPanel,
+  createMockTextDocument,
+  _resetMockWorkspace,
+  _appliedEdits,
+} from '../__mocks__/vscode';
+import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { DomainService } from '../../src/services/domainService';
+import { LayerService } from '../../src/services/layerService';
+import { ManifestService } from '../../src/services/manifestService';
+import { YmlParserService } from '../../src/services/ymlParserService';
+import { TemplateService } from '../../src/services/templateService';
+import { SelectorsService } from '../../src/services/selectorsService';
+import { LogicalModelService } from '../../src/services/logicalModelService';
+import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import type { Relationship } from '../../src/types/semantic';
+
+const FCT_ORDER = {
+  name: 'fct_order',
+  columns: [
+    { name: 'order_key', dataType: 'string', description: '', isPrimaryKey: true },
+    { name: 'customer_key', dataType: 'string', description: '' },
+  ],
+};
+const DIM_CUSTOMER = {
+  name: 'dim_customer',
+  columns: [{ name: 'customer_key', dataType: 'string', description: '', isPrimaryKey: true }],
+};
+const DIM_DATE = {
+  name: 'dim_date',
+  columns: [{ name: 'date_key', dataType: 'date', description: '', isPrimaryKey: true }],
+};
+
+const EDGE = {
+  fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key',
+} as const;
+
+interface Harness {
+  root: string;
+  domainService: DomainService;
+  logicalModelService: LogicalModelService;
+  domainPath: (name: string) => string;
+  /** Open a domain in a canvas panel; its messages go through `send`. */
+  open: (name: string) => Promise<{ send: (message: unknown) => Promise<void>; errors: () => string[] }>;
+  readDomain: (name: string) => { logical: { models: string[]; relationships: Relationship[] } };
+  shown: (name: string) => Relationship[];
+}
+
+/** A silver layer with three domains over one shared library; `ownRelationships` seeds `orders`. */
+async function createHarness(ownRelationships: Relationship[] = []): Promise<Harness> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-shared-rels-'));
+  const semanticDir = '.erd-studio';
+  const layerService = new LayerService(root, semanticDir);
+  const domainService = new DomainService(layerService);
+  const logicalModelService = new LogicalModelService(root, semanticDir);
+  domainService.setLogicalModelService(logicalModelService);
+  const selectorsService = new SelectorsService(domainService, root, semanticDir);
+  vi.spyOn(selectorsService, 'scheduleRegenerate').mockImplementation(() => undefined);
+
+  for (const model of [FCT_ORDER, DIM_CUSTOMER, DIM_DATE]) logicalModelService.saveModel(model);
+
+  const domainDir = path.join(root, semanticDir, 'silver');
+  fs.mkdirSync(domainDir, { recursive: true });
+  const domainPath = (name: string) => path.join(domainDir, `${name}.json`);
+  const writeDomain = (name: string, models: string[], relationships: Relationship[] = []) =>
+    fs.writeFileSync(domainPath(name), JSON.stringify({
+      schemaVersion: 5, domain: name, layer: 'silver', description: '',
+      logical: { models, relationships },
+      viewConfig: { positions: Object.fromEntries(models.map((m, i) => [m, { x: i * 300, y: 0 }])) },
+    }, null, 2) + '\n');
+  writeDomain('orders', ['fct_order', 'dim_customer'], ownRelationships);
+  writeDomain('reporting', ['fct_order', 'dim_customer', 'dim_date']);
+  writeDomain('finance', ['fct_order', 'dim_date']);
+
+  const context = {
+    extensionUri: vscode.Uri.file(root),
+    globalState: { get: () => undefined, update: async () => undefined },
+    secrets: vscode.createMockSecretStorage(),
+  } as unknown as vscode.ExtensionContext;
+  const provider = new SemanticEditorProvider(
+    context, domainService, new ManifestService(), new YmlParserService(), new TemplateService(),
+    layerService, root, selectorsService, logicalModelService, new OwnWriteTracker(),
+  );
+
+  return {
+    root,
+    domainService,
+    logicalModelService,
+    domainPath,
+    open: async (name) => {
+      const document = createMockTextDocument(domainPath(name), fs.readFileSync(domainPath(name), 'utf-8'), { persist: true });
+      const panel = createMockWebviewPanel();
+      await provider.resolveCustomTextEditor(
+        document as unknown as vscode.TextDocument,
+        panel as unknown as vscode.WebviewPanel,
+        { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => undefined }) } as unknown as vscode.CancellationToken,
+      );
+      return {
+        send: async (message) => {
+          _appliedEdits.length = 0;
+          panel._postedMessages.length = 0;
+          await panel._simulateMessage(message);
+        },
+        errors: () => panel._postedMessages
+          .filter((m): m is { type: 'error'; payload: { message: string } } => (m as { type: string }).type === 'error')
+          .map((m) => m.payload.message),
+      };
+    },
+    readDomain: (name) => JSON.parse(fs.readFileSync(domainPath(name), 'utf-8')),
+    shown: (name) => {
+      logicalModelService.invalidateCache();
+      return domainService.getDomain(domainPath(name)).logical.relationships;
+    },
+  };
+}
+
+describe('relationships stored once in the model library (#126)', () => {
+  let h: Harness;
+
+  beforeEach(() => { _resetMockWorkspace(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(h.root, { recursive: true, force: true });
+  });
+
+  describe('a project whose domain files hold no relationships (the default)', () => {
+    beforeEach(async () => { h = await createHarness(); });
+
+    it('stores a new relationship in the from-model file, not the domain file, in one WorkspaceEdit', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+
+      expect(orders.errors()).toEqual([]);
+      expect(_appliedEdits).toHaveLength(1);
+      expect(h.readDomain('orders').logical.relationships).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([
+        { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+      ]);
+      expect(fs.readFileSync(h.logicalModelService.modelPath('fct_order'), 'utf-8')).toMatch(/^relationships:/m);
+    });
+
+    it('is drawn by every domain holding both models, and by no domain missing one', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+
+      expect(h.shown('orders')).toEqual([{ ...EDGE, cardinality: 'many-to-one' }]);
+      expect(h.shown('reporting')).toEqual([{ ...EDGE, cardinality: 'many-to-one' }]);
+      expect(h.shown('finance')).toEqual([]);
+    });
+
+    it('a cardinality change made in one domain is what every domain shows', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      const reporting = await h.open('reporting');
+      await reporting.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+
+      expect(reporting.errors()).toEqual([]);
+      expect(h.shown('orders')).toEqual([{ ...EDGE, cardinality: 'one-to-one' }]);
+      expect(h.shown('reporting')).toEqual([{ ...EDGE, cardinality: 'one-to-one' }]);
+    });
+
+    it('refuses a second definition of the same relationship from another domain', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      const reporting = await h.open('reporting');
+      await reporting.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+
+      expect(reporting.errors()).toEqual(['Failed to add relationship: This relationship already exists.']);
+      expect(h.shown('orders')).toEqual([{ ...EDGE, cardinality: 'many-to-one' }]);
+    });
+
+    it('removing it in one domain removes it from all of them', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      const reporting = await h.open('reporting');
+      await reporting.send({ type: 'removeRelationship', payload: EDGE });
+
+      expect(reporting.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
+      expect(h.shown('orders')).toEqual([]);
+    });
+
+    it('follows a rename of the column it points at, in the other model\'s file', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      await orders.send({
+        type: 'updateColumn',
+        payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'customer_sk', dataType: 'string', description: '' } },
+      });
+
+      expect(orders.errors()).toEqual([]);
+      expect(h.shown('reporting')).toEqual([{ ...EDGE, toColumn: 'customer_sk', cardinality: 'many-to-one' }]);
+    });
+
+    it('follows a rename of the model it points at', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      await orders.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });
+
+      expect(orders.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships?.[0].toModel).toBe('dim_client');
+    });
+  });
+
+  describe('a project that keeps relationships in its domain files', () => {
+    const DATE_EDGE: Relationship = {
+      fromModel: 'fct_order', fromColumn: 'order_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one',
+    };
+    beforeEach(async () => { h = await createHarness([DATE_EDGE]); });
+
+    it('carries on writing new relationships to the domain file until it opts in', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+
+      expect(orders.errors()).toEqual([]);
+      expect(h.readDomain('orders').logical.relationships).toHaveLength(2);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
+      expect(h.shown('reporting')).toEqual([]);
+    });
+
+    it('once the library holds one, editing a domain-file relationship moves it there', async () => {
+      const model = h.logicalModelService.getModel('fct_order')!;
+      h.logicalModelService.saveModel({ ...model, relationships: [{ fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' }] });
+      const orders = await h.open('orders');
+      await orders.send({ type: 'updateRelationship', payload: { ...DATE_EDGE, cardinality: 'one-to-one' } });
+
+      expect(orders.errors()).toEqual([]);
+      expect(h.readDomain('orders').logical.relationships).toEqual([]);
+      expect(h.shown('reporting')).toContainEqual({ ...DATE_EDGE, cardinality: 'one-to-one' });
+    });
+  });
+});

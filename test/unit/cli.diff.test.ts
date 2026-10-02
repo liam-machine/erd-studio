@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { stringify as toYaml } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { relationshipKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
 import { fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
@@ -240,6 +241,14 @@ describe('fixesFromPlan', () => {
     expect(byCol['f.k']).toMatchObject({ kind: 'set-cardinality', from: 'one-to-one', to: 'many-to-one', file: '.erd-studio/silver/d.json' });
     expect(fixes.filter((f) => f.kind === 'resolve-phantom')).toHaveLength(1);
     expect(fixes[fixes.length - 1].severity).toBe('advisory');
+  });
+
+  it('names the from-model yml for a relationship stored in the model library (#126)', () => {
+    const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
+      inLibrary: new Set([relationshipKey({ fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' })]),
+      addToLibrary: true,
+    });
+    expect(fixes.find((f) => f.kind === 'set-cardinality')).toMatchObject({ file: '.erd-studio/logical-models/f.yml' });
   });
 });
 

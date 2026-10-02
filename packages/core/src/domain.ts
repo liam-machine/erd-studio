@@ -324,6 +324,7 @@ function parseStageData(
       // Create placeholder models from names
       models = names.map(name => ({ name, columns: [] }));
     }
+    return { models, relationships: mergeLibraryRelationships(models, relationships, filePath, warn) };
   } else {
     // v4 format: inline model objects — each must carry a string name
     models = [];
@@ -388,6 +389,61 @@ export function describeModelLoadError(error: ModelLoadError): string {
   return error.line !== undefined
     ? `logical-models file has a YAML error on line ${error.line}`
     : 'logical-models file has a YAML error';
+}
+
+/** Identity of a relationship: its four endpoints, compared without case. */
+export function relationshipKey(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): string {
+  return [rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()).join('\u0000');
+}
+
+/**
+ * The relationships a v5 domain draws (issue #126): its own
+ * `logical.relationships`, plus every relationship stored in a model's library
+ * file whose two ends are both in the domain. A relationship is defined once
+ * in the library and shown by every domain that holds both models.
+ *
+ * The domain's own entries keep their order (so moving them into the library
+ * changes nothing on the canvas) and the library entries follow. When both
+ * define the same endpoints, the library's cardinality wins — it is the one
+ * every other domain shows too — and the disagreement is warned about.
+ */
+export function mergeLibraryRelationships(
+  models: readonly SemanticModel[],
+  own: readonly Relationship[],
+  filePath = '',
+  warn: (message: string) => void = () => { /* silent */ },
+): Relationship[] {
+  const inDomain = new Set(models.map((m) => m.name.toLowerCase()));
+  const library = new Map<string, Relationship>();
+  for (const model of models) {
+    for (const rel of model.relationships ?? []) {
+      if (!inDomain.has(rel.toModel.toLowerCase())) continue;
+      const full: Relationship = { fromModel: model.name, ...rel };
+      const key = relationshipKey(full);
+      if (!library.has(key)) library.set(key, full);
+    }
+  }
+  if (library.size === 0) return [...own];
+
+  const merged: Relationship[] = [];
+  const seen = new Set<string>();
+  for (const rel of own) {
+    const key = relationshipKey(rel);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const shared = library.get(key);
+    if (shared && shared.cardinality !== rel.cardinality) {
+      warn(
+        `Relationship ${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn} in ${filePath} ` +
+        `is ${rel.cardinality}, but logical-models/ defines it as ${shared.cardinality}; using ${shared.cardinality}`,
+      );
+    }
+    merged.push(shared ? { ...rel, cardinality: shared.cardinality } : rel);
+  }
+  for (const [key, rel] of library) {
+    if (!seen.has(key)) merged.push(rel);
+  }
+  return merged;
 }
 
 /**
