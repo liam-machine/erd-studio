@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.6 — 2026-10-02
 
 ### Added
 - **Define a relationship once, use it in every diagram** ([#126](https://github.com/liam-machine/erd-studio/issues/126)). A relationship can now live in its from-model's file in `logical-models/`, under `relationships:`, instead of in each diagram. Every diagram that holds both models draws it, and a diagram missing either one does not. Change its cardinality on any canvas and every diagram shows the change; delete it and it is gone from all of them. Renaming a model or column, or removing a column, keeps these relationships pointing at the right place, and **Draw from dbt** / **Add models from dbt** store the relationships they find there too.
