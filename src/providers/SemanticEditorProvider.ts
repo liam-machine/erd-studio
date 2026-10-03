@@ -124,6 +124,7 @@ import type { GroundTruth } from '../types/syncPlan';
 import type { NodePosition, Relationship, SemanticModel, UnifiedDomain } from '../types/semantic';
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
+import { saveDocument, saveDocumentByUri } from './documentSave';
 import { domainLoadErrorCode, layoutFeature, type DomainLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
 import { openModelFileAt } from '../commands/openModelFile';
 import {
@@ -1655,6 +1656,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.logicalModelService.getModelsDir()));
       const shared = sharedRelationshipCount(readDomainRelationships(this.domainService, this.workspaceRoot, semanticDir));
       if (shared === 0) return;
+      telemetry.feature('relMoveOffered');
       const choice = await vscode.window.showInformationMessage(
         `Relationships can now be defined once and shared. ${shared === 1 ? '1 relationship here is' : `${shared} relationships here are`} ` +
         'kept as a separate copy in each diagram that shows it. Move them to the model library so each is defined once?',
@@ -1663,9 +1665,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         "Don't Ask Again",
       );
       if (choice === 'Review the Move…') {
-        await vscode.commands.executeCommand('erdStudio.moveRelationshipsToLibrary');
+        telemetry.feature('relMoveReview');
+        try {
+          await vscode.commands.executeCommand('erdStudio.moveRelationshipsToLibrary');
+        } catch (err) {
+          // The move reports its own failures; anything that escapes it is
+          // still the user's to see, never only a console line.
+          telemetry.error('relMoveFailed');
+          void vscode.window.showErrorMessage(
+            `Move Relationships to Model Library failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       } else if (choice === "Don't Ask Again") {
+        telemetry.feature('relMoveDeclined');
         await this.context.workspaceState?.update(RELATIONSHIP_MOVE_DECLINED_KEY, true);
+      } else {
+        telemetry.feature('relMoveNotNow');
       }
     } catch (err) {
       console.warn('[SemanticEditorProvider] Relationship move offer skipped:', err);
@@ -1894,11 +1909,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
         return false;
       }
-      await document.save();
-      // Own writes are recorded only once the bytes are on disk — the tracker
-      // stats the file — so the logical-model / semantic watchers can tell
-      // this save apart from an external edit and skip the extra refresh.
-      this.ownWriteTracker.recordWrite(document.uri.fsPath);
+      // A save that fails is reported, never ignored: the edit is applied in
+      // memory, so without a word the file would sit open and unsaved (#126).
+      const unsaved: string[] = [];
+      if (await saveDocument(document)) {
+        // Own writes are recorded only once the bytes are on disk — the tracker
+        // stats the file — so the logical-model / semantic watchers can tell
+        // this save apart from an external edit and skip the extra refresh.
+        this.ownWriteTracker.recordWrite(document.uri.fsPath);
+      } else {
+        unsaved.push(document.uri.fsPath);
+      }
       for (const filePath of created) {
         this.ownWriteTracker.recordWrite(filePath);
       }
@@ -1907,12 +1928,21 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       const ourPaths = this.editedModelPaths.get(panelKey) ?? new Set<string>();
       for (const modelDoc of modelDocs) {
-        await modelDoc.save();
-        this.ownWriteTracker.recordWrite(modelDoc.uri.fsPath);
         // Remember which yml documents WE edited for this domain, so an
         // undo/redo only ever flushes those (never a buffer the user is
         // hand-editing in another tab).
         ourPaths.add(modelDoc.uri.fsPath);
+        // Re-fetched by URI: VS Code may have disposed the handle opened
+        // before the edit, and the edit then landed in a fresh copy (#126).
+        if (await saveDocumentByUri(modelDoc.uri)) {
+          this.ownWriteTracker.recordWrite(modelDoc.uri.fsPath);
+        } else {
+          unsaved.push(modelDoc.uri.fsPath);
+        }
+      }
+      if (unsaved.length > 0) {
+        telemetry.error('saveFailed');
+        webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
       }
       for (const filePath of created) {
         ourPaths.add(filePath);
@@ -1946,6 +1976,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     onSuccess?.();
     return true;
+  }
+
+  /** The error shown when files an edit changed could not be saved. */
+  private describeUnsaved(filePaths: string[]): string {
+    const names = filePaths.map((p) => path.relative(this.workspaceRoot, p).split(path.sep).join('/'));
+    return `Could not save ${names.join(', ')} — the change is open in the editor but not on disk. ` +
+      'Save the file from its tab (or revert it), then try again.';
   }
 
   /**

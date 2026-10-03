@@ -67,6 +67,7 @@ import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus
 import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
+import { saveDocumentByUri } from './providers/documentSave';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -1495,10 +1496,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // Domain edits land in memory; a canvas never sits dirty, so save them.
       // Every path is recorded as our own write, and the refreshes the
       // watchers would have driven are issued directly below.
+      // Re-fetched by URI and checked (#126): a handle opened before the edit
+      // may have been disposed, and a save can fail without throwing.
+      const unsaved: string[] = [];
       for (const doc of domainDocs) {
-        await doc.save();
-        ownWrites.recordWrite(doc.uri.fsPath);
+        if (await saveDocumentByUri(doc.uri)) {
+          ownWrites.recordWrite(doc.uri.fsPath);
+        } else {
+          unsaved.push(path.relative(workspaceRoot, doc.uri.fsPath).split(path.sep).join('/'));
+        }
         treeProvider.invalidateDomain(doc.uri.fsPath);
+      }
+      if (unsaved.length > 0) {
+        telemetry.error('saveFailed');
+        void vscode.window.showErrorMessage(
+          `Could not save ${unsaved.join(', ')} — the rename is open in the editor but not on disk. Save the file from its tab, or revert it.`,
+        );
       }
       ownWrites.recordWrite(newPath);
       ownWrites.recordDelete(dup.filePath);
