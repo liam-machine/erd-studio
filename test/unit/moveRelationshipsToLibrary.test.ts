@@ -283,6 +283,8 @@ describe('moveRelationshipsToLibrary — writes disk directly (#126)', () => {
     expect(messages(info).some((m) => SUCCESS.test(m))).toBe(false);
     for (const [filePath, text] of p.originals) expect(fs.readFileSync(filePath, 'utf-8')).toBe(text);
     expect(p.onWritten).not.toHaveBeenCalled();
+    // Refused before the confirmation dialog — nobody settles conflicts only to be turned away.
+    expect(info.mock.calls.some(([text]) => String(text).startsWith('Define each relationship once'))).toBe(false);
   });
 
   it('puts every file back when a write fails mid-move', async () => {

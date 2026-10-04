@@ -103,6 +103,26 @@ export function writeFileAtomic(filePath: string, text: string): void {
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
+ * Refuse when any of `filePaths` is open with unsaved edits — the user's work
+ * in progress; writing under it would leave VS Code holding a copy that no
+ * longer matches disk. Returns true (and has told the user) when refused.
+ */
+function refuseIfDirty(filePaths: Iterable<string>, relPath: (filePath: string) => string): boolean {
+  const targets = new Set([...filePaths].map((p) => path.resolve(p)));
+  const dirty = vscode.workspace.textDocuments
+    .filter((doc) => doc.isDirty && targets.has(path.resolve(doc.uri.fsPath)))
+    .map((doc) => relPath(doc.uri.fsPath));
+  if (dirty.length === 0) return false;
+  telemetry.error('relMoveDirtyFiles');
+  const shown = dirty.slice(0, 5).join(', ') + (dirty.length > 5 ? ` and ${dirty.length - 5} more` : '');
+  void vscode.window.showErrorMessage(
+    `${TITLE}: ${dirty.length === 1 ? 'a file it would change has' : `${dirty.length} files it would change have`} unsaved edits — ${shown}. ` +
+    'Save or revert these first, then run the move again. Nothing was changed.',
+  );
+  return true;
+}
+
+/**
  * The command. Never throws: anything unexpected is shown as an error and
  * counted, so neither the palette nor the canvas offer can swallow it.
  */
@@ -143,6 +163,17 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     );
     return;
   }
+  // Checked before asking anything, so nobody settles conflicts only to be
+  // turned away; checked again before writing, in case a file was edited
+  // while the dialog was open.
+  const candidates = [
+    ...[...plan.toLibrary, ...plan.conflicts.map((c) => c.relationship)].map((r) => logicalModelService.modelPath(r.fromModel)),
+    ...domains
+      .filter((d) => plan.removeFromDomains.has(d.label) || plan.conflicts.some((c) => c.definitions.some((def) => def.domains.includes(d.label))))
+      .map((d) => d.filePath),
+  ];
+  if (refuseIfDirty(candidates, relPath)) return;
+
   const choice = await vscode.window.showInformationMessage(
     'Define each relationship once, in the model library?',
     {
@@ -231,21 +262,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     domainPaths.push(domain.filePath);
   }
 
-  // A file open with unsaved edits is the user's work in progress: writing
-  // under it would leave VS Code holding a copy that no longer matches disk.
-  const targets = new Set(writes.map((w) => path.resolve(w.filePath)));
-  const dirty = vscode.workspace.textDocuments
-    .filter((doc) => doc.isDirty && targets.has(path.resolve(doc.uri.fsPath)))
-    .map((doc) => relPath(doc.uri.fsPath));
-  if (dirty.length > 0) {
-    telemetry.error('relMoveDirtyFiles');
-    const shown = dirty.slice(0, 5).join(', ') + (dirty.length > 5 ? ` and ${dirty.length - 5} more` : '');
-    void vscode.window.showErrorMessage(
-      `${TITLE}: ${dirty.length === 1 ? 'a file it would change has' : `${dirty.length} files it would change have`} unsaved edits — ${shown}. ` +
-      'Save or revert these first, then run the move again. Nothing was changed.',
-    );
-    return;
-  }
+  if (refuseIfDirty(writes.map((w) => w.filePath), relPath)) return;
 
   // All or nothing: if one write fails, every file already written is put back.
   const written: typeof writes = [];
