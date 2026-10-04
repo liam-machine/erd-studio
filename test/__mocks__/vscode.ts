@@ -645,8 +645,37 @@ export const _appliedEdits: WorkspaceEdit[] = [];
 /** Set to false to make workspace.applyEdit reject (nothing is applied). */
 export const _mockWorkspaceState = { applyEditResult: true };
 
+/** fsPaths whose document save() resolves false (see `_failMockSave`). */
+const _failingSaves = new Set<string>();
+
+/**
+ * Make every save() of the document at `fsPath` resolve `false` without
+ * writing — VS Code's answer when its copy is older than the file on disk
+ * ("File Modified Since"). The document stays dirty.
+ */
+export function _failMockSave(fsPath: string): void {
+  _failingSaves.add(path.resolve(fsPath));
+}
+
+/**
+ * Dispose the open document at `fsPath`, as VS Code does with documents an
+ * extension opened but nobody is showing: the old object's save() rejects
+ * "Document has been closed", and the next openTextDocument (or an applyEdit
+ * touching the uri) gets a fresh object read from disk.
+ */
+export function _closeMockDocument(fsPath: string): void {
+  const key = Uri.file(fsPath).toString();
+  const doc = _mockDocuments.get(key);
+  if (!doc) return;
+  _mockDocuments.delete(key);
+  workspace.textDocuments = workspace.textDocuments.filter((d) => d !== doc);
+  (doc as MockTextDocument & { isClosed?: boolean }).isClosed = true;
+  doc.save = async () => { throw new Error('Document has been closed'); };
+}
+
 /** Reset documents, applied edits and applyEdit behaviour (call in beforeEach). */
 export function _resetMockWorkspace(): void {
+  _failingSaves.clear();
   _mockDocuments.clear();
   _appliedEdits.length = 0;
   _mockWorkspaceState.applyEditResult = true;
@@ -685,6 +714,7 @@ export function createMockTextDocument(fsPath: string, text = '{}', options: { p
       return Math.min(current.length, offset + position.character);
     },
     save: async () => {
+      if (_failingSaves.has(path.resolve(fsPath))) return false;
       if (doc._persist) {
         fs.writeFileSync(fsPath, current, 'utf-8');
       }

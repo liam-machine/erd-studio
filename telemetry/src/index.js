@@ -193,6 +193,17 @@ const FEATURES = [
   'copilotChatNoArgs',
   'welcomeDrawFromDbt',
   'welcomeOpenDiagram',
+  // Move Relationships to Model Library (#126): the canvas offer and its
+  // answers, then the command's own route.
+  'relMoveOffered',
+  'relMoveReview',
+  'relMoveNotNow',
+  'relMoveDeclined',
+  'relMoveStarted',
+  'relMoveCancelled',
+  'relMoveNothingToMove',
+  'relMoveCompleted',
+  'relMoveLeftover',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -239,6 +250,14 @@ const ERROR_CODES = [
   'domainLoadJson',
   'domainLoadInvalid',
   'domainLoadInternal',
+  // Move Relationships to Model Library (#126): refused because a file it
+  // would change had unsaved edits, a write failed (every file restored), or
+  // the command threw.
+  'relMoveDirtyFiles',
+  'relMoveWriteFailed',
+  'relMoveFailed',
+  // A canvas edit (or the duplicate-model rename) could not save a file.
+  'saveFailed',
 ];
 
 /**
