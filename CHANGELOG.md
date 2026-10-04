@@ -8,7 +8,7 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
-## Unreleased
+## 1.6.7 — 2026-10-04
 
 ### Fixed
 - **Move Relationships to Model Library now saves your files** ([#126](https://github.com/liam-machine/erd-studio/issues/126)). In 1.6.6 the move could change every model and diagram file but leave them open in tabs, unsaved — or, when a file had changed on disk (after a `git pull`, or an AI assistant's edit), save only some of them while still reporting success. The move now writes the files itself and changes nothing in them but the relationships: comments, formatting, folded text and line endings stay exactly as they were. If a file it needs to change has unsaved edits in an open tab, it stops and names the file before changing anything; if any file cannot be written, every file is put back and you are told which one failed. Because the files are saved directly, undo the move with git (or your source control) rather than Undo.
