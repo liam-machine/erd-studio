@@ -13,12 +13,18 @@
 import type { DisplayColumn, DisplayModel } from '../../src/types/display';
 import type { FkDialogPrefill } from '../store/editorStore';
 
+type KeyFlags = Pick<DisplayColumn, 'isPrimaryKey' | 'isNaturalKey' | 'isForeignKey'>;
+
 /**
- * A column other columns point at: a primary or natural key that is not
- * itself a foreign key (a bridge table's key columns are both, and point out).
+ * A column other columns point at: the model's whole primary key or whole
+ * natural key, and not itself a foreign key. A column that is only part of a
+ * composite key points out instead — a Data Vault satellite's hub hash key
+ * (key: hub key + load date), a fact keyed by its dimension keys, a bridge.
  */
-export function isReferencedKey(column: Pick<DisplayColumn, 'isPrimaryKey' | 'isNaturalKey' | 'isForeignKey'>): boolean {
-  return (column.isPrimaryKey || column.isNaturalKey) && !column.isForeignKey;
+export function isReferencedKey(column: KeyFlags, columns: readonly KeyFlags[] = [column]): boolean {
+  if (column.isForeignKey) return false;
+  const whole = (flag: 'isPrimaryKey' | 'isNaturalKey') => column[flag] && columns.filter((c) => c[flag]).length === 1;
+  return whole('isPrimaryKey') || whole('isNaturalKey');
 }
 
 /** The dialog prefill for a drag, turned round when it started on the key end. */
@@ -27,12 +33,15 @@ export function orientDraggedRelationship(
   models: ReadonlyArray<Pick<DisplayModel, 'name' | 'columns'>>,
 ): FkDialogPrefill {
   if (!prefill.toColumn) return prefill;
-  const columnOf = (model: string, column: string): DisplayColumn | undefined =>
-    models.find((m) => m.name === model)?.columns.find((c) => c.name === column);
-  const from = columnOf(prefill.fromModel, prefill.fromColumn);
-  const to = columnOf(prefill.toModel, prefill.toColumn);
-  if (!from || !to) return prefill;
-  if (!isReferencedKey(from) || isReferencedKey(to)) return prefill;
+  const referenced = (model: string, column: string): boolean | undefined => {
+    const columns = models.find((m) => m.name === model)?.columns;
+    const col = columns?.find((c) => c.name === column);
+    return col && columns ? isReferencedKey(col, columns) : undefined;
+  };
+  const from = referenced(prefill.fromModel, prefill.fromColumn);
+  const to = referenced(prefill.toModel, prefill.toColumn);
+  if (from === undefined || to === undefined) return prefill;
+  if (!from || to) return prefill;
   return {
     fromModel: prefill.toModel,
     fromColumn: prefill.toColumn,

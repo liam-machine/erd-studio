@@ -18,6 +18,30 @@ const MODELS = [
   { name: 'brg_account_customer', columns: [col('customer_key', { pk: true, fk: true })] },
 ];
 
+const HUB = { name: 'hub_customer', columns: [col('customer_hk', { pk: true }), col('customer_id', { nk: true })] };
+const SAT = { name: 'sat_customer', columns: [col('customer_hk', { pk: true }), col('load_date', { pk: true }), col('name')] };
+const LNK = { name: 'lnk_order_customer', columns: [col('order_customer_hk', { pk: true }), col('customer_hk'), col('order_hk')] };
+const FCT_GRAIN = { name: 'fct_daily', columns: [col('customer_key', { pk: true }), col('date_key', { pk: true }), col('amount')] };
+
+describe('orientDraggedRelationship — Data Vault and composite keys (#133)', () => {
+  const MODELS2 = [...MODELS, HUB, SAT, LNK, FCT_GRAIN];
+  const turned = (fm: string, fc: string, tm: string, tc: string) =>
+    orientDraggedRelationship({ fromModel: fm, fromColumn: fc, toModel: tm, toColumn: tc }, MODELS2).fromModel;
+
+  it('a drag from a hub to its satellite is stored on the satellite (part of its composite key)', () => {
+    expect(turned('hub_customer', 'customer_hk', 'sat_customer', 'customer_hk')).toBe('sat_customer');
+  });
+  it('a drag from a hub to a link is stored on the link', () => {
+    expect(turned('hub_customer', 'customer_hk', 'lnk_order_customer', 'customer_hk')).toBe('lnk_order_customer');
+  });
+  it('a drag from a dimension to a fact keyed by its dimension keys is stored on the fact', () => {
+    expect(turned('dim_customer', 'customer_key', 'fct_daily', 'customer_key')).toBe('fct_daily');
+  });
+  it('a drag already from the satellite is left alone', () => {
+    expect(turned('sat_customer', 'customer_hk', 'hub_customer', 'customer_hk')).toBe('sat_customer');
+  });
+});
+
 describe('orientDraggedRelationship (#133)', () => {
   it('turns a drag from a dimension key to a fact column round', () => {
     expect(orientDraggedRelationship(

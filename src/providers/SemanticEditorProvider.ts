@@ -148,6 +148,7 @@ import { pickDraftScope } from './dbtDraftPicker';
 import { readDomainRelationships } from '../commands/moveRelationshipsToLibrary';
 import {
   findLibraryColumnPair,
+  planRehome,
   removeColumnRelationships,
   removeLibraryRelationships,
   renameColumnInRelationships,
@@ -368,6 +369,12 @@ export const MANIFEST_HINT_DISMISSED_KEY = 'erdStudio.manifestHintDismissed';
  * relationships into the model library (#126). Per workspace.
  */
 export const RELATIONSHIP_MOVE_DECLINED_KEY = 'erdStudio.relationshipMoveDeclined';
+/**
+ * workspaceState: the user chose "Don't Ask Again" on the offer to store
+ * library relationships saved on their one side with the model holding the
+ * foreign key (#133). Separate from the #126 key: a different question.
+ */
+export const RELATIONSHIP_REHOME_DECLINED_KEY = 'erdStudio.relationshipRehomeDeclined';
 
 /** Error posted to the webview when a mutation is attempted while viewing the physical stage. */
 export const PHYSICAL_READ_ONLY_MESSAGE = 'Physical stage is read-only. Switch to the Logical stage to make changes.';
@@ -1668,8 +1675,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (this.relationshipMoveOffered) return;
     this.relationshipMoveOffered = true;
     try {
+      const models = this.logicalModelService.listModels();
+      if (this.relationshipsInLibrary(models)) {
+        await this.maybeOfferRehome(models);
+        return;
+      }
       if (this.context.workspaceState?.get<boolean>(RELATIONSHIP_MOVE_DECLINED_KEY)) return;
-      if (this.relationshipsInLibrary(this.logicalModelService.listModels())) return;
       const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.logicalModelService.getModelsDir()));
       const shared = sharedRelationshipCount(readDomainRelationships(this.domainService, this.workspaceRoot, semanticDir));
       if (shared === 0) return;
@@ -1701,6 +1712,46 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     } catch (err) {
       console.warn('[SemanticEditorProvider] Relationship move offer skipped:', err);
+    }
+  }
+
+  /**
+   * In a project that keeps relationships in the model library: offer to move
+   * entries saved on their one side (written before #133, by a teammate on an
+   * older version, or by hand) to the model holding the foreign key. Writes
+   * nothing itself — "Review the Move…" runs the move command, which asks first.
+   */
+  private async maybeOfferRehome(models: readonly SemanticModel[]): Promise<void> {
+    if (this.context.workspaceState?.get<boolean>(RELATIONSHIP_REHOME_DECLINED_KEY)) return;
+    const byName = new Map(models.map((m) => [m.name.toLowerCase(), m]));
+    const rehome = planRehome(models, (name) => byName.get(name.toLowerCase()) ?? null);
+    if (rehome.length === 0) return;
+    telemetry.feature('relMoveOffered');
+    const files = [...new Set(rehome.map((r) => `${r.from}.yml`))];
+    const where = files.length === 1 ? files[0] : `${files[0]} and ${files.length - 1} other file${files.length === 2 ? '' : 's'}`;
+    const choice = await vscode.window.showInformationMessage(
+      `${rehome.length === 1 ? '1 relationship is' : `${rehome.length} relationships are`} saved in the file of the model ` +
+      `${rehome.length === 1 ? 'it points' : 'they point'} at (${where}). Store each with the model that holds the foreign key, ` +
+      'so adding a fact never means editing its dimensions?',
+      'Review the Move…',
+      'Not Now',
+      "Don't Ask Again",
+    );
+    if (choice === 'Review the Move…') {
+      telemetry.feature('relMoveReview');
+      try {
+        await vscode.commands.executeCommand('erdStudio.moveRelationshipsToLibrary');
+      } catch (err) {
+        telemetry.error('relMoveFailed');
+        void vscode.window.showErrorMessage(
+          `Move Relationships to Model Library failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else if (choice === "Don't Ask Again") {
+      telemetry.feature('relMoveDeclined');
+      await this.context.workspaceState?.update(RELATIONSHIP_REHOME_DECLINED_KEY, true);
+    } else {
+      telemetry.feature('relMoveNotNow');
     }
   }
 
