@@ -56,6 +56,8 @@ export interface FkDialogEditData {
   toModel: string;
   toColumn: string;
   cardinality: import('../../src/types/semantic').Cardinality;
+  /** Optional label, e.g. `ship date`. */
+  role?: string;
 }
 
 export interface EditorState extends CanvasState {

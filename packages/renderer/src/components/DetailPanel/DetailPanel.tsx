@@ -211,6 +211,8 @@ export function DetailPanel() {
         toModel: rel.toModel,
         toColumn: rel.toColumn,
         cardinality: rel.cardinality,
+        // Carried so Edit opens with it — the dialog saves what it shows.
+        ...(rel.role ? { role: rel.role } : {}),
       };
       openEdgeContextMenu(x, y, edgeData);
     },

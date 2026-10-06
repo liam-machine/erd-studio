@@ -219,11 +219,19 @@ export interface Relationship {
   toModel: string;
   toColumn: string;
   cardinality: Cardinality;
+  /**
+   * Optional label for what this link means, e.g. `order date` and `ship date`
+   * for two columns pointing at the same date dimension. A label only: it is
+   * not part of the relationship's identity, which the columns already give.
+   */
+  role?: string;
 }
 
 /**
  * A relationship as stored in its from-model's library file: the same fields
  * as {@link Relationship} without `fromModel`, which is the file's own model.
+ * The from-model is the "many" (foreign-key) side — `canonicalRelationship`
+ * turns a `one-to-many` round before it is stored (issue #133).
  */
 export type ModelRelationship = Omit<Relationship, 'fromModel'>;
 

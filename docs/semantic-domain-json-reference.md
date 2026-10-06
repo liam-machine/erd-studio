@@ -4,7 +4,7 @@
 
 ## File Layout
 
-ERD Studio uses a **central model store**. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level or one folder down); domain JSON files reference models **by name** and hold the layout. Relationships are defined once in the from-model's YAML and drawn by every domain holding both models — or, in a project that keeps them per domain, in each domain JSON (see [Where relationships live](#where-relationships-live)).
+ERD Studio uses a **central model store**. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level or one folder down); domain JSON files reference models **by name** and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key, and drawn by every domain holding both models — or, in a project that keeps them per domain, in each domain JSON (see [Where relationships live](#where-relationships-live)).
 
 ```
 .erd-studio/
@@ -138,7 +138,7 @@ columns:
 | `columns` | array | No | Array of `ColumnDef`. |
 | `rationale` | object | No | Design rationale. Omit entirely if empty. |
 | `meta` | map | No | Free-form, dbt-style metadata (owner, source system, lineage…). See [Metadata](#metadata-meta). Omit entirely if empty. |
-| `relationships` | array | No | Relationships leaving this model: `Relationship` objects without `fromModel` (it is this model). Shared by every domain holding both ends. See [Where relationships live](#where-relationships-live). Omit entirely if empty. |
+| `relationships` | array | No | Relationships leaving this model — it holds the foreign key: `Relationship` objects without `fromModel` (it is this model). Shared by every domain holding both ends. See [Where relationships live](#where-relationships-live). Omit entirely if empty. |
 
 Models are defined once and can be referenced from several domains. Editing a model from any domain canvas updates the shared YAML.
 
@@ -198,7 +198,7 @@ Optional map on a model and on any column, named after and shaped like dbt's `me
 
 ## Relationships
 
-A relationship is stored in exactly one place: its from-model's YAML (`relationships:`) or a domain JSON (`logical.relationships`). See [Where relationships live](#where-relationships-live).
+A relationship is stored in exactly one place: the YAML of the model holding its foreign key (`relationships:`) or a domain JSON (`logical.relationships`). See [Where relationships live](#where-relationships-live).
 
 ```jsonc
 {
@@ -216,17 +216,18 @@ A relationship is stored in exactly one place: its from-model's YAML (`relations
 | `fromColumn` | string | Yes | FK column name on the from model. |
 | `toModel` | string | Yes | Referenced model (PK side). |
 | `toColumn` | string | Yes | Referenced PK column on the to model. |
-| `cardinality` | string | Yes | One of `"many-to-one"`, `"one-to-one"`, `"one-to-many"`, `"many-to-many"`. |
+| `cardinality` | string | Yes | One of `"many-to-one"`, `"one-to-one"`, `"one-to-many"`, `"many-to-many"`. `"one-to-many"` is still read, but ERD Studio never writes it into a model YAML (see the direction convention). |
+| `role` | string | No | A label for what the link means, e.g. `"order date"` and `"ship date"` for two columns pointing at the same date dimension. Trimmed, at most 60 characters, drawn on the line. A label only: not part of the identity. |
 
-**Identity key:** the composite `(fromModel, fromColumn, toModel, toColumn)` must be unique within the domain.
+**Identity key:** the composite `(fromModel, fromColumn, toModel, toColumn)` must be unique within the domain — and the same two columns may not be joined twice in opposite directions either: that is one link, drawn once.
 
-**Direction convention:** `fromModel` holds the FK, `toModel` holds the PK.
+**Direction convention:** `fromModel` holds the FK (the "many" side), `toModel` holds the PK. A `one-to-many` is the same relationship read from the other end, so it is stored with its ends swapped as `many-to-one` (`canonicalRelationship` in `@erd-studio/core`, issue #133). `one-to-one` and `many-to-many` keep the direction they were drawn in.
 
 Entries missing any of the four string endpoints are dropped on read with a console warning; an unrecognised `cardinality` falls back to `many-to-one`.
 
 ### Where relationships live
 
-**In the model library (the default for a new project, issue #126).** A relationship is written once, into the YAML of its `fromModel`, with the same fields minus `fromModel`:
+**In the model library (the default for a new project, issue #126).** A relationship is written once, into the YAML of its `fromModel` — the model holding the foreign key — with the same fields minus `fromModel`. Adding a new fact therefore only ever changes the fact's own file:
 
 ```yaml
 # logical-models/gold/fct_order_line.yml
@@ -237,15 +238,20 @@ relationships:
     toModel: dim_customer
     toColumn: customer_id
     cardinality: many-to-one
+  - fromColumn: ship_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
+    role: ship date
 ```
 
 Every domain whose `logical.models` holds both `fct_order_line` and `dim_customer` draws it; a domain missing either does not. Editing it on any canvas changes every diagram that shows it, and deleting it deletes it everywhere. Renaming a model or column, or removing a column, rewrites the entries in other model files that point at it. Removing a model from one domain leaves its relationships in the library.
 
-**Per domain.** A project whose domain files already hold relationships keeps adding them there, so teammates on a version before this one go on seeing every edge. It opts in with **ERD Studio: Move Relationships to Model Library**: every v5 domain's relationships are stored once in their from-models' YAML and taken out of the domain files, in one undoable edit. Opening a diagram in such a project offers the move (once a session, with **Don't Ask Again**) when at least one relationship's two models sit together in more than one diagram. Before writing, the command explains why and where each relationship goes; a relationship the domains define with different cardinalities is a **conflict**, and the user picks the cardinality every diagram will use (naming the diagrams behind each) or leaves it in the domain files for a later run.
+**Per domain.** A project whose domain files already hold relationships keeps adding them there, so teammates on a version before this one go on seeing every edge. It opts in with **ERD Studio: Move Relationships to Model Library**: every v5 domain's relationships are stored once in the YAML of the model holding each one's foreign key and taken out of the domain files, writing the files directly (undo with source control). The same command moves a library entry stored on its "one" side (a `one-to-many`, written before issue #133) to the model on its many side, as `many-to-one`, keeping its role. Opening a diagram in such a project offers the move (once a session, with **Don't Ask Again**) when at least one relationship's two models sit together in more than one diagram. Before writing, the command explains why and where each relationship goes; a relationship the domains define with different cardinalities is a **conflict**, and the user picks the cardinality every diagram will use (naming the diagrams behind each) or leaves it in the domain files for a later run.
 
 **Which one applies** is decided by what is on disk, like layer folders: the library is used once **any** model file holds a `relationships:` list, or when **no** domain file holds a `logical.relationships` entry.
 
-**Reading.** A domain draws its own `logical.relationships` first, in order, then the library relationships between its models. When both define the same endpoints (ignoring case) it is drawn once, with the library's cardinality, and a warning names the disagreement.
+**Reading.** A domain draws its own `logical.relationships` first, in order, then the library relationships between its models. When both define the same endpoints (ignoring case) it is drawn once, with the library's cardinality, and a warning names the disagreement. When they join the same two columns in opposite directions, it is drawn once, as the library stores it.
 
 ## View Config (`viewConfig`)
 
@@ -282,7 +288,7 @@ Persisted UI layout state. Safe to leave as `{}` — the extension auto-position
 | Change grain, modelRole, description, rationale, meta | the model's yml |
 | Add a model to a domain diagram | Domain `.json` → append the name to `logical.models` **and**, if no file for the name exists in any folder, create `logical-models/{layer}/{name}.yml` for the domain's layer |
 | Remove a model from a domain | Domain `.json` → remove the name from `logical.models` and its relationships from `logical.relationships` |
-| Add/remove/edit a relationship | The from-model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships` |
+| Add/remove/edit a relationship | The FK model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships` |
 | Rename a domain | Rewrite `domain` in the raw JSON and rename the file; never re-serialise a resolved domain (that inlines model bodies and produces a hybrid file) |
 
 ## Layers File (`.erd-studio/layers.json`)
@@ -440,7 +446,7 @@ AI Helper**) is read-only. `erd-studio diff --domain .erd-studio/{layer}/{domain
 or `--all`, builds both stages exactly as described above and runs the same comparison
 as the canvas, because both call the same code. It reports each difference as a fix
 that brings the logical side in line with dbt, naming the file to change: the model's
-`logical-models/{name}.yml` for columns and types, and for relationships the from-model's yml or the domain file, wherever the project keeps them. It exits `0` when there are no blocking differences and `1` when there are.
+`logical-models/{name}.yml` for columns and types, and for relationships the FK model's yml or the domain file, wherever the project keeps them. A relationship matches whichever end dbt tests it from. It exits `0` when there are no blocking differences and `1` when there are.
 A column that dbt has no type for yet is advisory, not blocking, unless you pass
 `--strict`. `erd-studio inventory --models a,b --json` prints the physical shape of the
 named models, as a starting point for new model files. The `/erd-studio-setup` Claude Code
@@ -483,7 +489,7 @@ Red Hat YAML matches paths with dot-folders skipped, so a project inside a hidde
 2. `layer` must match an `id` in `layers.json`.
 3. Every entry in `logical.models` must be a string. Mixed string/object arrays are rejected.
 4. Each referenced model should have a `logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`; a missing file renders as a placeholder with a warning.
-5. Relationship identity `(fromModel, fromColumn, toModel, toColumn)` must be unique, and both models should be in `logical.models`.
+5. Relationship identity `(fromModel, fromColumn, toModel, toColumn)` must be unique, in either direction, and both models should be in `logical.models`.
 6. `viewConfig` must be at the root of the document.
 
 ## Complete Example

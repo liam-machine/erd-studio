@@ -20,7 +20,7 @@ import type { SyncPlan } from '../types/syncPlan';
 import { DomainFileError } from '../services/domainService';
 import type { ModelFileError, ModelFileErrorKind } from '../services/logicalModelService';
 import { libraryRelationshipsOf, usesLibraryRelationships } from '../services/libraryRelationships';
-import { relationshipKey } from '@erd-studio/core';
+import { canonicalRelationship, relationshipKey } from '@erd-studio/core';
 import { computeDomainDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
@@ -205,9 +205,9 @@ export function fixesFromPlan(
 ): Fix[] {
   const ymlFile = (model: string): string =>
     plan.modelContext[model]?.logicalModelPath ?? `${semanticDir}/logical-models/${model}.yml`;
-  // A relationship is fixed where it is defined (#126): the from-model's yml
-  // when the library holds it, else the domain file. A new one goes where the
-  // project keeps relationships.
+  // A relationship is fixed where it is defined (#126): the yml of the model
+  // holding its foreign key when the library holds it, else the domain file.
+  // A new one goes where the project keeps relationships.
   const relationshipFile = (r: Parameters<typeof relationshipKey>[0], adding: boolean): string =>
     (adding ? relationshipHome.addToLibrary : relationshipHome.inLibrary.has(relationshipKey(r)))
       ? ymlFile(r.fromModel)
@@ -265,13 +265,17 @@ export function fixesFromPlan(
     const rel = { fromModel: r.fromModel, fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn };
     const link = `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`;
     switch (r.action) {
-      case 'add-relationship-to-logical':
+      case 'add-relationship-to-logical': {
+        // Written on its many side (#133): a one-to-many is the same link
+        // stored from the other end, in the other model's file.
+        const stored = r.targetCardinality ? canonicalRelationship({ ...rel, cardinality: r.targetCardinality }) : rel;
         fixes.push({
-          severity: 'blocking', kind: 'add-relationship', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, true),
-          relationship: { ...rel, ...(r.targetCardinality ? { cardinality: r.targetCardinality } : {}) },
+          severity: 'blocking', kind: 'add-relationship', model: stored.fromModel, column: stored.fromColumn, file: relationshipFile(stored, true),
+          relationship: stored,
           explain: `dbt tests the link ${link}, but the logical model does not draw it — add the relationship.`,
         });
         break;
+      }
       case 'remove-relationship-from-logical':
         fixes.push({
           severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, false),

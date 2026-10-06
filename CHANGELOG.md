@@ -8,6 +8,20 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+- **A relationship now always lives with the model that holds the foreign key** ([#133](https://github.com/liam-machine/erd-studio/issues/133)). Until now it was saved in the file of whichever model the line was drawn *from*, so drawing from a dimension to a fact put it in the dimension's file, and adding a new fact meant editing every dimension it joins. Now, however you draw it, it is saved in the fact's file (the "many" side), as many-to-one. Dragging from a key column to the column that points at it opens the New Relationship dialog the right way round, and the ⇄ swap moves a relationship to whichever model becomes the many side.
+- **Move Relationships to Model Library tidies up relationships saved the old way.** Run it once and every relationship stored in a dimension's file as one-to-many moves to the fact's file as many-to-one. The diagrams draw exactly the same lines; only the files change. It asks first, changes nothing but the relationships, and puts everything back if any file cannot be written.
+- The same two columns joined in both directions are one relationship: a diagram draws one line for them, adding the reverse is refused as a duplicate, and **Compare to Physical** / `erd-studio diff` match a relationship whichever end dbt tests it from. `erd-studio diff` names the fact's file for a relationship to add.
+- The AI helper files (harness v26) and the JSON schemas describe where relationships live and the new `role` key.
+
+### Added
+- **Relationship roles.** Give a relationship an optional label in the New / Edit Relationship dialog, such as *order date* and *ship date* for two columns pointing at the same date dimension. The label is drawn on the line and saved as `role:`.
+
+### Upgrading a team
+- Teammates on 1.6.7 or earlier still see every relationship, but they **drop a model's `role` labels** whenever they change that model on the canvas, and a line they draw from a dimension is still saved the old way. Update everyone before relying on roles; running **Move Relationships to Model Library** afterwards tidies up any relationship saved the old way.
+
 ## 1.6.7 — 2026-10-04
 
 ### Fixed

@@ -102,6 +102,7 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
     toModel: rel.toModel,
     toColumn: rel.toColumn,
     cardinality: rel.cardinality,
+    ...(rel.role ? { role: rel.role } : {}),
   }));
 
   return {

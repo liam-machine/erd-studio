@@ -136,6 +136,8 @@ export type FkEdgeData = {
   toModel: string;
   toColumn: string;
   cardinality: Cardinality;
+  /** Optional label for the link, e.g. `ship date`, drawn at the edge's midpoint. */
+  role?: string;
   /** Stage of the owning domain canvas — drives CSS colour class. */
   stage?: Stage;
   /** Discrepancy status for ghost/extra/mismatch edges. */

@@ -60,6 +60,7 @@ import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import type { DisplayDomain } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
+import { orientDraggedRelationship } from './lib/relationshipDirection';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -321,7 +322,10 @@ function EditorCanvas() {
 
     const handleColumnRelationshipDrop = (e: Event) => {
       const { fromModel, fromColumn, toModel, toColumn } = (e as CustomEvent).detail;
-      openFkDialogWithPrefill({ fromModel, fromColumn, toModel, toColumn });
+      // A drag that starts on a key is turned round, so the column pointing
+      // at the key is "from" — the many side, which stores it (#133).
+      const models = useEditorStore.getState().domain?.models ?? [];
+      openFkDialogWithPrefill(orientDraggedRelationship({ fromModel, fromColumn, toModel, toColumn }, models));
     };
 
     const handleColumnRelationshipSelfDrop = () => {

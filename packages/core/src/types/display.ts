@@ -136,6 +136,8 @@ export interface DisplayRelationship {
   toModel: string;
   toColumn: string;
   cardinality: Cardinality;
+  /** Optional label for the link, e.g. `ship date` (see `Relationship.role`). */
+  role?: string;
 }
 
 // ---------------------------------------------------------------------------

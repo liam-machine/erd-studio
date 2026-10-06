@@ -103,6 +103,20 @@
   color: var(--discrepancy-mismatch);
 }
 
+/* Role label (e.g. "ship date"), just above the midpoint so the swap
+   button below it stays reachable. */
+.fk-edge__role {
+  position: absolute;
+  pointer-events: none;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--panel-bg);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 /* Cardinality mismatch midpoint badge */
 .fk-edge__mismatch-badge {
   position: absolute;

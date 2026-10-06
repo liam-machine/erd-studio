@@ -88,11 +88,16 @@ function validateForm(
         return false;
       }
 
+      // The same two columns joined either way round is the same link.
       return (
-        rel.fromModel === fromModel &&
-        rel.fromColumn === fromColumn.trim() &&
-        rel.toModel === toModel &&
-        rel.toColumn === toColumn.trim()
+        (rel.fromModel === fromModel &&
+          rel.fromColumn === fromColumn.trim() &&
+          rel.toModel === toModel &&
+          rel.toColumn === toColumn.trim()) ||
+        (rel.fromModel === toModel &&
+          rel.fromColumn === toColumn.trim() &&
+          rel.toModel === fromModel &&
+          rel.toColumn === fromColumn.trim())
       );
     });
     if (isDuplicate) {
@@ -126,6 +131,7 @@ export function NewFkDialog() {
   const [toModel, setToModel] = useState('');
   const [toColumn, setToColumn] = useState('');
   const [cardinality, setCardinality] = useState<Cardinality>('many-to-one');
+  const [role, setRole] = useState('');
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   // Derive model names from domain
@@ -224,6 +230,7 @@ export function NewFkDialog() {
     setToModel('');
     setToColumn('');
     setCardinality('many-to-one');
+    setRole('');
     setTouched({});
   }, []);
 
@@ -251,6 +258,7 @@ export function NewFkDialog() {
           toModel,
           toColumn: toColumn.trim(),
           cardinality,
+          role: role.trim(),
         },
       });
     } else {
@@ -263,12 +271,13 @@ export function NewFkDialog() {
           toModel,
           toColumn: toColumn.trim(),
           cardinality,
+          ...(role.trim() ? { role: role.trim() } : {}),
         },
       });
     }
 
     handleClose();
-  }, [isValid, isEditMode, fkDialogEditData, fromModel, fromColumn, toModel, toColumn, cardinality, send, handleClose]);
+  }, [isValid, isEditMode, fkDialogEditData, fromModel, fromColumn, toModel, toColumn, cardinality, role, send, handleClose]);
 
   const handleBlur = useCallback((field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
@@ -292,6 +301,7 @@ export function NewFkDialog() {
     if (isOpen && fkDialogPrefill) {
       // Reset non-prefilled form state
       setCardinality('many-to-one');
+      setRole('');
       setTouched({});
       // Apply prefilled values
       setFromModel(fkDialogPrefill.fromModel);
@@ -306,11 +316,15 @@ export function NewFkDialog() {
   useEffect(() => {
     if (isOpen && fkDialogEditData) {
       setTouched({});
-      setFromModel(fkDialogEditData.fromModel);
-      setFromColumn(fkDialogEditData.fromColumn);
-      setToModel(fkDialogEditData.toModel);
-      setToColumn(fkDialogEditData.toColumn);
-      setCardinality(fkDialogEditData.cardinality);
+      // A one-to-many (stored before #133) opens turned round, as the many-to-one
+      // it will be saved as — the dialog offers no one-to-many.
+      const flip = fkDialogEditData.cardinality === 'one-to-many';
+      setFromModel(flip ? fkDialogEditData.toModel : fkDialogEditData.fromModel);
+      setFromColumn(flip ? fkDialogEditData.toColumn : fkDialogEditData.fromColumn);
+      setToModel(flip ? fkDialogEditData.fromModel : fkDialogEditData.toModel);
+      setToColumn(flip ? fkDialogEditData.fromColumn : fkDialogEditData.toColumn);
+      setCardinality(flip ? 'many-to-one' : fkDialogEditData.cardinality);
+      setRole(fkDialogEditData.role ?? '');
     }
   }, [isOpen, fkDialogEditData]);
 
@@ -473,6 +487,25 @@ export function NewFkDialog() {
             <option value="many-to-one">Many-to-One (*→1)</option>
             <option value="one-to-one">One-to-One (1→1)</option>
           </select>
+        </div>
+
+        {/* Role */}
+        <div className="new-fk-dialog__field">
+          <label className="new-fk-dialog__label" htmlFor="relationship-role">
+            Role (optional)
+          </label>
+          <input
+            id="relationship-role"
+            className="new-fk-dialog__input"
+            type="text"
+            value={role}
+            maxLength={60}
+            placeholder="e.g. ship date"
+            onChange={(e) => setRole(e.target.value)}
+          />
+          <span className="new-fk-dialog__hint">
+            Names the link when a model points at the same one more than once.
+          </span>
         </div>
 
         {/* Global errors */}

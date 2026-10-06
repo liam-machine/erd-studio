@@ -26,6 +26,7 @@ import type {
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
+import { normaliseRelationshipRole } from './relationships.js';
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.
@@ -391,6 +392,18 @@ export function describeModelLoadError(error: ModelLoadError): string {
     : 'logical-models file has a YAML error';
 }
 
+/**
+ * The link a relationship draws: its two column ends in either order, without
+ * case (#133). A relationship and the same one read from the other end — a
+ * library entry on the many side, a domain copy drawn the other way — share it,
+ * so one line is drawn, not two.
+ */
+function linkKey(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): string {
+  const from = `${rel.fromModel}.${rel.fromColumn}`.toLowerCase();
+  const to = `${rel.toModel}.${rel.toColumn}`.toLowerCase();
+  return from <= to ? `${from}\u0000${to}` : `${to}\u0000${from}`;
+}
+
 /** Identity of a relationship: its four endpoints, compared without case. */
 export function relationshipKey(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): string {
   return [rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()).join('\u0000');
@@ -419,7 +432,7 @@ export function mergeLibraryRelationships(
     for (const rel of model.relationships ?? []) {
       if (!inDomain.has(rel.toModel.toLowerCase())) continue;
       const full: Relationship = { fromModel: model.name, ...rel };
-      const key = relationshipKey(full);
+      const key = linkKey(full);
       if (!library.has(key)) library.set(key, full);
     }
   }
@@ -428,17 +441,23 @@ export function mergeLibraryRelationships(
   const merged: Relationship[] = [];
   const seen = new Set<string>();
   for (const rel of own) {
-    const key = relationshipKey(rel);
+    const key = linkKey(rel);
     if (seen.has(key)) continue;
     seen.add(key);
     const shared = library.get(key);
+    // Stored the other way round in the library (#133): the same link, read
+    // from the other end. The library's entry is the one drawn.
+    if (shared && relationshipKey(shared) !== relationshipKey(rel)) {
+      merged.push(shared);
+      continue;
+    }
     if (shared && shared.cardinality !== rel.cardinality) {
       warn(
         `Relationship ${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn} in ${filePath} ` +
         `is ${rel.cardinality}, but logical-models/ defines it as ${shared.cardinality}; using ${shared.cardinality}`,
       );
     }
-    merged.push(shared ? { ...rel, cardinality: shared.cardinality } : rel);
+    merged.push(shared ? { ...rel, cardinality: shared.cardinality, ...(shared.role ? { role: shared.role } : {}) } : rel);
   }
   for (const [key, rel] of library) {
     if (!seen.has(key)) merged.push(rel);
@@ -478,9 +497,12 @@ function parseRelationships(value: unknown, filePath: string, warn: (message: st
       );
     }
 
+    const { role: _role, ...rest } = r as unknown as Relationship;
+    const role = normaliseRelationshipRole(r.role);
     relationships.push({
-      ...(r as unknown as Relationship),
+      ...rest,
       cardinality,
+      ...(role ? { role } : {}),
     });
   }
   return relationships;

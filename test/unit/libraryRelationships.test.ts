@@ -6,12 +6,14 @@ import * as path from 'path';
 import {
   describeMovePlan,
   planMoveToLibrary,
+  planRehome,
   removeColumnRelationships,
   resolveConflict,
   sharedRelationshipCount,
   renameColumnInRelationships,
   renameModelInRelationships,
   routeToLibrary,
+  sameColumnPair,
   upsertLibraryRelationship,
   usesLibraryRelationships,
 } from '../../src/services/libraryRelationships';
@@ -173,5 +175,83 @@ describe('sharedRelationshipCount — what the offer to move is about', () => {
       { models: ['fct_order', 'dim_customer'], relationships: [REL] },
       { models: ['fct_order', 'dim_date'], relationships: [] },
     ])).toBe(0);
+  });
+});
+
+describe('stored on the many side (#133)', () => {
+  const REVERSED: Relationship = {
+    fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many',
+  };
+  const dim = (relationships?: SemanticModel['relationships']): SemanticModel =>
+    ({ name: 'dim_customer', columns: [], ...(relationships ? { relationships: structuredClone(relationships) } : {}) });
+
+  it('sameColumnPair: the same two columns either way round are one link', () => {
+    expect(sameColumnPair(REL, REL)).toBe(true);
+    expect(sameColumnPair(REL, REVERSED)).toBe(true);
+    expect(sameColumnPair(REL, { ...REL, fromColumn: 'other_key' })).toBe(false);
+  });
+
+  it('routeToLibrary stores a one-to-many on the fact, as many-to-one', () => {
+    const fact = fct();
+    const { kept, changed } = routeToLibrary([REVERSED], [], (name) => (name === 'fct_order' ? fact : dim()));
+    expect(kept).toEqual([]);
+    expect(changed.map((m) => m.name)).toEqual(['fct_order']);
+    expect(fact.relationships).toEqual([STORED]);
+  });
+
+  it('routeToLibrary skips a link the other model already stores the other way round', () => {
+    const fact = fct();
+    const { changed } = routeToLibrary([REL], [], (name) => (name === 'fct_order' ? fact : dim([
+      { fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' },
+    ])));
+    expect(changed).toEqual([]);
+    expect(fact.relationships).toBeUndefined();
+  });
+
+  it('planMoveToLibrary sends a one-to-many from a domain file to the fact', () => {
+    const plan = planMoveToLibrary([{ label: 'silver/orders', relationships: [REVERSED] }], (name) => (name === 'fct_order' ? fct() : dim()));
+    expect(plan.toLibrary).toEqual([REL]);
+    expect(plan.removeFromDomains.get('silver/orders')?.size).toBe(1);
+  });
+
+  it('a conflict settled as one-to-many goes to the other end', () => {
+    const plan = planMoveToLibrary(
+      [{ label: 'a', relationships: [REL] }, { label: 'b', relationships: [{ ...REL, cardinality: 'one-to-one' }] }],
+      (name) => (name === 'fct_order' ? fct() : dim()),
+    );
+    const settled = resolveConflict(plan, plan.conflicts[0], 'one-to-many');
+    expect(settled.toLibrary).toEqual([{ ...REVERSED, cardinality: 'many-to-one' }]);
+  });
+
+  it('planRehome finds library entries stored on their one side, and only those', () => {
+    const stored = { fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' as const };
+    const library = [dim([stored, { ...stored, toModel: 'stg_gone' }]), fct([STORED])];
+    const rehome = planRehome(library, (name) => library.find((m) => m.name === name) ?? null);
+    expect(rehome).toEqual([{ from: 'dim_customer', stored: REVERSED, to: REL }]);
+    expect(describeMovePlan({ toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [], rehome }))
+      .toMatch(/^Turned round: 1 relationship is stored in the file of the model it points at/);
+  });
+
+  it('upsertLibraryRelationship writes and compares the role', () => {
+    const fact = fct([STORED]);
+    expect(upsertLibraryRelationship(fact, { ...REL, role: 'buyer' })).toBe(true);
+    expect(fact.relationships).toEqual([{ ...STORED, role: 'buyer' }]);
+    expect(upsertLibraryRelationship(fact, { ...REL, role: 'buyer' })).toBe(false);
+  });
+});
+
+describe('the move keeps roles (#133)', () => {
+  it('a conflict settled by the user keeps the role a domain gave it', () => {
+    const plan = planMoveToLibrary(
+      [{ label: 'a', relationships: [{ ...REL, role: 'buyer' }] }, { label: 'b', relationships: [{ ...REL, cardinality: 'one-to-one' }] }],
+      (name) => (name === 'fct_order' ? fct() : null),
+    );
+    expect(resolveConflict(plan, plan.conflicts[0], 'one-to-one').toLibrary).toEqual([{ ...REL, cardinality: 'one-to-one', role: 'buyer' }]);
+  });
+
+  it('a domain role is copied onto a library entry that has none before the domain copy goes', () => {
+    const plan = planMoveToLibrary([{ label: 'a', relationships: [{ ...REL, role: 'buyer' }] }], (name) => (name === 'fct_order' ? fct([STORED]) : null));
+    expect(plan.toLibrary).toEqual([{ ...REL, role: 'buyer' }]);
+    expect(plan.removeFromDomains.get('a')?.size).toBe(1);
   });
 });

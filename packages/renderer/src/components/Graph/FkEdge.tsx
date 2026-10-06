@@ -169,7 +169,7 @@ function FkEdgeComponent({
   );
 
   if (!data) return null;
-  const { cardinality, stage, discrepancyStatus, dimmed, readOnly, isSelfLoop, fromColumn, toColumn } = data;
+  const { cardinality, role, stage, discrepancyStatus, dimmed, readOnly, isSelfLoop, fromColumn, toColumn } = data;
 
   // For cardinality mismatch edges, pull the mismatch details from the report
   // The edge data only has status — we need to find the original relationship discrepancy
@@ -235,7 +235,7 @@ function FkEdgeComponent({
     : `fk-edge--${stage ?? 'logical'}`;
 
   const edgeTitle = edgeHoverText({
-    fromModel, fromColumn, toModel, toColumn, cardinality, discrepancyStatus,
+    fromModel, fromColumn, toModel, toColumn, cardinality, role, discrepancyStatus,
   });
   // Cardinality labels at each end:
   // - many-to-one: * at source, 1 at target
@@ -326,6 +326,16 @@ function FkEdgeComponent({
         >
           {targetLabel}
         </span>
+        {role && (
+          <span
+            className={`fk-edge__role ${labelColorClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+            style={{
+              transform: `translate(-50%, calc(-100% - 10px)) translate(${midX}px, ${midY}px)`,
+            }}
+          >
+            {role}
+          </span>
+        )}
         {discrepancyStatus === 'cardinality-mismatch' && (
           <span
             className="fk-edge__mismatch-badge"

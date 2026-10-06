@@ -53,7 +53,7 @@
     },
     "relationships": {
       "type": "array",
-      "description": "Relationships that leave this model, defined once for the whole project: every domain that holds both this model and toModel draws the edge. The same fields as a domain file's relationship, without fromModel (it is this model).",
+      "description": "Relationships that leave this model, defined once for the whole project: every domain that holds both this model and toModel draws the edge. They live with the model holding the foreign key (the \"many\" side), so a new fact never means editing its dimensions: ERD Studio stores a one-to-many the other way round, as many-to-one on the other model. The same fields as a domain file's relationship, without fromModel (it is this model).",
       "items": {
         "$ref": "#/definitions/relationship"
       }
@@ -215,6 +215,12 @@
             "one-to-many",
             "many-to-many"
           ]
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Optional label for what this link means, e.g. \"order date\" and \"ship date\" for two columns pointing at the same date dimension. A label only; it is not part of the relationship's identity."
         }
       }
     }

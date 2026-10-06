@@ -69,9 +69,9 @@ and no `catalog.json` to observe the real one. It resolves exactly like
 | `add-column-to-logical` | Add column to the model's yml (`modelContext[name].logicalModelPath`) columns array, with the dbt column `meta` keys the team's metadata list names |
 | `remove-column-from-logical` | Remove column from the model's yml (`logicalModelPath`) |
 | `update-type-in-logical` | Update column `dataType` in the model's yml (`logicalModelPath`) to the value in `resolvedDataType` |
-| `add-relationship-to-logical` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action) where the project keeps relationships — the from-model's YAML `relationships:` or domain JSON `logical.relationships[]` (see "Where relationships live") |
-| `remove-relationship-from-logical` | Remove the matching relationship from wherever it is defined — the from-model's YAML `relationships:` or domain JSON `logical.relationships[]` |
-| `update-cardinality-in-logical` | Update `cardinality` on the matching relationship, wherever it is defined, to `targetCardinality` |
+| `add-relationship-to-logical` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action) where the project keeps relationships — the many-side (FK) model's YAML `relationships:` or domain JSON `logical.relationships[]` (see "Where relationships live"). A `one-to-many` is written with its ends swapped as `many-to-one`, in the other model's file |
+| `remove-relationship-from-logical` | Remove the matching relationship from wherever it is defined — the many-side (FK) model's YAML `relationships:` (either end's file, for one written before this rule) or domain JSON `logical.relationships[]` |
+| `update-cardinality-in-logical` | Update `cardinality` on the matching relationship, wherever it is defined, to `targetCardinality`. In a model YAML, a change to `one-to-many` moves the entry: take it out, swap the ends and add it to the other model's file as `many-to-one` |
 
 ### Physical-side actions (edit dbt project files)
 
@@ -119,4 +119,4 @@ models:
 - **Cascade deletions**: When removing a model from a domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a model or column, update every model YAML `relationships:` entry that points at it
 - **Column ordering**: When adding columns to logical-models YAML, append to the end of the columns array
 
-<!-- erd-studio-harness: 25 -->
+<!-- erd-studio-harness: 26 -->

@@ -951,6 +951,7 @@ export class LogicalModelService {
         toModel: rel.toModel,
         toColumn: rel.toColumn,
         cardinality: rel.cardinality,
+        ...(rel.role ? { role: rel.role } : {}),
       }));
     }
 

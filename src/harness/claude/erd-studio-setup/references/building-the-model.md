@@ -176,7 +176,8 @@ nothing else — a drafted extra column would show up as drift.
     domain file has a `logical.relationships` entry (always true for a first diagram). Write each
     one into its `fromModel`'s yml under `relationships:` — the same fields without `fromModel`,
     as in the worked example below — and leave `"relationships": []` in the domain JSON, as
-    above. Every diagram holding both models then draws it, and it is defined once.
+    above. The exception is a `one-to-many`: swap the ends and write it as `many-to-one` in the
+    other model's yml, so every relationship sits with the model holding the foreign key. Every diagram holding both models then draws it, and it is defined once.
   - **Per domain** — otherwise: the project's diagrams already keep their own. Put each one in
     the domain JSON's `logical.relationships` with all five fields (`fromModel`, `fromColumn`,
     `toModel`, `toColumn`, `cardinality`).

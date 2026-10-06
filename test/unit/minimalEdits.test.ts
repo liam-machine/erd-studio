@@ -224,6 +224,15 @@ function splitAroundRelationships(text: string): [string, string] {
   return [text.slice(0, start), text.slice(parsedEnd)];
 }
 
+describe('setYamlRelationships — role (#133)', () => {
+  it('writes a role after the cardinality, and the parser reads it back', () => {
+    const rel: ModelRelationship = { fromColumn: 'ship_date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one', role: 'ship: date' };
+    const text = setYamlRelationships('name: fct_order\n', [rel]);
+    expect(text).toContain('    cardinality: many-to-one\n    role: "ship: date"\n');
+    expect(parseLogicalModelText(text, 'fct_order')?.relationships).toEqual([rel]);
+  });
+});
+
 describe('setDomainRelationships', () => {
   it.each([
     ['2-space', '  '],

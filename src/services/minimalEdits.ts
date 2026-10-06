@@ -76,6 +76,7 @@ function renderYamlBlock(relationships: readonly ModelRelationship[], indent: nu
     lines.push(`${body}toModel: ${yamlScalar(r.toModel)}`);
     lines.push(`${body}toColumn: ${yamlScalar(r.toColumn)}`);
     lines.push(`${body}cardinality: ${yamlScalar(r.cardinality)}`);
+    if (r.role) lines.push(`${body}role: ${yamlScalar(r.role)}`);
   }
   return lines.join(eol);
 }
@@ -101,6 +102,7 @@ export function setYamlRelationships(text: string, relationships: readonly Model
     if (relationships.length === 0) doc.delete('relationships');
     else doc.set('relationships', relationships.map((r) => ({
       fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn, cardinality: r.cardinality,
+      ...(r.role ? { role: r.role } : {}),
     })));
     return bom + doc.toString();
   }

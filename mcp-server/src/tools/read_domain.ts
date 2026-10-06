@@ -89,6 +89,7 @@ export const read_domain = {
                 to_model: r.toModel,
                 to_column: r.toColumn,
                 cardinality: r.cardinality,
+                ...(r.role ? { role: r.role } : {}),
               })),
               view_config: unified.viewConfig ?? {},
             },

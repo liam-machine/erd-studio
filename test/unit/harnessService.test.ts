@@ -778,8 +778,16 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 25 (relationships defined once in model files, #126)', () => {
-      expect(HARNESS_VERSION).toBe('25');
+    it('is 26 (relationships stored on their many side, with an optional role, #133)', () => {
+      expect(HARNESS_VERSION).toBe('26');
+    });
+
+    it('tells assistants to store a relationship on its many side and never write one-to-many (#133)', () => {
+      const SCHEMA_CONTENT = service.generateContent('claude');
+      expect(SCHEMA_CONTENT).toContain('Never write `one-to-many`: swap the ends and write `many-to-one`');
+      expect(SCHEMA_CONTENT).toContain('| `role` | No |');
+      expect(SCHEMA_CONTENT).toContain('not once in each direction');
+      expect(SCHEMA_CONTENT).not.toMatch(/from-model's/);
     });
 
     it('tells assistants where relationships live and how to choose', () => {
