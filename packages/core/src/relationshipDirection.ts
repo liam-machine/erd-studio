@@ -66,7 +66,10 @@ interface Reading {
   reasons: string[];
 }
 
-/** What the key flags in the model file say about an end. */
+/**
+ * What the key flags in the model file say about an end, read on their own.
+ * This is the reading that decides whether a verdict can be **certain**.
+ */
 function readKeys(e: EndEvidence): Reading {
   const name = `${e.model}.${e.column}`;
   const wholePk = e.isPrimaryKey && e.pkColumnCount === 1;
@@ -89,55 +92,152 @@ function readKeys(e: EndEvidence): Reading {
   return { verdict: 'unknown', reasons: [] };
 }
 
-/** What dbt's tests say about an end. */
-function readDbt(e: EndEvidence): Reading {
-  const name = `${e.model}.${e.column}`;
-  const dbt = e.dbt;
-  if (!dbt) return { verdict: 'unknown', reasons: [] };
-  if (dbt.unique === true) {
-    return dbt.relationshipsTest
-      ? { verdict: 'one-fk', reasons: [`dbt tests ${name} as unique and as a relationship to another model`] }
-      : { verdict: 'one', reasons: [`dbt tests ${name} as unique`] };
-  }
-  if (dbt.inCompositeUnique) {
-    return { verdict: 'many', reasons: [`dbt tests ${name} as part of a unique combination of columns`] };
-  }
-  if (dbt.relationshipsTest) {
-    return { verdict: 'many', reasons: [`dbt tests ${name} with a relationships test`] };
-  }
-  if (dbt.unique === false) {
-    return { verdict: 'many', reasons: [`dbt does not treat ${name} as unique`] };
-  }
-  return { verdict: 'unknown', reasons: [] };
+/** Whether a dbt `relationships` test on an end names `other` as its target. */
+function testsPointAt(dbt: DbtColumnEvidence, other: DirectionEnd): boolean {
+  const model = other.model.toLowerCase();
+  const column = other.column.toLowerCase();
+  return (dbt.relationshipsTo ?? []).some((t) => t.model.toLowerCase() === model && t.column.toLowerCase() === column);
 }
 
-const isOne = (v: Verdict): boolean => v === 'one' || v === 'one-fk';
+/**
+ * Two separate facts about an end: whether its values are **unique**, and
+ * whether it **points out** at another table. They are never mixed up — a
+ * declared foreign key or a dbt `relationships` test says the column points
+ * somewhere, and says nothing about whether it is unique. Only when nothing
+ * says it is unique does a pointing column read as the many side.
+ */
+interface EndFacts {
+  /** From the key flags: whole key = unique, part of a composite key = not unique. */
+  keyUnique?: boolean;
+  keyUniqueReason?: string;
+  /** From dbt: `unique` = unique; a composite unique or `unique: false` = not unique. */
+  dbtUnique?: boolean;
+  dbtUniqueReason?: string;
+  /** The model file marks the column as a foreign key. */
+  declaredFk: boolean;
+  /** A dbt relationships test is declared on the column. */
+  dbtPoints: boolean;
+  /** …and it names the other end of this very relationship. */
+  dbtPointsAtOther: boolean;
+}
 
-/** Combined reading of one end: keys first, dbt where keys say nothing. */
+function readFacts(e: EndEvidence, other: DirectionEnd): EndFacts {
+  const name = `${e.model}.${e.column}`;
+  const facts: EndFacts = { declaredFk: e.isForeignKeyDeclared, dbtPoints: false, dbtPointsAtOther: false };
+  const wholePk = e.isPrimaryKey && e.pkColumnCount === 1;
+  const wholeNk = e.isNaturalKey && e.nkColumnCount === 1;
+  if (wholePk || wholeNk) {
+    facts.keyUnique = true;
+    facts.keyUniqueReason = `${name} is ${e.model}'s ${wholePk ? 'primary key' : 'natural key'}`;
+  } else if ((e.isPrimaryKey && e.pkColumnCount > 1) || (e.isNaturalKey && e.nkColumnCount > 1)) {
+    facts.keyUnique = false;
+    facts.keyUniqueReason = `${name} is only part of ${e.model}'s ${e.isPrimaryKey && e.pkColumnCount > 1 ? 'primary key' : 'natural key'}`;
+  }
+  const dbt = e.dbt;
+  if (dbt) {
+    if (dbt.unique === true) {
+      facts.dbtUnique = true;
+      facts.dbtUniqueReason = `dbt tests ${name} as unique`;
+    } else if (dbt.inCompositeUnique) {
+      facts.dbtUnique = false;
+      facts.dbtUniqueReason = `dbt tests ${name} as part of a unique combination of columns`;
+    } else if (dbt.unique === false) {
+      facts.dbtUnique = false;
+      facts.dbtUniqueReason = `dbt does not treat ${name} as unique`;
+    }
+    facts.dbtPoints = dbt.relationshipsTest === true;
+    facts.dbtPointsAtOther = facts.dbtPoints && testsPointAt(dbt, other);
+  }
+  return facts;
+}
+
+/**
+ * An end's combined verdict. `one-fk?` is a unique end whose foreign-key
+ * evidence involves dbt (its relationships test names the other end, or its
+ * uniqueness comes only from dbt): it is the foreign-key side of a one-to-one
+ * **only when the other end is unique too**. Against an end not known to be
+ * unique it is the parent-declared form of a dbt test — the other end is the
+ * many side — and reads as plain `one`.
+ */
+type EndVerdict = Verdict | 'one-fk?';
+
+const isOne = (v: EndVerdict): boolean => v === 'one' || v === 'one-fk' || v === 'one-fk?';
+
+/** Combined reading of one end. */
 interface EndReading {
   end: DirectionEnd;
-  verdict: Verdict;
-  /** Whether the verdict rests on key flags alone. */
-  fromKeys: boolean;
+  verdict: EndVerdict;
+  /** What the key flags alone say ('unknown' when they say nothing). */
+  keyVerdict: Verdict;
   conflict: boolean;
   reasons: string[];
 }
 
-function readEnd(e: EndEvidence): EndReading {
+function readEnd(e: EndEvidence, other: DirectionEnd): EndReading {
+  const name = `${e.model}.${e.column}`;
+  const otherName = `${other.model}.${other.column}`;
   const keys = readKeys(e);
-  const dbt = readDbt(e);
+  const f = readFacts(e, other);
   const end = { model: e.model, column: e.column };
-  if (keys.verdict !== 'unknown' && dbt.verdict !== 'unknown') {
-    if (isOne(keys.verdict) !== isOne(dbt.verdict)) {
-      return { end, verdict: keys.verdict, fromKeys: true, conflict: true, reasons: [...keys.reasons.map((r) => `${r}, but ${dbt.reasons.join(', ')}`)] };
-    }
-    // Agreeing sources; dbt can add that a unique key also points out.
-    const verdict = keys.verdict === 'one' && dbt.verdict === 'one-fk' ? 'one-fk' : keys.verdict;
-    return { end, verdict, fromKeys: verdict === keys.verdict, conflict: false, reasons: [...keys.reasons, ...dbt.reasons] };
+  // Only the two uniqueness facts can disagree: "points out" never contradicts "unique".
+  if (f.keyUnique !== undefined && f.dbtUnique !== undefined && f.keyUnique !== f.dbtUnique) {
+    return { end, verdict: keys.verdict, keyVerdict: keys.verdict, conflict: true, reasons: [`${f.keyUniqueReason}, but ${f.dbtUniqueReason}`] };
   }
-  if (keys.verdict !== 'unknown') return { end, verdict: keys.verdict, fromKeys: true, conflict: false, reasons: keys.reasons };
-  return { end, verdict: dbt.verdict, fromKeys: false, conflict: false, reasons: dbt.reasons };
+  const reasons = [...keys.reasons];
+  const dbtReason = f.dbtUnique === true && f.dbtPointsAtOther
+    ? `dbt tests ${name} as unique and as a relationship to ${otherName}`
+    : f.dbtUniqueReason
+      ?? (f.dbtPointsAtOther ? `dbt tests ${name} as a relationship to ${otherName}` : f.dbtPoints ? `dbt tests ${name} with a relationships test` : undefined);
+  if (dbtReason) reasons.push(dbtReason);
+
+  const unique = f.keyUnique ?? f.dbtUnique;
+  let verdict: EndVerdict;
+  if (unique === true) {
+    if (f.keyUnique === true && f.declaredFk) verdict = 'one-fk';
+    else if (f.dbtPointsAtOther || f.declaredFk) verdict = 'one-fk?';
+    else verdict = 'one';
+  } else if (unique === false) {
+    verdict = 'many';
+  } else {
+    // Nothing says whether it is unique: a column that points out is the many side.
+    verdict = f.declaredFk || f.dbtPoints ? 'many' : 'unknown';
+  }
+  return { end, verdict, keyVerdict: keys.verdict, conflict: false, reasons };
 }
+
+/** Settle a provisional `one-fk?` against the other end's verdict. */
+function settle(v: EndVerdict, other: EndVerdict): Verdict {
+  if (v !== 'one-fk?') return v;
+  return isOne(other) ? 'one-fk' : 'one';
+}
+
+/** What a pair of verdicts decides, before any confidence is attached. */
+type Decision =
+  | { kind: 'decided'; fromIsX: boolean; cardinality: DirectionVerdict['cardinality'] }
+  | { kind: 'ambiguous'; cardinality: DirectionVerdict['cardinality'] };
+
+function decide(vx: Verdict, vy: Verdict): Decision {
+  if (vx === 'unknown' && vy === 'unknown') return { kind: 'ambiguous', cardinality: 'many-to-one' };
+  // One end unique, the other not unique.
+  if (isOne(vx) && vy === 'many') return { kind: 'decided', fromIsX: false, cardinality: 'many-to-one' };
+  if (isOne(vy) && vx === 'many') return { kind: 'decided', fromIsX: true, cardinality: 'many-to-one' };
+  // Both unique: a one-to-one, from the end that also points out.
+  if (isOne(vx) && isOne(vy)) {
+    if (vx === 'one-fk' && vy === 'one') return { kind: 'decided', fromIsX: true, cardinality: 'one-to-one' };
+    if (vy === 'one-fk' && vx === 'one') return { kind: 'decided', fromIsX: false, cardinality: 'one-to-one' };
+    return { kind: 'ambiguous', cardinality: 'one-to-one' };
+  }
+  if (vx === 'many' && vy === 'many') return { kind: 'ambiguous', cardinality: 'many-to-many' };
+  // One end known, the other not.
+  const knownIsX = vy === 'unknown';
+  const known = knownIsX ? vx : vy;
+  if (known === 'one') return { kind: 'decided', fromIsX: !knownIsX, cardinality: 'many-to-one' };
+  if (known === 'one-fk') return { kind: 'decided', fromIsX: knownIsX, cardinality: 'one-to-one' };
+  return { kind: 'decided', fromIsX: knownIsX, cardinality: 'many-to-one' };
+}
+
+const sameDecision = (a: Decision, b: Decision): boolean =>
+  a.kind === b.kind && a.cardinality === b.cardinality && (a.kind === 'ambiguous' || (b.kind === 'decided' && a.fromIsX === b.fromIsX));
 
 const endLabel = (e: DirectionEnd): string => `${e.model}.${e.column}`.toLowerCase();
 
@@ -152,6 +252,7 @@ const endLabel = (e: DirectionEnd): string => `${e.model}.${e.column}`.toLowerCa
  *   or both ends are whole keys and exactly one is a declared foreign key →
  *   `one-to-one` from that end.
  * - **likely** — dbt tests decide it, or one end is known and the other is not.
+ *   dbt that agrees with keys which already settle it leaves the verdict certain.
  * - **ambiguous** — no evidence; both ends unique with no foreign-key evidence
  *   (a one-to-one either way); both ends not unique (many-to-many or unkeyed);
  *   or key flags and dbt disagree about an end (`conflict: true`). The ends
@@ -159,43 +260,35 @@ const endLabel = (e: DirectionEnd): string => `${e.model}.${e.column}`.toLowerCa
  */
 export function resolveDirection(a: EndEvidence, b: EndEvidence): DirectionVerdict {
   // Fixed order first, so the verdict cannot depend on argument order.
-  const [x, y] = endLabel(a) <= endLabel(b) ? [readEnd(a), readEnd(b)] : [readEnd(b), readEnd(a)];
+  const [ea, eb] = endLabel(a) <= endLabel(b) ? [a, b] : [b, a];
+  const endOf = (e: EndEvidence): DirectionEnd => ({ model: e.model, column: e.column });
+  const rx = readEnd(ea, endOf(eb));
+  const ry = readEnd(eb, endOf(ea));
+  const x = { ...rx, verdict: settle(rx.verdict, ry.verdict) };
+  const y = { ...ry, verdict: settle(ry.verdict, rx.verdict) };
   const reasons = [...x.reasons, ...y.reasons];
   const ambiguous = (cardinality: DirectionVerdict['cardinality'], extra: Partial<DirectionVerdict> = {}): DirectionVerdict => ({
     from: x.end, to: y.end, cardinality, confidence: 'ambiguous', reasons, ...extra,
   });
-  const decided = (
-    from: EndReading,
-    to: EndReading,
-    cardinality: DirectionVerdict['cardinality'],
-    confidence: DirectionConfidence,
-  ): DirectionVerdict => ({ from: from.end, to: to.end, cardinality, confidence, reasons: [...from.reasons, ...to.reasons] });
 
   if (x.conflict || y.conflict) {
     return ambiguous('many-to-one', { conflict: true });
   }
-  const certain = x.fromKeys && y.fromKeys;
-  const vx = x.verdict;
-  const vy = y.verdict;
-
-  if (vx === 'unknown' && vy === 'unknown') {
-    return ambiguous('many-to-one', { reasons: ['Neither column is a key, a declared foreign key or covered by a dbt test'] });
+  const decision = decide(x.verdict, y.verdict);
+  if (decision.kind === 'ambiguous') {
+    return x.verdict === 'unknown' && y.verdict === 'unknown'
+      ? ambiguous(decision.cardinality, { reasons: ['Neither column is a key, a declared foreign key or covered by a dbt test'] })
+      : ambiguous(decision.cardinality);
   }
-  // One end unique, the other not unique.
-  if (isOne(vx) && vy === 'many') return decided(y, x, 'many-to-one', certain ? 'certain' : 'likely');
-  if (isOne(vy) && vx === 'many') return decided(x, y, 'many-to-one', certain ? 'certain' : 'likely');
-  // Both unique: a one-to-one, from the end that also points out.
-  if (isOne(vx) && isOne(vy)) {
-    if (vx === 'one-fk' && vy === 'one') return decided(x, y, 'one-to-one', certain ? 'certain' : 'likely');
-    if (vy === 'one-fk' && vx === 'one') return decided(y, x, 'one-to-one', certain ? 'certain' : 'likely');
-    return ambiguous('one-to-one');
-  }
-  if (vx === 'many' && vy === 'many') return ambiguous('many-to-many');
-  // One end known, the other not.
-  const [known, unknown] = vx === 'unknown' ? [y, x] : [x, y];
-  if (known.verdict === 'one') return decided(unknown, known, 'many-to-one', 'likely');
-  if (known.verdict === 'one-fk') return decided(known, unknown, 'one-to-one', 'likely');
-  return decided(known, unknown, 'many-to-one', 'likely');
+  // Certain only when the key flags alone, read without dbt, reach the very
+  // same answer: dbt agreeing (or adding detail the answer does not turn on)
+  // never makes the verdict less sure, and dbt alone never makes it certain.
+  const certain = x.keyVerdict !== 'unknown' && y.keyVerdict !== 'unknown'
+    && sameDecision(decide(x.keyVerdict, y.keyVerdict), decision);
+  const [from, to] = decision.fromIsX ? [x, y] : [y, x];
+  // Only the two-sided case can be certain; "one end known" is always likely.
+  const confidence: DirectionConfidence = certain ? 'certain' : 'likely';
+  return { from: from.end, to: to.end, cardinality: decision.cardinality, confidence, reasons: [...from.reasons, ...to.reasons] };
 }
 
 /** A column as `endEvidence` reads it: the stored flags, or the display ones. */

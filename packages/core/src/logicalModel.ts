@@ -13,7 +13,7 @@ import type { Alias, Document, Node, Pair } from 'yaml';
 import type { Cardinality, ColumnDef, ModelRelationship, RelationshipReadIssue, SemanticModel } from './types/semantic.js';
 import { readMeta } from './meta.js';
 import { checkLimit } from './limits.js';
-import { normaliseRelationshipRole } from './relationships.js';
+import { normaliseRelationshipRole, relationshipRoleTooLong, RELATIONSHIP_ROLE_MAX_LENGTH } from './relationships.js';
 
 /** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
 export const LOGICAL_MODELS_DIR = 'logical-models';
@@ -244,10 +244,21 @@ function parseModelFile(
     maxChars,
   };
   const raw = toPlain(doc, doc.contents, state);
-  /** 1-based line of entry `index` of a literal `relationships:` sequence. */
+  /**
+   * 1-based line of entry `index` of a literal `relationships:` sequence; when
+   * `relationships:` is not a sequence at all, the line of the key itself.
+   */
   const relationshipLine = (index: number): number | undefined => {
-    const seq = isMap(doc.contents) ? doc.contents.get('relationships', true) : undefined;
-    const offset = isSeq(seq) ? (seq.items[index] as Node | undefined)?.range?.[0] : undefined;
+    if (!isMap(doc.contents)) return undefined;
+    const seq = doc.contents.get('relationships', true);
+    if (isSeq(seq)) {
+      const offset = (seq.items[index] as Node | undefined)?.range?.[0];
+      return offset === undefined ? undefined : lineCounter.linePos(offset).line;
+    }
+    // An aliased value's entries live elsewhere in the file: no line to give.
+    if (isAlias(seq)) return undefined;
+    const pair = doc.contents.items.find((p) => isScalar(p.key) && p.key.value === 'relationships');
+    const offset = pair && isScalar(pair.key) ? pair.key.range?.[0] : undefined;
     return offset === undefined ? undefined : lineCounter.linePos(offset).line;
   };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -410,7 +421,21 @@ function readRelationships(
 ): { relationships: ModelRelationship[]; issues: RelationshipReadIssue[] } {
   const relationships: ModelRelationship[] = [];
   const issues: RelationshipReadIssue[] = [];
-  if (!Array.isArray(value)) return { relationships, issues };
+  if (value === undefined || value === null) return { relationships, issues };
+  if (!Array.isArray(value)) {
+    // A mapping (the list dash forgotten) or a single value: nothing can be
+    // read, so say so rather than drawing nothing without a word.
+    const line = lineOf(0);
+    const shape = typeof value === 'object' ? 'a mapping' : 'a single value';
+    issues.push({
+      index: 0,
+      reason: 'not-a-list',
+      skipped: true,
+      ...(line !== undefined ? { line } : {}),
+      message: `The relationships: of ${modelName} is ${shape}, not a list (each entry starts with "- "), so none of it was read`,
+    });
+    return { relationships, issues };
+  }
   value.forEach((entry, index) => {
     const issue = (reason: RelationshipReadIssue['reason'], skipped: boolean, message: string): void => {
       const line = lineOf(index);
@@ -444,6 +469,10 @@ function readRelationships(
     }
     if (r.role !== undefined && r.role !== null && typeof r.role !== 'string') {
       issue('invalid-role', false, `Relationship entry ${index + 1} of ${modelName} has a role that is not text; it was ignored`);
+    }
+    if (relationshipRoleTooLong(r.role)) {
+      issue('role-too-long', false,
+        `Relationship entry ${index + 1} of ${modelName} has a role longer than ${RELATIONSHIP_ROLE_MAX_LENGTH} characters; it is shown shortened`);
     }
     const role = normaliseRelationshipRole(r.role);
     relationships.push({

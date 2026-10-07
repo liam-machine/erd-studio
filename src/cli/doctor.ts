@@ -47,11 +47,11 @@ import {
   type Envelope,
 } from './context';
 import { MODEL_YAML_HINTS, toUnreadableModelFile, type UnreadableModelFile } from './diff';
-import { checkProjectRelationships, countFindings } from './relationshipCheck';
+import { checkProjectRelationships, countFindings, type UncheckedFile } from './relationshipCheck';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
-  | 'fix-model-yaml' | 'migrate-v5' | 'fix-relationships' | 'update-harness' | 'ready';
+  | 'fix-model-yaml' | 'migrate-v5' | 'fix-relationships' | 'check-relationships' | 'update-harness' | 'ready';
 
 export interface NextStep {
   id: NextStepId;
@@ -119,9 +119,15 @@ export interface DoctorRelationships {
   warnings: number;
   info: number;
   byCode: Partial<Record<RelationshipIssueCode, number>>;
+  /** Files whose relationships could not be checked at all (domain files, model files that do not parse, an unusable layers.json). */
+  unchecked: number;
+  /** Those files, project-relative, each with why. */
+  uncheckedFiles: UncheckedFile[];
+  /** Set when the checks themselves failed: why, in one sentence. Absent when they ran or there was nothing to check. */
+  failed?: string;
 }
 
-const NO_RELATIONSHIP_CHECK: DoctorRelationships = { checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, byCode: {} };
+const NO_RELATIONSHIP_CHECK: DoctorRelationships = { checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, byCode: {}, unchecked: 0, uncheckedFiles: [] };
 
 /** Plain words per code, for the `fix-relationships` step. */
 const RELATIONSHIP_REASONS: Array<[RelationshipIssueCode, string]> = [
@@ -215,10 +221,15 @@ function relationshipSummary(ctx: CliContext, semanticDirExists: boolean): Docto
   try {
     const project = checkProjectRelationships(ctx);
     const { error, warning, info, byCode } = countFindings(project.findings);
-    return { checked: true, mode: project.mode, stored: project.checked.relationships, errors: error, warnings: warning, info, byCode };
-  } catch {
-    // Doctor reports; it never fails. `erd-studio check` shows the error itself.
-    return NO_RELATIONSHIP_CHECK;
+    return {
+      checked: true, mode: project.mode, stored: project.checked.relationships, errors: error, warnings: warning, info, byCode,
+      unchecked: project.unchecked.length,
+      uncheckedFiles: project.unchecked,
+    };
+  } catch (err) {
+    // Doctor reports; it never fails — but a check that could not run is
+    // said, never shown as if there were nothing to check.
+    return { ...NO_RELATIONSHIP_CHECK, failed: redactPaths(err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -320,6 +331,22 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       why: `${reasons.length > 0 ? `${reasons.join('; ')}. ` : ''}`
         + 'Run `erd-studio check` for the list with files and lines. In VS Code, "ERD Studio: Repair Relationships…" '
         + 'fixes most of them, showing every change before it writes anything.',
+      command: null,
+    });
+  }
+  // A check that could not run, or skipped a file, is never followed by
+  // "Ready": the model files that do not parse have their own step above;
+  // every other file it skipped — a model file that holds no model (empty,
+  // or no `name:`) included — and a check that failed outright get this.
+  const parseStep = new Set(r.erd.unreadableModelFiles.map((u) => u.file));
+  const skipped = r.relationships.uncheckedFiles.filter((u) => u.kind !== 'model' || !parseStep.has(u.file));
+  if (r.relationships.failed || skipped.length > 0) {
+    steps.push({
+      id: 'check-relationships',
+      title: r.relationships.failed ? 'Run the relationship checks' : `Fix ${skipped.length === 1 ? 'a file' : `${skipped.length} files`} the relationship checks could not read`,
+      why: r.relationships.failed
+        ? `The relationship checks could not run (${r.relationships.failed}), so nothing says the relationships are fine. Run \`erd-studio check\` to see why.`
+        : `${skipped.map((u) => `${u.file}: ${u.reason}`).join('; ')}. Its relationships were not looked at; run \`erd-studio check\` again once it is fixed.`,
       command: null,
     });
   }

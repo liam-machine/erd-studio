@@ -365,6 +365,33 @@ function compareRelationships(
       ? { ...found, cardinality: readFromOtherEnd(found.cardinality) }
       : found;
 
+    // A one-to-one's direction says which end holds the foreign key: stored
+    // A→B and B→A they are different relationships (#133, R2). Report them as
+    // the two different relationships they are — unless a stage cannot tell
+    // the direction (a one-to-one dbt tests from both ends).
+    if (
+      found && targetRel && rel.cardinality === 'one-to-one' && found.cardinality === 'one-to-one'
+      && !readsSameWay(found, rel) && !found.directionUnknown && !rel.directionUnknown
+    ) {
+      result.push({
+        fromModel: rel.fromModel,
+        fromColumn: rel.fromColumn,
+        toModel: rel.toModel,
+        toColumn: rel.toColumn,
+        status: 'extra',
+        sourceCardinality: rel.cardinality,
+      });
+      result.push({
+        fromModel: found.fromModel,
+        fromColumn: found.fromColumn,
+        toModel: found.toModel,
+        toColumn: found.toColumn,
+        status: 'missing',
+        targetCardinality: found.cardinality,
+      });
+      continue;
+    }
+
     if (!targetRel) {
       result.push({
         fromModel: rel.fromModel,

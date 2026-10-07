@@ -270,5 +270,13 @@ describe('selectedEdgesToRelationships (#133)', () => {
 
   it('skips an edge whose model the batch deletes, whatever its case', () => {
     expect(selectedEdgesToRelationships([edge], [REL_AB], ['A'])).toEqual([]);
+    expect(selectedEdgesToRelationships([edge], [{ ...REL_AB, source: { kind: 'domain' } }], ['A'])).toEqual([]);
+  });
+
+  it('keeps a selected model-library line even when its model is deleted too (removing a model does not cascade it)', () => {
+    const libraryRel = { ...REL_AB, stored, source: { kind: 'library', model: 'a', index: 0 } };
+    expect(selectedEdgesToRelationships([edge], [libraryRel], ['b'])).toEqual([
+      { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id', stored },
+    ]);
   });
 });

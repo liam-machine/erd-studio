@@ -14,7 +14,7 @@
  * Driven by the real editor store; only the message sender is mocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 
 const send = vi.hoisted(() => vi.fn());
@@ -105,6 +105,18 @@ describe('NewFkDialog — certain evidence', () => {
   });
 });
 
+describe('NewFkDialog — a many-to-many has no "one" side to contradict', () => {
+  it('editing a many-to-many stored from the key\'s model shows no warning and a plain Save', () => {
+    useEditorStore.getState().openFkDialogForEdit({
+      fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_daily', toColumn: 'customer_key',
+      cardinality: 'many-to-many',
+    });
+    renderDialog();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(primary().textContent).toBe('Save Changes');
+  });
+});
+
 describe('NewFkDialog — likely evidence', () => {
   it('is prefilled with a reason line', () => {
     useEditorStore.getState().openFkDialogWithPrefill({ fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' });
@@ -153,6 +165,99 @@ describe('NewFkDialog — ambiguous evidence', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Many on both sides (use a bridge model)' }));
     expect(text()).toContain(BRIDGE_HINT);
     expect(primary().disabled).toBe(false);
+  });
+});
+
+describe('NewFkDialog — both ends not unique (an ambiguous many-to-many verdict)', () => {
+  const twoForeignKeys = () => domain({
+    models: [
+      { name: 'a', description: '', columns: [col('x', { fk: true })] },
+      { name: 'b', description: '', columns: [col('y', { fk: true })] },
+    ],
+  } as Partial<DisplayDomain>);
+
+  it('prefills nothing it cannot back: Create stays disabled until a direction or a cardinality is chosen', () => {
+    useEditorStore.getState().setDomain(twoForeignKeys());
+    useEditorStore.getState().openFkDialogWithPrefill({ fromModel: 'b', fromColumn: 'y', toModel: 'a', toColumn: 'x' });
+    renderDialog();
+    expect((screen.getByRole('radio', { name: 'Many on both sides (use a bridge model)' }) as HTMLInputElement).checked).toBe(false);
+    expect(primary().disabled).toBe(true);
+    fireEvent.click(primary());
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('a many-to-many the user picks is theirs to create', () => {
+    useEditorStore.getState().setDomain(twoForeignKeys());
+    useEditorStore.getState().openFkDialogWithPrefill({ fromModel: 'b', fromColumn: 'y', toModel: 'a', toColumn: 'x' });
+    renderDialog();
+    fireEvent.click(screen.getByRole('radio', { name: 'Many on both sides (use a bridge model)' }));
+    expect(primary().disabled).toBe(false);
+    fireEvent.click(primary());
+    expect(send.mock.calls[0][0].payload).toMatchObject({ cardinality: 'many-to-many' });
+  });
+});
+
+describe('NewFkDialog — editing a many-to-many into a one-sided relationship', () => {
+  it('asks the direction when the keys do not settle it: the stored ends were never a choice', () => {
+    useEditorStore.getState().openFkDialogForEdit({
+      fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'y', cardinality: 'many-to-many',
+    });
+    renderDialog();
+    // Kept a many-to-many: nothing to ask.
+    expect(primary().disabled).toBe(false);
+    fireEvent.click(screen.getByRole('radio', { name: 'Many (usual)' }));
+    expect(text()).toContain('Which side has many rows? The keys do not say.');
+    expect(primary().disabled).toBe(true);
+    fireEvent.click(primary());
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'b has many rows per a' }));
+    expect(primary().disabled).toBe(false);
+    fireEvent.click(primary());
+    expect(send.mock.calls[0][0]).toMatchObject({
+      type: 'editRelationship',
+      payload: { originalFromModel: 'a', fromModel: 'b', fromColumn: 'y', toModel: 'a', toColumn: 'x', cardinality: 'many-to-one' },
+    });
+  });
+
+  it('opens with the edge menu\'s pick chosen, still asking the direction', () => {
+    useEditorStore.getState().openFkDialogForEdit({
+      fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'y', cardinality: 'many-to-many', pickedCardinality: 'one-to-one',
+    });
+    renderDialog();
+    expect((screen.getByRole('radio', { name: 'Only one' }) as HTMLInputElement).checked).toBe(true);
+    expect(primary().disabled).toBe(true);
+  });
+
+  it('a saved many-to-one keeps its direction as the user\'s choice', () => {
+    useEditorStore.getState().openFkDialogForEdit({
+      fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'y', cardinality: 'many-to-one',
+    });
+    renderDialog();
+    expect(primary().disabled).toBe(false);
+  });
+});
+
+describe('NewFkDialog — Escape then New Relationship starts afresh', () => {
+  it('a direction and key tick chosen before Escape are not carried into the next open', () => {
+    useEditorStore.getState().openFkDialogWithPrefill({ fromModel: 'b', fromColumn: 'y', toModel: 'a', toColumn: 'x' });
+    renderDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'a has many rows per b' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: "Mark y as b's key" }));
+    // What the global Escape shortcut does (useCanvasShortcuts): close through the store only.
+    act(() => {
+      const s = useEditorStore.getState();
+      s.setNewFkDialogOpen(false);
+      s.clearFkDialogPrefill();
+      s.clearFkDialogEditData();
+    });
+    expect(document.querySelector('.new-fk-dialog')).toBeNull();
+    // The toolbar's New Relationship.
+    act(() => { useEditorStore.getState().setNewFkDialogOpen(true); });
+    expect(text()).toContain('New Relationship');
+    expect(screen.queryByRole('checkbox', { name: "Mark y as b's key" })).toBeNull();
+    expect(primary().disabled).toBe(true);
+    fireEvent.click(primary());
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

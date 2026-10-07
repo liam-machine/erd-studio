@@ -169,6 +169,69 @@ const CASES: Case[] = [
     from: 'x.k', to: 'y.k', cardinality: 'many-to-many', confidence: 'ambiguous',
   },
   {
+    name: 'dbt: a unique key tested against an unrelated model does not turn a correct answer round',
+    a: end(dimCustomer, 'customer_key', { unique: true, relationshipsTest: true, relationshipsTo: [{ model: 'stg_customers', column: 'customer_key' }] }),
+    b: end(fctOrderUnflagged, 'customer_key'),
+    from: 'fct_order.customer_key', to: 'dim_customer.customer_key', cardinality: 'many-to-one', confidence: 'likely',
+  },
+  {
+    name: 'dbt: a unique key whose relationships test target is unknown is only unique',
+    a: end(dimCustomer, 'customer_key', { unique: true, relationshipsTest: true }),
+    b: end(fctOrderUnflagged, 'customer_key'),
+    from: 'fct_order.customer_key', to: 'dim_customer.customer_key', cardinality: 'many-to-one', confidence: 'likely',
+  },
+  {
+    name: 'dbt: a unique key tested against the other end is the foreign-key side of a 1:1',
+    a: end(employeeUnflagged, 'person_id', { unique: true, relationshipsTest: true, relationshipsTo: [{ model: 'PERSON', column: 'Person_Id' }] }),
+    b: end(person, 'person_id'),
+    from: 'employee.person_id', to: 'person.person_id', cardinality: 'one-to-one', confidence: 'likely',
+  },
+  {
+    name: 'dbt agreeing with keys that already settle it (unique + a relationships test) stays certain',
+    a: end(dimCustomer, 'customer_key', { unique: true, relationshipsTest: true, relationshipsTo: [{ model: 'fct_order', column: 'customer_key' }] }),
+    b: end(fctOrder, 'customer_key'),
+    from: 'fct_order.customer_key', to: 'dim_customer.customer_key', cardinality: 'many-to-one', confidence: 'certain',
+  },
+  {
+    name: 'dbt agreeing with keys (unique + a relationships test elsewhere) stays certain',
+    a: end(dimCustomer, 'customer_key', { unique: true, relationshipsTest: true, relationshipsTo: [{ model: 'stg_customers', column: 'customer_key' }] }),
+    b: end(fctOrder, 'customer_key'),
+    from: 'fct_order.customer_key', to: 'dim_customer.customer_key', cardinality: 'many-to-one', confidence: 'certain',
+  },
+  // A column pointing at another table says nothing about whether it is
+  // unique: a relationships test or a declared FK must never read as a
+  // key-vs-dbt conflict (review findings on #133).
+  {
+    name: 'a dimension key whose only dbt test points at its staging model is not a conflict',
+    a: end(dimCustomer, 'customer_key', { relationshipsTest: true, relationshipsTo: [{ model: 'stg_customers', column: 'customer_key' }] }),
+    b: end(fctOrder, 'customer_key'),
+    from: 'fct_order.customer_key', to: 'dim_customer.customer_key', cardinality: 'many-to-one', confidence: 'certain',
+  },
+  {
+    name: 'shared-primary-key 1:1: a primary key with a relationships test to the other key',
+    a: end(model('customer_details', 'customer_id:P', 'notes'), 'customer_id', { relationshipsTest: true, relationshipsTo: [{ model: 'customers', column: 'customer_id' }] }),
+    b: end(model('customers', 'customer_id:P', 'name'), 'customer_id'),
+    from: 'customer_details.customer_id', to: 'customers.customer_id', cardinality: 'one-to-one', confidence: 'likely',
+  },
+  {
+    name: 'a declared foreign key dbt tests as unique and as a relationship to the other end is a 1:1',
+    a: end(model('user_profile', 'profile_id:P', 'user_id:F'), 'user_id', { unique: true, relationshipsTest: true, relationshipsTo: [{ model: 'users', column: 'id' }] }),
+    b: end(model('users', 'id:P', 'email'), 'id'),
+    from: 'user_profile.user_id', to: 'users.id', cardinality: 'one-to-one', confidence: 'likely',
+  },
+  {
+    name: 'a parent-declared dbt test (unique key tested against an unkeyed column) makes the other end the many side',
+    a: end(model('dim_customer', 'customer_id', 'name'), 'customer_id', { unique: true, relationshipsTest: true, relationshipsTo: [{ model: 'fct_order', column: 'customer_id' }] }),
+    b: end(model('fct_order', 'order_id', 'customer_id'), 'customer_id'),
+    from: 'fct_order.customer_id', to: 'dim_customer.customer_id', cardinality: 'many-to-one', confidence: 'likely',
+  },
+  {
+    name: 'a parent-declared dbt test on a flagged primary key against an unkeyed column',
+    a: end(model('dim_customer', 'customer_id:P', 'name'), 'customer_id', { unique: true, relationshipsTest: true, relationshipsTo: [{ model: 'fct_order', column: 'customer_id' }] }),
+    b: end(model('fct_order', 'order_id', 'customer_id'), 'customer_id'),
+    from: 'fct_order.customer_id', to: 'dim_customer.customer_id', cardinality: 'many-to-one', confidence: 'likely',
+  },
+  {
     name: 'a whole key that is also a declared foreign key, other end unknown',
     a: end(employee, 'person_id'), b: end(model('legacy_person', 'person_id'), 'person_id'),
     from: 'employee.person_id', to: 'legacy_person.person_id', cardinality: 'one-to-one', confidence: 'likely',

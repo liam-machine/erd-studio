@@ -1154,6 +1154,15 @@ describe('DomainService', () => {
         ]);
       });
 
+      it('marks a one-to-one tested from both ends as having no known direction', () => {
+        const bothUnique = new Map([['dim_customer', new Set(['customer_id'])], ['fct_orders', new Set(['customer_id'])]]);
+        expect(derivePhysicalRelationships([fromDim, fromFact], models, bothUnique, new Map())).toEqual([
+          { ...fromDim, cardinality: 'one-to-one', directionUnknown: true },
+        ]);
+        // One test: the end that declares it holds the foreign key.
+        expect(derivePhysicalRelationships([fromFact], models, bothUnique, new Map())).toEqual([{ ...fromFact, cardinality: 'one-to-one' }]);
+      });
+
       it('keeps two different links between the same pair of models', () => {
         const other = { fromModel: 'fct_orders', fromColumn: 'billing_customer_id', toModel: 'dim_customer', toColumn: 'customer_id' };
         expect(derivePhysicalRelationships([fromFact, other, fromDim], models, unique, new Map())).toHaveLength(2);

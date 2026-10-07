@@ -69,12 +69,76 @@ describe('checkRelationships — stable codes (#133)', () => {
     expect(agree[0]).toMatchObject({ fix: 'remove-domain-copy', files: ['.erd-studio/silver/orders.json', 'logical-models/fct_order.yml'] });
   });
 
+  it('a v4 diagram\'s own copy is never compared with the library: it never draws the library\'s', () => {
+    const lib = entry(fctOrder([TO_CUSTOMER]));
+    // Inline models (as the v4 reader has them), and the flag toCheckDomains sets.
+    for (const v4 of [
+      domain({ mode: 'domain', models: [fctOrder(), dimCustomer()], relationships: [own({ cardinality: 'many-to-many' })] }),
+      domain({ mode: 'domain', olderFormat: true, relationships: [own({ cardinality: 'many-to-many' })] }),
+    ]) {
+      expect(checkRelationships({ libraryModels: [lib, entry(dimCustomer())], domains: [v4] })).toEqual([]);
+    }
+    // Its own copies are still checked against each other.
+    const twice = checkRelationships({
+      libraryModels: [lib, entry(dimCustomer())],
+      domains: [domain({ mode: 'domain', models: [fctOrder(), dimCustomer()], relationships: [own(), own({ cardinality: 'one-to-one' })] })],
+    });
+    expect(summary(twice)).toEqual(['REL001:error']);
+    expect(twice[0].files).toEqual(['.erd-studio/silver/orders.json']);
+  });
+
   it('REL002: a one-to-many stored in a model file names its home too', () => {
     const findings = checkRelationships({
       libraryModels: [entry(fctOrder()), entry(dimCustomer([rel('customer_key', 'fct_order', 'customer_key', { cardinality: 'one-to-many' })]))],
       domains: [],
     });
     expect(findings).toMatchObject([{ code: 'REL002', fix: 'rehome', files: ['logical-models/dim_customer.yml', 'logical-models/fct_order.yml'] }]);
+  });
+
+  it('REL003: a domain record naming a library model the diagram does not hold (v5 and v4)', () => {
+    const v5 = checkRelationships({
+      libraryModels: [entry(fctOrder()), entry(dimCustomer())],
+      domains: [domain({ models: ['fct_order'], relationships: [own()] })],
+    });
+    expect(summary(v5)).toEqual(['REL003:error']);
+    expect(v5[0].message).toMatch(/dim_customer, which is not one of this diagram's models/);
+    expect(v5[0]).toMatchObject({ files: ['.erd-studio/silver/orders.json'], fix: 'repoint' });
+
+    const v4 = checkRelationships({
+      libraryModels: [entry(dimCustomer())],
+      domains: [domain({ mode: 'domain', models: [fctOrder()], relationships: [own()] })],
+    });
+    expect(summary(v4)).toEqual(['REL003:error']);
+    // A stub the diagram lists is not a finding.
+    expect(checkRelationships({
+      libraryModels: [entry(fctOrder()), entry(dimCustomer())],
+      domains: [domain({ models: ['fct_order'], stubColumns: ['dim_customer'], relationships: [own()] })],
+    })).toEqual([]);
+  });
+
+  it('REL001 numbers its entries by their place in the file, counting an entry the reader skipped', () => {
+    const fct = parseLogicalModelText([
+      'name: fct_order',
+      'columns:',
+      '  - name: customer_key',
+      '    dataType: string',
+      'relationships:',
+      '  - { fromColumn: customer_key, toModel: dim_customer, toColumn: customer_key, cardinality: many-to-one }',
+      '  - { fromColumn: customer_key, toColumn: customer_key }',
+      '  - { fromColumn: customer_key, toModel: dim_customer, toColumn: customer_key, cardinality: many-to-one }',
+    ].join('\n'), 'fct_order')!;
+    const library = checkRelationships({ libraryModels: [entry(fct), entry(dimCustomer())], domains: [] });
+    expect(library.find((f) => f.code === 'REL008')!.message).toMatch(/entry 2 of fct_order/);
+    expect(library.find((f) => f.code === 'REL001')!.message).toMatch(/fct_order\.yml entry 1, logical-models\/fct_order\.yml entry 3\)/);
+
+    const domainFindings = checkRelationships({
+      libraryModels: [entry(fctOrder()), entry(dimCustomer())],
+      domains: [domain({
+        relationships: [own(), own()],
+        readIssues: [{ index: 1, reason: 'missing-endpoint', skipped: true, message: 'Relationship entry 2 of diagram silver/orders has no fromColumn, toModel, toColumn and was skipped' }],
+      })],
+    });
+    expect(domainFindings.find((f) => f.code === 'REL001')!.message).toMatch(/orders\.json entry 1, \.erd-studio\/silver\/orders\.json entry 3\)/);
   });
 
   it('REL003: an endpoint model missing from the library — but not an unreadable one or a stub', () => {
@@ -120,6 +184,18 @@ describe('checkRelationships — stable codes (#133)', () => {
     expect(findings).toMatchObject([{ code: 'REL008', severity: 'error', line: 4, fix: 'open-file', files: ['logical-models/fct_order.yml'] }]);
   });
 
+  it('REL008: a relationships: that is not a list at all, at the key\'s line', () => {
+    const model = parseLogicalModelText([
+      'name: fct_order',
+      'relationships:',
+      '  fromColumn: customer_key',
+      '  toModel: dim_customer',
+      '  toColumn: customer_key',
+    ].join('\n'), 'fct_order')!;
+    const findings = checkRelationships({ libraryModels: [entry(model), entry(dimCustomer())], domains: [] });
+    expect(findings).toMatchObject([{ code: 'REL008', severity: 'error', line: 2, fix: 'open-file', files: ['logical-models/fct_order.yml'] }]);
+  });
+
   it('checks a v4 domain against its inline models', () => {
     const findings = checkRelationships({
       libraryModels: [],
@@ -141,5 +217,21 @@ describe('checkRelationships — stable codes (#133)', () => {
       return order[a.split(':')[1]] - order[b.split(':')[1]] || a.localeCompare(b);
     }));
     for (const f of findings) expect(new Set(f.files).size).toBe(f.files.length);
+  });
+});
+
+describe('checkRelationships — models whose names differ only in case', () => {
+  it('reports the same findings whatever order the models come in', () => {
+    const t: SemanticModel = { name: 'T', columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }] };
+    const holder = (name: string, cardinality: 'many-to-one' | 'many-to-many'): SemanticModel => ({
+      name,
+      columns: [{ name: 'x', dataType: 'INT', description: '' }],
+      relationships: [{ fromColumn: 'x', toModel: 'T', toColumn: 'id', cardinality }],
+    });
+    const lib = (m: SemanticModel): CheckLibraryModel => ({ model: m, file: `logical-models/${m.name}.yml` });
+    const a = checkRelationships({ libraryModels: [lib(t), lib(holder('Dd', 'many-to-one')), lib(holder('DD', 'many-to-many'))], domains: [] });
+    const b = checkRelationships({ libraryModels: [lib(holder('DD', 'many-to-many')), lib(t), lib(holder('Dd', 'many-to-one'))], domains: [] });
+    expect(a).toEqual(b);
+    expect(a.length).toBeGreaterThan(0);
   });
 });

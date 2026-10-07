@@ -22,6 +22,7 @@ import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import type { DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
 import type { FkEdgeData } from '../../types/graph';
 import { relationshipStoredIn, removeRelationshipRequest } from '../../lib/relationshipActions';
+import { nodeIdResolver } from '../../lib/graphTransformer';
 import './DetailPanel.css';
 
 // ---------------------------------------------------------------------------
@@ -228,11 +229,12 @@ export function DetailPanel() {
     if (!domain || !selectedNode) {
       return { outgoing: [] as DisplayRelationship[], incoming: [] as DisplayRelationship[] };
     }
-    // Without case, like the canvas draws them (#133): an endpoint spelt
-    // differently from the node is still this model's relationship.
-    const selected = selectedNode.toLowerCase();
-    const outgoing = domain.relationships.filter((r) => r.fromModel.toLowerCase() === selected);
-    const incoming = domain.relationships.filter((r) => r.toModel.toLowerCase() === selected);
+    // Matched to a node exactly as the canvas draws them (#133): the exact
+    // name first, then without case only when no other model shares the
+    // folded name — so `Orders` never lists the relationships of `orders`.
+    const resolve = nodeIdResolver(domain.models.map((m) => m.name));
+    const outgoing = domain.relationships.filter((r) => resolve(r.fromModel) === selectedNode);
+    const incoming = domain.relationships.filter((r) => resolve(r.toModel) === selectedNode);
     return { outgoing, incoming };
   }, [domain, selectedNode]);
 

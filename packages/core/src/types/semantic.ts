@@ -167,6 +167,8 @@ export interface SemanticModelRuntimeFields {
 
 /** Why a model file's `relationships:` entry was not read exactly as written. */
 export type RelationshipReadIssueReason =
+  /** `relationships:` itself is a mapping or a single value rather than a list (nothing read; `index` is 0). */
+  | 'not-a-list'
   /** The entry is not a mapping (skipped). */
   | 'not-a-mapping'
   /** `fromColumn`, `toModel` or `toColumn` is missing, blank or not text (skipped). */
@@ -177,6 +179,8 @@ export type RelationshipReadIssueReason =
   | 'unknown-cardinality'
   /** A `role` that is not text (dropped). */
   | 'invalid-role'
+  /** A `role` longer than 60 characters (shown shortened; kept as written on disk). */
+  | 'role-too-long'
   /** A `fromModel:` key, which a model file does not use: the entry always leaves the file's own model. */
   | 'stray-from-model';
 

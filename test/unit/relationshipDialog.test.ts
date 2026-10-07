@@ -65,6 +65,11 @@ describe('contradiction warning (certain evidence, soft)', () => {
     expect(contradictionWarning(verdict, reversed(FACT_TO_DIM), MODELS))
       .toBe("dim_customer.customer_key is dim_customer's primary key, so dim_customer is normally the 'one' side.");
   });
+  it('never warns about a many-to-many: it has no "one" side', () => {
+    const verdict = directionFor(MODELS, FACT_TO_DIM)!;
+    expect(contradictionWarning(verdict, reversed(FACT_TO_DIM), MODELS, 'many-to-many')).toBeNull();
+    expect(contradictionWarning(verdict, reversed(FACT_TO_DIM), MODELS, 'many-to-one')).not.toBeNull();
+  });
   it('names a natural key as such', () => {
     const ends = { fromModel: 'fct_daily', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_code' };
     const verdict = directionFor(MODELS, ends)!;

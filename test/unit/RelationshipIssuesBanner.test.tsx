@@ -11,7 +11,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 const send = vi.hoisted(() => vi.fn());
 vi.mock('../../webview/hooks/useMessageBus', () => ({ useSend: () => send }));
 
-import { RelationshipIssuesBanner, bannerHeadline } from '../../webview/components/Canvas/RelationshipIssuesBanner';
+import { OLDER_FORMAT_HINT, RelationshipIssuesBanner, bannerHeadline } from '../../webview/components/Canvas/RelationshipIssuesBanner';
 import { useEditorStore } from '../../webview/store/editorStore';
 import type { DisplayDomain } from '../../src/types/display';
 
@@ -43,10 +43,32 @@ describe('RelationshipIssuesBanner', () => {
     expect(bannerHeadline(1)).toBe('1 relationship needs attention');
   });
 
+  it('counts relationships, not findings: one link missing a column on each end reads as one', () => {
+    setDomain({
+      relationshipIssues: [
+        { code: 'REL004', severity: 'error', message: 'uses column a.x, which a does not have', link: 'a.x|b.y' },
+        { code: 'REL004', severity: 'error', message: 'uses column b.y, which b does not have', link: 'a.x|b.y' },
+        { code: 'REL003', severity: 'error', message: 'another link points at a missing model', link: 'c.z|gone.id' },
+      ],
+    });
+    render(<RelationshipIssuesBanner />);
+    const headline = screen.getByText('2 relationships need attention');
+    // Every finding is still listed in the hover text.
+    expect(headline.getAttribute('title')?.split('\n')).toHaveLength(3);
+  });
+
   it('Repair Relationships… posts repairRelationships with no payload', () => {
     render(<RelationshipIssuesBanner />);
     fireEvent.click(screen.getByRole('button', { name: 'Repair Relationships…' }));
     expect(send).toHaveBeenCalledWith({ type: 'repairRelationships' });
+  });
+
+  it('on a diagram in the older (v4) format it points at the migration instead of offering a repair that cannot help', () => {
+    setDomain({ schemaVersion: 4 });
+    render(<RelationshipIssuesBanner />);
+    expect(screen.getByText('2 relationships need attention')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Repair Relationships…' })).toBeNull();
+    expect(screen.getByText(OLDER_FORMAT_HINT)).toBeTruthy();
   });
 
   it('× hides it until the findings change', () => {

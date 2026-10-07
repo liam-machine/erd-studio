@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { buildLogicalDisplayDomain } from '../../src/services/stageDisplay';
+import { buildDbtEvidenceIndex, buildLogicalDisplayDomain } from '../../src/services/stageDisplay';
 import type { SemanticDomain, SemanticModel } from '../../src/types/semantic';
 
 function model(name: string, columns: Array<Record<string, unknown>>, extra: Partial<SemanticModel> = {}): SemanticModel {
@@ -85,5 +85,20 @@ describe('buildLogicalDisplayDomain', () => {
     const d = domain({ models: [{ name: 'bare' } as SemanticModel], relationships: [] });
     const out = buildLogicalDisplayDomain(d, {});
     expect(out.models[0]).toEqual({ name: 'bare', schema: '', description: '', columns: [] });
+  });
+});
+
+describe('buildDbtEvidenceIndex', () => {
+  it('records where each relationships test points, once per target whatever the case', () => {
+    const index = buildDbtEvidenceIndex([
+      { relationshipTests: [{ fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'stg_customers', toColumn: 'customer_key' }] },
+      { relationshipTests: [{ fromModel: 'DIM_CUSTOMER', fromColumn: 'Customer_Key', toModel: 'STG_CUSTOMERS', toColumn: 'CUSTOMER_KEY' }] },
+      { uniqueColumns: new Map([['dim_customer', new Set(['customer_key'])]]) },
+    ]);
+    expect(index.get('dim_customer')?.get('customer_key')).toEqual({
+      relationshipsTest: true,
+      relationshipsTo: [{ model: 'stg_customers', column: 'customer_key' }],
+      unique: true,
+    });
   });
 });

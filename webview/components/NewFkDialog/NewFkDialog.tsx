@@ -27,7 +27,7 @@
  * When editing, the approval status is preserved by the extension host.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '@xyflow/react';
 import { sameLink } from '@erd-studio/core';
 
@@ -226,13 +226,21 @@ export function NewFkDialog() {
     () => (endsComplete && !errors.selfReference ? directionFor(models, ends) : undefined),
     [endsComplete, errors.selfReference, models, ends],
   );
-  const cardinality: Cardinality = cardinalityTouched ? chosenCardinality : verdict?.cardinality ?? chosenCardinality;
+  // The verdict's cardinality prefills the choice — except an ambiguous
+  // many-to-many (both ends look not unique): that is a guess with no "many"
+  // side to pick, so prefilling it would let one click store a many-to-many,
+  // in whichever model the drag started on. The default many-to-one then asks
+  // for a direction; a many-to-many is always the user's own explicit pick.
+  const suggested = verdict && !(verdict.confidence === 'ambiguous' && verdict.cardinality === 'many-to-many')
+    ? verdict.cardinality
+    : undefined;
+  const cardinality: Cardinality = cardinalityTouched ? chosenCardinality : suggested ?? chosenCardinality;
 
   // An ambiguous verdict has no default direction: the user picks one. A
-  // many-to-many has no "many" side to pick, so it needs no choice.
+  // many-to-many the user chose has no "many" side to pick, so it needs no choice.
   const ambiguous = verdict?.confidence === 'ambiguous' && cardinality !== 'many-to-many';
   const needsDirection = ambiguous && chosenDirection !== directionKey(ends);
-  const contradiction = contradictionWarning(verdict, ends, models);
+  const contradiction = contradictionWarning(verdict, ends, models, cardinality);
   const showTurned = turnedFor !== null && turnedFor === directionKey(ends);
   const offerMarkKey = ambiguous && !needsDirection && canOfferMarkKey(models, ends);
   const sendMarkKey = offerMarkKey && markKey;
@@ -333,6 +341,17 @@ export function NewFkDialog() {
     setChosenDirection(directionKey(next));
   }, [applyEnds]);
 
+  // Every open with neither a drag's prefill nor an edit (the toolbar's New
+  // Relationship) starts from an empty form. The dialog stays mounted while
+  // closed, and Escape closes it through the store without `handleClose`, so
+  // without this a cancelled direction choice, key tick or role would come
+  // back, already counted as decided.
+  const wasOpen = useRef(false);
+  useLayoutEffect(() => {
+    if (isOpen && !wasOpen.current && !fkDialogPrefill && !fkDialogEditData) resetForm();
+    wasOpen.current = isOpen;
+  }, [isOpen, fkDialogPrefill, fkDialogEditData, resetForm]);
+
   // Apply prefill when dialog opens with prefill data (from drag-to-connect).
   // Reset form first to clear any stale state from previous sessions.
   useEffect(() => {
@@ -370,11 +389,15 @@ export function NewFkDialog() {
         toColumn: fkDialogEditData.toColumn,
       };
       applyEnds(next);
-      setChosenCardinality(flip ? 'many-to-one' : fkDialogEditData.cardinality);
+      setChosenCardinality(fkDialogEditData.pickedCardinality ?? (flip ? 'many-to-one' : fkDialogEditData.cardinality));
       setCardinalityTouched(true);
       setRole(fkDialogEditData.role ?? '');
-      // The saved direction is the user's earlier choice.
-      setChosenDirection(directionKey(next));
+      // A saved many-to-one or one-to-one's direction is the user's earlier
+      // choice. A many-to-many's ends never were — it has no "many" side, so
+      // they are whichever model the drag started on — so changing it to one
+      // of the others asks for the direction when the keys do not settle it,
+      // exactly as a new relationship does (never broken by drag order).
+      setChosenDirection(fkDialogEditData.cardinality === 'many-to-many' ? null : directionKey(next));
       setTurnedFor(null);
       setMarkKey(false);
     }

@@ -16,13 +16,15 @@ import { toDisplayDomain } from '@erd-studio/core';
 
 import type { DisplayColumn, DisplayDomain } from '../types/display';
 import type { SemanticDomain, ViewConfig } from '../types/semantic';
+import { sameName } from '../types/naming';
 
 /**
  * Convert a logical `SemanticDomain` to a `DisplayDomain`.
  *
  * Key flags are coerced to booleans (`isPrimaryKey === true`), and a column is
  * a foreign key when it says so OR when it is the `fromColumn` of one of the
- * domain's relationships. `viewConfig` is passed separately because it lives
+ * domain's relationships. Relationships the diagram does not draw (REL003, an
+ * end outside the domain) are left out, so a comparison never reports them. `viewConfig` is passed separately because it lives
  * at the root of the unified domain file, not in the stage section.
  */
 export function buildLogicalDisplayDomain(
@@ -30,12 +32,20 @@ export function buildLogicalDisplayDomain(
   viewConfig: ViewConfig,
   stubColumns?: string[],
 ): DisplayDomain {
-  return toDisplayDomain(domain, {
+  const display = toDisplayDomain(domain, {
     viewConfig,
     stubColumns,
     layerConfig: undefined,
     readOnly: domain.stage === 'physical',
   });
+  // A domain-file relationship to a model the domain does not list (REL003)
+  // is kept by the reader but has no node to be drawn between, and the
+  // physical stage — scoped to the domain's models — can never hold it. It is
+  // not part of what this stage compares: the diff reports it only through
+  // its REL003 integrity finding, never as an "extra" relationship that no
+  // dbt test could ever clear (#133).
+  const drawn = display.relationships.filter((r) => !r.issues?.includes('REL003'));
+  return drawn.length === display.relationships.length ? display : { ...display, relationships: drawn };
 }
 
 /** What dbt's tests say about one column (`DisplayColumn.dbtEvidence`). */
@@ -45,7 +55,7 @@ export type DbtColumnEvidence = NonNullable<DisplayColumn['dbtEvidence']>;
 export interface DbtTestSource {
   uniqueColumns?: ReadonlyMap<string, ReadonlySet<string>>;
   compositeUniqueGroups?: ReadonlyMap<string, readonly (readonly string[])[]>;
-  relationshipTests?: ReadonlyArray<{ fromModel: string; fromColumn: string }>;
+  relationshipTests?: ReadonlyArray<{ fromModel: string; fromColumn: string; toModel?: string; toColumn?: string }>;
 }
 
 /**
@@ -79,7 +89,15 @@ export function buildDbtEvidenceIndex(sources: ReadonlyArray<DbtTestSource | und
       }
     }
     for (const test of source.relationshipTests ?? []) {
-      at(test.fromModel, test.fromColumn).relationshipsTest = true;
+      const evidence = at(test.fromModel, test.fromColumn);
+      evidence.relationshipsTest = true;
+      // Record where the test points, so a unique column's test only counts as
+      // "pointing at the other end" for the pair it actually names.
+      if (test.toModel && test.toColumn) {
+        const targets = evidence.relationshipsTo ?? (evidence.relationshipsTo = []);
+        const seen = targets.some((t) => sameName(t.model, test.toModel!) && sameName(t.column, test.toColumn!));
+        if (!seen) targets.push({ model: test.toModel, column: test.toColumn });
+      }
     }
   }
   return index;
@@ -104,7 +122,7 @@ export function withDbtEvidence(
       const evidence = columns.get(col.name.toLowerCase());
       if (!evidence || Object.keys(evidence).length === 0) return col;
       changed = true;
-      return { ...col, dbtEvidence: { ...evidence } };
+      return { ...col, dbtEvidence: { ...evidence, ...(evidence.relationshipsTo ? { relationshipsTo: evidence.relationshipsTo.map((t) => ({ ...t })) } : {}) } };
     });
     if (!changed) return model;
     touched = true;

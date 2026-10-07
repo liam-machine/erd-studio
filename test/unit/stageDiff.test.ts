@@ -119,6 +119,30 @@ describe('computeDomainDiff', () => {
     }
   });
 
+  it('leaves a domain-file relationship to a model outside the domain (REL003) out of the comparison', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-diff-rel003-'));
+    try {
+      fs.cpSync(FIXTURE_ROOT, tmp, { recursive: true });
+      const file = path.join(tmp, '.erd-studio', 'silver', 'showcase.json');
+      const { domainService } = services(tmp);
+      const before = computeDomainDiff({ domainService, ymlData, manifest, catalog }, file, 'logical').report;
+      const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      expect(json.logical.models).not.toContain('dim_location');
+      json.logical.relationships = [
+        ...(json.logical.relationships ?? []),
+        { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_location', toColumn: 'location_key', cardinality: 'many-to-one' },
+      ];
+      fs.writeFileSync(file, JSON.stringify(json));
+      const { report, source } = computeDomainDiff({ domainService, ymlData, manifest, catalog }, file, 'logical');
+      const touchesLocation = (r: { fromModel: string; toModel: string }) => r.fromModel === 'dim_location' || r.toModel === 'dim_location';
+      expect(source.relationships.some(touchesLocation)).toBe(false);
+      expect(report.relationships.some(touchesLocation)).toBe(false);
+      expect(report.relationships).toEqual(before.relationships);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('diffs a v4 domain file without throwing', () => {
     const { domainService } = services(FIXTURE_ROOT);
     const file = path.join(FIXTURE_ROOT, '.erd-studio', 'gold', 'finance.json');

@@ -268,6 +268,36 @@ describe('removeRelationships (H27)', () => {
     expect(lastError(panel)).toMatch(/Failed to remove relationship: Relationship not found\./);
   });
 
+  it.each([
+    ['an entry whose ends are not valid', () => ({ fromModel: 'x' })],
+    ['an entry whose stored ends name a different link', () => ({ ...REL_A, stored: { ...REL_B } })],
+  ])('refuses the whole batch, naming the entry, for %s — never removing the rest silently', async (_label, bad) => {
+    const { doc, panel, file } = await openShowcase();
+    const initial = readDomain(file).logical.relationships.length;
+    const before = counters(panel, doc);
+    await panel._simulateMessage({ type: 'removeRelationships', payload: { relationships: [REL_B, bad()] } });
+    expect(counters(panel, doc).edits).toBe(before.edits);
+    expect(readDomain(file).logical.relationships).toHaveLength(initial);
+    expect(lastError(panel)).toMatch(/^Failed to remove relationships: entry 2: /);
+  });
+
+  it('refuses a batch with no relationships rather than doing nothing without a word', async () => {
+    const { doc, panel } = await openShowcase();
+    const before = counters(panel, doc);
+    await panel._simulateMessage({ type: 'removeRelationships', payload: { relationships: [] } });
+    expect(counters(panel, doc).edits).toBe(before.edits);
+    expect(lastError(panel)).toBe('Failed to remove relationships: no relationships were given.');
+  });
+
+  it('uses the stored ends of an entry that names the same link', async () => {
+    const { panel, file } = await openShowcase();
+    const initial = readDomain(file).logical.relationships.length;
+    const stored = { fromModel: REL_A.fromModel.toUpperCase(), fromColumn: REL_A.fromColumn, toModel: REL_A.toModel, toColumn: REL_A.toColumn };
+    await panel._simulateMessage({ type: 'removeRelationships', payload: { relationships: [{ ...REL_A, stored }, REL_B] } });
+    expect(readDomain(file).logical.relationships).toHaveLength(initial - 2);
+    expect(lastError(panel)).toBeUndefined();
+  });
+
   it('keeps the single removeRelationship contract (not-found is an error)', async () => {
     const { panel } = await openShowcase();
     await panel._simulateMessage({ type: 'removeRelationship', payload: REL_MISSING });

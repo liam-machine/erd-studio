@@ -18,9 +18,12 @@
  */
 
 import {
+  RELATIONSHIP_ROLE_MAX_LENGTH,
   canonicalRelationship,
+  keepStoredRole,
   linkKey,
   normaliseRelationshipRole,
+  relationshipFilePositions,
   sameLink,
   type DisplayRelationshipIssue,
   type RelationshipEnds,
@@ -28,10 +31,18 @@ import {
   type RelationshipIssueCode,
 } from '@erd-studio/core';
 import type { Cardinality, ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
+import { countAffectedRelationships } from '../types/relationshipIssues';
 
 export type { RelationshipEnds };
 
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+/** `cardinality` as read from the other end (many-to-one ↔ one-to-many). */
+function readFromOtherEnd(cardinality: Cardinality): Cardinality {
+  if (cardinality === 'many-to-one') return 'one-to-many';
+  if (cardinality === 'one-to-many') return 'many-to-one';
+  return cardinality;
+}
 
 /** Whether `model.column` is the `side` end of `rel`, without case. */
 function endIs(rel: RelationshipEnds, side: 'from' | 'to', model: string, column?: string): boolean {
@@ -285,8 +296,10 @@ export interface RelationshipMarkKey {
  * - `add` — a new link (`rel` as drawn; stored canonical).
  * - `update` — a new cardinality for the link `stored` names (the ⇄ swap and
  *   the context menu). The cardinality is read in the direction the link is
- *   drawn — the canonical direction of the record a reader draws — so a
- *   `one-to-many` turns it round. The role is kept.
+ *   drawn: `drawn`, the ends as the canvas showed them, when given — so a
+ *   canvas drawn before the link was turned round elsewhere still gets what
+ *   it showed — else the canonical direction of the record a reader draws. A
+ *   `one-to-many` turns it round. The role is kept exactly as stored.
  * - `edit` — the dialog: the link `stored` names becomes `next` (ends,
  *   cardinality and role; a blank role clears it).
  * - `remove` — every link `stored` names.
@@ -295,7 +308,7 @@ export interface RelationshipMarkKey {
  */
 export type RelationshipCommitOp =
   | { kind: 'add'; rel: Relationship; markKey?: RelationshipMarkKey }
-  | { kind: 'update'; stored: RelationshipEnds; cardinality: Cardinality }
+  | { kind: 'update'; stored: RelationshipEnds; cardinality: Cardinality; drawn?: RelationshipEnds }
   | { kind: 'edit'; stored: RelationshipEnds; next: Relationship; markKey?: RelationshipMarkKey }
   | { kind: 'remove'; stored: readonly RelationshipEnds[] };
 
@@ -350,6 +363,32 @@ export class RelationshipCommitError extends Error {
   }
 }
 
+/**
+ * The library models at the ends of a commit, from the endpoint names it
+ * names: each name resolved as core's reader resolves it — the exact name,
+ * else the alphabetically first model whose name differs only in case — and
+ * each model once. Names are never folded together first: two models whose
+ * names differ only in case (`Dd`, `DD`, hand-made on a case-sensitive file
+ * system or in two folders) are two models, and a commit between them must
+ * plan against both.
+ */
+export function resolveEndpointModels(names: readonly string[], libraryModels: readonly SemanticModel[]): SemanticModel[] {
+  const out: SemanticModel[] = [];
+  for (const name of new Set(names)) {
+    const model = libraryModels.find((m) => m.name === name)
+      ?? libraryModels.filter((m) => same(m.name, name)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))[0];
+    if (model && !out.includes(model)) out.push(model);
+  }
+  return out;
+}
+
+/** Whether `model`'s `index`-th relationship (as read) has a role the reader showed shortened (REL008 `role-too-long`). */
+function roleShownShortened(model: SemanticModel, index: number): boolean {
+  const issues = model.relationshipIssues ?? [];
+  const raw = relationshipFilePositions(model.relationships?.length ?? 0, issues)[index];
+  return issues.some((i) => i.index === raw && i.reason === 'role-too-long');
+}
+
 /** One stored record of a link, where a commit found it. */
 type Copy =
   | { where: 'library'; model: SemanticModel; index: number; rel: Relationship }
@@ -365,6 +404,8 @@ function rankCopies(a: Copy, b: Copy): number {
     const ma = a.model.name.toLowerCase();
     const mb = b.model.name.toLowerCase();
     if (ma !== mb) return ma < mb ? -1 : 1;
+    // Case-only variants (`Dd`, `DD`): the exact name, as the reader ranks them.
+    if (a.model.name !== b.model.name) return a.model.name < b.model.name ? -1 : 1;
   }
   return a.index - b.index;
 }
@@ -385,8 +426,10 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
   // Distinct models (a self-reference names one model twice).
   const models: SemanticModel[] = [];
   for (const m of input.endpointModels) if (!models.includes(m)) models.push(m);
+  // The exact name, else the alphabetically first case variant (core's reader).
   const findModel = (name: string): SemanticModel | undefined =>
-    models.find((m) => m.name === name) ?? models.find((m) => same(m.name, name));
+    models.find((m) => m.name === name)
+    ?? models.filter((m) => same(m.name, name)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))[0];
   const before = new Map(models.map((m) => [m, JSON.stringify({ r: m.relationships ?? [], c: m.columns ?? [] })]));
   let domain = input.domainRelationships.map((rel) => rel);
 
@@ -422,8 +465,17 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
     case 'update': {
       const drawn = copies[0];
       if (!drawn) throw new RelationshipCommitError('Relationship not found.');
-      const role = normaliseRelationshipRole(drawn.rel.role);
-      next = { ...ends(canonicalRelationship(drawn.rel)), cardinality: op.cardinality, ...(role ? { role } : {}) };
+      // The stored role is kept as written: a long label the canvas shows
+      // shortened is never cut on disk by a cardinality change.
+      const role = keepStoredRole(drawn.rel.role, normaliseRelationshipRole(drawn.rel.role));
+      const base = ends(canonicalRelationship(drawn.rel));
+      // The cardinality was chosen against the ends as drawn; when the record
+      // now runs the other way (turned round since the canvas was drawn), it
+      // is read from the other end, so the result is what the canvas showed.
+      const reversed = op.drawn !== undefined && endIs(base, 'from', op.drawn.toModel, op.drawn.toColumn)
+        && endIs(base, 'to', op.drawn.fromModel, op.drawn.fromColumn)
+        && !(endIs(base, 'from', op.drawn.fromModel, op.drawn.fromColumn) && endIs(base, 'to', op.drawn.toModel, op.drawn.toColumn));
+      next = { ...base, cardinality: reversed ? readFromOtherEnd(op.cardinality) : op.cardinality, ...(role ? { role } : {}) };
       break;
     }
     case 'edit': {
@@ -432,7 +484,9 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
       if (!cleared.has(nextKey) && copiesOf(nextKey).length > 0) {
         throw new RelationshipCommitError('A relationship with this key already exists.');
       }
-      const role = normaliseRelationshipRole(op.next.role);
+      // A role the dialog sends back unchanged (the shortened label it was
+      // shown) keeps the stored text; any other role is the one written.
+      const role = keepStoredRole(copies[0].rel.role, op.next.role);
       next = { ...ends(op.next), cardinality: op.next.cardinality, ...(role ? { role } : {}) };
       break;
     }
@@ -474,6 +528,21 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
   const homeIndex = home
     ? copies.filter((c) => c.where === 'library' && c.model === home).map((c) => c.index).sort((a, b) => a - b)[0]
     : copies.filter((c) => c.where === 'domain').map((c) => c.index).sort((a, b) => a - b)[0];
+
+  // A model-file copy whose role is longer than the canvas shows keeps its
+  // text only when it is rewritten in place; written anywhere else it would be
+  // stored shortened. Refused, by name, before anything changes — unless the
+  // user chose a different role.
+  if (record && library && record.role !== undefined) {
+    for (const c of copies) {
+      if (c.where !== 'library' || (c.model === home && c.index === homeIndex)) continue;
+      if (!roleShownShortened(c.model, c.index) || normaliseRelationshipRole(c.rel.role) !== record.role) continue;
+      throw new RelationshipCommitError(
+        `This relationship's role in ${c.model.name}'s model file is longer than ${RELATIONSHIP_ROLE_MAX_LENGTH} characters ` +
+        'and would be cut by moving it. Shorten it there first, then try again.',
+      );
+    }
+  }
 
   // --- Take every copy out ---------------------------------------------------
   if (library) dropWhere(models, (rel) => cleared.has(linkKey(rel)));
@@ -523,6 +592,47 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
     ...(written ? { written } : {}),
     ...(otherDomainCopies ? { otherDomainCopies } : {}),
   };
+}
+
+/**
+ * Lay a commit's new list of well-formed domain-file relationships back over
+ * the list as written, so every entry the reader could not use (`raw` items
+ * that are not in `wellFormed`) keeps its exact slot — and with it the
+ * "entry N" a finding named — instead of being moved to the end.
+ *
+ * `next` is `planRelationshipCommit`'s `domainRelationships` for
+ * `wellFormed`: the entries it kept are the same objects, in order; anything
+ * else in it is the record it wrote. A written record takes the slot of the
+ * copy it replaced (the first well-formed entry, kept or removed, after the
+ * entries before it), or is appended when it goes at the end.
+ */
+export function mergeDomainRelationships(
+  raw: readonly unknown[],
+  wellFormed: readonly unknown[],
+  next: readonly unknown[],
+): unknown[] {
+  const original = new Set(wellFormed);
+  const out: unknown[] = [];
+  let j = 0;
+  const flushWritten = (): void => {
+    while (j < next.length && !original.has(next[j])) out.push(next[j++]);
+  };
+  for (const item of raw) {
+    if (!original.has(item)) {
+      out.push(item); // not one the plan saw: left exactly where it was
+      continue;
+    }
+    flushWritten();
+    if (j < next.length && next[j] === item) {
+      out.push(item);
+      j++;
+    }
+    // else: a copy the commit took out
+  }
+  flushWritten();
+  // Never drop anything the plan returned (it keeps order, so this is empty).
+  while (j < next.length) out.push(next[j++]);
+  return out;
 }
 
 /** Just the four ends of a relationship (no cardinality, role or runtime fields). */
@@ -612,11 +722,13 @@ export function describeRepairOffer(findings: readonly RelationshipFinding[]): s
     ['REL004', 'pointing at a column its model does not have'],
     ['REL008', 'could not be read'],
   ];
+  // Relationships, not findings — as the canvas banner counts them: one
+  // relationship missing a column on each end is one relationship.
   const parts = reasons
-    .map(([code, words]) => [needing.filter((f) => f.code === code).length, words] as const)
+    .map(([code, words]) => [countAffectedRelationships(needing.filter((f) => f.code === code)), words] as const)
     .filter(([n]) => n > 0)
     .map(([n, words]) => `${n} ${words}`);
-  const n = needing.length;
+  const n = countAffectedRelationships(needing);
   return `${n === 1 ? '1 relationship needs' : `${n} relationships need`} attention (${parts.join('; ')}). ` +
     'Review the fixes with Repair Relationships…? Nothing changes until you confirm.';
 }
@@ -630,6 +742,13 @@ export function describeRepairOffer(findings: readonly RelationshipFinding[]): s
 export function sharedRelationshipCount(
   domains: ReadonlyArray<{ models: readonly string[]; relationships: readonly Relationship[] }>,
 ): number {
+  return sharedRelationshipKeys(domains).size;
+}
+
+/** The links (`linkKey`) {@link sharedRelationshipCount} counts. */
+export function sharedRelationshipKeys(
+  domains: ReadonlyArray<{ models: readonly string[]; relationships: readonly Relationship[] }>,
+): Set<string> {
   const lowerModels = domains.map((d) => new Set(d.models.map((m) => m.toLowerCase())));
   const keys = new Set<string>();
   for (const domain of domains) {
@@ -639,5 +758,5 @@ export function sharedRelationshipCount(
       if (holders > 1) keys.add(linkKey(rel));
     }
   }
-  return keys.size;
+  return keys;
 }

@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { linkKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
-import { fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
+import { fixesFromPlan, relationshipHomeOf, runDiff, type DiffResult } from '../../src/cli/diff';
+import { normaliseRelationships } from '@erd-studio/core';
+import type { SemanticModel } from '../../src/types/semantic';
 import { canonicalRelationship } from '@erd-studio/core';
 import { main } from '../../src/cli/index';
 import type { InventoryResult } from '../../src/cli/inventory';
@@ -231,6 +233,70 @@ describe('fixesFromPlan — a new relationship is written on its many side (#133
       kind: 'add-relationship', model: 'fct_order', column: 'customer_key', file: '.erd-studio/logical-models/fct_order.yml',
       relationship: { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
     });
+  });
+});
+
+describe('diff — set-cardinality keeps the role exactly as written (#133)', () => {
+  const LONG = 'the customer who placed the order, as billed on the invoice at the time of purchase';
+  const MULTI = 'billing\n   contact';
+  const isOrderCustomer = (r: { fromModel?: string; fromColumn?: string; toModel?: string }) =>
+    r.fromModel === 'fct_order' && r.fromColumn === 'customer_key' && r.toModel === 'dim_customer';
+
+  async function setCardinalityFix(root: string) {
+    const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
+    const d = runDiff(ctx, { domains: ['.erd-studio/silver/showcase.json'] }).result.domains[0];
+    return d.fixes.find((f) => f.kind === 'set-cardinality' && f.model === 'fct_order' && f.column === 'customer_key');
+  }
+
+  for (const role of [LONG, MULTI]) {
+    it(`a domain-file entry: ${role === LONG ? 'a role over 60 characters' : 'a role written over two lines'}`, async () => {
+      const root = copyProject();
+      const file = path.join(root, '.erd-studio/silver/showcase.json');
+      const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      const entry = json.logical.relationships.find(isOrderCustomer);
+      expect(entry).toBeDefined();
+      Object.assign(entry, { cardinality: 'one-to-one', role });
+      fs.writeFileSync(file, JSON.stringify(json, null, 2));
+      const fix = await setCardinalityFix(root);
+      expect(fix).toMatchObject({ file: '.erd-studio/silver/showcase.json', to: 'many-to-one' });
+      expect(fix!.relationship!.role).toBe(role);
+    });
+  }
+
+  it('a model-file entry: the role as written in the yml', async () => {
+    const root = copyProject();
+    const file = path.join(root, '.erd-studio/silver/showcase.json');
+    const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    json.logical.relationships = json.logical.relationships.filter((r: Record<string, string>) => !isOrderCustomer(r));
+    fs.writeFileSync(file, JSON.stringify(json, null, 2));
+    const yml = path.join(root, '.erd-studio/logical-models/fct_order.yml');
+    const doc = parseYaml(fs.readFileSync(yml, 'utf-8'));
+    doc.relationships = [{ fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'one-to-one', role: LONG }];
+    fs.writeFileSync(yml, toYaml(doc));
+    const fix = await setCardinalityFix(root);
+    expect(fix).toMatchObject({ file: '.erd-studio/logical-models/fct_order.yml', to: 'many-to-one' });
+    expect(fix!.relationship!.role).toBe(LONG);
+  });
+});
+
+describe('fixesFromPlan — a one-to-one the stages store the other way round (#133)', () => {
+  it('is a remove and an add that say why, never "dbt has no test" or "the logical model does not draw it"', () => {
+    const plan: SyncPlan = {
+      generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+      modelContext: {}, models: [], columns: [], requiresCompile: false,
+      relationships: [
+        { fromModel: 'person', fromColumn: 'person_id', toModel: 'employee', toColumn: 'person_id', discrepancyStatus: 'extra', groundTruth: 'physical', action: 'remove-relationship-from-logical', sourceCardinality: 'one-to-one' },
+        { fromModel: 'employee', fromColumn: 'person_id', toModel: 'person', toColumn: 'person_id', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-one' },
+      ],
+    };
+    const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', []);
+    const remove = fixes.find((f) => f.kind === 'remove-relationship')!;
+    const add = fixes.find((f) => f.kind === 'add-relationship')!;
+    expect(fixes).toHaveLength(2);
+    expect(remove.model).toBe('person');
+    expect(remove.explain).toMatch(/as a one-to-one held by person, but dbt tests it from the other end/);
+    expect(add.explain).toMatch(/as a one-to-one held by employee; the logical model stores it the other way round/);
+    expect(add.relationship).toEqual({ fromModel: 'employee', fromColumn: 'person_id', toModel: 'person', toColumn: 'person_id', cardinality: 'one-to-one' });
   });
 });
 
@@ -482,5 +548,69 @@ describe('end to end, relationships in the model library (#126): inventory → l
       kind: 'add-relationship',
       file: `.erd-studio/logical-models/${dropped.fromModel}.yml`,
     }));
+  });
+});
+
+describe('fixesFromPlan — the file a relationship fix names is the one the canvas draws from (#133)', () => {
+  const col = (name: string, pk = false) => ({ name, dataType: 'INT', description: '', ...(pk ? { isPrimaryKey: true } : {}) });
+  // dim stores the link the old way (one-to-many), fct stores it at home: fct's copy is drawn.
+  const dim: SemanticModel = { name: 'dim', columns: [col('id', true)], relationships: [{ fromColumn: 'id', toModel: 'fct', toColumn: 'dim_id', cardinality: 'one-to-many' }] };
+  const fct: SemanticModel = { name: 'fct', columns: [col('k', true), col('dim_id')], relationships: [{ fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', cardinality: 'many-to-one', role: 'buyer' }] };
+  const base: SyncPlan = {
+    generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+    modelContext: {}, models: [], columns: [], requiresCompile: false, relationships: [],
+  };
+  const home = (models: SemanticModel[], own: Parameters<typeof relationshipHomeOf>[2] = []) =>
+    relationshipHomeOf(normaliseRelationships({ models, own }).relationships, models, own, true);
+
+  it('takes the holder from the drawn copy whatever the model order, and names every other copy', () => {
+    for (const models of [[dim, fct], [fct, dim]]) {
+      const h = home(models);
+      expect([...h.inLibrary.values()]).toEqual(['fct']);
+      const plan: SyncPlan = { ...base, relationships: [
+        { fromModel: 'fct', fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', discrepancyStatus: 'extra', groundTruth: 'physical', action: 'remove-relationship-from-logical', sourceCardinality: 'many-to-one' },
+      ] };
+      const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], h);
+      expect(fix).toMatchObject({ kind: 'remove-relationship', file: '.erd-studio/logical-models/fct.yml', alsoIn: ['.erd-studio/logical-models/dim.yml'] });
+      expect(fix.explain).toMatch(/also stored in \.erd-studio\/logical-models\/dim\.yml — remove that copy too/);
+    }
+  });
+
+  it('a domain-file copy of a library link is named too', () => {
+    const own = [{ fromModel: 'fct', fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', cardinality: 'many-to-one' as const }];
+    const fctOnly: SemanticModel = { ...fct };
+    const dimPlain: SemanticModel = { name: 'dim', columns: [col('id', true)] };
+    const plan: SyncPlan = { ...base, relationships: [
+      { fromModel: 'fct', fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', discrepancyStatus: 'extra', groundTruth: 'physical', action: 'remove-relationship-from-logical', sourceCardinality: 'many-to-one' },
+    ] };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], home([dimPlain, fctOnly], own));
+    expect(fix).toMatchObject({ file: '.erd-studio/logical-models/fct.yml', alsoIn: ['.erd-studio/silver/d.json'] });
+  });
+
+  it('set-cardinality: keeps the drawn copy\'s role, tells the other copies to go, and never sends an entry back into a file that holds it', () => {
+    const plan: SyncPlan = { ...base, relationships: [
+      { fromModel: 'fct', fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', discrepancyStatus: 'cardinality-mismatch', groundTruth: 'physical', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-one' },
+    ] };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], home([dim, fct]));
+    expect(fix).toMatchObject({
+      kind: 'set-cardinality', file: '.erd-studio/logical-models/fct.yml', alsoIn: ['.erd-studio/logical-models/dim.yml'],
+      relationship: { fromModel: 'fct', toModel: 'dim', cardinality: 'one-to-one', role: 'buyer' },
+    });
+    expect(fix.movesFrom).toBeUndefined();
+  });
+
+  it('set-cardinality that moves an entry says so in its explain, even when the ends stay the same', () => {
+    const key = linkKey({ fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' });
+    const plan: SyncPlan = { ...base, relationships: [
+      { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', discrepancyStatus: 'cardinality-mismatch', groundTruth: 'physical', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-one' },
+    ] };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
+      inLibrary: new Map([[key, 'dim_customer']]), addToLibrary: true, roles: new Map([[key, 'buyer']]),
+    });
+    expect(fix).toMatchObject({
+      file: '.erd-studio/logical-models/fct_order.yml', movesFrom: '.erd-studio/logical-models/dim_customer.yml',
+      relationship: { role: 'buyer' },
+    });
+    expect(fix.explain).toMatch(/change it to one-to-one, and move it: take it out of \.erd-studio\/logical-models\/dim_customer\.yml and add it to \.erd-studio\/logical-models\/fct_order\.yml/);
   });
 });

@@ -67,6 +67,8 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
   // Build FK column set for isForeignKey computation (names without case).
   const fkColumnsByModel = new Map<string, Set<string>>();
   for (const rel of domain.relationships) {
+    // A relationship to a model outside the domain (REL003) is not drawn, so it badges nothing.
+    if (rel.issues?.includes('REL003')) continue;
     const model = rel.fromModel.toLowerCase();
     if (!fkColumnsByModel.has(model)) {
       fkColumnsByModel.set(model, new Set());

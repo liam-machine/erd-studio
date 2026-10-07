@@ -81,6 +81,43 @@ describe('edge ContextMenu (#133)', () => {
     expect(postMessage.mock.calls[0][0]).toMatchObject({ type: 'editRelationship', payload: { fromModel: 'dim_customer', cardinality: 'many-to-many', role: '' } });
   });
 
+  describe('a many-to-many whose direction the keys do not settle', () => {
+    const plain = (name: string) => ({
+      name, dataType: 'string', description: '', isPrimaryKey: false, isNaturalKey: false, isForeignKey: false,
+    });
+    const AB = { fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'y' };
+    function openOnPlainColumns(cardinality: FkEdgeData['cardinality']) {
+      useEditorStore.getState().setDomain({
+        schemaVersion: 5, domain: 'sales', layer: 'gold', stage: 'logical', description: '',
+        models: [
+          { name: 'a', description: '', columns: [plain('x')] },
+          { name: 'b', description: '', columns: [plain('y')] },
+        ],
+        relationships: [], viewConfig: {}, readOnly: false, positionDraggable: true,
+      } as unknown as DisplayDomain);
+      useEditorStore.setState({ newFkDialogOpen: false, fkDialogEditData: null });
+      useEditorStore.getState().openEdgeContextMenu(10, 10, { ...AB, cardinality, role: 'link', stored: AB });
+      return render(<ContextMenu />);
+    }
+
+    it('Many → One opens Edit with it chosen instead of making the stored from-model the many side', () => {
+      openOnPlainColumns('many-to-many');
+      fireEvent.click(screen.getByRole('button', { name: /Many → Many/ }));
+      fireEvent.click(screen.getByRole('option', { name: 'Many → One' }));
+      expect(postMessage).not.toHaveBeenCalled();
+      const s = useEditorStore.getState();
+      expect(s.newFkDialogOpen).toBe(true);
+      expect(s.fkDialogEditData).toEqual({ ...AB, cardinality: 'many-to-many', role: 'link', stored: AB, pickedCardinality: 'many-to-one' });
+    });
+
+    it('a many-to-one on the same columns still changes in place (its direction was chosen)', () => {
+      openOnPlainColumns('many-to-one');
+      fireEvent.click(screen.getByRole('button', { name: /Many → One/ }));
+      fireEvent.click(screen.getByRole('option', { name: 'One → One' }));
+      expect(postMessage).toHaveBeenCalledWith({ type: 'updateRelationship', payload: { ...AB, stored: AB, cardinality: 'one-to-one' } });
+    });
+  });
+
   it('Remove (confirmed) sends the stored ends', () => {
     openMenu();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }));

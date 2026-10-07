@@ -141,7 +141,7 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<voi
   const analysis = analyseRepair(before, { moveDomainsToLibrary: mode.move });
   if (analysis.tasks.length === 0) {
     telemetry.feature('relMoveNothingToMove');
-    await reportNothingToDo(before, analysis.unreadableEntries, analysis.blocked, mode);
+    await reportNothingToDo(before, analysis.unreadableEntries, analysis.blocked, analysis.outOfReach, mode);
     return;
   }
   // Checked before asking anything, so nobody settles conflicts only to be
@@ -176,9 +176,18 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<voi
   }
   if (plan.changes.length === 0) {
     telemetry.feature('relMoveCancelled');
-    void vscode.window.showInformationMessage(`${mode.title}: nothing was changed.`);
+    // Say why: every relationship it looked at was left as it is, each for a reason.
+    const why = [
+      ...plan.left.slice(0, 3),
+      ...(plan.left.length > 3 ? [`…and ${plan.left.length - 3} more left as they are.`] : []),
+    ];
+    void vscode.window.showInformationMessage(`${mode.title}: nothing was changed.${why.length > 0 ? ` ${why.join(' ')}` : ''}`);
     return;
   }
+  // Every file the answers decided to write — an answer can move a record to
+  // a file no copy was in — is checked for unsaved edits before the preview,
+  // so nobody confirms a plan only to be turned away.
+  if (refuseIfDirty(plan.changes.map((c) => c.filePath), label, mode)) return;
   const planned = checkPlannedTexts(plan);
   if (planned.length > 0) {
     telemetry.error('relMoveFailed');
@@ -353,15 +362,24 @@ async function reportNothingToDo(
   snapshot: RepairSnapshot,
   unreadable: readonly RelationshipFinding[],
   blocked: readonly string[],
+  outOfReach: readonly string[],
   mode: RunnerMode,
 ): Promise<void> {
-  const base = mode.move
+  // Never an all-clear while something the checks found is out of this
+  // command's reach (a v4 diagram, a diagram file that could not be read) or
+  // was left for the user to change by hand first (`blocked`).
+  const base = outOfReach.length > 0 || blocked.length > 0
+    ? `${mode.title}: nothing it can change here.`
+    : mode.move
     ? `${MOVE_TITLE}: nothing to move — ${snapshot.domains.some((d) => d.relationships.length > 0)
       ? 'every relationship in the diagram files is already in the model library, or starts at a model with no readable file in logical-models/.'
       : 'no diagram file holds a relationship of its own, and every relationship in the model library is stored with the model holding the foreign key.'}`
     : `${REPAIR_TITLE}: nothing to repair — every relationship is stored once, in its home.`;
   const extra = [
-    ...blocked.slice(0, 2),
+    ...outOfReach.slice(0, 3),
+    ...(outOfReach.length > 3 ? [`…and ${outOfReach.length - 3} more.`] : []),
+    ...blocked.slice(0, 3),
+    ...(blocked.length > 3 ? [`…and ${blocked.length - 3} more left as they are.`] : []),
     ...(unreadable.length > 0 ? [describeUnreadableEntries(unreadable)] : []),
   ];
   await showWithOpenFile(`${base}${extra.length > 0 ? ` ${extra.join(' ')}` : ''}`, snapshot, unreadable);
@@ -387,6 +405,7 @@ async function reportDone(snapshot: RepairSnapshot, plan: RepairPlan, mode: Runn
     text = `${REPAIR_TITLE}: changed ${plural(plan.changes.length, 'file')}. ${fixes.join(' ')}` +
       (leftCount > 0 ? ` ${leftCount} left as ${leftCount === 1 ? 'it was' : 'they were'}; run Repair Relationships… again to settle ${leftCount === 1 ? 'it' : 'them'}.` : '');
   }
+  if (plan.outOfReach.length > 0) text += ` Not changed: ${plan.outOfReach.slice(0, 2).join(' ')}${plan.outOfReach.length > 2 ? ` …and ${plan.outOfReach.length - 2} more.` : ''}`;
   if (plan.unreadableEntries.length > 0) text += ` ${describeUnreadableEntries(plan.unreadableEntries)}`;
   await showWithOpenFile(text.trim(), snapshot, plan.unreadableEntries);
 }
@@ -430,9 +449,9 @@ async function showWithOpenFile(text: string, snapshot: RepairSnapshot, unreadab
   if (finding) await openAtLine(snapshot, finding);
 }
 
-/** Open the model file a REL008 finding names, at its line. */
+/** Open the model or diagram file a REL008 finding names, at its line (the top when it has none). */
 async function openAtLine(snapshot: RepairSnapshot, finding: RelationshipFinding): Promise<void> {
-  const file = snapshot.modelFiles.find((m) => m.file === finding.files[0]);
+  const file = [...snapshot.modelFiles, ...snapshot.domains, ...snapshot.olderFormat].find((m) => m.file === finding.files[0]);
   if (!file) return;
   const line = Math.max(0, (finding.line ?? 1) - 1);
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file.filePath));

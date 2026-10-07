@@ -355,7 +355,7 @@ function FkEdgeComponent({
             style={{
               transform: `translate(-50%, -50%) translate(${midX + ISSUE_BADGE_OFFSET}px, ${midY}px)`,
             }}
-            title={edgeIssueTitle(issueCodes)}
+            title={edgeIssueTitle(issueCodes, { olderFormat: data.olderFormat === true })}
             role="img"
             aria-label={`Relationship needs attention: ${issueCodes.join(', ')}`}
             data-issues={issueCodes.join(' ')}

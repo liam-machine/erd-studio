@@ -167,6 +167,11 @@ export type FkEdgeData = {
   stored?: RelationshipEnds;
   /** Codes of what is wrong with this link (logical stage); drives the edge's "?" badge. */
   issues?: RelationshipIssueCode[];
+  /**
+   * The diagram is in the older (v4, inline-model) format, which Repair
+   * Relationships… does not change: the badge's advice says to migrate first.
+   */
+  olderFormat?: boolean;
   /** Where the relationship was read from (logical stage): a model file or the domain file. */
   source?: RelationshipSource;
   /** Index signature required by React Flow's Edge generic. */

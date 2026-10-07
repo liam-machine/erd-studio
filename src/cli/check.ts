@@ -11,8 +11,10 @@
  * and writes nothing: the fixes are the user's, through "ERD Studio: Repair
  * Relationships…" or by hand.
  *
- * Exit codes: 0 no errors · 1 errors (or, with `--strict`, warnings) · 3 no
- * project or no ERD Studio folder. `info` findings never fail a run.
+ * Exit codes: 0 no errors · 1 errors (or, with `--strict`, warnings), or a
+ * file that could not be checked at all (a domain file or model file that does
+ * not parse, a layers.json that could not be used) · 3 no project or no ERD
+ * Studio folder. `info` findings never fail a run.
  */
 
 import * as fs from 'fs';
@@ -40,6 +42,10 @@ export interface CheckResult extends Envelope {
     byCode: Partial<Record<RelationshipFinding['code'], number>>;
   };
   checked: ProjectRelationshipCheck['checked'];
+  /** Files whose relationships could not be checked at all (domain files, model files, layers.json); any one makes the run not clean. */
+  unchecked: ProjectRelationshipCheck['unchecked'];
+  /** Domain files still in the older (v4) format: checked, but Repair Relationships… does not change them. */
+  olderFormat: string[];
   /** Errors first, then warnings, then info. Paths are project-relative. */
   findings: RelationshipFinding[];
 }
@@ -62,7 +68,7 @@ function checkSources(opts: CheckOptions): RelationshipCheckSources {
   const logicalModelService = new LogicalModelService(root, opts.semanticDir);
   const domainService = new DomainService(layerService);
   domainService.setLogicalModelService(logicalModelService);
-  return { root, semanticDir: opts.semanticDir, logicalModelService, domainService };
+  return { root, semanticDir: opts.semanticDir, logicalModelService, domainService, layerService };
 }
 
 /** Run the checks. A missing project or ERD Studio folder is a `CliEnvError` (exit 3). */
@@ -78,7 +84,9 @@ export function runCheck(opts: CheckOptions): { result: CheckResult; exitCode: 0
     );
   }
   const project = checkProjectRelationships(src);
-  if (project.checked.modelFiles === 0 && project.checked.domains === 0
+  // A file that exists but could not be checked is something, not nothing:
+  // it is reported in `unchecked` (exit 1), never as a wrong --semantic-dir.
+  if (project.checked.modelFiles === 0 && project.checked.domains === 0 && project.unchecked.length === 0
     && src.logicalModelService.listModelFiles().length === 0) {
     throw new CliEnvError(
       'nothing-to-check',
@@ -87,7 +95,9 @@ export function runCheck(opts: CheckOptions): { result: CheckResult; exitCode: 0
   }
   const { error, warning, info, byCode } = countFindings(project.findings);
   const strict = opts.strict === true;
-  const clean = error === 0 && (!strict || warning === 0);
+  // A domain file that could not be checked is never a clean pass: its
+  // relationships were not looked at.
+  const clean = error === 0 && (!strict || warning === 0) && project.unchecked.length === 0;
   return {
     result: {
       ...makeEnvelope(src.root, src.semanticDir),
@@ -96,6 +106,8 @@ export function runCheck(opts: CheckOptions): { result: CheckResult; exitCode: 0
       mode: project.mode,
       counts: { errors: error, warnings: warning, info, byCode },
       checked: project.checked,
+      unchecked: project.unchecked,
+      olderFormat: project.olderFormat,
       findings: project.findings,
     },
     exitCode: clean ? 0 : 1,

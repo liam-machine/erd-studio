@@ -57,6 +57,12 @@ export interface DbtColumnEvidence {
   inCompositeUnique?: boolean;
   /** A `relationships` test on this column points at another model. */
   relationshipsTest?: boolean;
+  /**
+   * Where those `relationships` tests point. A unique column counts as
+   * "pointing at the other end" of a relationship only when one of these names
+   * that end — a test aimed at an unrelated model is no evidence about the pair.
+   */
+  relationshipsTo?: Array<{ model: string; column: string }>;
 }
 
 /** Column ready for webview display. */
@@ -175,6 +181,12 @@ export interface DisplayRelationship {
   stored?: RelationshipEnds;
   /** Codes of what is wrong with this link, for an edge badge (logical stage). */
   issues?: RelationshipIssueCode[];
+  /**
+   * Physical stage: a `one-to-one` dbt tests from both ends, so neither end is
+   * known to hold the foreign key. A comparison then does not hold the
+   * direction against the other stage. Runtime only.
+   */
+  directionUnknown?: boolean;
 }
 
 /** A relationship finding summarised for the canvas banner. */

@@ -58,6 +58,41 @@ describe('inventory', () => {
     expect(r.semanticDir).toBe('.erd-studio');
   });
 
+  it('lists a foreign key on the many side when dbt declares the test on the dimension (#133)', async () => {
+    const root = path.join(tmp, 'proj');
+    fs.cpSync(PROJECT, root, { recursive: true });
+    const dir = path.join(root, 'models', 'gold');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'dim_store.sql'), 'select 1 as store_id\n');
+    fs.writeFileSync(path.join(dir, 'fct_visit.sql'), 'select 1 as visit_id, 1 as store_id\n');
+    fs.writeFileSync(path.join(dir, 'zz_store.yml'), [
+      'version: 2',
+      'models:',
+      '  - name: dim_store',
+      '    columns:',
+      '      - name: store_id',
+      '        tests:',
+      '          - unique',
+      '          - relationships:',
+      "              to: ref('fct_visit')",
+      '              field: store_id',
+      '  - name: fct_visit',
+      '    columns:',
+      '      - name: visit_id',
+      '        tests: [unique]',
+      '      - name: store_id',
+      '',
+    ].join('\n'));
+    const r = runInventory(await ctxFor(root), { models: ['dim_store', 'fct_visit'] });
+    // dbt reads it from the dimension (one-to-many)…
+    expect(r.relationships).toEqual([
+      { fromModel: 'dim_store', fromColumn: 'store_id', toModel: 'fct_visit', toColumn: 'store_id', cardinality: 'one-to-many' },
+    ]);
+    // …but the foreign key is the fact's column, never the dimension's own key.
+    expect(r.models.find((m) => m.name === 'dim_store')!.foreignKeys).toEqual([]);
+    expect(r.models.find((m) => m.name === 'fct_visit')!.foreignKeys).toEqual(['store_id']);
+  });
+
   it('--summary omits columns but keeps counts', async () => {
     const r = runInventory(await ctxFor(PROJECT), { summary: true });
     for (const m of r.models) {

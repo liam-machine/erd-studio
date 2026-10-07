@@ -10,26 +10,25 @@
  * the extension's lookup: every model file through
  * `LogicalModelService.relationshipCheckModels` (shadowed duplicates skipped,
  * unreadable files listed so they are not also reported as missing), every
- * domain file's own `logical.relationships`, and the mode the project is in
+ * domain file through `scanDomainFiles` (the reader the canvas and Repair
+ * Relationships… use), and the mode the project is in
  * (`usesLibraryRelationships`). Read-only, and free of `vscode`.
  */
 
-import * as fs from 'fs';
 
 import {
   checkRelationships,
-  normaliseRelationshipRole,
-  VALID_CARDINALITIES,
-  type CheckDomain,
+  relationshipFilePositions,
   type RelationshipFinding,
   type RelationshipIssueCode,
   type RelationshipSeverity,
 } from '@erd-studio/core';
 import { redactPaths } from '../types/feedback';
-import { detectDomainFormat, type Relationship, type SemanticModel } from '../types/semantic';
 import type { DomainService } from '../services/domainService';
+import type { LayerService } from '../services/layerService';
 import type { LogicalModelService } from '../services/logicalModelService';
 import { usesLibraryRelationships, type RelationshipMode } from '../services/libraryRelationships';
+import { scanDomainFiles, toCheckDomains } from '../services/relationshipRepair';
 import { relPath } from './context';
 
 /** What the checks need from a CLI context (also satisfied by the full `CliContext`). */
@@ -38,6 +37,16 @@ export interface RelationshipCheckSources {
   semanticDir: string;
   logicalModelService: LogicalModelService;
   domainService: DomainService;
+  /** When given, a layers.json that could not be used makes the check incomplete (its layer folders may have been skipped). */
+  layerService?: Pick<LayerService, 'getLoadError'>;
+}
+
+/** A file whose relationships were not looked at, and why. */
+export interface UncheckedFile {
+  file: string;
+  reason: string;
+  /** A domain file, a model file, or the layer config (layers.json) that says where domain files are. */
+  kind: 'domain' | 'model' | 'layers';
 }
 
 export interface ProjectRelationshipCheck {
@@ -50,9 +59,20 @@ export interface ProjectRelationshipCheck {
     modelFiles: number;
     /** Domain files read (v5 and v4). */
     domains: number;
-    /** Relationship entries stored on disk: model-file entries plus domain-file entries. */
+    /** Relationship entries read: model-file entries plus domain-file entries (skipped entries are REL008 findings). */
     relationships: number;
   };
+  /**
+   * Files whose relationships could not be checked at all, project-relative,
+   * each with why: a domain file that is not JSON, unreadable or in a layout
+   * ERD Studio cannot load; a model file that does not parse (its
+   * relationships were never read); a layers.json that could not be used (a
+   * domain file in a layer folder it names may have been skipped). A check
+   * that skipped one is never clean.
+   */
+  unchecked: UncheckedFile[];
+  /** Domain files still in the older (v4) format, project-relative: Repair Relationships… does not change them. */
+  olderFormat: string[];
 }
 
 export type SeverityCounts = Record<RelationshipSeverity, number>;
@@ -67,76 +87,68 @@ export function countFindings(findings: readonly RelationshipFinding[]): Severit
   return counts;
 }
 
-function isWellFormed(value: unknown): value is Relationship {
-  return !!value && typeof value === 'object'
-    && ['fromModel', 'fromColumn', 'toModel', 'toColumn'].every((k) => typeof (value as Record<string, unknown>)[k] === 'string');
-}
-
-/**
- * A domain file's own relationships as the canvas draws them: entries without
- * four text ends are left out (the reader skips them too), an unrecognised
- * cardinality reads as many-to-one, and a role is trimmed to its label.
- */
-function readOwnRelationships(raw: unknown): Relationship[] {
-  return (Array.isArray(raw) ? raw : [])
-    .filter(isWellFormed)
-    .map((r) => (VALID_CARDINALITIES.has(r.cardinality) ? r : { ...r, cardinality: 'many-to-one' as const }))
-    .map(({ role, ...r }) => {
-      const label = normaliseRelationshipRole(role);
-      return label ? { ...r, role: label } : r;
-    });
-}
-
-/** Every v5 and v4 domain file, as `checkRelationships` takes it. Unreadable and older-format files are skipped. */
-function readDomains(src: RelationshipCheckSources, mode: RelationshipMode): CheckDomain[] {
-  const domains: CheckDomain[] = [];
-  for (const summary of src.domainService.listDomains(src.root, src.semanticDir)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as Record<string, unknown>;
-      const format = detectDomainFormat(raw);
-      if (format !== 'v5' && format !== 'v4') continue;
-      const logical = raw.logical as { models?: unknown; relationships?: unknown } | undefined;
-      const stubColumns = (Array.isArray(raw.stubColumns) ? raw.stubColumns : []).filter((s): s is string => typeof s === 'string');
-      let models: Array<string | SemanticModel>;
-      if (format === 'v5') {
-        models = (Array.isArray(logical?.models) ? logical!.models : []).filter((m): m is string => typeof m === 'string');
-      } else {
-        // A v4 domain carries its models inline; they hold no library relationships.
-        models = src.domainService.getDomain(summary.filePath).logical.models
-          .map(({ relationships: _r, relationshipIssues: _i, ...m }) => m as SemanticModel);
-      }
-      domains.push({
-        label: `${summary.layer}/${summary.domain}`,
-        filePath: relPath(src.root, summary.filePath),
-        models,
-        relationships: readOwnRelationships(logical?.relationships),
-        // A v4 domain always keeps its own relationships.
-        mode: format === 'v4' ? 'domain' : mode,
-        ...(stubColumns.length > 0 ? { stubColumns } : {}),
-      });
-    } catch {
-      // A domain that cannot be read is diff's to report (`--all` names it).
-    }
-  }
-  return domains;
+/** layers.json, when it could not be used: the domain files in layer folders it names may have been skipped. */
+function layersUnchecked(src: RelationshipCheckSources): UncheckedFile[] {
+  const error = src.layerService?.getLoadError();
+  if (!error) return [];
+  return [{
+    file: `${src.semanticDir}/layers.json`.replace(/\\/g, '/'),
+    reason: `it could not be used (${redactPaths(error)}), so diagrams in layer folders it names may not have been checked — fix it, then check again`,
+    kind: 'layers',
+  }];
 }
 
 /** Run the project's relationship checks. Never writes; throws only on a programming error. */
 export function checkProjectRelationships(src: RelationshipCheckSources): ProjectRelationshipCheck {
   const fileName = (filePath: string): string => relPath(src.root, filePath);
   const { libraryModels, unreadableModels } = src.logicalModelService.relationshipCheckModels(fileName);
-  const mode: RelationshipMode = usesLibraryRelationships(
-    libraryModels.map((m) => m.model),
-    src.domainService.countDomainFileRelationships(src.root, src.semanticDir),
-  ) ? 'library' : 'domain';
-  const domains = readDomains(src, mode);
+  // The one domain reader every relationship check uses (the canvas and
+  // Repair Relationships… too): v5 and v4, stubs, entries it could not read.
+  const scan = scanDomainFiles(src.domainService, src.root, src.semanticDir);
+  const mode: RelationshipMode = usesLibraryRelationships(libraryModels.map((m) => m.model), scan.domainFileRelationshipCount)
+    ? 'library' : 'domain';
+  const domains = toCheckDomains(scan, mode, fileName);
+  // A record's `source.index` counts the entries that were read; in the
+  // CLI's JSON it names the entry's position in the file's own list (skipped
+  // entries counted), for a model file and a domain file alike — the same
+  // "entry N" the messages use.
+  const rawIndexes = new Map(scan.v5.map((d) => [fileName(d.filePath), d.rawIndexes]));
+  const libraryPositions = new Map(libraryModels.map((m) => [
+    `${m.file}\u0000${m.model.name}`,
+    relationshipFilePositions(m.model.relationships?.length ?? 0, m.model.relationshipIssues),
+  ]));
   const findings = checkRelationships({ libraryModels, domains, unreadableModels })
-    .map((f) => ({ ...f, message: redactPaths(f.message) }));
+    .map((f) => ({
+      ...f,
+      message: redactPaths(f.message),
+      ...(f.records ? {
+        records: f.records.map((r) => {
+          if (r.source.kind === 'domain') {
+            const raw = rawIndexes.get(r.file)?.[r.source.index];
+            return raw === undefined ? r : { ...r, source: { kind: 'domain' as const, index: raw } };
+          }
+          const raw = libraryPositions.get(`${r.file}\u0000${r.source.model}`)?.[r.source.index];
+          return raw === undefined ? r : { ...r, source: { ...r.source, index: raw } };
+        }),
+      } : {}),
+    }));
   const relationships = libraryModels.reduce((n, m) => n + (m.model.relationships?.length ?? 0), 0)
     + domains.reduce((n, d) => n + d.relationships.length, 0);
   return {
     mode,
     findings,
     checked: { modelFiles: libraryModels.length, domains: domains.length, relationships },
+    unchecked: [
+      ...layersUnchecked(src),
+      ...unreadableModels.map((u): UncheckedFile => ({
+        file: u.file,
+        reason: `${u.noModel
+          ? 'it holds no model (it is empty, not a mapping, or has no `name:`)'
+          : u.line !== undefined ? `it has a YAML error on line ${u.line}` : 'it could not be read'}, so the relationships in it were not checked`,
+        kind: 'model',
+      })),
+      ...scan.unchecked.map((d): UncheckedFile => ({ file: fileName(d.filePath), reason: redactPaths(d.reason), kind: 'domain' })),
+    ],
+    olderFormat: scan.v4.map((d) => fileName(d.filePath)),
   };
 }

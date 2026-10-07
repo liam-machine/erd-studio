@@ -338,6 +338,7 @@ export function transformDomain(
         ...(rel.stored ? { stored: rel.stored } : {}),
         ...(rel.source ? { source: rel.source } : {}),
         ...(rel.issues && rel.issues.length > 0 ? { issues: rel.issues } : {}),
+        ...(rel.issues && rel.issues.length > 0 && domain.schemaVersion < 5 ? { olderFormat: true } : {}),
       },
     });
   }

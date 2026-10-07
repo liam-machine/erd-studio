@@ -79,6 +79,12 @@ describe('edge issues', () => {
     expect(title.split('\n')).toHaveLength(3);
     expect(title).toContain('REL002');
   });
+  it('on an older-format (v4) diagram, never promises what Repair Relationships… does not do there', () => {
+    const title = edgeIssueTitle(['REL001'], { olderFormat: true });
+    expect(title).not.toContain('Repair Relationships… keeps one copy');
+    expect(title).toContain('Migrate Domains to Central Model Store');
+    expect(edgeIssueTitle(['REL006'], { olderFormat: true })).toBe(edgeIssueTitle(['REL006']));
+  });
 });
 
 describe('relationshipStoredIn', () => {

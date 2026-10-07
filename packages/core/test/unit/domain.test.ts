@@ -232,6 +232,16 @@ describe('buildUnifiedDomain', () => {
     ]);
   });
 
+  it('readDomainRelationshipEntries reads exactly the relationships the domain loader keeps', async () => {
+    const { readDomainRelationshipEntries } = await import('../../src/domain');
+    const good = { fromModel: 'a', fromColumn: 'k', toModel: 'b', toColumn: 'k', cardinality: 'one-to-one' };
+    const entries = [good, { ...good, toColumn: 'j', cardinality: 'sometimes' }, { fromModel: 'a' }, 'nope', { ...good, toColumn: 'i', role: ' r ' }];
+    const u = build({ schemaVersion: 5, logical: { models: [], relationships: entries } }, { warn: vi.fn() });
+    const strip = ({ source: _s, stored: _st, issues: _i, ...r }: Record<string, unknown>) => r;
+    expect(u.logical.relationships.map((r) => strip(r as unknown as Record<string, unknown>)))
+      .toEqual(readDomainRelationshipEntries(entries, 'x').relationships);
+  });
+
   it('drops malformed relationships and defaults an unknown cardinality, warning for each', () => {
     const warn = vi.fn();
     const good = { fromModel: 'a', fromColumn: 'k', toModel: 'b', toColumn: 'k', cardinality: 'one-to-one', note: 'kept' };
@@ -239,7 +249,7 @@ describe('buildUnifiedDomain', () => {
       {
         schemaVersion: 5,
         logical: {
-          models: [],
+          models: ['a', 'b'],
           relationships: [good, { ...good, cardinality: 'sometimes' }, { fromModel: 'a' }, 'nope'],
         },
       },

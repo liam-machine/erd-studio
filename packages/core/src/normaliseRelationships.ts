@@ -8,7 +8,8 @@
  * and every host (the canvas, the CLI's `diff` and `check`, the MCP server, the
  * read-only viewer) must draw exactly the same thing from the same files.
  * `normaliseRelationships` is that one interpretation. It is pure and
- * deterministic: the result never depends on the order of the domain's models.
+ * deterministic: the result — the drawn relationships and the diagnostics,
+ * order included — never depends on the order of the domain's models.
  */
 
 import type { Relationship, SemanticModel } from './types/semantic.js';
@@ -17,6 +18,7 @@ import {
   canonicalRelationship,
   linkKey,
   relationshipEnds,
+  relationshipFilePositions,
   sameRelationshipMeaning,
   type RelationshipDiagnostic,
   type RelationshipEnds,
@@ -36,6 +38,12 @@ export interface NormaliseRelationshipsInput {
   own: readonly Relationship[];
   /** How the domain file is named in messages. */
   filePath?: string;
+  /**
+   * Position of each of `own` in the domain file's list as written (entries
+   * the reader skipped counted), for "entry N" in messages. Without it, the
+   * n-th of `own` is called entry n.
+   */
+  ownPositions?: readonly number[];
 }
 
 export interface NormalisedRelationships {
@@ -74,11 +82,13 @@ interface Candidate {
  * name when that model has it, group records by `linkKey`, and draw one per
  * link. The winner is deterministic: a library record beats a domain-file
  * one; among library records, the one in its canonical home file, then the
- * lowest lowercased holding-model name, then the lowest index; among domain
+ * lowest lowercased holding-model name, then the exact name, then the lowest index; among domain
  * records, the lowest index.
  *
  * Diagnostics: REL001 (a link stored more than once: an error when the copies
  * differ in cardinality, role or one-to-one direction, else a warning),
+ * REL003 (a domain-file record naming a model the domain does not hold — kept,
+ * but there is nothing to draw it between),
  * REL002 (a `one-to-many` in a model file), REL005 (a case-only spelling
  * match), REL006 (the drawn direction contradicts certain key evidence),
  * REL008 (model file entries skipped or defaulted on read) and REL009 (a
@@ -140,10 +150,27 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
     });
   };
 
+  // A domain-file record whose end is not one of the domain's models has no
+  // node to be drawn between: it is kept (nothing is ever dropped) and marked
+  // REL003, so the canvas, `check` and the banner all say so.
+  const outside: Array<{ index: number; models: string[] }> = [];
   own.forEach((rel, index) => {
+    const missing = [rel.fromModel, rel.toModel].filter((name, i, all) => !findModel(name) && all.indexOf(name) === i);
+    if (missing.length > 0) outside.push({ index, models: missing });
     add(rel, relationshipEnds(rel), { kind: 'domain', index }, '', index);
   });
-  for (const model of byExact.values()) {
+  const outsideByIndex = new Map(outside.map((o) => [o.index, o.models]));
+  // Models in name order (lowercased, then exact), never the domain's listing
+  // order: the candidates' order decides the order of the link groups and so
+  // of the diagnostics, which must not change when `logical.models` is
+  // reordered (REL008 included).
+  const modelsInNameOrder = [...byExact.values()].sort((a, b) => {
+    const la = a.name.toLowerCase();
+    const lb = b.name.toLowerCase();
+    if (la !== lb) return la < lb ? -1 : 1;
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  });
+  for (const model of modelsInNameOrder) {
     (model.relationships ?? []).forEach((entry, index) => {
       if (!findModel(entry.toModel)) return;
       const record: Relationship = { ...entry, fromModel: model.name };
@@ -174,14 +201,23 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
     if (a.source.kind === 'library') {
       if (a.atHome !== b.atHome) return a.atHome ? -1 : 1;
       if (a.holder !== b.holder) return a.holder < b.holder ? -1 : 1;
+      // Two models whose names differ only in case (`Dd` and `DD`): the exact
+      // name decides, so the winner never depends on the domain's model order.
+      const ma = (a.source as { model: string }).model;
+      const mb = (b.source as { model: string }).model;
+      if (ma !== mb) return ma < mb ? -1 : 1;
     }
     return a.index - b.index;
   };
 
   const describe = (r: Relationship): string => `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`;
   const fileName = input.filePath || 'the domain file';
+  // "entry N" counts the file's own list, entries the reader skipped included.
+  const positions = new Map([...byExact.values()].map((m) => [m.name, relationshipFilePositions(m.relationships?.length ?? 0, m.relationshipIssues)]));
   const place = (s: RelationshipSource): string =>
-    `entry ${s.index + 1} of ${s.kind === 'library' ? `${s.model}'s model file` : fileName}`;
+    s.kind === 'library'
+      ? `entry ${(positions.get(s.model)?.[s.index] ?? s.index) + 1} of ${s.model}'s model file`
+      : `entry ${(input.ownPositions?.[s.index] ?? s.index) + 1} of ${fileName}`;
   const copy = (c: Candidate): string =>
     `${describe(c.rel)} ${c.rel.cardinality}${c.rel.role ? ` "${c.rel.role}"` : ''} in ${place(c.source)}`;
 
@@ -196,6 +232,12 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
     };
 
     for (const c of ordered) {
+      const notHere = c.source.kind === 'domain' ? outsideByIndex.get(c.source.index) : undefined;
+      if (notHere) {
+        note('REL003', 'error',
+          `Relationship ${describe(c.rel)} in ${place(c.source)} points at ${notHere.length === 1 ? 'model' : 'models'} ` +
+          `${notHere.join(' and ')}, which ${notHere.length === 1 ? 'is' : 'are'} not in this diagram, so it is not drawn`, [c]);
+      }
       if (c.respelled.length > 0) {
         note('REL005', 'warning',
           `Relationship ${describe(c.rel)} in ${place(c.source)} names ${c.respelled.join(', ')} only when case is ignored; ` +

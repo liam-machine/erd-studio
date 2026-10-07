@@ -559,6 +559,9 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
 
     expect(fs.readFileSync(logicalModelService.modelPath('fct_order'), 'utf-8')).toBe(FCT_WITH_COPY);
     expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(DIM);
-    expect(messages(info)).toContain('Move Relationships to Model Library: nothing was changed.');
+    // It says why: the copies disagree and were left as they are.
+    expect(messages(info)).toContainEqual(expect.stringMatching(
+      /^Move Relationships to Model Library: nothing was changed\. .*its copies disagree — left as they are\.$/,
+    ));
   });
 });

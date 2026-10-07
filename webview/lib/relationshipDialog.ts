@@ -104,13 +104,17 @@ export function directionKey(ends: DialogEnds): string {
 
 /**
  * The amber warning when the user has chosen the other way round from a
- * `certain` verdict, or null when there is nothing to warn about.
+ * `certain` verdict, or null when there is nothing to warn about. A
+ * many-to-many has no "one" side and its ends only decide which file stores
+ * it, so it never contradicts anything (as core's REL006 check reads it).
  */
 export function contradictionWarning(
   verdict: DirectionVerdict | undefined,
   ends: DialogEnds,
   models: DirectionModels,
+  cardinality?: Cardinality,
 ): string | null {
+  if (cardinality === 'many-to-many') return null;
   if (!verdict || verdict.confidence !== 'certain' || followsVerdict(verdict, ends)) return null;
   if (verdict.cardinality === 'one-to-one') {
     const { model, column } = verdict.from;

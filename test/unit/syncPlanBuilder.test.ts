@@ -131,6 +131,22 @@ describe('buildSyncPlan', () => {
     expect(Object.keys(plan.modelContext).sort()).toEqual(['dim_customer', 'fct_order']);
   });
 
+  it('plans both rows of a one-to-one the other stage stores the other way round (#133)', () => {
+    const flipped: DiscrepancyReport = {
+      ...report(),
+      models: [],
+      relationships: [
+        { fromModel: 'person', fromColumn: 'person_id', toModel: 'employee', toColumn: 'person_id', status: 'extra', sourceCardinality: 'one-to-one' },
+        { fromModel: 'employee', fromColumn: 'person_id', toModel: 'person', toColumn: 'person_id', status: 'missing', targetCardinality: 'one-to-one' },
+      ],
+    };
+    const plan = buildSyncPlan(flipped, allSelections(flipped, 'physical'), ctx);
+    expect(plan.relationships.map((r) => [r.fromModel, r.toModel, r.action])).toEqual([
+      ['person', 'employee', 'remove-relationship-from-logical'],
+      ['employee', 'person', 'add-relationship-to-logical'],
+    ]);
+  });
+
   it('prefers the yml path, then the manifest path, for dbt file context', () => {
     const manifest = { ...emptyManifest, models: new Map([['dim_missing', { originalFilePath: 'models/dims/dim_missing.sql' }]]) } as unknown as ManifestData;
     const ymlData = { models: new Map([['dim_extra', { filePath: '/proj/models/schema.yaml' }]]) } as unknown as YmlData;

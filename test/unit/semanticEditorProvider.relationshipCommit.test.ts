@@ -206,6 +206,37 @@ describe('one write path, in the project\'s mode', () => {
     expect(fs.readFileSync(h.modelPath('fct_order'), 'utf-8')).toBe(fctBefore);
   });
 
+  it('per-domain project: an entry the reader skips keeps its slot through a remove, an update and an add', async () => {
+    const unreadable = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', note: 'no toColumn' };
+    const toCustomer: Relationship = { ...EDGE, cardinality: 'many-to-one' };
+    const toDate: Relationship = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    h = await createHarness({ orders: [unreadable as unknown as Relationship, toCustomer, toDate] });
+    const orders = await h.open('orders');
+
+    await orders.send({ type: 'removeRelationship', payload: { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key' } });
+    expect(orders.errors()).toEqual([]);
+    expect(h.readDomain('orders').logical.relationships).toEqual([unreadable, toCustomer]);
+
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(orders.errors()).toEqual([]);
+    expect(h.readDomain('orders').logical.relationships).toEqual([unreadable, { ...EDGE, cardinality: 'one-to-one' }]);
+
+    await orders.send({ type: 'addRelationship', payload: { ...toDate } });
+    expect(orders.errors()).toEqual([]);
+    expect(h.readDomain('orders').logical.relationships).toEqual([unreadable, { ...EDGE, cardinality: 'one-to-one' }, toDate]);
+  });
+
+  it('per-domain project: an update in place keeps an unreadable entry that follows it where it was', async () => {
+    const unreadable = { fromModel: 'fct_order', fromColumn: 'customer_key', note: 'no to end' };
+    const toCustomer: Relationship = { ...EDGE, cardinality: 'many-to-one' };
+    const toDate: Relationship = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    h = await createHarness({ orders: [toCustomer, unreadable as unknown as Relationship, toDate] });
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(orders.errors()).toEqual([]);
+    expect(h.readDomain('orders').logical.relationships).toEqual([{ ...EDGE, cardinality: 'one-to-one' }, unreadable, toDate]);
+  });
+
   it('per-domain project: a column rename and a model removal follow relationships spelled in another case (D7)', async () => {
     h = await createHarness({ orders: [{ fromModel: 'FCT_ORDER', fromColumn: 'Customer_Key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' }] });
     const orders = await h.open('orders');
@@ -343,7 +374,10 @@ describe('the editable logical payload (#133, R5 / R7)', () => {
     expect(loaded.relationshipIssues?.[0].message).toContain('.erd-studio/logical-models/dim_customer.yml');
     const columns = (model: string) => loaded.models.find((m) => m.name === model)!.columns;
     expect(columns('dim_customer')[0].dbtEvidence).toEqual({ unique: true });
-    expect(columns('fct_order').find((c) => c.name === 'customer_key')?.dbtEvidence).toEqual({ relationshipsTest: true });
+    expect(columns('fct_order').find((c) => c.name === 'customer_key')?.dbtEvidence).toEqual({
+      relationshipsTest: true,
+      relationshipsTo: [{ model: 'dim_customer', column: 'customer_key' }],
+    });
     expect(columns('fct_order').find((c) => c.name === 'order_key')?.dbtEvidence).toEqual({ inCompositeUnique: true });
     expect(loaded.relationships.map((r) => r.issues)).toEqual([['REL002']]);
   });
@@ -430,5 +464,162 @@ describe('undo (R12)', () => {
     } finally {
       undo.dispose();
     }
+  });
+
+  it('an undo refreshes every other open diagram that draws the reverted model files', async () => {
+    h = await createHarness();
+    const domainFile = h.domainPath('orders');
+    const stack: Array<Map<string, string>> = [];
+    const apply = vscode.workspace.applyEdit.bind(vscode.workspace);
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      const before = new Map<string, string>();
+      for (const op of (edit as unknown as MockWorkspaceEdit)._ops) {
+        if (op.kind !== 'replace') continue;
+        const doc = await vscode.workspace.openTextDocument(op.uri.fsPath);
+        before.set(op.uri.fsPath, doc.getText());
+      }
+      const ok = await apply(edit);
+      if (ok && before.has(domainFile)) stack.push(before);
+      return ok;
+    });
+    const undo = vscode.commands.registerCommand('undo', async () => {
+      for (const [file, text] of stack.pop() ?? []) {
+        (await vscode.workspace.openTextDocument(file) as unknown as MockTextDocument)._setText(text);
+      }
+    });
+    const lastDrawn = (panel: Panel): Relationship[] | undefined => {
+      const loaded = panel.posted().filter((m) => m.type === 'domainLoaded');
+      return (loaded[loaded.length - 1]?.payload as DisplayDomain | undefined)?.relationships as Relationship[] | undefined;
+    };
+    try {
+      const orders = await h.open('orders');
+      const reporting = await h.open('reporting');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      expect(lastDrawn(reporting)?.map((r) => r.fromModel)).toEqual(['fct_order']);
+      reporting.posted().length = 0;
+      await orders.send({ type: 'undo' });
+      expect(h.model('fct_order')?.relationships).toBeUndefined();
+      // The other diagram no longer draws the link the undo took away.
+      expect(lastDrawn(reporting)).toEqual([]);
+    } finally {
+      undo.dispose();
+    }
+  });
+});
+
+describe('every other writer of a model file refuses the same files a commit does', () => {
+  const dirty = async (name: string): Promise<string> => {
+    const yml = await vscode.workspace.openTextDocument(h.modelPath(name)) as unknown as MockTextDocument;
+    yml._setText(`${yml.getText()}# typing…\n`);
+    return fs.readFileSync(h.modelPath(name), 'utf-8');
+  };
+  /** dbt says fct_order.customer_key → dim_customer.customer_key. */
+  const dbtSaysFactToCustomer = () => {
+    const tests = {
+      relationshipTests: [{ fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' }],
+      uniqueColumns: new Map([['dim_customer', new Set(['customer_key'])]]),
+      compositeUniqueGroups: new Map(),
+    };
+    vi.spyOn(YmlParserService.prototype, 'loadYmlData').mockResolvedValue({ models: new Map(), sourceFiles: new Map(), ...tests } as never);
+    vi.spyOn(ManifestService.prototype, 'loadManifest').mockResolvedValue({ models: new Map(), disabledModels: new Set(), ...tests, relationshipTests: [] } as never);
+  };
+  const writeSolo = () => fs.writeFileSync(h.domainPath('solo'), JSON.stringify({
+    schemaVersion: 5, domain: 'solo', layer: 'silver', description: '',
+    logical: { models: ['dim_customer'], relationships: [] },
+    viewConfig: { positions: { dim_customer: { x: 0, y: 0 } } },
+  }, null, 2) + '\n');
+
+  it('a column rename does not overwrite the unsaved edits of a model whose relationship follows it', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] } });
+    const before = await dirty('fct_order');
+    const orders = await h.open('orders');
+    await orders.send({
+      type: 'updateColumn',
+      payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'customer_sk', dataType: 'string', description: '' } },
+    });
+
+    expect(orders.errors().join(' ')).toContain('logical-models/fct_order.yml has unsaved changes. Save or revert it first, then try again.');
+    expect(_appliedEdits).toHaveLength(0);
+    expect(fs.readFileSync(h.modelPath('fct_order'), 'utf-8')).toBe(before);
+    expect(h.model('dim_customer')?.columns?.[0].name).toBe('customer_key');
+  });
+
+  it('a model rename does not overwrite the unsaved edits of a model pointing at it', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] } });
+    const before = await dirty('fct_order');
+    const orders = await h.open('orders');
+    await orders.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });
+
+    expect(orders.errors().join(' ')).toContain('logical-models/fct_order.yml has unsaved changes.');
+    expect(_appliedEdits).toHaveLength(0);
+    expect(fs.readFileSync(h.modelPath('fct_order'), 'utf-8')).toBe(before);
+    expect(h.model('dim_customer')).not.toBeNull();
+  });
+
+  it('Add Existing Model does not overwrite the unsaved edits of the model its relationship is routed into', async () => {
+    h = await createHarness();
+    dbtSaysFactToCustomer();
+    writeSolo();
+    const before = await dirty('fct_order');
+    const solo = await h.open('solo');
+    await solo.send({ type: 'addExistingModel', payload: { modelName: 'fct_order' } });
+
+    expect(solo.errors().join(' ')).toContain('logical-models/fct_order.yml has unsaved changes.');
+    expect(_appliedEdits).toHaveLength(0);
+    expect(fs.readFileSync(h.modelPath('fct_order'), 'utf-8')).toBe(before);
+    expect(h.readDomain('solo').logical.models).toEqual(['dim_customer']);
+  });
+
+  it('Add Existing Model refuses, by name, a from-model file it cannot read rather than storing the link in the diagram', async () => {
+    h = await createHarness();
+    dbtSaysFactToCustomer();
+    writeSolo();
+    fs.writeFileSync(h.modelPath('fct_order'), 'name: fct_order\ncolumns: [\n');
+    const solo = await h.open('solo');
+    await solo.send({ type: 'addExistingModel', payload: { modelName: 'fct_order' } });
+
+    expect(solo.errors()).toHaveLength(1);
+    expect(solo.errors()[0]).toMatch(/logical-models\/fct_order\.yml has a YAML error( on line \d+)?\. Fix the file first, then try again\.$/);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(h.readDomain('solo').logical).toEqual({ models: ['dim_customer'], relationships: [] });
+  });
+
+  it('Add Existing Model refuses a to-model file it cannot read, which might already store the link', async () => {
+    h = await createHarness();
+    dbtSaysFactToCustomer();
+    fs.writeFileSync(h.domainPath('solo'), JSON.stringify({
+      schemaVersion: 5, domain: 'solo', layer: 'silver', description: '',
+      logical: { models: ['dim_date'], relationships: [] },
+      viewConfig: { positions: { dim_date: { x: 0, y: 0 } } },
+    }, null, 2) + '\n');
+    // dim_customer is not in this domain, so no relationship is added: nothing to refuse.
+    fs.writeFileSync(h.modelPath('dim_customer'), 'name: dim_customer\ncolumns: [\n');
+    const solo = await h.open('solo');
+    await solo.send({ type: 'addExistingModel', payload: { modelName: 'fct_order' } });
+    expect(solo.errors()).toEqual([]);
+
+    // With dim_customer in the domain, the link is added — and its other end cannot be read.
+    writeSolo();
+    const fresh = await h.open('solo');
+    await fresh.send({ type: 'addExistingModel', payload: { modelName: 'fct_order' } });
+    expect(fresh.errors()).toHaveLength(1);
+    expect(fresh.errors()[0]).toMatch(/logical-models\/dim_customer\.yml has a YAML error/);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(h.model('fct_order')?.relationships).toBeUndefined();
+  });
+});
+
+describe('the relationship checks on each payload read the domain files once', () => {
+  it('builds the mode from the same scan as the findings — no second pass over every domain file', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] } });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    await orders.send({ type: 'ready' });
+    await new Promise((r) => setTimeout(r, 20));
+    const count = vi.spyOn(DomainService.prototype, 'countDomainFileRelationships');
+    await orders.send({ type: 'switchStage', payload: { stage: 'logical', requestId: 1 } });
+    const payload = orders.posted().find((m) => m.type === 'stageData' || m.type === 'domainLoaded')?.payload as DisplayDomain | undefined;
+    expect(payload?.relationshipHome).toBe('library');
+    expect(count).not.toHaveBeenCalled();
   });
 });

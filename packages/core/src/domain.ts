@@ -16,6 +16,7 @@ import type {
   ModelLoadErrorKind,
   NodePosition,
   Relationship,
+  RelationshipReadIssue,
   SemanticDomain,
   SemanticModel,
   StageData,
@@ -26,7 +27,7 @@ import type {
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
-import { normaliseRelationshipRole, type RelationshipDiagnostic } from './relationships.js';
+import { normaliseRelationshipRole, relationshipRoleTooLong, RELATIONSHIP_ROLE_MAX_LENGTH, type RelationshipDiagnostic } from './relationships.js';
 import { normaliseRelationships } from './normaliseRelationships.js';
 
 /**
@@ -304,7 +305,8 @@ function parseStageData(
 
   const obj = value as Record<string, unknown>;
   const rawModels = Array.isArray(obj.models) ? obj.models : [];
-  const relationships = parseRelationships(obj.relationships, filePath, warn);
+  const ownPositions: number[] = [];
+  const relationships = parseRelationships(obj.relationships, filePath, warn, ownPositions);
 
   let models: SemanticModel[];
   if (format === 'v5') {
@@ -352,7 +354,7 @@ function parseStageData(
   const library = format === 'v5'
     ? models
     : models.map(({ relationships: _relationships, relationshipIssues: _issues, ...model }) => model);
-  const normalised = normaliseRelationships({ models: library, own: relationships, filePath });
+  const normalised = normaliseRelationships({ models: library, own: relationships, filePath, ownPositions });
   reportDiagnostics(normalised.diagnostics, warn);
   onDiagnostics?.(normalised.diagnostics);
   return { models, relationships: normalised.relationships };
@@ -446,18 +448,100 @@ export function mergeLibraryRelationships(
   return relationships;
 }
 
+/** A domain file's `logical.relationships`, as the canvas draws them, with what was not read as written. */
+export interface DomainRelationshipEntries {
+  /** The entries with four text ends: an unrecognised cardinality reads as many-to-one, a role is normalised. */
+  relationships: Relationship[];
+  /** Position of each of `relationships` in the file's own list. */
+  rawIndexes: number[];
+  /** Whether each of `relationships` was read with a default cardinality. */
+  defaulted: boolean[];
+  /**
+   * Every entry not read exactly as written — skipped (not a mapping, an end
+   * missing) or defaulted (no or an unknown cardinality, a role that is not
+   * text) — `index` its position in the file's list. Finding REL008, as for a
+   * model file's entries, so nothing in a domain file is dropped silently.
+   */
+  issues: RelationshipReadIssue[];
+}
+
+/**
+ * Read a domain file's `logical.relationships` entry by entry: exactly what
+ * the canvas draws (the same rules as `parseDomainJson`), plus a
+ * {@link RelationshipReadIssue} for every entry that was skipped or read with
+ * a default. `label` names the diagram in the messages (`silver/orders`).
+ */
+export function readDomainRelationshipEntries(value: unknown, label: string): DomainRelationshipEntries {
+  const out: DomainRelationshipEntries = { relationships: [], rawIndexes: [], defaulted: [], issues: [] };
+  if (value === undefined || value === null) return out;
+  if (!Array.isArray(value)) {
+    out.issues.push({
+      index: 0, reason: 'not-a-list', skipped: true,
+      message: `The logical.relationships of diagram ${label} is not a list, so none of it was read`,
+    });
+    return out;
+  }
+  value.forEach((entry, index) => {
+    const issue = (reason: RelationshipReadIssue['reason'], skipped: boolean, message: string): void => {
+      out.issues.push({ index, reason, skipped, message });
+    };
+    const r = entry as Record<string, unknown> | null;
+    if (!r || typeof r !== 'object' || Array.isArray(r)) {
+      issue('not-a-mapping', true, `Relationship entry ${index + 1} of diagram ${label} is not a mapping and was skipped`);
+      return;
+    }
+    const missing = (['fromModel', 'fromColumn', 'toModel', 'toColumn'] as const).filter((key) => typeof r[key] !== 'string');
+    if (missing.length > 0) {
+      issue('missing-endpoint', true, `Relationship entry ${index + 1} of diagram ${label} has no ${missing.join(', ')} and was skipped`);
+      return;
+    }
+    const known = VALID_CARDINALITIES.has(r.cardinality as Cardinality);
+    if (!known) {
+      if (r.cardinality === undefined || r.cardinality === null) {
+        issue('missing-cardinality', false, `Relationship entry ${index + 1} of diagram ${label} has no cardinality; read as many-to-one`);
+      } else {
+        issue('unknown-cardinality', false,
+          `Relationship entry ${index + 1} of diagram ${label} has cardinality ${JSON.stringify(r.cardinality)}, which is not one of ` +
+          'many-to-one, one-to-one, one-to-many or many-to-many; read as many-to-one');
+      }
+    }
+    if (r.role !== undefined && r.role !== null && typeof r.role !== 'string') {
+      issue('invalid-role', false, `Relationship entry ${index + 1} of diagram ${label} has a role that is not text; it was ignored`);
+    }
+    if (relationshipRoleTooLong(r.role)) {
+      issue('role-too-long', false,
+        `Relationship entry ${index + 1} of diagram ${label} has a role longer than ${RELATIONSHIP_ROLE_MAX_LENGTH} characters; it is shown shortened`);
+    }
+    const { role: _role, ...rest } = r as unknown as Relationship;
+    const role = normaliseRelationshipRole(r.role);
+    out.relationships.push({
+      ...rest,
+      cardinality: known ? (r.cardinality as Cardinality) : 'many-to-one',
+      ...(role ? { role } : {}),
+    });
+    out.rawIndexes.push(index);
+    out.defaulted.push(!known);
+  });
+  return out;
+}
+
 /**
  * Validate the relationships array entry-by-entry. Entries missing any of the
  * four string endpoints are dropped with a warning; an unrecognised
  * cardinality falls back to many-to-one.
  */
-function parseRelationships(value: unknown, filePath: string, warn: (message: string) => void): Relationship[] {
+function parseRelationships(
+  value: unknown,
+  filePath: string,
+  warn: (message: string) => void,
+  positions: number[] = [],
+): Relationship[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
   const relationships: Relationship[] = [];
-  for (const entry of value) {
+  for (const [position, entry] of value.entries()) {
     const r = entry as Record<string, unknown> | null;
     if (
       !r || typeof r !== 'object' || Array.isArray(r) ||
@@ -478,6 +562,12 @@ function parseRelationships(value: unknown, filePath: string, warn: (message: st
       );
     }
 
+    if (relationshipRoleTooLong(r.role)) {
+      warn(
+        `Relationship ${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn} in ${filePath} ` +
+        `has a role longer than ${RELATIONSHIP_ROLE_MAX_LENGTH} characters; it is shown shortened`,
+      );
+    }
     const { role: _role, ...rest } = r as unknown as Relationship;
     const role = normaliseRelationshipRole(r.role);
     relationships.push({
@@ -485,6 +575,7 @@ function parseRelationships(value: unknown, filePath: string, warn: (message: st
       cardinality,
       ...(role ? { role } : {}),
     });
+    positions.push(position);
   }
   return relationships;
 }

@@ -171,7 +171,24 @@
     "stubColumns": [
       "raw_refunds"
     ],
-    "relationshipHome": "domain"
+    "relationshipHome": "domain",
+    "relationshipIssues": [
+      {
+        "code": "REL008",
+        "severity": "error",
+        "message": ".erd-studio/bronze/orders.json: Relationship entry 2 of diagram bronze/orders has cardinality \"sometimes\", which is not one of many-to-one, one-to-one, one-to-many or many-to-many; read as many-to-one"
+      },
+      {
+        "code": "REL008",
+        "severity": "error",
+        "message": ".erd-studio/bronze/orders.json: Relationship entry 3 of diagram bronze/orders has no toColumn and was skipped"
+      },
+      {
+        "code": "REL008",
+        "severity": "error",
+        "message": ".erd-studio/bronze/orders.json: Relationship entry 4 of diagram bronze/orders is not a mapping and was skipped"
+      }
+    ]
   },
   "welcomeDismissed": false
 }

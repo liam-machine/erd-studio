@@ -9,7 +9,7 @@ import {
   stripRelationshipProvenance,
   type RelationshipDiagnostic,
 } from '../../src/relationships';
-import type { Cardinality, ModelRelationship, Relationship, SemanticModel } from '../../src/types/semantic';
+import type { Cardinality, ModelRelationship, Relationship, RelationshipReadIssue, SemanticModel } from '../../src/types/semantic';
 
 const m2o = (fromModel: string, fromColumn: string, toModel: string, toColumn: string, extra: Partial<Relationship> = {}): Relationship => ({
   fromModel, fromColumn, toModel, toColumn, cardinality: 'many-to-one', ...extra,
@@ -41,6 +41,15 @@ describe('normaliseRelationships — one read path (#133)', () => {
       stored: { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' },
     }]);
     expect(diagnostics).toEqual([]);
+  });
+
+  it('keeps a domain record whose end is not one of the domain\'s models, and says so (REL003)', () => {
+    const { relationships, diagnostics } = normaliseRelationships({ models: [fct()], own: [TO_CUSTOMER], filePath: 'gold/o.json' });
+    expect(relationships).toHaveLength(1);
+    expect(relationships[0].issues).toEqual(['REL003']);
+    expect(codes(diagnostics)).toEqual(['REL003']);
+    expect(diagnostics[0]).toMatchObject({ severity: 'error' });
+    expect(diagnostics[0].message).toMatch(/dim_customer, which is not in this diagram, so it is not drawn/);
   });
 
   it('turns a one-to-many in a model file round, keeps the stored ends, and says so (REL002)', () => {
@@ -370,8 +379,40 @@ describe('normaliseRelationships properties (seeded)', () => {
       for (const s of [1, 2, 3]) {
         const shuffled = normaliseRelationships({ models: shuffle(seed + s, w.models), own: w.own });
         expect(shuffled.relationships).toEqual(base.relationships);
-        expect(codes(shuffled.diagnostics)).toEqual(codes(base.diagnostics));
+        // The whole result, diagnostics in order included — not only their codes.
+        expect(shuffled.diagnostics).toEqual(base.diagnostics);
       }
     }
+  });
+
+  it('orders the diagnostics the same whichever way round the models are listed (REL008 and library-only links)', () => {
+    const issue = (message: string): RelationshipReadIssue[] => [{ index: 9, reason: 'missing-endpoint', skipped: true, message }];
+    const f: SemanticModel = { ...fct([lib(TO_CUSTOMER)]), relationshipIssues: issue('fct bad') };
+    const d: SemanticModel = { ...dim([lib({ ...TO_CUSTOMER, fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' })]), relationshipIssues: issue('dim bad') };
+    const g: SemanticModel = { name: 'dim_geo', columns: [col('geo_key', { isPrimaryKey: true })], relationshipIssues: issue('geo bad') };
+    const fwd = normaliseRelationships({ models: [f, d, g], own: [] });
+    const back = normaliseRelationships({ models: [g, d, f], own: [] });
+    expect(fwd.diagnostics.length).toBeGreaterThanOrEqual(4);
+    expect(back).toEqual(fwd);
+  });
+});
+
+describe('normaliseRelationships — models whose names differ only in case', () => {
+  const t: SemanticModel = { name: 'T', columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }] };
+  const holder = (name: string, cardinality: Cardinality): SemanticModel => ({
+    name,
+    columns: [{ name: 'x', dataType: 'INT', description: '' }],
+    relationships: [{ fromColumn: 'x', toModel: 'T', toColumn: 'id', cardinality }],
+  });
+  const dd1 = holder('Dd', 'many-to-one');
+  const dd2 = holder('DD', 'many-to-many');
+
+  it('draws the same winner whatever order the domain lists them in', () => {
+    const orders = [[t, dd1, dd2], [t, dd2, dd1], [dd2, dd1, t], [dd1, t, dd2]];
+    const drawn = orders.map((models) => normaliseRelationships({ models, own: [] }).relationships);
+    for (const result of drawn) expect(result).toEqual(drawn[0]);
+    // 'DD' < 'Dd' by exact name: DD's copy is drawn.
+    expect(drawn[0]).toHaveLength(1);
+    expect(drawn[0][0]).toMatchObject({ fromModel: 'DD', cardinality: 'many-to-many', source: { kind: 'library', model: 'DD', index: 0 } });
   });
 });

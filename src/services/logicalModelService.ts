@@ -13,7 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Document, parseDocument, isAlias, isMap, isPair, isScalar, isSeq } from 'yaml';
+import { Document, parseDocument, isAlias, isMap, isPair, isScalar, isSeq, visit } from 'yaml';
 import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
 
 import {
@@ -112,6 +112,15 @@ const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRol
 
 /** The four cardinalities a relationship entry may hold. */
 const CARDINALITIES: ReadonlySet<string> = new Set<Cardinality>(['many-to-one', 'one-to-one', 'one-to-many', 'many-to-many']);
+
+/**
+ * A model file `checkRelationships` could not use: unreadable or with a YAML
+ * error (`line` when known), or — `noModel` — read fine but holding no model
+ * (empty, not a mapping, or no `name:`).
+ */
+export interface UncheckableModelFile extends CheckUnreadableModel {
+  noModel?: true;
+}
 
 /** Options for rendering a model file (`serializeModel`, `serializeModelAt`, `saveModel`). */
 export interface SerializeModelOptions {
@@ -414,18 +423,25 @@ export class LogicalModelService {
    * names a file in findings (e.g. project-relative); the default is its path.
    * This is the one lookup the canvas, its notification and Repair
    * Relationships… share, so all three see the same findings (D11).
+   *
+   * A file that parses but holds no model — empty, not a mapping, or with no
+   * `name:` — is listed as unreadable too (`noModel: true`): its
+   * relationships were never read, so a check over it is never clean.
    */
   relationshipCheckModels(fileName: (filePath: string) => string = (p) => p): {
     libraryModels: CheckLibraryModel[];
-    unreadableModels: CheckUnreadableModel[];
+    unreadableModels: UncheckableModelFile[];
   } {
     const libraryModels: CheckLibraryModel[] = [];
-    const unreadableModels: CheckUnreadableModel[] = [];
+    const unreadableModels: UncheckableModelFile[] = [];
     for (const entry of this.listModelFiles()) {
       if (entry.shadowedBy) continue;
       try {
         const model = this.readModelFile(entry.filePath, entry.name);
         if (model) libraryModels.push({ model, file: fileName(entry.filePath) });
+        // Null from a file that is still there: it holds no model to read.
+        // (A file deleted since it was listed is simply gone.)
+        else if (fs.existsSync(entry.filePath)) unreadableModels.push({ name: entry.name, file: fileName(entry.filePath), noModel: true });
       } catch (err) {
         const error = describeModelFileError(entry.name, entry.filePath, err);
         unreadableModels.push({
@@ -989,6 +1005,22 @@ export class LogicalModelService {
       if (desired.length > 0) root.set('relationships', doc.createNode(desired));
       return;
     }
+    if (isAlias(existing)) {
+      // `relationships: *shared` — the reader follows the alias, so the
+      // canvas draws its entries. An edit elsewhere in the model leaves them
+      // alone; only an edit that would change the list itself is refused,
+      // because writing it here would cut the link to the anchored list.
+      const target = existing.resolve(doc);
+      const read = isSeq(target)
+        ? target.items.map((item) => this.readRelationshipEntry(this.nodeToPlain(doc, item)))
+          .filter((r): r is ModelRelationship => r !== null).map((r) => this.relationshipToPlain(r))
+        : [];
+      if (JSON.stringify(read) === JSON.stringify(desired)) return;
+      throw new Error(
+        `${file}: "relationships:" is an alias (*${existing.source}) of a list written elsewhere in the file, ` +
+        'so ERD Studio cannot change it. Write the list out under "relationships:" by hand first.',
+      );
+    }
     if (!isSeq(existing)) {
       // Nothing was read from it, so nothing an edit could have changed.
       if (desired.length === 0) return;
@@ -1055,11 +1087,66 @@ export class LogicalModelService {
       if (!posFor.has(i)) items.push(doc.createNode(entry));
     });
 
+    // An entry about to be removed may carry an anchor (`- &base {…}`) that
+    // the file uses elsewhere (`*base`): removing it would leave that alias
+    // pointing at nothing, so the edit is refused, naming the entry.
+    const kept = new Set(items);
+    const removed = existing.items
+      .map((item, pos) => ({ item, pos }))
+      .filter(({ item }) => items.length === 0 || !kept.has(item));
+    for (const { item, pos } of removed) {
+      const anchor = this.referencedAnchor(doc, item, items.length === 0 ? existing : null);
+      if (anchor) {
+        throw new Error(
+          `${file}, relationship entry ${pos + 1} is marked &${anchor} and used elsewhere in the file (*${anchor}), ` +
+          'so ERD Studio cannot remove it. Replace that reference by hand first.',
+        );
+      }
+    }
+    if (items.length === 0 && existing.anchor && this.aliasesTo(doc, new Set([existing.anchor]), existing)) {
+      throw new Error(
+        `${file}: "relationships:" is marked &${existing.anchor} and used elsewhere in the file (*${existing.anchor}), ` +
+        'so ERD Studio cannot remove it. Replace that reference by hand first.',
+      );
+    }
+
     if (items.length === 0) {
       root.delete('relationships');
       return;
     }
     existing.items = items;
+  }
+
+  /**
+   * An anchor defined inside `node` (or on it) that an alias outside it
+   * still uses, or null. `scope`, when given, widens "inside" to that node:
+   * aliases within it are going away too.
+   */
+  private referencedAnchor(doc: Document, node: unknown, scope: unknown): string | null {
+    const anchors = new Set<string>();
+    visit(node as Parameters<typeof visit>[0], {
+      Node: (_key, n) => {
+        if (!isAlias(n) && (n as { anchor?: string }).anchor) anchors.add((n as { anchor: string }).anchor);
+      },
+    });
+    if (anchors.size === 0) return null;
+    return this.aliasesTo(doc, anchors, scope ?? node);
+  }
+
+  /** The first of `anchors` an alias outside `inside` refers to, or null. */
+  private aliasesTo(doc: Document, anchors: ReadonlySet<string>, inside: unknown): string | null {
+    let found: string | null = null;
+    visit(doc, {
+      Node: (_key, n) => {
+        if (n === inside) return visit.SKIP;
+        if (isAlias(n) && anchors.has(n.source)) {
+          found = n.source;
+          return visit.BREAK;
+        }
+        return undefined;
+      },
+    });
+    return found;
   }
 
   /** A relationship entry as written to a model file (no `fromModel`, no runtime fields). */
@@ -1152,8 +1239,13 @@ export class LogicalModelService {
       const differs = target ? written(key) !== want[key] : read[key] !== want[key];
       if (differs) node.set(key, want[key]);
     }
+    // A role on disk that reads as the wanted one (a long or multi-line label
+    // the reader shows shortened) is kept exactly as written.
+    const storedRole = written('role');
     const roleDiffers = target
-      ? (want.role === undefined ? node.has('role') : written('role') !== want.role)
+      ? (want.role === undefined
+        ? node.has('role')
+        : storedRole !== want.role && !(typeof storedRole === 'string' && normaliseRelationshipRole(storedRole) === want.role))
       : read.role !== want.role;
     if (roleDiffers) {
       if (want.role) node.set('role', want.role);

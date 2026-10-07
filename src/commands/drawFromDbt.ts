@@ -37,6 +37,7 @@ import type { LayerService } from '../services/layerService';
 import type { LogicalModelService } from '../services/logicalModelService';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
+import type { SemanticModel } from '../types/semantic';
 
 export const DRAW_FROM_DBT_COMMAND = 'erdStudio.drawFromDbt';
 
@@ -58,7 +59,11 @@ export interface DrawFromDbtDeps {
   modelPaths: readonly string[];
   layerService: Pick<LayerService, 'getValidLayerIds' | 'getCreatableLayers' | 'getAllLayers' | 'saveConfig'>;
   domainService: Pick<DomainService, 'listDomains' | 'countDomainFileRelationships'>;
-  logicalModelService: Pick<LogicalModelService, 'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel'>;
+  logicalModelService: Pick<
+    LogicalModelService,
+    'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel'
+    | 'getModelFileError' | 'findModelFile' | 'findModelNameIgnoringCase' | 'getModelsDir'
+  >;
   /** Schema yml and manifest; either may be undefined (no yml, never compiled). */
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
@@ -160,6 +165,21 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     return undefined;
   }
 
+  // Where the relationships go, decided before any write: their from-models'
+  // library files when the project keeps them there (#126). A model file that
+  // exists but cannot be read, or that an existing relationship would be
+  // saved into while it is open with unsaved changes, stops the command by
+  // name — as the canvas's Add models from dbt does — rather than putting
+  // its relationships in the diagram file without a word.
+  let routed: { kept: typeof draft.relationships; changed: SemanticModel[] };
+  try {
+    routed = routeDraftRelationships(draft, deps);
+  } catch (err) {
+    if (!(err instanceof DrawRefusal)) { telemetry.error('drawWriteFailed'); }
+    void vscode.window.showErrorMessage(`${TITLE}: ${err instanceof Error ? err.message : String(err)} Nothing was written.`);
+    return undefined;
+  }
+
   // Writes start here. A project with no ERD folder yet gets the default
   // layers.json first, exactly as Set Up Semantic Domains Directory writes it.
   const written: string[] = [];
@@ -173,14 +193,6 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     // otherwise read as "flat" after one top-level write. A flat library stays
     // flat; one already grouped by layer gets this layer's folder.
     const folder = logicalModelService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
-    // Relationships go to their from-models' library files when the project
-    // keeps them there (#126) — decided, like the folder, before any write.
-    const routed = usesLibraryRelationships(
-      logicalModelService.listModels(),
-      domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
-    )
-      ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
-      : { kept: draft.relationships, changed: [] };
     for (const model of draft.newModels) {
       logicalModelService.saveModel(model, folder);
       written.push(model.name);
@@ -221,6 +233,58 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
   const notice = describeDraftNotice(draft);
   if (notice) { void vscode.window.showInformationMessage(notice); }
   return { domainPath, draft };
+}
+
+/** Why Draw from dbt stopped before writing: a model file it may not touch. The message is for the user. */
+class DrawRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DrawRefusal';
+  }
+}
+
+/**
+ * The draft's relationships, routed to the model library when the project
+ * keeps them there. Throws `DrawRefusal` naming the file when a model file it
+ * reads exists but cannot be read, or one it would save is open with unsaved
+ * changes (the save would replace the editor's text under it).
+ */
+function routeDraftRelationships(
+  draft: DbtDraft,
+  deps: DrawFromDbtDeps,
+): { kept: DbtDraft['relationships']; changed: SemanticModel[] } {
+  const { workspaceRoot, semanticDir, domainService, logicalModelService } = deps;
+  if (!usesLibraryRelationships(
+    logicalModelService.listModels(),
+    domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
+  )) {
+    return { kept: draft.relationships, changed: [] };
+  }
+  const label = (filePath: string): string => {
+    const relative = path.relative(path.resolve(logicalModelService.getModelsDir()), filePath).split(path.sep).join('/');
+    return relative && !relative.startsWith('..') ? `logical-models/${relative}` : path.basename(filePath);
+  };
+  const libraryModel = (name: string): SemanticModel | null => {
+    const model = logicalModelService.getModel(name);
+    if (model) return model;
+    const realName = logicalModelService.findModelNameIgnoringCase(name) ?? name;
+    const error = logicalModelService.getModelFileError(realName);
+    if (!error) return null;
+    const filePath = logicalModelService.findModelFile(realName);
+    const file = filePath ? label(filePath) : `${realName}.yml`;
+    throw new DrawRefusal(error.kind === 'read'
+      ? `${file} could not be read. Fix the file first, then try again.`
+      : `${file} has a YAML error${error.line !== undefined ? ` on line ${error.line}` : ''}. Fix the file first, then try again.`);
+  };
+  const routed = routeToLibrary(draft.relationships, draft.newModels, libraryModel);
+  for (const model of routed.changed) {
+    if (draft.newModels.includes(model)) continue;
+    const filePath = logicalModelService.findModelFile(model.name);
+    if (filePath && vscode.workspace.textDocuments.some((doc) => doc.isDirty && path.resolve(doc.uri.fsPath) === path.resolve(filePath))) {
+      throw new DrawRefusal(`${label(filePath)} has unsaved changes. Save or revert it first, then try again.`);
+    }
+  }
+  return routed;
 }
 
 /** The one-line note after drawing — only when something was left out. */

@@ -208,7 +208,7 @@
         },
         "cardinality": {
           "type": "string",
-          "description": "Relationship cardinality, read from fromModel to toModel. Write many-to-one, one-to-one or many-to-many: a one-to-many is the same relationship stored the other way round, as many-to-one from the other model (still read, but `erd-studio check` reports it in a model file as REL002). A one-to-one runs from the model holding the foreign key. Always write it: an entry without it is drawn as many-to-one (and, in a model file, reported as REL008).",
+          "description": "Relationship cardinality, read from fromModel to toModel. Write many-to-one, one-to-one or many-to-many: a one-to-many is the same relationship stored the other way round, as many-to-one from the other model (still read, but `erd-studio check` reports it in a model file as REL002). A one-to-one runs from the model holding the foreign key. Always write it: an entry without it is drawn as many-to-one (and reported as REL008, in a model file or a domain file alike).",
           "enum": [
             "many-to-one",
             "one-to-one",

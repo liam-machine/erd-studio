@@ -10,11 +10,12 @@
  * viewer) reports only what it loaded.
  */
 
-import type { Relationship, SemanticModel } from './types/semantic.js';
+import type { Relationship, RelationshipReadIssue, SemanticModel } from './types/semantic.js';
 import {
   canonicalRelationship,
   linkKey,
   relationshipEnds,
+  relationshipFilePositions,
   sameRelationshipMeaning,
   type RelationshipEnds,
   type RelationshipIssueCode,
@@ -43,8 +44,21 @@ export interface CheckDomain {
   relationships: readonly Relationship[];
   /** Where the project keeps relationships (`usesLibraryRelationships`). */
   mode: 'library' | 'domain';
+  /**
+   * A domain file in the older (v4, inline-model) format. Its reader never
+   * draws the model library's relationships (`parseStageData` strips them
+   * from inline models), so its own records are never compared with the
+   * library's. Also assumed when `models` holds inline model objects.
+   */
+  olderFormat?: boolean;
   /** Models the domain shows as stubs: a column missing from one is not a finding. */
   stubColumns?: readonly string[];
+  /**
+   * Entries of the domain file's own list that were skipped or read with a
+   * default (`readDomainRelationshipEntries`): each is a REL008, as a model
+   * file's are. `relationships` holds only the entries that were read.
+   */
+  readIssues?: readonly RelationshipReadIssue[];
 }
 
 /** A model file that exists but could not be read. */
@@ -110,6 +124,8 @@ export interface RelationshipFinding {
 interface Rec {
   rel: Relationship;
   ref: RelationshipRecordRef;
+  /** 0-based position of the entry in its file's own list (skipped entries counted), for "entry N". */
+  position: number;
   /** Domain label, for domain records. */
   domain?: CheckDomain;
   /** Library only: stored in the file of its canonical from-model. */
@@ -129,12 +145,15 @@ const SEVERITY_ORDER: Record<RelationshipSeverity, number> = { error: 0, warning
  *   different domain files are not a finding.
  * - REL002 a `one-to-many` stored in a model file (warning).
  * - REL003 an endpoint model missing from the library (error; not when that
- *   model's file is unreadable or the domain lists it as a stub).
+ *   model's file is unreadable or the domain lists it as a stub), or — for a
+ *   domain file's own record — a model that is not one of that domain's
+ *   models, so the diagram has nothing to draw it between.
  * - REL004 an endpoint column missing from its model (error; not for an
  *   unreadable model, a stub, or a model with no columns yet).
  * - REL005 an endpoint that matches only when case is ignored (warning).
  * - REL006 the stored direction contradicts certain key evidence (info).
- * - REL008 a model file entry skipped or defaulted on read (error, with line).
+ * - REL008 a model file or domain file entry skipped or defaulted on read
+ *   (error, with the line where known).
  * - REL009 a domain-file copy of a link the library also holds, in a library
  *   project, saying the same thing (info).
  *
@@ -172,23 +191,40 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
     }
   }
 
+  for (const domain of input.domains) {
+    for (const issue of domain.readIssues ?? []) {
+      push({
+        code: 'REL008',
+        severity: 'error',
+        message: `${domain.filePath}: ${issue.message}`,
+        files: [domain.filePath],
+        ...(issue.line !== undefined ? { line: issue.line } : {}),
+        fix: 'open-file',
+      });
+    }
+  }
+
   // --- Collect every stored record -------------------------------------------
   const records: Rec[] = [];
   for (const { model, file } of input.libraryModels) {
+    const positions = relationshipFilePositions(model.relationships?.length ?? 0, model.relationshipIssues);
     (model.relationships ?? []).forEach((entry, index) => {
       const rel: Relationship = { ...stripRuntime(entry), fromModel: model.name };
       records.push({
         rel,
+        position: positions[index],
         ref: { file, source: { kind: 'library', model: model.name, index }, stored: relationshipEnds(rel), cardinality: rel.cardinality, ...(rel.role ? { role: rel.role } : {}) },
         atHome: canonicalRelationship(rel).fromModel.toLowerCase() === model.name.toLowerCase(),
       });
     });
   }
   for (const domain of input.domains) {
+    const positions = relationshipFilePositions(domain.relationships.length, domain.readIssues);
     domain.relationships.forEach((entry, index) => {
       const rel = stripRuntime(entry);
       records.push({
         rel,
+        position: positions[index],
         ref: { file: domain.filePath, source: { kind: 'domain', index }, stored: relationshipEnds(rel), cardinality: rel.cardinality, ...(rel.role ? { role: rel.role } : {}) },
         domain,
         atHome: false,
@@ -202,6 +238,10 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
     const describe = `${r.rel.fromModel}.${r.rel.fromColumn} → ${r.rel.toModel}.${r.rel.toColumn}`;
     const where = r.ref.file;
     const stubs = new Set((r.domain?.stubColumns ?? []).map((s) => s.toLowerCase()));
+    // A domain file's own record is drawn only between the domain's own models.
+    const inDiagram = r.domain
+      ? new Set(r.domain.models.map((m) => (typeof m === 'string' ? m : m.name).toLowerCase()))
+      : undefined;
 
     if (r.ref.source.kind === 'library' && r.rel.cardinality === 'one-to-many') {
       const home = canonicalRelationship(r.rel).fromModel;
@@ -228,6 +268,18 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
           code: 'REL003',
           severity: 'error',
           message: `${where}: relationship ${describe} points at model ${modelName}, which is not in the model library`,
+          files: [r.ref.file],
+          link: linkKey(r.rel),
+          fix: 'repoint',
+          records: [r.ref],
+        });
+        continue;
+      }
+      if (inDiagram && !inDiagram.has(lower) && !stubs.has(lower)) {
+        push({
+          code: 'REL003',
+          severity: 'error',
+          message: `${where}: relationship ${describe} points at model ${found.model.name}, which is not one of this diagram's models, so the diagram does not draw it`,
           files: [r.ref.file],
           link: linkKey(r.rel),
           fix: 'repoint',
@@ -308,10 +360,13 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
     if (library.length === 0 && libraryProjectDomains.length > 1) {
       duplicate(key, libraryProjectDomains.map(([, list]) => list[0]), push);
     }
-    // Domain copies of a library link.
+    // Domain copies of a library link. A v4 diagram is not one: it draws
+    // only its own records, never the library's, so the two never meet on
+    // any canvas and cannot disagree (its own duplicates are checked above).
     if (library.length > 0) {
       const kept = library[0];
       for (const [domain, list] of domains) {
+        if (isOlderFormat(domain)) continue;
         const first = list[0];
         if (!sameRelationshipMeaning(first.rel, kept.rel)) {
           duplicate(key, [kept, first], push);
@@ -338,6 +393,11 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
     || a.message.localeCompare(b.message));
 }
 
+/** Whether a domain is in the older (v4, inline-model) format. */
+function isOlderFormat(domain: CheckDomain): boolean {
+  return domain.olderFormat === true || domain.models.some((m) => typeof m !== 'string');
+}
+
 /** A REL001 finding over records of one link, the first of which a reader draws. */
 function duplicate(key: string, list: readonly Rec[], push: (f: RelationshipFinding) => void): void {
   const [kept, ...others] = list;
@@ -345,7 +405,7 @@ function duplicate(key: string, list: readonly Rec[], push: (f: RelationshipFind
   // Two copies in one file are told apart by their entry number rather than naming the file twice.
   const repeated = new Set(list.map((r) => r.ref.file).filter((f, i, all) => all.indexOf(f) !== i));
   const where = (r: Rec): string => repeated.has(r.ref.file)
-    ? `${r.ref.file} entry ${r.ref.source.index + 1}`
+    ? `${r.ref.file} entry ${r.position + 1}`
     : r.ref.file;
   const sites = list.map((r) => `${r.ref.cardinality}${r.ref.role ? ` "${r.ref.role}"` : ''} in ${where(r)}`);
   push({
@@ -367,6 +427,10 @@ function libraryRank(a: Rec, b: Rec): number {
   const ma = (a.ref.source as { model: string }).model.toLowerCase();
   const mb = (b.ref.source as { model: string }).model.toLowerCase();
   if (ma !== mb) return ma < mb ? -1 : 1;
+  // Case-only variants (`Dd`, `DD`): the exact name, as the reader ranks them.
+  const ea = (a.ref.source as { model: string }).model;
+  const eb = (b.ref.source as { model: string }).model;
+  if (ea !== eb) return ea < eb ? -1 : 1;
   return (a.ref.source as { index: number }).index - (b.ref.source as { index: number }).index;
 }
 

@@ -679,6 +679,13 @@ export function derivePhysicalRelationships(
       edges.push(edge);
     } else if (edgeRank(edge.cardinality) < edgeRank(edges[at].cardinality)) {
       edges[at] = edge;
+    } else if (
+      edge.cardinality === 'one-to-one' && edges[at].cardinality === 'one-to-one'
+      && !(sameName(edge.fromModel, edges[at].fromModel) && sameName(edge.fromColumn, edges[at].fromColumn))
+    ) {
+      // A one-to-one tested from both ends: which end holds the foreign key is
+      // not known, so the edge kept (the first) must not claim a direction.
+      edges[at] = { ...edges[at], directionUnknown: true };
     }
   }
   return edges;

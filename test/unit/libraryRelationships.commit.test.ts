@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { canonicalRelationship, checkRelationships, linkKey, type RelationshipEnds } from '@erd-studio/core';
+import { canonicalRelationship, checkRelationships, linkKey, parseLogicalModelText, type RelationshipEnds } from '@erd-studio/core';
 
 import {
   RelationshipCommitError,
@@ -23,6 +23,7 @@ import {
   removeLibraryRelationships,
   renameColumnInRelationships,
   renameModelInRelationships,
+  resolveEndpointModels,
   routeToLibrary,
   toDisplayRelationshipIssues,
   upsertLibraryRelationship,
@@ -245,6 +246,19 @@ describe('findings the canvas shows', () => {
     ]);
   });
 
+  it('counts relationships, not findings: one link missing both its columns is one relationship', () => {
+    const findings = checkRelationships({
+      libraryModels: [
+        { model: { ...FCT(), relationships: [{ fromColumn: 'no_such', toModel: 'dim_customer', toColumn: 'nor_this', cardinality: 'many-to-one' as const }] }, file: 'lm/fct_order.yml' },
+        { model: DIM(), file: 'lm/dim_customer.yml' },
+      ],
+      domains: [],
+    });
+    expect(findingsNeedingRepair(findings).map((f) => f.code)).toEqual(['REL004', 'REL004']);
+    expect(describeRepairOffer(findings)).toBe('1 relationship needs attention (1 pointing at a column its model does not have). ' +
+      'Review the fixes with Repair Relationships…? Nothing changes until you confirm.');
+  });
+
   it('offers nothing for info-only findings', () => {
     expect(describeRepairOffer([{ code: 'REL006', severity: 'info', message: 'x', files: [] }])).toBeNull();
   });
@@ -437,5 +451,92 @@ describe('planRelationshipCommit — properties over 400 seeded worlds', () => {
       expect(mine, `seed ${seed}`).toHaveLength(1);
       expect(mine[0].rel.cardinality).toBe('many-to-one');
     }
+  });
+});
+
+describe('planRelationshipCommit — models whose names differ only in case', () => {
+  it('updates from the copy the reader draws, whatever order the models come in', () => {
+    const make = () => {
+      const t: SemanticModel = { name: 'T', columns: [col('id', { isPrimaryKey: true })] };
+      const lower: SemanticModel = { name: 'Dd', columns: [col('x')], relationships: [{ fromColumn: 'x', toModel: 'T', toColumn: 'id', cardinality: 'many-to-one', role: 'lower' }] };
+      const upper: SemanticModel = { name: 'DD', columns: [col('x')], relationships: [{ fromColumn: 'x', toModel: 'T', toColumn: 'id', cardinality: 'many-to-many', role: 'upper' }] };
+      return { t, lower, upper };
+    };
+    const stored: RelationshipEnds = { fromModel: 'Dd', fromColumn: 'x', toModel: 'T', toColumn: 'id' };
+    const roles = [
+      (() => { const m = make(); return plan('library', { kind: 'update', stored, cardinality: 'one-to-one' }, [m.lower, m.upper, m.t]); })(),
+      (() => { const m = make(); return plan('library', { kind: 'update', stored, cardinality: 'one-to-one' }, [m.upper, m.lower, m.t]); })(),
+    ].map((result) => result.changedModels.flatMap((m) => (m.relationships ?? []).map((r) => `${m.name}:${r.role ?? ''}`)));
+    expect(roles[0]).toEqual(roles[1]);
+    // 'DD' sorts before 'Dd' by exact name, so DD's copy (role "upper") is the one drawn and kept.
+    expect(roles[0].join(',')).toContain('upper');
+  });
+
+  it('resolves each endpoint name to its own model, so a link between Dd and DD lands in Dd\'s file', () => {
+    const dd: SemanticModel = { name: 'Dd', columns: [col('x')] };
+    const DD: SemanticModel = { name: 'DD', columns: [col('y', { isPrimaryKey: true }), col('x')] };
+    const endpoints = resolveEndpointModels(['Dd', 'DD'], [DD, dd]);
+    expect(endpoints.map((m) => m.name)).toEqual(['Dd', 'DD']);
+    // A name in neither exact spelling resolves to the alphabetically first variant, once.
+    expect(resolveEndpointModels(['dd', 'DD'], [dd, DD]).map((m) => m.name)).toEqual(['DD']);
+    const result = plan('library', {
+      kind: 'add', rel: { fromModel: 'Dd', fromColumn: 'x', toModel: 'DD', toColumn: 'y', cardinality: 'many-to-one' },
+    }, endpoints);
+    expect(result.changedModels.map((m) => m.name)).toEqual(['Dd']);
+    expect(dd.relationships).toEqual([{ fromColumn: 'x', toModel: 'DD', toColumn: 'y', cardinality: 'many-to-one' }]);
+    expect(DD.relationships ?? []).toEqual([]);
+  });
+});
+
+describe('planRelationshipCommit — a canvas drawn before the link changed (#133 review)', () => {
+  const A = (rels: SemanticModel['relationships'] = []): SemanticModel => ({ name: 'A', columns: [col('id', { isPrimaryKey: true }), col('b_id')], ...(rels.length ? { relationships: rels } : {}) });
+  const B = (rels: SemanticModel['relationships'] = []): SemanticModel => ({ name: 'B', columns: [col('id'), col('a_ref')], ...(rels.length ? { relationships: rels } : {}) });
+  // The canvas drew A.b_id → B.id many-to-one; since then the link was turned
+  // round elsewhere and is stored in B.yml as B.id → A.b_id many-to-one.
+  const drawn: RelationshipEnds = { fromModel: 'A', fromColumn: 'b_id', toModel: 'B', toColumn: 'id' };
+  const flipped = () => [A(), B([{ fromColumn: 'id', toModel: 'A', toColumn: 'b_id', cardinality: 'many-to-one' }])];
+  const stored = (models: SemanticModel[]) => models.flatMap((m) => (m.relationships ?? []).map((r) => `${m.name}.${r.fromColumn}→${r.toModel}.${r.toColumn} ${r.cardinality}`));
+
+  it('reads the cardinality against the ends the canvas drew, not the record as it is now', () => {
+    // "B is the many side", as the stale canvas offered: already true — B keeps it.
+    const keep = flipped();
+    plan('library', { kind: 'update', stored: drawn, drawn, cardinality: 'one-to-many' }, keep);
+    expect(stored(keep)).toEqual(['B.id→A.b_id many-to-one']);
+    // "A is the many side": the link is stored with A.
+    const turn = flipped();
+    plan('library', { kind: 'update', stored: drawn, drawn, cardinality: 'many-to-one' }, turn);
+    expect(stored(turn)).toEqual(['A.b_id→B.id many-to-one']);
+  });
+
+  it('a domain-mode update keeps a role longer than the canvas shows exactly as stored', () => {
+    const long = 'the date the order was shipped from the warehouse to the customer address on file';
+    const domain: Relationship[] = [{ fromModel: 'A', fromColumn: 'b_id', toModel: 'B', toColumn: 'id', cardinality: 'many-to-one', role: long }];
+    const result = plan('domain', { kind: 'update', stored: drawn, drawn, cardinality: 'one-to-one' }, [A(), B()], domain);
+    expect(result.domainRelationships).toEqual([{ ...domain[0], cardinality: 'one-to-one' }]);
+    // The edit dialog sends the shortened label back unchanged: still kept.
+    const edit = plan('domain', {
+      kind: 'edit', stored: drawn, next: { ...drawn, cardinality: 'many-to-one', role: long.slice(0, 60) },
+    }, [A(), B()], domain);
+    expect(edit.domainRelationships[0].role).toBe(long);
+  });
+
+  it('refuses to move a model-file copy whose role is longer than the canvas shows (it would be cut), naming the file', () => {
+    const long = 'the date the order was shipped from the warehouse to the customer address on file';
+    const a = parseLogicalModelText([
+      'name: A', 'columns:', '  - name: id', '    dataType: string', '    isPrimaryKey: true', '  - name: b_id', '    dataType: string',
+      'relationships:', '  - fromColumn: b_id', '    toModel: B', '    toColumn: id', '    cardinality: one-to-one', `    role: ${long}`,
+    ].join('\n'), 'A')!;
+    const b: SemanticModel = { name: 'B', columns: [col('id', { isPrimaryKey: true })] };
+    const shown = a.relationships![0].role!;
+    // ⇄ on a one-to-one: the same link, stored from B now — in B's file.
+    expect(() => plan('library', {
+      kind: 'edit', stored: drawn, next: { fromModel: 'B', fromColumn: 'id', toModel: 'A', toColumn: 'b_id', cardinality: 'one-to-one', role: shown },
+    }, [a, b])).toThrow(/role in A's model file is longer than 60 characters and would be cut by moving it/);
+    expect(a.relationships![0].role).toBe(shown);
+    // A role the user changes is theirs to write anywhere.
+    const moved = plan('library', {
+      kind: 'edit', stored: drawn, next: { fromModel: 'B', fromColumn: 'id', toModel: 'A', toColumn: 'b_id', cardinality: 'one-to-one', role: 'shipped' },
+    }, [a, b]);
+    expect(moved.changedModels.map((m) => m.name).sort()).toEqual(['A', 'B']);
   });
 });

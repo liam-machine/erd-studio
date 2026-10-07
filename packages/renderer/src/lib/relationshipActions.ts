@@ -136,9 +136,21 @@ export function edgeIssues(issues: readonly RelationshipIssueCode[] | undefined)
   return EDGE_ISSUE_CODES.filter((code) => issues.includes(code));
 }
 
-/** The "?" badge's tooltip: one line per issue. */
-export function edgeIssueTitle(codes: readonly RelationshipIssueCode[]): string {
-  return ['This relationship needs attention:', ...codes.map((code) => `• ${code}: ${EDGE_ISSUE_TEXT[code] ?? code}`)].join('\n');
+/**
+ * The same sentences on a diagram in the older (v4, inline-model) format,
+ * which Repair Relationships… never changes: point at the migration, or at
+ * the edit that settles the copies on the line itself.
+ */
+const OLDER_FORMAT_EDGE_ISSUE_TEXT: Partial<Record<RelationshipIssueCode, string>> = {
+  REL001: 'Saved more than once — this diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store" first, or use Edit or ⇄ on the line, which keeps one copy.',
+  REL002: 'Saved as one-to-many in the "one" model\'s file — this diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store" first.',
+};
+
+/** The "?" badge's tooltip: one line per issue. `olderFormat`: the diagram is v4. */
+export function edgeIssueTitle(codes: readonly RelationshipIssueCode[], options: { olderFormat?: boolean } = {}): string {
+  const text = (code: RelationshipIssueCode): string =>
+    (options.olderFormat ? OLDER_FORMAT_EDGE_ISSUE_TEXT[code] : undefined) ?? EDGE_ISSUE_TEXT[code] ?? code;
+  return ['This relationship needs attention:', ...codes.map((code) => `• ${code}: ${text(code)}`)].join('\n');
 }
 
 /**

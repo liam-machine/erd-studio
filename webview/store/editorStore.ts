@@ -65,6 +65,12 @@ export interface FkDialogEditData {
   role?: string;
   /** The record's ends as stored on disk, sent as the edit's `stored` key (#133). */
   stored?: import('../../src/types/messages').StoredRelationshipEnds;
+  /**
+   * A cardinality the user already chose before the dialog opened (the edge
+   * menu's choice for a many-to-many whose direction the keys do not settle),
+   * preselected instead of `cardinality` — which stays the stored one.
+   */
+  pickedCardinality?: import('../../src/types/semantic').Cardinality;
 }
 
 export interface EditorState extends CanvasState {

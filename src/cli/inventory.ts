@@ -14,7 +14,7 @@ import * as path from 'path';
 
 import type { DisplayDomain, PhysicalColumnSource } from '../types/display';
 import { MODEL_NAME_PATTERN } from '../types/naming';
-import { readMeta } from '@erd-studio/core';
+import { canonicalRelationship, readMeta } from '@erd-studio/core';
 import type { Cardinality, Meta, UnifiedDomain } from '../types/semantic';
 import { getRawDomainModelNames } from '../types/semantic';
 import { mergeCompositeGroups, mergeUniqueMaps } from '../services/domainService';
@@ -61,7 +61,11 @@ export interface InventoryModel {
   columnCount: number;
   provenance: { columns: PhysicalColumnSource[]; types: PhysicalColumnSource } | null;
   keyCandidates: { unique: string[]; compositeUnique: string[][] };
-  /** `fromColumn`s of this model's relationships in `relationships`. */
+  /**
+   * Columns of this model that hold a foreign key: the `fromColumn` of each of
+   * its relationships read from the many side (a dbt test declared on the
+   * other model is turned round), never its own single-column unique key.
+   */
   foreignKeys: string[];
 }
 
@@ -233,6 +237,28 @@ function chooseNames(ctx: CliContext, requested?: string[]): { names: string[]; 
   return { names, skipped };
 }
 
+/**
+ * The columns of `model` that hold a foreign key, as Draw from dbt marks them
+ * (`markDraftKeys`): each relationship read from its many side
+ * (`canonicalRelationship` — a test declared on the dimension, dbt's
+ * `one-to-many`, belongs to the fact), and never the model's own single-column
+ * unique key, which is what other models point at.
+ */
+function foreignKeysOf(
+  model: string,
+  relationships: readonly InventoryRelationship[],
+  unique: readonly string[],
+  composite: readonly string[][],
+): string[] {
+  const key = normaliseName(model);
+  const ownKey = composite.length === 0 && unique.length === 1 ? normaliseName(unique[0]) : undefined;
+  const columns = relationships
+    .map((r) => canonicalRelationship(r))
+    .filter((r) => normaliseName(r.fromModel) === key && normaliseName(r.fromColumn) !== ownKey)
+    .map((r) => r.fromColumn);
+  return [...new Set(columns)];
+}
+
 /** Inventory models + relationships for `names`, with `suggestedLayer` from the plain folder rule. */
 function describeModels(ctx: CliContext, names: readonly string[], summary: boolean): { models: InventoryModel[]; relationships: InventoryRelationship[] } {
   const physical = buildInventoryDomain(ctx, names);
@@ -294,7 +320,7 @@ function describeModels(ctx: CliContext, names: readonly string[], summary: bool
       columnCount: m.columns.length,
       provenance: m.provenance ?? null,
       keyCandidates: { unique, compositeUnique: compositeByModel.get(key) ?? [] },
-      foreignKeys: [...new Set(relationships.filter((r) => normaliseName(r.fromModel) === normaliseName(m.name)).map((r) => r.fromColumn))],
+      foreignKeys: foreignKeysOf(m.name, relationships, unique, compositeByModel.get(key) ?? []),
     };
     // dbt's meta, the schema yml winning per key (the manifest is a compiled
     // copy of it, plus any project-level `+meta` config).

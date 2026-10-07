@@ -50,6 +50,45 @@ describe('readRelationships — per-entry issues (REL008)', () => {
     expect(model).not.toHaveProperty('relationshipIssues');
   });
 
+  it.each([
+    ['a mapping (the list dash forgotten)', [
+      'name: fct_order',
+      'columns: []',
+      'relationships:',
+      '  fromColumn: customer_id',
+      '  toModel: dim_customer',
+      '  toColumn: customer_id',
+      '  cardinality: many-to-one',
+    ], /is a mapping, not a list/],
+    ['a single value', ['name: fct_order', 'columns: []', 'relationships: oops'], /is a single value, not a list/],
+  ])('reports a relationships: that is %s instead of drawing nothing silently', (_label, lines, message) => {
+    const model = parseLogicalModelText(lines.join('\n'), 'fct_order')!;
+    expect(model).not.toHaveProperty('relationships');
+    expect(model.relationshipIssues).toEqual([
+      { index: 0, reason: 'not-a-list', skipped: true, line: 3, message: expect.stringMatching(message) },
+    ]);
+  });
+
+  it('reports a role longer than the canvas shows (REL008), with its line, instead of cutting it silently', async () => {
+    const long = 'the date the order was shipped from the warehouse to the customer address on file';
+    const model = parseLogicalModelText(
+      ['name: fct_order', 'relationships:', '  - fromColumn: a', '    toModel: dim_a', '    toColumn: a', '    cardinality: many-to-one', `    role: ${long}`].join('\n'),
+      'fct_order',
+    )!;
+    expect(model.relationships?.[0].role).toHaveLength(60);
+    expect(model.relationshipIssues).toEqual([expect.objectContaining({ index: 0, reason: 'role-too-long', skipped: false, line: 3 })]);
+    const { readDomainRelationshipEntries } = await import('../../src/domain');
+    const entries = readDomainRelationshipEntries([{ fromModel: 'f', fromColumn: 'a', toModel: 'd', toColumn: 'a', cardinality: 'many-to-one', role: long }], 'gold/o');
+    expect(entries.issues).toEqual([expect.objectContaining({ index: 0, reason: 'role-too-long', skipped: false })]);
+    // At the limit: nothing to report.
+    expect(readDomainRelationshipEntries([{ fromModel: 'f', fromColumn: 'a', toModel: 'd', toColumn: 'a', cardinality: 'many-to-one', role: long.slice(0, 60) }], 'gold/o').issues).toEqual([]);
+  });
+
+  it('says nothing about an empty relationships:', () => {
+    expect(parseLogicalModelText('name: m\nrelationships:\n', 'm')).not.toHaveProperty('relationshipIssues');
+    expect(parseLogicalModelText('name: m\nrelationships: []\n', 'm')).not.toHaveProperty('relationshipIssues');
+  });
+
   it('has no line for entries of an aliased list', () => {
     const model = parseLogicalModelText([
       'name: m',
@@ -106,5 +145,22 @@ describe('toDisplayDomain — relationship evidence and provenance (#133)', () =
     const bare = toDisplayDomain(domain, { viewConfig: {}, layerConfig: undefined, readOnly: true, relationshipIssues: [] });
     expect(bare).not.toHaveProperty('relationshipHome');
     expect(bare).not.toHaveProperty('relationshipIssues');
+  });
+});
+
+describe('readDomainRelationshipEntries — a domain file\'s entries, nothing dropped silently', () => {
+  it('reads what parseDomainJson draws and reports every entry skipped or defaulted, by position', async () => {
+    const { readDomainRelationshipEntries } = await import('../../src/domain');
+    const good = { fromModel: 'a', fromColumn: 'k', toModel: 'b', toColumn: 'k', cardinality: 'many-to-one' };
+    const entries = [good, { ...good, toColumn: 'j', cardinality: 'one_to_many' }, { fromModel: 'a' }, 'nope', { ...good, toColumn: 'i' }, { ...good, toColumn: 'h', role: 7 }];
+    const read = readDomainRelationshipEntries(entries, 'gold/x');
+    expect(read.relationships.map((r) => r.toColumn)).toEqual(['k', 'j', 'i', 'h']);
+    expect(read.rawIndexes).toEqual([0, 1, 4, 5]);
+    expect(read.defaulted).toEqual([false, true, false, false]);
+    expect(read.issues.map((i) => [i.index, i.reason, i.skipped])).toEqual([
+      [1, 'unknown-cardinality', false], [2, 'missing-endpoint', true], [3, 'not-a-mapping', true], [5, 'invalid-role', false],
+    ]);
+    expect(readDomainRelationshipEntries({ not: 'a list' }, 'gold/x').issues.map((i) => i.reason)).toEqual(['not-a-list']);
+    expect(readDomainRelationshipEntries(undefined, 'gold/x').issues).toEqual([]);
   });
 });

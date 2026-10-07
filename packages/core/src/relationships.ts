@@ -147,3 +147,44 @@ export function normaliseRelationshipRole(value: unknown): string | undefined {
   const role = value.replace(/\s+/g, ' ').trim().slice(0, RELATIONSHIP_ROLE_MAX_LENGTH).trim();
   return role === '' ? undefined : role;
 }
+
+/**
+ * Whether a stored `role` is longer than {@link RELATIONSHIP_ROLE_MAX_LENGTH}
+ * once its whitespace is collapsed — so a reader shows it shortened. The
+ * readers report such an entry (REL008) rather than cutting it silently, and
+ * the writers keep the text on disk unless the role itself is changed.
+ */
+export function relationshipRoleTooLong(value: unknown): boolean {
+  return typeof value === 'string' && value.replace(/\s+/g, ' ').trim().length > RELATIONSHIP_ROLE_MAX_LENGTH;
+}
+
+/**
+ * The role to write for a record whose stored role is `stored` and whose
+ * wanted role is `wanted`: the stored text, exactly as written, when it reads
+ * as the wanted role (a long or multi-line label the canvas shows shortened
+ * is not cut on disk by an unrelated edit); otherwise the wanted role.
+ */
+export function keepStoredRole(stored: unknown, wanted: string | undefined): string | undefined {
+  const normalised = normaliseRelationshipRole(wanted);
+  if (typeof stored === 'string' && normalised !== undefined && normaliseRelationshipRole(stored) === normalised) return stored;
+  return normalised;
+}
+
+/**
+ * Where each relationship that was read sits in its file's own list: the
+ * reader leaves skipped entries out, so the n-th relationship read is not
+ * always the n-th entry written. `issues` are the reader's per-entry issues
+ * (`SemanticModel.relationshipIssues`, a domain file's read issues); the
+ * result maps a read index to the 0-based position in the file.
+ */
+export function relationshipFilePositions(
+  readCount: number,
+  issues: ReadonlyArray<{ index: number; skipped: boolean; reason?: string }> | undefined,
+): number[] {
+  const skipped = new Set((issues ?? []).filter((i) => i.skipped && i.reason !== 'not-a-list').map((i) => i.index));
+  const positions: number[] = [];
+  for (let raw = 0; positions.length < readCount; raw++) {
+    if (!skipped.has(raw)) positions.push(raw);
+  }
+  return positions;
+}

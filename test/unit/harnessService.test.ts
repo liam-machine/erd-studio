@@ -397,6 +397,18 @@ describe('HarnessService', () => {
 
       const version = extractHarnessVersion(content);
       expect(version).toBe(HARNESS_VERSION);
+
+      // Never one-to-many on disk, wherever the entry lives (#133).
+      const cardinalityRow = content.split('\n').find((line) => line.startsWith('| `update-cardinality-in-logical`'))!;
+      expect(cardinalityRow).toContain('is never written as `one-to-many`');
+      expect(cardinalityRow).toContain('in a domain JSON by replacing the entry in place');
+      // An entry stored the other way round from the action is replaced, never
+      // edited in place (that would flip which model holds the foreign key).
+      expect(cardinalityRow).toContain("reads in the direction of the action's own ends");
+      expect(cardinalityRow).toContain('When they run the other way round, never just edit its `cardinality` in place');
+      // The installed copy the fixture project carries says the same.
+      const fixture = fs.readFileSync(path.join(__dirname, '../fixtures/dbt-project/.claude/skills/erd-studio/SYNC.md'), 'utf-8');
+      expect(fixture.split('\n').find((line) => line.startsWith('| `update-cardinality-in-logical`'))).toBe(cardinalityRow);
     });
 
     it('writes companion files using the custom semanticDir', () => {

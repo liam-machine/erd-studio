@@ -379,4 +379,13 @@ describe('setup skill: where relationships go (#126)', () => {
       expect(row, kind).toMatch(/relationships:/);
     }
   });
+
+  it('the sync-plan route never writes a one-to-many, nor edits an entry stored the other way round in place', () => {
+    const fix = ref('verify-and-fix.md');
+    const row = fix.split('\n').find((l) => l.startsWith('| `update-cardinality-in-logical`')) ?? '';
+    expect(row).toContain('which reads in the direction of those ends');
+    expect(row).toContain('A `one-to-many` is never written as `one-to-many`');
+    expect(row).toContain('When the stored entry\'s ends run the other way round from what you built, replace the entry');
+    expect(row).not.toContain('(write `targetCardinality`)');
+  });
 });

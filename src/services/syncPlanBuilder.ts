@@ -13,6 +13,7 @@
 import * as path from 'path';
 
 import { sameLink } from '@erd-studio/core';
+import { sameName } from '../types/naming';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { ManifestData } from '../types/manifest';
 import type {
@@ -163,7 +164,15 @@ export function buildSyncPlan(
       // The report holds one row per link (#133), so the key finds it whichever
       // end it names and in any case; the row's own ends are what the plan
       // carries, because its cardinalities are read in the row's direction.
-      const relDisc = report.relationships.find((r) => sameLink(r, { fromModel, fromColumn, toModel, toColumn }));
+      // A one-to-one stored the other way round in the other stage is two
+      // rows of one link (an `extra` and a `missing`, #133): the row named in
+      // the key's own direction first, then any row of the link.
+      const ends = { fromModel, fromColumn, toModel, toColumn };
+      const inOrder = (r: typeof ends): boolean =>
+        sameName(r.fromModel, fromModel) && sameName(r.fromColumn, fromColumn)
+        && sameName(r.toModel, toModel) && sameName(r.toColumn, toColumn);
+      const relDisc = report.relationships.find((r) => sameLink(r, ends) && inOrder(r))
+        ?? report.relationships.find((r) => sameLink(r, ends));
       if (!relDisc || relDisc.status === 'matched') continue;
 
       const action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);

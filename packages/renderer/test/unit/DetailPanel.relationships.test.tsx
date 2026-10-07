@@ -85,6 +85,27 @@ describe('DetailPanel relationship rows (#133)', () => {
     expect(container.querySelectorAll('.detail-panel__relationship')).toHaveLength(1);
   });
 
+  it('never lists another model\'s relationships under a model whose name differs only in case', () => {
+    const host: CanvasHost = { postMessage: vi.fn() };
+    const d = domain([
+      { ...LIBRARY_REL },
+      { fromModel: 'Orders', fromColumn: 'customer_id', toModel: 'customers', toColumn: 'customer_id', cardinality: 'many-to-one' },
+    ]);
+    d.models.push({ ...d.models[0], name: 'Orders' });
+    const store = createCanvasStore({ domain: d, selectedNode: 'Orders', detailPanelOpen: true });
+    const { container } = render(
+      <CanvasEnvironmentProvider host={host} viewer={false}>
+        <CanvasStoreProvider store={store}>
+          <ReactFlowProvider>
+            <DetailPanel />
+          </ReactFlowProvider>
+        </CanvasStoreProvider>
+      </CanvasEnvironmentProvider>,
+    );
+    // Only Orders' own relationship: orders' is drawn on the orders node.
+    expect(container.querySelectorAll('.detail-panel__relationship')).toHaveLength(1);
+  });
+
   it('the viewer keeps plain rows with no hover text, provenance or not', () => {
     const { container } = renderPanel([LIBRARY_REL], { viewer: true });
     const row = container.querySelector('.detail-panel__relationship')!;

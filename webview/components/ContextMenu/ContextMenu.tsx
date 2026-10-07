@@ -12,6 +12,7 @@ import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { FkEdgeData } from '@erd-studio/renderer/editor';
 import type { AnnotationColor, Cardinality } from '../../../src/types/semantic';
 import type { FkDialogEditData } from '../../store/editorStore';
+import { directionFor } from '../../lib/relationshipDirection';
 import {
   ANNOTATION_COLORS,
   relationshipSwap,
@@ -45,6 +46,36 @@ const CARDINALITY_LABEL: Record<Cardinality, string> = {
   'one-to-many': 'One → Many',
   'many-to-many': 'Many → Many',
 };
+
+/** The Edit dialog's data for an edge, as drawn plus its stored ends. */
+function editDataFor(data: FkEdgeData): FkDialogEditData {
+  const { fromModel, fromColumn, toModel, toColumn, cardinality, role, stored } = data;
+  return {
+    fromModel,
+    fromColumn,
+    toModel,
+    toColumn,
+    cardinality,
+    ...(role ? { role } : {}),
+    ...(stored ? { stored } : {}),
+  };
+}
+
+/**
+ * Whether changing an edge to `next` needs the user to say which side has
+ * many rows: a many-to-many's ends were never a direction choice (it has no
+ * "many" side), so turning it into a many-to-one or one-to-one when the keys
+ * do not settle the direction must ask — in the Edit dialog — rather than
+ * make whichever model the drag started on the many side (#133).
+ */
+export function cardinalityChangeNeedsDirection(
+  data: Pick<FkEdgeData, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn' | 'cardinality'>,
+  next: Cardinality,
+  models: Parameters<typeof directionFor>[0],
+): boolean {
+  if (data.cardinality !== 'many-to-many' || next === 'many-to-many') return false;
+  return directionFor(models, data)?.confidence === 'ambiguous';
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -183,11 +214,16 @@ export function ContextMenu() {
     (newCardinality: Cardinality) => {
       if (!contextMenu || contextMenu.type !== 'edge') return;
 
-      vscode.postMessage(updateCardinalityRequest(contextMenu.data, newCardinality));
+      if (cardinalityChangeNeedsDirection(contextMenu.data, newCardinality, domain?.models ?? [])) {
+        // The direction is the user's to pick: open Edit with this cardinality chosen.
+        openFkDialogForEdit({ ...editDataFor(contextMenu.data), pickedCardinality: newCardinality });
+      } else {
+        vscode.postMessage(updateCardinalityRequest(contextMenu.data, newCardinality));
+      }
       setCardinalityOpen(false);
       closeContextMenu();
     },
-    [contextMenu, vscode, closeContextMenu],
+    [contextMenu, vscode, closeContextMenu, openFkDialogForEdit, domain],
   );
 
   // Handle ⇄: flip the many side of a many-to-one, or swap the ends of a
@@ -203,17 +239,7 @@ export function ContextMenu() {
   const handleEditClick = useCallback(() => {
     if (!contextMenu || contextMenu.type !== 'edge') return;
 
-    const { fromModel, fromColumn, toModel, toColumn, cardinality, role, stored } = contextMenu.data;
-    const editData: FkDialogEditData = {
-      fromModel,
-      fromColumn,
-      toModel,
-      toColumn,
-      cardinality,
-      ...(role ? { role } : {}),
-      ...(stored ? { stored } : {}),
-    };
-    openFkDialogForEdit(editData);
+    openFkDialogForEdit(editDataFor(contextMenu.data));
     closeContextMenu();
   }, [contextMenu, openFkDialogForEdit, closeContextMenu]);
 

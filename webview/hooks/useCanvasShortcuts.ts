@@ -38,12 +38,17 @@ function fkEdgeId(r: RelationshipKey): string {
 }
 
 /**
- * Resolve selected edge ids to relationship keys, dropping edges the model
- * batch will cascade (an edge touching a model that is being deleted).
+ * Resolve selected edge ids to relationship keys, dropping only the edges the
+ * model batch really cascades: one touching a model being deleted whose drawn
+ * copy is this domain file's own (`removeModels` filters the domain file's
+ * `logical.relationships`). A relationship drawn from the model library
+ * (`source.kind === 'library'`) survives removing a model from a diagram by
+ * design, so a line the user selected for deletion is sent, and goes from
+ * the library too — never kept without a word.
  */
 export function selectedEdgesToRelationships(
   edgeIds: string[],
-  relationships: ReadonlyArray<RelationshipKey & { stored?: StoredRelationshipEnds }>,
+  relationships: ReadonlyArray<RelationshipKey & { stored?: StoredRelationshipEnds; source?: { kind: string } }>,
   deletedModels: string[],
 ): Array<RelationshipKey & { stored?: StoredRelationshipEnds }> {
   const deleted = new Set(deletedModels.map((m) => m.toLowerCase()));
@@ -51,7 +56,9 @@ export function selectedEdgesToRelationships(
   for (const edgeId of edgeIds) {
     const rel = relationships.find((r) => fkEdgeId(r) === edgeId);
     if (!rel) continue;
-    if (deleted.has(rel.fromModel.toLowerCase()) || deleted.has(rel.toModel.toLowerCase())) continue;
+    const cascades = rel.source?.kind !== 'library'
+      && (deleted.has(rel.fromModel.toLowerCase()) || deleted.has(rel.toModel.toLowerCase()));
+    if (cascades) continue;
     // The ends as drawn plus, when known, as stored on disk (#133).
     result.push(relationshipTarget(rel));
   }
@@ -256,7 +263,8 @@ export function useCanvasShortcuts(): void {
             post({ type: 'removeAnnotations', payload: { ids: selectedAnnotationIds } });
           }
 
-          // Skip edges that the model batch will cascade.
+          // Skip edges the model batch cascades (domain-file copies only;
+          // a library relationship is removed explicitly).
           const relationships = selectedEdgesToRelationships(
             selectedEdges,
             domain.relationships,

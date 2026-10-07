@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { linkKey } from '@erd-studio/core';
 
 import { runCheck, type CheckResult } from '../../src/cli/check';
@@ -16,6 +16,7 @@ import { buildCliContext } from '../../src/cli/context';
 import { runDiff } from '../../src/cli/diff';
 import { main } from '../../src/cli/index';
 import { parseArgs } from '../../src/cli/args';
+import { LogicalModelService } from '../../src/services/logicalModelService';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const PROJECT = path.join(FIXTURES, 'dbt-project');
@@ -350,7 +351,7 @@ describe('doctor — relationships', () => {
     fs.mkdirSync(root);
     fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: 'p'\n");
     const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
-    expect(r.relationships).toEqual({ checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, byCode: {} });
+    expect(r.relationships).toEqual({ checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, byCode: {}, unchecked: 0, uncheckedFiles: [] });
     expect(r.nextSteps.map((s) => s.id)).not.toContain('fix-relationships');
   });
 });
@@ -389,5 +390,240 @@ describe('diff — advisory integrity', () => {
     const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
     const { result } = runDiff(ctx, { domains: ['.erd-studio/silver/showcase.json'], cwd: root });
     expect(result.domains[0].integrity).toEqual([]);
+  });
+});
+
+describe('check — domain files are never skipped without a word', () => {
+  const ENTRY = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+  const models = { 'dim_customer.yml': DIM_CUSTOMER, 'dim_date.yml': DIM_DATE, 'fct_order.yml': fact('  []\n') };
+
+  it('reports a domain entry with a misspelt or missing cardinality, or a missing end, as REL008 — and exits 1', async () => {
+    const root = makeProject(models, {
+      'silver/orders.json': domain(['fct_order', 'dim_customer', 'dim_date'], [
+        { ...ENTRY, cardinality: 'one_to_many' },
+        { fromModel: 'fct_order', fromColumn: 'order_date_key', toModel: 'dim_date' },
+        { fromModel: 'fct_order', fromColumn: 'order_date_key', toModel: 'dim_date', toColumn: 'date_key' },
+      ]),
+    });
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.clean).toBe(false);
+    const rel008 = result.findings.filter((f) => f.code === 'REL008');
+    expect(rel008.map((f) => f.message)).toEqual([
+      expect.stringMatching(/silver\/orders\.json: Relationship entry 1 of diagram silver\/orders has cardinality "one_to_many", which is not one of .*read as many-to-one/),
+      expect.stringMatching(/silver\/orders\.json: Relationship entry 2 of diagram silver\/orders has no toColumn and was skipped/),
+      expect.stringMatching(/silver\/orders\.json: Relationship entry 3 of diagram silver\/orders has no cardinality; read as many-to-one/),
+    ]);
+    for (const f of rel008) expect(f).toMatchObject({ severity: 'error', files: ['.erd-studio/silver/orders.json'], fix: 'open-file' });
+  });
+
+  it('names a domain record by its place in the file, counting the entries that could not be read', async () => {
+    const root = makeProject(models, {
+      'silver/orders.json': domain(['fct_order', 'dim_customer'], [
+        'not a relationship',
+        { ...ENTRY, toColumn: 'nope' },
+      ]),
+    });
+    const { result } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    const rel004 = result.findings.find((f) => f.code === 'REL004')!;
+    expect(rel004.records?.[0].source).toEqual({ kind: 'domain', index: 1 });
+  });
+
+  it('a domain file that cannot be read makes the run not clean, exit 1, and is named', async () => {
+    const root = makeProject(models, {
+      'silver/orders.json': domain(['fct_order', 'dim_customer'], [ENTRY]),
+    });
+    fs.mkdirSync(path.join(root, '.erd-studio', 'gold'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'gold', 'broken.json'), '{ "broken');
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.clean).toBe(false);
+    expect(result.findings).toEqual([]);
+    expect(result.unchecked).toEqual([{ file: '.erd-studio/gold/broken.json', reason: expect.stringMatching(/^it could not be read/), kind: 'domain' }]);
+    const { code, out } = await run(['check', '--project', root], tmp);
+    expect(code).toBe(1);
+    expect(out).toMatch(/1 diagram file could not be checked/);
+    expect(out).toMatch(/\.erd-studio\/gold\/broken\.json was not checked: it could not be read/);
+  });
+
+  it('a hybrid (unloadable) domain file is named too, pointing at the migration', async () => {
+    const root = makeProject(models, {
+      'silver/orders.json': domain(['fct_order', 'dim_customer'], [ENTRY]),
+      'gold/mixed.json': { schemaVersion: 5, domain: 'mixed', layer: 'gold', logical: { models: ['fct_order', { name: 'x', columns: [] }], relationships: [] } },
+    });
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.unchecked).toEqual([{ file: '.erd-studio/gold/mixed.json', reason: expect.stringMatching(/Migrate Domains to Central Model Store/), kind: 'domain' }]);
+  });
+
+  it('says Repair Relationships… does not change a v4 diagram, and points at the migration', async () => {
+    const root = makeProject(models, {
+      'gold/legacy.json': {
+        schemaVersion: 4, domain: 'legacy', layer: 'gold',
+        logical: {
+          models: [{ name: 'a', columns: [{ name: 'id', dataType: 'INT' }] }, { name: 'b', columns: [{ name: 'a_id', dataType: 'INT' }] }],
+          relationships: [{ fromModel: 'b', fromColumn: 'nope', toModel: 'a', toColumn: 'id', cardinality: 'many-to-one' }],
+        },
+      },
+    });
+    const { result } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(result.olderFormat).toEqual(['.erd-studio/gold/legacy.json']);
+    expect(result.findings.map((f) => f.code)).toEqual(['REL004']);
+    const { out } = await run(['check', '--project', root], tmp);
+    expect(out).toMatch(/does not change diagrams still in the older format \(\.erd-studio\/gold\/legacy\.json\)/);
+  });
+});
+
+describe('doctor and diff — a relationship check that could not run is said, never shown as nothing to check', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('doctor names the failure and keeps exit 0', async () => {
+    const root = makeProject({ 'dim_customer.yml': DIM_CUSTOMER }, { 'silver/orders.json': domain(['dim_customer']) });
+    vi.spyOn(LogicalModelService.prototype, 'relationshipCheckModels').mockImplementation(() => { throw new Error('boom'); });
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
+    expect(r.relationships).toMatchObject({ checked: false, failed: 'boom' });
+    const { code, out } = await run(['doctor', '--no-dbt', '--project', root], tmp);
+    expect(code).toBe(0);
+    expect(out).toMatch(/relationships: not checked — boom \(run erd-studio check\)/);
+  });
+
+  it('diff carries integrityError and says so in its output', async () => {
+    const root = path.join(tmp, 'dbt-project');
+    fs.cpSync(PROJECT, root, { recursive: true });
+    const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
+    vi.spyOn(LogicalModelService.prototype, 'relationshipCheckModels').mockImplementation(() => { throw new Error('boom'); });
+    const { result } = runDiff(ctx, { domains: ['.erd-studio/silver/showcase.json'], cwd: root });
+    expect(result.integrityError).toBe('boom');
+    const { out } = await run(['diff', '--project', root, '--domain', '.erd-studio/silver/showcase.json'], tmp);
+    expect(out).toMatch(/relationship checks not run — boom/);
+  });
+});
+
+describe('check — nothing it could not read passes as clean (#133 review)', () => {
+  const BROKEN_FACT = `name: fct_order
+description: Orders: one row: per order
+columns:
+  - name: customer_key
+    dataType: INT
+relationships:
+  - fromColumn: customer_key
+    toModel: dim_ghost
+    toColumn: nope
+    cardinality: many-to-one
+`;
+
+  it('a model file that does not parse makes the run not clean, exit 1, and is named with its line', async () => {
+    const root = makeProject({ 'fct_order.yml': BROKEN_FACT });
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.clean).toBe(false);
+    expect(result.unchecked).toEqual([{
+      file: '.erd-studio/logical-models/fct_order.yml',
+      reason: expect.stringMatching(/^it has a YAML error on line \d+, so the relationships in it were not checked$/),
+      kind: 'model',
+    }]);
+    const { code, out } = await run(['check', '--project', root], tmp);
+    expect(code).toBe(1);
+    expect(out).toMatch(/1 model file could not be checked/);
+    expect(out).not.toContain('No relationship problems');
+  });
+
+  it.each([
+    ['no `name:`', `columns:
+  - name: customer_key
+    dataType: INT
+relationships:
+  - fromColumn: customer_key
+    toModel: dim_nope
+    toColumn: nope
+    cardinality: bogus
+`],
+    ['empty', ''],
+    ['a top-level list', '- a\n- b\n'],
+  ])('a model file that holds no model (%s) makes the run not clean, exit 1, and is named', async (_label, text) => {
+    const root = makeProject({ 'fct_order.yml': text });
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.clean).toBe(false);
+    expect(result.unchecked).toEqual([{
+      file: '.erd-studio/logical-models/fct_order.yml',
+      reason: 'it holds no model (it is empty, not a mapping, or has no `name:`), so the relationships in it were not checked',
+      kind: 'model',
+    }]);
+    const { code, out } = await run(['check', '--project', root], tmp);
+    expect(code).toBe(1);
+    expect(out).not.toContain('No relationship problems');
+  });
+
+  it('a layers.json that cannot be used makes the run not clean, so a skipped layer folder is never a pass', async () => {
+    const root = makeProject({ 'dim_customer.yml': DIM_CUSTOMER }, {
+      'marts/o.json': domain(['dim_customer'], [{ fromModel: 'dim_customer' }]),
+    });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'layers.json'), '{ "schemaVersion": 1, "layers": [], }');
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.clean).toBe(false);
+    expect(result.unchecked).toEqual([expect.objectContaining({ file: '.erd-studio/layers.json', kind: 'layers' })]);
+    expect(result.unchecked[0].reason).toMatch(/diagrams in layer folders it names may not have been checked/);
+  });
+
+  it('a project whose only domain file cannot be read is exit 1 with the file named, not "nothing to check"', async () => {
+    const root = makeProject({});
+    fs.mkdirSync(path.join(root, '.erd-studio', 'silver'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'silver', 'o.json'), '{ not json');
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.unchecked.map((u) => u.file)).toEqual(['.erd-studio/silver/o.json']);
+  });
+
+  it('a library record\'s source.index in the JSON is its place in the file, counting an entry the reader skipped', () => {
+    const fct = `name: fct_order
+columns:
+  - name: customer_key
+    dataType: INT
+relationships:
+  - { fromColumn: customer_key, toModel: dim_customer, toColumn: customer_key, cardinality: many-to-one }
+  - { fromColumn: customer_key, toColumn: customer_key }
+  - { fromColumn: customer_key, toModel: dim_customer, toColumn: customer_key, cardinality: many-to-one }
+`;
+    const root = makeProject({ 'dim_customer.yml': DIM_CUSTOMER, 'fct_order.yml': fct });
+    const { result } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    const dup = result.findings.find((f) => f.code === 'REL001')!;
+    expect(dup.records!.map((r) => r.source.index)).toEqual([0, 2]);
+    expect(dup.message).toMatch(/entry 1, .*entry 3\)/);
+  });
+});
+
+describe('doctor — never "Ready" when the relationship checks did not cover everything (#133 review)', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('a domain file the checks could not read gets its own next step', async () => {
+    const root = makeProject({ 'dim_customer.yml': DIM_CUSTOMER }, { 'silver/orders.json': domain(['dim_customer']) });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'silver', 'broken.json'), '{ broken');
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
+    expect(r.relationships.unchecked).toBe(1);
+    const ids = r.nextSteps.map((s) => s.id);
+    expect(ids).toContain('check-relationships');
+    expect(ids).not.toContain('ready');
+    expect(r.nextSteps.find((s) => s.id === 'check-relationships')!.why).toContain('.erd-studio/silver/broken.json');
+  });
+
+  it('a model file that holds no model (no `name:`) gets a next step: there is no parse error to fix-model-yaml', async () => {
+    const root = makeProject({ 'dim_customer.yml': DIM_CUSTOMER, 'fct_order.yml': 'columns:\n  - name: customer_key\n' }, { 'silver/orders.json': domain(['dim_customer']) });
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
+    expect(r.relationships.unchecked).toBe(1);
+    const ids = r.nextSteps.map((s) => s.id);
+    expect(ids).not.toContain('fix-model-yaml');
+    expect(ids).toContain('check-relationships');
+    expect(ids).not.toContain('ready');
+    expect(r.nextSteps.find((s) => s.id === 'check-relationships')!.why).toContain('.erd-studio/logical-models/fct_order.yml: it holds no model');
+  });
+
+  it('checks that could not run get a next step too', async () => {
+    const root = makeProject({ 'dim_customer.yml': DIM_CUSTOMER }, { 'silver/orders.json': domain(['dim_customer']) });
+    vi.spyOn(LogicalModelService.prototype, 'relationshipCheckModels').mockImplementation(() => { throw new Error('boom'); });
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
+    expect(r.nextSteps.map((s) => s.id)).toContain('check-relationships');
+    expect(r.nextSteps.map((s) => s.id)).not.toContain('ready');
   });
 });

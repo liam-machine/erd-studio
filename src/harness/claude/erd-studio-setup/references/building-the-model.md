@@ -92,7 +92,7 @@ For each `InventoryModel` in the `inventory --models` output:
 | `columns[].dataType` | `columns[].dataType`, copied exactly (e.g. `NUMBER(38,0)`, `varchar`). If it is `''`, see "When dbt has no type" |
 | `columns[].description` | `columns[].description`; if empty, a short draft ending in "(draft)" when the meaning is obvious from the name, else `""` |
 | `columns[].isPrimaryKey: true` | The column in `keyCandidates.unique` when there is exactly one. With several, prefer the one named like `<entity>_id` for the model (`order_id` for `fct_order`). With none, every column of the first `keyCandidates.compositeUnique` group |
-| `columns[].isForeignKey: true` | Every column listed in `foreignKeys` |
+| `columns[].isForeignKey: true` | Every column listed in `foreignKeys` (already read from each relationship's many side — never the model's own key — whichever end dbt declared the test on) |
 | `meta`, `columns[].meta` | Only with a team metadata list: its `dbt` keys from `meta` / `columns[].meta` — `references/metadata.md` section 5 |
 
 ### Quote every text value

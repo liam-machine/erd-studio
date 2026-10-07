@@ -88,31 +88,58 @@ function findingLine(f: RelationshipFinding, p: Paint): string {
   return `  ${mark} ${f.code} ${f.message}${f.line !== undefined && !f.message.includes(`line ${f.line}`) ? ` (line ${f.line})` : ''}`;
 }
 
+/** "1 diagram file", "2 model files and 1 diagram file", "layers.json" — what could not be checked. */
+export function describeUncheckedFiles(unchecked: ReadonlyArray<{ kind: 'domain' | 'model' | 'layers' }>): string {
+  const models = unchecked.filter((u) => u.kind === 'model').length;
+  const domains = unchecked.filter((u) => u.kind === 'domain').length;
+  const parts = [
+    ...(unchecked.some((u) => u.kind === 'layers') ? ['layers.json'] : []),
+    ...(models > 0 ? [plural(models, 'model file')] : []),
+    ...(domains > 0 ? [plural(domains, 'diagram file')] : []),
+  ];
+  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
 export function formatCheck(r: CheckResult, p: Paint): string {
   const { errors, warnings, info } = r.counts;
   const where = r.mode === 'library' ? 'kept in the model files' : 'kept in each diagram';
   const scope = `${plural(r.checked.relationships, 'relationship')} ${where}, ${plural(r.checked.modelFiles, 'model file')}, ${plural(r.checked.domains, 'diagram')}`;
   const lines: string[] = [];
-  if (r.findings.length === 0) {
+  const notChecked = r.unchecked.map((u) => `  ${p.red('✗')} ${u.file} was not checked: ${u.reason}`);
+  if (r.findings.length === 0 && r.unchecked.length === 0) {
     lines.push(`${p.green('✓')} No relationship problems (${scope}).`);
+    return lines.join('\n') + '\n';
+  }
+  if (r.findings.length === 0) {
+    lines.push(`${p.red(describeUncheckedFiles(r.unchecked))} could not be checked; no problems in the rest (${scope}).`);
+    lines.push(...notChecked);
     return lines.join('\n') + '\n';
   }
   const parts = [
     errors > 0 ? p.red(plural(errors, 'error')) : '',
     warnings > 0 ? p.yellow(plural(warnings, 'warning')) : '',
     info > 0 ? plural(info, 'note') : '',
+    r.unchecked.length > 0 ? p.red(`${describeUncheckedFiles(r.unchecked)} not checked`) : '',
   ].filter(Boolean);
   lines.push(`${parts.join(', ')} (${scope})`);
+  lines.push(...notChecked);
   for (const f of r.findings) { lines.push(findingLine(f, p)); }
   if (errors + warnings > 0) {
+    const older = r.olderFormat.filter((file) => r.findings.some((f) => f.severity !== 'info' && f.files.includes(file)));
     lines.push('', 'In VS Code, "ERD Studio: Repair Relationships…" fixes most of these, showing every change first.');
+    if (older.length > 0) {
+      lines.push(`It does not change diagrams still in the older format (${older.join(', ')}): run "ERD Studio: Migrate Domains to Central Model Store" first.`);
+    }
   }
   return lines.join('\n') + '\n';
 }
 
 export function formatDiff(r: DiffResult, p: Paint): string {
-  if (r.domains.length === 0) { return 'No domains to compare.\n'; }
-  return r.domains.map((d) => domainBlock(d, p).join('\n')).join('\n\n') + '\n';
+  const skipped = r.integrityError !== undefined
+    ? `${p.yellow('!')} relationship checks not run — ${r.integrityError} (run erd-studio check)\n\n`
+    : '';
+  if (r.domains.length === 0) { return `${skipped}No domains to compare.\n`; }
+  return skipped + r.domains.map((d) => domainBlock(d, p).join('\n')).join('\n\n') + '\n';
 }
 
 export function formatDoctor(r: DoctorResult, p: Paint): string {
@@ -141,8 +168,12 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   if (r.relationships.checked) {
     const rel = r.relationships;
     const problems = rel.errors + rel.warnings;
-    lines.push(`${ok(problems === 0)} relationships: ${plural(rel.stored, 'stored entry', 'stored entries')}`
-      + (problems === 0 ? ', no problems' : `, ${[rel.errors ? plural(rel.errors, 'error') : '', rel.warnings ? plural(rel.warnings, 'warning') : ''].filter(Boolean).join(', ')}`));
+    lines.push(`${ok(problems === 0 && rel.unchecked === 0)} relationships: ${plural(rel.stored, 'stored entry', 'stored entries')}`
+      + (problems === 0 ? ', no problems' : `, ${[rel.errors ? plural(rel.errors, 'error') : '', rel.warnings ? plural(rel.warnings, 'warning') : ''].filter(Boolean).join(', ')}`)
+      + (rel.unchecked > 0 ? `; ${describeUncheckedFiles(rel.uncheckedFiles)} could not be checked (run erd-studio check)` : ''));
+  } else if (r.relationships.failed) {
+    // The checks crashed: say so, never just leave the line out.
+    lines.push(`${ok(false)} relationships: not checked — ${r.relationships.failed} (run erd-studio check)`);
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
   lines.push('', 'Next steps:');

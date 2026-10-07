@@ -19,13 +19,23 @@ import * as path from 'path';
 
 import type { DiscrepancyReport } from '../types/discrepancy';
 import { redactPaths } from '../types/feedback';
-import type { Cardinality, SemanticModel, UnifiedDomain } from '../types/semantic';
+import type { Cardinality, Relationship, SemanticModel, UnifiedDomain } from '../types/semantic';
 import { detectDomainFormat } from '../types/semantic';
 import type { SyncPlan } from '../types/syncPlan';
 import { DomainFileError } from '../services/domainService';
 import type { ModelFileError, ModelFileErrorKind } from '../services/logicalModelService';
 import { findingsForDomain, libraryRelationshipsOf, usesLibraryRelationships } from '../services/libraryRelationships';
-import { canonicalRelationship, linkKey, type RelationshipEnds, type RelationshipFinding } from '@erd-studio/core';
+import {
+  canonicalRelationship,
+  keepStoredRole,
+  linkKey,
+  normaliseRelationshipRole,
+  readDomainRelationshipEntries,
+  sameLink,
+  type RelationshipEnds,
+  type RelationshipFinding,
+} from '@erd-studio/core';
+import { parse as parseYaml } from 'yaml';
 import { computeDomainDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
@@ -55,12 +65,19 @@ export interface Fix {
    * the entry to store — on its many side, `many-to-one` rather than
    * `one-to-many` (#133). For remove-relationship it is the link as drawn.
    */
-  relationship?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality?: Cardinality };
+  relationship?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality?: Cardinality; role?: string };
   /**
    * set-cardinality only: the file the relationship is stored in now, when
    * the fix stores it in another one (`file`) — take it out of this file.
    */
   movesFrom?: string;
+  /**
+   * remove-relationship and set-cardinality: other files that hold a copy of
+   * the same link (the same two columns, either way round) besides the one
+   * this domain draws — remove the copy from each, so the link is stored
+   * once (or, for a removal, not at all).
+   */
+  alsoIn?: string[];
   /** fix-model-yaml: where the parser stopped (1-based). */
   line?: number;
   explain: string;
@@ -163,6 +180,12 @@ export interface DiffResult extends Envelope {
   /** Every domain clean (and none errored or needing migration). */
   clean: boolean;
   domains: DomainDiff[];
+  /**
+   * Set when the relationship checks could not run: why. Every `integrity`
+   * list is then empty because nothing was checked — not because nothing is
+   * wrong. (Advisory, like `integrity`: it does not change `clean`.)
+   */
+  integrityError?: string;
 }
 
 export interface DiffOptions {
@@ -209,11 +232,44 @@ function sortFixes(fixes: Fix[]): Fix[] {
 export interface RelationshipHome {
   /**
    * The links (`linkKey`, either way round) this domain draws from model yml
-   * files, each with the model whose file holds it.
+   * files, each with the model whose file holds the copy that is drawn.
    */
   inLibrary: ReadonlyMap<string, string>;
   /** Whether a new relationship goes to the from-model's yml (`usesLibraryRelationships`). */
   addToLibrary: boolean;
+  /**
+   * By link: every other stored copy besides the drawn one — a model's yml
+   * (`{ model }`) or this domain file (`{ domain: true }`).
+   */
+  otherCopies?: ReadonlyMap<string, ReadonlyArray<{ model: string } | { domain: true }>>;
+  /**
+   * By link: the role of the copy that is drawn, exactly as written on disk
+   * (a long or multi-line label the reader shows shortened is not cut), kept
+   * when the fix rewrites the entry.
+   */
+  roles?: ReadonlyMap<string, string>;
+}
+
+/** Where a drawn copy is stored: a model's yml, or this domain file. */
+export type RelationshipHolder = { model: string } | { domain: true };
+
+/**
+ * The `role` exactly as written on the entry of `entries` (a model yml's
+ * `relationships:` — whose entries' `fromModel` is `fromModel` — or a domain
+ * file's `logical.relationships`, as parsed) that stores `rel`'s link with
+ * the role the reader shows for it; undefined when there is none.
+ */
+export function storedRoleIn(entries: unknown, rel: RelationshipEnds & { role?: string }, fromModel?: string): unknown {
+  if (!Array.isArray(entries) || rel.role === undefined) return undefined;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const o = entry as Record<string, unknown>;
+    const ends = { fromModel: fromModel ?? o.fromModel, fromColumn: o.fromColumn, toModel: o.toModel, toColumn: o.toColumn };
+    if (![ends.fromModel, ends.fromColumn, ends.toModel, ends.toColumn].every((v) => typeof v === 'string')) continue;
+    if (!sameLink(ends as RelationshipEnds, rel)) continue;
+    if (normaliseRelationshipRole(o.role) === rel.role) return o.role;
+  }
+  return undefined;
 }
 
 /**
@@ -245,6 +301,13 @@ export function fixesFromPlan(
   };
   const homeFile = (stored: RelationshipEnds, inLibrary: boolean): string =>
     (inLibrary ? ymlFile(stored.fromModel) : domainFile);
+  /** Files other than `except` that hold a copy of the link. */
+  const otherFiles = (r: RelationshipEnds, except: readonly string[]): string[] => [...new Set(
+    (relationshipHome.otherCopies?.get(linkKey(r)) ?? []).map((c) => ('model' in c ? ymlFile(c.model) : domainFile)),
+  )].filter((f) => !except.includes(f));
+  const role = (r: RelationshipEnds): string | undefined => relationshipHome.roles?.get(linkKey(r));
+  const andRemove = (files: readonly string[]): string =>
+    (files.length === 0 ? '' : ` It is also stored in ${files.join(' and ')} — remove ${files.length === 1 ? 'that copy' : 'those copies'} too.`);
   const fixes: Fix[] = [];
   // A phantom is one question (rename it or drop it), not one fix per column
   // and edge: from the logical side compare() reports it 'extra' with every
@@ -297,6 +360,31 @@ export function fixesFromPlan(
     if (phantomNames.has(r.fromModel) || phantomNames.has(r.toModel)) { continue; }
     const rel = { fromModel: r.fromModel, fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn };
     const link = `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`;
+    // A one-to-one the two stages store the other way round is a remove and
+    // an add of one link (#133): each says the other model holds the key.
+    const flipped = plan.relationships.some((o) => o !== r && o.action !== r.action && sameLink(o, r));
+    if (flipped && r.action === 'remove-relationship-from-logical') {
+      const file = currentFile(rel);
+      const alsoIn = otherFiles(rel, [file]);
+      fixes.push({
+        severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file,
+        relationship: { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) },
+        ...(alsoIn.length > 0 ? { alsoIn } : {}),
+        explain: `The logical model stores ${link} as a one-to-one held by ${r.fromModel}, but dbt tests it from the other end — `
+          + 'remove this entry; the matching add-relationship stores it the way dbt has it.' + andRemove(alsoIn),
+      });
+      continue;
+    }
+    if (flipped && r.action === 'add-relationship-to-logical') {
+      fixes.push({
+        severity: 'blocking', kind: 'add-relationship', model: r.fromModel, column: r.fromColumn,
+        file: homeFile(rel, relationshipHome.addToLibrary),
+        relationship: { ...rel, cardinality: r.targetCardinality ?? 'one-to-one' },
+        explain: `dbt tests ${link} as a one-to-one held by ${r.fromModel}; the logical model stores it the other way round — `
+          + 'add it this way, in place of the entry the matching remove-relationship takes out.',
+      });
+      continue;
+    }
     switch (r.action) {
       case 'add-relationship-to-logical': {
         // Written on its many side (#133): a one-to-many is the same link
@@ -310,13 +398,18 @@ export function fixesFromPlan(
         });
         break;
       }
-      case 'remove-relationship-from-logical':
+      case 'remove-relationship-from-logical': {
+        const file = currentFile(rel);
+        const alsoIn = otherFiles(rel, [file]);
         fixes.push({
-          severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file: currentFile(rel),
+          severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file,
           relationship: { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) },
-          explain: `The logical model draws ${link}, but dbt has no relationships test for it — remove it, or add the test to dbt.`,
+          ...(alsoIn.length > 0 ? { alsoIn } : {}),
+          explain: `The logical model draws ${link}, but dbt has no relationships test for it — remove it, or add the test to dbt.`
+            + andRemove(alsoIn),
         });
         break;
+      }
       case 'update-cardinality-in-logical': {
         // The entry as it should be stored (D10): a one-to-many is the same
         // link turned round, many-to-one, on the other model — so in a
@@ -327,18 +420,23 @@ export function fixesFromPlan(
         const current = currentFile(rel);
         const file = homeFile(stored, heldBy(rel) !== undefined);
         const movesFrom = file !== current ? current : undefined;
+        const alsoIn = otherFiles(rel, [file, current]);
         const source = r.sourceCardinality ? (turned ? reverseCardinality(r.sourceCardinality) : r.sourceCardinality) : undefined;
         const storedLink = `${stored.fromModel}.${stored.fromColumn} → ${stored.toModel}.${stored.toColumn}`;
+        const keptRole = role(rel);
         fixes.push({
           severity: 'blocking', kind: 'set-cardinality', model: stored.fromModel, column: stored.fromColumn, file,
           ...(source ? { from: source } : {}), to: stored.cardinality,
-          relationship: { ...stored, cardinality: stored.cardinality },
+          relationship: { ...stored, cardinality: stored.cardinality, ...(keptRole ? { role: keptRole } : {}) },
           ...(movesFrom ? { movesFrom } : {}),
-          explain: turned
+          ...(alsoIn.length > 0 ? { alsoIn } : {}),
+          explain: (turned
             ? `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests, `
               + `so ${stored.fromModel} is the many side — store it the other way round, as ${storedLink} ${stored.cardinality}`
               + (movesFrom ? `: take it out of ${movesFrom} and add it to ${file}.` : ', replacing the old entry.')
-            : `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — change it to ${r.targetCardinality}.`,
+            : `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — change it to ${r.targetCardinality}`
+              + (movesFrom ? `, and move it: take it out of ${movesFrom} and add it to ${file}, where ${stored.fromModel} (the side holding the foreign key) keeps it.` : '.'))
+            + andRemove(alsoIn),
         });
         break;
       }
@@ -383,27 +481,80 @@ function reverseCardinality(c: Cardinality): Cardinality {
   return c;
 }
 
-/** Library relationships a domain draws, by link, with the model whose file holds each. */
-export function libraryHolders(models: readonly SemanticModel[]): Map<string, string> {
-  const held = new Map<string, string>();
-  for (const model of models) {
-    for (const rel of libraryRelationshipsOf(model)) {
-      const key = linkKey(rel);
-      if (!held.has(key)) held.set(key, model.name);
+/**
+ * Where each link a domain draws is stored, from the drawn relationships' own
+ * provenance (`source`, set by core's `normaliseRelationships` — the copy the
+ * canvas draws), never a first-match scan: the drawn copy's holder, the role
+ * on it, and every other copy (another model's yml, this domain file) a fix
+ * must also take out. `own` is the domain file's own relationships as read.
+ */
+export function relationshipHomeOf(
+  drawn: readonly Relationship[],
+  models: readonly SemanticModel[],
+  own: readonly Relationship[],
+  addToLibrary: boolean,
+  /**
+   * The role as written on disk for the drawn copy, when it can be read: the
+   * readers collapse whitespace and cut a role at 60 characters, and a fix
+   * that hands the shortened text back would cut the label on disk.
+   */
+  rawRoleOf?: (holder: RelationshipHolder, rel: Relationship) => unknown,
+): RelationshipHome {
+  const inLibrary = new Map<string, string>();
+  const roles = new Map<string, string>();
+  const drawnHolder = new Map<string, { model: string } | { domain: true }>();
+  for (const rel of drawn) {
+    const key = linkKey(rel);
+    if (rel.source?.kind === 'library') {
+      inLibrary.set(key, rel.source.model);
+      drawnHolder.set(key, { model: rel.source.model });
+    } else if (rel.source?.kind === 'domain') {
+      drawnHolder.set(key, { domain: true });
+    }
+    if (rel.role) {
+      const holder = drawnHolder.get(key);
+      const raw = holder && rawRoleOf ? rawRoleOf(holder, rel) : undefined;
+      roles.set(key, keepStoredRole(raw, rel.role) ?? rel.role);
     }
   }
-  return held;
+  const copies = new Map<string, Array<{ model: string } | { domain: true }>>();
+  const add = (key: string, holder: { model: string } | { domain: true }): void => {
+    if (!drawnHolder.has(key)) return; // only links this domain draws
+    const list = copies.get(key) ?? [];
+    list.push(holder);
+    copies.set(key, list);
+  };
+  const seen = new Set<string>();
+  for (const model of models) {
+    if (seen.has(model.name)) continue;
+    seen.add(model.name);
+    for (const rel of libraryRelationshipsOf(model)) add(linkKey(rel), { model: model.name });
+  }
+  for (const rel of own) add(linkKey(rel), { domain: true });
+  const otherCopies = new Map<string, Array<{ model: string } | { domain: true }>>();
+  for (const [key, list] of copies) {
+    const holder = drawnHolder.get(key)!;
+    let skipped = false;
+    // Drop the drawn copy once; every further copy, even in the same file, is another to remove.
+    const others = list.filter((c) => {
+      const same = 'model' in holder ? 'model' in c && c.model === holder.model : 'domain' in c;
+      if (same && !skipped) { skipped = true; return false; }
+      return true;
+    });
+    if (others.length > 0) otherCopies.set(key, others);
+  }
+  return { inLibrary, addToLibrary, otherCopies, roles };
 }
 
 /**
- * The project's relationship findings, or null when the checks could not run —
- * diff still compares; `erd-studio check` reports the failure on its own.
+ * The project's relationship findings, or null with the reason when the checks
+ * could not run — diff still compares, and says the checks were skipped.
  */
-function projectFindingsOf(ctx: CliContext): RelationshipFinding[] | null {
+function projectFindingsOf(ctx: CliContext): { findings: RelationshipFinding[] | null; error?: string } {
   try {
-    return checkProjectRelationships(ctx).findings;
-  } catch {
-    return null;
+    return { findings: checkProjectRelationships(ctx).findings };
+  } catch (err) {
+    return { findings: null, error: redactPaths(err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -432,7 +583,7 @@ export function diffDomain(
   ctx: CliContext,
   file: string,
   strict: boolean,
-  projectFindings: readonly RelationshipFinding[] | null = projectFindingsOf(ctx),
+  projectFindings: readonly RelationshipFinding[] | null = projectFindingsOf(ctx).findings,
 ): DomainDiff {
   const rel = relPath(ctx.root, file);
 
@@ -499,13 +650,30 @@ export function diffDomain(
     modelFolder: (name) => ctx.logicalModelService.modelFolder(name),
   });
   const unreadableModelFiles = unreadableModels(ctx, unified);
-  const relationshipHome: RelationshipHome = {
-    inLibrary: libraryHolders(unified.logical.models),
-    addToLibrary: usesLibraryRelationships(
+  const rawOwn = (obj.logical as { relationships?: unknown } | undefined)?.relationships;
+  // A fix that keeps a role hands it back exactly as written (never the
+  // reader's shortened, single-line copy): read from the file that holds it.
+  const rawRoleOf = (holder: RelationshipHolder, drawnRel: Relationship): unknown => {
+    if ('domain' in holder) return storedRoleIn(rawOwn, drawnRel);
+    const filePath = ctx.logicalModelService.findModelFile(holder.model);
+    if (!filePath) return undefined;
+    try {
+      const doc = parseYaml(fs.readFileSync(filePath, 'utf-8')) as { relationships?: unknown } | null;
+      return storedRoleIn(doc?.relationships, drawnRel, holder.model);
+    } catch {
+      return undefined; // unreadable: the role as read is the best there is
+    }
+  };
+  const relationshipHome = relationshipHomeOf(
+    unified.logical.relationships,
+    unified.logical.models,
+    readDomainRelationshipEntries(rawOwn, rel).relationships,
+    usesLibraryRelationships(
       ctx.logicalModelService.listModels(),
       ctx.domainService.countDomainFileRelationships(ctx.root, ctx.semanticDir),
     ),
-  };
+    rawRoleOf,
+  );
   const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles, relationshipHome);
   const blocking = fixes.filter((f) => f.severity === 'blocking').length;
   const advisory = fixes.length - blocking;
@@ -553,7 +721,7 @@ function unreadableModels(ctx: CliContext, unified: UnifiedDomain): UnreadableMo
  */
 export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResult; exitCode: 0 | 1 } {
   const domains: DomainDiff[] = [];
-  const projectFindings = projectFindingsOf(ctx);
+  const { findings: projectFindings, error: integrityError } = projectFindingsOf(ctx);
 
   if (opts.all) {
     // `--all` over nothing must never read as "clean": a wrong or omitted
@@ -607,7 +775,7 @@ export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResul
 
   const clean = domains.every((d) => d.clean);
   return {
-    result: { ...ctx.envelope, inputs: inputsOf(ctx), clean, domains },
+    result: { ...ctx.envelope, inputs: inputsOf(ctx), clean, domains, ...(integrityError !== undefined ? { integrityError } : {}) },
     exitCode: clean ? 0 : 1,
   };
 }

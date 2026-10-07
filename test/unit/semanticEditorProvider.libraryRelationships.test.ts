@@ -245,6 +245,21 @@ describe('relationships stored once in the model library (#126)', () => {
       expect(offers[0].slice(1)).toEqual(['Review the Move…', 'Not Now', "Don't Ask Again"]);
     });
 
+    it('is not offered the move for a shared relationship the move could not store (a stub-only end)', async () => {
+      const stubRel = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'ext_src', toColumn: 'id', cardinality: 'many-to-one' };
+      const write = (name: string, models: string[], relationships: unknown[]) => fs.writeFileSync(h.domainPath(name), JSON.stringify({
+        schemaVersion: 5, domain: name, layer: 'silver', description: '', stubColumns: ['ext_src'],
+        logical: { models, relationships },
+        viewConfig: { positions: Object.fromEntries(models.map((m, i) => [m, { x: i * 300, y: 0 }])) },
+      }, null, 2) + '\n');
+      write('orders', ['fct_order', 'ext_src'], [stubRel]);
+      write('reporting', ['fct_order', 'ext_src'], []);
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+      await (await h.open('orders')).send({ type: 'ready' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(info.mock.calls.filter(([text]) => String(text).startsWith('Relationships can now be defined once'))).toEqual([]);
+    });
+
     it('carries on writing new relationships to the domain file until it opts in', async () => {
       const orders = await h.open('orders');
       await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
@@ -337,6 +352,23 @@ describe('relationships stored once in the model library (#126)', () => {
       expect(offers[0][0]).toBe('1 relationship needs attention (1 saved in the file of the model it points at). '
         + 'Review the fixes with Repair Relationships…? Nothing changes until you confirm.');
       expect(offers[0].slice(1)).toEqual(['Repair Relationships…', 'Not Now', "Don't Ask Again"]);
+    });
+
+    it('offers nothing for a diagram relationship its stub columns allow — the command would find nothing (D11)', async () => {
+      // Only this diagram shows dim_store, so the move is not what is offered.
+      h.logicalModelService.saveModel({ name: 'dim_store', columns: [{ name: 'store_key', dataType: 'string', description: '', isPrimaryKey: true }] });
+      fs.writeFileSync(h.domainPath('stubs'), JSON.stringify({
+        schemaVersion: 5, domain: 'stubs', layer: 'silver', description: '', stubColumns: ['dim_store'],
+        logical: {
+          models: ['fct_order', 'dim_store'],
+          relationships: [{ fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_store', toColumn: 'store_code', cardinality: 'many-to-one' }],
+        },
+        viewConfig: { positions: { fct_order: { x: 0, y: 0 }, dim_store: { x: 300, y: 0 } } },
+      }, null, 2) + '\n');
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+      await (await h.open('stubs')).send({ type: 'ready' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(info.mock.calls).toEqual([]);
     });
 
     it('offers nothing when every library relationship is already on its many side', async () => {

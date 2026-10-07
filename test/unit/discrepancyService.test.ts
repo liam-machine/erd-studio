@@ -630,6 +630,15 @@ describe('DiscrepancyService.compare — a link matches whichever end each stage
     expect(report.relationships.map((r) => r.status)).toEqual(['extra']);
   });
 
+  it('reports a one-to-one stored the other way round as two different relationships', () => {
+    expect(run(fromDim('one-to-one'), fromFact('one-to-one'))).toEqual([
+      { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', status: 'extra', sourceCardinality: 'one-to-one' },
+      { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', status: 'missing', targetCardinality: 'one-to-one' },
+    ]);
+    // …but not when dbt tests the one-to-one from both ends: no direction is known.
+    expect(run(fromDim('one-to-one'), { ...fromFact('one-to-one'), directionUnknown: true }).map((r) => r.status)).toEqual(['matched']);
+  });
+
   it('reports a real cardinality difference once, in the source\'s direction', () => {
     expect(run(fromFact('one-to-one'), fromDim('one-to-many'))).toEqual([
       {

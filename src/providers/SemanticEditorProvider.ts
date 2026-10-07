@@ -80,6 +80,7 @@ import {
   checkRelationships,
   computeMissingPositions,
   DomainValidationError,
+  readDomainRelationshipEntries,
   sameLink,
   setMetaEntry,
   toDisplayDomain,
@@ -151,16 +152,19 @@ import {
 } from '../services/dbtDraft';
 import { pickDraftScope } from './dbtDraftPicker';
 import { readDomainRelationships } from '../commands/moveRelationshipsToLibrary';
+import { linksTheMoveStores, readRepairSnapshot, scanDomainFiles, toCheckDomains } from '../services/relationshipRepair';
 import {
   RelationshipCommitError,
   describeRepairOffer,
   findingsForDomain,
+  mergeDomainRelationships,
   planRelationshipCommit,
   removeColumnRelationships,
   renameColumnInRelationships,
   renameModelInRelationships,
+  resolveEndpointModels,
   routeToLibrary,
-  sharedRelationshipCount,
+  sharedRelationshipKeys,
   toDisplayRelationshipIssues,
   usesLibraryRelationships,
   type RelationshipCommitOp,
@@ -1129,11 +1133,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'removeRelationships': {
-            const payload = (message as { payload?: { relationships: Array<RelationshipKey & { stored?: RelationshipKey }> } }).payload;
-            if (payload && Array.isArray(payload.relationships) && payload.relationships.length > 0) {
-              await this.queueEdit(panelKey, () =>
-                this.handleRemoveRelationships(document, webviewPanel.webview, payload));
+            const payload = (message as { payload?: { relationships?: unknown } }).payload;
+            // Validated as a whole at the boundary, exactly as the single
+            // remove is: one malformed entry refuses the batch, naming it,
+            // rather than deleting the rest of the selection without a word.
+            const invalid = this.removeRelationshipsPayloadError(payload);
+            if (invalid) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to remove relationships: ${invalid}` } });
+              break;
             }
+            const valid = payload as { relationships: Array<RelationshipKey & { stored?: RelationshipKey }> };
+            await this.queueEdit(panelKey, () =>
+              this.handleRemoveRelationships(document, webviewPanel.webview, valid));
             break;
           }
           case 'updateRelationship': {
@@ -1759,6 +1770,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return null;
   }
 
+  /** What is wrong with a `removeRelationships` payload, or null: every entry checked as a single remove is. */
+  private removeRelationshipsPayloadError(payload: unknown): string | null {
+    const list = (payload as { relationships?: unknown } | undefined)?.relationships;
+    if (!Array.isArray(list) || list.length === 0) return 'no relationships were given.';
+    const problems: string[] = [];
+    list.forEach((entry, i) => {
+      const error = this.relationshipPayloadError(entry, { stored: true });
+      if (error) problems.push(`entry ${i + 1}: ${error}`);
+    });
+    return problems.length > 0 ? problems.join('; ') : null;
+  }
+
   /**
    * Relationships an add-models edit would put in this domain file, sent to
    * their from-models' library files instead when the project keeps them
@@ -1771,7 +1794,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (added.length === 0 || !this.relationshipsInLibrary(this.logicalModelService.listModels())) {
       return { kept: [...added], saves: [...newModels] };
     }
-    const { kept, changed } = routeToLibrary(added, newModels, (name) => this.logicalModelService.getModel(name));
+    // A model file that exists but cannot be read is refused, never treated as
+    // "no file": its relationship would land in this domain file instead, or
+    // (for the other end) a copy it already stores would go unseen and be
+    // written twice. The add is refused, naming the file, like a canvas commit.
+    const libraryModel = (name: string): SemanticModel | null => {
+      const model = this.logicalModelService.getModel(name);
+      if (model) return model;
+      const realName = this.logicalModelService.findModelNameIgnoringCase(name) ?? name;
+      const refusal = this.unreadableModelRefusal(realName);
+      if (refusal) throw new Error(refusal);
+      return null;
+    };
+    const { kept, changed } = routeToLibrary(added, newModels, libraryModel);
     const saves = [...newModels, ...changed.filter((m) => !newModels.includes(m))];
     return { kept, saves };
   }
@@ -1797,7 +1832,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const models = this.logicalModelService.listModels();
       if (!this.relationshipsInLibrary(models)
         && !this.context.workspaceState?.get<boolean>(RELATIONSHIP_MOVE_DECLINED_KEY)) {
-        const shared = sharedRelationshipCount(readDomainRelationships(this.domainService, this.workspaceRoot, this.semanticDirName()));
+        const sharedKeys = sharedRelationshipKeys(readDomainRelationships(this.domainService, this.workspaceRoot, this.semanticDirName()));
+        // Only links the move would really store count: one it would leave
+        // where it is (a stub-only end, no readable model file, an entry's
+        // own keys) is no reason to offer it — the offer would come back
+        // every session for a move that can never act (#133).
+        const movable = sharedKeys.size > 0
+          ? linksTheMoveStores(readRepairSnapshot({
+            workspaceRoot: this.workspaceRoot,
+            semanticDir: this.semanticDirName(),
+            domainService: this.domainService,
+            logicalModelService: this.logicalModelService,
+          }))
+          : new Set<string>();
+        const shared = [...sharedKeys].filter((key) => movable.has(key)).length;
         if (shared > 0) {
           await this.offerRelationshipMove(shared);
           return;
@@ -1865,24 +1913,28 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * The project's relationship findings (`checkRelationships`): every model
-   * file (`LogicalModelService.relationshipCheckModels`) and every v5 domain
-   * file (`readDomainRelationships`), files named project-relative, the mode
-   * the project is in. `extraDomain` adds a domain those do not list (the
-   * open v4 domain) or replaces one (to pass its `stubColumns`).
+   * file (`LogicalModelService.relationshipCheckModels`) and every domain file
+   * as `scanDomainFiles` reads it — v5 and v4, with their stubs and the
+   * entries that could not be read — files named project-relative, and the
+   * mode the project is in. The same reader Repair Relationships… and the CLI
+   * use, so the notification, the banner and the command never disagree (D11).
+   * `extraDomain` adds a domain file the scan does not list.
    */
   private relationshipFindings(
-    extraDomain?: { domain: Omit<CheckDomain, 'mode'>; v4: boolean },
+    extra?: { filePath: string; domain: () => Omit<CheckDomain, 'mode'> & { v4: boolean } },
   ): { findings: RelationshipFinding[]; mode: RelationshipMode } {
     const rel = (filePath: string): string => projectRelative(this.workspaceRoot, filePath);
     const { libraryModels, unreadableModels } = this.logicalModelService.relationshipCheckModels(rel);
-    const mode: RelationshipMode = usesLibraryRelationships(
-      libraryModels.map((m) => m.model),
-      this.domainService.countDomainFileRelationships(this.workspaceRoot, this.semanticDirName()),
-    ) ? 'library' : 'domain';
-    const domains: CheckDomain[] = readDomainRelationships(this.domainService, this.workspaceRoot, this.semanticDirName())
-      .map((d) => ({ label: d.label, filePath: rel(d.filePath), models: d.models, relationships: d.relationships, mode }))
-      .filter((d) => d.filePath !== extraDomain?.domain.filePath);
-    if (extraDomain) domains.push({ ...extraDomain.domain, mode: extraDomain.v4 ? 'domain' : mode });
+    // One read of every domain file: the checks' domains and the mode both come from it.
+    const scan = scanDomainFiles(this.domainService, this.workspaceRoot, this.semanticDirName());
+    const mode: RelationshipMode = usesLibraryRelationships(libraryModels.map((m) => m.model), scan.domainFileRelationshipCount)
+      ? 'library' : 'domain';
+    const domains = toCheckDomains(scan, mode, rel);
+    const scanned = [...scan.v5, ...scan.v4, ...scan.unchecked].some((d) => rel(d.filePath) === extra?.filePath);
+    if (extra && !scanned) {
+      const { v4, ...domain } = extra.domain();
+      domains.push({ ...domain, mode: v4 ? 'domain' : mode, ...(v4 ? { olderFormat: true } : {}) });
+    }
     return { findings: checkRelationships({ libraryModels, domains, unreadableModels }), mode };
   }
 
@@ -1902,26 +1954,28 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const rel = (filePath: string): string => projectRelative(this.workspaceRoot, filePath);
       const filePath = rel(domainFilePath);
       const modelNames = domain.models.map((m) => m.name);
-      // The open domain as the checks see it: its own records, its stubs, and
-      // for v4 its inline models.
-      let own: Relationship[] = [];
-      try {
-        const raw = JSON.parse(fs.readFileSync(domainFilePath, 'utf-8')) as { logical?: { relationships?: unknown } };
-        own = (Array.isArray(raw.logical?.relationships) ? raw.logical!.relationships as unknown[] : [])
-          .filter(isWellFormedRelationship);
-      } catch {
-        // Unreadable right now: the canvas loaded it a moment ago; skip its own records.
-      }
-      const { findings, mode } = this.relationshipFindings({
-        domain: {
-          label: `${path.basename(path.dirname(domainFilePath))}/${path.basename(domainFilePath, '.json')}`,
+      // The open domain as the checks see it, read the scan's way — read only
+      // when the scan does not list this file (a layer folder it skips).
+      const openDomain = (): Omit<CheckDomain, 'mode'> & { v4: boolean } => {
+        const label = `${path.basename(path.dirname(domainFilePath))}/${path.basename(domainFilePath, '.json')}`;
+        let entries = readDomainRelationshipEntries(undefined, label);
+        try {
+          const raw = JSON.parse(fs.readFileSync(domainFilePath, 'utf-8')) as { logical?: { relationships?: unknown } };
+          entries = readDomainRelationshipEntries(raw.logical?.relationships, label);
+        } catch {
+          // Unreadable right now: the canvas loaded it a moment ago; skip its own records.
+        }
+        return {
+          label,
           filePath,
           models: v4 ? domain.models : modelNames,
-          relationships: own,
+          relationships: entries.relationships,
           ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
-        },
-        v4,
-      });
+          ...(entries.issues.length > 0 ? { readIssues: entries.issues } : {}),
+          v4,
+        };
+      };
+      const { findings, mode } = this.relationshipFindings({ filePath, domain: openDomain });
       const modelFiles = v4 ? [] : modelNames
         .map((name) => this.logicalModelService.resolveModelPath(name))
         .filter((p): p is string => p !== null && fs.existsSync(p))
@@ -2006,6 +2060,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const deleted: string[] = [];
     if (!ops) return { docs, created, deleted };
 
+    // Every writer of a model file comes through here — a canvas edit of the
+    // model itself, a rename or column cascade into the models that point at
+    // it, Add Existing Model / Add models from dbt routing a relationship into
+    // the library — so the one check that a file the edit would replace, carry
+    // across or delete holds no unsaved hand edits lives here too. Replacing
+    // the buffer with text rendered from the disk bytes would lose them
+    // without a word.
+    const touched = [
+      ...(ops.delete ?? []).filter((name) => this.logicalModelService.modelExists(name)),
+      ...(ops.save ?? []).flatMap(({ model, fromName }) => [
+        ...(this.logicalModelService.modelExists(model.name) ? [model.name] : []),
+        ...(fromName !== undefined && fromName !== model.name && this.logicalModelService.modelExists(fromName) ? [fromName] : []),
+      ]),
+    ];
+    for (const name of touched) {
+      const filePath = this.logicalModelService.findModelFile(name) ?? this.logicalModelService.modelPath(name);
+      if (this.isDirtyOnScreen(filePath)) throw new Error(this.unsavedModelRefusal(filePath));
+    }
+
     for (const name of ops.delete ?? []) {
       if (!this.logicalModelService.modelExists(name)) continue;
       const deletePath = this.logicalModelService.modelPath(name);
@@ -2048,19 +2121,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * open in another tab with unsaved hand edits is never force-saved — those
    * bytes are theirs to keep or discard.
    */
-  private async saveDirtyModelDocuments(panelKey: string): Promise<void> {
+  private async saveDirtyModelDocuments(panelKey: string): Promise<string[]> {
+    const saved: string[] = [];
     const ourPaths = this.editedModelPaths.get(panelKey);
-    if (!ourPaths || ourPaths.size === 0) return;
+    if (!ourPaths || ourPaths.size === 0) return saved;
     for (const doc of vscode.workspace.textDocuments) {
       if (!doc.isDirty) continue;
       if (!ourPaths.has(doc.uri.fsPath)) continue;
       try {
         await doc.save();
         this.ownWriteTracker.recordWrite(doc.uri.fsPath);
+        saved.push(doc.uri.fsPath);
       } catch (err) {
         console.error(`[SemanticEditorProvider] Failed to save ${doc.uri.fsPath} after undo/redo:`, err);
       }
     }
+    return saved;
   }
 
   /**
@@ -2082,9 +2158,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await vscode.commands.executeCommand(command);
       await document.save();
       this.ownWriteTracker.recordWrite(document.uri.fsPath);
-      await this.saveDirtyModelDocuments(panelKey);
+      const reverted = await this.saveDirtyModelDocuments(panelKey);
       this.logicalModelService.invalidateCache();
       await this.sendDomainData(document, webview, panelKey);
+      // The yml saves above are our own writes, which the watcher skips: any
+      // OTHER open diagram showing those models (a library relationship is
+      // drawn by every diagram holding both ends) is refreshed from here, as
+      // applyDomainEdit does after the edit being undone.
+      const names = new Set(reverted.map((filePath) => path.basename(filePath).replace(/\.ya?ml$/i, '')));
+      for (const name of names) {
+        await this.refreshDomainsReferencingModel(name, panelKey);
+      }
       this._onDidWriteDomain.fire({ uri: document.uri, modelLibraryChanged: true });
     } finally {
       this.pendingUpdates.delete(panelKey);
@@ -3221,11 +3305,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * and the result goes out through `applyDomainEdit`'s single WorkspaceEdit
    * (one undo step, the domain file included even when only a yml changed).
    *
-   * Only the (at most four) endpoint models are read. A model file the commit
-   * may write is refused, naming the file, when it is open with unsaved
-   * changes (the edit would replace the buffer with a rendering of the disk
-   * bytes) or cannot be read (a relationship stored in it could not be found,
-   * and writing it would regenerate the file).
+   * The library is listed once (to decide the mode — whether any model file
+   * holds a relationship — and to find the endpoint models); only the (at
+   * most four) endpoint models are planned against and may be written. A
+   * model file the commit may write is refused, naming the file, when it is
+   * open with unsaved changes (the edit would replace the buffer with a
+   * rendering of the disk bytes) or cannot be read (a relationship stored in
+   * it could not be found, and writing it would regenerate the file).
    */
   private async commitRelationship(
     document: vscode.TextDocument,
@@ -3248,23 +3334,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           : op.kind === 'update' ? [op.stored]
             : op.kind === 'edit' ? [op.stored, op.next]
               : [...op.stored];
-      const endpointNames = [...new Map(
-        ends.flatMap((e) => [e.fromModel, e.toModel]).map((name) => [name.toLowerCase(), name]),
-      ).values()];
+      // Distinct by exact spelling: two models whose names differ only in
+      // case (`Dd`, `DD`, hand-made on a case-sensitive file system) are two
+      // models, and folding them together would plan against the wrong one.
+      const endpointNames = [...new Set(ends.flatMap((e) => [e.fromModel, e.toModel]))];
       const markKey = op.kind === 'add' || op.kind === 'edit' ? op.markKey : undefined;
 
-      // v5: copies of the endpoint models (the library's spelling, any case).
-      const endpointModels: SemanticModel[] = [];
+      // v5: copies of the endpoint models, each name resolved as core's reader
+      // resolves it — the exact name, else the alphabetically first case variant.
+      const endpointModels: SemanticModel[] = v5 ? resolveEndpointModels(endpointNames, libraryModels) : [];
       if (v5) {
-        const mayWrite = new Set(
-          (mode === 'library' ? endpointNames : markKey ? [markKey.model] : []).map((n) => n.toLowerCase()),
-        );
-        for (const name of endpointNames) {
-          const model = libraryModels.find((m) => m.name === name) ?? libraryModels.find((m) => sameName(m.name, name));
-          if (model) endpointModels.push(model);
-          if (!mayWrite.has(name.toLowerCase())) continue;
-          const realName = model?.name ?? this.logicalModelService.findModelNameIgnoringCase(name);
-          if (!realName) continue;
+        const resolveLibrary = (name: string): SemanticModel | undefined => resolveEndpointModels([name], libraryModels)[0];
+        const writable = mode === 'library' ? endpointNames : markKey ? [markKey.model] : [];
+        const checked = new Set<string>();
+        // Every model file the commit may write is checked, each once.
+        for (const name of writable) {
+          const realName = resolveLibrary(name)?.name ?? this.logicalModelService.findModelNameIgnoringCase(name);
+          if (!realName || checked.has(realName)) continue;
+          checked.add(realName);
           const refusal = this.relationshipWriteRefusal(realName);
           if (refusal) {
             fail(refusal);
@@ -3285,9 +3372,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         document,
         (section) => {
           const current = Array.isArray(section.relationships) ? section.relationships as unknown[] : [];
+          // An entry without four text ends is never matched, never dropped and never moved.
           const wellFormed = current.filter(isWellFormedRelationship);
-          // An entry without four text ends is never matched, and never dropped.
-          const malformed = current.filter((rel) => !isWellFormedRelationship(rel));
           // v4: the inline models (objects in this very document) take a markKey.
           const inline = v5 ? [] : ((Array.isArray(section.models) ? section.models : []) as SemanticModel[])
             .filter((m) => !!m && typeof m === 'object' && typeof m.name === 'string'
@@ -3300,7 +3386,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             otherDomains,
             describeMissingModel: (name) => this.modelUnavailableMessage(name),
           });
-          if (plan.domainChanged) section.relationships = [...plan.domainRelationships, ...malformed];
+          // Entries the reader could not use keep their slot (and their "entry N").
+          if (plan.domainChanged) section.relationships = mergeDomainRelationships(current, wellFormed, plan.domainRelationships);
           if (v5 && plan.changedModels.length > 0) {
             const written = plan.written;
             modelFiles.save = plan.changedModels.map((model) => ({
@@ -3328,17 +3415,31 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private relationshipWriteRefusal(modelName: string): string | null {
     const filePath = this.logicalModelService.findModelFile(modelName);
     if (!filePath) return null;
-    const file = this.libraryRelativePath(modelName);
-    if (vscode.workspace.textDocuments.some((doc) => doc.isDirty && samePath(doc.uri.fsPath, filePath))) {
-      return `${file} has unsaved changes. Save or revert it first, then try again.`;
-    }
+    if (this.isDirtyOnScreen(filePath)) return this.unsavedModelRefusal(filePath);
+    return this.unreadableModelRefusal(modelName);
+  }
+
+  /** Whether `filePath` is open in an editor with unsaved changes. */
+  private isDirtyOnScreen(filePath: string): boolean {
+    return vscode.workspace.textDocuments.some((doc) => doc.isDirty && samePath(doc.uri.fsPath, filePath));
+  }
+
+  /** The refusal for a model file that is open with unsaved changes. */
+  private unsavedModelRefusal(filePath: string): string {
+    const root = path.resolve(this.logicalModelService.getModelsDir());
+    const relative = path.relative(root, filePath).split(path.sep).join('/');
+    const file = relative && !relative.startsWith('..') ? `logical-models/${relative}` : path.basename(filePath);
+    return `${file} has unsaved changes. Save or revert it first, then try again.`;
+  }
+
+  /** Why `modelName`'s file, which exists, cannot be read — or null when it reads (or does not exist). */
+  private unreadableModelRefusal(modelName: string): string | null {
     const error = this.logicalModelService.getModelFileError(modelName);
-    if (error) {
-      return error.kind === 'read'
-        ? `${file} could not be read. Fix the file first, then try again.`
-        : `${file} has a YAML error${error.line !== undefined ? ` on line ${error.line}` : ''}. Fix the file first, then try again.`;
-    }
-    return null;
+    if (!error) return null;
+    const file = this.libraryRelativePath(modelName);
+    return error.kind === 'read'
+      ? `${file} could not be read. Fix the file first, then try again.`
+      : `${file} has a YAML error${error.line !== undefined ? ` on line ${error.line}` : ''}. Fix the file first, then try again.`;
   }
 
   /**
@@ -3684,11 +3785,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     payload: { relationships: Array<RelationshipKey & { stored?: RelationshipKey }> },
   ): Promise<void> {
-    const keys = payload.relationships
-      .filter((k) => isValidRelationshipEnds(k))
-      // The stored ends only ever name the same link as the drawn ones.
-      .map((k) => (isValidRelationshipEnds(k.stored) && sameLink(k.stored, k) ? k.stored : k));
-    if (keys.length === 0) return;
+    // Validated at the message boundary (`relationshipPayloadError`): every
+    // entry has valid ends, and its stored ends, when given, name the same link.
+    const keys = payload.relationships.map((k) => k.stored ?? k);
     const label = keys.length === 1 ? 'relationship' : 'relationships';
     await this.commitRelationship(document, webview, { kind: 'remove', stored: keys }, 'remove', label);
   }
@@ -3699,8 +3798,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; stored?: RelationshipKey },
   ): Promise<void> {
+    const drawn: RelationshipEnds = {
+      fromModel: payload.fromModel, fromColumn: payload.fromColumn, toModel: payload.toModel, toColumn: payload.toColumn,
+    };
     await this.commitRelationship(
-      document, webview, { kind: 'update', stored: payload.stored ?? payload, cardinality: payload.cardinality }, 'update', 'relationship',
+      document, webview, { kind: 'update', stored: payload.stored ?? payload, drawn, cardinality: payload.cardinality }, 'update', 'relationship',
     );
   }
 
@@ -3997,10 +4099,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      // Use yml relationship tests as primary, fall back to manifest
-      const ymlRelTests = ymlData.relationshipTests;
-      const manifestRelTests = this.manifestService.getRelationshipTests();
-      const relationshipTests = ymlRelTests.length > 0 ? ymlRelTests : manifestRelTests;
+      // The yml and manifest relationship tests together, with the unique
+      // tests: the same reading the v5 path stores (one record per link,
+      // turned round to its many side — a test declared on the dimension is
+      // the fact's many-to-one — names matched without case).
+      const tests = dbtTestsOf(ymlData, manifest);
 
       await this.applyDomainEdit(
         document,
@@ -4040,22 +4143,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           });
 
           const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
-          const modelNames = new Set(models.map((m) => m.name as string));
-
-          for (const test of relationshipTests) {
-            if (!sameName(test.fromModel, payload.modelName) && !sameName(test.toModel, payload.modelName)) continue;
-            if (!modelNames.has(test.fromModel) || !modelNames.has(test.toModel)) continue;
-            // The same link either way round, without case, is already drawn (#133).
-            const alreadyExists = relationships.some((r) => isWellFormedRelationship(r) && sameLink(r, test));
-            if (!alreadyExists) {
-              relationships.push({
-                fromModel: test.fromModel, fromColumn: test.fromColumn,
-                toModel: test.toModel, toColumn: test.toColumn,
-                cardinality: 'many-to-one' as const,
-              });
-            }
-          }
-          sec.relationships = relationships;
+          const modelNames = models.map((m) => m.name).filter((n): n is string => typeof n === 'string');
+          // Deduped against what the domain already draws, either way round, without case (#133).
+          const added = relationshipsForAddedModels(
+            modelNames,
+            [payload.modelName],
+            tests.relationshipTests,
+            tests.unique,
+            relationships.filter(isWellFormedRelationship) as unknown as Relationship[],
+          );
+          sec.relationships = [...relationships, ...added];
 
           const updatedPositions = { ...existingPositions, [payload.modelName]: newPosition };
           sec.models = models;

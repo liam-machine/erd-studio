@@ -106,6 +106,23 @@ describe('relationships are synced entry by entry (R6)', () => {
     expect(reread.relationshipIssues?.map((i) => i.reason)).toEqual(['not-a-mapping', 'missing-endpoint']);
   });
 
+  it('a target whose role is longer than the canvas shows keeps the role exactly as written', () => {
+    const long = 'the date the order was shipped from the warehouse to the customer address on file';
+    write('fct_order', FILE.replace('    role: ship date', `    role: ${long}`));
+    const model = read('fct_order');
+    expect(model.relationshipIssues?.map((i) => i.reason)).toContain('role-too-long');
+    const entry = model.relationships![1];
+    expect(entry.role).toHaveLength(60);
+    // ⇄ / cardinality change: the reader's shortened role comes back with the edit.
+    model.relationships![1] = { ...entry, cardinality: 'one-to-one' };
+    const text = service.serializeModel(model, undefined, { relationshipTargets: [1] });
+    expect(text).toContain(`role: ${long}`);
+    expect(text).toContain('cardinality: one-to-one');
+    // A different role is written.
+    model.relationships![1] = { ...entry, role: 'shipped' };
+    expect(service.serializeModel(model, undefined, { relationshipTargets: [1] })).toContain('role: shipped\n');
+  });
+
   it('a new entry is appended; a removed readable one goes; the order of the rest holds', () => {
     write('fct_order', FILE);
     const model = read('fct_order');
@@ -134,6 +151,41 @@ describe('relationships are synced entry by entry (R6)', () => {
     expect(service.serializeModel({ ...model, description: 'x' })).toContain('relationships:\n  customer: dim_customer\n');
     expect(() => service.serializeModel({ ...model, relationships: [{ fromColumn: 'a', toModel: 'b', toColumn: 'c', cardinality: 'many-to-one' }] }))
       .toThrow('fct_order.yml: "relationships:" is not a list');
+  });
+
+  it('a relationships: that is an alias of a list elsewhere: other edits save, a change to the list is refused by name', () => {
+    const aliased = 'name: fct\nx-shared: &r\n  - {fromColumn: d, toModel: dim, toColumn: d, cardinality: many-to-one}\nrelationships: *r\n';
+    write('fct', aliased);
+    const model = read('fct');
+    expect(model.relationships).toEqual([{ fromColumn: 'd', toModel: 'dim', toColumn: 'd', cardinality: 'many-to-one' }]);
+    const text = service.serializeModel({ ...model, description: 'new' });
+    expect(text).toContain('relationships: *r');
+    expect(text).toContain('description: new');
+    expect(() => service.serializeModel({ ...model, relationships: [] }))
+      .toThrow('fct.yml: "relationships:" is an alias (*r) of a list written elsewhere in the file');
+  });
+
+  it('removing an entry whose anchor the file uses elsewhere is refused, naming the file and the entry', () => {
+    const anchored = [
+      'name: fct',
+      'relationships:',
+      '  - &base {fromColumn: d, toModel: dim, toColumn: d, cardinality: many-to-one}',
+      'meta:',
+      '  copy: *base',
+      '',
+    ].join('\n');
+    write('fct', anchored);
+    const model = read('fct');
+    expect(() => service.serializeModel({ ...model, relationships: [] }))
+      .toThrow('fct.yml, relationship entry 1 is marked &base and used elsewhere in the file (*base)');
+    // An edit that keeps the entry is fine.
+    expect(service.serializeModel({ ...model, description: 'x' })).toContain('&base');
+  });
+
+  it('removing an anchored entry nothing else uses is fine', () => {
+    write('fct', 'name: fct\nrelationships:\n  - &base {fromColumn: d, toModel: dim, toColumn: d, cardinality: many-to-one}\n');
+    const model = read('fct');
+    expect(service.serializeModel({ ...model, relationships: [] })).not.toContain('relationships');
   });
 
   it('a flow-style list that did not change keeps its flow style', () => {

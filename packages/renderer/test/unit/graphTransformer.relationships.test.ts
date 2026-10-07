@@ -46,6 +46,12 @@ describe('nodeIdResolver', () => {
 });
 
 describe('transformDomain relationship edges (#133)', () => {
+  it('marks an edge with issues on an older-format (v4) diagram, so its badge points at the migration', () => {
+    const rel: DisplayRelationship = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', issues: ['REL001'] };
+    expect(fkEdges(domain([rel], { schemaVersion: 4 }))[0].data!.olderFormat).toBe(true);
+    expect(fkEdges(domain([rel]))[0].data!.olderFormat).toBeUndefined();
+    expect(fkEdges(domain([{ ...rel, issues: undefined }], { schemaVersion: 4 }))[0].data!.olderFormat).toBeUndefined();
+  });
   it('draws a relationship whose model names differ from the nodes only in case (D3)', () => {
     const edges = fkEdges(domain([
       { fromModel: 'FCT_ORDER', fromColumn: 'customer_key', toModel: 'Dim_Customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
