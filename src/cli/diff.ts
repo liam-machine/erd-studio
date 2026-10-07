@@ -564,13 +564,16 @@ function integrityFor(
   findings: readonly RelationshipFinding[] | null,
   file: string,
   modelNames: readonly string[],
+  olderFormat = false,
 ): RelationshipFinding[] {
   if (!findings || findings.length === 0) return [];
-  const modelFiles = modelNames
+  // A v4 diagram never draws the library's relationships: only its own file's
+  // findings concern it (the canvas applies the same rule).
+  const modelFiles = olderFormat ? [] : modelNames
     .map((name) => ctx.logicalModelService.resolveModelPath(name))
     .filter((p): p is string => p !== null && fs.existsSync(p))
     .map((p) => relPath(ctx.root, p));
-  return findingsForDomain(findings, { filePath: relPath(ctx.root, file), models: modelNames, modelFiles });
+  return findingsForDomain(findings, { filePath: relPath(ctx.root, file), models: modelNames, modelFiles, olderFormat });
 }
 
 /**
@@ -616,7 +619,7 @@ export function diffDomain(
       unreadableModelFiles: [],
       modelsWithoutColumns: [],
       fixes: [],
-      integrity: integrityFor(ctx, projectFindings, file, inlineNames),
+      integrity: integrityFor(ctx, projectFindings, file, inlineNames, true),
       needsMigration: true,
     };
   }

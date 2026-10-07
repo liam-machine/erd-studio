@@ -239,7 +239,16 @@ function decide(vx: Verdict, vy: Verdict): Decision {
 const sameDecision = (a: Decision, b: Decision): boolean =>
   a.kind === b.kind && a.cardinality === b.cardinality && (a.kind === 'ambiguous' || (b.kind === 'decided' && a.fromIsX === b.fromIsX));
 
-const endLabel = (e: DirectionEnd): string => `${e.model}.${e.column}`.toLowerCase();
+const exactLabel = (e: DirectionEnd): string => `${e.model}.${e.column}`;
+const endLabel = (e: DirectionEnd): string => exactLabel(e).toLowerCase();
+
+/** Whether `a` comes first in the fixed order: lowercased label, then the exact one. */
+function endSortsFirst(a: DirectionEnd, b: DirectionEnd): boolean {
+  const la = endLabel(a);
+  const lb = endLabel(b);
+  if (la !== lb) return la < lb;
+  return exactLabel(a) <= exactLabel(b);
+}
 
 /**
  * Decide which way a relationship between two columns points, from key flags
@@ -259,8 +268,10 @@ const endLabel = (e: DirectionEnd): string => `${e.model}.${e.column}`.toLowerCa
  *   are then reported in a fixed order, not the order they were passed in.
  */
 export function resolveDirection(a: EndEvidence, b: EndEvidence): DirectionVerdict {
-  // Fixed order first, so the verdict cannot depend on argument order.
-  const [ea, eb] = endLabel(a) <= endLabel(b) ? [a, b] : [b, a];
+  // Fixed order first, so the verdict cannot depend on argument order. Two
+  // ends that differ only in case (`Dd.id`, `DD.id`) tie on the lowercased
+  // label and are then ordered by the exact one.
+  const [ea, eb] = endSortsFirst(a, b) ? [a, b] : [b, a];
   const endOf = (e: EndEvidence): DirectionEnd => ({ model: e.model, column: e.column });
   const rx = readEnd(ea, endOf(eb));
   const ry = readEnd(eb, endOf(ea));

@@ -627,3 +627,68 @@ describe('doctor — never "Ready" when the relationship checks did not cover ev
     expect(r.nextSteps.map((s) => s.id)).not.toContain('ready');
   });
 });
+
+describe('check — the same gate the canvas and diff load through (#133 review)', () => {
+  const models = { 'dim_customer.yml': DIM_CUSTOMER, 'fct_order.yml': fact('  []\n') };
+  const ENTRY = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+
+  it('a domain file with no numeric schemaVersion, or a newer one, is named as unchecked and fails the run', async () => {
+    const { schemaVersion: _drop, ...noVersion } = domain(['fct_order', 'dim_customer'], [ENTRY]) as Record<string, unknown>;
+    const root = makeProject(models, {
+      'gold/nover.json': noVersion,
+      'gold/future.json': { ...(domain(['fct_order', 'dim_customer'], [{ ...ENTRY, toColumn: 'nope' }]) as Record<string, unknown>), schemaVersion: 99 },
+    });
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.clean).toBe(false);
+    expect(result.checked.domains).toBe(0);
+    expect(result.findings).toEqual([]);
+    expect(result.unchecked).toEqual([
+      { file: '.erd-studio/gold/future.json', reason: expect.stringMatching(/schemaVersion 99, newer than this version of ERD Studio reads \(up to 5\)/), kind: 'domain' },
+      { file: '.erd-studio/gold/nover.json', reason: expect.stringMatching(/no numeric "schemaVersion"/), kind: 'domain' },
+    ]);
+  });
+
+  it('a v4 record\'s source.index is its place in the file, counting an entry the reader skipped', () => {
+    const root = makeProject(models, {
+      'silver/bob.json': {
+        schemaVersion: 4, domain: 'bob', layer: 'silver',
+        logical: {
+          models: [{ name: 'a', columns: [{ name: 'b_id', dataType: 'INT' }] }, { name: 'b', columns: [{ name: 'id', dataType: 'INT' }] }],
+          relationships: [
+            { fromModel: 'a', toModel: 'b', toColumn: 'id', cardinality: 'many-to-one' },
+            { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id', cardinality: 'many-to-one' },
+            { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id', cardinality: 'one-to-one' },
+          ],
+        },
+      },
+    });
+    const { result } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    const dup = result.findings.find((f) => f.code === 'REL001')!;
+    expect(dup.message).toMatch(/entry 2; .*entry 3\)/);
+    expect(dup.records!.map((r) => r.source.index)).toEqual([1, 2]);
+  });
+
+  it('diff gives a v4 diagram only its own file\'s findings, never the model library\'s', async () => {
+    const root = makeProject({
+      'dim_customer.yml': `${DIM_CUSTOMER}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: one-to-many\n  - { fromColumn: customer_key }\n`,
+      'fct_order.yml': fact('  []\n'),
+    }, {
+      'gold/finance.json': {
+        schemaVersion: 4, domain: 'finance', layer: 'gold',
+        logical: {
+          models: [{ name: 'dim_customer', columns: [{ name: 'customer_key', dataType: 'INT' }] }, { name: 'fct_order', columns: [{ name: 'customer_key', dataType: 'INT' }] }],
+          relationships: [{ ...ENTRY, toColumn: 'nope' }],
+        },
+      },
+    });
+    const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
+    const all = runCheck({ project: root, semanticDir: '.erd-studio' }).result.findings.map((f) => f.code).sort();
+    expect(all).toEqual(['REL002', 'REL004', 'REL008']);
+    const { result } = runDiff(ctx, { domains: ['.erd-studio/gold/finance.json'], cwd: root });
+    const d = result.domains[0];
+    expect(d.needsMigration).toBe(true);
+    expect(d.integrity.map((f) => f.code)).toEqual(['REL004']);
+    expect(d.integrity.every((f) => f.files.includes('.erd-studio/gold/finance.json'))).toBe(true);
+  });
+});

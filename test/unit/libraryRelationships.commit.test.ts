@@ -156,6 +156,30 @@ describe('planRelationshipCommit — library mode', () => {
     expect(untouched.relationships).toBeUndefined();
   });
 
+  it('markKey refuses a model that already has a primary key, leaving every model untouched (#133 review)', () => {
+    const fct = FCT();
+    const dim = { ...DIM(), columns: [col('customer_key', { isPrimaryKey: true }), col('id')] };
+    const snapshot = JSON.stringify([fct, dim]);
+    expect(() => plan('library', {
+      kind: 'add',
+      rel: { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'id', cardinality: 'many-to-one' },
+      markKey: { model: 'dim_customer', column: 'id' },
+    }, [fct, dim])).toThrow("Can't mark dim_customer.id as dim_customer's key: dim_customer already has a primary key (customer_key). Re-open the dialog and try again.");
+    expect(JSON.stringify([fct, dim])).toBe(snapshot);
+  });
+
+  it('markKey refuses the many side\'s foreign key, but takes either end of a one-to-one (#133 review)', () => {
+    const fct = { ...FCT(), columns: [col('order_key'), col('customer_key')] };
+    const dim = { ...DIM(), columns: [col('customer_key')] };
+    expect(() => plan('library', { kind: 'add', rel: { ...EDGE, cardinality: 'many-to-one' }, markKey: { model: 'fct_order', column: 'customer_key' } }, [fct, dim]))
+      .toThrow("Can't mark fct_order.customer_key as fct_order's key: it is the many side of this relationship");
+    expect(fct.columns.some((c) => c.isPrimaryKey)).toBe(false);
+    expect(fct.relationships).toBeUndefined();
+
+    plan('library', { kind: 'add', rel: { ...EDGE, cardinality: 'one-to-one' }, markKey: { model: 'fct_order', column: 'customer_key' } }, [fct, dim]);
+    expect(fct.columns[1].isPrimaryKey).toBe(true);
+  });
+
   it('names other domain files still drawing a removed link from their own copy', () => {
     const result = planRelationshipCommit({
       mode: 'library',
@@ -244,6 +268,22 @@ describe('findings the canvas shows', () => {
     expect(toDisplayRelationshipIssues(mine).map((i) => Object.keys(i).sort())).toEqual([
       ['code', 'link', 'message', 'severity'], ['code', 'link', 'message', 'severity'],
     ]);
+  });
+
+  it('a v4 diagram gets only its own file\'s findings, never the library\'s it does not draw (#133 review)', () => {
+    const findings = checkRelationships({
+      libraryModels: libraryModels(),
+      domains: [{
+        label: 'gold/legacy', filePath: 'gold/legacy.json', mode: 'domain', olderFormat: true,
+        models: [FCT(), DIM()],
+        relationships: [{ ...EDGE, toColumn: 'nope', cardinality: 'many-to-one' }],
+      }],
+    });
+    const v4 = findingsForDomain(findings, {
+      filePath: 'gold/legacy.json', models: ['fct_order', 'dim_customer'], modelFiles: ['lm/fct_order.yml', 'lm/dim_customer.yml'], olderFormat: true,
+    });
+    expect(v4.map((f) => f.code)).toEqual(['REL004']);
+    expect(v4.every((f) => f.files.includes('gold/legacy.json'))).toBe(true);
   });
 
   it('counts relationships, not findings: one link missing both its columns is one relationship', () => {

@@ -141,7 +141,7 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<voi
   const analysis = analyseRepair(before, { moveDomainsToLibrary: mode.move });
   if (analysis.tasks.length === 0) {
     telemetry.feature('relMoveNothingToMove');
-    await reportNothingToDo(before, analysis.unreadableEntries, analysis.blocked, analysis.outOfReach, mode);
+    await reportNothingToDo(before, analysis.unreadableEntries, [...analysis.blocked, ...analysis.noHome], analysis.outOfReach, mode);
     return;
   }
   // Checked before asking anything, so nobody settles conflicts only to be
@@ -405,6 +405,9 @@ async function reportDone(snapshot: RepairSnapshot, plan: RepairPlan, mode: Runn
     text = `${REPAIR_TITLE}: changed ${plural(plan.changes.length, 'file')}. ${fixes.join(' ')}` +
       (leftCount > 0 ? ` ${leftCount} left as ${leftCount === 1 ? 'it was' : 'they were'}; run Repair Relationships… again to settle ${leftCount === 1 ? 'it' : 'them'}.` : '');
   }
+  // Name what stayed, not only how many: "run again" does not settle a
+  // relationship whose home model has no readable file.
+  if (plan.left.length > 0) text += ` Left as it is: ${plan.left.slice(0, 2).join(' ')}${plan.left.length > 2 ? ` …and ${plan.left.length - 2} more.` : ''}`;
   if (plan.outOfReach.length > 0) text += ` Not changed: ${plan.outOfReach.slice(0, 2).join(' ')}${plan.outOfReach.length > 2 ? ` …and ${plan.outOfReach.length - 2} more.` : ''}`;
   if (plan.unreadableEntries.length > 0) text += ` ${describeUnreadableEntries(plan.unreadableEntries)}`;
   await showWithOpenFile(text.trim(), snapshot, plan.unreadableEntries);

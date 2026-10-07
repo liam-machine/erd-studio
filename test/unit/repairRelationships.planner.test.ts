@@ -892,3 +892,145 @@ describe('review findings (#133): nothing lost, nothing rolled back for somethin
     expect(JSON.parse(p.read('gold/orders.json')).logical.relationships).toEqual([]);
   });
 });
+
+describe('review findings (#133): the move never plans what it cannot store and draw', () => {
+  const good = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+  const ghost = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_ghost', toColumn: 'ghost_key', cardinality: 'many-to-one' };
+  const base = (a: unknown[], b: unknown[] = a): Record<string, string> => ({
+    'logical-models/dim_customer.yml': DIM,
+    'logical-models/fct_order.yml': FCT_HEAD + '\n',
+    'gold/a.json': domainJson('a', ['fct_order', 'dim_customer', 'dim_ghost'], a),
+    'gold/b.json': domainJson('b', ['fct_order', 'dim_customer', 'dim_ghost'], b),
+  });
+
+  it('a link to a model with no readable file is left up front, and the good move goes through', async () => {
+    const p = project(base([good, ghost]));
+    const before = readRepairSnapshot(p.deps);
+    expect([...linksTheMoveStores(before)]).toHaveLength(1);
+    const run = await repair(p, [], { moveDomainsToLibrary: true });
+    expect(run.questions).toEqual([]);
+    expect(run.problems).toEqual([]);
+    expect(run.plan!.counts.moved).toBe(1);
+    expect(run.plan!.left).toEqual([
+      expect.stringMatching(/^fct_order\.date_key → dim_ghost\.ghost_key: left in gold\/a\.json — it points at dim_ghost, which has no readable file in logical-models\//),
+    ]);
+    expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([ghost]);
+    expect(p.read('logical-models/fct_order.yml')).toContain('toModel: dim_customer');
+  });
+
+  it('a link with an empty column is left up front: a model file cannot hold it', async () => {
+    const empty = { ...good, fromColumn: 'date_key', toColumn: '' };
+    const p = project(base([good, empty], [good]));
+    expect([...linksTheMoveStores(readRepairSnapshot(p.deps))]).toHaveLength(1);
+    const run = await repair(p, [], { moveDomainsToLibrary: true });
+    expect(run.problems).toEqual([]);
+    expect(run.plan!.counts.moved).toBe(1);
+    expect(run.plan!.left).toEqual([expect.stringMatching(/its toColumn is empty, which a model file cannot hold/)]);
+    expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([empty]);
+  });
+
+  it('a single diagram relationship whose from-model has no readable file is named as left, never passed over', async () => {
+    const stray = { fromModel: 'stg_x', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT_HEAD + '\n',
+      'gold/a.json': domainJson('a', ['fct_order', 'dim_customer', 'stg_x'], [good, stray]),
+      'gold/b.json': domainJson('b', ['fct_order', 'dim_customer'], [good]),
+    });
+    const run = await repair(p, [], { moveDomainsToLibrary: true });
+    expect(run.problems).toEqual([]);
+    expect(run.plan!.counts).toMatchObject({ moved: 1, left: 1, noHome: 1 });
+    expect(run.plan!.left).toEqual([
+      'stg_x.customer_key → dim_customer.customer_key: stg_x has no readable file in logical-models/, so it stays where it is.',
+    ]);
+    expect(describeRepairPlan(run.plan!)).toContain('stg_x has no readable file in logical-models/');
+    expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([stray]);
+  });
+
+  it('copies that disagree with no home are not asked about, and count as left, never as settled', async () => {
+    const stray = { fromModel: 'stg_x', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT_HEAD + '\n',
+      'gold/a.json': domainJson('a', ['fct_order', 'dim_customer', 'stg_x'], [good, stray]),
+      'gold/b.json': domainJson('b', ['fct_order', 'dim_customer', 'stg_x'], [good, { ...stray, cardinality: 'many-to-many' }]),
+    });
+    const run = await repair(p, [(q) => q.options[0].id], { moveDomainsToLibrary: true });
+    expect(run.questions).toEqual([]);
+    expect(run.problems).toEqual([]);
+    expect(run.plan!.counts).toMatchObject({ moved: 1, settled: 0, left: 1, noHome: 1 });
+    expect(run.plan!.expect.userChanged.size).toBe(0);
+  });
+
+  it('a conflict picked, then left for want of a home, takes back its "settled" count', async () => {
+    // A library project with the link in two diagram files, from a model that
+    // has no file (REL003): the pick is asked, then the endpoint, and with
+    // "Leave as is" there the link has nowhere to go.
+    const stray = { fromModel: 'stg_x', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': `${FCT_HEAD}\nrelationships:\n  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
+      'gold/a.json': domainJson('a', ['dim_customer', 'stg_x'], [stray]),
+      'gold/b.json': domainJson('b', ['dim_customer', 'stg_x'], [{ ...stray, cardinality: 'many-to-many' }]),
+    });
+    expect(readRepairSnapshot(p.deps).mode).toBe('library');
+    const run = await repair(p, [(q) => q.options[0].id, LEAVE_AS_IS]);
+    expect(run.questions.map((q) => q.kind)).toEqual(['conflict', 'endpoint']);
+    expect(run.problems).toEqual([]);
+    expect(run.plan!.changes).toEqual([]);
+    expect(run.plan!.counts).toMatchObject({ settled: 0, left: 1 });
+    expect(run.plan!.left).toEqual(['stg_x.customer_key → dim_customer.customer_key: stg_x has no readable file in logical-models/, so it stays where it is.']);
+    expect(run.plan!.expect.userChanged.size).toBe(0);
+  });
+});
+
+describe('review findings (#133): repoint in a per-diagram project', () => {
+  it('offers the obvious repoint although another diagram holds that link: each diagram keeps its own copy', async () => {
+    const right = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT_HEAD + '\n',
+      'gold/a.json': domainJson('a', ['fct_order', 'dim_customer'], [right]),
+      'gold/b.json': domainJson('b', ['fct_order', 'dim_customer'], [{ ...right, toColumn: 'cust_key' }]),
+    });
+    expect(readRepairSnapshot(p.deps).mode).toBe('domain');
+    const run = await repair(p, [(q) => q.options.find((o) => o.id.startsWith('repoint:'))?.id ?? LEAVE_AS_IS]);
+    expect(run.questions[0].options.map((o) => o.label)).toEqual([
+      'Remove this relationship', 'Point it at dim_customer.customer_key', 'Leave as is',
+    ]);
+    expect(run.problems).toEqual([]);
+    expect(JSON.parse(p.read('gold/b.json')).logical.relationships).toEqual([right]);
+    expect(run.after!.findings).toEqual([]);
+  });
+
+  it('still never repoints onto a link the same diagram file already holds', async () => {
+    const right = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT_HEAD + '\n',
+      'gold/b.json': domainJson('b', ['fct_order', 'dim_customer'], [right, { ...right, toColumn: 'cust_key' }]),
+    });
+    const run = await repair(p);
+    expect(run.questions[0].options.map((o) => o.label)).toEqual(['Remove this relationship', 'Leave as is']);
+  });
+});
+
+describe('review findings (#133): never an all-clear over files it did not read', () => {
+  it('a model file with a YAML error is out of reach, named with its line', () => {
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': 'name: fct_order\ndescription: Orders: one: row\ncolumns: []\n',
+    });
+    const analysis = analyseRepair(readRepairSnapshot(p.deps));
+    expect(analysis.tasks).toEqual([]);
+    expect(analysis.outOfReach).toEqual([
+      expect.stringMatching(/^logical-models\/fct_order\.yml was not checked: it has a YAML error on line \d+, so the relationships in it were not looked at/),
+    ]);
+  });
+
+  it('a layers.json that cannot be used is out of reach', () => {
+    const p = project({ 'logical-models/dim_customer.yml': DIM });
+    const analysis = analyseRepair(readRepairSnapshot({ ...p.deps, layerService: { getLoadError: () => 'Invalid JSON' } }));
+    expect(analysis.outOfReach).toEqual([expect.stringMatching(/^layers\.json could not be used \(Invalid JSON\)/)]);
+  });
+});

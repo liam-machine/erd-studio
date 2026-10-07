@@ -260,6 +260,16 @@ describe('resolveDirection — direction from evidence (#133)', () => {
     }
   });
 
+  it('is symmetric for two ends that differ only in case', () => {
+    const lower = end(model('Dd', 'id'), 'id');
+    const upper = end(model('DD', 'id'), 'id');
+    expect(resolveDirection(lower, upper)).toEqual(resolveDirection(upper, lower));
+    expect(label(resolveDirection(lower, upper).from)).toBe('DD.id');
+    const lowerKey = end(model('Dd', 'id:P'), 'id');
+    const upperKey = end(model('DD', 'id:P'), 'id');
+    expect(resolveDirection(lowerKey, upperKey)).toEqual(resolveDirection(upperKey, lowerKey));
+  });
+
   it('explains a certain verdict in plain words', () => {
     const verdict = resolveDirection(end(dimCustomer, 'customer_key'), end(fctOrder, 'customer_key'));
     expect(verdict.reasons).toEqual([

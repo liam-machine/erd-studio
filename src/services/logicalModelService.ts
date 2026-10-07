@@ -547,6 +547,22 @@ export class LogicalModelService {
   }
 
   /**
+   * Write text already rendered by {@link serializeModelAt} (or a file's
+   * previous bytes, to put it back) to `filePath`, atomically and recorded
+   * as our own write. `filePath` must be a `.yml` inside logical-models/.
+   */
+  writeModelText(filePath: string, content: string): void {
+    const modelsDir = path.resolve(this.modelsDir);
+    const resolved = path.resolve(filePath);
+    const relative = path.relative(modelsDir, resolved);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !resolved.endsWith('.yml')) {
+      throw new Error(`Refusing to write ${filePath}: not a model file in logical-models/.`);
+    }
+    this.ensureDir(resolved);
+    this.writeAtomic(resolved, content);
+  }
+
+  /**
    * Produce the full YAML text for a model: the existing document at
    * `filePath` edited in place when it can be parsed, otherwise a fresh
    * document generated from the model.

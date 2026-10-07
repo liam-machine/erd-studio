@@ -308,6 +308,20 @@ describe('Repair Relationships… — problems it cannot reach are never an all-
   });
 });
 
+describe('Repair Relationships… — a model file it could not read is never an all-clear (#133 review)', () => {
+  it('names the file and its line instead of "nothing to repair"', async () => {
+    f = fixture({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': 'name: fct_order\ndescription: Orders: one: row\ncolumns: []\n',
+    });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await f.run();
+    expect(texts(info)).toHaveLength(1);
+    expect(texts(info)[0]).not.toContain('every relationship is stored once');
+    expect(texts(info)[0]).toMatch(/^Repair Relationships: nothing it can change here\. logical-models\/fct_order\.yml was not checked: it has a YAML error on line \d+/);
+  });
+});
+
 describe('Repair Relationships… — relationships it must leave for the user are all named', () => {
   it('never an all-clear while relationships are left as they are, and none goes unmentioned', async () => {
     const cols = ['c1', 'c2', 'c3', 'c4'];

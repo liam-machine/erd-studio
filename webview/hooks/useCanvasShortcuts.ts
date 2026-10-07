@@ -38,27 +38,32 @@ function fkEdgeId(r: RelationshipKey): string {
 }
 
 /**
- * Resolve selected edge ids to relationship keys, dropping only the edges the
- * model batch really cascades: one touching a model being deleted whose drawn
- * copy is this domain file's own (`removeModels` filters the domain file's
- * `logical.relationships`). A relationship drawn from the model library
- * (`source.kind === 'library'`) survives removing a model from a diagram by
- * design, so a line the user selected for deletion is sent, and goes from
- * the library too — never kept without a word.
+ * Resolve selected edge ids to relationship keys for a batch delete. An edge
+ * touching a model the batch deletes is left out unless the user picked that
+ * line themselves (`pickedEdges`: clicked or Shift+clicked):
+ *
+ * - a domain-file copy goes with its model anyway (`removeModels` filters the
+ *   domain file's `logical.relationships`);
+ * - a model-library relationship survives removing a model from a diagram by
+ *   design — other diagrams draw it. React Flow's box selection selects every
+ *   line touching a boxed model, so such a line is no request to delete it
+ *   from the library; only a line the user picked is sent, and then it goes
+ *   from the library too.
  */
 export function selectedEdgesToRelationships(
   edgeIds: string[],
   relationships: ReadonlyArray<RelationshipKey & { stored?: StoredRelationshipEnds; source?: { kind: string } }>,
   deletedModels: string[],
+  pickedEdges: readonly string[] = [],
 ): Array<RelationshipKey & { stored?: StoredRelationshipEnds }> {
   const deleted = new Set(deletedModels.map((m) => m.toLowerCase()));
+  const picked = new Set(pickedEdges);
   const result: Array<RelationshipKey & { stored?: StoredRelationshipEnds }> = [];
   for (const edgeId of edgeIds) {
     const rel = relationships.find((r) => fkEdgeId(r) === edgeId);
     if (!rel) continue;
-    const cascades = rel.source?.kind !== 'library'
-      && (deleted.has(rel.fromModel.toLowerCase()) || deleted.has(rel.toModel.toLowerCase()));
-    if (cascades) continue;
+    const touchesDeleted = deleted.has(rel.fromModel.toLowerCase()) || deleted.has(rel.toModel.toLowerCase());
+    if (touchesDeleted && (rel.source?.kind !== 'library' || !picked.has(edgeId))) continue;
     // The ends as drawn plus, when known, as stored on disk (#133).
     result.push(relationshipTarget(rel));
   }
@@ -263,12 +268,14 @@ export function useCanvasShortcuts(): void {
             post({ type: 'removeAnnotations', payload: { ids: selectedAnnotationIds } });
           }
 
-          // Skip edges the model batch cascades (domain-file copies only;
-          // a library relationship is removed explicitly).
+          // Skip edges the model batch cascades, and model-library lines a
+          // box selection pulled in with their model (only a line the user
+          // picked themselves is deleted from the library).
           const relationships = selectedEdgesToRelationships(
             selectedEdges,
             domain.relationships,
             selectedModelNames,
+            s.pickedEdges,
           );
           if (relationships.length > 0) {
             post({ type: 'removeRelationships', payload: { relationships } });
@@ -277,6 +284,7 @@ export function useCanvasShortcuts(): void {
           s.selectNode(null);
           s.selectAnnotation(null);
           s.setSelectedEdges([]);
+          s.clearPickedEdges();
           return;
         }
 

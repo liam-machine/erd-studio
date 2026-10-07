@@ -57,7 +57,7 @@ import {
 } from '@erd-studio/core';
 import { setDomainRelationships, setYamlRelationships } from './minimalEdits';
 import { usesLibraryRelationships } from './libraryRelationships';
-import { detectDomainFormat } from '../types/semantic';
+import { CURRENT_SCHEMA_VERSION, detectDomainFormat } from '../types/semantic';
 import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 import type { DomainService } from './domainService';
 import type { LogicalModelService } from './logicalModelService';
@@ -102,6 +102,8 @@ export interface OlderFormatDomain {
   /** The inline models, without any library relationships. */
   models: SemanticModel[];
   relationships: Relationship[];
+  /** Position of each of `relationships` in the file's `logical.relationships` array. */
+  rawIndexes: number[];
   readIssues: RelationshipReadIssue[];
   stubColumns: string[];
 }
@@ -173,7 +175,17 @@ export function scanDomainFiles(domainService: DomainScanSource, workspaceRoot: 
       continue;
     }
     const rawRelationships = (raw as { logical?: { relationships?: unknown } } | null)?.logical?.relationships;
+    // Counted as `DomainService.countDomainFileRelationships` counts — every
+    // file that parses — so the project's mode is decided the same way here
+    // as everywhere else, even for a file the gate below turns away.
     if (Array.isArray(rawRelationships)) scan.domainFileRelationshipCount += rawRelationships.length;
+    // The gate the canvas and `diff` load through (`validateDomainDocument`):
+    // a file they refuse is never checked, counted clean, repaired or moved.
+    const refused = refusedDomainDocument(raw);
+    if (refused) {
+      scan.unchecked.push({ label, filePath: summary.filePath, reason: refused });
+      continue;
+    }
     const format = detectDomainFormat(raw);
     if (format !== 'v5' && format !== 'v4') {
       scan.unchecked.push({
@@ -218,11 +230,31 @@ export function scanDomainFiles(domainService: DomainScanSource, workspaceRoot: 
       // A v4 domain carries its models inline; they hold no library relationships.
       models: models.map(({ relationships: _r, relationshipIssues: _i, ...m }) => m as SemanticModel),
       relationships: entries.relationships,
+      rawIndexes: entries.rawIndexes,
       readIssues: entries.issues,
       stubColumns,
     });
   }
   return scan;
+}
+
+/**
+ * Why the canvas and `diff` would refuse a parsed domain document before
+ * looking at its format — the object and `schemaVersion` checks of core's
+ * `validateDomainDocument` — as one plain sentence, or undefined.
+ */
+function refusedDomainDocument(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return 'it does not hold a JSON object, so ERD Studio cannot open it';
+  }
+  const version = (raw as { schemaVersion?: unknown }).schemaVersion;
+  if (typeof version !== 'number') {
+    return `it has no numeric "schemaVersion", so ERD Studio cannot open it — add "schemaVersion": ${CURRENT_SCHEMA_VERSION}`;
+  }
+  if (version > CURRENT_SCHEMA_VERSION) {
+    return `it has schemaVersion ${version}, newer than this version of ERD Studio reads (up to ${CURRENT_SCHEMA_VERSION}) — update the extension`;
+  }
+  return undefined;
 }
 
 /** Every readable v5 domain file's models and `logical.relationships`. */
@@ -283,6 +315,11 @@ export interface RepairSnapshot {
   olderFormat: Array<OlderFormatDomain & { file: string }>;
   /** Domain files that could not be checked at all. */
   unchecked: Array<UncheckedDomainFile & { file: string }>;
+  /**
+   * Why layers.json could not be used, when it could not: a domain file in a
+   * layer folder it names may not have been read at all.
+   */
+  layersError?: string;
   /** `checkRelationships` over all of it, files named as `file`. */
   findings: RelationshipFinding[];
 }
@@ -292,6 +329,8 @@ export interface RepairSnapshotDeps {
   semanticDir: string;
   domainService: Pick<DomainService, 'listDomains' | 'countDomainFileRelationships'>;
   logicalModelService: Pick<LogicalModelService, 'relationshipCheckModels' | 'invalidateCache' | 'getModelsDir'>;
+  /** The layer config, for its load error (as the CLI's `check` reports it). */
+  layerService?: { getLoadError(): string | null };
 }
 
 /** A file named relative to the ERD data directory (the parent of `logical-models/`), with forward slashes. */
@@ -354,6 +393,7 @@ export function readRepairSnapshot(deps: RepairSnapshotDeps): RepairSnapshot {
     domains: toCheckDomains(scan, mode, label),
     unreadableModels: unreadable,
   });
+  const layersError = deps.layerService?.getLoadError() ?? undefined;
   return {
     mode,
     modelFiles,
@@ -361,6 +401,7 @@ export function readRepairSnapshot(deps: RepairSnapshotDeps): RepairSnapshot {
     unreadable,
     olderFormat: scan.v4.map((d) => ({ ...d, file: label(d.filePath) })),
     unchecked: scan.unchecked.map((d) => ({ ...d, file: label(d.filePath) })),
+    ...(layersError ? { layersError } : {}),
     findings,
   };
 }
@@ -449,8 +490,18 @@ interface LinkTask {
 
 export interface RepairAnalysis {
   tasks: LinkTask[];
-  /** Relationships with something to fix but an unreadable copy, left as they are. */
+  /**
+   * Relationships with something to fix that this command cannot store, left
+   * as they are, one line each: an unreadable copy, an end only a diagram's
+   * stub columns allow, or a model-library copy that could not be read back
+   * or drawn (an end model with no readable file, an empty column).
+   */
   blocked: string[];
+  /**
+   * Move: domain-file relationships left where they are because their home
+   * (from) model has no readable file in logical-models/, one line each.
+   */
+  noHome: string[];
   /** REL008 findings: entries the reader could not read in full, left for the user (with their line). */
   unreadableEntries: RelationshipFinding[];
   /**
@@ -805,11 +856,23 @@ export function analyseRepair(snapshot: RepairSnapshot, options: RepairOptions =
 
   const tasks: LinkTask[] = [];
   const blocked: string[] = [];
+  const noHome: string[] = [];
   const involved = new Set<string>();
   let questionCount = 0;
   for (const task of candidates) {
     const meanings = distinctMeanings(find, task.records);
     const r = meanings[0].rel;
+    // A domain-file relationship bound for the model library with no endpoint
+    // question that could change its ends (the move asks none): when no
+    // meaning the user could pick has a home model file, it stays where it is
+    // and is said — a single copy as much as several — and nobody is asked
+    // to choose between meanings none of which can be stored.
+    const unanswerable = task.scope === 'library' && task.moving
+      && !task.findings.some((f) => f.code === 'REL003' || f.code === 'REL004');
+    if (unanswerable && !meanings.some((m) => find(m.rel.fromModel)) && !task.records.some((rec) => rec.untouchable)) {
+      noHome.push(`${describeEnds(r)}: ${r.fromModel} has no readable file in logical-models/, so it stays where it is.`);
+      continue;
+    }
     const needsQuestion = meanings.length > 1 || task.findings.length > 0;
     const autoChange = needsQuestion ? false : wouldChange(find, task, r);
     if (!needsQuestion && !autoChange) continue;
@@ -828,6 +891,18 @@ export function analyseRepair(snapshot: RepairSnapshot, options: RepairOptions =
           `${describeEnds(r)}: left in ${stubbed.rec.file} — ${stubbed.what}, which only that diagram's stub columns allow, ` +
           'so a model-library copy would point at nothing. Add it to the model file first.',
         );
+        continue;
+      }
+    }
+    // The same relationship as a model-library record must be readable back
+    // and drawn where it is drawn now; when no meaning with a home can be, it
+    // is said now — never planned, written, found wrong and rolled back
+    // together with every good change of the run.
+    if (unanswerable) {
+      const problems = meanings.filter((m) => find(m.rel.fromModel)).map((m) => libraryCopyProblem(find, m.rel));
+      if (problems.every((p) => p !== null)) {
+        const where = task.records.find((rec) => rec.where === 'domain')!.file;
+        blocked.push(`${describeEnds(r)}: left in ${where} — ${problems[0]}. Fix it first.`);
         continue;
       }
     }
@@ -870,9 +945,18 @@ export function analyseRepair(snapshot: RepairSnapshot, options: RepairOptions =
     );
   }
   for (const d of snapshot.unchecked) outOfReach.push(`${d.file} was not checked: ${d.reason}.`);
+  // A model file that could not be read: none of its relationships were seen,
+  // so nothing about them may be reported as fine.
+  for (const u of snapshot.unreadable) {
+    outOfReach.push(`${u.file} was not checked: ${u.line !== undefined ? `it has a YAML error on line ${u.line}` : 'it could not be read'}, so the relationships in it were not looked at — fix it, then run this command again.`);
+  }
+  if (snapshot.layersError) {
+    outOfReach.push(`layers.json could not be used (${snapshot.layersError}), so diagrams in layer folders it names may not have been checked — fix it, then run this command again.`);
+  }
   return {
     tasks,
     blocked,
+    noHome,
     unreadableEntries: snapshot.findings.filter((f) => f.code === 'REL008'),
     outOfReach,
     involvedFiles: [...involved],
@@ -900,6 +984,24 @@ function stubDependentEnd(find: (name: string) => RepairModelFile | undefined, r
     if (columns.length > 0 && !columns.some((c) => lower(c.name) === lower(column))) {
       return `it uses ${found.name}.${column}, which ${found.name}'s model file does not list`;
     }
+  }
+  return null;
+}
+
+/**
+ * Why `rel`, stored as a model-library record in its from-model's file, could
+ * not be read back or drawn as it is drawn now, or null: a model file entry
+ * needs every end as non-empty text, and a diagram draws a library record
+ * only when its to-model has a readable file (core's `normaliseRelationships`).
+ */
+function libraryCopyProblem(find: (name: string) => RepairModelFile | undefined, rel: Relationship): string | null {
+  for (const [what, value] of [['fromColumn', rel.fromColumn], ['toModel', rel.toModel], ['toColumn', rel.toColumn]] as const) {
+    if (typeof value !== 'string' || value.trim() === '') {
+      return `its ${what} is empty, which a model file cannot hold`;
+    }
+  }
+  if (!find(rel.toModel)) {
+    return `it points at ${rel.toModel}, which has no readable file in logical-models/, so no diagram would draw a model-library copy`;
   }
   return null;
 }
@@ -957,7 +1059,31 @@ export async function planRelationshipRepair(
   analysis: RepairAnalysis = analyseRepair(snapshot, options),
 ): Promise<RepairPlan | null> {
   const find = libraryIndex(snapshot.modelFiles);
-  const allLinks = new Set(collectRecords(snapshot).map((r) => linkKey(r.rel)));
+  // Links already stored, for "Point it at …" never to make a duplicate. In a
+  // per-domain project each diagram file keeps its own copy, and copies in
+  // different diagram files are not duplicates (core's REL001): a record
+  // settled within one diagram file is checked against that file and the
+  // library only. Everything else is checked against every record.
+  const allLinks = new Set<string>();
+  const libraryLinks = new Set<string>();
+  const domainLinks = new Map<RepairDomainFile, Set<string>>();
+  for (const rec of collectRecords(snapshot)) {
+    const key = linkKey(rec.rel);
+    allLinks.add(key);
+    if (rec.where === 'library') libraryLinks.add(key);
+    else {
+      if (!domainLinks.has(rec.domain!)) domainLinks.set(rec.domain!, new Set());
+      domainLinks.get(rec.domain!)!.add(key);
+    }
+  }
+  const takenFor = (task: LinkTask): { has: (key: string) => boolean; add: (key: string) => void } => {
+    if (task.scope === 'domain' && snapshot.mode === 'domain') {
+      if (!domainLinks.has(task.domain!)) domainLinks.set(task.domain!, new Set());
+      const own = domainLinks.get(task.domain!)!;
+      return { has: (key) => own.has(key) || libraryLinks.has(key), add: (key) => { own.add(key); allLinks.add(key); } };
+    }
+    return { has: (key) => allLinks.has(key), add: (key) => { allLinks.add(key); } };
+  };
   const modelEdits = new Map<RepairModelFile, FileEdits>();
   const domainEdits = new Map<RepairDomainFile, FileEdits>();
   const editsFor = (rec: { modelFile?: RepairModelFile; domain?: RepairDomainFile }): FileEdits => {
@@ -972,8 +1098,9 @@ export async function planRelationshipRepair(
     rehomed: 0, respelled: 0, deduplicated: 0, domainCopiesRemoved: 0, moved: 0, settled: 0,
     removed: 0, repointed: 0, swapped: 0, left: 0, noHome: 0,
   };
-  const left: string[] = [...analysis.blocked];
-  counts.left += analysis.blocked.length;
+  const left: string[] = [...analysis.blocked, ...analysis.noHome];
+  counts.left += analysis.blocked.length + analysis.noHome.length;
+  counts.noHome += analysis.noHome.length;
   const gone: RepairPlan['expect']['gone'] = [];
   const userChanged = new Set<string>();
   const removedByUser = new Map<string, Set<number>>();
@@ -999,6 +1126,22 @@ export async function planRelationshipRepair(
     const settled = (): void => { gone.push(...taskGone); };
     const countsBefore = { ...counts };
     const leftBefore = left.length;
+    const taken = takenFor(task);
+    // What this task added to the run-wide sets, so a task that ends up left
+    // as it is takes nothing with it: no "settled as you picked" count for a
+    // link that did not change, no link verify stops checking.
+    const addedUserChanged: string[] = [];
+    const markUserChanged = (key: string): void => {
+      if (!userChanged.has(key)) { userChanged.add(key); addedUserChanged.push(key); }
+    };
+    const leaveTask = (reason: string, noHomeLeft = false): void => {
+      Object.assign(counts, countsBefore);
+      left.length = leftBefore;
+      for (const key of addedUserChanged) userChanged.delete(key);
+      left.push(reason);
+      counts.left++;
+      if (noHomeLeft) counts.noHome++;
+    };
 
     // --- 1. Which meaning (REL001, copies that disagree) --------------------
     let r = meanings[0].rel;
@@ -1013,7 +1156,7 @@ export async function planRelationshipRepair(
       }
       r = meanings[Number(answer.slice('meaning:'.length))].rel;
       userPicked = true;
-      userChanged.add(task.key);
+      markUserChanged(task.key);
       counts.settled++;
     }
 
@@ -1021,7 +1164,7 @@ export async function planRelationshipRepair(
     const endpointFinding = task.findings.find((f) => f.code === 'REL003' || f.code === 'REL004');
     const problem = endpointFinding ? missingEnd(find, r, task.scope === 'domain' ? task.domain : undefined) : null;
     if (endpointFinding && problem) {
-      const question = endpointQuestion(task, r, problem, endpointFinding, find, snapshot.modelFiles, allLinks);
+      const question = endpointQuestion(task, r, problem, endpointFinding, find, snapshot.modelFiles, taken);
       const answer = await ask(question, position());
       if (answer === undefined) return null;
       if (answer === 'remove') {
@@ -1033,7 +1176,7 @@ export async function planRelationshipRepair(
           if (!removedByUser.has(filePath)) removedByUser.set(filePath, new Set());
           removedByUser.get(filePath)!.add(rec.rawIndex);
         }
-        userChanged.add(task.key);
+        markUserChanged(task.key);
         expectGone(endpointFinding.code);
         if (task.records.length > 1) expectGone('REL001');
         counts.removed++;
@@ -1045,11 +1188,11 @@ export async function planRelationshipRepair(
         r = problem.side === 'from'
           ? { ...r, fromModel: model, fromColumn: column }
           : { ...r, toModel: model, toColumn: column };
-        userChanged.add(task.key);
-        userChanged.add(linkKey(r));
+        markUserChanged(task.key);
+        markUserChanged(linkKey(r));
         // Now stored: a later question must not offer it again (a duplicate
         // would only be caught after writing, and every answer thrown away).
-        allLinks.add(linkKey(r));
+        taken.add(linkKey(r));
         userPicked = true;
         expectGone(endpointFinding.code, task.key);
         counts.repointed++;
@@ -1066,7 +1209,7 @@ export async function planRelationshipRepair(
       if (answer === undefined) return null;
       if (answer === 'swap') {
         r = { ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn };
-        userChanged.add(task.key);
+        markUserChanged(task.key);
         expectGone('REL006');
         counts.swapped++;
       } else {
@@ -1081,11 +1224,8 @@ export async function planRelationshipRepair(
     const keepCandidate = keptRecord(task, r, find);
     const losing = task.records.filter((rec) => rec !== keepCandidate && rec.extras.length > 0);
     if (losing.length > 0) {
-      Object.assign(counts, countsBefore);
-      left.length = leftBefore;
       const what = losing.map((rec) => `${rec.file} entry ${rec.rawIndex + 1} has ${describeExtras(rec.extras)}`);
-      left.push(`${describeEnds(r)}: ${what.join('; ')}, which this change would remove — left as it is; change it by hand.`);
-      counts.left++;
+      leaveTask(`${describeEnds(r)}: ${what.join('; ')}, which this change would remove — left as it is; change it by hand.`);
       continue;
     }
     const respelledAny = task.records.some((rec) => !sameStoredFields(rec.rel, respellWith(find, rec.rel)));
@@ -1093,13 +1233,21 @@ export async function planRelationshipRepair(
     if (task.scope === 'library') {
       const home = find(r.fromModel);
       if (!home) {
-        const reason = `${r.fromModel} has no readable file in logical-models/, so it stays where it is.`;
-        left.push(`${describeEnds(r)}: ${reason}`);
-        counts.left++;
-        if (task.moving && !task.hadLibraryRecord) counts.noHome++;
+        leaveTask(
+          `${describeEnds(r)}: ${r.fromModel} has no readable file in logical-models/, so it stays where it is.`,
+          task.moving && !task.hadLibraryRecord,
+        );
         continue;
       }
       const record: Relationship = { ...r, fromModel: home.name };
+      // A diagram-file copy is taken out only when the model-library record
+      // that replaces it can be read back and drawn (an answer such as
+      // "Leave as is" may have kept a missing end).
+      const copyProblem = task.records.some((rec) => rec.where === 'domain') ? libraryCopyProblem(find, record) : null;
+      if (copyProblem) {
+        leaveTask(`${describeEnds(r)}: ${copyProblem} — left as it is.`);
+        continue;
+      }
       const keep = keepCandidate;
       for (const rec of task.records) {
         if (rec === keep) continue;
@@ -1316,7 +1464,7 @@ function endpointQuestion(
   finding: RelationshipFinding,
   find: (name: string) => RepairModelFile | undefined,
   modelFiles: readonly RepairModelFile[],
-  allLinks: ReadonlySet<string>,
+  taken: { has: (key: string) => boolean },
 ): RepairQuestion {
   const where = [...new Set(task.records.map((rec) => rec.file))].join(', ');
   const targets: Array<{ model: string; column: string }> = [];
@@ -1353,7 +1501,7 @@ function endpointQuestion(
       },
       // Only a choice that leaves nothing missing: with both ends missing,
       // pointing one elsewhere would still point at nothing.
-      ...repointOptions(r, problem, targets, allLinks, (next) => missingEnd(find, next, diagram) === null),
+      ...repointOptions(r, problem, targets, taken, (next) => missingEnd(find, next, diagram) === null),
       leaveOption('It stays as it is, pointing at nothing. Run this command again to settle it.'),
     ],
   };
@@ -1363,7 +1511,7 @@ function repointOptions(
   r: Relationship,
   problem: MissingEnd,
   targets: ReadonlyArray<{ model: string; column: string }>,
-  allLinks: ReadonlySet<string>,
+  taken: { has: (key: string) => boolean },
   complete: (next: Relationship) => boolean,
 ): RepairOption[] {
   const options: RepairOption[] = [];
@@ -1373,7 +1521,7 @@ function repointOptions(
       : { ...r, toModel: target.model, toColumn: target.column };
     if (!complete(next)) continue;
     // Never onto a link that is already stored (a duplicate), nor onto itself.
-    if (allLinks.has(linkKey(next))) continue;
+    if (taken.has(linkKey(next))) continue;
     if (lower(next.fromModel) === lower(next.toModel) && lower(next.fromColumn) === lower(next.toColumn)) continue;
     options.push({
       id: `repoint:\u0000${target.model}\u0000${target.column}`,

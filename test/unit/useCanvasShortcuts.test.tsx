@@ -273,10 +273,66 @@ describe('selectedEdgesToRelationships (#133)', () => {
     expect(selectedEdgesToRelationships([edge], [{ ...REL_AB, source: { kind: 'domain' } }], ['A'])).toEqual([]);
   });
 
-  it('keeps a selected model-library line even when its model is deleted too (removing a model does not cascade it)', () => {
+  it('sends a model-library line the user picked themselves even when its model is deleted too', () => {
     const libraryRel = { ...REL_AB, stored, source: { kind: 'library', model: 'a', index: 0 } };
-    expect(selectedEdgesToRelationships([edge], [libraryRel], ['b'])).toEqual([
+    expect(selectedEdgesToRelationships([edge], [libraryRel], ['b'], [edge])).toEqual([
       { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id', stored },
     ]);
+  });
+
+  it('never sends a model-library line a box selection pulled in with its model (#133 review)', () => {
+    const libraryRel = { ...REL_AB, stored, source: { kind: 'library', model: 'a', index: 0 } };
+    expect(selectedEdgesToRelationships([edge], [libraryRel], ['b'])).toEqual([]);
+    expect(selectedEdgesToRelationships([edge], [libraryRel], ['b'], ['fk-other'])).toEqual([]);
+    // Not touching a deleted model: a selected line is a line to delete, picked or not.
+    expect(selectedEdgesToRelationships([edge], [libraryRel], ['c'])).toHaveLength(1);
+  });
+});
+
+describe('box-select a model and press Delete (#133 review)', () => {
+  const libraryDomain = {
+    ...domain,
+    relationships: [{ ...REL_AB, source: { kind: 'library', model: 'a', index: 0 } }, REL_BC],
+  } as unknown as DisplayDomain;
+
+  it('removes the model from this diagram and leaves its model-library lines in the library', () => {
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.setState({
+        domain: libraryDomain,
+        nodes: [modelNode('a', true), modelNode('b'), modelNode('c')],
+        // React Flow's box selection selects every line touching the boxed model.
+        selectedEdges: [edgeId(REL_AB)],
+        pickedEdges: [],
+      });
+    });
+    press('Delete');
+    expect(sent()).toEqual([{ type: 'removeModels', payload: { modelNames: ['a'] } }]);
+  });
+
+  it('deletes a line the user Shift+clicked beside the model, from the library too', () => {
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.setState({ domain: libraryDomain, nodes: [modelNode('a', true), modelNode('b'), modelNode('c')], selectedEdges: [edgeId(REL_AB)] });
+      useEditorStore.getState().pickEdge(edgeId(REL_AB), true);
+    });
+    press('Delete');
+    expect(sent()).toEqual([
+      { type: 'removeModels', payload: { modelNames: ['a'] } },
+      { type: 'removeRelationships', payload: { relationships: [{ fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id' }] } },
+    ]);
+    expect(useEditorStore.getState().pickedEdges).toEqual([]);
+  });
+
+  it('a box selection forgets earlier picks; a plain click replaces them', () => {
+    act(() => {
+      useEditorStore.getState().pickEdge('e1', false);
+      useEditorStore.getState().pickEdge('e2', true);
+    });
+    expect(useEditorStore.getState().pickedEdges).toEqual(['e1', 'e2']);
+    act(() => { useEditorStore.getState().pickEdge('e3', false); });
+    expect(useEditorStore.getState().pickedEdges).toEqual(['e3']);
+    act(() => { useEditorStore.getState().clearPickedEdges(); });
+    expect(useEditorStore.getState().pickedEdges).toEqual([]);
   });
 });

@@ -1980,7 +1980,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         .map((name) => this.logicalModelService.resolveModelPath(name))
         .filter((p): p is string => p !== null && fs.existsSync(p))
         .map(rel);
-      const issues = toDisplayRelationshipIssues(findingsForDomain(findings, { filePath, models: modelNames, modelFiles }));
+      const issues = toDisplayRelationshipIssues(findingsForDomain(findings, { filePath, models: modelNames, modelFiles, olderFormat: v4 }));
       return {
         relationshipHome: v4 ? 'domain' : mode,
         ...(issues.length > 0 ? { relationshipIssues: issues } : {}),

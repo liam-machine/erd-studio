@@ -511,16 +511,35 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
     }
   }
 
-  // A key to mark in the same commit: an end of the record, checked before
-  // anything is changed.
+  // A key to mark in the same commit, checked against the models as they are
+  // now, before anything is changed — the dialog's offer was made against the
+  // canvas it drew, which another writer may have overtaken since. Only the
+  // end the relationship points at (either end of a one-to-one) may be marked,
+  // and only while its model has no primary key: a tick never turns an
+  // existing key into a composite one, nor makes the many side's foreign key
+  // part of its own model's key.
   const markKey = op.kind === 'add' || op.kind === 'edit' ? op.markKey : undefined;
   let markColumn: NonNullable<SemanticModel['columns']>[number] | undefined;
   if (markKey && record) {
-    const atEnd = endIs(record, 'from', markKey.model, markKey.column) || endIs(record, 'to', markKey.model, markKey.column);
-    const model = atEnd ? findModel(markKey.model) : undefined;
+    const atFrom = endIs(record, 'from', markKey.model, markKey.column);
+    const atTo = endIs(record, 'to', markKey.model, markKey.column);
+    const model = atFrom || atTo ? findModel(markKey.model) : undefined;
     markColumn = model?.columns?.find((c) => c.name === markKey.column) ?? model?.columns?.find((c) => same(c.name, markKey.column));
-    if (!markColumn) {
+    if (!model || !markColumn) {
       throw new RelationshipCommitError(`Can't mark ${markKey.model}.${markKey.column} as a key: it is not an end of this relationship.`);
+    }
+    if (!atTo && record.cardinality !== 'one-to-one') {
+      throw new RelationshipCommitError(
+        `Can't mark ${model.name}.${markColumn.name} as ${model.name}'s key: it is the many side of this relationship, ` +
+        'not the end it points at. Re-open the dialog and try again.',
+      );
+    }
+    const otherKeys = (model.columns ?? []).filter((c) => c !== markColumn && c.isPrimaryKey === true).map((c) => c.name);
+    if (otherKeys.length > 0) {
+      throw new RelationshipCommitError(
+        `Can't mark ${model.name}.${markColumn.name} as ${model.name}'s key: ${model.name} already has a primary key ` +
+        `(${otherKeys.join(', ')}). Re-open the dialog and try again.`,
+      );
     }
   }
 
@@ -674,12 +693,17 @@ export function findingsNeedingRepair(findings: readonly RelationshipFinding[]):
  * naming its file, those about a link whose two models it holds, and those
  * about a model file it shows that could not be read in full (REL008) or that
  * points at a missing model or column (REL003 / REL004). `domain.modelFiles`
- * are the domain's models' file names as the findings spell them.
+ * are the domain's models' file names as the findings spell them. A v4
+ * domain (`olderFormat`) gets only the findings naming its own file.
  */
 export function findingsForDomain(
   findings: readonly RelationshipFinding[],
-  domain: { filePath: string; models: readonly string[]; modelFiles: readonly string[] },
+  domain: { filePath: string; models: readonly string[]; modelFiles: readonly string[]; olderFormat?: boolean },
 ): RelationshipFinding[] {
+  // A v4 (inline-model) diagram draws only its own records, never the model
+  // library's (core's `parseStageData` strips them), so only findings about
+  // its own file concern it — the canvas banner and `diff` alike.
+  if (domain.olderFormat) return findings.filter((f) => f.files.includes(domain.filePath));
   const models = new Set(domain.models.map((m) => m.toLowerCase()));
   const modelFiles = new Set(domain.modelFiles);
   const holds = (name: string): boolean => models.has(name.toLowerCase());

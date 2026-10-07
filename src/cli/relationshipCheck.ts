@@ -112,7 +112,7 @@ export function checkProjectRelationships(src: RelationshipCheckSources): Projec
   // CLI's JSON it names the entry's position in the file's own list (skipped
   // entries counted), for a model file and a domain file alike — the same
   // "entry N" the messages use.
-  const rawIndexes = new Map(scan.v5.map((d) => [fileName(d.filePath), d.rawIndexes]));
+  const rawIndexes = new Map([...scan.v5, ...scan.v4].map((d) => [fileName(d.filePath), d.rawIndexes]));
   const libraryPositions = new Map(libraryModels.map((m) => [
     `${m.file}\u0000${m.model.name}`,
     relationshipFilePositions(m.model.relationships?.length ?? 0, m.model.relationshipIssues),

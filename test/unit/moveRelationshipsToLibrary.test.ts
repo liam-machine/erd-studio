@@ -266,6 +266,25 @@ describe('moveRelationshipsToLibrary — writes disk directly (#126)', () => {
     expect(JSON.parse(after).logical.relationships).toEqual([kept]);
   });
 
+  it('names a relationship it left for want of a home model file, in the preview and when done (#133 review)', async () => {
+    const info = acceptModal();
+    const kept = { fromModel: 'not_in_library', fromColumn: 'a', toModel: modelName(0), toColumn: 'id', cardinality: 'many-to-one' };
+    fs.writeFileSync(p.domainPaths[0], p.originals.get(p.domainPaths[0])!.replace(
+      '"relationships": [\n',
+      `"relationships": [\n            ${JSON.stringify(kept)},\n`,
+    ));
+
+    await p.run();
+
+    const all = messages(info);
+    const preview = info.mock.calls.find((c) => (c[1] as { modal?: boolean } | undefined)?.modal)!;
+    expect(String((preview[1] as { detail: string }).detail)).toContain('not_in_library.a → model_00.id: not_in_library has no readable file in logical-models/');
+    const done = all.find((m) => SUCCESS.test(m))!;
+    expect(done).toMatch(/1 stayed as it was/);
+    expect(done).toContain('not_in_library has no readable file in logical-models/');
+    expect(JSON.parse(fs.readFileSync(p.domainPaths[0], 'utf-8')).logical.relationships).toEqual([kept]);
+  });
+
   it('refuses to run over a target file open with unsaved edits, writing nothing', async () => {
     const info = acceptModal();
     const error = vi.spyOn(vscode.window, 'showErrorMessage');

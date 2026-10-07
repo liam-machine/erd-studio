@@ -110,6 +110,49 @@ describe('edge ContextMenu (#133)', () => {
       expect(s.fkDialogEditData).toEqual({ ...AB, cardinality: 'many-to-many', role: 'link', stored: AB, pickedCardinality: 'many-to-one' });
     });
 
+    it('a many-to-many drawn against the keys opens Edit instead of storing the drawn order as the direction (#133 review)', () => {
+      const key = (name: string) => ({ ...plain(name), isPrimaryKey: true });
+      for (const fk of [plain('customer_key'), { ...plain('customer_key'), isForeignKey: true, isForeignKeyDeclared: true }]) {
+        postMessage.mockClear();
+        const DRAWN_BACK = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key' };
+        useEditorStore.getState().setDomain({
+          schemaVersion: 5, domain: 'sales', layer: 'gold', stage: 'logical', description: '',
+          models: [
+            { name: 'dim_customer', description: '', columns: [key('customer_key')] },
+            { name: 'fct_order', description: '', columns: [key('order_key'), fk] },
+          ],
+          relationships: [], viewConfig: {}, readOnly: false, positionDraggable: true,
+        } as unknown as DisplayDomain);
+        useEditorStore.setState({ newFkDialogOpen: false, fkDialogEditData: null });
+        useEditorStore.getState().openEdgeContextMenu(10, 10, { ...DRAWN_BACK, cardinality: 'many-to-many', stored: DRAWN_BACK });
+        const { unmount } = render(<ContextMenu />);
+        fireEvent.click(screen.getByRole('button', { name: /Many → Many/ }));
+        fireEvent.click(screen.getByRole('option', { name: 'Many → One' }));
+        expect(postMessage).not.toHaveBeenCalled();
+        expect(useEditorStore.getState().newFkDialogOpen).toBe(true);
+        expect(useEditorStore.getState().fkDialogEditData).toMatchObject({ ...DRAWN_BACK, pickedCardinality: 'many-to-one' });
+        unmount();
+      }
+    });
+
+    it('a many-to-many drawn the way the keys point still changes in place', () => {
+      const key = (name: string) => ({ ...plain(name), isPrimaryKey: true });
+      const DRAWN = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' };
+      useEditorStore.getState().setDomain({
+        schemaVersion: 5, domain: 'sales', layer: 'gold', stage: 'logical', description: '',
+        models: [
+          { name: 'dim_customer', description: '', columns: [key('customer_key')] },
+          { name: 'fct_order', description: '', columns: [key('order_key'), plain('customer_key')] },
+        ],
+        relationships: [], viewConfig: {}, readOnly: false, positionDraggable: true,
+      } as unknown as DisplayDomain);
+      useEditorStore.getState().openEdgeContextMenu(10, 10, { ...DRAWN, cardinality: 'many-to-many', stored: DRAWN });
+      render(<ContextMenu />);
+      fireEvent.click(screen.getByRole('button', { name: /Many → Many/ }));
+      fireEvent.click(screen.getByRole('option', { name: 'Many → One' }));
+      expect(postMessage).toHaveBeenCalledWith({ type: 'updateRelationship', payload: { ...DRAWN, stored: DRAWN, cardinality: 'many-to-one' } });
+    });
+
     it('a many-to-one on the same columns still changes in place (its direction was chosen)', () => {
       openOnPlainColumns('many-to-one');
       fireEvent.click(screen.getByRole('button', { name: /Many → One/ }));

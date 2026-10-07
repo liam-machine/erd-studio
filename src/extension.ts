@@ -952,6 +952,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     semanticDir,
     domainService,
     logicalModelService,
+    layerService,
     onWritten: async (domainPaths: string[]) => {
       for (const domainPath of domainPaths) treeProvider.invalidateDomain(domainPath);
       modelLibraryProvider.refresh();

@@ -437,8 +437,23 @@ function EditorCanvas() {
   // Close context menu on pane click
   const handlePaneClick = useCallback(() => {
     closeContextMenu();
+    useEditorStore.getState().clearPickedEdges();
     onPaneClick();
   }, [closeContextMenu, onPaneClick]);
+
+  // A line the user clicked (Shift+click adds it) is one they picked; a box
+  // selection also selects every line touching a boxed model, which is not
+  // a request to delete those lines from the model library (#133).
+  const handleEdgeClick = useCallback(
+    (event: React.MouseEvent, edge: FkFlowEdge | AnnotationFlowEdge) => {
+      useEditorStore.getState().pickEdge(edge.id, event.shiftKey);
+      onEdgeClick(event, edge);
+    },
+    [onEdgeClick],
+  );
+  const handleSelectionStart = useCallback(() => {
+    useEditorStore.getState().clearPickedEdges();
+  }, []);
 
   // --- Error state -----------------------------------------------------------
   // Only an error with no domain to fall back on (initial load failure) takes
@@ -531,7 +546,8 @@ function EditorCanvas() {
         edgeTypes={canvasEdgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
-        onEdgeClick={onEdgeClick}
+        onEdgeClick={handleEdgeClick}
+        onSelectionStart={handleSelectionStart}
         onPaneClick={handlePaneClick}
         onDoubleClick={onPaneDoubleClick}
         onNodeContextMenu={onNodeContextMenu}

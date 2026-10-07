@@ -12,7 +12,7 @@ import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { FkEdgeData } from '@erd-studio/renderer/editor';
 import type { AnnotationColor, Cardinality } from '../../../src/types/semantic';
 import type { FkDialogEditData } from '../../store/editorStore';
-import { directionFor } from '../../lib/relationshipDirection';
+import { directionFor, verdictStartsAt } from '../../lib/relationshipDirection';
 import {
   ANNOTATION_COLORS,
   relationshipSwap,
@@ -62,11 +62,13 @@ function editDataFor(data: FkEdgeData): FkDialogEditData {
 }
 
 /**
- * Whether changing an edge to `next` needs the user to say which side has
- * many rows: a many-to-many's ends were never a direction choice (it has no
- * "many" side), so turning it into a many-to-one or one-to-one when the keys
- * do not settle the direction must ask — in the Edit dialog — rather than
- * make whichever model the drag started on the many side (#133).
+ * Whether changing an edge to `next` must go through the Edit dialog rather
+ * than change in place: a many-to-many's ends were never a direction choice
+ * (it has no "many" side), so its drawn order may not become the direction
+ * (#133). It changes in place only when the keys point the same way as the
+ * drawn order; when they do not settle the direction (the user picks it) or
+ * point the other way (the dialog shows why, and turns it or asks), the Edit
+ * dialog opens with `next` chosen.
  */
 export function cardinalityChangeNeedsDirection(
   data: Pick<FkEdgeData, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn' | 'cardinality'>,
@@ -74,7 +76,10 @@ export function cardinalityChangeNeedsDirection(
   models: Parameters<typeof directionFor>[0],
 ): boolean {
   if (data.cardinality !== 'many-to-many' || next === 'many-to-many') return false;
-  return directionFor(models, data)?.confidence === 'ambiguous';
+  const verdict = directionFor(models, data);
+  if (!verdict) return false;
+  if (verdict.confidence === 'ambiguous') return true;
+  return !verdictStartsAt(verdict, data.fromModel, data.fromColumn);
 }
 
 // ---------------------------------------------------------------------------

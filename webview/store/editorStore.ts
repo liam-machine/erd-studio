@@ -76,6 +76,13 @@ export interface FkDialogEditData {
 export interface EditorState extends CanvasState {
   /** React Flow viewport (pan + zoom). */
   viewport: Viewport;
+  /**
+   * Edge ids the user picked themselves — clicked, or Shift+clicked — since
+   * the last box selection (#133). React Flow's box selection also selects
+   * every line touching a boxed model; only a line picked here is the user's
+   * request to delete a model-library relationship along with its model.
+   */
+  pickedEdges: string[];
   /** Whether the new model dialog is open. */
   newModelDialogOpen: boolean;
   /** Whether the new FK relationship dialog is open. */
@@ -170,6 +177,10 @@ export interface EditorState extends CanvasState {
 
 export interface EditorActions extends CanvasActions {
   setViewport: (viewport: Viewport) => void;
+  /** An edge clicked: it alone is picked, or (Shift) it is added to the picks. */
+  pickEdge: (edgeId: string, additive: boolean) => void;
+  /** Forget every picked edge (a box selection started, or the pane was clicked). */
+  clearPickedEdges: () => void;
   setNewModelDialogOpen: (open: boolean) => void;
   setNewFkDialogOpen: (open: boolean) => void;
   /** Open FK dialog with prefilled source/target from drag-to-connect. */
@@ -268,6 +279,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
 
   // Default state
   viewport: { x: 0, y: 0, zoom: 1 },
+  pickedEdges: [],
   newModelDialogOpen: false,
   newFkDialogOpen: false,
   fkDialogPrefill: null,
@@ -304,6 +316,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
+  pickEdge: (edgeId, additive) => set((state) => ({
+    pickedEdges: additive ? [...state.pickedEdges.filter((id) => id !== edgeId), edgeId] : [edgeId],
+  })),
+  clearPickedEdges: () => set({ pickedEdges: [] }),
   setNewModelDialogOpen: (open) => set({ newModelDialogOpen: open }),
   setNewFkDialogOpen: (open) => set({ newFkDialogOpen: open }),
   openFkDialogWithPrefill: (prefill) =>

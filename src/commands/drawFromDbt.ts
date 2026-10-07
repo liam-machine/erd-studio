@@ -62,7 +62,7 @@ export interface DrawFromDbtDeps {
   logicalModelService: Pick<
     LogicalModelService,
     'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel'
-    | 'getModelFileError' | 'findModelFile' | 'findModelNameIgnoringCase' | 'getModelsDir'
+    | 'getModelFileError' | 'findModelFile' | 'findModelNameIgnoringCase' | 'getModelsDir' | 'serializeModelAt' | 'writeModelText'
   >;
   /** Schema yml and manifest; either may be undefined (no yml, never compiled). */
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData }>;
@@ -172,8 +172,14 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
   // name — as the canvas's Add models from dbt does — rather than putting
   // its relationships in the diagram file without a word.
   let routed: { kept: typeof draft.relationships; changed: SemanticModel[] };
+  // Every existing model file that gains a relationship, rendered before the
+  // first write: a file the save would refuse (a `relationships:` that is not
+  // a list, an alias the edit would change) stops the command here, with
+  // nothing written, rather than after the diagram file has landed.
+  let existingSaves: ExistingModelSave[];
   try {
     routed = routeDraftRelationships(draft, deps);
+    existingSaves = renderExistingModelSaves(routed.changed, draft, deps);
   } catch (err) {
     if (!(err instanceof DrawRefusal)) { telemetry.error('drawWriteFailed'); }
     void vscode.window.showErrorMessage(`${TITLE}: ${err instanceof Error ? err.message : String(err)} Nothing was written.`);
@@ -183,6 +189,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
   // Writes start here. A project with no ERD folder yet gets the default
   // layers.json first, exactly as Set Up Semantic Domains Directory writes it.
   const written: string[] = [];
+  let domainWritten = false;
+  const savedExisting: ExistingModelSave[] = [];
   try {
     if (!fs.existsSync(path.join(workspaceRoot, semanticDir))) {
       await layerService.saveConfig(layerService.getAllLayers());
@@ -206,21 +214,41 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
       relationships: routed.kept,
     });
     fs.writeFileSync(domainPath, serializeDraftDomainDocument(doc), { encoding: 'utf-8', flag: 'wx' });
+    domainWritten = true;
     ownWrites.recordWrite(domainPath);
-    // Existing library models that gained a relationship, once the diagram is on disk.
-    for (const model of routed.changed) {
-      if (!draft.newModels.includes(model)) logicalModelService.saveModel(model);
+    // Existing library models that gained a relationship, once the diagram is
+    // on disk — exactly the text rendered (and so checked) before any write.
+    for (const save of existingSaves) {
+      logicalModelService.writeModelText(save.filePath, save.text);
+      savedExisting.push(save);
     }
   } catch (err) {
-    // Leave no orphan model files behind a domain that was never written.
+    // Undo everything this run wrote, newest first: the existing model files
+    // it changed go back to their previous bytes, the diagram file goes, and
+    // the model files it created go. What could not be undone is named.
+    const leftBehind: string[] = [];
+    for (const save of savedExisting.reverse()) {
+      try { logicalModelService.writeModelText(save.filePath, save.before); } catch { leftBehind.push(save.label); }
+    }
+    if (domainWritten) {
+      try {
+        fs.unlinkSync(domainPath);
+        ownWrites.recordDelete(domainPath);
+      } catch {
+        leftBehind.push(path.relative(workspaceRoot, domainPath).split(path.sep).join('/'));
+      }
+    }
     for (const modelName of written) {
-      try { logicalModelService.deleteModel(modelName); } catch { /* best effort */ }
+      try { logicalModelService.deleteModel(modelName); } catch { leftBehind.push(`${modelName}.yml`); }
     }
     const exists = err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST';
     if (!exists) { telemetry.error('drawWriteFailed'); }
+    const outcome = leftBehind.length === 0
+      ? 'Nothing was written.'
+      : `These files could not be put back and may need tidying by hand: ${leftBehind.join(', ')}.`;
     const msg = exists
       ? `A diagram named "${slug}" already exists in the ${layerLabel} layer.`
-      : `${TITLE} could not write the diagram: ${err instanceof Error ? err.message : String(err)}`;
+      : `${TITLE} could not write the diagram: ${err instanceof Error ? err.message : String(err)} ${outcome}`;
     void vscode.window.showErrorMessage(msg);
     return undefined;
   }
@@ -285,6 +313,45 @@ function routeDraftRelationships(
     }
   }
   return routed;
+}
+
+/** An existing library model file the draw will rewrite: its new text, and its bytes before. */
+interface ExistingModelSave {
+  filePath: string;
+  label: string;
+  text: string;
+  before: string;
+}
+
+/**
+ * Render every existing model that gains a relationship, without writing.
+ * Throws `DrawRefusal` naming the file when its save would be refused.
+ */
+function renderExistingModelSaves(
+  changed: readonly SemanticModel[],
+  draft: DbtDraft,
+  deps: DrawFromDbtDeps,
+): ExistingModelSave[] {
+  const { logicalModelService } = deps;
+  const saves: ExistingModelSave[] = [];
+  for (const model of changed) {
+    if (draft.newModels.includes(model)) continue;
+    const filePath = logicalModelService.findModelFile(model.name);
+    if (!filePath) continue;
+    const relative = path.relative(path.resolve(logicalModelService.getModelsDir()), filePath).split(path.sep).join('/');
+    const label = relative && !relative.startsWith('..') ? `logical-models/${relative}` : path.basename(filePath);
+    let before: string;
+    let text: string;
+    try {
+      before = fs.readFileSync(filePath, 'utf-8');
+      text = logicalModelService.serializeModelAt(model, filePath);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new DrawRefusal(`Cannot save the new relationship into ${label}. ${reason}`);
+    }
+    saves.push({ filePath, label, text, before });
+  }
+  return saves;
 }
 
 /** The one-line note after drawing — only when something was left out. */

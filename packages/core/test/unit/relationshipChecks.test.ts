@@ -235,3 +235,35 @@ describe('checkRelationships — models whose names differ only in case', () => 
     expect(a.length).toBeGreaterThan(0);
   });
 });
+
+describe('checkRelationships — deterministic and linear (#133 review)', () => {
+  it('orders findings by code unit, never by the machine locale', async () => {
+    const { vi } = await import('vitest');
+    // A collation that reverses plain order, as lt_LT does for j/y and da_DK for aa/b.
+    const spy = vi.spyOn(String.prototype, 'localeCompare').mockImplementation(function (this: string, other: string) {
+      const self = String(this);
+      return self < other ? 1 : self > other ? -1 : 0;
+    });
+    try {
+      const j: SemanticModel = { name: 'j', columns: [col('id', { isPrimaryKey: true })], relationships: [rel('id', 'nowhere', 'id')] };
+      const y: SemanticModel = { name: 'y', columns: [col('id', { isPrimaryKey: true })], relationships: [rel('id', 'nowhere', 'id')] };
+      const findings = checkRelationships({ libraryModels: [entry(y), entry(j)], domains: [] });
+      expect(findings.map((f) => f.files[0])).toEqual(['logical-models/j.yml', 'logical-models/y.yml']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('reads each domain\'s model list once, not once per record', () => {
+    const names = Array.from({ length: 40 }, (_, i) => `m${i}`);
+    const libraryModels = names.map((n) => entry({ name: n, columns: [col('id', { isPrimaryKey: true }), col('ref_id')] }));
+    const relationships: Relationship[] = names.slice(1).map((n, i) => ({
+      fromModel: n, fromColumn: 'ref_id', toModel: names[i], toColumn: 'id', cardinality: 'many-to-one',
+    }));
+    let reads = 0;
+    const d: CheckDomain = { label: 'gold/big', filePath: 'gold/big.json', relationships, mode: 'domain', models: [] };
+    Object.defineProperty(d, 'models', { get: () => { reads += 1; return names; } });
+    expect(checkRelationships({ libraryModels, domains: [d] })).toEqual([]);
+    expect(reads).toBeLessThanOrEqual(4);
+  });
+});

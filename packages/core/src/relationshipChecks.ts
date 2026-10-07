@@ -233,15 +233,34 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
   }
 
   // --- Per-record checks: REL002, REL003, REL004, REL005, REL006 -------------
+  // What each record needs from its domain is built once per domain, not once
+  // per record, so the check stays linear in records + models.
+  interface DomainView {
+    resolve: ReturnType<typeof modelResolver>;
+    stubs: ReadonlySet<string>;
+    inDiagram?: ReadonlySet<string>;
+  }
+  const libraryView: DomainView = { resolve: modelResolver(undefined, libByExact, libByLower), stubs: new Set() };
+  const domainViews = new Map<CheckDomain, DomainView>();
+  const viewOf = (domain: CheckDomain | undefined): DomainView => {
+    if (!domain) return libraryView;
+    let view = domainViews.get(domain);
+    if (!view) {
+      const models = domain.models;
+      view = {
+        resolve: modelResolver(domain, libByExact, libByLower),
+        stubs: new Set((domain.stubColumns ?? []).map((s) => s.toLowerCase())),
+        // A domain file's own record is drawn only between the domain's own models.
+        inDiagram: new Set(models.map((m) => (typeof m === 'string' ? m : m.name).toLowerCase())),
+      };
+      domainViews.set(domain, view);
+    }
+    return view;
+  };
   for (const r of records) {
-    const resolve = modelResolver(r.domain, libByExact, libByLower);
+    const { resolve, stubs, inDiagram } = viewOf(r.domain);
     const describe = `${r.rel.fromModel}.${r.rel.fromColumn} → ${r.rel.toModel}.${r.rel.toColumn}`;
     const where = r.ref.file;
-    const stubs = new Set((r.domain?.stubColumns ?? []).map((s) => s.toLowerCase()));
-    // A domain file's own record is drawn only between the domain's own models.
-    const inDiagram = r.domain
-      ? new Set(r.domain.models.map((m) => (typeof m === 'string' ? m : m.name).toLowerCase()))
-      : undefined;
 
     if (r.ref.source.kind === 'library' && r.rel.cardinality === 'one-to-many') {
       const home = canonicalRelationship(r.rel).fromModel;
@@ -385,12 +404,20 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
     }
   }
 
+  // Code-unit order, never `localeCompare`: the default collation follows the
+  // machine's locale (LANG / LC_ALL), so a teammate and CI would list the
+  // same findings in a different order.
   return findings.sort((a, b) =>
     SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
-    || a.code.localeCompare(b.code)
-    || (a.files[0] ?? '').localeCompare(b.files[0] ?? '')
+    || codeUnitOrder(a.code, b.code)
+    || codeUnitOrder(a.files[0] ?? '', b.files[0] ?? '')
     || (a.line ?? 0) - (b.line ?? 0)
-    || a.message.localeCompare(b.message));
+    || codeUnitOrder(a.message, b.message));
+}
+
+/** Plain code-unit comparison, the same on every machine whatever its locale. */
+function codeUnitOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** Whether a domain is in the older (v4, inline-model) format. */
@@ -454,9 +481,15 @@ function modelResolver(
   libByExact: ReadonlyMap<string, CheckLibraryModel>,
   libByLower: ReadonlyMap<string, CheckLibraryModel>,
 ): (name: string) => { model: SemanticModel; file?: string } | undefined {
-  const inline = (domain?.models ?? []).filter((m): m is SemanticModel => typeof m !== 'string');
+  const inlineByExact = new Map<string, SemanticModel>();
+  const inlineByLower = new Map<string, SemanticModel>();
+  for (const m of domain?.models ?? []) {
+    if (typeof m === 'string') continue;
+    if (!inlineByExact.has(m.name)) inlineByExact.set(m.name, m);
+    if (!inlineByLower.has(m.name.toLowerCase())) inlineByLower.set(m.name.toLowerCase(), m);
+  }
   return (name) => {
-    const exactInline = inline.find((m) => m.name === name) ?? inline.find((m) => m.name.toLowerCase() === name.toLowerCase());
+    const exactInline = inlineByExact.get(name) ?? inlineByLower.get(name.toLowerCase());
     if (exactInline) return { model: exactInline };
     const lib = libByExact.get(name) ?? libByLower.get(name.toLowerCase());
     return lib ? { model: lib.model, file: lib.file } : undefined;

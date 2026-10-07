@@ -108,3 +108,51 @@ describe('Draw from dbt — library relationships', () => {
     expect(fs.readFileSync(models.modelPath('dim_customer'), 'utf-8')).toBe(before);
   });
 });
+
+describe('Draw from dbt — a model file the save would refuse (#133 review)', () => {
+  const regionDraft = (): DbtDraft => ({
+    modelNames: ['dim_customer', 'dim_region'], newModels: [{ name: 'dim_region', columns: [col('region_key', { isPrimaryKey: true })] }],
+    reusedModels: ['dim_customer'],
+    relationships: [{ fromModel: 'dim_customer', fromColumn: 'region_key', toModel: 'dim_region', toColumn: 'region_key', cardinality: 'many-to-one' }],
+    skipped: [], truncated: false,
+  });
+
+  it.each([
+    ['a mapping', 'relationships:\n  foo: bar\n'],
+    ['an alias of another list', 'other: &shared []\nrelationships: *shared\n'],
+  ])('stops before writing anything when "relationships:" is %s', async (_label, tail) => {
+    models.saveModel({ name: 'dim_customer', columns: [col('customer_key', { isPrimaryKey: true }), col('region_key')] });
+    const file = models.modelPath('dim_customer');
+    fs.writeFileSync(file, `${fs.readFileSync(file, 'utf-8')}${tail}`);
+    const before = fs.readFileSync(file, 'utf-8');
+    expect(models.getModel('dim_customer')).not.toBeNull();
+    expect(models.getModelFileError('dim_customer')).toBeNull();
+    state.draft = regionDraft();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const written = vi.fn();
+
+    await expect(drawFromDbt({ ...deps(), onWritten: written })).resolves.toBeUndefined();
+
+    expect(String(error.mock.calls[0][0])).toMatch(/Cannot save the new relationship into logical-models\/dim_customer\.yml\. .*Nothing was written\./);
+    expect(fs.existsSync(domainFile())).toBe(false);
+    expect(fs.existsSync(path.join(tmp, '.erd-studio', 'logical-models', 'dim_region.yml'))).toBe(false);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+    expect(written).not.toHaveBeenCalled();
+  });
+
+  it('puts back everything it wrote when a write fails after the diagram file landed', async () => {
+    models.saveModel({ name: 'dim_customer', columns: [col('customer_key', { isPrimaryKey: true }), col('region_key')] });
+    const file = models.modelPath('dim_customer');
+    const before = fs.readFileSync(file, 'utf-8');
+    state.draft = regionDraft();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vi.spyOn(models, 'writeModelText').mockImplementationOnce(() => { throw new Error('disk full'); });
+
+    await drawFromDbt(deps());
+
+    expect(String(error.mock.calls[0][0])).toBe('Draw from dbt could not write the diagram: disk full Nothing was written.');
+    expect(fs.existsSync(domainFile())).toBe(false);
+    expect(fs.existsSync(path.join(tmp, '.erd-studio', 'logical-models', 'dim_region.yml'))).toBe(false);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+  });
+});
