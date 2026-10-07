@@ -281,12 +281,18 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
       const columnName = side === 'from' ? r.rel.fromColumn : r.rel.toColumn;
       const found = resolve(modelName);
       const lower = modelName.toLowerCase();
-      if (!found) {
-        if (unreadable.has(lower) || stubs.has(lower)) continue;
+      // A domain file's own record is drawn only between that domain's own
+      // models. This is asked first: a model whose file cannot be read — or
+      // a name in `stubColumns`, which only excuses missing columns and never
+      // puts a model on the diagram — is no reason to stay quiet about a
+      // record the canvas does not draw (`normaliseRelationships` marks it
+      // REL003 whatever the model file holds), so the canvas, `check` and the
+      // banner always agree.
+      if (inDiagram && !inDiagram.has(lower)) {
         push({
           code: 'REL003',
           severity: 'error',
-          message: `${where}: relationship ${describe} points at model ${modelName}, which is not in the model library`,
+          message: `${where}: relationship ${describe} points at model ${found?.model.name ?? modelName}, which is not one of this diagram's models, so the diagram does not draw it`,
           files: [r.ref.file],
           link: linkKey(r.rel),
           fix: 'repoint',
@@ -294,11 +300,12 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
         });
         continue;
       }
-      if (inDiagram && !inDiagram.has(lower) && !stubs.has(lower)) {
+      if (!found) {
+        if (unreadable.has(lower) || stubs.has(lower)) continue;
         push({
           code: 'REL003',
           severity: 'error',
-          message: `${where}: relationship ${describe} points at model ${found.model.name}, which is not one of this diagram's models, so the diagram does not draw it`,
+          message: `${where}: relationship ${describe} points at model ${modelName}, which is not in the model library`,
           files: [r.ref.file],
           link: linkKey(r.rel),
           fix: 'repoint',
@@ -434,12 +441,37 @@ function duplicate(key: string, list: readonly Rec[], push: (f: RelationshipFind
   const where = (r: Rec): string => repeated.has(r.ref.file)
     ? `${r.ref.file} entry ${r.position + 1}`
     : r.ref.file;
-  const sites = list.map((r) => `${r.ref.cardinality}${r.ref.role ? ` "${r.ref.role}"` : ''} in ${where(r)}`);
+  // Each copy is described in the direction the link is named in (the kept
+  // record's canonical one), never as stored: a reversed `one-to-many` copy
+  // says the same as a `many-to-one` one, and listing it as "one-to-many"
+  // against a link named the other way would read as a cardinality conflict
+  // that is not there. A copy whose canonical direction differs from the
+  // named one is shown with its own ends.
+  const named = canonicalRelationship(kept.rel);
+  const namedFrom = `${named.fromModel}.${named.fromColumn}`.toLowerCase();
+  const runsAsNamed = (c: Relationship): boolean =>
+    c.cardinality === 'many-to-many' || `${c.fromModel}.${c.fromColumn}`.toLowerCase() === namedFrom;
+  const sites = list.map((r) => {
+    const c = canonicalRelationship(r.rel);
+    const ends = runsAsNamed(c) ? '' : ` ${c.fromModel}.${c.fromColumn} → ${c.toModel}.${c.toColumn}`;
+    return `${c.cardinality}${ends}${r.ref.role ? ` "${r.ref.role}"` : ''} in ${where(r)}`;
+  });
+  // What actually differs, so the reader is never asked to choose between two
+  // spellings of the same cardinality.
+  const differences: string[] = [];
+  if (differs) {
+    const canon = list.map((r) => canonicalRelationship(r.rel));
+    if (new Set(canon.map((c) => c.cardinality)).size > 1) differences.push('cardinality');
+    if (canon.some((c) => c.cardinality !== 'many-to-many' && !runsAsNamed(c))
+      && new Set(canon.map((c) => c.cardinality)).size === 1) differences.push('direction');
+    if (new Set(list.map((r) => r.ref.role ?? '')).size > 1) differences.push('role');
+  }
+  const onWhat = differences.length > 0 ? ` on ${differences.join(' and ')}` : '';
   push({
     code: 'REL001',
     severity: differs ? 'error' : 'warning',
     message: differs
-      ? `Relationship ${describeLink(kept.rel)} is stored ${list.length} times and the copies disagree (${sites.join('; ')})`
+      ? `Relationship ${describeLink(kept.rel)} is stored ${list.length} times and the copies disagree${onWhat} (${sites.join('; ')})`
       : `Relationship ${describeLink(kept.rel)} is stored ${list.length} times (${list.map(where).join(', ')})`,
     files: [...new Set(list.map((r) => r.ref.file))],
     link: key,

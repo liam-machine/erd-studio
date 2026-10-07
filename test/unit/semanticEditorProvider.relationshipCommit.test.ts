@@ -623,3 +623,240 @@ describe('the relationship checks on each payload read the domain files once', (
     expect(count).not.toHaveBeenCalled();
   });
 });
+
+describe('nothing the user wrote is lost by a canvas commit (#133 review 6)', () => {
+  it('per-domain project: a cardinality change keeps the entry\'s own keys', async () => {
+    const toDate: Relationship = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    const mine = { ...EDGE, cardinality: 'many-to-one', role: 'x', description: 'keep me', tests: ['a'] };
+    h = await createHarness({ orders: [mine as unknown as Relationship, toDate] });
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(orders.errors()).toEqual([]);
+    expect(h.readDomain('orders').logical.relationships).toEqual([{ ...mine, cardinality: 'one-to-one' }, toDate]);
+  });
+
+  it('per-domain project: adding to a logical.relationships that is not a list is refused, and the file is untouched', async () => {
+    const toDate: Relationship = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    h = await createHarness({ reporting: [toDate] });
+    const handWritten = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' };
+    const raw = JSON.parse(fs.readFileSync(h.domainPath('orders'), 'utf-8'));
+    raw.logical.relationships = handWritten;
+    fs.writeFileSync(h.domainPath('orders'), JSON.stringify(raw, null, 2) + '\n');
+    const before = fs.readFileSync(h.domainPath('orders'), 'utf-8');
+    const orders = await h.open('orders');
+    await orders.send({ type: 'addRelationship', payload: { ...toDate } });
+    expect(orders.errors()).toEqual([
+      'Failed to add relationship: orders.json: "logical.relationships" is not a list, so ERD Studio cannot write to it. Fix it by hand first.',
+    ]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(fs.readFileSync(h.domainPath('orders'), 'utf-8')).toBe(before);
+  });
+
+  it('library project: turning a relationship whose entry carries a comment into another model file is refused, by name', async () => {
+    h = await createHarness({
+      library: { dim_customer: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }] },
+    });
+    // A comment inside the entry: moving it to fct_order's file would lose it.
+    const file = h.modelPath('dim_customer');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace('cardinality: one-to-many', 'cardinality: one-to-many # agreed with finance'));
+    h.models.invalidateCache();
+    const before = fs.readFileSync(file, 'utf-8');
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'many-to-many' } });
+    expect(orders.errors()).toEqual([
+      "Failed to update relationship: Entry 1 of dim_customer's model file has comments, which changing this relationship here would remove. " +
+      'Move that text out of the entry or make the change by hand, then try again.',
+    ]);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+  });
+
+  it.each([
+    ['a comment indented under the entry at its end', (text: string) => text.replace(
+      /^(\s*)cardinality: one-to-many$/m, (_m, indent: string) => `${indent}cardinality: one-to-many\n${indent}# Agreed with finance 2024-03`,
+    )],
+    ['a flow entry\'s trailing comment', (text: string) => text.replace(
+      /relationships:[\s\S]*$/,
+      'relationships:\n  - { fromColumn: customer_key, toModel: fct_order, toColumn: customer_key, cardinality: one-to-many } # legacy SAP link, keep\n',
+    )],
+  ])('library project: an entry carrying %s is refused, never moved with the comment dropped (#133 review)', async (_label, addComment) => {
+    h = await createHarness({
+      library: { dim_customer: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }] },
+    });
+    const file = h.modelPath('dim_customer');
+    const commented = addComment(fs.readFileSync(file, 'utf-8'));
+    expect(commented).toMatch(/# (Agreed|legacy)/);
+    fs.writeFileSync(file, commented);
+    h.models.invalidateCache();
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'many-to-many' } });
+    expect(orders.errors()).toEqual([
+      "Failed to update relationship: Entry 1 of dim_customer's model file has comments, which changing this relationship here would remove. " +
+      'Move that text out of the entry or make the change by hand, then try again.',
+    ]);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(commented);
+  });
+
+  it('library project: a link stored twice with different roles is refused, not quietly merged', async () => {
+    h = await createHarness({
+      library: {
+        fct_order: [{ ...ENTRY }],
+        dim_customer: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many', role: 'ship date' }],
+      },
+    });
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(orders.errors()).toHaveLength(1);
+    expect(orders.errors()[0]).toMatch(/copies disagree.*Repair Relationships…/);
+    expect(h.model('dim_customer')?.relationships?.[0]).toMatchObject({ role: 'ship date' });
+    expect(h.model('fct_order')?.relationships).toEqual([ENTRY]);
+  });
+});
+
+describe('cascades never skip a model file they cannot read (#133 review 6)', () => {
+  const brokenOrders = 'name: orders\ncolumns: [\nrelationships:\n  - fromColumn: customer_id\n    toModel: dim_customer\n    toColumn: customer_key\n';
+  const setUp = async (brokenText: string) => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] } });
+    fs.writeFileSync(path.join(path.dirname(h.modelPath('fct_order')), 'orders.yml'), brokenText);
+    h.models.invalidateCache();
+    return h.open('orders');
+  };
+
+  it('refuses a column rename while an unreadable model file names the model', async () => {
+    const orders = await setUp(brokenOrders);
+    const before = fs.readFileSync(h.modelPath('dim_customer'), 'utf-8');
+    await orders.send({
+      type: 'updateColumn',
+      payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'cust_key', dataType: 'string', description: '' } },
+    });
+    expect(orders.errors()).toEqual([
+      'Failed to update column: logical-models/orders.yml could not be read, so a relationship it holds to dim_customer would keep ' +
+      'pointing at the old name after this column rename. Fix that file first, then try again.',
+    ]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(fs.readFileSync(h.modelPath('dim_customer'), 'utf-8')).toBe(before);
+  });
+
+  it('refuses a column removal and a model rename the same way', async () => {
+    const orders = await setUp(brokenOrders);
+    await orders.send({ type: 'removeColumn', payload: { modelName: 'dim_customer', columnName: 'customer_key' } });
+    expect(orders.errors()[0]).toMatch(/^Failed to remove column: logical-models\/orders\.yml could not be read/);
+    await orders.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });
+    expect(orders.errors()[0]).toMatch(/^Failed to rename model: logical-models\/orders\.yml could not be read.*after this rename/);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(h.model('dim_customer')).not.toBeNull();
+  });
+
+  it('goes ahead when the unreadable file does not name the model', async () => {
+    const orders = await setUp('name: orders\ncolumns: [\n');
+    await orders.send({
+      type: 'updateColumn',
+      payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'cust_key', dataType: 'string', description: '' } },
+    });
+    expect(orders.errors()).toEqual([]);
+    expect(h.model('fct_order')?.relationships).toEqual([{ ...ENTRY, toColumn: 'cust_key' }]);
+  });
+});
+
+describe('a model file with a YAML error never switches where relationships are kept (#133 review)', () => {
+  it('a new relationship between two healthy models still goes to the model library', async () => {
+    const leftover: Relationship = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] }, reporting: [leftover] });
+    // The only model file holding relationships gets a merge-conflict marker.
+    const fct = h.modelPath('fct_order');
+    fs.writeFileSync(fct, `<<<<<<< HEAD\n${fs.readFileSync(fct, 'utf-8')}=======\nname: fct_order\n>>>>>>> theirs\n`);
+    h.models.invalidateCache();
+    expect(h.models.relationshipModeInputs().unreadableWithRelationships).toBe(1);
+
+    const orders = await h.open('orders');
+    await orders.send({ type: 'switchStage', payload: { stage: 'logical', requestId: 1 } });
+    const payload = orders.posted().find((m) => m.type === 'stageData' || m.type === 'domainLoaded')?.payload as DisplayDomain | undefined;
+    expect(payload?.relationshipHome).toBe('library');
+
+    const before = fs.readFileSync(h.domainPath('orders'), 'utf-8');
+    await orders.send({
+      type: 'addRelationship',
+      payload: { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' },
+    });
+    expect(orders.errors()).toEqual([]);
+    expect(fs.readFileSync(h.domainPath('orders'), 'utf-8')).toBe(before);
+    expect(h.model('dim_customer')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' },
+    ]);
+  });
+});
+
+describe('an older-format (v4) diagram with copies that disagree (#133 review)', () => {
+  it('refuses the change by pointing at the migration, never at Repair Relationships… alone', async () => {
+    h = await createHarness();
+    const copy = { ...EDGE, cardinality: 'many-to-one' };
+    fs.writeFileSync(h.domainPath('legacy'), JSON.stringify({
+      schemaVersion: 4, domain: 'legacy', layer: 'silver', description: '',
+      logical: { models: [structuredClone(FCT_ORDER), structuredClone(DIM_CUSTOMER)], relationships: [copy, { ...copy, role: 'buyer' }] },
+      viewConfig: {},
+    }, null, 2) + '\n');
+    const before = fs.readFileSync(h.domainPath('legacy'), 'utf-8');
+    const legacy = await h.open('legacy');
+    await legacy.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(legacy.errors()).toHaveLength(1);
+    expect(legacy.errors()[0]).toMatch(/older format: run "ERD Studio: Migrate Domains to Central Model Store", then "Repair Relationships…".*remove the extra entry from legacy\.json by hand\./);
+    expect(fs.readFileSync(h.domainPath('legacy'), 'utf-8')).toBe(before);
+  });
+});
+
+describe('the relationship checks cost one project scan, not one per model per panel (#133 review)', () => {
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  it('another open diagram holding several touched models is re-sent once per edit', async () => {
+    h = await createHarness({
+      library: { dim_customer: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }] },
+    });
+    const orders = await h.open('orders');
+    const reporting = await h.open('reporting');
+    await orders.send({ type: 'ready' });
+    await reporting.send({ type: 'ready' });
+    await settle();
+    reporting.posted().length = 0;
+    // A change that moves the entry from dim_customer.yml to fct_order.yml: both models are written.
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(orders.errors()).toEqual([]);
+    expect(h.model('dim_customer')?.relationships).toBeUndefined();
+    expect(h.model('fct_order')?.relationships).toEqual([{ ...ENTRY, cardinality: 'one-to-one' }]);
+    const sends = reporting.posted().filter((m) => m.type === 'domainLoaded' || m.type === 'stageData');
+    expect(sends).toHaveLength(1);
+  });
+
+  it('reuses the findings between payloads while no file changed, and reads them again after an edit or a change on disk', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] } });
+    const orders = await h.open('orders');
+    await orders.send({ type: 'ready' });
+    await settle();
+    const scans = vi.spyOn(LogicalModelService.prototype, 'relationshipCheckModels');
+    await orders.send({ type: 'switchStage', payload: { stage: 'logical', requestId: 1 } });
+    await orders.send({ type: 'switchStage', payload: { stage: 'logical', requestId: 2 } });
+    expect(scans).toHaveBeenCalledTimes(0);
+
+    // An edit of ours: read again.
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(orders.errors()).toEqual([]);
+    const afterEdit = scans.mock.calls.length;
+    expect(afterEdit).toBeGreaterThan(0);
+
+    // A model file changed on disk by someone else: read again, and the banner sees it.
+    const file = h.modelPath('dim_customer');
+    fs.writeFileSync(file, `${fs.readFileSync(file, 'utf-8')}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: one-to-many\n`);
+    h.models.invalidateCache();
+    await orders.send({ type: 'switchStage', payload: { stage: 'logical', requestId: 3 } });
+    expect(scans.mock.calls.length).toBeGreaterThan(afterEdit);
+    const payload = orders.posted().filter((m) => m.type === 'stageData').pop()?.payload as DisplayDomain | undefined;
+    expect(payload?.relationshipIssues?.map((i) => i.code)).toEqual(expect.arrayContaining(['REL001']));
+  });
+
+  it('a commit in a library project does not count every domain file\'s relationships', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] } });
+    const orders = await h.open('orders');
+    const count = vi.spyOn(DomainService.prototype, 'countDomainFileRelationships');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(orders.errors()).toEqual([]);
+    expect(count).not.toHaveBeenCalled();
+  });
+});

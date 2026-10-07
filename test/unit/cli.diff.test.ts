@@ -7,6 +7,7 @@ import { linkKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
 import { fixesFromPlan, relationshipHomeOf, runDiff, type DiffResult } from '../../src/cli/diff';
+import { formatDiff, makePaint } from '../../src/cli/format';
 import { normaliseRelationships } from '@erd-studio/core';
 import type { SemanticModel } from '../../src/types/semantic';
 import { canonicalRelationship } from '@erd-studio/core';
@@ -297,6 +298,36 @@ describe('fixesFromPlan — a one-to-one the stages store the other way round (#
     expect(remove.explain).toMatch(/as a one-to-one held by person, but dbt tests it from the other end/);
     expect(add.explain).toMatch(/as a one-to-one held by employee; the logical model stores it the other way round/);
     expect(add.relationship).toEqual({ fromModel: 'employee', fromColumn: 'person_id', toModel: 'person', toColumn: 'person_id', cardinality: 'one-to-one' });
+    // Marked as one pair, so the two are applied together as a replace (#133 review).
+    expect(remove.flipped).toBe(true);
+    expect(add.flipped).toBe(true);
+
+    // The human output never says dbt does not test it: it does, from the other end.
+    const out = formatDiff({
+      cliVersion: '0', project: '.', inputs: {}, clean: false,
+      domains: [{
+        file: '.erd-studio/silver/d.json', domain: 'd', layer: 'silver', clean: false,
+        counts: { blocking: 2, advisory: 0, matchedModels: 0, matchedColumns: 0, matchedRelationships: 0 },
+        phantoms: [], missingModelFiles: [], unreadableModelFiles: [], modelsWithoutColumns: [], integrity: [], fixes,
+      }],
+    } as unknown as DiffResult, makePaint(false));
+    expect(out).not.toContain('not tested in dbt');
+    expect(out).not.toContain('missing in logical');
+    expect(out).toContain('person → employee on person_id  stored the other way round from dbt — replace it');
+    expect(out).toContain('employee → person on person_id  one-to-one the way dbt tests it — replaces the entry stored the other way round');
+  });
+
+  it('an ordinary remove or add is not marked as a pair', () => {
+    const plan: SyncPlan = {
+      generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+      modelContext: {}, models: [], columns: [], requiresCompile: false,
+      relationships: [
+        { fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'x', discrepancyStatus: 'extra', groundTruth: 'physical', action: 'remove-relationship-from-logical', sourceCardinality: 'many-to-one' },
+        { fromModel: 'c', fromColumn: 'y', toModel: 'b', toColumn: 'y', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'many-to-one' },
+      ],
+    };
+    const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', []);
+    expect(fixes.map((f) => f.flipped)).toEqual([undefined, undefined]);
   });
 });
 
@@ -574,6 +605,32 @@ describe('fixesFromPlan — the file a relationship fix names is the one the can
       expect(fix).toMatchObject({ kind: 'remove-relationship', file: '.erd-studio/logical-models/fct.yml', alsoIn: ['.erd-studio/logical-models/dim.yml'] });
       expect(fix.explain).toMatch(/also stored in \.erd-studio\/logical-models\/dim\.yml — remove that copy too/);
     }
+  });
+
+  it('names a further copy in the very file the fix edits (#133 review)', () => {
+    // Two identical entries in fct.yml: removing "the matching entry" alone would leave the link drawn.
+    const twice: SemanticModel = { ...fct, relationships: [fct.relationships![0], fct.relationships![0]] };
+    const dimPlain: SemanticModel = { name: 'dim', columns: [col('id', true)] };
+    const plan: SyncPlan = { ...base, relationships: [
+      { fromModel: 'fct', fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', discrepancyStatus: 'extra', groundTruth: 'physical', action: 'remove-relationship-from-logical', sourceCardinality: 'many-to-one' },
+    ] };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], home([dimPlain, twice]));
+    expect(fix).toMatchObject({ kind: 'remove-relationship', file: '.erd-studio/logical-models/fct.yml', alsoIn: ['.erd-studio/logical-models/fct.yml'] });
+    expect(fix.explain).toMatch(/also stored in \.erd-studio\/logical-models\/fct\.yml \(another entry besides the one this fix is about\) — remove that copy too\./);
+  });
+
+  it('set-cardinality that moves the link names the copy already in its destination file (#133 review)', () => {
+    // fct holds it many-to-one (drawn); dim also holds it as one-to-many; dbt says one-to-many from fct's side.
+    const fctPlain: SemanticModel = { ...fct, relationships: [{ fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', cardinality: 'many-to-one' }] };
+    const plan: SyncPlan = { ...base, relationships: [
+      { fromModel: 'fct', fromColumn: 'dim_id', toModel: 'dim', toColumn: 'id', discrepancyStatus: 'cardinality-mismatch', groundTruth: 'physical', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many' },
+    ] };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], home([dim, fctPlain]));
+    expect(fix).toMatchObject({
+      kind: 'set-cardinality', file: '.erd-studio/logical-models/dim.yml', movesFrom: '.erd-studio/logical-models/fct.yml',
+      alsoIn: ['.erd-studio/logical-models/dim.yml'],
+    });
+    expect(fix.explain).toMatch(/also stored in \.erd-studio\/logical-models\/dim\.yml \(another entry besides the one this fix is about\) — remove that copy too\./);
   });
 
   it('a domain-file copy of a library link is named too', () => {

@@ -783,3 +783,43 @@ describe('loadDisplayDomain', () => {
     });
   });
 });
+
+describe('loadDisplayDomain — a library target that matches a listed model only without case', () => {
+  const g = [
+    'name: g',
+    'columns:',
+    '  - { name: d, dataType: INT }',
+    'relationships:',
+    '  - { fromColumn: d, toModel: Dd, toColumn: id, cardinality: many-to-one }',
+    '',
+  ].join('\n');
+  const domain = v5(['DD', 'g']);
+  const base: Record<string, string> = {
+    [DOMAIN]: domain,
+    '.erd-studio/logical-models/DD.yml': modelYml('DD'),
+    '.erd-studio/logical-models/g.yml': g,
+  };
+
+  it('is not drawn when the library has a model of that exact name (as the extension)', async () => {
+    const { result, reads } = load({ ...base, '.erd-studio/logical-models/gold/Dd.yml': modelYml('Dd') });
+    const d = await result;
+    expect(d.relationships).toEqual([]);
+    expect(reads).toContain('.erd-studio/logical-models/gold/Dd.yml');
+  });
+
+  it('is drawn as a respelling when no such model exists', async () => {
+    const d = await load(base).result;
+    expect(d.relationships.map((r) => `${r.fromModel}->${r.toModel}`)).toEqual(['g->DD']);
+  });
+
+  it('a store that ignores case answering Dd.yml with DD.yml is not taken for another model', async () => {
+    const files = { ...base };
+    const readFile = async (p: string) => {
+      const hit = Object.keys(files).find((k) => k.toLowerCase() === p.toLowerCase());
+      return hit === undefined ? null : files[hit];
+    };
+    const d = await loadDisplayDomain({ domainPath: DOMAIN, readFile, readOnly: true, warn: () => {} });
+    expect(d.relationships.map((r) => `${r.fromModel}->${r.toModel}`)).toEqual(['g->DD']);
+  });
+});
+

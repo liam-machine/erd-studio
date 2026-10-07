@@ -298,3 +298,134 @@ export function setDomainRelationships(text: string, relationships: readonly Rel
     + lead + '"relationships"' + separator + rendered
     + body.slice(anchor.valueEnd);
 }
+
+/** The elements of the array whose `[` is at `open`: each element's span. */
+function scanArray(text: string, open: number): { open: number; close: number; elements: Array<[number, number]> } {
+  const elements: Array<[number, number]> = [];
+  let i = skipWs(text, open + 1);
+  if (text[i] === ']') return { open, close: i, elements };
+  for (;;) {
+    const start = i;
+    const end = scanValue(text, i);
+    elements.push([start, end]);
+    i = skipWs(text, end);
+    if (text[i] === ']') return { open, close: i, elements };
+    i = skipWs(text, i + 1); // past ','
+  }
+}
+
+/** Where `logical.relationships` is in `body`, or null when it is absent or not an array. */
+function domainRelationshipsArray(body: string): { open: number; close: number; elements: Array<[number, number]> } | null {
+  const root = scanObject(body, skipWs(body, 0));
+  // JSON.parse keeps the last of duplicate keys; so does this.
+  const logicalMember = [...root.members].reverse().find((m) => m.key === 'logical');
+  if (!logicalMember || body[logicalMember.valueStart] !== '{') return null;
+  const logical = scanObject(body, logicalMember.valueStart);
+  const member = [...logical.members].reverse().find((m) => m.key === 'relationships');
+  if (!member || body[member.valueStart] !== '[') return null;
+  return scanArray(body, member.valueStart);
+}
+
+/**
+ * The source text of each element of a domain file's `logical.relationships`,
+ * exactly as written, or null when the file is not JSON or the list is not an
+ * array. What a repair compares to prove it left an entry alone.
+ */
+export function domainRelationshipElementTexts(text: string): string[] | null {
+  const { body } = splitBom(text);
+  try {
+    JSON.parse(body);
+    const array = domainRelationshipsArray(body);
+    return array ? array.elements.map(([start, end]) => body.slice(start, end)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The fields of a relationship entry an edit sets, in the order they are added when missing. */
+const RELATIONSHIP_FIELDS = ['fromModel', 'fromColumn', 'toModel', 'toColumn', 'cardinality', 'role'] as const;
+
+/**
+ * One entry's object text with its relationship fields set to `rel`, value by
+ * value: every other key, and the bytes of every value that does not change,
+ * are kept as written. A missing field is added after the last member; a role
+ * `rel` does not have is removed.
+ */
+function editEntryObject(objectText: string, rel: Relationship, eol: string): string {
+  const span = scanObject(objectText, 0);
+  const lastOf = (key: string): JsonMember | undefined => [...span.members].reverse().find((m) => m.key === key);
+  const splices: Array<{ start: number; end: number; text: string }> = [];
+  const additions: string[] = [];
+  for (const field of RELATIONSHIP_FIELDS) {
+    const want = rel[field];
+    const member = lastOf(field);
+    if (want === undefined || want === '') {
+      if (!member) continue;
+      // Removed (every copy of the key) with the separator before it, or
+      // after it when it is the first member.
+      for (const m of span.members.filter((x) => x.key === field)) {
+        const at = span.members.indexOf(m);
+        if (at > 0) splices.push({ start: span.members[at - 1].valueEnd, end: m.valueEnd, text: '' });
+        else if (span.members.length > 1) splices.push({ start: m.keyStart, end: span.members[1].keyStart, text: '' });
+        else splices.push({ start: m.keyStart, end: m.valueEnd, text: '' });
+      }
+      continue;
+    }
+    if (member) {
+      let current: unknown;
+      try { current = JSON.parse(objectText.slice(member.valueStart, member.valueEnd)); } catch { current = undefined; }
+      if (current !== want) splices.push({ start: member.valueStart, end: member.valueEnd, text: JSON.stringify(want) });
+    } else {
+      additions.push(`"${field}": ${JSON.stringify(want)}`);
+    }
+  }
+  if (additions.length > 0) {
+    const last = span.members[span.members.length - 1];
+    const indent = last ? indentIfFirstOnLine(objectText, last.keyStart) : null;
+    const lead = indent === null ? ', ' : ',' + eol + indent;
+    const at = last ? last.valueEnd : span.open + 1;
+    splices.push({ start: at, end: at, text: (last ? lead : '') + additions.join(lead) });
+  }
+  let out = objectText;
+  for (const s of [...splices].sort((a, b) => b.start - a.start || b.end - a.end)) {
+    out = out.slice(0, s.start) + s.text + out.slice(s.end);
+  }
+  return out;
+}
+
+/**
+ * Return `text` (a domain JSON) with entries of `logical.relationships`
+ * removed (`remove`, by position as written) or changed (`update`), entry by
+ * entry: every other entry keeps its exact bytes — its layout, number
+ * spelling, escapes and keys — and a changed entry keeps everything but the
+ * values that change. Throws when the file is not JSON or the list is not
+ * an array.
+ */
+export function editDomainRelationshipEntries(
+  text: string,
+  edits: { remove: ReadonlySet<number>; update: ReadonlyMap<number, Relationship> },
+): string {
+  const { bom, body } = splitBom(text);
+  JSON.parse(body);
+  const array = domainRelationshipsArray(body);
+  if (!array) throw new Error('editDomainRelationshipEntries: "logical.relationships" is not a list');
+  const eol = detectEol(body);
+  const { elements } = array;
+  const kept = elements.map((_, i) => i).filter((i) => !edits.remove.has(i));
+  const elementText = (i: number): string => {
+    const [start, end] = elements[i];
+    const original = body.slice(start, end);
+    const update = edits.update.get(i);
+    if (!update) return original;
+    if (original[0] !== '{') throw new Error(`editDomainRelationshipEntries: entry ${i + 1} is not an object`);
+    return editEntryObject(original, update, eol);
+  };
+  if (kept.length === 0) return bom + body.slice(0, array.open) + '[]' + body.slice(array.close + 1);
+  let inner = body.slice(array.open + 1, elements[0][0]);
+  kept.forEach((i, n) => {
+    inner += elementText(i);
+    if (n < kept.length - 1) inner += body.slice(elements[i][1], elements[i + 1][0]);
+  });
+  inner += body.slice(elements[elements.length - 1][1], array.close);
+  return bom + body.slice(0, array.open + 1) + inner + body.slice(array.close);
+}

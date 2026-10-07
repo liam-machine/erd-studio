@@ -83,6 +83,9 @@ describe('edge issues', () => {
     const title = edgeIssueTitle(['REL001'], { olderFormat: true });
     expect(title).not.toContain('Repair Relationships… keeps one copy');
     expect(title).toContain('Migrate Domains to Central Model Store');
+    // Edit / ⇄ keep one copy only when the copies agree: a commit refuses copies that disagree (#133 review).
+    expect(title).not.toContain('or use Edit or ⇄ on the line, which keeps one copy');
+    expect(title).toContain('only when every copy says the same — copies that disagree are refused there');
     expect(edgeIssueTitle(['REL006'], { olderFormat: true })).toBe(edgeIssueTitle(['REL006']));
   });
 });

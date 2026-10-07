@@ -15,7 +15,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { createMockTextDocument, _resetMockWorkspace } from '../__mocks__/vscode';
-import { repairRelationships, writeFileAtomic } from '../../src/commands/repairRelationships';
+import { repairRelationships, runMoveRelationships, writeFileAtomic } from '../../src/commands/repairRelationships';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
@@ -210,14 +210,22 @@ describe('Repair Relationships… — automatic fixes', () => {
     expect(f.read('logical-models/fct_order.yml')).toBe(fctWithKey);
   });
 
-  it('names a file it cannot edit in place, changing nothing', async () => {
+  it('names a file it cannot edit in place, changing nothing — before any question, not as an error', async () => {
     fs.writeFileSync(f.at('logical-models/dim_customer.yml'),
       `${DIM}relationships: [{ fromColumn: customer_key, toModel: fct_order, toColumn: customer_key, cardinality: one-to-many }]\n`);
     acceptModal();
     const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage');
     await f.run();
-    expect(texts(error)[0]).toContain('logical-models/dim_customer.yml');
-    expect(texts(error)[0]).toContain('Nothing was changed.');
+    // Found before any question and reported as left, by name — never an
+    // error that throws away every other fix of the run (#133 review).
+    expect(texts(error)).toEqual([]);
+    expect(texts(warn)).toEqual([]);
+    expect(texts(info)).toEqual([
+      'Repair Relationships: nothing it can change here. fct_order.customer_key → dim_customer.customer_key: ' +
+      'logical-models/dim_customer.yml: "relationships:" is not a list with one "- " entry per line — left as it is; change it by hand.',
+    ]);
     expect(f.read('logical-models/fct_order.yml')).toBe(FCT);
   });
 });
@@ -346,3 +354,125 @@ describe('Repair Relationships… — relationships it must leave for the user a
     expect(f.read('logical-models/fct_order.yml')).toBe(fct);
   });
 });
+
+describe('Repair Relationships… — a link newly defined in the model library (#133 review 6)', () => {
+  it('says why, and names the diagram that will start drawing it', async () => {
+    const link = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const domain = (name: string, relationships: unknown[]) => JSON.stringify({
+      schemaVersion: 5, domain: name, layer: 'gold', description: '', logical: { models: ['fct_order', 'dim_customer'], relationships }, viewConfig: {},
+    }, null, 2) + '\n';
+    f = fixture({
+      'logical-models/dim_customer.yml': DIM,
+      // Library mode: a model file already holds a relationship.
+      'logical-models/fct_order.yml': `${FCT}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: many-to-many\n`,
+      'gold/a.json': domain('a', [link]),
+      'gold/b.json': domain('b', [link]),
+      'gold/c.json': domain('c', []),
+    });
+    const info = acceptModal();
+    await f.run();
+    const modal = info.mock.calls.find((c) => (c[1] as { modal?: boolean } | undefined)?.modal);
+    expect(modal).toBeDefined();
+    const detail = (modal![1] as { detail: string }).detail;
+    expect(detail).toMatch(/^Why: a relationship stored in more than one diagram file is defined once/);
+    expect(detail).toContain('• gold/c.json will also draw fct_order.customer_key → dim_customer.customer_key');
+  });
+});
+
+describe('Repair Relationships… — symlinked and read-only files (#133 review)', () => {
+  beforeEach(() => {
+    f = fixture({ 'logical-models/dim_customer.yml': DIM_ONE_SIDED, 'shared/fct_order.yml': FCT });
+    fs.symlinkSync(f.at('shared/fct_order.yml'), f.at('logical-models/fct_order.yml'));
+  });
+
+  it('writes a symlinked model file through its link: the link stays a link and its target gets the new text', async () => {
+    acceptModal();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    await f.run();
+    expect(texts(error)).toEqual([]);
+    expect(fs.lstatSync(f.at('logical-models/fct_order.yml')).isSymbolicLink()).toBe(true);
+    expect(f.read('shared/fct_order.yml')).toContain('toModel: dim_customer');
+    expect(f.read('logical-models/dim_customer.yml')).toBe(DIM);
+  });
+
+  it('refuses a read-only file before the preview, changing nothing', async () => {
+    fs.chmodSync(f.at('shared/fct_order.yml'), 0o444);
+    const info = acceptModal();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    await f.run();
+    expect(info.mock.calls.some((c) => (c[1] as { modal?: boolean } | undefined)?.modal)).toBe(false);
+    expect(texts(error)).toHaveLength(1);
+    expect(texts(error)[0]).toContain('logical-models/fct_order.yml is read-only');
+    expect(texts(error)[0]).toContain('Nothing was changed.');
+    expect(f.read('logical-models/dim_customer.yml')).toBe(DIM_ONE_SIDED);
+    expect(f.read('shared/fct_order.yml')).toBe(FCT);
+    expect(fs.statSync(f.at('shared/fct_order.yml')).mode & 0o777).toBe(0o444);
+    fs.chmodSync(f.at('shared/fct_order.yml'), 0o644);
+  });
+});
+
+describe('writeFileAtomic (repair) — keeps what a rename would lose', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-repair-write-'));
+    f = { root: dir } as Fixture;
+  });
+
+  it("keeps the file's permission bits", () => {
+    const file = path.join(dir, 'a.json');
+    fs.writeFileSync(file, 'old');
+    fs.chmodSync(file, 0o640);
+    writeFileAtomic(file, 'new');
+    expect(fs.readFileSync(file, 'utf-8')).toBe('new');
+    expect(fs.statSync(file).mode & 0o777).toBe(0o640);
+  });
+
+  it('refuses a read-only file instead of replacing it', () => {
+    const file = path.join(dir, 'a.json');
+    fs.writeFileSync(file, 'old');
+    fs.chmodSync(file, 0o444);
+    expect(() => writeFileAtomic(file, 'new')).toThrow('a.json is read-only');
+    expect(fs.readFileSync(file, 'utf-8')).toBe('old');
+    expect(fs.readdirSync(dir)).toEqual(['a.json']);
+    fs.chmodSync(file, 0o644);
+  });
+
+  it('writes through a symlink, leaving the link in place', () => {
+    const real = path.join(dir, 'real.json');
+    const link = path.join(dir, 'link.json');
+    fs.writeFileSync(real, 'old');
+    fs.symlinkSync(real, link);
+    writeFileAtomic(link, 'new');
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(real, 'utf-8')).toBe('new');
+  });
+});
+
+describe('Move Relationships to Model Library — the closing message names only what happened (#133 review)', () => {
+  const FCT_WITH_LINK = `${FCT}relationships:\n  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n`;
+  const domainWithCopy = JSON.stringify({
+    schemaVersion: 5, domain: 'x', layer: 'silver',
+    logical: {
+      models: ['dim_customer', 'fct_order'],
+      relationships: [{ fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' }],
+    },
+    viewConfig: {},
+  }, null, 2) + '\n';
+
+  it('a run that only removed a diagram-file copy does not say it moved anything', async () => {
+    f = fixture({ 'logical-models/dim_customer.yml': DIM, 'logical-models/fct_order.yml': FCT_WITH_LINK, 'silver/x.json': domainWithCopy });
+    const info = acceptModal();
+    const layerService = new LayerService(f.root, SEMANTIC_DIR);
+    const domainService = new DomainService(layerService);
+    const logicalModelService = new LogicalModelService(f.root, SEMANTIC_DIR);
+    domainService.setLogicalModelService(logicalModelService);
+    await runMoveRelationships({ workspaceRoot: f.root, semanticDir: SEMANTIC_DIR, domainService, logicalModelService, onWritten: f.onWritten });
+
+    expect(JSON.parse(f.read('silver/x.json')).logical.relationships).toEqual([]);
+    const closing = texts(info).filter((t) => !t.includes('?'));
+    expect(closing).toHaveLength(1);
+    expect(closing[0]).not.toMatch(/Moved \d+ relationship/);
+    expect(closing[0]).toContain('1 diagram-file copy of library relationships removed.');
+  });
+});
+

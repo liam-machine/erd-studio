@@ -44,11 +44,13 @@ import {
   directionChoices,
   directionKey,
   directionQuestion,
+  followsVerdict,
   likelyReason,
   readBack,
   relationshipSentence,
   reversed,
   turnedRoundNote,
+  verdictEnds,
   type DialogEnds,
 } from '../../lib/relationshipDialog';
 import type { Cardinality } from '../../../src/types/semantic';
@@ -87,9 +89,19 @@ export function validateForm(
     errors.toColumn = 'Target column is required';
   }
 
-  // Check for self-referential relationship
+  // A new relationship between a model and itself is not offered here; an
+  // existing self-reference (a hierarchy such as employee.manager_id →
+  // employee.employee_id, which the canvas draws as a loop) can still be
+  // edited — its role and cardinality — as long as it joins two different
+  // columns.
   if (fromModel && toModel && fromModel === toModel) {
-    errors.selfReference = 'A model cannot have a relationship with itself';
+    const editingSelfReference = originalKey !== undefined
+      && originalKey.fromModel.toLowerCase() === originalKey.toModel.toLowerCase();
+    if (!editingSelfReference) {
+      errors.selfReference = 'A model cannot have a relationship with itself';
+    } else if (fromColumn.trim() !== '' && fromColumn.trim().toLowerCase() === toColumn.trim().toLowerCase()) {
+      errors.selfReference = 'A column cannot have a relationship with itself';
+    }
   }
 
   // Duplicate check: the same two columns, either way round and in any case,
@@ -106,6 +118,11 @@ export function validateForm(
   }
 
   return errors;
+}
+
+/** The four ends exactly as spelled (`directionKey` folds case; two models may differ only in case). */
+function exactEndsKey(ends: DialogEnds): string {
+  return [ends.fromModel, ends.fromColumn, ends.toModel, ends.toColumn].join('\u0000');
 }
 
 // ---------------------------------------------------------------------------
@@ -140,9 +157,16 @@ export function NewFkDialog() {
   const [chosenDirection, setChosenDirection] = useState<string | null>(null);
   // The direction a drag was turned round to (directionKey), for the note.
   const [turnedFor, setTurnedFor] = useState<string | null>(null);
-  const [markKey, setMarkKey] = useState(false);
+  // The ends (directionKey) the "Mark … as … key" box was ticked for, or
+  // null. A tick belongs to the column it named: once the ends change, the box
+  // shows unticked and nothing is marked unless the user ticks it again.
+  const [markKeyFor, setMarkKeyFor] = useState<string | null>(null);
 
   const models = useMemo(() => domain?.models ?? [], [domain]);
+  // Read by the edit effect when it opens, without re-running it (and so
+  // resetting the form) every time the domain refreshes.
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
 
   // Derive model names from domain
   const modelNames = useMemo(() => models.map((m) => m.name), [models]);
@@ -215,6 +239,23 @@ export function NewFkDialog() {
     toModel !== '' &&
     toColumn.trim() !== '';
 
+  // An edited relationship whose model or column is not in this diagram
+  // (REL003 / REL004): its select shows the name as an option of its own,
+  // never a blank "Select …" over a value that would still be saved, and the
+  // form says what is wrong. Stub models excuse a missing column, as the checks read it.
+  const stubModels = useMemo(() => new Set((domain?.stubColumns ?? []).map((n) => n.toLowerCase())), [domain]);
+  const fromModelMissing = fromModel !== '' && !modelNames.includes(fromModel);
+  const toModelMissing = toModel !== '' && !modelNames.includes(toModel);
+  const fromColumnMissing = sourceColumns.length > 0 && fromColumn !== '' && !sourceColumns.includes(fromColumn);
+  const toColumnMissing = targetColumns.length > 0 && toColumn !== '' && !targetColumns.includes(toColumn);
+  // A Set: a self-reference to a missing model names it once.
+  const missingEnds = [...new Set([
+    ...(fromModelMissing ? [`${fromModel} is not one of this diagram's models`] : []),
+    ...(toModelMissing ? [`${toModel} is not one of this diagram's models`] : []),
+    ...(fromColumnMissing && !stubModels.has(fromModel.toLowerCase()) ? [`${fromModel} has no column ${fromColumn}`] : []),
+    ...(toColumnMissing && !stubModels.has(toModel.toLowerCase()) ? [`${toModel} has no column ${toColumn}`] : []),
+  ])];
+
   // --- Direction (#133) ----------------------------------------------------
 
   const ends: DialogEnds = useMemo(
@@ -243,6 +284,7 @@ export function NewFkDialog() {
   const contradiction = contradictionWarning(verdict, ends, models, cardinality);
   const showTurned = turnedFor !== null && turnedFor === directionKey(ends);
   const offerMarkKey = ambiguous && !needsDirection && canOfferMarkKey(models, ends);
+  const markKey = markKeyFor !== null && markKeyFor === exactEndsKey(ends);
   const sendMarkKey = offerMarkKey && markKey;
   const canSubmit = isValid && !needsDirection;
 
@@ -258,7 +300,7 @@ export function NewFkDialog() {
     setTouched({});
     setChosenDirection(null);
     setTurnedFor(null);
-    setMarkKey(false);
+    setMarkKeyFor(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -321,11 +363,6 @@ export function NewFkDialog() {
     setToColumn('');
   }, []);
 
-  const handleCardinalityChange = useCallback((value: Cardinality) => {
-    setChosenCardinality(value);
-    setCardinalityTouched(true);
-  }, []);
-
   /** Put the given ends in the form (Swap sides / Swap back / a direction button). */
   const applyEnds = useCallback((next: DialogEnds) => {
     setFromModel(next.fromModel);
@@ -333,6 +370,23 @@ export function NewFkDialog() {
     setToModel(next.toModel);
     setToColumn(next.toColumn);
   }, []);
+
+  const handleCardinalityChange = useCallback((value: Cardinality) => {
+    setChosenCardinality(value);
+    setCardinalityTouched(true);
+    // An edited many-to-many still showing its stored (drag-order) ends, made
+    // one-sided here: turned the way the keys say, as the edge menu's pick is
+    // when the dialog opens. Ends the user set themselves are left alone.
+    if (
+      value !== 'many-to-many' && fkDialogEditData?.cardinality === 'many-to-many' && chosenDirection === null &&
+      directionKey(ends) === directionKey(fkDialogEditData) &&
+      verdict && verdict.confidence !== 'ambiguous' && verdict.cardinality !== 'many-to-many' && !followsVerdict(verdict, ends)
+    ) {
+      const next = verdictEnds(verdict);
+      applyEnds(next);
+      setTurnedFor(directionKey(next));
+    }
+  }, [fkDialogEditData, chosenDirection, ends, verdict, applyEnds]);
 
   const handleSwapSides = useCallback(() => applyEnds(reversed(ends)), [applyEnds, ends]);
 
@@ -362,7 +416,7 @@ export function NewFkDialog() {
       setRole('');
       setTouched({});
       setChosenDirection(null);
-      setMarkKey(false);
+      setMarkKeyFor(null);
       // Apply prefilled values
       setFromModel(fkDialogPrefill.fromModel);
       setFromColumn(fkDialogPrefill.fromColumn);
@@ -382,14 +436,27 @@ export function NewFkDialog() {
       // A one-to-many (stored before #133) opens turned round, as the many-to-one
       // it will be saved as — the dialog offers no one-to-many.
       const flip = fkDialogEditData.cardinality === 'one-to-many';
-      const next = flip ? reversed(fkDialogEditData) : {
+      let next = flip ? reversed(fkDialogEditData) : {
         fromModel: fkDialogEditData.fromModel,
         fromColumn: fkDialogEditData.fromColumn,
         toModel: fkDialogEditData.toModel,
         toColumn: fkDialogEditData.toColumn,
       };
+      const picked = fkDialogEditData.pickedCardinality ?? (flip ? 'many-to-one' : fkDialogEditData.cardinality);
+      // A many-to-many's ends are only the order it was dragged in. Made one
+      // of the others, it goes the way the keys say when they say it (likely
+      // or certain), exactly as a new drag is turned round — with the
+      // "Turned round" note and Swap back; an ambiguous verdict asks below.
+      let turned: string | null = null;
+      if (fkDialogEditData.cardinality === 'many-to-many' && picked !== 'many-to-many') {
+        const verdict = directionFor(modelsRef.current, next);
+        if (verdict && verdict.confidence !== 'ambiguous' && verdict.cardinality !== 'many-to-many' && !followsVerdict(verdict, next)) {
+          next = verdictEnds(verdict);
+          turned = directionKey(next);
+        }
+      }
       applyEnds(next);
-      setChosenCardinality(fkDialogEditData.pickedCardinality ?? (flip ? 'many-to-one' : fkDialogEditData.cardinality));
+      setChosenCardinality(picked);
       setCardinalityTouched(true);
       setRole(fkDialogEditData.role ?? '');
       // A saved many-to-one or one-to-one's direction is the user's earlier
@@ -398,8 +465,8 @@ export function NewFkDialog() {
       // of the others asks for the direction when the keys do not settle it,
       // exactly as a new relationship does (never broken by drag order).
       setChosenDirection(fkDialogEditData.cardinality === 'many-to-many' ? null : directionKey(next));
-      setTurnedFor(null);
-      setMarkKey(false);
+      setTurnedFor(turned);
+      setMarkKeyFor(null);
     }
   }, [isOpen, fkDialogEditData, applyEnds]);
 
@@ -408,7 +475,7 @@ export function NewFkDialog() {
   }
 
   const home = domain?.relationshipHome;
-  const back = readBack(ends, cardinality, home);
+  const back = readBack(ends, cardinality, home, (domain?.schemaVersion ?? 5) < 5);
   const primaryLabel = contradiction
     ? (isEditMode ? 'Save anyway' : 'Create anyway')
     : (isEditMode ? 'Save Changes' : 'Create Relationship');
@@ -445,6 +512,7 @@ export function NewFkDialog() {
             onBlur={() => handleBlur('fromModel')}
           >
             <option value="">Select model...</option>
+            {fromModelMissing && <option value={fromModel}>{`${fromModel} (not in this diagram)`}</option>}
             {modelNames.map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -470,6 +538,7 @@ export function NewFkDialog() {
               onBlur={() => handleBlur('fromColumn')}
             >
               <option value="">Select column...</option>
+              {fromColumnMissing && <option value={fromColumn}>{`${fromColumn} (not a column of ${fromModel})`}</option>}
               {sourceColumns.map((name) => (
                 <option key={name} value={name}>
                   {name}
@@ -506,6 +575,7 @@ export function NewFkDialog() {
             onBlur={() => handleBlur('toModel')}
           >
             <option value="">Select model...</option>
+            {toModelMissing && <option value={toModel}>{`${toModel} (not in this diagram)`}</option>}
             {modelNames.map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -531,6 +601,7 @@ export function NewFkDialog() {
               onBlur={() => handleBlur('toColumn')}
             >
               <option value="">Select column...</option>
+              {toColumnMissing && <option value={toColumn}>{`${toColumn} (not a column of ${toModel})`}</option>}
               {targetColumns.map((name) => (
                 <option key={name} value={name}>
                   {name}
@@ -553,6 +624,16 @@ export function NewFkDialog() {
             <span className="new-fk-dialog__error">{errors.toColumn}</span>
           )}
         </div>
+
+        {missingEnds.length > 0 && (
+          <div className="new-fk-dialog__warning new-fk-dialog__warning--global new-fk-dialog__warning--missing-end">
+            <span className="new-fk-dialog__warning-icon">⚠</span>
+            <span>
+              {missingEnds.join('; ')}, so the canvas cannot draw this relationship. Pick another model or column,
+              or remove the relationship.
+            </span>
+          </div>
+        )}
 
         {/* Direction: settled by the evidence, or asked for (#133) */}
         {endsComplete && !errors.selfReference && (
@@ -587,7 +668,17 @@ export function NewFkDialog() {
                   </span>
                 )}
                 {!showTurned && verdict?.confidence === 'likely' && (
-                  <span className="new-fk-dialog__note">{likelyReason(verdict, ends)}</span>
+                  <span className="new-fk-dialog__note">
+                    {likelyReason(verdict, ends)}
+                    {cardinality !== 'many-to-many' && !followsVerdict(verdict, ends) && (
+                      <>
+                        {' '}
+                        <button type="button" className="new-fk-dialog__link-button" onClick={handleSwapSides}>
+                          Swap sides
+                        </button>
+                      </>
+                    )}
+                  </span>
                 )}
               </>
             )}
@@ -614,7 +705,7 @@ export function NewFkDialog() {
 
             {offerMarkKey && (
               <label className="new-fk-dialog__radio">
-                <input type="checkbox" checked={markKey} onChange={(e) => setMarkKey(e.target.checked)} />
+                <input type="checkbox" checked={markKey} onChange={(e) => setMarkKeyFor(e.target.checked ? exactEndsKey(ends) : null)} />
                 Mark {ends.toColumn} as {ends.toModel}&apos;s key
               </label>
             )}

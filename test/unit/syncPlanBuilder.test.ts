@@ -127,6 +127,8 @@ describe('buildSyncPlan', () => {
       fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id',
       discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical',
       sourceCardinality: undefined, targetCardinality: 'many-to-one',
+      resolvedCardinality: 'many-to-one',
+      resolvedRelationship: { fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id', cardinality: 'many-to-one' },
     }]);
     expect(Object.keys(plan.modelContext).sort()).toEqual(['dim_customer', 'fct_order']);
   });
@@ -249,5 +251,51 @@ describe('SemanticEditorProvider.handleGenerateSyncPlan parity', () => {
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('buildSyncPlan — the cardinality to write is stage-absolute (#133 review 6)', () => {
+  const ctx = {
+    manifest: emptyManifest, ymlData: emptyYml, projectRoot: '/proj', semanticDir: '.erd-studio',
+    domain: 'tasks', layer: 'gold', now: new Date('2026-01-02T03:04:05.000Z'),
+  };
+  // dbt tests dim_task.task_key → fct_task_event.task_key as one-to-many (declared on the
+  // dimension); logical stores fct → dim one-to-one. Compared from the physical stage, the
+  // row is physical's: source = dbt's one-to-many, target = logical's one-to-one.
+  const physicalSource = (): DiscrepancyReport => ({
+    domain: 'tasks', layer: 'gold', sourceStage: 'physical', targetStage: 'logical', models: [],
+    relationships: [{
+      fromModel: 'dim_task', fromColumn: 'task_key', toModel: 'fct_task_event', toColumn: 'task_key',
+      status: 'cardinality-mismatch', sourceCardinality: 'one-to-many', targetCardinality: 'one-to-one',
+    }],
+    summary: { totalModels: 0, matchedModels: 0, extraModels: 0, missingModels: 0, totalColumns: 0, matchedColumns: 0, extraColumns: 0, missingColumns: 0, dataTypeMismatches: 0, undeclaredColumns: 0 },
+  } as DiscrepancyReport);
+
+  it('physical as ground truth on a physical-stage plan: dbt\'s value, stored on the fact as many-to-one', () => {
+    const plan = buildSyncPlan(physicalSource(), { 'rel:dim_task:task_key:fct_task_event:task_key': 'physical' }, ctx);
+    expect(plan.relationships[0]).toMatchObject({
+      action: 'update-cardinality-in-logical',
+      resolvedCardinality: 'one-to-many',
+      resolvedRelationship: { fromModel: 'fct_task_event', fromColumn: 'task_key', toModel: 'dim_task', toColumn: 'task_key', cardinality: 'many-to-one' },
+    });
+  });
+
+  it('logical as ground truth on a physical-stage plan: the logical value', () => {
+    const plan = buildSyncPlan(physicalSource(), { 'rel:dim_task:task_key:fct_task_event:task_key': 'logical' }, ctx);
+    expect(plan.relationships[0]).toMatchObject({ action: 'update-cardinality-in-physical', resolvedCardinality: 'one-to-one' });
+  });
+
+  it('a logical-stage plan resolves to the same stored relationship', () => {
+    const fromLogical: DiscrepancyReport = {
+      ...physicalSource(), sourceStage: 'logical', targetStage: 'physical',
+      relationships: [{
+        fromModel: 'fct_task_event', fromColumn: 'task_key', toModel: 'dim_task', toColumn: 'task_key',
+        status: 'cardinality-mismatch', sourceCardinality: 'one-to-one', targetCardinality: 'many-to-one',
+      }],
+    };
+    const plan = buildSyncPlan(fromLogical, { 'rel:fct_task_event:task_key:dim_task:task_key': 'physical' }, ctx);
+    expect(plan.relationships[0].resolvedRelationship).toEqual(
+      { fromModel: 'fct_task_event', fromColumn: 'task_key', toModel: 'dim_task', toColumn: 'task_key', cardinality: 'many-to-one' },
+    );
   });
 });

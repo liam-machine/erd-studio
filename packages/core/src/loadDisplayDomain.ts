@@ -264,6 +264,11 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
 
   // 7. v5 model files: each unique, allowed name read and parsed once.
   const parsed = new Map<string, ParsedModel>();
+  // Library models named only as a relationship's target that matches one of
+  // the domain's models without case: whether such a model exists decides
+  // whether the entry is a respelling (drawn) or points at another, real
+  // model outside the diagram (not drawn). See `libraryHasModel`.
+  const caseVariantTargets = new Map<string, boolean>();
   if (format === 'v5' && rawModels) {
     const names = [...new Set(rawModels.filter((m): m is string => typeof m === 'string'))]
       .filter((name) => modelNameFilter(name));
@@ -271,13 +276,38 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
     // Alphabetical, like the extension's LogicalModelService, so a name that
     // (wrongly) exists in two folders resolves to the same file in both hosts.
     const folders = [...new Set([domainLayer, ...layers.map((l) => l.id)])].sort((a, b) => a.localeCompare(b));
-    await mapWithLimit(names, maxParallelReads, async (name) => {
-      // One lane probes one candidate at a time, so maxParallelReads holds.
+    // One lane probes one candidate at a time, so maxParallelReads holds.
+    const probe = async (name: string): Promise<string | null | undefined> => {
       let text = await readFile(`${modelsDir}${name}.yml`);
       for (let i = 0; (text === null || text === undefined) && i < folders.length; i++) {
         text = await readFile(`${modelsDir}${folders[i]}/${name}.yml`);
       }
-      parsed.set(name, parseModel(name, text, maxYamlChars, maxYamlNodes, warn));
+      return text;
+    };
+    await mapWithLimit(names, maxParallelReads, async (name) => {
+      parsed.set(name, parseModel(name, await probe(name), maxYamlChars, maxYamlNodes, warn));
+    });
+
+    const listedExact = new Set(rawModels.filter((m): m is string => typeof m === 'string'));
+    const listedLower = new Set([...listedExact].map((n) => n.toLowerCase()));
+    const targets = new Set<string>();
+    for (const entry of parsed.values()) {
+      for (const rel of entry.model?.relationships ?? []) {
+        const target = rel.toModel;
+        if (typeof target !== 'string' || listedExact.has(target) || !listedLower.has(target.toLowerCase())) continue;
+        if (modelNameFilter(target)) targets.add(target);
+      }
+    }
+    await mapWithLimit([...targets], maxParallelReads, async (name) => {
+      // Every candidate place, not only the first hit: on a store that
+      // ignores case, `gold/Dd.yml` may answer with `gold/DD.yml` while the
+      // real `Dd` sits in `silver/`.
+      const places = [`${modelsDir}${name}.yml`, ...folders.map((f) => `${modelsDir}${f}/${name}.yml`)];
+      let found = false;
+      for (let i = 0; !found && i < places.length; i++) {
+        found = libraryFileIsModel(name, await readFile(places[i]));
+      }
+      caseVariantTargets.set(name, found);
     });
   }
 
@@ -307,6 +337,7 @@ export async function loadDisplayDomain(options: LoadDisplayDomainOptions): Prom
       parsed,
       readOnly,
       ignoreStrayPositions,
+      caseVariantTargets,
       warn: callerWarn,
     });
   } catch (err) {
@@ -333,10 +364,11 @@ function buildDisplayDomain(
     parsed: ReadonlyMap<string, ParsedModel>;
     readOnly: boolean;
     ignoreStrayPositions: boolean;
+    caseVariantTargets: ReadonlyMap<string, boolean>;
     warn: (message: string) => void;
   },
 ): DisplayDomain {
-  const { domainPath, fileName, parentDirName, layers, layerLookup, parsed, readOnly, ignoreStrayPositions, warn } = ctx;
+  const { domainPath, fileName, parentDirName, layers, layerLookup, parsed, readOnly, ignoreStrayPositions, caseVariantTargets, warn } = ctx;
 
   // 8. The UnifiedDomain, each occurrence of a model its own copy (sharing
   // the parsed strings, which are immutable, so repeats cost no text). Each
@@ -364,6 +396,9 @@ function buildDisplayDomain(
       return copyPlain(entry.model);
     },
     getModelError: (name) => parsed.get(name)?.loadError ?? null,
+    // Probed in step 7, from the same top level and layer folders the
+    // extension lists, so both hosts draw the same library entries.
+    libraryHasModel: (name) => caseVariantTargets.get(name) ?? false,
     warn,
   });
 
@@ -433,6 +468,19 @@ interface ParsedModel {
 }
 
 const NO_MODEL: ParsedModel = { model: null, copies: 0 };
+
+/**
+ * Whether a probed `{name}.yml` is a library model of that exact name, as
+ * the extension's file listing (by file name, case-sensitively) would say.
+ * A host whose store ignores case (a local macOS or Windows disk) answers a
+ * probe for `Dd.yml` with `DD.yml`; such a file declares `name: DD`, which
+ * gives it away — there it is the same model, not another one.
+ */
+function libraryFileIsModel(name: string, text: string | null | undefined): boolean {
+  if (text === null || text === undefined) return false;
+  const declared = /^name[ \t]*:[ \t]*["']?([A-Za-z0-9_]+)["']?[ \t]*(?:#.*)?$/m.exec(text)?.[1];
+  return declared === undefined || declared === name || declared.toLowerCase() !== name.toLowerCase();
+}
 
 /** Parse one model file's text, charging it to the budgets. */
 function parseModel(

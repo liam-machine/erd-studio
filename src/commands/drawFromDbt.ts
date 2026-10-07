@@ -61,7 +61,7 @@ export interface DrawFromDbtDeps {
   domainService: Pick<DomainService, 'listDomains' | 'countDomainFileRelationships'>;
   logicalModelService: Pick<
     LogicalModelService,
-    'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel'
+    'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'relationshipModeInputs' | 'getModel'
     | 'getModelFileError' | 'findModelFile' | 'findModelNameIgnoringCase' | 'getModelsDir' | 'serializeModelAt' | 'writeModelText'
   >;
   /** Schema yml and manifest; either may be undefined (no yml, never compiled). */
@@ -282,9 +282,11 @@ function routeDraftRelationships(
   deps: DrawFromDbtDeps,
 ): { kept: DbtDraft['relationships']; changed: SemanticModel[] } {
   const { workspaceRoot, semanticDir, domainService, logicalModelService } = deps;
+  const library = logicalModelService.relationshipModeInputs();
   if (!usesLibraryRelationships(
-    logicalModelService.listModels(),
+    library.models,
     domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
+    library.unreadableWithRelationships,
   )) {
     return { kept: draft.relationships, changed: [] };
   }

@@ -1600,7 +1600,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (modelNames.length > 0) { modelLibraryProvider.refresh(); }
           // A new model file may be one an open diagram already references
           // (a placeholder until now); the model watcher skipped the own write.
-          for (const name of modelNames) { void editorProvider.refreshDomainsReferencingModel(name); }
+          void editorProvider.refreshDomainsReferencingModels(modelNames);
           layerDecorationProvider.refresh();
           decorationProvider.refresh();
           refreshContextKeys();

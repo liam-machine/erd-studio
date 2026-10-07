@@ -152,9 +152,9 @@ function readFacts(e: EndEvidence, other: DirectionEnd): EndFacts {
 }
 
 /**
- * An end's combined verdict. `one-fk?` is a unique end whose foreign-key
- * evidence involves dbt (its relationships test names the other end, or its
- * uniqueness comes only from dbt): it is the foreign-key side of a one-to-one
+ * An end's combined verdict. `one-fk?` is a unique end whose only foreign-key
+ * evidence is a dbt relationships test naming the other end (no declared
+ * foreign key): it is the foreign-key side of a one-to-one
  * **only when the other end is unique too**. Against an end not known to be
  * unique it is the parent-declared form of a dbt test — the other end is the
  * many side — and reads as plain `one`.
@@ -193,8 +193,11 @@ function readEnd(e: EndEvidence, other: DirectionEnd): EndReading {
   const unique = f.keyUnique ?? f.dbtUnique;
   let verdict: EndVerdict;
   if (unique === true) {
-    if (f.keyUnique === true && f.declaredFk) verdict = 'one-fk';
-    else if (f.dbtPointsAtOther || f.declaredFk) verdict = 'one-fk?';
+    // A declared foreign key that is unique is a one-fk however its
+    // uniqueness is known (a whole key, or a dbt `unique` test): the same
+    // facts must give the same verdict.
+    if (f.declaredFk) verdict = 'one-fk';
+    else if (f.dbtPointsAtOther) verdict = 'one-fk?';
     else verdict = 'one';
   } else if (unique === false) {
     verdict = 'many';
@@ -232,7 +235,12 @@ function decide(vx: Verdict, vy: Verdict): Decision {
   const knownIsX = vy === 'unknown';
   const known = knownIsX ? vx : vy;
   if (known === 'one') return { kind: 'decided', fromIsX: !knownIsX, cardinality: 'many-to-one' };
-  if (known === 'one-fk') return { kind: 'decided', fromIsX: knownIsX, cardinality: 'one-to-one' };
+  // A unique column that also points out says nothing about which way it
+  // relates to a column nothing is known about: it may hold the key to it (a
+  // one-to-one, as a subtype holds its supertype's key), or be the key the
+  // other column points at (a many-to-one, as a department's manager_id
+  // points at a subtype's key). Never guessed.
+  if (known === 'one-fk') return { kind: 'ambiguous', cardinality: 'many-to-one' };
   return { kind: 'decided', fromIsX: knownIsX, cardinality: 'many-to-one' };
 }
 
@@ -287,8 +295,14 @@ export function resolveDirection(a: EndEvidence, b: EndEvidence): DirectionVerdi
   }
   const decision = decide(x.verdict, y.verdict);
   if (decision.kind === 'ambiguous') {
-    return x.verdict === 'unknown' && y.verdict === 'unknown'
-      ? ambiguous(decision.cardinality, { reasons: ['Neither column is a key, a declared foreign key or covered by a dbt test'] })
+    if (x.verdict === 'unknown' && y.verdict === 'unknown') {
+      return ambiguous(decision.cardinality, { reasons: ['Neither column is a key, a declared foreign key or covered by a dbt test'] });
+    }
+    const unknownEnd = x.verdict === 'unknown' ? x : y.verdict === 'unknown' ? y : undefined;
+    return unknownEnd
+      ? ambiguous(decision.cardinality, {
+        reasons: [...reasons, `nothing is known about ${exactLabel(unknownEnd.end)}, so it is not known which way the two relate`],
+      })
       : ambiguous(decision.cardinality);
   }
   // Certain only when the key flags alone, read without dbt, reach the very

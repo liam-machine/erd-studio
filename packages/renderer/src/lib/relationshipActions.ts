@@ -138,11 +138,12 @@ export function edgeIssues(issues: readonly RelationshipIssueCode[] | undefined)
 
 /**
  * The same sentences on a diagram in the older (v4, inline-model) format,
- * which Repair Relationships… never changes: point at the migration, or at
- * the edit that settles the copies on the line itself.
+ * which Repair Relationships… never changes: point at the migration first.
+ * Edit or ⇄ on the line keeps one copy only when the copies agree (a commit
+ * refuses copies that disagree), so the badge never offers it unqualified.
  */
 const OLDER_FORMAT_EDGE_ISSUE_TEXT: Partial<Record<RelationshipIssueCode, string>> = {
-  REL001: 'Saved more than once — this diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store" first, or use Edit or ⇄ on the line, which keeps one copy.',
+  REL001: 'Saved more than once — this diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store" first; after that, Repair Relationships… settles the copies. Edit or ⇄ on the line keeps one copy only when every copy says the same — copies that disagree are refused there.',
   REL002: 'Saved as one-to-many in the "one" model\'s file — this diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store" first.',
 };
 

@@ -667,6 +667,37 @@ describe('LogicalModelService layer folders', () => {
       }
     });
 
+    it('lists a model file that is a symlink to a file, as the canvas reads it; a dangling link is not listed (#133 review)', async () => {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-outside-'));
+      try {
+        fs.writeFileSync(path.join(outside, 'dim_customer.yml'),
+          'name: dim_customer\ncolumns:\n  - { name: customer_key, dataType: INT, isPrimaryKey: true }\n', 'utf-8');
+        fs.mkdirSync(modelsDir, { recursive: true });
+        fs.symlinkSync(path.join(outside, 'dim_customer.yml'), path.join(modelsDir, 'dim_customer.yml'), 'file');
+        fs.symlinkSync(path.join(outside, 'gone.yml'), path.join(modelsDir, 'gone.yml'), 'file');
+        fs.writeFileSync(path.join(modelsDir, 'fct_order.yml'), [
+          'name: fct_order',
+          'columns:',
+          '  - { name: customer_key, dataType: INT }',
+          'relationships:',
+          '  - { fromColumn: customer_key, toModel: dim_customer, toColumn: customer_key, cardinality: many-to-one }',
+          '',
+        ].join('\n'), 'utf-8');
+        expect(service.getModel('dim_customer')).not.toBeNull();
+        expect(service.listModelNames()).toEqual(['dim_customer', 'fct_order']);
+        const { libraryModels, unreadableModels } = service.relationshipCheckModels();
+        expect(libraryModels.map((m) => m.model.name)).toEqual(['dim_customer', 'fct_order']);
+        expect(unreadableModels).toEqual([]);
+        const { checkRelationships } = await import('@erd-studio/core');
+        expect(checkRelationships({
+          libraryModels,
+          domains: [{ label: 'gold/x', filePath: 'gold/x.json', models: ['dim_customer', 'fct_order'], relationships: [], mode: 'library' }],
+        })).toEqual([]);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
     it('lists folders alphabetically and returns [] when the library does not exist', () => {
       expect(service.listFolders()).toEqual([]);
       expect(service.listModelFiles()).toEqual([]);

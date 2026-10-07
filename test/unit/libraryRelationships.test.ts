@@ -33,6 +33,44 @@ describe('usesLibraryRelationships — opt-in per project, the default for a new
   it('is on once the library holds one, whatever the domain files hold', () => {
     expect(usesLibraryRelationships([fct([STORED])], 3)).toBe(true);
   });
+
+  describe('a relationships: key ERD Studio could not read counts the same, readable file or not (#133 review)', () => {
+    const modes = (text: string): { readable: boolean; unreadable: boolean } => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-mode-'));
+      try {
+        const lms = new LogicalModelService(root, '.erd-studio');
+        fs.mkdirSync(lms.getModelsDir(), { recursive: true });
+        const file = path.join(lms.getModelsDir(), 'fct_order.yml');
+        fs.writeFileSync(file, `name: fct_order\ncolumns:\n  - name: customer_key\n    dataType: string\n${text}`);
+        const readable = lms.relationshipModeInputs();
+        // The same file with a YAML error added.
+        fs.writeFileSync(file, `name: fct_order\ncolumns:\n  - name: customer_key\n    dataType: string\n    description: a: b\n${text}`);
+        lms.invalidateCache();
+        const unreadable = lms.relationshipModeInputs();
+        expect(unreadable.models).toEqual([]);
+        return {
+          readable: usesLibraryRelationships(readable.models, 3, readable.unreadableWithRelationships),
+          unreadable: usesLibraryRelationships(unreadable.models, 3, unreadable.unreadableWithRelationships),
+        };
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    };
+
+    it('a mapping where the list belongs (the forgotten "- ")', () => {
+      expect(modes('relationships:\n  fromColumn: customer_key\n  toModel: dim_customer\n  toColumn: customer_key\n'))
+        .toEqual({ readable: true, unreadable: true });
+    });
+
+    it('a list whose only entry has no fromColumn', () => {
+      expect(modes('relationships:\n  - toModel: dim_customer\n    toColumn: customer_key\n'))
+        .toEqual({ readable: true, unreadable: true });
+    });
+
+    it('an empty relationships: [] counts in neither', () => {
+      expect(modes('relationships: []\n')).toEqual({ readable: false, unreadable: false });
+    });
+  });
 });
 
 describe('library relationship edits', () => {

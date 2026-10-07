@@ -181,7 +181,11 @@ export type RelationshipReadIssueReason =
   | 'invalid-role'
   /** A `role` longer than 60 characters (shown shortened; kept as written on disk). */
   | 'role-too-long'
-  /** A `fromModel:` key, which a model file does not use: the entry always leaves the file's own model. */
+  /**
+   * A `fromModel:` key, which a model file does not use: the entry always
+   * leaves the file's own model. Read (not skipped) when it names that model;
+   * skipped when it names another, since reading it would draw another link.
+   */
   | 'stray-from-model';
 
 /** One entry of a model file's `relationships:` list that was skipped or defaulted. */

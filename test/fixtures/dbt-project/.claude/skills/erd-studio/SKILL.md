@@ -358,7 +358,7 @@ relationships:
 
 So adding a new fact only ever changes the fact's own file; its dimensions never list who points at them.
 
-**Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` list, or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]` (still from the many side), and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same two columns twice — not in both places, not in two model files, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
+**Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` entry — even one ERD Studio could not read (an empty `relationships: []` does not count), or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]` (still from the many side), and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same two columns twice — not in both places, not in two model files, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
 
 ---
 
@@ -428,4 +428,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 26 -->
+<!-- erd-studio-harness: 27 -->

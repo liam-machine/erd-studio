@@ -172,7 +172,7 @@ nothing else — a drafted extra column would show up as drift.
   including `cardinality`. Do not add connections you inferred from column names: a connection
   dbt does not test would be drift. Offer those as dbt tests in Stage 6 instead.
 - **Where they go** follows the `/erd-studio` skill's "Where relationships live":
-  - **In the model library** — when any model file already has a `relationships:` list, or no
+  - **In the model library** — when any model file already has a `relationships:` entry — even one ERD Studio could not read (an empty `relationships: []` does not count), or no
     domain file has a `logical.relationships` entry (always true for a first diagram). Write each
     one into its `fromModel`'s yml under `relationships:` — the same fields without `fromModel`,
     as in the worked example below — and leave `"relationships": []` in the domain JSON, as

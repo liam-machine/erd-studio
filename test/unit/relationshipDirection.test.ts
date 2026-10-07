@@ -178,3 +178,18 @@ describe('orientDrag — evidence, never drag order (#133)', () => {
       .toBeDefined();
   });
 });
+
+describe('orientDrag — models whose names differ only in case (#133 review 6)', () => {
+  it('turns a drag from Dd.id to DD.id round when DD is the many side', () => {
+    const models = [
+      { name: 'Dd', columns: [col('id', { pk: true })] },
+      { name: 'DD', columns: [col('k', { pk: true }), col('id', { fk: true })] },
+    ];
+    const oriented = orientDrag({ fromModel: 'Dd', fromColumn: 'id', toModel: 'DD', toColumn: 'id' }, models);
+    expect(oriented.verdict?.from).toEqual({ model: 'DD', column: 'id' });
+    expect(oriented.turned).toBe(true);
+    expect(oriented.prefill).toMatchObject({ fromModel: 'DD', toModel: 'Dd' });
+    // Already the right way round: left alone.
+    expect(orientDrag({ fromModel: 'DD', fromColumn: 'id', toModel: 'Dd', toColumn: 'id' }, models).turned).toBe(false);
+  });
+});

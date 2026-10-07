@@ -120,6 +120,37 @@ const CARDINALITIES: ReadonlySet<string> = new Set<Cardinality>(['many-to-one', 
  */
 export interface UncheckableModelFile extends CheckUnreadableModel {
   noModel?: true;
+  /**
+   * The file's text has a top-level `relationships:` key. Its relationships
+   * could not be read, but they are on disk: evidence that the project keeps
+   * relationships in the model library (`usesLibraryRelationships`), so a
+   * broken file never switches the project to per-diagram storage.
+   */
+  holdsRelationships?: true;
+}
+
+/** Whether a symlink resolves to a regular file (a dangling link does not). */
+function isFileThroughLink(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A top-level `relationships:` key, found in a model file's text without
+ * parsing it — but not one written empty (`[]`, `null`, `~`), which a
+ * readable file would not count either (`usesLibraryRelationships`).
+ */
+const RELATIONSHIPS_KEY = /^relationships[ \t]*:(?![ \t]*(?:\[[ \t]*\]|null|Null|NULL|~)[ \t]*(?:#.*)?$)/m;
+
+function textHoldsRelationships(filePath: string): boolean {
+  try {
+    return RELATIONSHIPS_KEY.test(fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, ''));
+  } catch {
+    return false;
+  }
 }
 
 /** Options for rendering a model file (`serializeModel`, `serializeModelAt`, `saveModel`). */
@@ -343,7 +374,10 @@ export class LogicalModelService {
    * one-level sub-folder in alphabetical order, files sorted by name inside
    * each. A name that appears more than once is flagged `shadowedBy` on every
    * copy but the first (the one {@link findModelFile} resolves to).
-   * Dot-folders, deeper nesting and symlinked folders are not scanned.
+   * Dot-folders, deeper nesting and symlinked folders are not scanned. A
+   * model file that is a symlink to a file is listed, as the canvas reads it
+   * through the link (`findModelFile`): the checks and Repair must see every
+   * model the canvas draws, or a drawn relationship reads as dangling.
    */
   listModelFiles(): ModelFileEntry[] {
     if (!fs.existsSync(this.modelsDir)) {
@@ -355,7 +389,7 @@ export class LogicalModelService {
       let files: string[];
       try {
         files = fs.readdirSync(dir, { withFileTypes: true })
-          .filter((d) => d.isFile() && d.name.endsWith('.yml'))
+          .filter((d) => d.name.endsWith('.yml') && (d.isFile() || (d.isSymbolicLink() && isFileThroughLink(path.join(dir, d.name)))))
           .map((d) => d.name)
           .sort((a, b) => a.localeCompare(b));
       } catch {
@@ -441,17 +475,38 @@ export class LogicalModelService {
         if (model) libraryModels.push({ model, file: fileName(entry.filePath) });
         // Null from a file that is still there: it holds no model to read.
         // (A file deleted since it was listed is simply gone.)
-        else if (fs.existsSync(entry.filePath)) unreadableModels.push({ name: entry.name, file: fileName(entry.filePath), noModel: true });
+        else if (fs.existsSync(entry.filePath)) {
+          unreadableModels.push({
+            name: entry.name,
+            file: fileName(entry.filePath),
+            noModel: true,
+            ...(textHoldsRelationships(entry.filePath) ? { holdsRelationships: true as const } : {}),
+          });
+        }
       } catch (err) {
         const error = describeModelFileError(entry.name, entry.filePath, err);
         unreadableModels.push({
           name: entry.name,
           file: fileName(entry.filePath),
           ...(error.line !== undefined ? { line: error.line } : {}),
+          ...(textHoldsRelationships(entry.filePath) ? { holdsRelationships: true as const } : {}),
         });
       }
     }
     return { libraryModels, unreadableModels };
+  }
+
+  /**
+   * What `usesLibraryRelationships` decides the project's mode from: every
+   * readable model, and how many model files cannot be read but have a
+   * `relationships:` key in their text. One pass over the library.
+   */
+  relationshipModeInputs(): { models: SemanticModel[]; unreadableWithRelationships: number } {
+    const { libraryModels, unreadableModels } = this.relationshipCheckModels();
+    return {
+      models: libraryModels.map((m) => m.model),
+      unreadableWithRelationships: unreadableModels.filter((u) => u.holdsRelationships).length,
+    };
   }
 
   /**

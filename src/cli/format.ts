@@ -43,9 +43,14 @@ function fixLine(f: Fix, p: Paint): string {
     case 'remove-column':
       return `  ${mark} ${where}  not in dbt`;
     case 'add-relationship':
-      return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  missing in logical`;
+      return f.flipped
+        ? `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  one-to-one the way dbt tests it — replaces the entry stored the other way round`
+        : `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  missing in logical`;
     case 'remove-relationship':
-      return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not tested in dbt`;
+      // A one-to-one stored the other way round is tested in dbt, from the other end.
+      return f.flipped
+        ? `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  stored the other way round from dbt — replace it`
+        : `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not tested in dbt`;
     case 'set-cardinality':
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  cardinality: ${f.from} (logical) vs ${f.to} (dbt)`
         + (f.movesFrom ? `, store it in ${f.file}` : '');

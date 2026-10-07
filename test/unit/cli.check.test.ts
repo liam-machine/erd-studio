@@ -323,6 +323,19 @@ describe('erd-studio check', () => {
 });
 
 describe('doctor — relationships', () => {
+  it('describes a REL003 for a model missing from the diagram (in the library) without calling it missing from the library (#133 review)', async () => {
+    const root = makeProject({ 'dim_customer.yml': DIM_CUSTOMER, 'fct_order.yml': fact('  []\n').replace('relationships:\n  []\n', '') }, {
+      'silver/orders.json': domain(['fct_order'], [
+        { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+      ]),
+    });
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
+    expect(r.relationships.byCode).toMatchObject({ REL003: 1 });
+    const why = r.nextSteps.find((s) => s.id === 'fix-relationships')!.why;
+    expect(why).toContain('1 pointing at a model that is missing (from the model library, or from the diagram that stores it)');
+    expect(why).not.toContain('not in the model library');
+  });
+
   it('counts the findings and adds a fix-relationships step, still exit 0', async () => {
     const root = makeProject({
       'dim_customer.yml': DIM_CUSTOMER,
@@ -337,7 +350,7 @@ describe('doctor — relationships', () => {
     expect(r.relationships).toMatchObject({ checked: true, mode: 'library', stored: 2, errors: 1, warnings: 1, byCode: { REL002: 1, REL003: 1 } });
     const step = r.nextSteps.find((s) => s.id === 'fix-relationships')!;
     expect(step.title).toBe('Fix 2 relationship problems');
-    expect(step.why).toMatch(/1 saved in the file of the model it points at; 1 pointing at a model that is not in the model library/);
+    expect(step.why).toMatch(/1 saved in the file of the model it points at; 1 pointing at a model that is missing \(from the model library, or from the diagram that stores it\)/);
     expect(step.why).toMatch(/erd-studio check/);
     expect(step.command).toBeNull();
 
@@ -553,6 +566,32 @@ relationships:
     const { code, out } = await run(['check', '--project', root], tmp);
     expect(code).toBe(1);
     expect(out).not.toContain('No relationship problems');
+  });
+
+  it('a shadowed duplicate model file makes the run not clean, and doctor names it (#133 review)', async () => {
+    const root = makeProject({
+      'fct_order.yml': SOUND_FACT,
+      'dim_customer.yml': DIM_CUSTOMER,
+      'dim_date.yml': DIM_DATE,
+      'gold/fct_order.yml': fact(`  - fromColumn: customer_idx
+    toModel: dim_nothing
+    toColumn: id
+    cardinality: one_to_many
+`),
+    });
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(exitCode).toBe(1);
+    expect(result.clean).toBe(false);
+    expect(result.findings).toEqual([]);
+    expect(result.unchecked).toEqual([{
+      file: '.erd-studio/logical-models/gold/fct_order.yml',
+      reason: 'a model named fct_order is already in .erd-studio/logical-models/fct_order.yml, so ERD Studio ignores this file and ' +
+        'never draws its relationships — merge it into that file, or give it its own name ("ERD Studio: Give Duplicate Model Its Own Name…")',
+      kind: 'model',
+    }]);
+    const doctor = await run(['doctor', '--project', root, '--no-dbt', '--json'], tmp);
+    const steps = (JSON.parse(doctor.out) as { nextSteps: Array<{ id: string; why: string }> }).nextSteps;
+    expect(steps.find((s) => s.id === 'check-relationships')?.why).toContain('.erd-studio/logical-models/gold/fct_order.yml: a model named fct_order is already in');
   });
 
   it('a layers.json that cannot be used makes the run not clean, so a skipped layer folder is never a pass', async () => {

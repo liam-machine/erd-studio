@@ -81,6 +81,7 @@ import {
   computeMissingPositions,
   DomainValidationError,
   readDomainRelationshipEntries,
+  relationshipFilePositions,
   sameLink,
   setMetaEntry,
   toDisplayDomain,
@@ -153,6 +154,7 @@ import {
 import { pickDraftScope } from './dbtDraftPicker';
 import { readDomainRelationships } from '../commands/moveRelationshipsToLibrary';
 import { linksTheMoveStores, readRepairSnapshot, scanDomainFiles, toCheckDomains } from '../services/relationshipRepair';
+import { yamlEntryExtras } from '../services/relationshipEntryExtras';
 import {
   RelationshipCommitError,
   describeRepairOffer,
@@ -475,6 +477,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly pendingUpdates = new Map<string, boolean>();
   /** The move-to-library offer is made at most once per session (#126). */
   private relationshipMoveOffered = false;
+  /** The last project findings and the file signature they were read from (`relationshipFindings`). */
+  private relationshipFindingsCache?: { key: string; result: { findings: RelationshipFinding[]; mode: RelationshipMode } };
 
   /**
    * The last load failure posted to each panel, so an error the user is
@@ -1736,8 +1740,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Whether this project keeps relationships in the model library (#126) —
    * see `usesLibraryRelationships` for the opt-in rule.
    */
-  private relationshipsInLibrary(models: readonly SemanticModel[]): boolean {
-    return usesLibraryRelationships(models, this.domainService.countDomainFileRelationships(this.workspaceRoot, this.semanticDirName()));
+  private relationshipsInLibrary(models: readonly SemanticModel[], unreadableWithRelationships: number): boolean {
+    // Library evidence already in hand settles it: no need to read every
+    // domain file for a count that cannot change the answer.
+    if (unreadableWithRelationships > 0 || models.some((m) => (m.relationships?.length ?? 0) > 0)) return true;
+    return usesLibraryRelationships(
+      models,
+      this.domainService.countDomainFileRelationships(this.workspaceRoot, this.semanticDirName()),
+      unreadableWithRelationships,
+    );
   }
 
   /** The semantic directory, relative to the project root (e.g. `.erd-studio`). */
@@ -1791,7 +1802,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     added: readonly Relationship[],
     newModels: readonly SemanticModel[],
   ): { kept: Relationship[]; saves: SemanticModel[] } {
-    if (added.length === 0 || !this.relationshipsInLibrary(this.logicalModelService.listModels())) {
+    if (added.length === 0) return { kept: [...added], saves: [...newModels] };
+    const library = this.logicalModelService.relationshipModeInputs();
+    if (!this.relationshipsInLibrary(library.models, library.unreadableWithRelationships)) {
       return { kept: [...added], saves: [...newModels] };
     }
     // A model file that exists but cannot be read is refused, never treated as
@@ -1829,8 +1842,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (this.relationshipMoveOffered) return;
     this.relationshipMoveOffered = true;
     try {
-      const models = this.logicalModelService.listModels();
-      if (!this.relationshipsInLibrary(models)
+      const library = this.logicalModelService.relationshipModeInputs();
+      if (!this.relationshipsInLibrary(library.models, library.unreadableWithRelationships)
         && !this.context.workspaceState?.get<boolean>(RELATIONSHIP_MOVE_DECLINED_KEY)) {
         const sharedKeys = sharedRelationshipKeys(readDomainRelationships(this.domainService, this.workspaceRoot, this.semanticDirName()));
         // Only links the move would really store count: one it would leave
@@ -1923,12 +1936,58 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private relationshipFindings(
     extra?: { filePath: string; domain: () => Omit<CheckDomain, 'mode'> & { v4: boolean } },
   ): { findings: RelationshipFinding[]; mode: RelationshipMode } {
+    // Every payload asks; the files rarely change between two payloads. The
+    // result is reused while every model and domain file is the one it was
+    // read from (path, size, modification time — a stat, never a read) and
+    // no edit of ours has happened since (`invalidateRelationshipFindings`).
+    const signature = this.relationshipFilesSignature();
+    const cacheable = signature !== null && (!extra || signature.domainFiles.has(extra.filePath));
+    if (cacheable && this.relationshipFindingsCache?.key === signature.key) return this.relationshipFindingsCache.result;
+    const result = this.computeRelationshipFindings(extra);
+    if (cacheable) this.relationshipFindingsCache = { key: signature.key, result };
+    return result;
+  }
+
+  /** Forget the cached project findings (after an edit of ours: never wait for a file's mtime to tick). */
+  private invalidateRelationshipFindings(): void {
+    this.relationshipFindingsCache = undefined;
+  }
+
+  /**
+   * What the project findings are read from, as one string: every model file
+   * and domain file the checks read, with its size and modification time,
+   * plus the domain files' project-relative paths. Null when a file cannot be
+   * looked at (then nothing is cached).
+   */
+  private relationshipFilesSignature(): { key: string; domainFiles: Set<string> } | null {
+    try {
+      const stamp = (filePath: string): string => {
+        const st = fs.statSync(filePath);
+        return `${filePath}\u0000${st.size}\u0000${st.mtimeMs}`;
+      };
+      const models = this.logicalModelService.listModelFiles().map((e) => `${stamp(e.filePath)}\u0000${e.shadowedBy ?? ''}`);
+      const domains = this.domainService.listDomains(this.workspaceRoot, this.semanticDirName()).map((d) => d.filePath);
+      return {
+        key: [this.semanticDirName(), ...models, '\u0001', ...domains.map(stamp)].join('\u0002'),
+        domainFiles: new Set(domains.map((d) => projectRelative(this.workspaceRoot, d))),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private computeRelationshipFindings(
+    extra?: { filePath: string; domain: () => Omit<CheckDomain, 'mode'> & { v4: boolean } },
+  ): { findings: RelationshipFinding[]; mode: RelationshipMode } {
     const rel = (filePath: string): string => projectRelative(this.workspaceRoot, filePath);
     const { libraryModels, unreadableModels } = this.logicalModelService.relationshipCheckModels(rel);
     // One read of every domain file: the checks' domains and the mode both come from it.
     const scan = scanDomainFiles(this.domainService, this.workspaceRoot, this.semanticDirName());
-    const mode: RelationshipMode = usesLibraryRelationships(libraryModels.map((m) => m.model), scan.domainFileRelationshipCount)
-      ? 'library' : 'domain';
+    const mode: RelationshipMode = usesLibraryRelationships(
+      libraryModels.map((m) => m.model),
+      scan.domainFileRelationshipCount,
+      unreadableModels.filter((u) => u.holdsRelationships).length,
+    ) ? 'library' : 'domain';
     const domains = toCheckDomains(scan, mode, rel);
     const scanned = [...scan.v5, ...scan.v4, ...scan.unchecked].some((d) => rel(d.filePath) === extra?.filePath);
     if (extra && !scanned) {
@@ -1989,6 +2048,33 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       console.warn('[SemanticEditorProvider] Relationship checks skipped:', err);
       return {};
     }
+  }
+
+  /**
+   * Why a column rename / column removal / model rename of `modelName` must
+   * not go ahead, or null. The cascade rewrites the relationships other model
+   * files hold to it (`otherLibraryModels`), but a model file that cannot be
+   * read is not among them: it would keep pointing at the old name, to be
+   * found dangling (REL003 / REL004) only once someone fixes it. So an
+   * unreadable file is refused, by name, whenever its text names `modelName`
+   * (a relationship to it must) — or cannot be read at all, so nobody knows.
+   */
+  private unreadableReferrerRefusal(modelName: string, what: string): string | null {
+    const { unreadableModels } = this.logicalModelService.relationshipCheckModels();
+    for (const unreadable of unreadableModels) {
+      if (sameName(unreadable.name, modelName)) continue;
+      let text: string | null = null;
+      try {
+        text = fs.readFileSync(unreadable.file, 'utf-8');
+      } catch {
+        text = null;
+      }
+      if (text !== null && !mentionsName(text, modelName)) continue;
+      const file = this.libraryRelativePath(unreadable.name);
+      return `${file} could not be read, so a relationship it holds to ${modelName} would keep pointing at the old name after this ${what}. ` +
+        'Fix that file first, then try again.';
+    }
+    return null;
   }
 
   /** Every library model except `exclude`, fresh copies an edit may change. */
@@ -2166,9 +2252,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // drawn by every diagram holding both ends) is refreshed from here, as
       // applyDomainEdit does after the edit being undone.
       const names = new Set(reverted.map((filePath) => path.basename(filePath).replace(/\.ya?ml$/i, '')));
-      for (const name of names) {
-        await this.refreshDomainsReferencingModel(name, panelKey);
-      }
+      this.invalidateRelationshipFindings();
+      await this.refreshDomainsReferencingModels(names, panelKey);
       this._onDidWriteDomain.fire({ uri: document.uri, modelLibraryChanged: true });
     } finally {
       this.pendingUpdates.delete(panelKey);
@@ -2284,6 +2369,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (ourPaths.size > 0) {
         this.editedModelPaths.set(panelKey, ourPaths);
       }
+      // The project findings are read again for the payloads below.
+      this.invalidateRelationshipFindings();
       // Our own writes are suppressed at the watcher, so the refreshes it
       // used to drive are issued here instead: this panel via sendDomainData,
       // the sidebar/model library via onDidWriteDomain, and any OTHER open
@@ -2299,10 +2386,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       ...(modelFiles?.save ?? []).map((entry) => entry.model.name),
       ...(modelFiles?.delete ?? []),
     ];
-    for (const name of new Set(touchedModels)) {
-      this.logicalModelService.invalidateCache(name);
-      await this.refreshDomainsReferencingModel(name, panelKey);
-    }
+    for (const name of new Set(touchedModels)) this.logicalModelService.invalidateCache(name);
+    // Each other open diagram holding any of them is re-sent once, not once
+    // per touched model (a box-select delete touches many).
+    await this.refreshDomainsReferencingModels(touchedModels, panelKey);
     this._onDidWriteDomain.fire({
       uri: document.uri,
       modelLibraryChanged: created.length > 0 || deleted.length > 0,
@@ -2644,6 +2731,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * cross-panel refresh has to be driven from here).
    */
   async refreshDomainsReferencingModel(modelName: string, exceptPanelKey?: string): Promise<void> {
+    await this.refreshDomainsReferencingModels([modelName], exceptPanelKey);
+  }
+
+  /**
+   * {@link refreshDomainsReferencingModel} for several models at once: every
+   * open domain editor that references any of them is re-sent exactly once.
+   */
+  async refreshDomainsReferencingModels(modelNames: Iterable<string>, exceptPanelKey?: string): Promise<void> {
+    const names = new Set(modelNames);
+    if (names.size === 0) return;
+    // A model file changed (on disk, by us or by someone else): the findings
+    // are read again once, then shared by every panel re-sent below.
+    this.invalidateRelationshipFindings();
+    const modelName = [...names].join(', ');
     for (const [panelKey, { document, webview }] of Array.from(this.openPanels.entries())) {
       if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
         continue;
@@ -2660,7 +2761,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // Check if this domain references the changed model. The shared
         // format-agnostic extractor handles v5 name strings, v4/hybrid inline
         // objects and legacy top-level `models` — and tolerates junk entries.
-        const referencesModel = getRawDomainModelNames(parsed).includes(modelName);
+        const referencesModel = getRawDomainModelNames(parsed).some((name) => names.has(name));
 
         if (referencesModel) {
           await this.sendDomainData(document, webview, panelKey);
@@ -2951,6 +3052,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V5: write column update to central model file, cascade rename to domain
       if (this.isDomainV5(parsed)) {
         const columnRenamed = payload.oldColumnName !== payload.column.name;
+        if (columnRenamed) {
+          const refusal = this.unreadableReferrerRefusal(payload.modelName, 'column rename');
+          if (refusal) {
+            webview.postMessage({ type: 'error', payload: { message: `Failed to update column: ${refusal}` } });
+            return;
+          }
+        }
         const domainMutator = columnRenamed ? (section: Record<string, unknown>) => {
           const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
           for (const rel of relationships) {
@@ -3082,6 +3190,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V5: write to central model file, cascade orphaned relationships in the domain.
       // No-op silently if the column or model is already gone (e.g. spam-clicked delete).
       if (this.isDomainV5(parsed)) {
+        const hasColumn = this.logicalModelService.getModel(payload.modelName)?.columns?.some((c) => c.name === payload.columnName) === true;
+        const refusal = hasColumn ? this.unreadableReferrerRefusal(payload.modelName, 'column removal') : null;
+        if (refusal) {
+          webview.postMessage({ type: 'error', payload: { message: `Failed to remove column: ${refusal}` } });
+          return;
+        }
         const ok = await this.applyModelEdit(
           document,
           webview,
@@ -3326,8 +3440,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     try {
       const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
       const v5 = this.isDomainV5(parsed);
-      const libraryModels = v5 ? this.logicalModelService.listModels() : [];
-      const mode: RelationshipMode = v5 && this.relationshipsInLibrary(libraryModels) ? 'library' : 'domain';
+      // The mode counts a model file with a YAML error that still has a
+      // `relationships:` key as library evidence: a broken file must never
+      // quietly send a new relationship into the diagram file (R3).
+      const library = v5 ? this.logicalModelService.relationshipModeInputs() : { models: [], unreadableWithRelationships: 0 };
+      const libraryModels = library.models;
+      const mode: RelationshipMode = v5 && this.relationshipsInLibrary(libraryModels, library.unreadableWithRelationships) ? 'library' : 'domain';
 
       const ends: RelationshipEnds[] =
         op.kind === 'add' ? [op.rel]
@@ -3385,7 +3503,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             domainRelationships: wellFormed,
             otherDomains,
             describeMissingModel: (name) => this.modelUnavailableMessage(name),
+            libraryEntryExtras: (model, index) => this.libraryEntryExtras(model, index),
+            domainFileLabel: path.basename(document.uri.fsPath),
+            olderFormat: !v5,
+            domainPositions: current.flatMap((entry, i) => (isWellFormedRelationship(entry) ? [i] : [])),
           });
+          // A `logical.relationships` that is not a list (REL008: none of it
+          // was read) is never replaced by the one record a commit writes —
+          // the hand-written value would be lost without a word.
+          if (plan.domainChanged && section.relationships !== undefined && section.relationships !== null
+            && !Array.isArray(section.relationships)) {
+            throw new RelationshipCommitError(
+              `${path.basename(document.uri.fsPath)}: "logical.relationships" is not a list, so ERD Studio cannot write to it. Fix it by hand first.`,
+            );
+          }
           // Entries the reader could not use keep their slot (and their "entry N").
           if (plan.domainChanged) section.relationships = mergeDomainRelationships(current, wellFormed, plan.domainRelationships);
           if (v5 && plan.changedModels.length > 0) {
@@ -3406,6 +3537,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       fail(message);
     }
+  }
+
+  /**
+   * What taking `model`'s `index`-th relationship (as read) out of its model
+   * file would lose — its own keys and comments — read from the file as it
+   * is on screen (or on disk). Empty when the file cannot be found or read.
+   */
+  private libraryEntryExtras(model: SemanticModel, index: number): readonly string[] {
+    const filePath = this.logicalModelService.findModelFile(model.name);
+    if (!filePath) return [];
+    let text: string;
+    try {
+      const open = vscode.workspace.textDocuments.find((doc) => samePath(doc.uri.fsPath, filePath));
+      text = open ? open.getText() : fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return [];
+    }
+    const raw = relationshipFilePositions(model.relationships?.length ?? 0, model.relationshipIssues)[index] ?? index;
+    return yamlEntryExtras(text).get(raw) ?? [];
   }
 
   /**
@@ -3528,6 +3678,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const existingModel = this.logicalModelService.getModel(payload.oldName);
         if (!existingModel) {
           webview.postMessage({ type: 'error', payload: { message: this.modelUnavailableMessage(payload.oldName) } });
+          return;
+        }
+        const refusal = this.unreadableReferrerRefusal(payload.oldName, 'rename');
+        if (refusal) {
+          webview.postMessage({ type: 'error', payload: { message: `Failed to rename model: ${refusal}` } });
           return;
         }
         const renamedModel: import('../types/semantic').SemanticModel = { ...existingModel, name: trimmedNew };
@@ -4944,4 +5099,13 @@ function isTerminalAlive(terminal: vscode.Terminal): boolean {
   if (terminal.exitStatus !== undefined) return false;
   const open = vscode.window.terminals;
   return Array.isArray(open) ? open.includes(terminal) : true;
+}
+
+/**
+ * Whether `text` names `name` as a whole word, without case — how a model
+ * file that cannot be parsed is checked for a relationship to `name`.
+ */
+function mentionsName(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^A-Za-z0-9_])${escaped}($|[^A-Za-z0-9_])`, 'i').test(text);
 }

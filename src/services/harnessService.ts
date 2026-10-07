@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '26';
+export const HARNESS_VERSION = '27';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -478,7 +478,7 @@ relationships:
 
 So adding a new fact only ever changes the fact's own file; its dimensions never list who points at them.
 
-**Which to use:** put new relationships in the model YAML when **any** model file already has a \`relationships:\` list, or **no** domain file has a \`logical.relationships\` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's \`logical.relationships[]\` (still from the many side), and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same two columns twice — not in both places, not in two model files, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
+**Which to use:** put new relationships in the model YAML when **any** model file already has a \`relationships:\` entry — even one ERD Studio could not read (an empty \`relationships: []\` does not count), or **no** domain file has a \`logical.relationships\` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's \`logical.relationships[]\` (still from the many side), and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same two columns twice — not in both places, not in two model files, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
 
 ---
 
@@ -606,6 +606,14 @@ Key fields:
   \`update-type-*\` actions. \`sourceDataType\` / \`targetDataType\` are named for the
   comparison direction, so which of them holds the ground-truth value flips when
   the plan was generated from the physical stage — \`resolvedDataType\` never does.
+- **resolvedCardinality** / **resolvedRelationship**: the same for relationships.
+  \`sourceCardinality\` / \`targetCardinality\` are named for the comparison direction
+  too, so on a plan made from the physical stage (\`sourceStage: physical\`)
+  \`targetCardinality\` is the LOGICAL value — writing it keeps the drift.
+  \`resolvedCardinality\` is always the ground-truth stage's value, read from
+  \`fromModel\` to \`toModel\`; \`resolvedRelationship\` is the entry to store, already
+  canonical (never \`one-to-many\`), whose \`fromModel\` is the model holding the
+  foreign key. Never write \`sourceCardinality\` or \`targetCardinality\`.
 
 ## Action Reference
 
@@ -623,9 +631,9 @@ and no \`catalog.json\` to observe the real one. It resolves exactly like
 | \`add-column-to-logical\` | Add column to the model's yml (\`modelContext[name].logicalModelPath\`) columns array, with the dbt column \`meta\` keys the team's metadata list names |
 | \`remove-column-from-logical\` | Remove column from the model's yml (\`logicalModelPath\`) |
 | \`update-type-in-logical\` | Update column \`dataType\` in the model's yml (\`logicalModelPath\`) to the value in \`resolvedDataType\` |
-| \`add-relationship-to-logical\` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action) where the project keeps relationships — the many-side (FK) model's YAML \`relationships:\` or domain JSON \`logical.relationships[]\` (see "Where relationships live"). A \`one-to-many\` is written with its ends swapped as \`many-to-one\` — in a model YAML that is the other model's file, in a domain JSON the same list |
-| \`remove-relationship-from-logical\` | Remove the matching relationship from wherever it is defined — the many-side (FK) model's YAML \`relationships:\` (either end's file, for one written before this rule) or domain JSON \`logical.relationships[]\` |
-| \`update-cardinality-in-logical\` | Find the matching relationship — the same two columns, whichever way round it is written, wherever it is defined — and keep its \`role\`. \`targetCardinality\` reads in the direction of the action's own ends (\`fromModel\` → \`toModel\`), not necessarily the stored entry's. First turn the action into the entry to store: its ends with \`targetCardinality\`, except that a \`one-to-many\` is never written as \`one-to-many\` — swap the ends and write \`many-to-one\`. When the stored entry's ends run the same way as that, set its \`cardinality\`. When they run the other way round, never just edit its \`cardinality\` in place (that would record the other model as holding the foreign key): replace the entry — in a model YAML by moving the entry to the other model's file, in a domain JSON by replacing the entry in place |
+| \`add-relationship-to-logical\` | Add \`resolvedRelationship\` (ends and cardinality exactly as given — it is already the way round to store) where the project keeps relationships — its \`fromModel\`'s YAML \`relationships:\` (the many-side, FK model) or domain JSON \`logical.relationships[]\` (see "Where relationships live") |
+| \`remove-relationship-from-logical\` | Remove the matching relationship from wherever it is defined — the many-side (FK) model's YAML \`relationships:\` (either end's file, for one written before this rule) or domain JSON \`logical.relationships[]\`. When the plan also has an \`add-relationship-to-logical\` for the same two columns the other way round, the two are one change — a one-to-one stored the other way round from dbt, which does test it: apply them together as one replace (the add's \`resolvedRelationship\`, keeping the entry's \`role\`), never one without the other |
+| \`update-cardinality-in-logical\` | Find the matching relationship — the same two columns, whichever way round it is written, wherever it is defined — and keep its \`role\`. The entry to store is \`resolvedRelationship\` (never \`sourceCardinality\` / \`targetCardinality\`, whose meaning flips with \`sourceStage\`): it is already the way round to store, so a \`one-to-many\` is never written as \`one-to-many\`. When the stored entry's ends run the same way as \`resolvedRelationship\`'s, set its \`cardinality\`. When they run the other way round, never just edit its \`cardinality\` in place (that would record the other model as holding the foreign key): replace the entry — in a model YAML by moving the entry to \`resolvedRelationship.fromModel\`'s file, in a domain JSON by replacing the entry in place |
 
 ### Physical-side actions (edit dbt project files)
 
@@ -638,7 +646,7 @@ and no \`catalog.json\` to observe the real one. It resolves exactly like
 | \`update-type-in-physical\` | Update column casting in dbt SQL or \`data_type\` in schema YAML to \`resolvedDataType\` |
 | \`add-relationship-test-to-physical\` | Add \`relationships\` test to dbt schema YAML (see format below) |
 | \`remove-relationship-test-from-physical\` | Remove the \`relationships\` test from dbt schema YAML |
-| \`update-cardinality-in-physical\` | Add/remove \`unique\` test on FK column in dbt schema YAML to match target cardinality |
+| \`update-cardinality-in-physical\` | Add/remove \`unique\` test on FK column in dbt schema YAML to match \`resolvedCardinality\` (the logical value, read from \`fromModel\` to \`toModel\`) |
 
 ## dbt Relationship Test Format
 

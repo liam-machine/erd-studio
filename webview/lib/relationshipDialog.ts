@@ -44,6 +44,13 @@ export const WHY_HERE_LIBRARY =
   'Relationships live with the model holding the foreign key, so adding a fact never edits its dimensions.';
 export const WHY_HERE_DOMAIN =
   "This project keeps each diagram's relationships in the diagram's own file. Move Relationships to Model Library… stores them with their models instead.";
+/**
+ * An older-format (v4, inline-model) diagram keeps its relationships in its
+ * own file whatever the project does, and neither the move nor Repair
+ * Relationships… writes it: only the migration changes that.
+ */
+export const WHY_HERE_OLDER_FORMAT =
+  'This diagram is in the older format, so its relationships live in its own file. Run "ERD Studio: Migrate Domains to Central Model Store" to store them with their models.';
 
 /** The sentence at the top of the direction section. */
 export function relationshipSentence(ends: DialogEnds, cardinality: Cardinality): string {
@@ -60,12 +67,15 @@ export function cardinalityQuestion(ends: DialogEnds): string {
 /**
  * The read-back: what the relationship says from the target's side, and
  * where it is saved. `home` is the canvas payload's `relationshipHome`; with
- * none (an older host) the saved line is left out.
+ * none (an older host) the saved line is left out. `olderFormat`: the
+ * diagram is v4 (`schemaVersion` below 5), whose "Why here?" names the
+ * migration rather than the project's mode.
  */
 export function readBack(
   ends: DialogEnds,
   cardinality: Cardinality,
   home: 'library' | 'domain' | undefined,
+  olderFormat = false,
 ): { text: string; savedIn?: string; why?: string } {
   const text = cardinality === 'one-to-one'
     ? `A ${ends.toModel} has at most one ${ends.fromModel}.`
@@ -73,7 +83,7 @@ export function readBack(
       ? `A ${ends.toModel} can match many ${ends.fromModel} too.`
       : `A ${ends.toModel} has many ${ends.fromModel}.`;
   if (home === 'library') return { text, savedIn: `Saved in ${ends.fromModel}.yml`, why: WHY_HERE_LIBRARY };
-  if (home === 'domain') return { text, savedIn: 'Saved in this diagram', why: WHY_HERE_DOMAIN };
+  if (home === 'domain') return { text, savedIn: 'Saved in this diagram', why: olderFormat ? WHY_HERE_OLDER_FORMAT : WHY_HERE_DOMAIN };
   return { text };
 }
 
@@ -140,18 +150,28 @@ export function likelyReason(verdict: DirectionVerdict, ends: DialogEnds): strin
     : `Usually the other way round: ${why}.`;
 }
 
-/** The two direction buttons of an ambiguous verdict, in the verdict's fixed order. */
+/**
+ * The two direction buttons of an ambiguous verdict, in the verdict's fixed
+ * order. Named after the models — and after the columns when both ends are
+ * in one model (a self-reference, compared without case), where the model
+ * names alone would make the two buttons read the same.
+ */
 export function directionChoices(
   verdict: DirectionVerdict,
   cardinality: Cardinality,
 ): Array<{ label: string; ends: DialogEnds }> {
   const first = verdictEnds(verdict);
-  return [first, reversed(first)].map((ends) => ({
-    ends,
-    label: cardinality === 'one-to-one'
-      ? `${ends.fromModel} holds the key to ${ends.toModel}`
-      : `${ends.fromModel} has many rows per ${ends.toModel}`,
-  }));
+  const sameModel = first.fromModel.toLowerCase() === first.toModel.toLowerCase();
+  return [first, reversed(first)].map((ends) => {
+    const from = sameModel ? `${ends.fromModel}.${ends.fromColumn}` : ends.fromModel;
+    const to = sameModel ? `${ends.toModel}.${ends.toColumn}` : ends.toModel;
+    return {
+      ends,
+      label: cardinality === 'one-to-one'
+        ? `${from} holds the key to ${to}`
+        : `${from} has many rows per ${to}`,
+    };
+  });
 }
 
 /** The question above the two direction buttons. */

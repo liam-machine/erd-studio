@@ -372,6 +372,26 @@ describe('setup skill: where relationships go (#126)', () => {
     expect(building).not.toMatch(/"relationships": \[\n\s+\{ "fromModel"/);
   });
 
+  it('a one-to-one stored the other way round from dbt is one replace, never the "dbt doesn\'t test it" question (#133 review)', () => {
+    const fix = ref('verify-and-fix.md');
+    const field = fix.split('\n').find((l) => l.startsWith('| `flipped`')) ?? '';
+    expect(field).toContain('Apply the two together as one replace');
+    expect(field).toContain('never as a question');
+    const removeRow = fix.split('\n').find((l) => l.startsWith('| `remove-relationship`')) ?? '';
+    expect(removeRow).toContain('except with `flipped: true`');
+    expect(fix).toContain('(`remove-relationship` without `flipped`)');
+    const planRow = fix.split('\n').find((l) => l.startsWith('| `remove-relationship-from-logical`')) ?? '';
+    expect(planRow).toContain('applied together as one replace without asking');
+  });
+
+  it('names every reason check lists a model file as unchecked, not only a YAML error (#133 review)', () => {
+    const fix = ref('verify-and-fix.md');
+    expect(fix).toContain('Read `reason`');
+    expect(fix).toContain('a model yml with a YAML error');
+    expect(fix).toContain('a model yml that holds no model — empty, not a mapping, or no `name:`');
+    expect(fix).toContain('a second file with a model\nname the library already has, which ERD Studio ignores (shadowed)');
+  });
+
   it('fixes a relationship wherever it is defined', () => {
     const fix = ref('verify-and-fix.md');
     for (const kind of ['remove-column', 'set-cardinality', 'resolve-phantom']) {
@@ -383,8 +403,10 @@ describe('setup skill: where relationships go (#126)', () => {
   it('the sync-plan route never writes a one-to-many, nor edits an entry stored the other way round in place', () => {
     const fix = ref('verify-and-fix.md');
     const row = fix.split('\n').find((l) => l.startsWith('| `update-cardinality-in-logical`')) ?? '';
-    expect(row).toContain('which reads in the direction of those ends');
-    expect(row).toContain('A `one-to-many` is never written as `one-to-many`');
+    // The stage-absolute entry to store, never the stage-relative cardinality fields (#133 review 6).
+    expect(row).toContain('with `resolvedRelationship` as the entry to store');
+    expect(row).not.toContain('targetCardinality');
+    expect(row).toContain('a `one-to-many` is never written as `one-to-many`');
     expect(row).toContain('When the stored entry\'s ends run the other way round from what you built, replace the entry');
     expect(row).not.toContain('(write `targetCardinality`)');
   });

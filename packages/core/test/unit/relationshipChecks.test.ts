@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import { checkRelationships, type CheckDomain, type CheckLibraryModel } from '../../src/relationshipChecks';
 import { parseLogicalModelText } from '../../src/logicalModel';
+import { normaliseRelationships } from '../../src/normaliseRelationships';
 import type { ModelRelationship, Relationship, SemanticModel } from '../../src/types/semantic';
 
 const col = (name: string, flags: Partial<{ isPrimaryKey: boolean; isForeignKey: boolean }> = {}) => ({ name, dataType: 'INT', description: '', ...flags });
@@ -112,8 +113,18 @@ describe('checkRelationships — stable codes (#133)', () => {
     // A stub the diagram lists is not a finding.
     expect(checkRelationships({
       libraryModels: [entry(fctOrder()), entry(dimCustomer())],
-      domains: [domain({ models: ['fct_order'], stubColumns: ['dim_customer'], relationships: [own()] })],
+      domains: [domain({ models: ['fct_order', 'dim_customer'], stubColumns: ['dim_customer'], relationships: [own()] })],
     })).toEqual([]);
+    // A name only in stubColumns is not on the diagram: the record is not
+    // drawn, and check says so exactly as the canvas does (#133 review).
+    const stubOnly = { models: [fctOrder(), dimCustomer()].filter((m) => m.name === 'fct_order'), own: [own()] };
+    expect(normaliseRelationships(stubOnly).relationships[0].issues).toEqual(['REL003']);
+    const notListed = checkRelationships({
+      libraryModels: [entry(fctOrder()), entry(dimCustomer())],
+      domains: [domain({ models: ['fct_order'], stubColumns: ['dim_customer'], relationships: [own()] })],
+    });
+    expect(summary(notListed)).toEqual(['REL003:error']);
+    expect(notListed[0].message).toMatch(/dim_customer, which is not one of this diagram's models/);
   });
 
   it('REL001 numbers its entries by their place in the file, counting an entry the reader skipped', () => {
@@ -147,7 +158,8 @@ describe('checkRelationships — stable codes (#133)', () => {
     expect(checkRelationships({ libraryModels: lib, domains: [], unreadableModels: [{ name: 'dim_gone', file: 'x.yml', line: 3 }] })).toEqual([]);
     expect(checkRelationships({
       libraryModels: [entry(fctOrder())],
-      domains: [domain({ relationships: [own({ toModel: 'dim_stub', toColumn: 'k' })], stubColumns: ['dim_stub'] })],
+      // The stub is on the diagram (listed in logical.models) but has no model file.
+      domains: [domain({ models: ['fct_order', 'dim_customer', 'dim_stub'], relationships: [own({ toModel: 'dim_stub', toColumn: 'k' })], stubColumns: ['dim_stub'] })],
     })).toEqual([]);
   });
 
@@ -265,5 +277,71 @@ describe('checkRelationships — deterministic and linear (#133 review)', () => 
     Object.defineProperty(d, 'models', { get: () => { reads += 1; return names; } });
     expect(checkRelationships({ libraryModels, domains: [d] })).toEqual([]);
     expect(reads).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('checkRelationships — agrees with normaliseRelationships (#133 review 6)', () => {
+  it('REL003 for a diagram\'s own record to a model it does not list, even when that model\'s file is unreadable', async () => {
+    const { normaliseRelationships } = await import('../../src/normaliseRelationships');
+    const a: SemanticModel = { name: 'A', columns: [col('id', { isPrimaryKey: true }), col('u_id')] };
+    const record: Relationship = { fromModel: 'A', fromColumn: 'u_id', toModel: 'U', toColumn: 'id', cardinality: 'many-to-one' };
+    const drawn = normaliseRelationships({ models: [a], own: [record] });
+    expect(drawn.relationships[0].issues).toEqual(['REL003']);
+
+    for (const mode of ['library', 'domain'] as const) {
+      const findings = checkRelationships({
+        libraryModels: [entry(a)],
+        domains: [domain({ label: 'silver/d', filePath: 'silver/d.json', models: ['A'], relationships: [record], mode })],
+        unreadableModels: [{ name: 'U', file: 'logical-models/U.yml', line: 3 }],
+      });
+      expect(summary(findings)).toEqual(['REL003:error']);
+      expect(findings[0].message).toContain('points at model U, which is not one of this diagram\'s models');
+    }
+  });
+
+  it('still says nothing about an unreadable endpoint the diagram does list', () => {
+    const a: SemanticModel = { name: 'A', columns: [col('id', { isPrimaryKey: true }), col('u_id')] };
+    const record: Relationship = { fromModel: 'A', fromColumn: 'u_id', toModel: 'U', toColumn: 'id', cardinality: 'many-to-one' };
+    expect(checkRelationships({
+      libraryModels: [entry(a)],
+      domains: [domain({ models: ['A', 'U'], relationships: [record] })],
+      unreadableModels: [{ name: 'U', file: 'logical-models/U.yml' }],
+    })).toEqual([]);
+  });
+
+  it('REL006 for two models whose names differ only in case, as for any two models', () => {
+    const dd: SemanticModel = { name: 'Dd', columns: [col('id', { isPrimaryKey: true })] };
+    const DD: SemanticModel = { name: 'DD', columns: [col('k', { isPrimaryKey: true }), col('id', { isForeignKey: true })] };
+    const backwards: Relationship = { fromModel: 'Dd', fromColumn: 'id', toModel: 'DD', toColumn: 'id', cardinality: 'many-to-one' };
+    const findings = checkRelationships({
+      libraryModels: [entry(dd), entry(DD)],
+      domains: [domain({ models: ['Dd', 'DD'], relationships: [backwards], mode: 'domain' })],
+    });
+    expect(summary(findings)).toEqual(['REL006:info']);
+  });
+
+  it('REL001: copies that differ only in role say so, each in the named direction', () => {
+    const fct = fctOrder([{ ...TO_CUSTOMER, role: 'buyer' }]);
+    const reversed = rel('customer_key', 'fct_order', 'customer_key', { cardinality: 'one-to-many' });
+    const findings = checkRelationships({ libraryModels: [entry(fct), entry(dimCustomer([reversed]))], domains: [] });
+    const dup = findings.find((f) => f.code === 'REL001')!;
+    expect(dup.severity).toBe('error');
+    expect(dup.message).toBe(
+      'Relationship fct_order.customer_key → dim_customer.customer_key is stored 2 times and the copies disagree on role ' +
+      '(many-to-one "buyer" in logical-models/fct_order.yml; many-to-one in logical-models/dim_customer.yml)',
+    );
+    expect(dup.message).not.toContain('one-to-many');
+  });
+
+  it('REL001: a one-to-one stored both ways names each copy\'s own ends and says the direction differs', () => {
+    const findings = checkRelationships({
+      libraryModels: [entry(fctOrder()), entry(dimCustomer())],
+      domains: [domain({ relationships: [own({ cardinality: 'one-to-one' }), {
+        fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-one',
+      }] })],
+    });
+    const dup = findings.find((f) => f.code === 'REL001')!;
+    expect(dup.message).toContain('disagree on direction');
+    expect(dup.message).toContain('one-to-one dim_customer.customer_key → fct_order.customer_key in');
   });
 });

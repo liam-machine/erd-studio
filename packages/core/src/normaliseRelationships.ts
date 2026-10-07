@@ -44,6 +44,17 @@ export interface NormaliseRelationshipsInput {
    * n-th of `own` is called entry n.
    */
   ownPositions?: readonly number[];
+  /**
+   * Whether the model library holds a model named exactly `name`. A library
+   * entry whose `toModel` matches none of the domain's models exactly is
+   * drawn against a case variant (`Dd` → `DD`) only when the library has no
+   * model of that exact name: `Dd` and `DD` are then two real models, the
+   * entry points at the one this diagram does not hold, and it is not drawn
+   * (as any library relationship with an end outside the domain). Without it
+   * — a host that cannot list the library — a case variant is assumed to be
+   * a respelling.
+   */
+  libraryHasModel?: (name: string) => boolean;
 }
 
 export interface NormalisedRelationships {
@@ -170,9 +181,17 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
     if (la !== lb) return la < lb ? -1 : 1;
     return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   });
+  // A library entry's target, resolved the way `checkRelationships` resolves
+  // it: the domain's exact name, else — only when no library model has that
+  // exact name — a case variant among the domain's models.
+  const libraryTargetInDomain = (name: string): boolean => {
+    if (byExact.has(name)) return true;
+    if (!byLower.has(name.toLowerCase())) return false;
+    return !(input.libraryHasModel?.(name) ?? false);
+  };
   for (const model of modelsInNameOrder) {
     (model.relationships ?? []).forEach((entry, index) => {
-      if (!findModel(entry.toModel)) return;
+      if (!libraryTargetInDomain(entry.toModel)) return;
       const record: Relationship = { ...entry, fromModel: model.name };
       add(record, relationshipEnds(record), { kind: 'library', model: model.name, index }, model.name.toLowerCase(), index);
     });
@@ -324,9 +343,10 @@ export function keyEvidenceContradiction(
   if (!a || !b) return null;
   const verdict = resolveDirection(a, b);
   if (verdict.confidence !== 'certain') return null;
-  const sameEnd = (x: { model: string; column: string }, model: string, column: string): boolean =>
-    x.model.toLowerCase() === model.toLowerCase() && x.column.toLowerCase() === column.toLowerCase();
-  if (sameEnd(verdict.from, canonical.fromModel, canonical.fromColumn)) return null;
+  // Compared exactly, with the real names the evidence carries: two models
+  // whose names differ only in case (`Dd`, `DD`) are two models, and folding
+  // them here would call a backwards record agreeing with its own keys.
+  if (verdict.from.model === a.model && verdict.from.column === a.column) return null;
   return (
     `Relationship ${canonical.fromModel}.${canonical.fromColumn} → ${canonical.toModel}.${canonical.toColumn} ` +
     `makes ${canonical.fromModel} the ${canonical.cardinality === 'one-to-one' ? 'foreign-key' : 'many'} side, but ` +

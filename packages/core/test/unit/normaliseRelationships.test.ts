@@ -416,3 +416,60 @@ describe('normaliseRelationships — models whose names differ only in case', ()
     expect(drawn[0][0]).toMatchObject({ fromModel: 'DD', cardinality: 'many-to-many', source: { kind: 'library', model: 'DD', index: 0 } });
   });
 });
+
+describe('normaliseRelationships — REL006 between models whose names differ only in case (#133 review 6)', () => {
+  it('flags a backwards record exactly as it would between two differently named models', () => {
+    const col = (name: string, flags: Record<string, boolean> = {}) => ({ name, dataType: 'INT', description: '', ...flags });
+    const run = (other: string) => normaliseRelationships({
+      models: [
+        { name: 'Dd', columns: [col('id', { isPrimaryKey: true })] },
+        { name: other, columns: [col('k', { isPrimaryKey: true }), col('id', { isForeignKey: true })] },
+      ],
+      own: [{ fromModel: 'Dd', fromColumn: 'id', toModel: other, toColumn: 'id', cardinality: 'many-to-one' }],
+    }).diagnostics.map((d) => d.code);
+    expect(run('Bb')).toEqual(['REL006']);
+    expect(run('DD')).toEqual(['REL006']);
+  });
+});
+
+describe('normaliseRelationships — a library entry naming a model outside the diagram whose case variant is in it (#133 review)', () => {
+  const DD: SemanticModel = { name: 'DD', columns: [col('id', { isPrimaryKey: true })] };
+  const g: SemanticModel = {
+    name: 'g',
+    columns: [col('d')],
+    relationships: [{ fromColumn: 'd', toModel: 'Dd', toColumn: 'id', cardinality: 'many-to-one' }],
+  };
+
+  it('is not drawn against the case variant when the library holds a model of that exact name', () => {
+    const library = new Set(['Dd', 'DD', 'g']);
+    const { relationships, diagnostics } = normaliseRelationships({
+      models: [DD, g], own: [], libraryHasModel: (name) => library.has(name),
+    });
+    expect(relationships).toEqual([]);
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('is still respelled (REL005) when the library has no model of that exact name', () => {
+    const library = new Set(['DD', 'g']);
+    const { relationships, diagnostics } = normaliseRelationships({
+      models: [DD, g], own: [], libraryHasModel: (name) => library.has(name),
+    });
+    expect(relationships.map((r) => [r.fromModel, r.toModel])).toEqual([['g', 'DD']]);
+    expect(codes(diagnostics)).toEqual(['REL005']);
+  });
+
+  it('buildUnifiedDomain passes the library lookup through for a v5 domain', () => {
+    const library: Record<string, SemanticModel> = { DD, g, Dd: { name: 'Dd', columns: [col('id', { isPrimaryKey: true })] } };
+    const unified = buildUnifiedDomain(
+      { schemaVersion: 5, domain: 'x', logical: { models: ['DD', 'g'], relationships: [] } },
+      'v5',
+      {
+        filePath: 'x.json', domainNameFallback: 'x', parentDirName: 'gold', layers: { hasLayer: () => true, getValidLayerIds: () => ['gold'] },
+        getModel: (name) => library[name] ?? null,
+        libraryHasModel: (name) => name in library,
+        warn: () => { /* quiet */ },
+      },
+    );
+    expect(unified.logical.relationships).toEqual([]);
+  });
+});

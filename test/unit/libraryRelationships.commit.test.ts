@@ -264,7 +264,7 @@ describe('findings the canvas shows', () => {
     expect(elsewhere).toEqual([]);
     expect(findingsNeedingRepair(findings).map((f) => f.code).sort()).toEqual(['REL002', 'REL003']);
     expect(describeRepairOffer(findings)).toBe('2 relationships need attention (1 saved in the file of the model it points at; ' +
-      '1 pointing at a model that is not in the model library). Review the fixes with Repair Relationships…? Nothing changes until you confirm.');
+      '1 pointing at a model that is missing (from the model library, or from the diagram that stores it)). Review the fixes with Repair Relationships…? Nothing changes until you confirm.');
     expect(toDisplayRelationshipIssues(mine).map((i) => Object.keys(i).sort())).toEqual([
       ['code', 'link', 'message', 'severity'], ['code', 'link', 'message', 'severity'],
     ]);
@@ -496,6 +496,24 @@ describe('planRelationshipCommit — properties over 400 seeded worlds', () => {
 
 describe('planRelationshipCommit — models whose names differ only in case', () => {
   it('updates from the copy the reader draws, whatever order the models come in', () => {
+    // Two copies that say the same thing: the one the reader draws is kept, in its file.
+    const make = () => {
+      const t: SemanticModel = { name: 'T', columns: [col('id', { isPrimaryKey: true })] };
+      const lower: SemanticModel = { name: 'Dd', columns: [col('x')], relationships: [{ fromColumn: 'x', toModel: 'T', toColumn: 'id', cardinality: 'many-to-one', role: 'same' }] };
+      const upper: SemanticModel = { name: 'DD', columns: [col('x')], relationships: [{ fromColumn: 'x', toModel: 'T', toColumn: 'id', cardinality: 'many-to-one', role: 'same' }] };
+      return { t, lower, upper };
+    };
+    const stored: RelationshipEnds = { fromModel: 'Dd', fromColumn: 'x', toModel: 'T', toColumn: 'id' };
+    const kept = [
+      (() => { const m = make(); return plan('library', { kind: 'update', stored, cardinality: 'one-to-one' }, [m.lower, m.upper, m.t]); })(),
+      (() => { const m = make(); return plan('library', { kind: 'update', stored, cardinality: 'one-to-one' }, [m.upper, m.lower, m.t]); })(),
+    ].map((result) => result.changedModels.flatMap((m) => (m.relationships ?? []).map((r) => `${m.name}:${r.cardinality}:${r.role ?? ''}`)));
+    expect(kept[0]).toEqual(kept[1]);
+    // 'DD' sorts before 'Dd' by exact name, so DD's copy is the one drawn and kept.
+    expect(kept[0]).toEqual(['DD:one-to-one:same']);
+  });
+
+  it('refuses to update a link whose copies disagree, whatever order the models come in (#133 review 6)', () => {
     const make = () => {
       const t: SemanticModel = { name: 'T', columns: [col('id', { isPrimaryKey: true })] };
       const lower: SemanticModel = { name: 'Dd', columns: [col('x')], relationships: [{ fromColumn: 'x', toModel: 'T', toColumn: 'id', cardinality: 'many-to-one', role: 'lower' }] };
@@ -503,13 +521,10 @@ describe('planRelationshipCommit — models whose names differ only in case', ()
       return { t, lower, upper };
     };
     const stored: RelationshipEnds = { fromModel: 'Dd', fromColumn: 'x', toModel: 'T', toColumn: 'id' };
-    const roles = [
-      (() => { const m = make(); return plan('library', { kind: 'update', stored, cardinality: 'one-to-one' }, [m.lower, m.upper, m.t]); })(),
-      (() => { const m = make(); return plan('library', { kind: 'update', stored, cardinality: 'one-to-one' }, [m.upper, m.lower, m.t]); })(),
-    ].map((result) => result.changedModels.flatMap((m) => (m.relationships ?? []).map((r) => `${m.name}:${r.role ?? ''}`)));
-    expect(roles[0]).toEqual(roles[1]);
-    // 'DD' sorts before 'Dd' by exact name, so DD's copy (role "upper") is the one drawn and kept.
-    expect(roles[0].join(',')).toContain('upper');
+    for (const order of [(m: ReturnType<typeof make>) => [m.lower, m.upper, m.t], (m: ReturnType<typeof make>) => [m.upper, m.lower, m.t]]) {
+      const m = make();
+      expect(() => plan('library', { kind: 'update', stored, cardinality: 'one-to-one' }, order(m))).toThrow(/copies disagree/);
+    }
   });
 
   it('resolves each endpoint name to its own model, so a link between Dd and DD lands in Dd\'s file', () => {
@@ -578,5 +593,127 @@ describe('planRelationshipCommit — a canvas drawn before the link changed (#13
       kind: 'edit', stored: drawn, next: { fromModel: 'B', fromColumn: 'id', toModel: 'A', toColumn: 'b_id', cardinality: 'one-to-one', role: 'shipped' },
     }, [a, b]);
     expect(moved.changedModels.map((m) => m.name).sort()).toEqual(['A', 'B']);
+  });
+});
+
+describe('planRelationshipCommit — never drops what the user wrote on a copy (#133 review 6)', () => {
+  it('domain mode: an update keeps the entry\'s own keys and its place', () => {
+    const entry = { ...EDGE, cardinality: 'many-to-one', role: 'x', description: 'keep me', tests: ['a'] } as unknown as Relationship;
+    const other = { fromModel: 'fct_order', fromColumn: 'ship_date_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' } as Relationship;
+    const result = plan('domain', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [FCT(), DIM()], [entry, other]);
+    expect(result.domainRelationships).toEqual([
+      { ...EDGE, cardinality: 'one-to-one', role: 'x', description: 'keep me', tests: ['a'] },
+      other,
+    ]);
+  });
+
+  it('domain mode: an edit that clears the role keeps the entry\'s own keys, without the role', () => {
+    const entry = { ...EDGE, cardinality: 'many-to-one', role: 'x', description: 'keep me' } as unknown as Relationship;
+    const result = plan('domain', { kind: 'edit', stored: EDGE, next: { ...EDGE, cardinality: 'many-to-one' } }, [FCT(), DIM()], [entry]);
+    expect(result.domainRelationships).toEqual([{ ...EDGE, cardinality: 'many-to-one', description: 'keep me' }]);
+  });
+
+  it('domain mode: a second copy carrying its own keys is refused rather than taken out', () => {
+    const first = { ...EDGE, cardinality: 'many-to-one' } as Relationship;
+    const second = { ...EDGE, cardinality: 'many-to-one', description: 'mine' } as unknown as Relationship;
+    expect(() => plan('domain', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [FCT(), DIM()], [first, second]))
+      .toThrow(/entry 2 of this diagram has its own key description/i);
+  });
+
+  it('library mode: a copy that moves to another model file and carries comments is refused', () => {
+    const fct = FCT();
+    const dim = DIM();
+    // Stored on the dimension, one-to-many (REL002): ⇄ to many-to-one moves it to fct_order's file.
+    dim.relationships = [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }];
+    const extras = (model: SemanticModel, index: number) => (model.name === 'dim_customer' && index === 0 ? ['comments'] : []);
+    expect(() => planRelationshipCommit({
+      mode: 'library', op: { kind: 'update', stored: REVERSED, cardinality: 'many-to-many' },
+      endpointModels: [fct, dim], domainRelationships: [], libraryEntryExtras: extras,
+    })).toThrow(/entry 1 of dim_customer's model file has comments/i);
+    // Rewritten in place (it stays in its file), the same comments are no reason to refuse.
+    const inPlace = FCT();
+    inPlace.relationships = [{ ...ENTRY }];
+    const ok = planRelationshipCommit({
+      mode: 'library', op: { kind: 'update', stored: EDGE, cardinality: 'one-to-one' },
+      endpointModels: [inPlace, DIM()], domainRelationships: [], libraryEntryExtras: () => ['comments'],
+    });
+    expect(ok.written).toEqual({ where: 'library', model: 'fct_order', index: 0 });
+  });
+
+  it('library mode: a domain-file copy with its own keys is refused rather than taken out', () => {
+    const fct = FCT();
+    fct.relationships = [{ ...ENTRY }];
+    const copy = { ...EDGE, cardinality: 'many-to-one', description: 'mine' } as unknown as Relationship;
+    expect(() => plan('library', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [fct, DIM()], [copy]))
+      .toThrow(/entry 1 of this diagram has its own key description/i);
+  });
+
+  it('refuses to change a link whose copies disagree (a role the canvas never showed), naming both', () => {
+    const fct = FCT();
+    const dim = DIM();
+    fct.relationships = [{ ...ENTRY }];
+    dim.relationships = [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many', role: 'ship date' }];
+    for (const op of [
+      { kind: 'update', stored: EDGE, cardinality: 'one-to-one' },
+      { kind: 'edit', stored: EDGE, next: { ...EDGE, cardinality: 'one-to-one' } },
+    ] as RelationshipCommitOp[]) {
+      expect(() => plan('library', op, [fct, dim])).toThrow(
+        /copies disagree \(entry 1 of fct_order's model file and entry 1 of dim_customer's model file\).*Repair Relationships…/,
+      );
+    }
+    // Removing still takes every copy out.
+    const removed = plan('library', { kind: 'remove', stored: [EDGE] }, [fct, dim]);
+    expect(removed.changedModels.map((m) => m.name).sort()).toEqual(['dim_customer', 'fct_order']);
+  });
+});
+
+describe('planRelationshipCommit — copies compared as the readers read them (#133 review)', () => {
+  const withRole = (): SemanticModel => {
+    const fct = FCT();
+    fct.relationships = [{ ...ENTRY, role: 'ship to' }];
+    return fct;
+  };
+
+  it.each([
+    ['no cardinality key', { ...EDGE, role: 'ship to' }],
+    ['a role differing only in whitespace', { ...EDGE, cardinality: 'many-to-one', role: '  ship   to ' }],
+    ['an unknown cardinality', { ...EDGE, cardinality: 'many_to_one', role: 'ship to' }],
+  ])('a domain-file copy with %s agrees with the library copy, so the change is not refused', (_label, copy) => {
+    const result = plan('library', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [withRole(), DIM()], [copy as unknown as Relationship]);
+    expect(result.written).toEqual({ where: 'library', model: 'fct_order', index: 0 });
+    expect(result.domainRelationships).toEqual([]);
+  });
+
+  it('a domain-file copy whose role really differs is still refused', () => {
+    expect(() => plan('library', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [withRole(), DIM()],
+      [{ ...EDGE, cardinality: 'many-to-one', role: 'bill to' }])).toThrow(/copies disagree/);
+  });
+
+  it('domain mode: two copies that read the same (one without a cardinality) are not refused', () => {
+    const result = plan('domain', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [FCT(), DIM()],
+      [{ ...EDGE, cardinality: 'many-to-one' }, { ...EDGE } as unknown as Relationship]);
+    expect(result.domainRelationships).toEqual([{ ...EDGE, cardinality: 'one-to-one' }]);
+  });
+});
+
+describe('planRelationshipCommit — copies that disagree in an older-format diagram (#133 review)', () => {
+  it('points at the migration, never at Repair Relationships… alone (which never writes a v4 file)', () => {
+    const a: Relationship = { ...EDGE, cardinality: 'many-to-one' };
+    let message = '';
+    try {
+      planRelationshipCommit({
+        mode: 'domain', op: { kind: 'update', stored: EDGE, cardinality: 'one-to-one' },
+        endpointModels: [FCT(), DIM()], domainRelationships: [a, { ...a, role: 'buyer' }],
+        domainFileLabel: 'legacy.json', olderFormat: true,
+      });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toBe(
+      'This relationship is stored more than once and the copies disagree (entry 1 of legacy.json and entry 2 of legacy.json), ' +
+      'so changing it here would throw away what the other copies say. This diagram is in the older format: run ' +
+      '"ERD Studio: Migrate Domains to Central Model Store", then "Repair Relationships…" to choose which one is right — ' +
+      'or remove the extra entry from legacy.json by hand.',
+    );
   });
 });

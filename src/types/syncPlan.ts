@@ -107,8 +107,33 @@ export interface RelationshipResolution {
   discrepancyStatus: 'extra' | 'missing' | 'cardinality-mismatch';
   groundTruth: GroundTruth;
   action: RelationshipAction;
+  /** The cardinality in the stage the user was viewing (`sourceStage`), read from `fromModel` to `toModel`. */
   sourceCardinality?: Cardinality;
+  /** The cardinality in the other stage, read from `fromModel` to `toModel`. */
   targetCardinality?: Cardinality;
+  /**
+   * The cardinality to WRITE: the ground-truth stage's, read from `fromModel`
+   * to `toModel`. Like `resolvedDataType` it is stage-ABSOLUTE: which of
+   * `sourceCardinality` / `targetCardinality` holds the ground-truth value
+   * flips when the comparison is run from the physical stage, and picking
+   * the wrong one silently keeps the drift. Absent when the ground-truth
+   * stage does not hold the link.
+   */
+  resolvedCardinality?: Cardinality;
+  /**
+   * The relationship to store in the logical model, built from the action's
+   * ends and `resolvedCardinality`: canonical, so never `one-to-many` (that is
+   * the same link turned round, `many-to-one`). Its `fromModel` is the model
+   * holding the foreign key — the model file it belongs in. Absent with
+   * `resolvedCardinality`.
+   */
+  resolvedRelationship?: {
+    fromModel: string;
+    fromColumn: string;
+    toModel: string;
+    toColumn: string;
+    cardinality: Exclude<Cardinality, 'one-to-many'>;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +236,20 @@ export function deriveModelAction(
  * where exactly one of the two values is empty by definition: choosing wrong
  * there writes an empty `data_type:` rather than a visibly wrong one.
  */
+/**
+ * The cardinality to write for a relationship row: the ground-truth stage's
+ * value, by the same rule as {@link resolveGroundTruthDataType} — the
+ * comparison's `source` / `target` fields flip with the stage it ran from.
+ */
+export function resolveGroundTruthCardinality(
+  groundTruth: GroundTruth,
+  sourceStage: Stage,
+  sourceCardinality: Cardinality | undefined,
+  targetCardinality: Cardinality | undefined,
+): Cardinality | undefined {
+  return groundTruth === sourceStage ? sourceCardinality : targetCardinality;
+}
+
 export function resolveGroundTruthDataType(
   groundTruth: GroundTruth,
   sourceStage: Stage,

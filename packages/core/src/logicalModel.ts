@@ -453,9 +453,21 @@ function readRelationships(
       return;
     }
     if (r.fromModel !== undefined) {
-      const named = typeof r.fromModel === 'string' ? ` (${JSON.stringify(r.fromModel)})` : '';
+      const ownName = typeof r.fromModel === 'string' && r.fromModel.toLowerCase() === modelName.toLowerCase();
+      if (!ownName) {
+        // The entry says it leaves another model. Reading it as leaving this
+        // one would draw a different link from the one written (a self-loop
+        // when its toModel is this model) — so it is skipped, and writers
+        // leave it exactly as it is.
+        const says = typeof r.fromModel === 'string'
+          ? `describes ${r.fromModel}.${fromColumn as string} → ${toModel as string}.${toColumn as string}, which leaves ${r.fromModel}, not ${modelName}; ` +
+            `it was skipped — move it to ${r.fromModel}'s model file without the fromModel key`
+          : `has a fromModel key that is not text; it was skipped — a model file's relationships always leave ${modelName}, so remove the key`;
+        issue('stray-from-model', true, `Relationship entry ${index + 1} of ${modelName} ${says}`);
+        return;
+      }
       issue('stray-from-model', false,
-        `Relationship entry ${index + 1} of ${modelName} has a fromModel key${named}; a model file's relationships always leave ${modelName}`);
+        `Relationship entry ${index + 1} of ${modelName} has a fromModel key (${JSON.stringify(r.fromModel)}); a model file's relationships always leave ${modelName}, so the key is not needed`);
     }
     let read: Cardinality = 'many-to-one';
     if (typeof cardinality === 'string' && CARDINALITIES.has(cardinality)) {

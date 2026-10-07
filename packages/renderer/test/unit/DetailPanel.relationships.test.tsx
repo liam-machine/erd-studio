@@ -113,3 +113,13 @@ describe('DetailPanel relationship rows (#133)', () => {
     expect(container.querySelector('.detail-panel__relationship--clickable')).toBeNull();
   });
 });
+
+describe('DetailPanel — a relationship whose other end is not in the diagram (#133 review)', () => {
+  it('says it is not drawn', () => {
+    const gone = { fromModel: 'orders', fromColumn: 'customer_id', toModel: 'gone', toColumn: 'id' };
+    const { container } = renderPanel([{ ...gone, cardinality: 'many-to-one', stored: gone, source: { kind: 'domain', index: 0 }, issues: ['REL003'] }]);
+    expect(container.querySelector('.detail-panel__relationship--clickable')!.getAttribute('title'))
+      .toBe("Not drawn: gone is not one of this diagram's models\nClick to edit cardinality\nStored in silver/sales.json (this diagram)");
+  });
+});
+

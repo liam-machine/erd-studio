@@ -133,7 +133,7 @@ const NO_RELATIONSHIP_CHECK: DoctorRelationships = { checked: false, mode: null,
 const RELATIONSHIP_REASONS: Array<[RelationshipIssueCode, string]> = [
   ['REL001', 'stored more than once'],
   ['REL002', 'saved in the file of the model it points at'],
-  ['REL003', 'pointing at a model that is not in the model library'],
+  ['REL003', 'pointing at a model that is missing (from the model library, or from the diagram that stores it)'],
   ['REL004', 'pointing at a column its model does not have'],
   ['REL005', 'naming a model or column with different capital letters'],
   ['REL008', 'could not be read'],

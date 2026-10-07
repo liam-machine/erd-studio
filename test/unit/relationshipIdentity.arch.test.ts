@@ -36,6 +36,14 @@ const ALLOWED: Record<string, { text: string; why: string }[]> = {
   ],
   'webview/components/NewFkDialog/NewFkDialog.tsx': [
     { text: 'fromModel === toModel', why: 'self-reference check on the two dropdown values, not link identity' },
+    { text: 'originalKey.fromModel.toLowerCase() === originalKey.toModel.toLowerCase()', why: 'whether the relationship being edited is a self-reference (its two ends\' models), not link identity' },
+  ],
+  'webview/lib/relationshipDialog.ts': [
+    { text: 'first.fromModel.toLowerCase() === first.toModel.toLowerCase()', why: 'whether the two direction buttons are for a self-reference (one model at both ends), so they name the columns — not link identity' },
+  ],
+  'packages/core/src/displayDomain.ts': [
+    { text: 'columns.find((c) => c.name === rel.fromColumn)', why: 'finds the from end\'s column among its own model\'s columns (exact name first) for the FK badge — a name lookup, not link identity' },
+    { text: 'columns.find((c) => c.name.toLowerCase() === rel.fromColumn.toLowerCase())', why: 'the same lookup without case, after the exact name' },
   ],
   'packages/renderer/src/lib/graphTransformer.ts': [
     { text: 'isSelfLoop = fromModel === toModel', why: 'self-loop detection on node ids already resolved by nodeIdResolver' },

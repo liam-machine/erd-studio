@@ -58,8 +58,16 @@ export function directionFor(
   return resolveDirection(a, b);
 }
 
-/** Whether a verdict's "from" end is the given end (names compared without case). */
+/**
+ * Whether a verdict's "from" end is the given end. An exact match on either
+ * end decides first — two models whose names differ only in case (`Dd`,
+ * `DD`) are two models, so `DD.id` is never taken for `Dd.id` — and only a
+ * name that matches neither end exactly is compared without case.
+ */
 export function verdictStartsAt(verdict: DirectionVerdict, model: string, column: string): boolean {
+  const exact = (end: { model: string; column: string }) => end.model === model && end.column === column;
+  if (exact(verdict.from)) return true;
+  if (exact(verdict.to)) return false;
   return verdict.from.model.toLowerCase() === model.toLowerCase()
     && verdict.from.column.toLowerCase() === column.toLowerCase();
 }

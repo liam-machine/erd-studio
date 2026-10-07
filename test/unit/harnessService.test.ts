@@ -404,11 +404,17 @@ describe('HarnessService', () => {
       expect(cardinalityRow).toContain('in a domain JSON by replacing the entry in place');
       // An entry stored the other way round from the action is replaced, never
       // edited in place (that would flip which model holds the foreign key).
-      expect(cardinalityRow).toContain("reads in the direction of the action's own ends");
+      // Built from the plan's stage-absolute resolvedRelationship, never targetCardinality (#133 review 6).
+      expect(cardinalityRow).toContain('The entry to store is `resolvedRelationship`');
       expect(cardinalityRow).toContain('When they run the other way round, never just edit its `cardinality` in place');
       // The installed copy the fixture project carries says the same.
       const fixture = fs.readFileSync(path.join(__dirname, '../fixtures/dbt-project/.claude/skills/erd-studio/SYNC.md'), 'utf-8');
       expect(fixture.split('\n').find((line) => line.startsWith('| `update-cardinality-in-logical`'))).toBe(cardinalityRow);
+      // A remove and an add of the same two columns the other way round are
+      // one one-to-one stored the other way round: one replace (#133 review).
+      const removeRow = content.split('\n').find((line) => line.startsWith('| `remove-relationship-from-logical`'))!;
+      expect(removeRow).toContain('apply them together as one replace');
+      expect(fixture.split('\n').find((line) => line.startsWith('| `remove-relationship-from-logical`'))).toBe(removeRow);
     });
 
     it('writes companion files using the custom semanticDir', () => {
@@ -814,8 +820,20 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 26 (relationships stored on their many side, with an optional role, #133)', () => {
-      expect(HARNESS_VERSION).toBe('26');
+    it('is 27 (relationships stored on their many side, with an optional role, and sync plans\' resolvedRelationship, #133)', () => {
+      expect(HARNESS_VERSION).toBe('27');
+    });
+
+    it('tells assistants to write a sync plan\'s resolvedRelationship, never targetCardinality (#133 review 6)', () => {
+      service.install(tmpDir, CLAUDE, true);
+      const sync = read(tmpDir, SYNC_GUIDE);
+      expect(sync).toContain('on a plan made from the physical stage (`sourceStage: physical`)');
+      expect(sync).toContain('Never write `sourceCardinality` or `targetCardinality`.');
+      const update = sync.split('\n').find((line) => line.startsWith('| `update-cardinality-in-logical` |'))!;
+      expect(update).toContain('The entry to store is `resolvedRelationship`');
+      expect(update).not.toMatch(/its ends with `targetCardinality`/);
+      const add = sync.split('\n').find((line) => line.startsWith('| `add-relationship-to-logical` |'))!;
+      expect(add).toContain('`resolvedRelationship`');
     });
 
     it('tells assistants to store a relationship on its many side and never write one-to-many (#133)', () => {
@@ -829,7 +847,8 @@ describe('HarnessService', () => {
     it('tells assistants where relationships live and how to choose', () => {
       const SCHEMA_CONTENT = service.generateContent('claude');
       expect(SCHEMA_CONTENT).toContain('### Where relationships live');
-      expect(SCHEMA_CONTENT).toMatch(/\*\*any\*\* model file already has a `relationships:` list, or \*\*no\*\* domain file has a `logical\.relationships` entry/);
+      // An entry ERD Studio could not read counts, as the extension counts it (#133 review); an empty list does not.
+      expect(SCHEMA_CONTENT).toMatch(/\*\*any\*\* model file already has a `relationships:` entry — even one ERD Studio could not read \(an empty `relationships: \[\]` does not count\), or \*\*no\*\* domain file has a `logical\.relationships` entry/);
       expect(SCHEMA_CONTENT).not.toContain('relationships are ONLY stored in the domain');
     });
 

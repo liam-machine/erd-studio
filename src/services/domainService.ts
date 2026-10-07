@@ -225,6 +225,9 @@ export class DomainService {
             : null;
         }
         : undefined,
+      libraryHasModel: this.logicalModelService
+        ? (name) => this.logicalModelService!.listModelNames().includes(name)
+        : undefined,
       warn: (message) => console.warn(`[DomainService] ${message}`),
     });
   }

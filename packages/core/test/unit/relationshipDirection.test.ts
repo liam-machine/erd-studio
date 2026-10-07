@@ -231,10 +231,40 @@ const CASES: Case[] = [
     b: end(model('fct_order', 'order_id', 'customer_id'), 'customer_id'),
     from: 'fct_order.customer_id', to: 'dim_customer.customer_id', cardinality: 'many-to-one', confidence: 'likely',
   },
+  // A unique column that is also a declared foreign key says nothing about
+  // which way it relates to a column nothing is known about: a subtype may
+  // hold the key to it (parent case), or it may be the key a child points at
+  // (child-of-subtype case). The same facts must give the same answer whether
+  // the uniqueness comes from a key flag or a dbt test — ambiguous either way
+  // (review finding on #133).
   {
     name: 'a whole key that is also a declared foreign key, other end unknown',
     a: end(employee, 'person_id'), b: end(model('legacy_person', 'person_id'), 'person_id'),
-    from: 'employee.person_id', to: 'legacy_person.person_id', cardinality: 'one-to-one', confidence: 'likely',
+    from: 'employee.person_id', to: 'legacy_person.person_id', cardinality: 'many-to-one', confidence: 'ambiguous',
+  },
+  {
+    name: 'child of a subtype: an unflagged column against a whole key that is also a declared foreign key',
+    a: end(model('department', 'department_id:P', 'manager_id'), 'manager_id'),
+    b: end(model('manager', 'employee_id:PF', 'bonus'), 'employee_id'),
+    from: 'department.manager_id', to: 'manager.employee_id', cardinality: 'many-to-one', confidence: 'ambiguous',
+  },
+  {
+    name: 'child of a subtype: the same facts with uniqueness from a dbt test',
+    a: end(model('department', 'department_id:P', 'manager_id'), 'manager_id'),
+    b: end(model('manager', 'employee_id:F', 'bonus'), 'employee_id', { unique: true }),
+    from: 'department.manager_id', to: 'manager.employee_id', cardinality: 'many-to-one', confidence: 'ambiguous',
+  },
+  {
+    name: 'a self-reference onto a whole key that is also a declared foreign key',
+    a: end(model('employee', 'person_id:PF', 'manager_id'), 'manager_id'),
+    b: end(model('employee', 'person_id:PF', 'manager_id'), 'person_id'),
+    from: 'employee.manager_id', to: 'employee.person_id', cardinality: 'many-to-one', confidence: 'ambiguous',
+  },
+  {
+    name: 'a declared foreign key dbt tests as unique still points at a key it is not',
+    a: end(model('manager', 'employee_id:F', 'bonus'), 'employee_id', { unique: true }),
+    b: end(model('employee', 'employee_id:P', 'name'), 'employee_id'),
+    from: 'manager.employee_id', to: 'employee.employee_id', cardinality: 'one-to-one', confidence: 'likely',
   },
 ];
 

@@ -252,9 +252,14 @@ export function DetailPanel() {
 
   const { outgoing, incoming } = relationships;
   // Row hover text: what a click does, and which file holds the relationship (#133).
+  const resolveNode = nodeIdResolver(domain.models.map((m) => m.name));
   const rowTitle = (rel: DisplayRelationship): string => {
     const storedIn = relationshipStoredIn(rel.source, domain);
-    return storedIn ? `Click to edit cardinality\nStored in ${storedIn}` : 'Click to edit cardinality';
+    const base = storedIn ? `Click to edit cardinality\nStored in ${storedIn}` : 'Click to edit cardinality';
+    // An end that is not one of this diagram's models (REL003): the canvas
+    // draws no edge for it, so the row says so rather than looking like one.
+    const absent = [rel.fromModel, rel.toModel].find((name) => resolveNode(name) === undefined);
+    return absent !== undefined ? `Not drawn: ${absent} is not one of this diagram's models\n${base}` : base;
   };
   const totalRelationships = outgoing.length + incoming.length;
 

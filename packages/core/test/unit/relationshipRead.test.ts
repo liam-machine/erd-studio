@@ -30,19 +30,58 @@ describe('readRelationships — per-entry issues (REL008)', () => {
       { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
       { fromColumn: 'a', toModel: 'dim_a', toColumn: 'a', cardinality: 'many-to-one' },
       { fromColumn: 'c', toModel: 'dim_c', toColumn: 'c', cardinality: 'many-to-one' },
-      { fromColumn: 'd', toModel: 'dim_d', toColumn: 'd', cardinality: 'one-to-one' },
     ]);
     expect(model.relationshipIssues?.map(({ index, reason, skipped, line }) => ({ index, reason, skipped, line }))).toEqual([
       { index: 1, reason: 'unknown-cardinality', skipped: false, line: 7 },
       { index: 2, reason: 'missing-endpoint', skipped: true, line: 8 },
       { index: 3, reason: 'not-a-mapping', skipped: true, line: 9 },
       { index: 4, reason: 'missing-cardinality', skipped: false, line: 10 },
-      { index: 5, reason: 'stray-from-model', skipped: false, line: 11 },
-      { index: 5, reason: 'invalid-role', skipped: false, line: 11 },
+      { index: 5, reason: 'stray-from-model', skipped: true, line: 11 },
     ]);
     expect(model.relationshipIssues?.[0].message).toMatch(/"one_to_many", which is not one of/);
     expect(model.relationshipIssues?.[1].message).toMatch(/has no toColumn and was skipped/);
-    expect(model.relationshipIssues?.[4].message).toMatch(/"dim_other"/);
+    expect(model.relationshipIssues?.[4].message).toMatch(/leaves dim_other, not fct_order/);
+  });
+
+  it('skips an entry whose fromModel names another model rather than drawing a self-loop on the holder', async () => {
+    const dim = parseLogicalModelText([
+      'name: dim_customer',
+      'columns:',
+      '  - { name: customer_id, dataType: INT, isPrimaryKey: true }',
+      'relationships:',
+      '  - fromModel: fct_order',
+      '    fromColumn: customer_id',
+      '    toModel: dim_customer',
+      '    toColumn: customer_id',
+      '    cardinality: many-to-one',
+    ].join('\n'), 'dim_customer')!;
+    expect(dim).not.toHaveProperty('relationships');
+    expect(dim.relationshipIssues).toEqual([{
+      index: 0, reason: 'stray-from-model', skipped: true, line: 5,
+      message: expect.stringMatching(/describes fct_order\.customer_id → dim_customer\.customer_id.*move it to fct_order's model file/),
+    }]);
+    const fct = parseLogicalModelText('name: fct_order\ncolumns:\n  - { name: customer_id, dataType: INT }\n', 'fct_order')!;
+    const { normaliseRelationships } = await import('../../src/normaliseRelationships');
+    const { relationships } = normaliseRelationships({ models: [dim, fct], own: [] });
+    expect(relationships).toEqual([]);
+  });
+
+  it('reads an entry whose fromModel is the holder itself (any case), flagging the key as not needed', () => {
+    const model = parseLogicalModelText(
+      'name: fct_order\nrelationships:\n  - { fromModel: FCT_order, fromColumn: a, toModel: dim_a, toColumn: a, cardinality: many-to-one }\n',
+      'fct_order',
+    )!;
+    expect(model.relationships).toEqual([{ fromColumn: 'a', toModel: 'dim_a', toColumn: 'a', cardinality: 'many-to-one' }]);
+    expect(model.relationshipIssues).toEqual([expect.objectContaining({ reason: 'stray-from-model', skipped: false })]);
+  });
+
+  it('skips an entry whose fromModel is not text', () => {
+    const model = parseLogicalModelText(
+      'name: fct_order\nrelationships:\n  - { fromModel: 12, fromColumn: a, toModel: dim_a, toColumn: a, cardinality: many-to-one }\n',
+      'fct_order',
+    )!;
+    expect(model).not.toHaveProperty('relationships');
+    expect(model.relationshipIssues).toEqual([expect.objectContaining({ reason: 'stray-from-model', skipped: true })]);
   });
 
   it('leaves the field off when every entry reads as written', () => {
@@ -162,5 +201,21 @@ describe('readDomainRelationshipEntries — a domain file\'s entries, nothing dr
     ]);
     expect(readDomainRelationshipEntries({ not: 'a list' }, 'gold/x').issues.map((i) => i.reason)).toEqual(['not-a-list']);
     expect(readDomainRelationshipEntries(undefined, 'gold/x').issues).toEqual([]);
+  });
+});
+
+describe('toDisplayDomain — models whose names differ only in case (#133 review 6)', () => {
+  it('badges only the model a relationship leaves, never its case-only twin', () => {
+    const domain: SemanticDomain = {
+      schemaVersion: 5, domain: 'd', layer: 'silver', stage: 'logical', description: '',
+      models: [
+        { name: 'Dd', columns: [{ name: 'id', dataType: 'INT', description: '', isPrimaryKey: true }] },
+        { name: 'DD', columns: [{ name: 'k', dataType: 'INT', description: '', isPrimaryKey: true }, { name: 'id', dataType: 'INT', description: '' }] },
+      ],
+      relationships: [{ fromModel: 'DD', fromColumn: 'id', toModel: 'Dd', toColumn: 'id', cardinality: 'many-to-one' }],
+    };
+    const display = toDisplayDomain(domain, { viewConfig: {}, layerConfig: undefined, readOnly: false });
+    expect(display.models.find((m) => m.name === 'Dd')!.columns[0]).toMatchObject({ isForeignKey: false });
+    expect(display.models.find((m) => m.name === 'DD')!.columns[1]).toMatchObject({ isForeignKey: true });
   });
 });

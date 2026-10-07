@@ -66,9 +66,11 @@ export interface ProjectRelationshipCheck {
    * Files whose relationships could not be checked at all, project-relative,
    * each with why: a domain file that is not JSON, unreadable or in a layout
    * ERD Studio cannot load; a model file that does not parse (its
-   * relationships were never read); a layers.json that could not be used (a
-   * domain file in a layer folder it names may have been skipped). A check
-   * that skipped one is never clean.
+   * relationships were never read); a shadowed duplicate model file (a name
+   * the library already has elsewhere: ignored, its relationships never
+   * read or drawn); a layers.json that could not be used (a domain file in a
+   * layer folder it names may have been skipped). A check that skipped one
+   * is never clean.
    */
   unchecked: UncheckedFile[];
   /** Domain files still in the older (v4) format, project-relative: Repair Relationships… does not change them. */
@@ -105,8 +107,11 @@ export function checkProjectRelationships(src: RelationshipCheckSources): Projec
   // The one domain reader every relationship check uses (the canvas and
   // Repair Relationships… too): v5 and v4, stubs, entries it could not read.
   const scan = scanDomainFiles(src.domainService, src.root, src.semanticDir);
-  const mode: RelationshipMode = usesLibraryRelationships(libraryModels.map((m) => m.model), scan.domainFileRelationshipCount)
-    ? 'library' : 'domain';
+  const mode: RelationshipMode = usesLibraryRelationships(
+    libraryModels.map((m) => m.model),
+    scan.domainFileRelationshipCount,
+    unreadableModels.filter((u) => u.holdsRelationships).length,
+  ) ? 'library' : 'domain';
   const domains = toCheckDomains(scan, mode, fileName);
   // A record's `source.index` counts the entries that were read; in the
   // CLI's JSON it names the entry's position in the file's own list (skipped
@@ -147,6 +152,17 @@ export function checkProjectRelationships(src: RelationshipCheckSources): Projec
           : u.line !== undefined ? `it has a YAML error on line ${u.line}` : 'it could not be read'}, so the relationships in it were not checked`,
         kind: 'model',
       })),
+      // A second file with a name the library already has is ignored
+      // everywhere (shadowed): its relationships are never read or drawn, so
+      // a check that passed over it in silence would be a false all-clear.
+      ...src.logicalModelService.listModelFiles()
+        .filter((e) => e.shadowedBy)
+        .map((e): UncheckedFile => ({
+          file: fileName(e.filePath),
+          reason: `a model named ${e.name} is already in ${fileName(e.shadowedBy!)}, so ERD Studio ignores this file and ` +
+            'never draws its relationships — merge it into that file, or give it its own name ("ERD Studio: Give Duplicate Model Its Own Name…")',
+          kind: 'model',
+        })),
       ...scan.unchecked.map((d): UncheckedFile => ({ file: fileName(d.filePath), reason: redactPaths(d.reason), kind: 'domain' })),
     ],
     olderFormat: scan.v4.map((d) => fileName(d.filePath)),

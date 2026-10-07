@@ -19,12 +19,14 @@
 
 import {
   RELATIONSHIP_ROLE_MAX_LENGTH,
+  VALID_CARDINALITIES,
   canonicalRelationship,
   keepStoredRole,
   linkKey,
   normaliseRelationshipRole,
   relationshipFilePositions,
   sameLink,
+  sameRelationshipMeaning,
   type DisplayRelationshipIssue,
   type RelationshipEnds,
   type RelationshipFinding,
@@ -32,6 +34,7 @@ import {
 } from '@erd-studio/core';
 import type { Cardinality, ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 import { countAffectedRelationships } from '../types/relationshipIssues';
+import { describeExtras, domainObjectExtras } from './relationshipEntryExtras';
 
 export type { RelationshipEnds };
 
@@ -67,8 +70,21 @@ function endIs(rel: RelationshipEnds, side: 'from' | 'to', model: string, column
 export function usesLibraryRelationships(
   models: readonly SemanticModel[],
   domainFileRelationshipCount: number,
+  /**
+   * Model files that cannot be read but whose text has a `relationships:`
+   * key (`UncheckableModelFile.holdsRelationships`). They are library
+   * evidence too: a YAML error in the one file holding relationships must
+   * never switch where every new relationship is written.
+   */
+  unreadableWithRelationships = 0,
 ): boolean {
-  return domainFileRelationshipCount === 0 || models.some((m) => (m.relationships?.length ?? 0) > 0);
+  // A file whose `relationships:` holds only entries that could not be read
+  // (REL008 — a mapping, an entry missing an end) is evidence too, exactly as
+  // the same key in a file with a YAML error is: fixing the YAML error must
+  // not switch the project back to per-domain without a word.
+  return domainFileRelationshipCount === 0
+    || unreadableWithRelationships > 0
+    || models.some((m) => (m.relationships?.length ?? 0) > 0 || (m.relationshipIssues?.length ?? 0) > 0);
 }
 
 /** The full relationships stored in `model`'s library file. */
@@ -123,6 +139,22 @@ function domainEntry(rel: Relationship): Relationship {
     cardinality: rel.cardinality,
     ...(rel.role ? { role: rel.role } : {}),
   };
+}
+
+/**
+ * The domain-file entry for `rel` written over the entry it replaces: that
+ * entry's own keys (a `description`, `tests`, anything a relationship does
+ * not have) and their order are kept, the relationship's fields are set to
+ * `rel`'s, and a role `rel` does not have is removed. Without an entry to
+ * replace, the plain {@link domainEntry}.
+ */
+function domainEntryOver(existing: Relationship | undefined, rel: Relationship): Relationship {
+  if (!existing || typeof existing !== 'object') return domainEntry(rel);
+  const out: Record<string, unknown> = { ...(existing as unknown as Record<string, unknown>) };
+  for (const key of ['source', 'stored', 'issues']) delete out[key];
+  Object.assign(out, domainEntry(rel));
+  if (!rel.role) delete out.role;
+  return out as unknown as Relationship;
 }
 
 /**
@@ -332,6 +364,26 @@ export interface RelationshipCommitInput {
   otherDomains?: ReadonlyArray<{ label: string; models: readonly string[]; relationships: readonly Relationship[] }>;
   /** The message for a home model that is not among `endpointModels` (library mode). */
   describeMissingModel?: (name: string) => string;
+  /**
+   * What taking `model`'s `index`-th relationship (as read) out of its file
+   * would lose — its own keys and comments (`yamlEntryExtras`), empty when
+   * nothing. A copy that would lose something is refused rather than dropped
+   * (library mode). Without it, model-file copies are assumed to hold none.
+   */
+  libraryEntryExtras?: (model: SemanticModel, index: number) => readonly string[];
+  /** How the domain file is named in a refusal (default "this diagram"). */
+  domainFileLabel?: string;
+  /**
+   * The domain file is in the older (v4, inline-model) format, which Repair
+   * Relationships… never writes: a refusal points at the migration instead.
+   */
+  olderFormat?: boolean;
+  /**
+   * Position of each of `domainRelationships` in the domain file's list as
+   * written (entries the reader could not use counted), for "entry N" in a
+   * refusal. Without it, the n-th is called entry n.
+   */
+  domainPositions?: readonly number[];
 }
 
 export interface RelationshipCommitPlan {
@@ -410,6 +462,17 @@ function rankCopies(a: Copy, b: Copy): number {
   return a.index - b.index;
 }
 
+/** A stored record as core's readers read it (`readDomainRelationshipEntries`, `parseLogicalModelText`). */
+function asRead(rel: Relationship): Relationship {
+  const { role: _role, ...rest } = rel;
+  const role = normaliseRelationshipRole(rel.role);
+  return {
+    ...rest,
+    cardinality: VALID_CARDINALITIES.has(rel.cardinality) ? rel.cardinality : 'many-to-one',
+    ...(role ? { role } : {}),
+  };
+}
+
 /**
  * Plan one relationship edit (R4). Every copy of the link — in the endpoint
  * models' files (library mode) and in the current domain file — is taken out,
@@ -454,6 +517,35 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
     op.kind === 'remove' ? op.stored.map(linkKey) : [linkKey(op.kind === 'add' ? op.rel : op.stored)],
   );
   const copies = [...cleared].flatMap(copiesOf);
+  const domainLabel = input.domainFileLabel ?? 'this diagram';
+  const placeOf = (c: Copy): string => c.where === 'library'
+    ? `entry ${(relationshipFilePositions(c.model.relationships?.length ?? 0, c.model.relationshipIssues)[c.index] ?? c.index) + 1} of ${c.model.name}'s model file`
+    : `entry ${(input.domainPositions?.[c.index] ?? c.index) + 1} of ${domainLabel}`;
+  // A change made from the canvas writes ONE record from the copy the canvas
+  // draws. When the link is stored more than once and the copies disagree
+  // (REL001, an error), writing it would silently drop what the other copies
+  // say — a role, a cardinality, a one-to-one's direction the user never saw.
+  // That choice is the repair's, where the user picks; a remove takes every
+  // copy out by design and is not refused.
+  if (op.kind === 'update' || op.kind === 'edit') {
+    // Compared as every reader reads them: a domain-file copy is the entry as
+    // written, a library copy the parsed record, so a missing or unknown
+    // cardinality reads as many-to-one and a role is normalised on both sides
+    // — exactly core's REL001 "copies disagree", never a difference of spelling.
+    const disagreeing = copies.filter((c) => !sameRelationshipMeaning(asRead(c.rel), asRead(copies[0].rel)));
+    if (disagreeing.length > 0) {
+      const sites = [copies[0], ...disagreeing].map(placeOf).join(' and ');
+      throw new RelationshipCommitError(
+        `This relationship is stored more than once and the copies disagree (${sites}), ` +
+        'so changing it here would throw away what the other copies say. ' +
+        (input.olderFormat
+          // Repair Relationships… never writes an older-format diagram.
+          ? `This diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store", then ` +
+            `"Repair Relationships…" to choose which one is right — or remove the extra entry from ${domainLabel} by hand.`
+          : 'Run "Repair Relationships…" to choose which one is right, then try again.'),
+      );
+    }
+  }
   let next: Relationship | null = null;
   switch (op.kind) {
     case 'add': {
@@ -563,7 +655,27 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
     }
   }
 
+  // --- Nothing the user wrote on a copy is lost without a word --------------
+  // The copy rewritten in place keeps its comments and its own keys (a model
+  // file entry through `syncRelationships`, a domain file entry below). Any
+  // other copy is taken out of its file; one carrying something a
+  // relationship does not have is refused, as the repair refuses it.
+  const domainKeptIndex = record && !home ? homeIndex : undefined;
+  for (const c of copies) {
+    const keptInPlace = c.where === 'library'
+      ? record !== null && c.model === home && c.index === homeIndex
+      : record !== null && !home && c.index === domainKeptIndex;
+    if (keptInPlace || op.kind === 'remove') continue;
+    const lost = c.where === 'library' ? input.libraryEntryExtras?.(c.model, c.index) ?? [] : domainObjectExtras(c.rel);
+    if (lost.length === 0) continue;
+    throw new RelationshipCommitError(
+      `${placeOf(c)[0].toUpperCase()}${placeOf(c).slice(1)} has ${describeExtras(lost)}, which changing this relationship here would remove. ` +
+      'Move that text out of the entry or make the change by hand, then try again.',
+    );
+  }
+
   // --- Take every copy out ---------------------------------------------------
+  const keptDomainEntry = domainKeptIndex !== undefined ? domain[domainKeptIndex] : undefined;
   if (library) dropWhere(models, (rel) => cleared.has(linkKey(rel)));
   domain = domain.filter((rel) => !cleared.has(linkKey(rel)));
 
@@ -578,7 +690,7 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
       written = { where: 'library', model: home.name, index };
     } else {
       const index = homeIndex ?? domain.length;
-      domain.splice(index, 0, domainEntry(record));
+      domain.splice(index, 0, domainEntryOver(keptDomainEntry, record));
       written = { where: 'domain', index };
     }
   }
@@ -742,7 +854,7 @@ export function describeRepairOffer(findings: readonly RelationshipFinding[]): s
   const reasons: Array<[RelationshipIssueCode, string]> = [
     ['REL001', 'stored more than once'],
     ['REL002', 'saved in the file of the model it points at'],
-    ['REL003', 'pointing at a model that is not in the model library'],
+    ['REL003', 'pointing at a model that is missing (from the model library, or from the diagram that stores it)'],
     ['REL004', 'pointing at a column its model does not have'],
     ['REL008', 'could not be read'],
   ];

@@ -208,6 +208,14 @@ export interface BuildUnifiedDomainContext {
    * reporting the model as missing.
    */
   getModelError?: (name: string) => ModelLoadError | null;
+  /**
+   * Whether the model library holds a model named exactly `name` (see
+   * `normaliseRelationships`' `libraryHasModel`). Omitted by a host that
+   * cannot answer it; a host that cannot list the library can still probe
+   * for the file by name, as `loadDisplayDomain` does, and should, so it
+   * draws what the extension draws.
+   */
+  libraryHasModel?: (name: string) => boolean;
   /** Receives repair warnings (dropped entries, defaulted values). Defaults to console.warn. */
   warn?: (message: string) => void;
   /**
@@ -254,7 +262,7 @@ export function buildUnifiedDomain(
     layer,
     description: typeof obj.description === 'string' ? obj.description : '',
     ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
-    logical: parseStageData(obj.logical, format, filePath, ctx.getModel, ctx.getModelError, warn, ctx.onRelationshipDiagnostics)
+    logical: parseStageData(obj.logical, format, filePath, ctx.getModel, ctx.getModelError, warn, ctx.onRelationshipDiagnostics, ctx.libraryHasModel)
       ?? { ...emptyStage },
     ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
     viewConfig: globalViewConfig,
@@ -298,6 +306,7 @@ function parseStageData(
   getModelError: ((name: string) => ModelLoadError | null) | undefined,
   warn: (message: string) => void,
   onDiagnostics: ((diagnostics: RelationshipDiagnostic[]) => void) | undefined,
+  libraryHasModel?: (name: string) => boolean,
 ): StageData | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -354,7 +363,10 @@ function parseStageData(
   const library = format === 'v5'
     ? models
     : models.map(({ relationships: _relationships, relationshipIssues: _issues, ...model }) => model);
-  const normalised = normaliseRelationships({ models: library, own: relationships, filePath, ownPositions });
+  const normalised = normaliseRelationships({
+    models: library, own: relationships, filePath, ownPositions,
+    ...(format === 'v5' && libraryHasModel ? { libraryHasModel } : {}),
+  });
   reportDiagnostics(normalised.diagnostics, warn);
   onDiagnostics?.(normalised.diagnostics);
   return { models, relationships: normalised.relationships };

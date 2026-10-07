@@ -63,7 +63,8 @@ Each fix:
 | `from`, `to` | Current logical value and the dbt value, for types and cardinalities — a cardinality pair reads in the direction of `relationship`. **Write `to`** (never `one-to-many`) |
 | `relationship` | The connection, for relationship fixes. For `add-relationship` and `set-cardinality` it is exactly the entry to store: ends, direction, `cardinality` and, for `set-cardinality`, the `role` the entry already has |
 | `movesFrom` | `set-cardinality` only: the file the relationship is in now, when it has to move to `file` |
-| `alsoIn` | `remove-relationship` and `set-cardinality`: other files that hold a copy of the same relationship (the same two columns, either way round) — remove the copy from each, so it ends up stored once (or, for a removal, nowhere) |
+| `alsoIn` | `remove-relationship` and `set-cardinality`: every file that holds a further copy of the same relationship (the same two columns, either way round) besides the entry the fix is about — `file` and `movesFrom` too when they hold another entry of it; `explain` says how many — remove every such copy, so it ends up stored once (or, for a removal, nowhere) |
+| `flipped` | `true` on a `remove-relationship` and an `add-relationship` that are one change: a one-to-one the logical model stores the other way round from dbt (dbt does test it, from the other end). Apply the two together as one replace — take the entry out and store `relationship` from the add, keeping the entry's `role` — never one without the other, and never as a question |
 | `explain` | One plain-English sentence — use it when describing the fix to the user |
 
 ## 2. Fix kinds → exact edits
@@ -75,7 +76,7 @@ Each fix:
 | `remove-column` | Delete the column from the yml, **and** delete every relationship that names it: in the domain JSON (`fromModel`/`fromColumn` or `toModel`/`toColumn`), in this model's own `relationships:` (`fromColumn`), and in any other model yml's `relationships:` that points at it (`toModel`/`toColumn`) |
 | `set-type` | Set the column's `dataType` to `to` |
 | `add-relationship` | Add `relationship` (with its `cardinality`) where the project keeps relationships — the `fromModel`'s yml `relationships:` (without `fromModel`) or `logical.relationships` in the domain JSON, by the `/erd-studio` skill's "Where relationships live" — then set `isForeignKey: true` on the `fromColumn` in that yml if it is not already. `relationship` is already on its many side; if you ever see a `one-to-many`, swap the ends and write `many-to-one` in the other model's yml |
-| `remove-relationship` | Remove the matching entry from `file` — a model yml's `relationships:` or `logical.relationships` — and every copy in `alsoIn`. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 |
+| `remove-relationship` | Remove the matching entry from `file` — a model yml's `relationships:` or `logical.relationships` — and every copy in `alsoIn`. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 — except with `flipped: true`, which is half of a replace (see `flipped` above) |
 | `set-cardinality` | Make the matching relationship (the same two columns, whichever way round it is written) read exactly as `relationship`, in the file `file` names — a model yml's `relationships:` or the domain JSON. When `movesFrom` is set, take the entry out of that file and add `relationship` to `file` (without `fromModel` in a yml), keeping its `role`. Remove every copy in `alsoIn`. When the ends in `relationship` are the other way round from the entry, replace the entry, keeping its `role`. A yml change shows in every diagram holding both models |
 | `resolve-phantom` | Always a question: rename it in `logical.models` (and its relationships — in the domain JSON and in any model yml's `relationships:` whose `toModel` names it) to the real dbt model name, or remove it from this domain. **Never** delete its `logical-models/*.yml` — other domains may use it |
 
@@ -94,8 +95,10 @@ who owns the model.
 without asking — you just wrote them from dbt, so a difference is your mistake or a detail the
 inventory could not show. Batch all edits to one file into one Edit where you can.
 
-Exception — **a relationship only logical has** (`remove-relationship`) between models you
-created: ask, because the link may be real and simply untested in dbt:
+Exception — **a relationship only logical has** (`remove-relationship` without `flipped`) between
+models you created: ask, because the link may be real and simply untested in dbt. A
+`remove-relationship` with `flipped: true` is not one of these — dbt tests that link, from the
+other end — so apply it together with its `add-relationship` as one replace, without asking:
 
 > "dbt doesn't test the link from `fct_order.customer_id` to `dim_customer` yet. I can add a
 > `relationships` test to your dbt yml so it shows up in both views (recommended), or drop it
@@ -207,17 +210,19 @@ Use this when the helper cannot run. Ask the user to:
 
 That writes `.erd-studio/.sync-plan.json`. Read it. Its `columns[]`, `relationships[]` and
 `models[]` entries carry an `action` and, for types, `resolvedDataType` — always write
-`resolvedDataType`, never `sourceDataType`/`targetDataType`. The logical-side actions map to the
-edits above:
+`resolvedDataType`, never `sourceDataType`/`targetDataType`. Relationships carry
+`resolvedRelationship`, the entry to store (already the right way round, never `one-to-many`) —
+always write that, never `sourceCardinality`/`targetCardinality`, whose meaning flips with the
+plan's `sourceStage`. The logical-side actions map to the edits above:
 
 | Sync-plan action | Same as |
 |---|---|
 | `add-column-to-logical` | `add-column` |
 | `remove-column-from-logical` | `remove-column` |
 | `update-type-in-logical` | `set-type` (write `resolvedDataType`) |
-| `add-relationship-to-logical` | `add-relationship` |
-| `remove-relationship-from-logical` | `remove-relationship` (ask first, section 3) |
-| `update-cardinality-in-logical` | `set-cardinality`, but the plan carries no `relationship`: build it from the action's ends and `targetCardinality`, which reads in the direction of those ends. A `one-to-many` is never written as `one-to-many` — swap the ends and write `many-to-one` (in a model yml, the other model's file). When the stored entry's ends run the other way round from what you built, replace the entry, keeping its `role` — never just change its `cardinality` in place |
+| `add-relationship-to-logical` | `add-relationship` with `resolvedRelationship`, in its `fromModel`'s file |
+| `remove-relationship-from-logical` | `remove-relationship` (ask first, section 3) — unless the plan also has an `add-relationship-to-logical` for the same two columns the other way round: that pair is a `flipped` one-to-one, applied together as one replace without asking |
+| `update-cardinality-in-logical` | `set-cardinality` with `resolvedRelationship` as the entry to store — already the way round to store it, so a `one-to-many` is never written as `one-to-many`. When the stored entry's ends run the other way round from what you built, replace the entry (in a model yml, move it to `resolvedRelationship.fromModel`'s file), keeping its `role` — never just change its `cardinality` in place |
 | `add-to-logical` / `remove-from-logical` | ask first — adding or removing a whole model from the domain |
 
 Apply the same rules from section 3 about who decides. Delete `.erd-studio/.sync-plan.json` when
@@ -251,10 +256,15 @@ rules.
 
 Top level: `clean`, `mode` (`library` — relationships live in model files — or `domain` — in
 each domain file), `counts` (`errors`, `warnings`, `info`, `byCode`), `unchecked[]` (files
-it could not check at all, each with its `file`, `reason` and `kind`: `model` — a model yml that
-does not parse, so its relationships were never read; `domain` — a domain JSON it could not read
-or load; `layers` — a `layers.json` it could not use, so a layer folder may have been skipped. Fix
-a file you wrote; tell the user about the rest), `olderFormat[]` (domain files still in the v4 format: Repair Relationships…
+it could not check at all, each with its `file`, `reason` and `kind`. Read `reason`: it says which
+case it is and what to do. `model` is one of three: a model yml with a YAML error (fix it as for
+`fix-model-yaml`); a model yml that holds no model — empty, not a mapping, or no `name:` (write
+the model into it, or delete it if you created it by mistake); or a second file with a model
+name the library already has, which ERD Studio ignores (shadowed) — merge it into the file
+`reason` names, or give it its own name (the user can run "ERD Studio: Give Duplicate Model Its
+Own Name…"). `domain` — a domain JSON it could not read or load; `layers` — a `layers.json` it
+could not use, so a layer folder may have been skipped. Fix a file you wrote; tell the user about
+the rest), `olderFormat[]` (domain files still in the v4 format: Repair Relationships…
 does not change them until they are migrated) and `findings[]`. Each
 finding has a `code`, a `severity`, a plain `message`, the `files` involved (project-relative),
 a `line` when known and `records[]` (each stored entry: its `file`, its ends as written, its

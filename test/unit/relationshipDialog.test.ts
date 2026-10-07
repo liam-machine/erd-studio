@@ -101,6 +101,19 @@ describe('ambiguous choices', () => {
     expect(directionChoices(ba, 'many-to-one').map((c) => c.label)).toEqual(labels);
     expect(directionChoices(ab, 'one-to-one')[0].label).toBe('a holds the key to b');
   });
+  it('names the columns on a self-reference, so the two buttons never read the same (#133 review)', () => {
+    const employee = [{ name: 'employee', columns: [col('employee_id'), col('manager_id')] }];
+    const verdict = directionFor(employee, { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' })!;
+    expect(verdict.confidence).toBe('ambiguous');
+    expect(directionChoices(verdict, 'many-to-one').map((c) => c.label)).toEqual([
+      'employee.employee_id has many rows per employee.manager_id',
+      'employee.manager_id has many rows per employee.employee_id',
+    ]);
+    expect(directionChoices(verdict, 'one-to-one').map((c) => c.label)).toEqual([
+      'employee.employee_id holds the key to employee.manager_id',
+      'employee.manager_id holds the key to employee.employee_id',
+    ]);
+  });
   it('offers "Mark as key" only when the target model has no primary key', () => {
     expect(canOfferMarkKey(MODELS, { fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'y' })).toBe(true);
     expect(canOfferMarkKey(MODELS, FACT_TO_DIM)).toBe(false);

@@ -2,7 +2,7 @@
  * Logical stage -> DisplayDomain: the shape the canvas renders.
  */
 
-import type { ModelTemplate, NodePosition, Relationship, SemanticDomain, ViewConfig } from './types/semantic.js';
+import type { ModelTemplate, NodePosition, Relationship, SemanticDomain, SemanticModel, ViewConfig } from './types/semantic.js';
 import type { DisplayDomain, DisplayRelationshipIssue, ExistingModelPreview, ManifestModelPreview } from './types/display.js';
 import type { LayerConfig } from './types/layer.js';
 import { computeNewModelPositions } from './positions.js';
@@ -64,27 +64,44 @@ export interface ToDisplayDomainOptions {
 export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomainOptions): DisplayDomain {
   const { viewConfig, stubColumns, layerConfig, readOnly, editorPayload, relationshipHome, relationshipIssues } = options;
 
-  // Build FK column set for isForeignKey computation (names without case).
+  // Build the FK column set for isForeignKey: each relationship's from end is
+  // resolved to ONE model and ONE column of this domain — the exact name
+  // first, then without case (the alphabetically first variant, as
+  // `normaliseRelationships` resolves names) — so two models whose names
+  // differ only in case (`Dd`, `DD`) never badge each other's columns.
+  const byExact = new Map<string, SemanticModel>();
+  for (const model of domain.models) {
+    if (!byExact.has(model.name)) byExact.set(model.name, model);
+  }
+  const byLower = new Map<string, SemanticModel>();
+  for (const name of [...byExact.keys()].sort()) {
+    if (!byLower.has(name.toLowerCase())) byLower.set(name.toLowerCase(), byExact.get(name)!);
+  }
   const fkColumnsByModel = new Map<string, Set<string>>();
   for (const rel of domain.relationships) {
     // A relationship to a model outside the domain (REL003) is not drawn, so it badges nothing.
     if (rel.issues?.includes('REL003')) continue;
-    const model = rel.fromModel.toLowerCase();
-    if (!fkColumnsByModel.has(model)) {
-      fkColumnsByModel.set(model, new Set());
+    const owner = byExact.get(rel.fromModel) ?? byLower.get(rel.fromModel.toLowerCase());
+    if (!owner) continue;
+    const columns = owner.columns ?? [];
+    const column = columns.find((c) => c.name === rel.fromColumn)
+      ?? columns.find((c) => c.name.toLowerCase() === rel.fromColumn.toLowerCase());
+    if (!column) continue;
+    if (!fkColumnsByModel.has(owner.name)) {
+      fkColumnsByModel.set(owner.name, new Set());
     }
-    fkColumnsByModel.get(model)!.add(rel.fromColumn.toLowerCase());
+    fkColumnsByModel.get(owner.name)!.add(column.name);
   }
 
   const models = domain.models.map((model) => {
     const loadError = modelLoadErrorOf(model);
-    const fkCols = fkColumnsByModel.get(model.name.toLowerCase()) ?? new Set<string>();
+    const fkCols = fkColumnsByModel.get(model.name) ?? new Set<string>();
     const columns = (model.columns ?? []).map((col) => ({
       name: col.name,
       dataType: col.dataType,
       description: col.description,
       isPrimaryKey: col.isPrimaryKey === true,
-      isForeignKey: col.isForeignKey === true || fkCols.has(col.name.toLowerCase()),
+      isForeignKey: col.isForeignKey === true || fkCols.has(col.name),
       ...(col.isForeignKey === true ? { isForeignKeyDeclared: true } : {}),
       isNaturalKey: col.isNaturalKey === true,
       ...(col.scdType != null ? { scdType: col.scdType } : {}),

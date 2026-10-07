@@ -72,12 +72,21 @@ export interface Fix {
    */
   movesFrom?: string;
   /**
-   * remove-relationship and set-cardinality: other files that hold a copy of
-   * the same link (the same two columns, either way round) besides the one
-   * this domain draws — remove the copy from each, so the link is stored
-   * once (or, for a removal, not at all).
+   * remove-relationship and set-cardinality: every file that holds a further
+   * copy of the same link (the same two columns, either way round) besides
+   * the one entry this domain draws — `file` and `movesFrom` included when
+   * they hold another entry of it — so the link ends up stored once (or, for
+   * a removal, not at all). `explain` says how many entries each holds.
    */
   alsoIn?: string[];
+  /**
+   * remove-relationship and add-relationship: the two halves of one
+   * one-to-one that the logical model stores the other way round from dbt
+   * (#133). dbt does test the link, so the remove is never "not tested in
+   * dbt": apply the pair together, as one replace of the entry (keeping its
+   * `role`) — never one without the other, and never as a question.
+   */
+  flipped?: true;
   /** fix-model-yaml: where the parser stopped (1-based). */
   line?: number;
   explain: string;
@@ -301,13 +310,29 @@ export function fixesFromPlan(
   };
   const homeFile = (stored: RelationshipEnds, inLibrary: boolean): string =>
     (inLibrary ? ymlFile(stored.fromModel) : domainFile);
-  /** Files other than `except` that hold a copy of the link. */
-  const otherFiles = (r: RelationshipEnds, except: readonly string[]): string[] => [...new Set(
-    (relationshipHome.otherCopies?.get(linkKey(r)) ?? []).map((c) => ('model' in c ? ymlFile(c.model) : domainFile)),
-  )].filter((f) => !except.includes(f));
+  /**
+   * Every further copy of the link besides the drawn one, by file, in the
+   * order found — a second entry in the very file the fix edits included
+   * (`relationshipHomeOf` keeps every further copy, even in the same file).
+   */
+  const furtherCopies = (r: RelationshipEnds): Array<{ file: string; count: number }> => {
+    const byFile = new Map<string, number>();
+    for (const c of relationshipHome.otherCopies?.get(linkKey(r)) ?? []) {
+      const f = 'model' in c ? ymlFile(c.model) : domainFile;
+      byFile.set(f, (byFile.get(f) ?? 0) + 1);
+    }
+    return [...byFile].map(([file, count]) => ({ file, count }));
+  };
   const role = (r: RelationshipEnds): string | undefined => relationshipHome.roles?.get(linkKey(r));
-  const andRemove = (files: readonly string[]): string =>
-    (files.length === 0 ? '' : ` It is also stored in ${files.join(' and ')} — remove ${files.length === 1 ? 'that copy' : 'those copies'} too.`);
+  /** The sentence naming every further copy; `edited` are the files the fix itself edits. */
+  const andRemove = (copies: ReadonlyArray<{ file: string; count: number }>, edited: readonly string[]): string => {
+    if (copies.length === 0) return '';
+    const total = copies.reduce((n, c) => n + c.count, 0);
+    const where = copies.map((c) => (edited.includes(c.file)
+      ? `${c.file} (${c.count === 1 ? 'another entry' : `${c.count} more entries`} besides the one this fix is about)`
+      : `${c.file}${c.count > 1 ? ` (${c.count} entries)` : ''}`));
+    return ` It is also stored in ${where.join(' and ')} — remove ${total === 1 ? 'that copy' : 'those copies'} too.`;
+  };
   const fixes: Fix[] = [];
   // A phantom is one question (rename it or drop it), not one fix per column
   // and edge: from the logical side compare() reports it 'extra' with every
@@ -365,13 +390,15 @@ export function fixesFromPlan(
     const flipped = plan.relationships.some((o) => o !== r && o.action !== r.action && sameLink(o, r));
     if (flipped && r.action === 'remove-relationship-from-logical') {
       const file = currentFile(rel);
-      const alsoIn = otherFiles(rel, [file]);
+      const copies = furtherCopies(rel);
+      const alsoIn = copies.map((c) => c.file);
       fixes.push({
         severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file,
         relationship: { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) },
         ...(alsoIn.length > 0 ? { alsoIn } : {}),
+        flipped: true,
         explain: `The logical model stores ${link} as a one-to-one held by ${r.fromModel}, but dbt tests it from the other end — `
-          + 'remove this entry; the matching add-relationship stores it the way dbt has it.' + andRemove(alsoIn),
+          + 'remove this entry; the matching add-relationship stores it the way dbt has it.' + andRemove(copies, [file]),
       });
       continue;
     }
@@ -380,6 +407,7 @@ export function fixesFromPlan(
         severity: 'blocking', kind: 'add-relationship', model: r.fromModel, column: r.fromColumn,
         file: homeFile(rel, relationshipHome.addToLibrary),
         relationship: { ...rel, cardinality: r.targetCardinality ?? 'one-to-one' },
+        flipped: true,
         explain: `dbt tests ${link} as a one-to-one held by ${r.fromModel}; the logical model stores it the other way round — `
           + 'add it this way, in place of the entry the matching remove-relationship takes out.',
       });
@@ -400,13 +428,14 @@ export function fixesFromPlan(
       }
       case 'remove-relationship-from-logical': {
         const file = currentFile(rel);
-        const alsoIn = otherFiles(rel, [file]);
+        const copies = furtherCopies(rel);
+        const alsoIn = copies.map((c) => c.file);
         fixes.push({
           severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file,
           relationship: { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) },
           ...(alsoIn.length > 0 ? { alsoIn } : {}),
           explain: `The logical model draws ${link}, but dbt has no relationships test for it — remove it, or add the test to dbt.`
-            + andRemove(alsoIn),
+            + andRemove(copies, [file]),
         });
         break;
       }
@@ -420,7 +449,8 @@ export function fixesFromPlan(
         const current = currentFile(rel);
         const file = homeFile(stored, heldBy(rel) !== undefined);
         const movesFrom = file !== current ? current : undefined;
-        const alsoIn = otherFiles(rel, [file, current]);
+        const copies = furtherCopies(rel);
+        const alsoIn = copies.map((c) => c.file);
         const source = r.sourceCardinality ? (turned ? reverseCardinality(r.sourceCardinality) : r.sourceCardinality) : undefined;
         const storedLink = `${stored.fromModel}.${stored.fromColumn} → ${stored.toModel}.${stored.toColumn}`;
         const keptRole = role(rel);
@@ -436,7 +466,7 @@ export function fixesFromPlan(
               + (movesFrom ? `: take it out of ${movesFrom} and add it to ${file}.` : ', replacing the old entry.')
             : `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — change it to ${r.targetCardinality}`
               + (movesFrom ? `, and move it: take it out of ${movesFrom} and add it to ${file}, where ${stored.fromModel} (the side holding the foreign key) keeps it.` : '.'))
-            + andRemove(alsoIn),
+            + andRemove(copies, [file, current]),
         });
         break;
       }
@@ -671,10 +701,21 @@ export function diffDomain(
     unified.logical.relationships,
     unified.logical.models,
     readDomainRelationshipEntries(rawOwn, rel).relationships,
-    usesLibraryRelationships(
-      ctx.logicalModelService.listModels(),
-      ctx.domainService.countDomainFileRelationships(ctx.root, ctx.semanticDir),
-    ),
+    (() => {
+      // A relationship check that cannot run is reported as `integrityError`;
+      // the fixes still need a mode, read from the models that load.
+      let library: { models: SemanticModel[]; unreadableWithRelationships: number };
+      try {
+        library = ctx.logicalModelService.relationshipModeInputs();
+      } catch {
+        library = { models: ctx.logicalModelService.listModels(), unreadableWithRelationships: 0 };
+      }
+      return usesLibraryRelationships(
+        library.models,
+        ctx.domainService.countDomainFileRelationships(ctx.root, ctx.semanticDir),
+        library.unreadableWithRelationships,
+      );
+    })(),
     rawRoleOf,
   );
   const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles, relationshipHome);

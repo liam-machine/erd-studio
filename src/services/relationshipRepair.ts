@@ -36,7 +36,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { isMap, isPair, isScalar, isSeq, parseDocument, stringify, visit } from 'yaml';
+import { isMap, isPair, isScalar, isSeq, parseDocument, stringify } from 'yaml';
 import type { Node, Pair, YAMLMap } from 'yaml';
 
 import {
@@ -55,7 +55,8 @@ import {
   type RelationshipFinding,
   type RelationshipIssueCode,
 } from '@erd-studio/core';
-import { setDomainRelationships, setYamlRelationships } from './minimalEdits';
+import { domainRelationshipElementTexts, editDomainRelationshipEntries, setDomainRelationships, setYamlRelationships } from './minimalEdits';
+import { COMMENTS, describeExtras, domainEntryExtras, yamlEntryExtras } from './relationshipEntryExtras';
 import { usesLibraryRelationships } from './libraryRelationships';
 import { CURRENT_SCHEMA_VERSION, detectDomainFormat } from '../types/semantic';
 import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
@@ -310,7 +311,14 @@ export interface RepairSnapshot {
   mode: 'library' | 'domain';
   modelFiles: RepairModelFile[];
   domains: RepairDomainFile[];
-  unreadable: CheckUnreadableModel[];
+  /** Model files that could not be read; `holdsRelationships` when their text has a `relationships:` key. */
+  unreadable: Array<CheckUnreadableModel & { holdsRelationships?: true }>;
+  /**
+   * How many `logical.relationships` entries every domain file holds, read
+   * raw (`DomainFileScan.domainFileRelationshipCount`), for the mode a plan
+   * leaves the project in. Optional for snapshots built by hand.
+   */
+  domainFileRelationshipCount?: number;
   /** v4 domain files: checked, never repaired (their findings point at the migration). */
   olderFormat: Array<OlderFormatDomain & { file: string }>;
   /** Domain files that could not be checked at all. */
@@ -349,7 +357,7 @@ export function readRepairSnapshot(deps: RepairSnapshotDeps): RepairSnapshot {
   const label = (filePath: string): string => repairFileLabel(modelsDir, filePath);
 
   const { libraryModels, unreadableModels } = logicalModelService.relationshipCheckModels((p) => p);
-  const unreadable: CheckUnreadableModel[] = unreadableModels.map((u) => ({ ...u, file: label(u.file) }));
+  const unreadable: RepairSnapshot['unreadable'] = unreadableModels.map((u) => ({ ...u, file: label(u.file) }));
   const modelFiles: RepairModelFile[] = [];
   for (const { file: filePath } of libraryModels) {
     const stem = path.basename(filePath).replace(/\.ya?ml$/i, '');
@@ -386,7 +394,11 @@ export function readRepairSnapshot(deps: RepairSnapshotDeps): RepairSnapshot {
 
   const scan = scanDomainFiles(domainService, workspaceRoot, semanticDir);
   const domains: RepairDomainFile[] = scan.v5.map((d) => ({ ...d, file: label(d.filePath) }));
-  const mode = usesLibraryRelationships(modelFiles.map((m) => m.model), scan.domainFileRelationshipCount) ? 'library' : 'domain';
+  const mode = usesLibraryRelationships(
+    modelFiles.map((m) => m.model),
+    scan.domainFileRelationshipCount,
+    unreadableModels.filter((u) => u.holdsRelationships).length,
+  ) ? 'library' : 'domain';
   // The same domains, stubs and unreadable entries every other check uses.
   const findings = checkRelationships({
     libraryModels: modelFiles.map((m) => ({ model: m.model, file: m.file })),
@@ -399,6 +411,7 @@ export function readRepairSnapshot(deps: RepairSnapshotDeps): RepairSnapshot {
     modelFiles,
     domains,
     unreadable,
+    domainFileRelationshipCount: scan.domainFileRelationshipCount,
     olderFormat: scan.v4.map((d) => ({ ...d, file: label(d.filePath) })),
     unchecked: scan.unchecked.map((d) => ({ ...d, file: label(d.filePath) })),
     ...(layersError ? { layersError } : {}),
@@ -580,9 +593,23 @@ export interface RepairCounts {
 
 export interface RepairPlan {
   changes: RepairFileChange[];
+  /**
+   * When the planned files would change where the project keeps
+   * relationships (`usesLibraryRelationships`) other than as the move
+   * intends — e.g. the last model-library relationship removed while a
+   * diagram file still holds its own — one plain sentence saying so, for the
+   * preview. Every new relationship is saved there afterwards.
+   */
+  modeChange?: string;
   counts: RepairCounts;
   /** Why some relationships were left as they are, one line each. */
   left: string[];
+  /**
+   * Diagrams that will start drawing a relationship they did not draw: it is
+   * now in the model library (`expect.consolidated`) and the diagram holds
+   * both its models. One line each, naming the diagram file and the link.
+   */
+  alsoDrawn: string[];
   unreadableEntries: RelationshipFinding[];
   /** As {@link RepairAnalysis.outOfReach}. */
   outOfReach: string[];
@@ -600,6 +627,19 @@ export interface RepairPlan {
      * with them by the user's choice; every other entry's must survive.
      */
     removedByUser: Map<string, Set<number>>;
+    /**
+     * By domain file path: the positions (in the file's own list) of the
+     * entries the plan removes or changes. Every other entry must read back
+     * byte for byte as it was (an entry the reader could not read included).
+     * Optional for plans built before it existed.
+     */
+    domainEntries?: Map<string, { remove: Set<number>; update: Set<number> }>;
+    /**
+     * Where the project keeps relationships once the plan is written, worked
+     * out from the planned texts. A result in any other mode is refused.
+     * Optional for plans built before it existed (then: the mode before).
+     */
+    modeAfter?: 'library' | 'domain';
   };
 }
 
@@ -704,11 +744,12 @@ function collectRecords(snapshot: RepairSnapshot): Rec[] {
   }
   for (const domain of snapshot.domains) {
     const extras = domainEntryExtras(domain.text);
-    // A role the reader showed shortened, or dropped as not text, would be
-    // stored that way: such an entry is left for the user, as a model file's is.
-    const roleIssues = new Set(domain.readIssues
-      .filter((i) => i.reason === 'role-too-long' || i.reason === 'invalid-role')
-      .map((i) => i.index));
+    // Any entry the reader could not read in full (REL008) — a cardinality it
+    // did not recognise and drew as many-to-one, a role it showed shortened
+    // or dropped — is left for the user, as a model file's is: storing what
+    // the reader guessed (`one_to_many` as many-to-one) would bake the
+    // misreading in and silence the warning for good.
+    const readIssues = new Set(domain.readIssues.map((i) => i.index));
     domain.relationships.forEach((rel, readIndex) => {
       const rawIndex = domain.rawIndexes[readIndex];
       records.push({
@@ -717,75 +758,13 @@ function collectRecords(snapshot: RepairSnapshot): Rec[] {
         readIndex,
         rawIndex,
         rel: plain(rel),
-        // A domain file's unrecognised cardinality is drawn as many-to-one;
-        // storing that loses nothing the diagram shows (the move always did).
-        untouchable: roleIssues.has(rawIndex),
+        untouchable: readIssues.has(rawIndex) || domain.defaulted[readIndex] === true,
         file: domain.file,
         extras: extras.get(rawIndex) ?? [],
       });
     });
   }
   return records;
-}
-
-/** The fields a model file's relationship entry has; anything else is the user's. */
-const MODEL_ENTRY_KEYS = new Set(['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role']);
-/** The fields a domain file's relationship entry has. */
-const DOMAIN_ENTRY_KEYS = new Set(['fromModel', 'fromColumn', 'toModel', 'toColumn', 'cardinality', 'role']);
-/** How {@link Rec.extras} names comments. */
-const COMMENTS = 'comments';
-
-/**
- * For each entry of a model file's `relationships:` list (by position as
- * written), what removing it would lose: its unknown keys, and `comments`
- * when a comment sits inside it (on one of its lines, or between its keys).
- * A comment on the lines above an entry is not the entry's: removing the
- * entry leaves it where it is (`editYamlRelationships`).
- */
-function yamlEntryExtras(text: string): Map<number, string[]> {
-  const out = new Map<number, string[]>();
-  const body = text.startsWith(BOM) ? text.slice(1) : text;
-  const doc = parseDocument(body);
-  const root = doc.contents;
-  if (!isMap(root)) return out;
-  const pair = (root.items as unknown[]).find((p): p is Pair => isPair(p) && isScalar(p.key) && p.key.value === 'relationships');
-  if (!pair || !isSeq(pair.value)) return out;
-  (pair.value.items as Node[]).forEach((item, i) => {
-    const lost: string[] = [];
-    if (isMap(item)) {
-      for (const p of item.items) {
-        if (isPair(p) && isScalar(p.key) && !MODEL_ENTRY_KEYS.has(String(p.key.value))) lost.push(String(p.key.value));
-      }
-    }
-    let commented = false;
-    visit(item as Parameters<typeof visit>[0], {
-      Node: (_k, n) => {
-        if (n === item) return;
-        if ((n as { commentBefore?: string }).commentBefore || (n as { comment?: string }).comment) commented = true;
-      },
-    });
-    if (commented) lost.push(COMMENTS);
-    if (lost.length > 0) out.set(i, lost);
-  });
-  return out;
-}
-
-/** For each entry of a domain file's `logical.relationships` (by position), the keys a relationship does not have. */
-function domainEntryExtras(text: string): Map<number, string[]> {
-  const out = new Map<number, string[]>();
-  try {
-    const raw = JSON.parse(text.replace(/^\uFEFF/, '')) as { logical?: { relationships?: unknown } };
-    const list = raw.logical?.relationships;
-    if (!Array.isArray(list)) return out;
-    list.forEach((entry, i) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
-      const lost = Object.keys(entry).filter((k) => !DOMAIN_ENTRY_KEYS.has(k));
-      if (lost.length > 0) out.set(i, lost);
-    });
-  } catch {
-    // An unreadable file is never a repair's to edit.
-  }
-  return out;
 }
 
 /** Findings by the record they are about. */
@@ -859,6 +838,11 @@ export function analyseRepair(snapshot: RepairSnapshot, options: RepairOptions =
   const noHome: string[] = [];
   const involved = new Set<string>();
   let questionCount = 0;
+  const listProblems = new Map<RepairModelFile, string | null>();
+  const listProblemOf = (modelFile: RepairModelFile): string | null => {
+    if (!listProblems.has(modelFile)) listProblems.set(modelFile, yamlRelationshipsListProblem(modelFile.text, modelFile.file));
+    return listProblems.get(modelFile)!;
+  };
   for (const task of candidates) {
     const meanings = distinctMeanings(find, task.records);
     const r = meanings[0].rel;
@@ -905,6 +889,14 @@ export function analyseRepair(snapshot: RepairSnapshot, options: RepairOptions =
         blocked.push(`${describeEnds(r)}: left in ${where} — ${problems[0]}. Fix it first.`);
         continue;
       }
+    }
+    // A model file whose list cannot be edited in place (written on one line,
+    // `relationships: [ … ]`, …) is found now, before any question — never
+    // after every answer, taking every other fix of the run down with it.
+    const writeProblem = repairWriteProblem(task, meanings, needsQuestion, find, listProblemOf);
+    if (writeProblem) {
+      blocked.push(`${describeEnds(r)}: ${writeProblem.replace(/[.;]? change (it|its relationships) by hand\.$/, '')} — left as it is; change it by hand.`);
+      continue;
     }
     tasks.push(task);
     if (needsQuestion) questionCount++;
@@ -1023,6 +1015,38 @@ function distinctMeanings(find: (name: string) => RepairModelFile | undefined, r
   return meanings;
 }
 
+/**
+ * Why settling `task` would have to edit a model file whose list cannot be
+ * edited in place, or null. A record's file counts unless it is the record
+ * kept unchanged; a home file counts when the record would be appended to it.
+ * With a question, every answer is assumed to change the kept record, and a
+ * link is blocked only when no meaning's home could take it.
+ */
+function repairWriteProblem(
+  task: LinkTask,
+  meanings: readonly Meaning[],
+  needsQuestion: boolean,
+  find: (name: string) => RepairModelFile | undefined,
+  listProblemOf: (modelFile: RepairModelFile) => string | null,
+): string | null {
+  const r = meanings[0].rel;
+  const home = task.scope === 'library' ? find(r.fromModel) : undefined;
+  const keep = needsQuestion ? undefined : keptRecord(task, r, find);
+  const keptAsIs = keep !== undefined && keep.where === 'library' && home !== undefined
+    && sameStoredFields(keep.rel, { ...r, fromModel: home.name });
+  for (const rec of task.records) {
+    if (rec.where !== 'library' || (rec === keep && keptAsIs)) continue;
+    const problem = listProblemOf(rec.modelFile!);
+    if (problem) return problem;
+  }
+  if (task.scope === 'library') {
+    const homes = [...new Set(meanings.map((m) => find(m.rel.fromModel)).filter((h): h is RepairModelFile => h !== undefined))];
+    const usable = homes.filter((h) => !listProblemOf(h) || (keptAsIs && keep!.modelFile === h));
+    if (homes.length > 0 && usable.length === 0) return listProblemOf(homes[0]);
+  }
+  return null;
+}
+
 /** Whether settling `task` on `r` would change any file (no questions involved). */
 function wouldChange(find: (name: string) => RepairModelFile | undefined, task: LinkTask, r: Relationship): boolean {
   if (task.records.length > 1) return true;
@@ -1046,6 +1070,17 @@ interface FileEdits {
 }
 
 const newEdits = (): FileEdits => ({ remove: new Set(), update: new Map(), append: [], notes: [] });
+
+function copyEdits<K>(edits: ReadonlyMap<K, FileEdits>): Map<K, FileEdits> {
+  return new Map([...edits].map(([key, e]) => [key, {
+    remove: new Set(e.remove), update: new Map(e.update), append: [...e.append], notes: [...e.notes],
+  }]));
+}
+
+function restoreEdits<K>(edits: Map<K, FileEdits>, from: ReadonlyMap<K, FileEdits>): void {
+  edits.clear();
+  for (const [key, e] of copyEdits(from)) edits.set(key, e);
+}
 
 /**
  * Plan a repair: ask every question `analyseRepair` found (through `ask`),
@@ -1086,8 +1121,11 @@ export async function planRelationshipRepair(
   };
   const modelEdits = new Map<RepairModelFile, FileEdits>();
   const domainEdits = new Map<RepairDomainFile, FileEdits>();
+  // The model files the current task edits, to check each still edits cleanly.
+  let touchedByTask = new Set<RepairModelFile>();
   const editsFor = (rec: { modelFile?: RepairModelFile; domain?: RepairDomainFile }): FileEdits => {
     if (rec.modelFile) {
+      touchedByTask.add(rec.modelFile);
       if (!modelEdits.has(rec.modelFile)) modelEdits.set(rec.modelFile, newEdits());
       return modelEdits.get(rec.modelFile)!;
     }
@@ -1105,6 +1143,7 @@ export async function planRelationshipRepair(
   const userChanged = new Set<string>();
   const removedByUser = new Map<string, Set<number>>();
   const consolidated = new Set<string>();
+  const consolidatedRecords = new Map<string, Relationship>();
 
   let asked = 0;
   for (const task of analysis.tasks) {
@@ -1123,9 +1162,43 @@ export async function planRelationshipRepair(
       if ((code === 'REL001' || code === 'REL009') && task.partialLeft) return;
       taskGone.push({ code, link, files: taskFiles });
     };
-    const settled = (): void => { gone.push(...taskGone); };
+    // Settled — once every model file the task edits still edits in place. An
+    // entry that cannot be (a value written as an alias or a | block, a role
+    // as its first key) leaves this one link as it is, with the reason; every
+    // other fix of the run goes ahead.
+    const settled = (): boolean => {
+      for (const modelFile of touchedByTask) {
+        const edits = modelEdits.get(modelFile);
+        if (!edits) continue;
+        try {
+          editYamlRelationships(modelFile.text, {
+            remove: edits.remove,
+            update: new Map([...edits.update].map(([i, rel]) => [i, toModelEntry(rel)])),
+            append: edits.append.map(toModelEntry),
+          }, modelFile.file);
+        } catch (err) {
+          if (!(err instanceof RepairEditError)) throw err;
+          restoreEdits(modelEdits, editsBefore.model);
+          restoreEdits(domainEdits, editsBefore.domain);
+          removedByUser.clear();
+          for (const [file, at] of removedBefore) removedByUser.set(file, at);
+          consolidatedRecords.clear();
+          for (const [key, rel] of consolidatedBefore) consolidatedRecords.set(key, rel);
+          consolidated.clear();
+          for (const key of consolidatedBefore.keys()) consolidated.add(key);
+          leaveTask(`${subject}: ${err.message.replace(/[.;]? change (it|its relationships) by hand\.$/, '')} — left as it is; change it by hand.`);
+          return false;
+        }
+      }
+      gone.push(...taskGone);
+      return true;
+    };
     const countsBefore = { ...counts };
     const leftBefore = left.length;
+    touchedByTask = new Set();
+    const editsBefore = { model: copyEdits(modelEdits), domain: copyEdits(domainEdits) };
+    const removedBefore = new Map([...removedByUser].map(([file, at]) => [file, new Set(at)]));
+    const consolidatedBefore = new Map(consolidatedRecords);
     const taken = takenFor(task);
     // What this task added to the run-wide sets, so a task that ends up left
     // as it is takes nothing with it: no "settled as you picked" count for a
@@ -1281,6 +1354,7 @@ export async function planRelationshipRepair(
         } else {
           counts.moved++;
           consolidated.add(linkKey(record));
+          consolidatedRecords.set(linkKey(record), record);
         }
       }
     } else {
@@ -1328,14 +1402,83 @@ export async function planRelationshipRepair(
     }
   }
   changes.sort((a, b) => (a.kind === b.kind ? (a.file < b.file ? -1 : a.file > b.file ? 1 : 0) : a.kind === 'model' ? -1 : 1));
+
+  // A relationship newly in the model library is drawn by every diagram that
+  // holds both its models — including ones that never drew it. Each is named,
+  // so the preview says what the diagrams will show, not only which files change.
+  const alsoDrawn: string[] = [];
+  if (consolidatedRecords.size > 0) {
+    const drawnBefore = drawnByDomain(snapshot);
+    for (const [key, record] of consolidatedRecords) {
+      for (const domain of snapshot.domains) {
+        const names = new Set(domain.models.map(lower));
+        if (!names.has(lower(record.fromModel)) || !names.has(lower(record.toModel))) continue;
+        if (drawnBefore.get(domain.filePath)?.has(key)) continue;
+        alsoDrawn.push(`${domain.file} will also draw ${describeEnds(record)}: it holds both models, and the relationship is now in the model library`);
+      }
+    }
+    alsoDrawn.sort();
+  }
+  // Where new relationships go afterwards (`usesLibraryRelationships`, read
+  // from the planned texts). A change the user did not ask for — the last
+  // model-library relationship removed while a diagram file keeps its own —
+  // is said in the preview, never left for the next canvas edit to discover.
+  const modeAfter = plannedMode(snapshot, changes);
+  const intended = options.moveDomainsToLibrary === true && modeAfter === 'library';
+  const modeChange = modeAfter === snapshot.mode || intended
+    ? undefined
+    : modeAfter === 'domain'
+      ? 'After this no model file holds a relationship while diagram files still hold their own, so the project goes back to ' +
+        'keeping relationships in each diagram\'s file: new relationships will be saved there. Run "Move Relationships to Model ' +
+        'Library" afterwards to keep them with their models.'
+      : 'After this no diagram file holds a relationship, so the project keeps relationships in the model library from now on: ' +
+        'new relationships will be saved with the model that holds the foreign key.';
   return {
     changes,
+    ...(modeChange ? { modeChange } : {}),
     counts,
     left,
+    alsoDrawn,
     unreadableEntries: analysis.unreadableEntries,
     outOfReach: analysis.outOfReach,
-    expect: { gone, userChanged, consolidated, removedByUser },
+    expect: {
+      gone, userChanged, consolidated, removedByUser,
+      domainEntries: new Map([...domainEdits].map(([domain, edits]) => [domain.filePath, {
+        remove: new Set(edits.remove), update: new Set(edits.update.keys()),
+      }])),
+      modeAfter,
+    },
   };
+}
+
+/** How many entries a domain file's `logical.relationships` holds, read raw (0 when it cannot be read). */
+function rawDomainRelationshipCount(text: string): number {
+  try {
+    const raw = JSON.parse(text.replace(/^\uFEFF/, '')) as { logical?: { relationships?: unknown } };
+    return Array.isArray(raw.logical?.relationships) ? raw.logical!.relationships.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** The mode (`usesLibraryRelationships`) the project is in once `changes` are written. */
+function plannedMode(snapshot: RepairSnapshot, changes: readonly RepairFileChange[]): 'library' | 'domain' {
+  const planned = new Map(changes.map((c) => [c.filePath, c]));
+  const models = snapshot.modelFiles.map((modelFile) => {
+    const change = planned.get(modelFile.filePath);
+    if (!change) return modelFile.model;
+    try {
+      return parseLogicalModelText(change.text, modelFile.name) ?? { name: modelFile.name, columns: [] };
+    } catch {
+      return { name: modelFile.name, columns: [] };
+    }
+  });
+  let domainCount = snapshot.domainFileRelationshipCount ?? snapshot.domains.reduce((n, d) => n + rawDomainRelationshipCount(d.text), 0);
+  for (const change of changes) {
+    if (change.kind === 'domain') domainCount += rawDomainRelationshipCount(change.text) - rawDomainRelationshipCount(change.original);
+  }
+  const unreadableWithRelationships = snapshot.unreadable.filter((u) => u.holdsRelationships).length;
+  return usesLibraryRelationships(models, domainCount, unreadableWithRelationships) ? 'library' : 'domain';
 }
 
 /**
@@ -1356,15 +1499,6 @@ function keptRecord(task: LinkTask, r: Relationship, find: (name: string) => Rep
   }
   const withExtras = task.records.filter((rec) => rec.extras.length > 0);
   return withExtras.length === 1 ? withExtras[0] : task.records[0];
-}
-
-function describeExtras(extras: readonly string[]): string {
-  const keys = extras.filter((e) => e !== COMMENTS);
-  const parts = [
-    ...(keys.length > 0 ? [`${keys.length === 1 ? 'its own key' : 'its own keys'} ${keys.join(', ')}`] : []),
-    ...(extras.includes(COMMENTS) ? ['comments'] : []),
-  ];
-  return parts.join(' and ');
 }
 
 function describeRecord(r: Relationship): string {
@@ -1440,15 +1574,19 @@ function missingEnd(
     const model = side === 'from' ? r.fromModel : r.toModel;
     const column = side === 'from' ? r.fromColumn : r.toColumn;
     const found = find(model);
+    // Not one of the diagram's models: the diagram cannot draw it, whatever
+    // its stub columns say (they excuse missing columns only, as the checks
+    // read it).
+    if (inDiagram && !inDiagram.has(lower(model))) {
+      if (!found) return { side, kind: 'model', model, column, what: `model ${model} is not in the model library` };
+      return { side, kind: 'model', model: found.name, column, what: `model ${found.name} is not one of ${diagram!.file}'s models`, diagram };
+    }
     // A diagram's stub model or column is not missing there (as the checks read it).
     if (stubs.has(lower(model)) && (!found || (found.model.columns ?? []).every((c) => lower(c.name) !== lower(column)))) continue;
     if (!found) return { side, kind: 'model', model, column, what: `model ${model} is not in the model library` };
-    if (inDiagram && !inDiagram.has(lower(model)) && !stubs.has(lower(model))) {
-      return { side, kind: 'model', model: found.name, column, what: `model ${found.name} is not one of ${diagram!.file}'s models`, diagram };
-    }
     const columns = found.model.columns ?? [];
     if (columns.length > 0 && !columns.some((c) => lower(c.name) === lower(column))) {
-      return { side, kind: 'column', model: found.name, column, what: `${found.name} has no column ${column}` };
+      return { side, kind: 'column', model: found.name, column, what: `model ${found.name} has no column ${column}` };
     }
   }
   return null;
@@ -1566,6 +1704,12 @@ export function describeRepairPlan(plan: RepairPlan, maxFiles = 12, maxNotes = 4
     if (change.notes.length > maxNotes) lines.push(`    – …and ${change.notes.length - maxNotes} more`);
   }
   if (plan.changes.length > maxFiles) lines.push(`• …and ${plan.changes.length - maxFiles} more files`);
+  if (plan.modeChange) lines.push('', `Where new relationships are saved: ${plan.modeChange}`);
+  if (plan.alsoDrawn.length > 0) {
+    lines.push('', 'Diagrams that will start drawing a relationship:');
+    for (const note of plan.alsoDrawn.slice(0, 5)) lines.push(`• ${note}`);
+    if (plan.alsoDrawn.length > 5) lines.push(`• …and ${plan.alsoDrawn.length - 5} more`);
+  }
   if (plan.left.length > 0) {
     lines.push('', 'Left as it is:');
     for (const note of plan.left.slice(0, 5)) lines.push(`• ${note}`);
@@ -1662,6 +1806,28 @@ function renderEntry(r: ModelRelationship, indent: number, eol: string): string 
  * a list whose every entry is removed goes. Throws `RepairEditError` (naming
  * `file`) for a list or entry it cannot edit in place.
  */
+/**
+ * Why a model file's `relationships:` list as a whole cannot be edited in
+ * place by {@link editYamlRelationships} — the file is not YAML, not a
+ * mapping, written on one line, or its list is not one `- ` entry per line —
+ * or null when it can (an absent or empty list can always be written).
+ * `analyseRepair` asks it before any question, so a link stored in such a
+ * file is left as it is, said, and never planned.
+ */
+export function yamlRelationshipsListProblem(text: string, file = 'the model file'): string | null {
+  const body = text.startsWith(BOM) ? text.slice(1) : text;
+  const doc = parseDocument(body);
+  if (doc.errors.length > 0) return `${file} could not be read as YAML: ${doc.errors[0].message}`;
+  const root = doc.contents;
+  if (!isMap(root)) return `${file} is not a YAML mapping.`;
+  const pair = (root.items as unknown[]).find((p): p is Pair => isPair(p) && isScalar(p.key) && p.key.value === 'relationships');
+  const seq = pair?.value as Node | null | undefined;
+  if (!pair || seq === null || seq === undefined || (isSeq(seq) && seq.items.length === 0)) return null;
+  if (root.flow) return `${file} is written on one line ({ … }); change its relationships by hand.`;
+  if (!isSeq(seq) || seq.flow) return `${file}: "relationships:" is not a list with one "- " entry per line; change it by hand.`;
+  return null;
+}
+
 export function editYamlRelationships(
   text: string,
   edits: { remove: ReadonlySet<number>; update: ReadonlyMap<number, ModelRelationship>; append: readonly ModelRelationship[] },
@@ -1670,10 +1836,10 @@ export function editYamlRelationships(
   if (edits.remove.size === 0 && edits.update.size === 0 && edits.append.length === 0) return text;
   const bom = text.startsWith(BOM) ? BOM : '';
   const body = bom ? text.slice(1) : text;
+  const listProblem = yamlRelationshipsListProblem(text, file);
+  if (listProblem) throw new RepairEditError(listProblem);
   const doc = parseDocument(body);
-  if (doc.errors.length > 0) throw new RepairEditError(`${file} could not be read as YAML: ${doc.errors[0].message}`);
-  const root = doc.contents;
-  if (!isMap(root)) throw new RepairEditError(`${file} is not a YAML mapping.`);
+  const root = doc.contents as YAMLMap;
   const pair = (root.items as unknown[]).find((p): p is Pair => isPair(p) && isScalar(p.key) && p.key.value === 'relationships');
   const seq = pair?.value as Node | null | undefined;
   const items = isSeq(seq) ? (seq.items as Node[]) : [];
@@ -1681,10 +1847,6 @@ export function editYamlRelationships(
   if (!pair || seq === null || seq === undefined || (isSeq(seq) && items.length === 0)) {
     if (edits.remove.size > 0 || edits.update.size > 0) throw new RepairEditError(`${file} has no relationships to change.`);
     return setYamlRelationships(text, edits.append);
-  }
-  if (root.flow) throw new RepairEditError(`${file} is written on one line ({ … }); change its relationships by hand.`);
-  if (!isSeq(seq) || seq.flow) {
-    throw new RepairEditError(`${file}: "relationships:" is not a list with one "- " entry per line; change it by hand.`);
   }
   for (const i of [...edits.remove, ...edits.update.keys()]) {
     if (i < 0 || i >= items.length) throw new RepairEditError(`${file}: relationship entry ${i + 1} is not there any more.`);
@@ -1729,10 +1891,20 @@ function updateEntrySplices(body: string, item: Node, next: ModelRelationship, e
   const pairs = (item as YAMLMap).items.filter(isPair) as Pair[];
   const find = (key: string): Pair | undefined => pairs.find((p) => isScalar(p.key) && p.key.value === key);
   const splices: Splice[] = [];
-  const replaceValue = (p: Pair, value: string): void => {
+  // `reads` is how the reader turns the written value into what the record
+  // holds (a role is trimmed and collapsed): a value that already reads as
+  // the wanted one is left exactly as written.
+  const replaceValue = (p: Pair, value: string, reads: (written: string) => string | undefined = (w) => w): void => {
     const node = p.value as Node | null;
-    if (!isScalar(node) || !node.range) throw new RepairEditError(`${where}: "${String((p.key as { value?: unknown }).value)}" is not a plain value; change it by hand.`);
-    if (String(node.value) === value) return;
+    const key = String((p.key as { value?: unknown }).value);
+    if (!isScalar(node) || !node.range) throw new RepairEditError(`${where}: "${key}" is not a plain value; change it by hand.`);
+    if (String(node.value) === value || reads(String(node.value)) === value) return;
+    // A block scalar's range runs to the start of the next line (its line
+    // break included): spliced, the next key would join this line and the
+    // file would no longer parse.
+    if (node.type === 'BLOCK_LITERAL' || node.type === 'BLOCK_FOLDED') {
+      throw new RepairEditError(`${where}: "${key}" is written as a block (| or >); change it by hand.`);
+    }
     splices.push({ start: node.range[0], end: node.range[1], text: yamlScalar(value), rank: 0 });
   };
   for (const field of ENTRY_FIELDS) {
@@ -1743,7 +1915,7 @@ function updateEntrySplices(body: string, item: Node, next: ModelRelationship, e
   const rolePair = find('role');
   if (next.role) {
     if (rolePair) {
-      replaceValue(rolePair, next.role);
+      replaceValue(rolePair, next.role, normaliseRelationshipRole);
     } else {
       const first = pairs[0].key as Node;
       const column = first.range![0] - lineStart(body, first.range![0]);
@@ -1781,23 +1953,20 @@ export function editDomainRelationships(
   for (const i of [...edits.remove, ...edits.update.keys()]) {
     if (i < 0 || i >= raw.length) throw new RepairEditError(`${file}: relationship entry ${i + 1} is not there any more.`);
   }
-  const next = raw.flatMap((entry, i) => {
-    if (edits.remove.has(i)) return [];
-    const update = edits.update.get(i);
-    if (!update) return [entry];
-    const merged: Record<string, unknown> = {
-      ...(entry as Record<string, unknown>),
-      fromModel: update.fromModel,
-      fromColumn: update.fromColumn,
-      toModel: update.toModel,
-      toColumn: update.toColumn,
-      cardinality: update.cardinality,
-    };
-    if (update.role) merged.role = update.role;
-    else delete merged.role;
-    return [merged];
-  });
-  return setDomainRelationships(text, next as Relationship[]);
+  for (const i of edits.update.keys()) {
+    const entry = raw[i];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new RepairEditError(`${file}: relationship entry ${i + 1} is not an object.`);
+    }
+  }
+  // Entry by entry: every entry not removed or changed keeps its exact bytes
+  // (layout, number spelling, escapes, keys); a changed one keeps all but the
+  // values that change.
+  try {
+    return editDomainRelationshipEntries(text, edits);
+  } catch (err) {
+    throw new RepairEditError(`${file} could not be edited: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1859,6 +2028,13 @@ export function onlyRelationshipsChanged(kind: 'model' | 'domain', before: strin
 export function checkPlannedTexts(plan: RepairPlan): string[] {
   const problems: string[] = [];
   for (const change of plan.changes) {
+    // A planned text that would not read back is refused before anything is
+    // written, never found out by the read-back after.
+    const parseError = plannedTextError(change.kind, change.text);
+    if (parseError) {
+      problems.push(`${change.file} would no longer read: ${parseError}`);
+      continue;
+    }
     try {
       if (!onlyRelationshipsChanged(change.kind, change.original, change.text)) {
         problems.push(`${change.file}: something other than its relationships would change`);
@@ -1868,6 +2044,21 @@ export function checkPlannedTexts(plan: RepairPlan): string[] {
     }
   }
   return problems;
+}
+
+/** Why a planned file text would not parse, or null when it does. */
+function plannedTextError(kind: 'model' | 'domain', text: string): string | null {
+  const body = text.startsWith(BOM) ? text.slice(1) : text;
+  if (kind === 'domain') {
+    try {
+      JSON.parse(body);
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  }
+  const doc = parseDocument(body);
+  return doc.errors.length > 0 ? doc.errors[0].message.split('\n')[0] : null;
 }
 
 /** What each domain draws: one relationship per link (core's `normaliseRelationships`). */
@@ -1880,7 +2071,10 @@ function drawnByDomain(snapshot: RepairSnapshot): Map<string, Map<string, Relati
       const found = find(name);
       if (found && !models.includes(found.model)) models.push(found.model);
     }
-    const { relationships } = normaliseRelationships({ models, own: domain.relationships, filePath: domain.file });
+    const { relationships } = normaliseRelationships({
+      models, own: domain.relationships, filePath: domain.file,
+      libraryHasModel: (name) => find(name)?.name === name,
+    });
     // The canvas draws an edge only between two of the domain's own models.
     const shown = new Set(domain.models.map(lower));
     drawn.set(domain.filePath, new Map(relationships
@@ -1963,6 +2157,19 @@ export function verifyRepair(before: RepairSnapshot, after: RepairSnapshot, plan
     if (lostKeys.length > 0) {
       problems.push(`${change.file}: an entry's own ${lostKeys.length === 1 ? 'key' : 'keys'} ${lostKeys.join(', ')} ${lostKeys.length === 1 ? 'is' : 'are'} gone`);
     }
+    // A diagram file changes entry by entry: every entry the plan neither
+    // removes nor changes must read back exactly as it was written.
+    const planned = change.kind === 'domain' ? plan.expect.domainEntries?.get(change.filePath) : undefined;
+    if (planned) {
+      const was = domainRelationshipElementTexts(change.original);
+      const now = domainRelationshipElementTexts(text);
+      const expected = was?.filter((_, i) => !planned.remove.has(i));
+      const keptIndexes = was?.map((_, i) => i).filter((i) => !planned.remove.has(i)) ?? [];
+      if (!was || !now || !expected || now.length !== expected.length
+        || keptIndexes.some((i, j) => !planned.update.has(i) && now[j] !== was[i])) {
+        problems.push(`${change.file}: an entry the repair did not change was rewritten`);
+      }
+    }
     if (change.kind === 'model') {
       const was = before.modelFiles.find((m) => m.filePath === change.filePath);
       const now = after.modelFiles.find((m) => m.filePath === change.filePath);
@@ -1987,13 +2194,18 @@ export function verifyRepair(before: RepairSnapshot, after: RepairSnapshot, plan
     if (f.severity === 'info' || f.code === 'REL008' || ownCopies(f)) continue;
     if (!was.has(findingKey(f))) problems.push(`new: ${f.message}`);
   }
-  // Model file entries that could not be read are never touched, so their
-  // count must not move. A diagram file's entry read with a default may be
-  // rewritten as the diagram draws it (one fewer), never gain one.
-  const domainFiles = new Set([before, after].flatMap((snap) => [...snap.domains, ...snap.olderFormat].map((d) => d.file)));
-  const rel008 = (snap: RepairSnapshot, inDomains: boolean): number =>
-    snap.findings.filter((f) => f.code === 'REL008' && domainFiles.has(f.files[0] ?? '') === inDomains).length;
-  if (rel008(after, false) !== rel008(before, false) || rel008(after, true) > rel008(before, true)) {
+  // Where new relationships are saved changes only as the plan said (the
+  // move's switch to the library, or one the preview named).
+  const modeAfter = plan.expect.modeAfter ?? before.mode;
+  if (after.mode !== modeAfter) {
+    problems.push(after.mode === 'domain'
+      ? 'the project would go back to keeping relationships in each diagram\'s file, which the plan did not say'
+      : 'the project would switch to keeping relationships in the model library, which the plan did not say');
+  }
+  // Entries that could not be read in full (REL008) are never touched — in a
+  // model file or a diagram file — so their count must not move.
+  const rel008 = (snap: RepairSnapshot): number => snap.findings.filter((f) => f.code === 'REL008').length;
+  if (rel008(after) !== rel008(before)) {
     problems.push('the entries that could not be read changed');
   }
 

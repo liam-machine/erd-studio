@@ -58,19 +58,56 @@ export interface RepairRelationshipsDeps extends RepairSnapshotDeps {
 /**
  * Write `text` to `filePath` atomically: a unique temp file in the same folder,
  * then a rename over the target, so a reader never sees half a file.
+ *
+ * A rename replaces whatever sits at the path, so the file it lands on is the
+ * real one: a symlinked diagram or model file (a shared checkout) is written
+ * through its link — the link stays a link and its target gets the new text —
+ * and the temp file is given the original's permission bits before the rename.
+ * A file the user cannot write (a read-only `0444` file) is refused rather
+ * than silently replaced, which a rename would otherwise allow.
  */
 export function writeFileAtomic(filePath: string, text: string): void {
+  let target = filePath;
+  let mode: number | undefined;
+  if (fs.existsSync(filePath)) {
+    target = fs.realpathSync(filePath);
+    try {
+      fs.accessSync(target, fs.constants.W_OK);
+    } catch {
+      throw new Error(`${path.basename(filePath)} is read-only`);
+    }
+    mode = fs.statSync(target).mode & 0o7777;
+  }
   const tmpPath = path.join(
-    path.dirname(filePath),
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 10)}.tmp`,
+    path.dirname(target),
+    `.${path.basename(target)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 10)}.tmp`,
   );
   try {
     fs.writeFileSync(tmpPath, text, 'utf-8');
-    fs.renameSync(tmpPath, filePath);
+    if (mode !== undefined) fs.chmodSync(tmpPath, mode);
+    fs.renameSync(tmpPath, target);
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* the temp file may not exist */ }
     throw err;
   }
+}
+
+/**
+ * The files among `filePaths` that exist and cannot be written (read-only, or
+ * a link to a file that is) — checked before the preview, so nobody confirms a
+ * plan the writes would then refuse half-way.
+ */
+export function unwritableFiles(filePaths: Iterable<string>): string[] {
+  const refused: string[] = [];
+  for (const filePath of filePaths) {
+    if (!fs.existsSync(filePath)) continue;
+    try {
+      fs.accessSync(fs.realpathSync(filePath), fs.constants.W_OK);
+    } catch {
+      refused.push(filePath);
+    }
+  }
+  return refused;
 }
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -188,6 +225,15 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<voi
   // a file no copy was in — is checked for unsaved edits before the preview,
   // so nobody confirms a plan only to be turned away.
   if (refuseIfDirty(plan.changes.map((c) => c.filePath), label, mode)) return;
+  const readOnly = unwritableFiles(plan.changes.map((c) => c.filePath));
+  if (readOnly.length > 0) {
+    telemetry.error('relMoveFailed');
+    void vscode.window.showErrorMessage(
+      `${mode.title}: ${readOnly.map(label).join(', ')} ${readOnly.length === 1 ? 'is' : 'are'} read-only. ` +
+      `Make ${readOnly.length === 1 ? 'it' : 'them'} writable, then run ${mode.noun} again. Nothing was changed.`,
+    );
+    return;
+  }
   const planned = checkPlannedTexts(plan);
   if (planned.length > 0) {
     telemetry.error('relMoveFailed');
@@ -300,7 +346,13 @@ async function confirmPlan(plan: RepairPlan, mode: RunnerMode): Promise<boolean>
     ? ['Why: today each diagram keeps its own copy of a relationship, so two diagrams can draw the same link ' +
       'differently, and a new diagram has to draw it again. After the move each relationship is defined once, in the ' +
       'file of the model that holds the foreign key, and every diagram that holds both models draws it.', '']
-    : [];
+    : plan.counts.moved > 0
+      // The repair also defines a relationship copied into several diagram
+      // files once, in the model library — and then every diagram that holds
+      // both models draws it, which the preview below names.
+      ? ['Why: a relationship stored in more than one diagram file is defined once, in the file of the model that ' +
+        'holds the foreign key, so every diagram that holds both models draws it.', '']
+      : [];
   const after = movesDomains
     ? ['', 'Teammates on an older ERD Studio version will not see relationships stored in the model library until they update.']
     : [];
@@ -394,10 +446,13 @@ async function reportDone(snapshot: RepairSnapshot, plan: RepairPlan, mode: Runn
     const moved = c.moved;
     const turned = c.rehomed;
     const parts = [
-      ...(moved > 0 || !turned ? [`Moved ${moved} relationship${moved === 1 ? '' : 's'} into the model library — each is now defined once.`] : []),
+      // Only what happened: a run that only removed diagram-file copies of
+      // library relationships (or respelled entries) moved nothing.
+      ...(moved > 0 ? [`Moved ${moved} relationship${moved === 1 ? '' : 's'} into the model library — each is now defined once.`] : []),
       ...(turned > 0 ? [`${turned} relationship${turned === 1 ? ' is' : 's are'} now stored with the model holding the foreign key.`] : []),
       ...describeOtherFixes(c, ['moved', 'rehomed']),
     ];
+    if (parts.length === 0) parts.push(`${MOVE_TITLE}: changed ${plural(plan.changes.length, 'file')}.`);
     text = parts.join(' ') +
       (leftCount > 0 ? ` ${leftCount} stayed as ${leftCount === 1 ? 'it was' : 'they were'}; run this command again to settle ${leftCount === 1 ? 'it' : 'them'}.` : '');
   } else {

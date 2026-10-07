@@ -12,7 +12,7 @@
 
 import * as path from 'path';
 
-import { sameLink } from '@erd-studio/core';
+import { canonicalRelationship, sameLink } from '@erd-studio/core';
 import { sameName } from '../types/naming';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { ManifestData } from '../types/manifest';
@@ -34,6 +34,7 @@ import {
   deriveRelationshipAction,
   modelKey,
   relationshipKey,
+  resolveGroundTruthCardinality,
   resolveGroundTruthDataType,
 } from '../types/syncPlan';
 import type { YmlData } from '../types/ymlData';
@@ -178,16 +179,30 @@ export function buildSyncPlan(
       const action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);
       if (!action) continue;
 
+      // Stage-absolute, as `resolvedDataType` is for types: the value from
+      // the stage the user chose, whichever stage the comparison ran from.
+      const resolvedCardinality = resolveGroundTruthCardinality(
+        groundTruth, report.sourceStage, relDisc.sourceCardinality, relDisc.targetCardinality,
+      );
+      const rowEnds = { fromModel: relDisc.fromModel, fromColumn: relDisc.fromColumn, toModel: relDisc.toModel, toColumn: relDisc.toColumn };
+      const stored = resolvedCardinality ? canonicalRelationship({ ...rowEnds, cardinality: resolvedCardinality }) : undefined;
       relationships.push({
-        fromModel: relDisc.fromModel,
-        fromColumn: relDisc.fromColumn,
-        toModel: relDisc.toModel,
-        toColumn: relDisc.toColumn,
+        ...rowEnds,
         discrepancyStatus: relDisc.status,
         groundTruth,
         action,
         sourceCardinality: relDisc.sourceCardinality,
         targetCardinality: relDisc.targetCardinality,
+        ...(resolvedCardinality ? { resolvedCardinality } : {}),
+        ...(stored ? {
+          resolvedRelationship: {
+            fromModel: stored.fromModel,
+            fromColumn: stored.fromColumn,
+            toModel: stored.toModel,
+            toColumn: stored.toColumn,
+            cardinality: stored.cardinality as Exclude<typeof stored.cardinality, 'one-to-many'>,
+          },
+        } : {}),
       });
       referencedModels.add(relDisc.fromModel);
       referencedModels.add(relDisc.toModel);
