@@ -1,26 +1,56 @@
 /**
- * NewFkDialog — dialog for creating or editing FK relationships between models.
+ * NewFkDialog — dialog for creating or editing a relationship between models.
  *
  * Form fields:
- * - Source model (dropdown)
- * - Source column (dropdown, filtered by source model)
- * - Target model (dropdown)
- * - Target column (dropdown, filtered by target model)
- * - Cardinality (many-to-one / one-to-one)
+ * - From model / column — the column that points (the "many" side, which
+ *   stores the relationship)
+ * - To model / column — the key it points at
+ * - "How many <from> rows can share one <to>?" — Many (many-to-one), Only one
+ *   (one-to-one), Many on both sides (many-to-many, with the bridge hint)
+ * - Role (optional)
+ *
+ * Direction (issue #133) comes from the evidence, never from drag order: the
+ * key flags the model files declare and dbt's tests, through core's
+ * `resolveDirection` (see `webview/lib/relationshipDirection.ts`). A certain
+ * verdict is prefilled and choosing against it warns ("Create anyway"); a
+ * likely one is prefilled with its reason; an ambiguous one has no default —
+ * two buttons named after the models, Create disabled until one is picked,
+ * and an optional "Mark <col> as <model>'s key" tick (`markKey`, saved in the
+ * same undo step). The read-back says what the relationship means from the
+ * target's side and where it is saved (`DisplayDomain.relationshipHome`).
  *
  * Mode detection:
  * - Create mode: fkDialogEditData is null (sends addRelationship)
- * - Edit mode: fkDialogEditData is set (sends editRelationship)
+ * - Edit mode: fkDialogEditData is set (sends editRelationship with the drawn
+ *   ends as the original key and the stored ends as `stored`)
  *
  * When editing, the approval status is preserved by the extension host.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
+import { sameLink } from '@erd-studio/core';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useSend } from '../../hooks/useMessageBus';
 import { detectCircularFk, formatCyclePath } from '../../lib/validation';
+import { directionFor } from '../../lib/relationshipDirection';
+import {
+  BRIDGE_HINT,
+  DIALOG_CARDINALITIES,
+  canOfferMarkKey,
+  cardinalityQuestion,
+  contradictionWarning,
+  directionChoices,
+  directionKey,
+  directionQuestion,
+  likelyReason,
+  readBack,
+  relationshipSentence,
+  reversed,
+  turnedRoundNote,
+  type DialogEnds,
+} from '../../lib/relationshipDialog';
 import type { Cardinality } from '../../../src/types/semantic';
 import './NewFkDialog.css';
 
@@ -32,25 +62,15 @@ import './NewFkDialog.css';
  * Validate the FK relationship form fields.
  * Returns a record of field name → error message.
  *
- * @param originalKey - When editing, the original composite key to exclude from duplicate check
+ * @param originalKey - When editing, the relationship being edited, excluded from the duplicate check
  */
-function validateForm(
+export function validateForm(
   fromModel: string,
   fromColumn: string,
   toModel: string,
   toColumn: string,
-  existingRelationships: Array<{
-    fromModel: string;
-    fromColumn: string;
-    toModel: string;
-    toColumn: string;
-  }>,
-  originalKey?: {
-    fromModel: string;
-    fromColumn: string;
-    toModel: string;
-    toColumn: string;
-  },
+  existingRelationships: ReadonlyArray<DialogEnds>,
+  originalKey?: DialogEnds,
 ): Record<string, string> {
   const errors: Record<string, string> = {};
 
@@ -72,34 +92,14 @@ function validateForm(
     errors.selfReference = 'A model cannot have a relationship with itself';
   }
 
-  // Check for duplicate relationship (same composite key)
-  // When editing, skip the check if the key matches the original relationship
+  // Duplicate check: the same two columns, either way round and in any case,
+  // are the same link (#133). When editing, the link being edited is not a
+  // duplicate of itself.
   if (fromModel && fromColumn && toModel && toColumn) {
-    const isDuplicate = existingRelationships.some((rel) => {
-      const isSameAsOriginal =
-        originalKey &&
-        rel.fromModel === originalKey.fromModel &&
-        rel.fromColumn === originalKey.fromColumn &&
-        rel.toModel === originalKey.toModel &&
-        rel.toColumn === originalKey.toColumn;
-
-      // If this is the relationship we're editing, don't count it as a duplicate
-      if (isSameAsOriginal) {
-        return false;
-      }
-
-      // The same two columns joined either way round is the same link.
-      return (
-        (rel.fromModel === fromModel &&
-          rel.fromColumn === fromColumn.trim() &&
-          rel.toModel === toModel &&
-          rel.toColumn === toColumn.trim()) ||
-        (rel.fromModel === toModel &&
-          rel.fromColumn === toColumn.trim() &&
-          rel.toModel === fromModel &&
-          rel.toColumn === fromColumn.trim())
-      );
-    });
+    const ends = { fromModel, fromColumn: fromColumn.trim(), toModel, toColumn: toColumn.trim() };
+    const isDuplicate = existingRelationships.some(
+      (rel) => !(originalKey && sameLink(rel, originalKey)) && sameLink(rel, ends),
+    );
     if (isDuplicate) {
       errors.duplicate = 'This relationship already exists';
     }
@@ -111,6 +111,7 @@ function validateForm(
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
 
 export function NewFkDialog() {
   const isOpen = useEditorStore((s) => s.newFkDialogOpen);
@@ -130,31 +131,37 @@ export function NewFkDialog() {
   const [fromColumn, setFromColumn] = useState('');
   const [toModel, setToModel] = useState('');
   const [toColumn, setToColumn] = useState('');
-  const [cardinality, setCardinality] = useState<Cardinality>('many-to-one');
+  const [chosenCardinality, setChosenCardinality] = useState<Cardinality>('many-to-one');
+  // Until the user answers the cardinality question, it follows the evidence.
+  const [cardinalityTouched, setCardinalityTouched] = useState(false);
   const [role, setRole] = useState('');
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  // The direction the user picked when the evidence could not (directionKey).
+  const [chosenDirection, setChosenDirection] = useState<string | null>(null);
+  // The direction a drag was turned round to (directionKey), for the note.
+  const [turnedFor, setTurnedFor] = useState<string | null>(null);
+  const [markKey, setMarkKey] = useState(false);
+
+  const models = useMemo(() => domain?.models ?? [], [domain]);
 
   // Derive model names from domain
-  const modelNames = useMemo(
-    () => (domain?.models ?? []).map((m) => m.name),
-    [domain],
-  );
+  const modelNames = useMemo(() => models.map((m) => m.name), [models]);
 
   // Derive columns for source model
   const sourceColumns = useMemo(() => {
-    if (!fromModel || !domain) return [];
-    const model = domain.models.find((m) => m.name === fromModel);
+    if (!fromModel) return [];
+    const model = models.find((m) => m.name === fromModel);
     if (!model) return [];
     return model.columns.map((c) => c.name);
-  }, [fromModel, domain]);
+  }, [fromModel, models]);
 
   // Derive columns for target model
   const targetColumns = useMemo(() => {
-    if (!toModel || !domain) return [];
-    const model = domain.models.find((m) => m.name === toModel);
+    if (!toModel) return [];
+    const model = models.find((m) => m.name === toModel);
     if (!model) return [];
     return model.columns.map((c) => c.name);
-  }, [toModel, domain]);
+  }, [toModel, models]);
 
   // Existing relationships for duplicate check
   const existingRelationships = useMemo(
@@ -172,15 +179,7 @@ export function NewFkDialog() {
   // (otherwise changing endpoints could cause false positive cycle warnings)
   const relationshipsForCycleCheck = useMemo(() => {
     if (!fkDialogEditData) return existingRelationships;
-    return existingRelationships.filter(
-      (r) =>
-        !(
-          r.fromModel === fkDialogEditData.fromModel &&
-          r.fromColumn === fkDialogEditData.fromColumn &&
-          r.toModel === fkDialogEditData.toModel &&
-          r.toColumn === fkDialogEditData.toColumn
-        ),
-    );
+    return existingRelationships.filter((r) => !sameLink(r, fkDialogEditData));
   }, [existingRelationships, fkDialogEditData]);
 
   // Circular FK detection (warning only, doesn't block submission)
@@ -204,14 +203,7 @@ export function NewFkDialog() {
         toModel,
         toColumn,
         existingRelationships,
-        fkDialogEditData
-          ? {
-              fromModel: fkDialogEditData.fromModel,
-              fromColumn: fkDialogEditData.fromColumn,
-              toModel: fkDialogEditData.toModel,
-              toColumn: fkDialogEditData.toColumn,
-            }
-          : undefined,
+        fkDialogEditData ?? undefined,
       ),
     [fromModel, fromColumn, toModel, toColumn, existingRelationships, fkDialogEditData],
   );
@@ -223,15 +215,42 @@ export function NewFkDialog() {
     toModel !== '' &&
     toColumn.trim() !== '';
 
+  // --- Direction (#133) ----------------------------------------------------
+
+  const ends: DialogEnds = useMemo(
+    () => ({ fromModel, fromColumn: fromColumn.trim(), toModel, toColumn: toColumn.trim() }),
+    [fromModel, fromColumn, toModel, toColumn],
+  );
+  const endsComplete = ends.fromModel !== '' && ends.fromColumn !== '' && ends.toModel !== '' && ends.toColumn !== '';
+  const verdict = useMemo(
+    () => (endsComplete && !errors.selfReference ? directionFor(models, ends) : undefined),
+    [endsComplete, errors.selfReference, models, ends],
+  );
+  const cardinality: Cardinality = cardinalityTouched ? chosenCardinality : verdict?.cardinality ?? chosenCardinality;
+
+  // An ambiguous verdict has no default direction: the user picks one. A
+  // many-to-many has no "many" side to pick, so it needs no choice.
+  const ambiguous = verdict?.confidence === 'ambiguous' && cardinality !== 'many-to-many';
+  const needsDirection = ambiguous && chosenDirection !== directionKey(ends);
+  const contradiction = contradictionWarning(verdict, ends, models);
+  const showTurned = turnedFor !== null && turnedFor === directionKey(ends);
+  const offerMarkKey = ambiguous && !needsDirection && canOfferMarkKey(models, ends);
+  const sendMarkKey = offerMarkKey && markKey;
+  const canSubmit = isValid && !needsDirection;
+
   // Handlers
   const resetForm = useCallback(() => {
     setFromModel('');
     setFromColumn('');
     setToModel('');
     setToColumn('');
-    setCardinality('many-to-one');
+    setChosenCardinality('many-to-one');
+    setCardinalityTouched(false);
     setRole('');
     setTouched({});
+    setChosenDirection(null);
+    setTurnedFor(null);
+    setMarkKey(false);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -242,10 +261,12 @@ export function NewFkDialog() {
   }, [setNewFkDialogOpen, clearFkDialogPrefill, clearFkDialogEditData, resetForm]);
 
   const handleSubmit = useCallback(() => {
-    if (!isValid) return;
+    if (!canSubmit) return;
+    const markKeyPayload = sendMarkKey ? { markKey: { model: ends.toModel, column: ends.toColumn } } : {};
 
     if (isEditMode && fkDialogEditData) {
-      // Edit mode: send editRelationship with original key
+      // Edit mode: the drawn ends are the original key; the stored ends let
+      // the host find the record however it is written on disk.
       send({
         type: 'editRelationship',
         payload: {
@@ -253,12 +274,11 @@ export function NewFkDialog() {
           originalFromColumn: fkDialogEditData.fromColumn,
           originalToModel: fkDialogEditData.toModel,
           originalToColumn: fkDialogEditData.toColumn,
-          fromModel,
-          fromColumn: fromColumn.trim(),
-          toModel,
-          toColumn: toColumn.trim(),
+          ...ends,
           cardinality,
           role: role.trim(),
+          ...(fkDialogEditData.stored ? { stored: fkDialogEditData.stored } : {}),
+          ...markKeyPayload,
         },
       });
     } else {
@@ -266,18 +286,16 @@ export function NewFkDialog() {
       send({
         type: 'addRelationship',
         payload: {
-          fromModel,
-          fromColumn: fromColumn.trim(),
-          toModel,
-          toColumn: toColumn.trim(),
+          ...ends,
           cardinality,
           ...(role.trim() ? { role: role.trim() } : {}),
+          ...markKeyPayload,
         },
       });
     }
 
     handleClose();
-  }, [isValid, isEditMode, fkDialogEditData, fromModel, fromColumn, toModel, toColumn, cardinality, role, send, handleClose]);
+  }, [canSubmit, sendMarkKey, isEditMode, fkDialogEditData, ends, cardinality, role, send, handleClose]);
 
   const handleBlur = useCallback((field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
@@ -295,20 +313,46 @@ export function NewFkDialog() {
     setToColumn('');
   }, []);
 
+  const handleCardinalityChange = useCallback((value: Cardinality) => {
+    setChosenCardinality(value);
+    setCardinalityTouched(true);
+  }, []);
+
+  /** Put the given ends in the form (Swap sides / Swap back / a direction button). */
+  const applyEnds = useCallback((next: DialogEnds) => {
+    setFromModel(next.fromModel);
+    setFromColumn(next.fromColumn);
+    setToModel(next.toModel);
+    setToColumn(next.toColumn);
+  }, []);
+
+  const handleSwapSides = useCallback(() => applyEnds(reversed(ends)), [applyEnds, ends]);
+
+  const handleChooseDirection = useCallback((next: DialogEnds) => {
+    applyEnds(next);
+    setChosenDirection(directionKey(next));
+  }, [applyEnds]);
+
   // Apply prefill when dialog opens with prefill data (from drag-to-connect).
   // Reset form first to clear any stale state from previous sessions.
   useEffect(() => {
     if (isOpen && fkDialogPrefill) {
       // Reset non-prefilled form state
-      setCardinality('many-to-one');
+      setChosenCardinality('many-to-one');
+      setCardinalityTouched(false);
       setRole('');
       setTouched({});
+      setChosenDirection(null);
+      setMarkKey(false);
       // Apply prefilled values
       setFromModel(fkDialogPrefill.fromModel);
       setFromColumn(fkDialogPrefill.fromColumn);
       setToModel(fkDialogPrefill.toModel);
       // Apply target column if user dropped on a specific column handle
       setToColumn(fkDialogPrefill.toColumn ?? '');
+      setTurnedFor(fkDialogPrefill.turnedRound && fkDialogPrefill.toColumn
+        ? directionKey({ ...fkDialogPrefill, toColumn: fkDialogPrefill.toColumn })
+        : null);
     }
   }, [isOpen, fkDialogPrefill]);
 
@@ -319,18 +363,32 @@ export function NewFkDialog() {
       // A one-to-many (stored before #133) opens turned round, as the many-to-one
       // it will be saved as — the dialog offers no one-to-many.
       const flip = fkDialogEditData.cardinality === 'one-to-many';
-      setFromModel(flip ? fkDialogEditData.toModel : fkDialogEditData.fromModel);
-      setFromColumn(flip ? fkDialogEditData.toColumn : fkDialogEditData.fromColumn);
-      setToModel(flip ? fkDialogEditData.fromModel : fkDialogEditData.toModel);
-      setToColumn(flip ? fkDialogEditData.fromColumn : fkDialogEditData.toColumn);
-      setCardinality(flip ? 'many-to-one' : fkDialogEditData.cardinality);
+      const next = flip ? reversed(fkDialogEditData) : {
+        fromModel: fkDialogEditData.fromModel,
+        fromColumn: fkDialogEditData.fromColumn,
+        toModel: fkDialogEditData.toModel,
+        toColumn: fkDialogEditData.toColumn,
+      };
+      applyEnds(next);
+      setChosenCardinality(flip ? 'many-to-one' : fkDialogEditData.cardinality);
+      setCardinalityTouched(true);
       setRole(fkDialogEditData.role ?? '');
+      // The saved direction is the user's earlier choice.
+      setChosenDirection(directionKey(next));
+      setTurnedFor(null);
+      setMarkKey(false);
     }
-  }, [isOpen, fkDialogEditData]);
+  }, [isOpen, fkDialogEditData, applyEnds]);
 
   if (!isOpen) {
     return null;
   }
+
+  const home = domain?.relationshipHome;
+  const back = readBack(ends, cardinality, home);
+  const primaryLabel = contradiction
+    ? (isEditMode ? 'Save anyway' : 'Create anyway')
+    : (isEditMode ? 'Save Changes' : 'Create Relationship');
 
   return (
     <Panel position="top-center" className="new-fk-dialog">
@@ -354,7 +412,7 @@ export function NewFkDialog() {
         {/* Source Model */}
         <div className="new-fk-dialog__field">
           <label className="new-fk-dialog__label" htmlFor="fromModel">
-            Source Model
+            From model
           </label>
           <select
             id="fromModel"
@@ -378,7 +436,7 @@ export function NewFkDialog() {
         {/* Source Column */}
         <div className="new-fk-dialog__field">
           <label className="new-fk-dialog__label" htmlFor="fromColumn">
-            Source Column (FK)
+            From column (the one that points)
           </label>
           {sourceColumns.length > 0 ? (
             <select
@@ -415,7 +473,7 @@ export function NewFkDialog() {
         {/* Target Model */}
         <div className="new-fk-dialog__field">
           <label className="new-fk-dialog__label" htmlFor="toModel">
-            Target Model
+            To model
           </label>
           <select
             id="toModel"
@@ -439,7 +497,7 @@ export function NewFkDialog() {
         {/* Target Column */}
         <div className="new-fk-dialog__field">
           <label className="new-fk-dialog__label" htmlFor="toColumn">
-            Target Column (PK)
+            To column (the key it points at)
           </label>
           {targetColumns.length > 0 ? (
             <select
@@ -473,21 +531,98 @@ export function NewFkDialog() {
           )}
         </div>
 
-        {/* Cardinality */}
-        <div className="new-fk-dialog__field">
-          <label className="new-fk-dialog__label" htmlFor="cardinality">
-            Cardinality
-          </label>
-          <select
-            id="cardinality"
-            className="new-fk-dialog__select"
-            value={cardinality}
-            onChange={(e) => setCardinality(e.target.value as Cardinality)}
-          >
-            <option value="many-to-one">Many-to-One (*→1)</option>
-            <option value="one-to-one">One-to-One (1→1)</option>
-          </select>
-        </div>
+        {/* Direction: settled by the evidence, or asked for (#133) */}
+        {endsComplete && !errors.selfReference && (
+          <div className="new-fk-dialog__direction">
+            {needsDirection && verdict ? (
+              <div className="new-fk-dialog__choice" role="group" aria-label="Direction">
+                <span className="new-fk-dialog__choice-question">
+                  {verdict.conflict
+                    ? `The keys and dbt's tests disagree (${verdict.reasons.join('; ')}). Which way does it go?`
+                    : directionQuestion(cardinality)}
+                </span>
+                {directionChoices(verdict, cardinality).map((choice) => (
+                  <button
+                    key={directionKey(choice.ends)}
+                    type="button"
+                    className="new-fk-dialog__choice-button"
+                    onClick={() => handleChooseDirection(choice.ends)}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <>
+                <span className="new-fk-dialog__sentence">{relationshipSentence(ends, cardinality)}</span>
+                {showTurned && (
+                  <span className="new-fk-dialog__note">
+                    {turnedRoundNote(verdict)}{' '}
+                    <button type="button" className="new-fk-dialog__link-button" onClick={handleSwapSides}>
+                      Swap back
+                    </button>
+                  </span>
+                )}
+                {!showTurned && verdict?.confidence === 'likely' && (
+                  <span className="new-fk-dialog__note">{likelyReason(verdict, ends)}</span>
+                )}
+              </>
+            )}
+
+            {/* Cardinality, as a question about the from side */}
+            <fieldset className="new-fk-dialog__cardinality">
+              <legend className="new-fk-dialog__label">{cardinalityQuestion(ends)}</legend>
+              {DIALOG_CARDINALITIES.map((option) => (
+                <label key={option.value} className="new-fk-dialog__radio">
+                  <input
+                    type="radio"
+                    name="relationship-cardinality"
+                    value={option.value}
+                    checked={cardinality === option.value}
+                    onChange={() => handleCardinalityChange(option.value)}
+                  />
+                  {option.label}
+                </label>
+              ))}
+              {cardinality === 'many-to-many' && (
+                <span className="new-fk-dialog__hint">{BRIDGE_HINT}</span>
+              )}
+            </fieldset>
+
+            {offerMarkKey && (
+              <label className="new-fk-dialog__radio">
+                <input type="checkbox" checked={markKey} onChange={(e) => setMarkKey(e.target.checked)} />
+                Mark {ends.toColumn} as {ends.toModel}&apos;s key
+              </label>
+            )}
+
+            {contradiction && (
+              <div className="new-fk-dialog__warning new-fk-dialog__warning--global" role="alert">
+                <span className="new-fk-dialog__warning-icon">⚠</span>
+                <span>
+                  {contradiction}{' '}
+                  <button type="button" className="new-fk-dialog__link-button" onClick={handleSwapSides}>
+                    Swap sides
+                  </button>
+                </span>
+              </div>
+            )}
+
+            {!needsDirection && (
+              <div className="new-fk-dialog__readback">
+                <span>{back.text}</span>
+                {back.savedIn && (
+                  <span className="new-fk-dialog__saved-in">
+                    {back.savedIn}.{' '}
+                    <span className="new-fk-dialog__why" title={back.why} tabIndex={0}>
+                      Why here?
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Role */}
         <div className="new-fk-dialog__field">
@@ -527,19 +662,6 @@ export function NewFkDialog() {
             {circularWarning}
           </div>
         )}
-
-        {/* Preview */}
-        {fromModel && toModel && (
-          <div className="new-fk-dialog__preview">
-            <span className="new-fk-dialog__preview-label">Preview:</span>
-            <span className="new-fk-dialog__preview-text">
-              {fromModel}.{fromColumn || '?'} → {toModel}.{toColumn || '?'}
-              <span className="new-fk-dialog__preview-cardinality">
-                ({cardinality === 'many-to-one' ? '*→1' : '1→1'})
-              </span>
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Footer */}
@@ -553,9 +675,10 @@ export function NewFkDialog() {
         <button
           className="new-fk-dialog__button new-fk-dialog__button--primary"
           onClick={handleSubmit}
-          disabled={!isValid}
+          disabled={!canSubmit}
+          title={needsDirection ? 'Choose which side has many rows first' : undefined}
         >
-          {isEditMode ? 'Save Changes' : 'Create Relationship'}
+          {primaryLabel}
         </button>
       </div>
     </Panel>

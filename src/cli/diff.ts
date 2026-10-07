@@ -7,6 +7,11 @@
  * as "All Physical → Generate sync plan" would. The `fixes` below are a
  * beginner-friendly re-reading of that plan and nothing more: there is no
  * comparison logic in this file, and there must never be (spec risk 6).
+ *
+ * Each domain also carries `integrity`: the project relationship checks
+ * (`erd-studio check`, issue #133) that concern it. They are advisory here —
+ * they never make a domain unclean or change the exit code, because they are
+ * about how the ERD Studio files are stored, not about drift from dbt.
  */
 
 import * as fs from 'fs';
@@ -14,16 +19,17 @@ import * as path from 'path';
 
 import type { DiscrepancyReport } from '../types/discrepancy';
 import { redactPaths } from '../types/feedback';
-import type { Cardinality, UnifiedDomain } from '../types/semantic';
+import type { Cardinality, SemanticModel, UnifiedDomain } from '../types/semantic';
 import { detectDomainFormat } from '../types/semantic';
 import type { SyncPlan } from '../types/syncPlan';
 import { DomainFileError } from '../services/domainService';
 import type { ModelFileError, ModelFileErrorKind } from '../services/logicalModelService';
-import { libraryRelationshipsOf, usesLibraryRelationships } from '../services/libraryRelationships';
-import { canonicalRelationship, relationshipKey } from '@erd-studio/core';
+import { findingsForDomain, libraryRelationshipsOf, usesLibraryRelationships } from '../services/libraryRelationships';
+import { canonicalRelationship, linkKey, type RelationshipEnds, type RelationshipFinding } from '@erd-studio/core';
 import { computeDomainDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
+import { checkProjectRelationships } from './relationshipCheck';
 
 export type FixKind =
   | 'add-column' | 'remove-column' | 'set-type'
@@ -37,10 +43,24 @@ export interface Fix {
   column?: string;
   /** The file to edit: `<semanticDir>/logical-models/<m>.yml` or the domain JSON, project-relative. */
   file: string;
-  /** Types (set-type) or cardinalities (set-cardinality). */
+  /**
+   * Types (set-type) or cardinalities (set-cardinality). A cardinality pair
+   * reads in the direction of `relationship`, so `to` is always a value to
+   * write — never `one-to-many`.
+   */
   from?: string;
   to?: string;
+  /**
+   * The relationship. For add-relationship and set-cardinality it is exactly
+   * the entry to store — on its many side, `many-to-one` rather than
+   * `one-to-many` (#133). For remove-relationship it is the link as drawn.
+   */
   relationship?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality?: Cardinality };
+  /**
+   * set-cardinality only: the file the relationship is stored in now, when
+   * the fix stores it in another one (`file`) — take it out of this file.
+   */
+  movesFrom?: string;
   /** fix-model-yaml: where the parser stopped (1-based). */
   line?: number;
   explain: string;
@@ -124,6 +144,11 @@ export interface DomainDiff {
    */
   modelsWithoutColumns: string[];
   fixes: Fix[];
+  /**
+   * The project relationship checks that concern this domain (the same
+   * findings as `erd-studio check`). Advisory: they never affect `clean`.
+   */
+  integrity: RelationshipFinding[];
   /** Absent for a v4 domain or a domain that could not be read. */
   report?: DiscrepancyReport;
   plan?: SyncPlan;
@@ -182,8 +207,11 @@ function sortFixes(fixes: Fix[]): Fix[] {
 
 /** Where a domain's relationships are defined, so a relationship fix names the right file. */
 export interface RelationshipHome {
-  /** `relationshipKey`s of the relationships this domain draws from model yml files. */
-  inLibrary: ReadonlySet<string>;
+  /**
+   * The links (`linkKey`, either way round) this domain draws from model yml
+   * files, each with the model whose file holds it.
+   */
+  inLibrary: ReadonlyMap<string, string>;
   /** Whether a new relationship goes to the from-model's yml (`usesLibraryRelationships`). */
   addToLibrary: boolean;
 }
@@ -201,17 +229,22 @@ export function fixesFromPlan(
   semanticDir: string,
   phantoms: DomainDiff['phantoms'],
   unreadable: UnreadableModelFile[] = [],
-  relationshipHome: RelationshipHome = { inLibrary: new Set(), addToLibrary: false },
+  relationshipHome: RelationshipHome = { inLibrary: new Map(), addToLibrary: false },
 ): Fix[] {
   const ymlFile = (model: string): string =>
     plan.modelContext[model]?.logicalModelPath ?? `${semanticDir}/logical-models/${model}.yml`;
   // A relationship is fixed where it is defined (#126): the yml of the model
-  // holding its foreign key when the library holds it, else the domain file.
-  // A new one goes where the project keeps relationships.
-  const relationshipFile = (r: Parameters<typeof relationshipKey>[0], adding: boolean): string =>
-    (adding ? relationshipHome.addToLibrary : relationshipHome.inLibrary.has(relationshipKey(r)))
-      ? ymlFile(r.fromModel)
-      : domainFile;
+  // whose file holds it when the library holds it, else the domain file —
+  // found by link, whichever way round it is stored (#133). A relationship
+  // being written goes to its home: the yml of its many-side model in a
+  // project that keeps relationships in the library, else the domain file.
+  const heldBy = (r: RelationshipEnds): string | undefined => relationshipHome.inLibrary.get(linkKey(r));
+  const currentFile = (r: RelationshipEnds): string => {
+    const holder = heldBy(r);
+    return holder ? ymlFile(holder) : domainFile;
+  };
+  const homeFile = (stored: RelationshipEnds, inLibrary: boolean): string =>
+    (inLibrary ? ymlFile(stored.fromModel) : domainFile);
   const fixes: Fix[] = [];
   // A phantom is one question (rename it or drop it), not one fix per column
   // and edge: from the logical side compare() reports it 'extra' with every
@@ -270,7 +303,8 @@ export function fixesFromPlan(
         // stored from the other end, in the other model's file.
         const stored = r.targetCardinality ? canonicalRelationship({ ...rel, cardinality: r.targetCardinality }) : rel;
         fixes.push({
-          severity: 'blocking', kind: 'add-relationship', model: stored.fromModel, column: stored.fromColumn, file: relationshipFile(stored, true),
+          severity: 'blocking', kind: 'add-relationship', model: stored.fromModel, column: stored.fromColumn,
+          file: homeFile(stored, relationshipHome.addToLibrary),
           relationship: stored,
           explain: `dbt tests the link ${link}, but the logical model does not draw it — add the relationship.`,
         });
@@ -278,19 +312,36 @@ export function fixesFromPlan(
       }
       case 'remove-relationship-from-logical':
         fixes.push({
-          severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, false),
+          severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file: currentFile(rel),
           relationship: { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) },
           explain: `The logical model draws ${link}, but dbt has no relationships test for it — remove it, or add the test to dbt.`,
         });
         break;
-      case 'update-cardinality-in-logical':
+      case 'update-cardinality-in-logical': {
+        // The entry as it should be stored (D10): a one-to-many is the same
+        // link turned round, many-to-one, on the other model — so in a
+        // library project it also moves to that model's file.
+        const target: Cardinality = r.targetCardinality ?? 'many-to-one';
+        const stored = canonicalRelationship({ ...rel, cardinality: target });
+        const turned = stored.fromModel !== rel.fromModel || stored.fromColumn !== rel.fromColumn;
+        const current = currentFile(rel);
+        const file = homeFile(stored, heldBy(rel) !== undefined);
+        const movesFrom = file !== current ? current : undefined;
+        const source = r.sourceCardinality ? (turned ? reverseCardinality(r.sourceCardinality) : r.sourceCardinality) : undefined;
+        const storedLink = `${stored.fromModel}.${stored.fromColumn} → ${stored.toModel}.${stored.toColumn}`;
         fixes.push({
-          severity: 'blocking', kind: 'set-cardinality', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, false),
-          from: r.sourceCardinality, to: r.targetCardinality,
-          relationship: { ...rel, ...(r.targetCardinality ? { cardinality: r.targetCardinality } : {}) },
-          explain: `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — change it to ${r.targetCardinality}.`,
+          severity: 'blocking', kind: 'set-cardinality', model: stored.fromModel, column: stored.fromColumn, file,
+          ...(source ? { from: source } : {}), to: stored.cardinality,
+          relationship: { ...stored, cardinality: stored.cardinality },
+          ...(movesFrom ? { movesFrom } : {}),
+          explain: turned
+            ? `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests, `
+              + `so ${stored.fromModel} is the many side — store it the other way round, as ${storedLink} ${stored.cardinality}`
+              + (movesFrom ? `: take it out of ${movesFrom} and add it to ${file}.` : ', replacing the old entry.')
+            : `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — change it to ${r.targetCardinality}.`,
         });
         break;
+      }
       default:
         break;
     }
@@ -325,8 +376,64 @@ export function fixesFromPlan(
   return sortFixes(fixes);
 }
 
-/** Compare one domain file. Load errors are thrown (the caller decides between exit 3 and `domains[i].error`). */
-export function diffDomain(ctx: CliContext, file: string, strict: boolean): DomainDiff {
+/** The same cardinality read from the other end. */
+function reverseCardinality(c: Cardinality): Cardinality {
+  if (c === 'many-to-one') return 'one-to-many';
+  if (c === 'one-to-many') return 'many-to-one';
+  return c;
+}
+
+/** Library relationships a domain draws, by link, with the model whose file holds each. */
+export function libraryHolders(models: readonly SemanticModel[]): Map<string, string> {
+  const held = new Map<string, string>();
+  for (const model of models) {
+    for (const rel of libraryRelationshipsOf(model)) {
+      const key = linkKey(rel);
+      if (!held.has(key)) held.set(key, model.name);
+    }
+  }
+  return held;
+}
+
+/**
+ * The project's relationship findings, or null when the checks could not run —
+ * diff still compares; `erd-studio check` reports the failure on its own.
+ */
+function projectFindingsOf(ctx: CliContext): RelationshipFinding[] | null {
+  try {
+    return checkProjectRelationships(ctx).findings;
+  } catch {
+    return null;
+  }
+}
+
+/** The findings that concern one domain file (its own records, and links between its models). */
+function integrityFor(
+  ctx: CliContext,
+  findings: readonly RelationshipFinding[] | null,
+  file: string,
+  modelNames: readonly string[],
+): RelationshipFinding[] {
+  if (!findings || findings.length === 0) return [];
+  const modelFiles = modelNames
+    .map((name) => ctx.logicalModelService.resolveModelPath(name))
+    .filter((p): p is string => p !== null && fs.existsSync(p))
+    .map((p) => relPath(ctx.root, p));
+  return findingsForDomain(findings, { filePath: relPath(ctx.root, file), models: modelNames, modelFiles });
+}
+
+/**
+ * Compare one domain file. Load errors are thrown (the caller decides between
+ * exit 3 and `domains[i].error`). `projectFindings` are the project's
+ * relationship checks, computed once by `runDiff`; omitted, they are computed
+ * here.
+ */
+export function diffDomain(
+  ctx: CliContext,
+  file: string,
+  strict: boolean,
+  projectFindings: readonly RelationshipFinding[] | null = projectFindingsOf(ctx),
+): DomainDiff {
   const rel = relPath(ctx.root, file);
 
   let raw: unknown;
@@ -342,8 +449,11 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
   // that load might have tripped over (an unknown layer, say). A file with no
   // numeric schemaVersion also detects as v4, but it is not a v4 domain —
   // getDomain reports that one precisely.
-  const obj = (raw ?? {}) as { domain?: unknown; layer?: unknown; schemaVersion?: unknown };
+  const obj = (raw ?? {}) as { domain?: unknown; layer?: unknown; schemaVersion?: unknown; logical?: { models?: unknown } };
   if (format === 'v4' && typeof obj.schemaVersion === 'number') {
+    const inlineNames = (Array.isArray(obj.logical?.models) ? obj.logical!.models : [])
+      .map((m) => (m && typeof m === 'object' ? (m as { name?: unknown }).name : undefined))
+      .filter((n): n is string => typeof n === 'string');
     return {
       file: rel,
       domain: typeof obj.domain === 'string' ? obj.domain : path.basename(file, '.json'),
@@ -355,6 +465,7 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
       unreadableModelFiles: [],
       modelsWithoutColumns: [],
       fixes: [],
+      integrity: integrityFor(ctx, projectFindings, file, inlineNames),
       needsMigration: true,
     };
   }
@@ -389,7 +500,7 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
   });
   const unreadableModelFiles = unreadableModels(ctx, unified);
   const relationshipHome: RelationshipHome = {
-    inLibrary: new Set(unified.logical.models.flatMap(libraryRelationshipsOf).map(relationshipKey)),
+    inLibrary: libraryHolders(unified.logical.models),
     addToLibrary: usesLibraryRelationships(
       ctx.logicalModelService.listModels(),
       ctx.domainService.countDomainFileRelationships(ctx.root, ctx.semanticDir),
@@ -414,6 +525,7 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
     unreadableModelFiles,
     modelsWithoutColumns,
     fixes,
+    integrity: integrityFor(ctx, projectFindings, file, unified.logical.models.map((m) => m.name)),
     report,
     plan,
   };
@@ -441,6 +553,7 @@ function unreadableModels(ctx: CliContext, unified: UnifiedDomain): UnreadableMo
  */
 export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResult; exitCode: 0 | 1 } {
   const domains: DomainDiff[] = [];
+  const projectFindings = projectFindingsOf(ctx);
 
   if (opts.all) {
     // `--all` over nothing must never read as "clean": a wrong or omitted
@@ -462,7 +575,7 @@ export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResul
     }
     for (const summary of summaries) {
       try {
-        domains.push(diffDomain(ctx, summary.filePath, opts.strict === true));
+        domains.push(diffDomain(ctx, summary.filePath, opts.strict === true, projectFindings));
       } catch (err) {
         domains.push({
           file: relPath(ctx.root, summary.filePath),
@@ -475,6 +588,7 @@ export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResul
           unreadableModelFiles: [],
           modelsWithoutColumns: [],
           fixes: [],
+          integrity: [],
           error: describeDomainError(ctx, summary.filePath, err),
         });
       }
@@ -483,7 +597,7 @@ export function runDiff(ctx: CliContext, opts: DiffOptions): { result: DiffResul
     for (const arg of opts.domains ?? []) {
       const file = resolveDomainPath(ctx, arg, opts.cwd);
       try {
-        domains.push(diffDomain(ctx, file, opts.strict === true));
+        domains.push(diffDomain(ctx, file, opts.strict === true, projectFindings));
       } catch (err) {
         const { code, message } = describeDomainError(ctx, file, err);
         throw new CliEnvError(code, message);

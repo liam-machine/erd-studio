@@ -103,10 +103,9 @@ user to type a command that belongs to a different one.
 | Cursor | `/erd-studio-setup` | Read the schema skill file |
 
 - **The schema skill file** is `SKILL.md` in `.claude/skills/erd-studio/` or
-  `.agents/skills/erd-studio/` of the project folder. ERD Studio installs whichever folder the
-  user's assistants read, so check both and read the one that exists, in full. Its `SYNC.md`
-  guide sits next to it. If neither exists, see `references/troubleshooting.md` → "Format rules
-  missing".
+  `.agents/skills/erd-studio/` of the project folder: check both and read the one that exists, in
+  full. Its `SYNC.md` guide sits next to it. If neither exists, see
+  `references/troubleshooting.md` → "Format rules missing".
 - Wherever this skill says the user can "run `/erd-studio-setup` again", use your own row's form.
 - **Approvals.** Every assistant asks before it changes a file or runs a command unless the user
   has allowed it. Tell the user once, in Stage 4, in words that fit their assistant, and say that
@@ -128,8 +127,7 @@ user to type a command that belongs to a different one.
   session until its format rules are loaded. If you see it, that's expected — I'll carry on." If
   that first Write or Edit is denied by the hook, make sure `/erd-studio` is loaded and retry the
   same write **once**. It is not an error; do not apologise at length. Only Claude Code installs
-  this check (Copilot can run it if Claude hooks are enabled in its settings, and it then lets
-  every change through).
+  this check (Copilot runs it only with Claude hooks enabled, and then lets every change through).
 
 ## The helper tool
 
@@ -143,6 +141,7 @@ tool, so the user sees each change. The commands you will use:
 | `~/.erd-studio-cli/bin/erd-studio inventory --summary --json --semantic-dir .erd-studio` | Every dbt model: folder, suggested layer, column count, relationship clusters, what is already modelled, and the project's modelling `conventions` |
 | `~/.erd-studio-cli/bin/erd-studio inventory --models a,b,c --json --semantic-dir .erd-studio` | Full columns, types, keys and relationships for just those models |
 | `~/.erd-studio-cli/bin/erd-studio diff --domain <file> --json --semantic-dir .erd-studio` | The same comparison as the canvas's **⊕ Diff** button, plus a list of fixes |
+| `~/.erd-studio-cli/bin/erd-studio check --json --semantic-dir .erd-studio` | Every relationship in the ERD Studio files checked: stored twice, saved on the wrong side, a missing model or column, unreadable — each `findings[]` entry with a code, the files and a line |
 
 Run them from the dbt project folder (the one with `dbt_project.yml`) or add `--project <folder>`;
 if doctor reports `project.found: false`, ask which folder holds it and pass `--project` from then on.
@@ -157,7 +156,8 @@ if doctor reports `project.found: false`, ask which folder holds it and pass `--
   mean the helper is looking in the wrong folder: the ERD Studio folder is set by the
   `erdStudio.semanticDir` setting, which the helper cannot read — ask the user for it and pass
   it with `--semantic-dir`. Never report that as a match.
-- For `diff`, exit code 1 is **not** a failure — it means "differences found" (Stage 5's job).
+- For `diff` and `check`, exit code 1 is **not** a failure — it means "something to fix". A
+  `check` that says *Unknown command "check"* is an older helper: use `doctor` instead.
 - On Windows, if the shell cannot run the file above (PowerShell always cannot), use
   `~/.erd-studio-cli/bin/erd-studio.cmd` (in PowerShell: `& "$HOME\.erd-studio-cli\bin\erd-studio.cmd" …`).
   Tell the user which route you are using.
@@ -268,8 +268,7 @@ again now that the manifest is built.") — and report what you have as short �
 ### 3a. The business area
 
 Say "Listing the models in your dbt project," then run `inventory --summary`. Summarise in two or
-three lines: how many models, which folders, and how many are already in ERD Studio
-(`alreadyModelled`).
+three lines: how many models, which folders, and how many are in ERD Studio (`alreadyModelled`).
 
 Explain two terms, one line each:
 - A **domain** is one focused diagram of related tables for one business area — for example
@@ -383,7 +382,8 @@ evidence. Never ask cold: **detect, then confirm.** Read `references/modelling-a
    Models that already have a model file (in any folder) are **referenced by name, never rewritten** —
    they may be someone's careful design and other domains may share them.
 7. Keep a list, **created this session**, of every model yml you wrote (Stage 5 needs it). Then
-   run `doctor` and fix each `fix-model-yaml` file:line it lists first (usually a value to quote).
+   run `doctor` and fix each `fix-model-yaml` file:line it lists first (usually a value to quote),
+   then `check` and fix every finding in a file you wrote (`references/verify-and-fix.md` §8).
 8. Tell the user what you wrote in one or two lines ("Wrote 8 model files and the `orders`
    diagram, marking 2 facts and 6 dimensions the Kimball way"), not file by file.
 

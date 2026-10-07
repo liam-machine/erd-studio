@@ -18,6 +18,13 @@ export * from './positions.js';
 export * from './domain.js';
 export * from './relationships.js';
 export {
+  normaliseRelationships,
+  type NormaliseRelationshipsInput,
+  type NormalisedRelationships,
+} from './normaliseRelationships.js';
+export * from './relationshipDirection.js';
+export * from './relationshipChecks.js';
+export {
   LOGICAL_MODELS_DIR,
   RATIONALE_KEYS,
   YamlNodeLimitError,

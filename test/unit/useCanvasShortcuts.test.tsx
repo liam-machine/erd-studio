@@ -33,7 +33,7 @@ vi.mock('@xyflow/react', () => ({
   useReactFlow: () => mockReactFlow,
 }));
 
-import { useCanvasShortcuts } from '../../webview/hooks/useCanvasShortcuts';
+import { useCanvasShortcuts, selectedEdgesToRelationships } from '../../webview/hooks/useCanvasShortcuts';
 import { useEditorStore } from '../../webview/store/editorStore';
 import type { ModelFlowNode, AnnotationFlowNode } from '@erd-studio/renderer/editor';
 import type { DisplayDomain } from '../../src/types/display';
@@ -255,5 +255,20 @@ describe('useCanvasShortcuts', () => {
     expect(sent()).toEqual([
       { type: 'switchStage', payload: { stage: 'physical', requestId: expect.any(Number) } },
     ]);
+  });
+});
+
+describe('selectedEdgesToRelationships (#133)', () => {
+  const stored = { fromModel: 'A', fromColumn: 'b_id', toModel: 'b', toColumn: 'id' };
+  const edge = 'fk-a-b_id-b-id';
+
+  it('sends the stored ends beside the drawn ones, so the host removes the record as written', () => {
+    expect(selectedEdgesToRelationships([edge], [{ ...REL_AB, stored }], [])).toEqual([
+      { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id', stored },
+    ]);
+  });
+
+  it('skips an edge whose model the batch deletes, whatever its case', () => {
+    expect(selectedEdgesToRelationships([edge], [REL_AB], ['A'])).toEqual([]);
   });
 });

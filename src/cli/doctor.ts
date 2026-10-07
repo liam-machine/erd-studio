@@ -2,7 +2,8 @@
  * `erd-studio doctor` — one report on everything the setup skill needs to
  * know before it starts: is there a dbt project, does dbt run, where is
  * profiles.yml, how fresh are manifest.json and catalog.json, what is
- * already in the ERD Studio folder, and is the Claude harness current.
+ * already in the ERD Studio folder, are its relationships sound (the same
+ * checks as `erd-studio check`, counted), and is the Claude harness current.
  *
  * Runs `dbt --version` at most (never `dbt parse` or `docs generate`), and
  * writes nothing.
@@ -33,6 +34,8 @@ import {
   type ProfilesInfo,
 } from '../services/dbtEnv';
 import { HARNESS_VERSION, HarnessService } from '../services/harnessService';
+import type { RelationshipMode } from '../services/libraryRelationships';
+import type { RelationshipIssueCode } from '@erd-studio/core';
 import {
   buildCliContext,
   makeEnvelope,
@@ -44,10 +47,11 @@ import {
   type Envelope,
 } from './context';
 import { MODEL_YAML_HINTS, toUnreadableModelFile, type UnreadableModelFile } from './diff';
+import { checkProjectRelationships, countFindings } from './relationshipCheck';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
-  | 'fix-model-yaml' | 'migrate-v5' | 'update-harness' | 'ready';
+  | 'fix-model-yaml' | 'migrate-v5' | 'fix-relationships' | 'update-harness' | 'ready';
 
 export interface NextStep {
   id: NextStepId;
@@ -95,9 +99,39 @@ export interface DoctorResult extends Envelope {
     /** Library model files that exist but do not parse (shadowed duplicates are never read, so never listed). */
     unreadableModelFiles: UnreadableModelFile[];
   };
+  /**
+   * The relationship checks (`erd-studio check`), counted. Doctor never fails
+   * on them; `fix-relationships` in `nextSteps` says what to do.
+   */
+  relationships: DoctorRelationships;
   harness: { schemaSkill: FileState; setupSkill: FileState; version: string };
   nextSteps: NextStep[];
 }
+
+export interface DoctorRelationships {
+  /** False when there was nothing to check (no ERD Studio folder) or the checks could not run. */
+  checked: boolean;
+  /** Where the project keeps relationships; null when not checked. */
+  mode: RelationshipMode | null;
+  /** Relationship entries stored on disk (model files plus domain files). */
+  stored: number;
+  errors: number;
+  warnings: number;
+  info: number;
+  byCode: Partial<Record<RelationshipIssueCode, number>>;
+}
+
+const NO_RELATIONSHIP_CHECK: DoctorRelationships = { checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, byCode: {} };
+
+/** Plain words per code, for the `fix-relationships` step. */
+const RELATIONSHIP_REASONS: Array<[RelationshipIssueCode, string]> = [
+  ['REL001', 'stored more than once'],
+  ['REL002', 'saved in the file of the model it points at'],
+  ['REL003', 'pointing at a model that is not in the model library'],
+  ['REL004', 'pointing at a column its model does not have'],
+  ['REL005', 'naming a model or column with different capital letters'],
+  ['REL008', 'could not be read'],
+];
 
 export interface DoctorOptions {
   project?: string;
@@ -174,6 +208,18 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     domainFormatIssues: issues,
     unreadableModelFiles: unreadable,
   };
+}
+
+function relationshipSummary(ctx: CliContext, semanticDirExists: boolean): DoctorRelationships {
+  if (!semanticDirExists) { return NO_RELATIONSHIP_CHECK; }
+  try {
+    const project = checkProjectRelationships(ctx);
+    const { error, warning, info, byCode } = countFindings(project.findings);
+    return { checked: true, mode: project.mode, stored: project.checked.relationships, errors: error, warnings: warning, info, byCode };
+  } catch {
+    // Doctor reports; it never fails. `erd-studio check` shows the error itself.
+    return NO_RELATIONSHIP_CHECK;
+  }
 }
 
 function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boolean; installPath: string; invocation: string | null }): NextStep[] {
@@ -262,6 +308,21 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: null,
     });
   }
+  const problems = r.relationships.errors + r.relationships.warnings;
+  if (problems > 0) {
+    const reasons = RELATIONSHIP_REASONS
+      .map(([code, words]) => [r.relationships.byCode[code] ?? 0, words] as const)
+      .filter(([n]) => n > 0)
+      .map(([n, words]) => `${n} ${words}`);
+    steps.push({
+      id: 'fix-relationships',
+      title: `Fix ${problems === 1 ? '1 relationship problem' : `${problems} relationship problems`}`,
+      why: `${reasons.length > 0 ? `${reasons.join('; ')}. ` : ''}`
+        + 'Run `erd-studio check` for the list with files and lines. In VS Code, "ERD Studio: Repair Relationships…" '
+        + 'fixes most of them, showing every change before it writes anything.',
+      command: null,
+    });
+  }
   if (r.harness.schemaSkill === 'outdated' || r.harness.setupSkill === 'outdated') {
     steps.push({
       id: 'update-harness',
@@ -299,6 +360,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       },
       projectFiles: { schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 },
       erd: { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [] },
+      relationships: NO_RELATIONSHIP_CHECK,
       harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion },
     };
     return { ...base, nextSteps: [] };
@@ -329,6 +391,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
     if (!ctx.manifest.disabledModels.has(n)) { discovered.add(n); }
   }
 
+  const erd = erdSummary(ctx);
   const base: Omit<DoctorResult, 'nextSteps'> = {
     ...ctx.envelope,
     runtime: runtimeInfo(),
@@ -367,7 +430,8 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
       sourceFiles: ctx.ymlData.sourceFiles?.size ?? 0,
       modelsDiscovered: discovered.size,
     },
-    erd: erdSummary(ctx),
+    erd,
+    relationships: relationshipSummary(ctx, erd.semanticDirExists),
     harness: { schemaSkill: harness.claude.schemaSkill, setupSkill: harness.claude.setupSkill, version: harnessVersion },
   };
 

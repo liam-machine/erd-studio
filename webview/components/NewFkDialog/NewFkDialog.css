@@ -164,36 +164,118 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Preview
+   Direction (#133): sentence, cardinality question, read-back
    --------------------------------------------------------------------------- */
 
-.new-fk-dialog__preview {
+.new-fk-dialog__direction {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
-  background: rgba(249, 115, 22, 0.1); /* Design orange tint */
-  border: 1px solid rgba(249, 115, 22, 0.3);
 }
 
-.new-fk-dialog__preview-label {
-  font-size: 11px;
+.new-fk-dialog__sentence {
+  font-size: 13px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--vscode-descriptionForeground, #888);
-}
-
-.new-fk-dialog__preview-text {
-  font-size: 12px;
-  font-family: var(--vscode-editor-font-family, monospace);
   color: var(--editor-fg);
 }
 
-.new-fk-dialog__preview-cardinality {
-  margin-left: 6px;
-  color: var(--vscode-descriptionForeground, #888);
+.new-fk-dialog__note {
+  font-size: 11px;
+  color: var(--dim-fg);
+}
+
+.new-fk-dialog__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.new-fk-dialog__choice-question {
+  font-size: 12px;
+  color: var(--editor-fg);
+}
+
+.new-fk-dialog__choice-button {
+  padding: 6px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-fg);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.new-fk-dialog__choice-button:hover,
+.new-fk-dialog__choice-button:focus-visible {
+  border-color: var(--focus-border);
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
+.new-fk-dialog__cardinality {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.new-fk-dialog__cardinality .new-fk-dialog__label {
+  padding: 0;
+  margin-bottom: 2px;
+}
+
+.new-fk-dialog__radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--editor-fg);
+  cursor: pointer;
+}
+
+.new-fk-dialog__readback {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--editor-fg);
+}
+
+.new-fk-dialog__saved-in {
+  font-size: 11px;
+  color: var(--dim-fg);
+}
+
+.new-fk-dialog__why {
+  text-decoration: underline dotted;
+  cursor: help;
+}
+
+.new-fk-dialog__why:focus-visible {
+  outline: 1px solid var(--focus-border);
+  outline-offset: 1px;
+}
+
+.new-fk-dialog__link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--focus-border);
+  font-family: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.new-fk-dialog__warning--global .new-fk-dialog__link-button {
+  color: inherit;
 }
 
 /* ---------------------------------------------------------------------------

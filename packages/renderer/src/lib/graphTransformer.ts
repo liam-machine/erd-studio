@@ -66,6 +66,23 @@ const DEFAULT_POSITION = { x: 0, y: 0 };
 const hasMeta = (meta: Meta | undefined): meta is Meta => !!meta && Object.keys(meta).length > 0;
 
 /**
+ * Maps a relationship endpoint to the id of the node it names: the exact id
+ * when there is one, else the one id that matches without case. Undefined
+ * when no node matches, or when only case-insensitive matches exist and there
+ * are several (two nodes `Orders` and `orders` — never guess between them).
+ */
+export function nodeIdResolver(ids: Iterable<string>): (name: string) => string | undefined {
+  const exact = new Set<string>();
+  const folded = new Map<string, string | null>();
+  for (const id of ids) {
+    exact.add(id);
+    const key = id.toLowerCase();
+    folded.set(key, folded.has(key) ? null : id);
+  }
+  return (name) => (exact.has(name) ? name : folded.get(name.toLowerCase()) ?? undefined);
+}
+
+/**
  * Convert a DisplayModel's columns to ColumnDisplay[].
  * Sort by key priority (PK → NK → FK → non-key).
  */
@@ -277,64 +294,77 @@ export function transformDomain(
   }
 
   // Only include edges where both endpoints exist in the models/ghost nodes.
-  const allNodeNames = new Set(positionMap.keys());
+  // An endpoint is matched to its node without case (#133, D3): core already
+  // corrects the spelling of what it reads, but a relationship whose model
+  // name differs only in case must never be read and then silently not drawn.
+  // The edge connects to the node's real id; its own id keeps the
+  // relationship's spelling, which is how selection maps an edge back to it.
+  const nodeIdFor = nodeIdResolver(positionMap.keys());
 
-  const edges: (FkFlowEdge | AnnotationFlowEdge)[] = relationships
-    .filter((rel) => allNodeNames.has(rel.fromModel) && allNodeNames.has(rel.toModel))
-    .map((rel) => {
-      const isSelfLoop = rel.fromModel === rel.toModel;
-      // Self-refs attach to top (source) and right (target) handles so the
-      // FkEdge component can arc the path over the top-right corner.
-      const { sourceSide, targetSide } = isSelfLoop
-        ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
-        : pickHandleSides(rectOf(rel.fromModel), rectOf(rel.toModel));
+  const edges: (FkFlowEdge | AnnotationFlowEdge)[] = [];
+  for (const rel of relationships) {
+    const fromModel = nodeIdFor(rel.fromModel);
+    const toModel = nodeIdFor(rel.toModel);
+    if (fromModel === undefined || toModel === undefined) continue;
+    const isSelfLoop = fromModel === toModel;
+    // Self-refs attach to top (source) and right (target) handles so the
+    // FkEdge component can arc the path over the top-right corner.
+    const { sourceSide, targetSide } = isSelfLoop
+      ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
+      : pickHandleSides(rectOf(fromModel), rectOf(toModel));
 
-      const relKey = `${rel.fromModel}|${rel.fromColumn}|${rel.toModel}|${rel.toColumn}`;
-      const discStatus = relDiscrepancyMap.get(relKey);
+    const relKey = `${rel.fromModel}|${rel.fromColumn}|${rel.toModel}|${rel.toColumn}`;
+    const discStatus = relDiscrepancyMap.get(relKey);
 
-      return {
-        id: `fk-${rel.fromModel}-${rel.fromColumn}-${rel.toModel}-${rel.toColumn}`,
-        type: 'fk' as const,
-        source: rel.fromModel,
-        target: rel.toModel,
-        sourceHandle: `node-${sourceSide}-src`,
-        targetHandle: `node-${targetSide}-tgt`,
-        data: {
-          fromModel: rel.fromModel,
-          fromColumn: rel.fromColumn,
-          toModel: rel.toModel,
-          toColumn: rel.toColumn,
-          cardinality: rel.cardinality,
-          ...(rel.role ? { role: rel.role } : {}),
-          stage,
-          ...(readOnly ? { readOnly: true } : {}),
-          ...(discStatus ? { discrepancyStatus: discStatus } : {}),
-          ...(isSelfLoop ? { isSelfLoop: true } : {}),
-        },
-      };
+    edges.push({
+      id: `fk-${rel.fromModel}-${rel.fromColumn}-${rel.toModel}-${rel.toColumn}`,
+      type: 'fk' as const,
+      source: fromModel,
+      target: toModel,
+      sourceHandle: `node-${sourceSide}-src`,
+      targetHandle: `node-${targetSide}-tgt`,
+      data: {
+        fromModel,
+        fromColumn: rel.fromColumn,
+        toModel,
+        toColumn: rel.toColumn,
+        cardinality: rel.cardinality,
+        ...(rel.role ? { role: rel.role } : {}),
+        stage,
+        ...(readOnly ? { readOnly: true } : {}),
+        ...(discStatus ? { discrepancyStatus: discStatus } : {}),
+        ...(isSelfLoop ? { isSelfLoop: true } : {}),
+        // Logical-stage provenance (#133): absent on the physical stage.
+        ...(rel.stored ? { stored: rel.stored } : {}),
+        ...(rel.source ? { source: rel.source } : {}),
+        ...(rel.issues && rel.issues.length > 0 ? { issues: rel.issues } : {}),
+      },
     });
+  }
 
   // Ghost edges for 'missing' relationships from discrepancy report
   if (options?.discrepancyReport) {
     for (const rd of options.discrepancyReport.relationships) {
       if (rd.status === 'missing') {
-        if (!positionMap.has(rd.fromModel) || !positionMap.has(rd.toModel)) continue;
+        const fromModel = nodeIdFor(rd.fromModel);
+        const toModel = nodeIdFor(rd.toModel);
+        if (fromModel === undefined || toModel === undefined) continue;
 
-        const isSelfLoop = rd.fromModel === rd.toModel;
+        const isSelfLoop = fromModel === toModel;
         const { sourceSide, targetSide } = isSelfLoop
           ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
-          : pickHandleSides(rectOf(rd.fromModel), rectOf(rd.toModel));
+          : pickHandleSides(rectOf(fromModel), rectOf(toModel));
         edges.push({
           id: `ghost-fk-${rd.fromModel}-${rd.fromColumn}-${rd.toModel}-${rd.toColumn}`,
           type: 'fk' as const,
-          source: rd.fromModel,
-          target: rd.toModel,
+          source: fromModel,
+          target: toModel,
           sourceHandle: `node-${sourceSide}-src`,
           targetHandle: `node-${targetSide}-tgt`,
           data: {
-            fromModel: rd.fromModel,
+            fromModel,
             fromColumn: rd.fromColumn,
-            toModel: rd.toModel,
+            toModel,
             toColumn: rd.toColumn,
             cardinality: rd.sourceCardinality ?? rd.targetCardinality ?? 'many-to-one',
             stage,

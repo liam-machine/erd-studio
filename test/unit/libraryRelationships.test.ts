@@ -4,11 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import {
-  describeMovePlan,
-  planMoveToLibrary,
-  planRehome,
   removeColumnRelationships,
-  resolveConflict,
   sharedRelationshipCount,
   renameColumnInRelationships,
   renameModelInRelationships,
@@ -71,40 +67,6 @@ describe('library relationship edits', () => {
   });
 });
 
-describe('planMoveToLibrary', () => {
-  const lookup = (name: string): SemanticModel | null => (name === 'fct_order' ? fct() : null);
-
-  it('moves a relationship the domains agree on once, out of every domain holding it', () => {
-    const plan = planMoveToLibrary(
-      [{ label: 'silver/orders', relationships: [REL] }, { label: 'silver/reporting', relationships: [REL] }],
-      lookup,
-    );
-    expect(plan.toLibrary).toEqual([REL]);
-    expect([...plan.removeFromDomains.keys()]).toEqual(['silver/orders', 'silver/reporting']);
-    expect(plan.conflicts).toEqual([]);
-  });
-
-  it('never settles a disagreement — it is reported and left in place', () => {
-    const plan = planMoveToLibrary(
-      [{ label: 'silver/orders', relationships: [REL] }, { label: 'silver/reporting', relationships: [{ ...REL, cardinality: 'one-to-one' }] }],
-      lookup,
-    );
-    expect(plan.toLibrary).toEqual([]);
-    expect(plan.removeFromDomains.size).toBe(0);
-    expect(plan.conflicts[0].definitions).toEqual([
-      { cardinality: 'many-to-one', domains: ['silver/orders'] },
-      { cardinality: 'one-to-one', domains: ['silver/reporting'] },
-    ]);
-    expect(describeMovePlan(plan)).toMatch(/fct_order\.customer_key → dim_customer\.customer_key: many-to-one in silver\/orders; one-to-one in silver\/reporting/);
-  });
-
-  it('leaves a relationship whose from-model has no library file', () => {
-    const plan = planMoveToLibrary([{ label: 'silver/orders', relationships: [{ ...REL, fromModel: 'stg_x' }] }], lookup);
-    expect(plan.skippedNoModel).toHaveLength(1);
-    expect(plan.removeFromDomains.size).toBe(0);
-  });
-});
-
 describe('LogicalModelService writes relationships', () => {
   it('round-trips the list and leaves an unchanged one (and its comment) alone', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-rels-yml-'));
@@ -122,44 +84,6 @@ describe('LogicalModelService writes relationships', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
-  });
-});
-
-describe('settling a conflict (#126)', () => {
-  const lookup = (name: string): SemanticModel | null => (name === 'fct_order' ? fct() : null);
-  const conflicted = () => planMoveToLibrary(
-    [{ label: 'gold/orders', relationships: [REL] }, { label: 'gold/reporting', relationships: [{ ...REL, cardinality: 'one-to-one' }] }],
-    lookup,
-  );
-
-  it('moves the picked cardinality to the library and takes every diagram\'s copy out', () => {
-    const plan = conflicted();
-    const settled = resolveConflict(plan, plan.conflicts[0], 'one-to-one');
-    expect(settled.conflicts).toEqual([]);
-    expect(settled.toLibrary).toEqual([{ ...REL, cardinality: 'one-to-one' }]);
-    expect([...settled.removeFromDomains.keys()].sort()).toEqual(['gold/orders', 'gold/reporting']);
-    expect(plan.conflicts).toHaveLength(1); // the original plan is untouched
-  });
-
-  it('explains why, where each relationship goes, and that conflicts are picked next', () => {
-    const plan = planMoveToLibrary(
-      [
-        { label: 'gold/orders', relationships: [REL, { ...REL, fromColumn: 'order_date_key', toModel: 'dim_date', toColumn: 'date_key' }] },
-        { label: 'gold/reporting', relationships: [{ ...REL, cardinality: 'one-to-one' }] },
-      ],
-      lookup,
-    );
-    const detail = describeMovePlan(plan, (m) => `logical-models/gold/${m}.yml`);
-    expect(detail).toMatch(/^Why: today each diagram keeps its own copy/);
-    expect(detail).toContain('• logical-models/gold/fct_order.yml — fct_order.order_date_key → dim_date.date_key');
-    expect(detail).toMatch(/Conflicts: 1 relationship is drawn differently.*Next you pick the cardinality to keep/s);
-  });
-
-  it('says where a conflicting relationship will go, even when it is the only one', () => {
-    const plan = conflicted();
-    const detail = describeMovePlan(plan, (m) => `logical-models/${m}.yml`);
-    expect(detail).toContain('• logical-models/fct_order.yml — fct_order.customer_key → dim_customer.customer_key');
-    expect(detail).toContain('(2 diagrams)');
   });
 });
 
@@ -208,50 +132,10 @@ describe('stored on the many side (#133)', () => {
     expect(fact.relationships).toBeUndefined();
   });
 
-  it('planMoveToLibrary sends a one-to-many from a domain file to the fact', () => {
-    const plan = planMoveToLibrary([{ label: 'silver/orders', relationships: [REVERSED] }], (name) => (name === 'fct_order' ? fct() : dim()));
-    expect(plan.toLibrary).toEqual([REL]);
-    expect(plan.removeFromDomains.get('silver/orders')?.size).toBe(1);
-  });
-
-  it('a conflict settled as one-to-many goes to the other end', () => {
-    const plan = planMoveToLibrary(
-      [{ label: 'a', relationships: [REL] }, { label: 'b', relationships: [{ ...REL, cardinality: 'one-to-one' }] }],
-      (name) => (name === 'fct_order' ? fct() : dim()),
-    );
-    const settled = resolveConflict(plan, plan.conflicts[0], 'one-to-many');
-    expect(settled.toLibrary).toEqual([{ ...REVERSED, cardinality: 'many-to-one' }]);
-  });
-
-  it('planRehome finds library entries stored on their one side, and only those', () => {
-    const stored = { fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' as const };
-    const library = [dim([stored, { ...stored, toModel: 'stg_gone' }]), fct([STORED])];
-    const rehome = planRehome(library, (name) => library.find((m) => m.name === name) ?? null);
-    expect(rehome).toEqual([{ from: 'dim_customer', stored: REVERSED, to: REL }]);
-    expect(describeMovePlan({ toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [], rehome }))
-      .toMatch(/^Turned round: 1 relationship is stored in the file of the model it points at/);
-  });
-
   it('upsertLibraryRelationship writes and compares the role', () => {
     const fact = fct([STORED]);
     expect(upsertLibraryRelationship(fact, { ...REL, role: 'buyer' })).toBe(true);
     expect(fact.relationships).toEqual([{ ...STORED, role: 'buyer' }]);
     expect(upsertLibraryRelationship(fact, { ...REL, role: 'buyer' })).toBe(false);
-  });
-});
-
-describe('the move keeps roles (#133)', () => {
-  it('a conflict settled by the user keeps the role a domain gave it', () => {
-    const plan = planMoveToLibrary(
-      [{ label: 'a', relationships: [{ ...REL, role: 'buyer' }] }, { label: 'b', relationships: [{ ...REL, cardinality: 'one-to-one' }] }],
-      (name) => (name === 'fct_order' ? fct() : null),
-    );
-    expect(resolveConflict(plan, plan.conflicts[0], 'one-to-one').toLibrary).toEqual([{ ...REL, cardinality: 'one-to-one', role: 'buyer' }]);
-  });
-
-  it('a domain role is copied onto a library entry that has none before the domain copy goes', () => {
-    const plan = planMoveToLibrary([{ label: 'a', relationships: [{ ...REL, role: 'buyer' }] }], (name) => (name === 'fct_order' ? fct([STORED]) : null));
-    expect(plan.toLibrary).toEqual([{ ...REL, role: 'buyer' }]);
-    expect(plan.removeFromDomains.get('a')?.size).toBe(1);
   });
 });

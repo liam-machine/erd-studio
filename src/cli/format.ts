@@ -3,6 +3,8 @@
  * CLI prints without `--json`). Colour only on a TTY and never with NO_COLOR.
  */
 
+import type { RelationshipFinding } from '@erd-studio/core';
+import type { CheckResult } from './check';
 import { describeUnreadable, type DiffResult, type DomainDiff, type Fix } from './diff';
 import type { DoctorResult } from './doctor';
 import type { InventoryResult } from './inventory';
@@ -45,7 +47,8 @@ function fixLine(f: Fix, p: Paint): string {
     case 'remove-relationship':
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not tested in dbt`;
     case 'set-cardinality':
-      return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  cardinality: ${f.from} (logical) vs ${f.to} (dbt)`;
+      return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  cardinality: ${f.from} (logical) vs ${f.to} (dbt)`
+        + (f.movesFrom ? `, store it in ${f.file}` : '');
     case 'resolve-phantom':
       return `  ${mark} ${f.model}  not a dbt model`;
     default:
@@ -72,7 +75,39 @@ function domainBlock(d: DomainDiff, p: Paint): string[] {
   if (d.modelsWithoutColumns.length > 0) {
     lines.push(p.dim(`  ${plural(d.modelsWithoutColumns.length, 'model')} with no column information in dbt yet: ${d.modelsWithoutColumns.join(', ')}`));
   }
+  const notable = d.integrity.filter((f) => f.severity !== 'info');
+  if (notable.length > 0) {
+    lines.push(p.dim(`  relationship checks (not part of the comparison — see erd-studio check):`));
+    for (const f of notable) { lines.push(findingLine(f, p)); }
+  }
   return lines;
+}
+
+function findingLine(f: RelationshipFinding, p: Paint): string {
+  const mark = f.severity === 'error' ? p.red('✗') : f.severity === 'warning' ? p.yellow('!') : p.dim('·');
+  return `  ${mark} ${f.code} ${f.message}${f.line !== undefined && !f.message.includes(`line ${f.line}`) ? ` (line ${f.line})` : ''}`;
+}
+
+export function formatCheck(r: CheckResult, p: Paint): string {
+  const { errors, warnings, info } = r.counts;
+  const where = r.mode === 'library' ? 'kept in the model files' : 'kept in each diagram';
+  const scope = `${plural(r.checked.relationships, 'relationship')} ${where}, ${plural(r.checked.modelFiles, 'model file')}, ${plural(r.checked.domains, 'diagram')}`;
+  const lines: string[] = [];
+  if (r.findings.length === 0) {
+    lines.push(`${p.green('✓')} No relationship problems (${scope}).`);
+    return lines.join('\n') + '\n';
+  }
+  const parts = [
+    errors > 0 ? p.red(plural(errors, 'error')) : '',
+    warnings > 0 ? p.yellow(plural(warnings, 'warning')) : '',
+    info > 0 ? plural(info, 'note') : '',
+  ].filter(Boolean);
+  lines.push(`${parts.join(', ')} (${scope})`);
+  for (const f of r.findings) { lines.push(findingLine(f, p)); }
+  if (errors + warnings > 0) {
+    lines.push('', 'In VS Code, "ERD Studio: Repair Relationships…" fixes most of these, showing every change first.');
+  }
+  return lines.join('\n') + '\n';
 }
 
 export function formatDiff(r: DiffResult, p: Paint): string {
@@ -102,6 +137,12 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'domain')}, ${plural(r.erd.logicalModels, 'logical model')}`);
   for (const u of r.erd.unreadableModelFiles) {
     lines.push(`${p.red('✗')} ${describeUnreadable(u)}`);
+  }
+  if (r.relationships.checked) {
+    const rel = r.relationships;
+    const problems = rel.errors + rel.warnings;
+    lines.push(`${ok(problems === 0)} relationships: ${plural(rel.stored, 'stored entry', 'stored entries')}`
+      + (problems === 0 ? ', no problems' : `, ${[rel.errors ? plural(rel.errors, 'error') : '', rel.warnings ? plural(rel.warnings, 'warning') : ''].filter(Boolean).join(', ')}`));
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
   lines.push('', 'Next steps:');

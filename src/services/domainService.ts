@@ -16,6 +16,7 @@ import {
   DomainFileError,
   NON_DOMAIN_DIRS,
   buildUnifiedDomain,
+  linkKey,
   parseDomainJson,
   toLogicalStage,
   validateDomainDocument,
@@ -29,6 +30,7 @@ import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
 import type { LogicalModelService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
+import { sameName } from '../types/naming';
 
 // The pure domain parsing lives in @erd-studio/core; these are re-exported so
 // existing imports of this module keep working.
@@ -650,33 +652,63 @@ export function derivePhysicalRelationships(
     group.push(test);
   }
 
-  return domainTests.map(rel => ({
-    fromModel: rel.fromModel,
-    fromColumn: rel.fromColumn,
-    toModel: rel.toModel,
-    toColumn: rel.toColumn,
-    cardinality: deriveCardinality(
-      rel,
-      testsByPair.get(pairKey(rel.fromModel, rel.toModel)) ?? [],
-      normalisedUnique,
-      normalisedComposite,
-    ),
-  }));
+  // One edge per link (#133, D9): a test declared on both ends — the fact's
+  // `relationships` test and the dimension's test back to the fact — is one
+  // line, not two. Cardinality is derived per test first (the composite-key
+  // rule reads the tests in their own direction), then the copy read from the
+  // child side wins: a `one-to-many` is the same link seen from its "one" end.
+  const edges: DisplayRelationship[] = [];
+  const indexByLink = new Map<string, number>();
+  for (const rel of domainTests) {
+    const edge: DisplayRelationship = {
+      fromModel: rel.fromModel,
+      fromColumn: rel.fromColumn,
+      toModel: rel.toModel,
+      toColumn: rel.toColumn,
+      cardinality: deriveCardinality(
+        rel,
+        testsByPair.get(pairKey(rel.fromModel, rel.toModel)) ?? [],
+        normalisedUnique,
+        normalisedComposite,
+      ),
+    };
+    const key = linkKey(edge);
+    const at = indexByLink.get(key);
+    if (at === undefined) {
+      indexByLink.set(key, edges.length);
+      edges.push(edge);
+    } else if (edgeRank(edge.cardinality) < edgeRank(edges[at].cardinality)) {
+      edges[at] = edge;
+    }
+  }
+  return edges;
 }
 
 /**
- * True if a relationship references the given (model, column) on either endpoint.
- * Used to cascade-delete relationships when a column is removed.
+ * Which of two tests of one link to draw: lower wins, ties keep the first.
+ * A `one-to-many` is read from the parent, so the child-side test beats it.
+ */
+function edgeRank(cardinality: Cardinality): number {
+  if (cardinality === 'one-to-many') { return 2; }
+  if (cardinality === 'many-to-many') { return 1; }
+  return 0;
+}
+
+/**
+ * True if a relationship references the given (model, column) on either
+ * endpoint, ignoring case (#133, D7) — names are one identifier in any case,
+ * so a cascade must not miss an end spelled `Dim_Customer`. Ends that are not
+ * text never match. Used to cascade-delete relationships when a column is removed.
  */
 export function relationshipReferencesColumn(
   rel: { fromModel?: unknown; fromColumn?: unknown; toModel?: unknown; toColumn?: unknown },
   modelName: string,
   columnName: string,
 ): boolean {
-  return (
-    (rel.fromModel === modelName && rel.fromColumn === columnName) ||
-    (rel.toModel === modelName && rel.toColumn === columnName)
-  );
+  const isEnd = (model: unknown, column: unknown): boolean =>
+    typeof model === 'string' && typeof column === 'string'
+    && sameName(model, modelName) && sameName(column, columnName);
+  return isEnd(rel.fromModel, rel.fromColumn) || isEnd(rel.toModel, rel.toColumn);
 }
 
 /**

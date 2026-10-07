@@ -51,6 +51,7 @@ import { Toast } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { ManifestHint } from './components/Canvas/ManifestHint';
+import { RelationshipIssuesBanner } from './components/Canvas/RelationshipIssuesBanner';
 import { EmptyCanvas } from './components/EmptyCanvas/EmptyCanvas';
 import { DiscrepancyPanel } from './components/DiscrepancyPanel/DiscrepancyPanel';
 import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
@@ -60,7 +61,7 @@ import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import type { DisplayDomain } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
-import { orientDraggedRelationship } from './lib/relationshipDirection';
+import { orientDrag } from './lib/relationshipDirection';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -323,9 +324,11 @@ function EditorCanvas() {
     const handleColumnRelationshipDrop = (e: Event) => {
       const { fromModel, fromColumn, toModel, toColumn } = (e as CustomEvent).detail;
       // A drag that starts on a key is turned round, so the column pointing
-      // at the key is "from" — the many side, which stores it (#133).
+      // at the key is "from" — the many side, which stores it (#133). Only
+      // when the evidence says so; otherwise the dialog asks.
       const models = useEditorStore.getState().domain?.models ?? [];
-      openFkDialogWithPrefill(orientDraggedRelationship({ fromModel, fromColumn, toModel, toColumn }, models));
+      const { prefill, turned } = orientDrag({ fromModel, fromColumn, toModel, toColumn }, models);
+      openFkDialogWithPrefill(turned ? { ...prefill, turnedRound: true } : prefill);
     };
 
     const handleColumnRelationshipSelfDrop = () => {
@@ -515,6 +518,8 @@ function EditorCanvas() {
       <PhysicalSourceNotice />
       {/* Logical-stage "Run dbt parse" hint (#113) — no manifest.json yet. */}
       <ManifestHint />
+      {/* Logical-stage "N relationships need attention — Repair Relationships…" (#133). */}
+      <RelationshipIssuesBanner />
 
       <ReactFlow
         // flex basis 0 rather than the default height:100%, so the notice's

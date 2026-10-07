@@ -85,6 +85,18 @@ describe('harnessAssets', () => {
       expect(skill.content.split('\n').length).toBeLessThan(500);
     });
 
+    it('lists the check command, runs it after writing relationships, and falls back to doctor on an older helper (#133)', () => {
+      expect(skill.content).toContain('`~/.erd-studio-cli/bin/erd-studio check --json --semantic-dir .erd-studio`');
+      expect(skill.content).toMatch(/then `check` and fix every finding in a file you wrote/);
+      expect(skill.content).toContain('*Unknown command "check"* is an older helper: use `doctor` instead');
+      const verify = CLAUDE_SETUP_SKILL_FILES.find((a) => a.relativePath === 'references/verify-and-fix.md')!;
+      expect(verify.content).toContain('## 8. Relationship checks (`check --json`)');
+      for (const code of ['REL001', 'REL002', 'REL003', 'REL004', 'REL005', 'REL006', 'REL008', 'REL009']) {
+        expect(verify.content).toContain(`| \`${code}\` |`);
+      }
+      expect(verify.content).toContain('`movesFrom`');
+    });
+
     it('has YAML frontmatter naming the skill with a description of at most 1024 characters', () => {
       const fm = frontmatter(skill.content);
       expect(fm.name).toBe('erd-studio-setup');

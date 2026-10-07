@@ -59,14 +59,34 @@
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 0
+        },
+        "stored": {
+          "fromModel": "dim_missing",
+          "fromColumn": "customer_key",
+          "toModel": "dim_customer",
+          "toColumn": "customer_key"
+        }
       },
       {
         "fromModel": "broken",
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "one-to-one"
+        "cardinality": "one-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 1
+        },
+        "stored": {
+          "fromModel": "broken",
+          "fromColumn": "customer_key",
+          "toModel": "dim_customer",
+          "toColumn": "customer_key"
+        }
       }
     ],
     "viewConfig": {
@@ -101,7 +121,16 @@
       "order": 0
     },
     "readOnly": false,
-    "positionDraggable": true
+    "positionDraggable": true,
+    "relationshipHome": "domain",
+    "relationshipIssues": [
+      {
+        "code": "REL003",
+        "severity": "error",
+        "message": ".erd-studio/silver/partial.json: relationship dim_missing.customer_key → dim_customer.customer_key points at model dim_missing, which is not in the model library",
+        "link": "dim_customer.customer_key\u0000dim_missing.customer_key"
+      }
+    ]
   },
   "welcomeDismissed": false
 }

@@ -47,5 +47,6 @@ export * from './lib/stageColors';
 export * from './lib/dataTypeColors';
 export * from './lib/badgeLabels';
 export { swapCardinality } from './lib/cardinalityUtils';
+export * from './lib/relationshipActions';
 export { computeModelLabels, matchesModelSearch, type LabelledModel } from './lib/modelLabels';
 export { ANNOTATION_COLORS } from './lib/annotationColors';

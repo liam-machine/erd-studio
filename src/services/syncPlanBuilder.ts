@@ -12,6 +12,7 @@
 
 import * as path from 'path';
 
+import { sameLink } from '@erd-studio/core';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { ManifestData } from '../types/manifest';
 import type {
@@ -158,32 +159,29 @@ export function buildSyncPlan(
       });
       referencedModels.add(modelName);
     } else if (kind === 'rel') {
-      const [, fromModel, fromColumn, toModel, toColumn] = parts;
-      const relDisc = report.relationships.find(
-        (r) =>
-          r.fromModel === fromModel &&
-          r.fromColumn === fromColumn &&
-          r.toModel === toModel &&
-          r.toColumn === toColumn,
-      );
+      const [, fromModel = '', fromColumn = '', toModel = '', toColumn = ''] = parts;
+      // The report holds one row per link (#133), so the key finds it whichever
+      // end it names and in any case; the row's own ends are what the plan
+      // carries, because its cardinalities are read in the row's direction.
+      const relDisc = report.relationships.find((r) => sameLink(r, { fromModel, fromColumn, toModel, toColumn }));
       if (!relDisc || relDisc.status === 'matched') continue;
 
       const action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);
       if (!action) continue;
 
       relationships.push({
-        fromModel,
-        fromColumn,
-        toModel,
-        toColumn,
+        fromModel: relDisc.fromModel,
+        fromColumn: relDisc.fromColumn,
+        toModel: relDisc.toModel,
+        toColumn: relDisc.toColumn,
         discrepancyStatus: relDisc.status,
         groundTruth,
         action,
         sourceCardinality: relDisc.sourceCardinality,
         targetCardinality: relDisc.targetCardinality,
       });
-      referencedModels.add(fromModel);
-      referencedModels.add(toModel);
+      referencedModels.add(relDisc.fromModel);
+      referencedModels.add(relDisc.toModel);
     }
   }
 

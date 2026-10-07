@@ -25,8 +25,8 @@ import {
   type EdgeProps,
 } from '@xyflow/react';
 import type { FkFlowEdge } from '../../types/graph';
-import { useCanvasHost } from '../../host/canvasEnvironment';
-import { swapCardinality } from '../../lib/cardinalityUtils';
+import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
+import { edgeIssues, edgeIssueTitle, relationshipSwap } from '../../lib/relationshipActions';
 import { edgeHoverText } from '../../lib/badgeLabels';
 import {
   calculateEdgeOffsetInGroup,
@@ -54,6 +54,9 @@ const LABEL_OFFSET = 8;
  * right side. A larger radius means the loop extends further from the node.
  */
 const SELF_LOOP_RADIUS = 55;
+
+/** How far (px) right of the edge midpoint the "?" issue badge sits, clear of ⇄. */
+const ISSUE_BADGE_OFFSET = 20;
 
 /** Stable empty sibling group for edges whose handle side is unknown. */
 const NO_SIBLINGS: readonly import('@xyflow/react').Edge[] = Object.freeze([]);
@@ -148,28 +151,27 @@ function FkEdgeComponent({
   }, [positionsKey, neighbourIds, storeApi]);
 
   const host = useCanvasHost();
+  const viewer = useIsViewer();
   const [hovered, setHovered] = useState(false);
+
+  // What ⇄ does depends on the cardinality: flip the many side, or swap the
+  // ends of a one-to-one / many-to-many (#133). The tooltip says which.
+  const swap = useMemo(() => (data ? relationshipSwap(data) : null), [data]);
 
   const handleSwap = useCallback(
     (e: React.MouseEvent) => {
-      if (!data) return;
+      if (!swap) return;
       e.stopPropagation();
-      host.postMessage({
-        type: 'updateRelationship',
-        payload: {
-          fromModel: data.fromModel,
-          fromColumn: data.fromColumn,
-          toModel: data.toModel,
-          toColumn: data.toColumn,
-          cardinality: swapCardinality(data.cardinality),
-        },
-      });
+      host.postMessage(swap.request);
     },
-    [host, data],
+    [host, swap],
   );
 
   if (!data) return null;
   const { cardinality, role, stage, discrepancyStatus, dimmed, readOnly, isSelfLoop, fromColumn, toColumn } = data;
+  // Stored-relationship problems worth flagging on the line itself (#133).
+  // An editing affordance: never on a read-only stage or in the viewer.
+  const issueCodes = readOnly || viewer ? [] : edgeIssues(data.issues);
 
   // For cardinality mismatch edges, pull the mismatch details from the report
   // The edge data only has status — we need to find the original relationship discrepancy
@@ -347,6 +349,20 @@ function FkEdgeComponent({
             !
           </span>
         )}
+        {issueCodes.length > 0 && (
+          <span
+            className={`fk-edge__issue-badge${dimmed ? ' fk-edge__issue-badge--dimmed' : ''}`}
+            style={{
+              transform: `translate(-50%, -50%) translate(${midX + ISSUE_BADGE_OFFSET}px, ${midY}px)`,
+            }}
+            title={edgeIssueTitle(issueCodes)}
+            role="img"
+            aria-label={`Relationship needs attention: ${issueCodes.join(', ')}`}
+            data-issues={issueCodes.join(' ')}
+          >
+            ?
+          </span>
+        )}
         {!readOnly && discrepancyStatus !== 'missing' && (
           <span
             className={`fk-edge__swap-zone${dimmed ? ' fk-edge__swap-zone--dimmed' : ''}`}
@@ -360,8 +376,8 @@ function FkEdgeComponent({
               <button
                 className="fk-edge__swap-btn"
                 onClick={handleSwap}
-                title={`Swap cardinality (${cardinality} → ${swapCardinality(cardinality)})`}
-                aria-label="Swap cardinality direction"
+                title={swap?.title}
+                aria-label={swap?.title ?? 'Swap cardinality direction'}
               >
                 &#x21c4;
               </button>

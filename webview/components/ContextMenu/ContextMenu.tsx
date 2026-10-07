@@ -12,8 +12,12 @@ import { useVsCodeApi } from '../../hooks/useVsCodeApi';
 import type { FkEdgeData } from '@erd-studio/renderer/editor';
 import type { AnnotationColor, Cardinality } from '../../../src/types/semantic';
 import type { FkDialogEditData } from '../../store/editorStore';
-import { swapCardinality } from '@erd-studio/renderer/editor';
-import { ANNOTATION_COLORS } from '@erd-studio/renderer/editor';
+import {
+  ANNOTATION_COLORS,
+  relationshipSwap,
+  removeRelationshipRequest,
+  updateCardinalityRequest,
+} from '@erd-studio/renderer/editor';
 import './ContextMenu.css';
 
 // ---------------------------------------------------------------------------
@@ -23,13 +27,24 @@ import './ContextMenu.css';
 /** Padding from viewport edge when repositioning. */
 const VIEWPORT_PADDING = 8;
 
-/** All supported cardinality types with display labels. */
-const CARDINALITY_OPTIONS: { value: Cardinality; label: string }[] = [
+/**
+ * The cardinalities the menu offers. No "One → Many": that is the same
+ * relationship read from the other end, stored as many-to-one on the other
+ * model (#133) — ⇄ makes the other side the many one.
+ */
+export const CARDINALITY_OPTIONS: { value: Cardinality; label: string }[] = [
   { value: 'many-to-one', label: 'Many → One' },
   { value: 'one-to-one', label: 'One → One' },
-  { value: 'one-to-many', label: 'One → Many' },
   { value: 'many-to-many', label: 'Many → Many' },
 ];
+
+/** Label for a cardinality, including a one-to-many shown on a read-only stage. */
+const CARDINALITY_LABEL: Record<Cardinality, string> = {
+  'many-to-one': 'Many → One',
+  'one-to-one': 'One → One',
+  'one-to-many': 'One → Many',
+  'many-to-many': 'Many → Many',
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -157,11 +172,8 @@ export function ContextMenu() {
     if (!confirmingDelete) {
       setConfirmingDelete(true);
     } else {
-      const { fromModel, fromColumn, toModel, toColumn } = contextMenu.data;
-      vscode.postMessage({
-        type: 'removeRelationship',
-        payload: { fromModel, fromColumn, toModel, toColumn },
-      });
+      // The stored ends travel with it, so the copy on disk is the one removed (#133).
+      vscode.postMessage(removeRelationshipRequest(contextMenu.data));
       closeContextMenu();
     }
   }, [contextMenu, vscode, closeContextMenu, confirmingDelete]);
@@ -171,26 +183,19 @@ export function ContextMenu() {
     (newCardinality: Cardinality) => {
       if (!contextMenu || contextMenu.type !== 'edge') return;
 
-      const { fromModel, fromColumn, toModel, toColumn } = contextMenu.data;
-      vscode.postMessage({
-        type: 'updateRelationship',
-        payload: { fromModel, fromColumn, toModel, toColumn, cardinality: newCardinality },
-      });
+      vscode.postMessage(updateCardinalityRequest(contextMenu.data, newCardinality));
       setCardinalityOpen(false);
       closeContextMenu();
     },
     [contextMenu, vscode, closeContextMenu],
   );
 
-  // Handle swap cardinality (flip direction)
+  // Handle ⇄: flip the many side of a many-to-one, or swap the ends of a
+  // one-to-one / many-to-many (an edit with the role kept) (#133).
   const handleSwapCardinality = useCallback(() => {
     if (!contextMenu || contextMenu.type !== 'edge') return;
 
-    const { fromModel, fromColumn, toModel, toColumn, cardinality } = contextMenu.data;
-    vscode.postMessage({
-      type: 'updateRelationship',
-      payload: { fromModel, fromColumn, toModel, toColumn, cardinality: swapCardinality(cardinality) },
-    });
+    vscode.postMessage(relationshipSwap(contextMenu.data).request);
     closeContextMenu();
   }, [contextMenu, vscode, closeContextMenu]);
 
@@ -198,7 +203,7 @@ export function ContextMenu() {
   const handleEditClick = useCallback(() => {
     if (!contextMenu || contextMenu.type !== 'edge') return;
 
-    const { fromModel, fromColumn, toModel, toColumn, cardinality, role } = contextMenu.data;
+    const { fromModel, fromColumn, toModel, toColumn, cardinality, role, stored } = contextMenu.data;
     const editData: FkDialogEditData = {
       fromModel,
       fromColumn,
@@ -206,6 +211,7 @@ export function ContextMenu() {
       toColumn,
       cardinality,
       ...(role ? { role } : {}),
+      ...(stored ? { stored } : {}),
     };
     openFkDialogForEdit(editData);
     closeContextMenu();
@@ -361,8 +367,8 @@ export function ContextMenu() {
   const isEditable = !isReadOnly && !isGhostEdge;
 
   // Get current cardinality label
-  const currentOption = CARDINALITY_OPTIONS.find((opt) => opt.value === edge.cardinality);
-  const cardinalityLabel = currentOption?.label ?? edge.cardinality;
+  const cardinalityLabel = CARDINALITY_LABEL[edge.cardinality] ?? edge.cardinality;
+  const swap = relationshipSwap(edge);
 
   const displayX = adjustedPosition?.x ?? contextMenu.x;
   const displayY = adjustedPosition?.y ?? contextMenu.y;
@@ -459,8 +465,8 @@ export function ContextMenu() {
               <button
                 className="context-menu__swap-btn"
                 onClick={handleSwapCardinality}
-                title={`Swap to ${swapCardinality(edge.cardinality).replace(/-/g, ' ')}`}
-                aria-label="Swap cardinality direction"
+                title={swap.title}
+                aria-label={swap.title}
               >
                 &#x21c4;
               </button>

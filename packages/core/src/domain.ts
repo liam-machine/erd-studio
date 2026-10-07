@@ -26,7 +26,8 @@ import type {
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
-import { normaliseRelationshipRole } from './relationships.js';
+import { normaliseRelationshipRole, type RelationshipDiagnostic } from './relationships.js';
+import { normaliseRelationships } from './normaliseRelationships.js';
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.
@@ -208,6 +209,12 @@ export interface BuildUnifiedDomainContext {
   getModelError?: (name: string) => ModelLoadError | null;
   /** Receives repair warnings (dropped entries, defaulted values). Defaults to console.warn. */
   warn?: (message: string) => void;
+  /**
+   * Receives every diagnostic `normaliseRelationships` produced for the
+   * logical stage (duplicates, stored one-to-many, case-only spellings, …),
+   * including the `info` ones that are not passed to `warn`.
+   */
+  onRelationshipDiagnostics?: (diagnostics: RelationshipDiagnostic[]) => void;
 }
 
 /**
@@ -246,7 +253,8 @@ export function buildUnifiedDomain(
     layer,
     description: typeof obj.description === 'string' ? obj.description : '',
     ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
-    logical: parseStageData(obj.logical, format, filePath, ctx.getModel, ctx.getModelError, warn) ?? { ...emptyStage },
+    logical: parseStageData(obj.logical, format, filePath, ctx.getModel, ctx.getModelError, warn, ctx.onRelationshipDiagnostics)
+      ?? { ...emptyStage },
     ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
     viewConfig: globalViewConfig,
   };
@@ -288,6 +296,7 @@ function parseStageData(
   getModel: ((name: string) => SemanticModel | null) | undefined,
   getModelError: ((name: string) => ModelLoadError | null) | undefined,
   warn: (message: string) => void,
+  onDiagnostics: ((diagnostics: RelationshipDiagnostic[]) => void) | undefined,
 ): StageData | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -325,7 +334,6 @@ function parseStageData(
       // Create placeholder models from names
       models = names.map(name => ({ name, columns: [] }));
     }
-    return { models, relationships: mergeLibraryRelationships(models, relationships, filePath, warn) };
   } else {
     // v4 format: inline model objects — each must carry a string name
     models = [];
@@ -339,7 +347,22 @@ function parseStageData(
     }
   }
 
-  return { models, relationships };
+  // One read path for every format (#133). Inline v4 models never carry
+  // library relationships, whatever their objects hold.
+  const library = format === 'v5'
+    ? models
+    : models.map(({ relationships: _relationships, relationshipIssues: _issues, ...model }) => model);
+  const normalised = normaliseRelationships({ models: library, own: relationships, filePath });
+  reportDiagnostics(normalised.diagnostics, warn);
+  onDiagnostics?.(normalised.diagnostics);
+  return { models, relationships: normalised.relationships };
+}
+
+/** Pass a normalisation's errors and warnings (not its `info`) to `warn`. */
+function reportDiagnostics(diagnostics: readonly RelationshipDiagnostic[], warn: (message: string) => void): void {
+  for (const d of diagnostics) {
+    if (d.severity !== 'info') warn(d.message);
+  }
 }
 
 /** The YAML parser's error codes, grouped into the kinds the UI and telemetry use. */
@@ -393,18 +416,10 @@ export function describeModelLoadError(error: ModelLoadError): string {
 }
 
 /**
- * The link a relationship draws: its two column ends in either order, without
- * case (#133). A relationship and the same one read from the other end — a
- * library entry on the many side, a domain copy drawn the other way — share it,
- * so one line is drawn, not two.
+ * Identity of a relationship read in one direction: its four endpoints, in
+ * order, compared without case. Kept for compatibility; to ask whether two
+ * relationships are the same link (either way round) use `linkKey` / `sameLink`.
  */
-function linkKey(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): string {
-  const from = `${rel.fromModel}.${rel.fromColumn}`.toLowerCase();
-  const to = `${rel.toModel}.${rel.toColumn}`.toLowerCase();
-  return from <= to ? `${from}\u0000${to}` : `${to}\u0000${from}`;
-}
-
-/** Identity of a relationship: its four endpoints, compared without case. */
 export function relationshipKey(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): string {
   return [rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()).join('\u0000');
 }
@@ -415,10 +430,10 @@ export function relationshipKey(rel: Pick<Relationship, 'fromModel' | 'fromColum
  * file whose two ends are both in the domain. A relationship is defined once
  * in the library and shown by every domain that holds both models.
  *
- * The domain's own entries keep their order (so moving them into the library
- * changes nothing on the canvas) and the library entries follow. When both
- * define the same endpoints, the library's cardinality wins — it is the one
- * every other domain shows too — and the disagreement is warned about.
+ * A thin wrapper over {@link normaliseRelationships}, kept for API
+ * compatibility: one relationship per link, canonical, with the library's
+ * record winning over the domain file's; every error and warning goes to
+ * `warn`.
  */
 export function mergeLibraryRelationships(
   models: readonly SemanticModel[],
@@ -426,43 +441,9 @@ export function mergeLibraryRelationships(
   filePath = '',
   warn: (message: string) => void = () => { /* silent */ },
 ): Relationship[] {
-  const inDomain = new Set(models.map((m) => m.name.toLowerCase()));
-  const library = new Map<string, Relationship>();
-  for (const model of models) {
-    for (const rel of model.relationships ?? []) {
-      if (!inDomain.has(rel.toModel.toLowerCase())) continue;
-      const full: Relationship = { fromModel: model.name, ...rel };
-      const key = linkKey(full);
-      if (!library.has(key)) library.set(key, full);
-    }
-  }
-  if (library.size === 0) return [...own];
-
-  const merged: Relationship[] = [];
-  const seen = new Set<string>();
-  for (const rel of own) {
-    const key = linkKey(rel);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const shared = library.get(key);
-    // Stored the other way round in the library (#133): the same link, read
-    // from the other end. The library's entry is the one drawn.
-    if (shared && relationshipKey(shared) !== relationshipKey(rel)) {
-      merged.push(shared);
-      continue;
-    }
-    if (shared && shared.cardinality !== rel.cardinality) {
-      warn(
-        `Relationship ${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn} in ${filePath} ` +
-        `is ${rel.cardinality}, but logical-models/ defines it as ${shared.cardinality}; using ${shared.cardinality}`,
-      );
-    }
-    merged.push(shared ? { ...rel, cardinality: shared.cardinality, ...(shared.role ? { role: shared.role } : {}) } : rel);
-  }
-  for (const [key, rel] of library) {
-    if (!seen.has(key)) merged.push(rel);
-  }
-  return merged;
+  const { relationships, diagnostics } = normaliseRelationships({ models, own, filePath });
+  reportDiagnostics(diagnostics, warn);
+  return relationships;
 }
 
 /**

@@ -24,8 +24,8 @@ import {
   altStageShortcut,
   resolveSingleDeleteTarget,
 } from '../lib/keyboardShortcuts';
-import type { ModelFlowNode, AnnotationFlowNode } from '@erd-studio/renderer/editor';
-import type { WebviewMessage, RelationshipKey } from '../../src/types/messages';
+import { relationshipTarget, type ModelFlowNode, type AnnotationFlowNode } from '@erd-studio/renderer/editor';
+import type { WebviewMessage, RelationshipKey, StoredRelationshipEnds } from '../../src/types/messages';
 import type { AnnotationColor } from '../../src/types/semantic';
 
 /** Module-level clipboard for annotation copy/paste (not in Zustand — never drives rendering). */
@@ -41,22 +41,19 @@ function fkEdgeId(r: RelationshipKey): string {
  * Resolve selected edge ids to relationship keys, dropping edges the model
  * batch will cascade (an edge touching a model that is being deleted).
  */
-function selectedEdgesToRelationships(
+export function selectedEdgesToRelationships(
   edgeIds: string[],
-  relationships: RelationshipKey[],
+  relationships: ReadonlyArray<RelationshipKey & { stored?: StoredRelationshipEnds }>,
   deletedModels: string[],
-): RelationshipKey[] {
-  const result: RelationshipKey[] = [];
+): Array<RelationshipKey & { stored?: StoredRelationshipEnds }> {
+  const deleted = new Set(deletedModels.map((m) => m.toLowerCase()));
+  const result: Array<RelationshipKey & { stored?: StoredRelationshipEnds }> = [];
   for (const edgeId of edgeIds) {
     const rel = relationships.find((r) => fkEdgeId(r) === edgeId);
     if (!rel) continue;
-    if (deletedModels.includes(rel.fromModel) || deletedModels.includes(rel.toModel)) continue;
-    result.push({
-      fromModel: rel.fromModel,
-      fromColumn: rel.fromColumn,
-      toModel: rel.toModel,
-      toColumn: rel.toColumn,
-    });
+    if (deleted.has(rel.fromModel.toLowerCase()) || deleted.has(rel.toModel.toLowerCase())) continue;
+    // The ends as drawn plus, when known, as stored on disk (#133).
+    result.push(relationshipTarget(rel));
   }
   return result;
 }

@@ -185,6 +185,11 @@
         "category": "ERD Studio"
       },
       {
+        "command": "erdStudio.repairRelationships",
+        "title": "Repair Relationships…",
+        "category": "ERD Studio"
+      },
+      {
         "command": "erdStudio.resolveDuplicateModel",
         "title": "Give Duplicate Model Its Own Name…",
         "category": "ERD Studio",
@@ -471,6 +476,11 @@
           "group": "1_organise@1"
         },
         {
+          "command": "erdStudio.repairRelationships",
+          "when": "view == erdStudio.modelLibrary",
+          "group": "1_organise@2"
+        },
+        {
           "command": "erdStudio.drawFromDbt",
           "when": "view == erdStudio.domainTree && erdStudio.hasDbtProject",
           "group": "navigation@0"
@@ -626,8 +636,8 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
-    "@erd-studio/core": "0.1.2",
-    "@erd-studio/renderer": "0.1.1",
+    "@erd-studio/core": "0.2.0",
+    "@erd-studio/renderer": "0.2.0",
     "@xyflow/react": "^12.4.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",

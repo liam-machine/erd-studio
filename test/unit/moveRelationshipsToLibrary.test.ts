@@ -518,19 +518,47 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     expect(messages(info)[0]).toMatch(/nothing to move/);
   });
 
-  it('drops the reversed copy when the fact already stores the link', async () => {
-    fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT + [
-      'relationships:',
-      '  - fromColumn: customer_key',
-      '    toModel: dim_customer',
-      '    toColumn: customer_key',
-      '    cardinality: many-to-one',
-      '',
-    ].join('\n'));
+  const FCT_WITH_COPY = FCT + [
+    'relationships:',
+    '  - fromColumn: customer_key   # stored by hand',
+    '    toModel: dim_customer',
+    '    toColumn: customer_key',
+    '    cardinality: many-to-one',
+    '',
+  ].join('\n');
+
+  it('asks which copy to keep when the fact already stores the link without the role — never drops one silently (D12)', async () => {
+    fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT_WITH_COPY);
     acceptModal();
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string }>) =>
+      items.find((i) => i.label.includes('"buyer"'))) as never);
     await run();
+
+    expect(pick).toHaveBeenCalledTimes(1);
+    const labels = (pick.mock.calls[0][0] as unknown as Array<{ label: string }>).map((i) => i.label);
+    expect(labels).toEqual([
+      'fct_order.customer_key → dim_customer.customer_key (many-to-one)',
+      'fct_order.customer_key → dim_customer.customer_key (many-to-one, "buyer")',
+      'Leave as is',
+    ]);
     logicalModelService.invalidateCache();
     expect(logicalModelService.getModel('dim_customer')?.relationships).toBeUndefined();
-    expect(logicalModelService.getModel('fct_order')?.relationships).toHaveLength(1);
+    expect(logicalModelService.getModel('fct_order')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' },
+    ]);
+    // The kept entry is changed in place: its comment stays.
+    expect(fs.readFileSync(logicalModelService.modelPath('fct_order'), 'utf-8')).toContain('customer_key   # stored by hand');
+  });
+
+  it('leaves both copies as they are when the user picks "Leave as is"', async () => {
+    fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT_WITH_COPY);
+    const info = acceptModal();
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string }>) =>
+      items.find((i) => i.label === 'Leave as is')) as never);
+    await run();
+
+    expect(fs.readFileSync(logicalModelService.modelPath('fct_order'), 'utf-8')).toBe(FCT_WITH_COPY);
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(DIM);
+    expect(messages(info)).toContain('Move Relationships to Model Library: nothing was changed.');
   });
 });

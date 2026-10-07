@@ -180,10 +180,14 @@ nothing else — a drafted extra column would show up as drift.
     other model's yml, so every relationship sits with the model holding the foreign key. Every diagram holding both models then draws it, and it is defined once.
   - **Per domain** — otherwise: the project's diagrams already keep their own. Put each one in
     the domain JSON's `logical.relationships` with all five fields (`fromModel`, `fromColumn`,
-    `toModel`, `toColumn`, `cardinality`).
+    `toModel`, `toColumn`, `cardinality`), a `one-to-many` turned round to `many-to-one` there too.
   - Never write one in both places, and never move existing relationships from one place to the
     other yourself — that is the user's choice, made with **ERD Studio: Move Relationships to
     Model Library**, which explains the move and lets them settle conflicts.
+  - A relationship is its two columns, whichever way round: never write the same two columns
+    twice, spell every model and column exactly as its file does, and always write `cardinality`.
+    Then run `check` (verify-and-fix.md section 8) — it finds anything stored twice, saved on the
+    wrong side, pointing at a missing model or column, or unreadable.
 - `viewConfig: {}` (no positions) makes ERD Studio auto-arrange the diagram with its auto layout
   the first time the domain is opened, and save the result. Do not write positions yourself;
   the user can re-run the layout any time with **Layout** in the canvas toolbar or Shift+L.
@@ -191,7 +195,7 @@ nothing else — a drafted extra column would show up as drift.
   them.
 
 If the domain file already exists (a re-run), add new names to `logical.models` and new
-relationships where the project keeps them (skip any already defined in the model library), and
+relationships where the project keeps them (skip any already defined, either way round, in the model library), and
 never touch `viewConfig.positions` — that is the user's layout.
 
 ## Worked example

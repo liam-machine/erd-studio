@@ -47,6 +47,11 @@ export interface FkDialogPrefill {
   toModel: string;
   /** Optional target column — set when user drags to a specific column handle. */
   toColumn?: string;
+  /**
+   * The drag was turned round because the evidence says the other end is the
+   * "many" side (#133); the dialog says so and offers "Swap back".
+   */
+  turnedRound?: boolean;
 }
 
 /** Edit data for FK dialog when editing an existing relationship. */
@@ -58,6 +63,8 @@ export interface FkDialogEditData {
   cardinality: import('../../src/types/semantic').Cardinality;
   /** Optional label, e.g. `ship date`. */
   role?: string;
+  /** The record's ends as stored on disk, sent as the edit's `stored` key (#133). */
+  stored?: import('../../src/types/messages').StoredRelationshipEnds;
 }
 
 export interface EditorState extends CanvasState {

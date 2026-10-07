@@ -265,6 +265,94 @@ describe('relationshipsForAddedModels', () => {
   });
 });
 
+describe('relationshipsForAddedModels — direction and identity (#133, D1)', () => {
+  /** shopYml with the customer test declared on the dimension, pointing back at the fact. */
+  function parentDeclared(): YmlData {
+    const y = shopYml();
+    y.relationshipTests = [
+      { fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id' },
+    ];
+    return y;
+  }
+
+  it('stores a test declared on the dimension on the fact, many-to-one', () => {
+    const t = dbtTestsOf(parentDeclared());
+    const rels = relationshipsForAddedModels([], ['fct_orders', 'dim_customers'], t.relationshipTests, t.unique);
+    expect(rels).toEqual([
+      { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customers', toColumn: 'customer_id', cardinality: 'many-to-one' },
+    ]);
+  });
+
+  it('never marks the dimension key as a foreign key for a parent-declared test', () => {
+    const y = parentDeclared();
+    const draft = buildDbtDraft({ modelNames: ['fct_orders', 'dim_customers'], ymlData: y, libraryHas: () => false });
+    const fct = draft.newModels.find((m) => m.name === 'fct_orders')!;
+    const dim = draft.newModels.find((m) => m.name === 'dim_customers')!;
+    const col = (m: typeof fct, n: string) => m.columns!.find((c) => c.name === n)!;
+    expect(col(dim, 'customer_id').isPrimaryKey).toBe(true);
+    expect(col(dim, 'customer_id').isForeignKey).toBeUndefined();
+    expect(col(fct, 'customer_id').isForeignKey).toBe(true);
+    expect(draft.relationships.every((r) => r.fromModel === 'fct_orders')).toBe(true);
+  });
+
+  it('draws a link tested from both ends once, from the fact', () => {
+    const y = shopYml();
+    y.relationshipTests = [
+      { fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id' },
+      { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customers', toColumn: 'customer_id' },
+    ];
+    const t = dbtTestsOf(y);
+    // Both tests are kept for cardinality — each is read in its own direction.
+    expect(t.relationshipTests).toHaveLength(2);
+    const rels = relationshipsForAddedModels([], ['fct_orders', 'dim_customers'], t.relationshipTests, t.unique);
+    expect(rels).toEqual([
+      { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customers', toColumn: 'customer_id', cardinality: 'many-to-one' },
+    ]);
+  });
+
+  it('skips a link the domain already stores the other way round or in another case', () => {
+    const t = dbtTestsOf(shopYml());
+    const rels = relationshipsForAddedModels(
+      ['dim_customers', 'dim_products'], ['fct_orders'], t.relationshipTests, t.unique,
+      [
+        { fromModel: 'DIM_CUSTOMERS', fromColumn: 'Customer_Id', toModel: 'fct_orders', toColumn: 'customer_id' },
+        { fromModel: 'dim_products', fromColumn: 'product_id', toModel: 'FCT_ORDERS', toColumn: 'PRODUCT_ID' },
+      ],
+    );
+    expect(rels).toEqual([]);
+  });
+
+  it('ignores domain entries without four text ends instead of throwing', () => {
+    const t = dbtTestsOf(shopYml());
+    const junk = [{ fromModel: 'dim_customers' } as unknown as { fromModel: string; fromColumn: string; toModel: string; toColumn: string }];
+    const rels = relationshipsForAddedModels(['dim_customers'], ['fct_orders'], t.relationshipTests, t.unique, junk);
+    expect(rels.map((r) => r.toModel)).toEqual(['dim_customers']);
+  });
+
+  it('narrows only many-to-many, in the test direction', () => {
+    const y = parentDeclared();
+    y.uniqueColumns = new Map();
+    const t = dbtTestsOf(y);
+    // No uniqueness test anywhere: the test itself names dim_customers' column
+    // as referencing the fact's, so that is what a draft can say.
+    expect(relationshipsForAddedModels([], ['fct_orders', 'dim_customers'], t.relationshipTests, t.unique)).toEqual([
+      { fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id', cardinality: 'many-to-one' },
+    ]);
+  });
+
+  it('counts a link tested from both ends as one connection when ranking a scope', () => {
+    const y = shopYml();
+    y.relationshipTests = [
+      ...y.relationshipTests,
+      { fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id' },
+      { fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id' },
+    ];
+    const marts = listDraftScopes({ ...shopInput(), ymlData: y }).find((s) => s.id === 'folder:marts')!;
+    // fct_orders has two links; dim_customers one (not three), dim_products one.
+    expect(marts.modelNames).toEqual(['fct_orders', 'dim_customers', 'dim_products']);
+  });
+});
+
 describe('markDraftKeys', () => {
   it('marks a sole unique column as PK and relationship sources as FK', () => {
     const model = seedModelFromDbt('fct_orders', shopYml())!;
@@ -276,6 +364,24 @@ describe('markDraftKeys', () => {
     expect(col('order_id').isPrimaryKey).toBe(true);
     expect(col('customer_id').isForeignKey).toBe(true);
     expect(col('amount').isPrimaryKey).toBeUndefined();
+  });
+
+  it('never marks a primary key as a foreign key, and reads relationships in their stored direction', () => {
+    const y = shopYml();
+    const dim = seedModelFromDbt('dim_customers', y)!;
+    const marked = markDraftKeys(dim, dbtTestsOf(y).unique, [
+      // A one-to-many read from the dimension: stored on the fact.
+      { fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id', cardinality: 'one-to-many' },
+      // A shared-key one-to-one leaving from the dimension's own key.
+      { fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'dim_products', toColumn: 'product_id', cardinality: 'one-to-one' },
+    ]);
+    const col = marked.columns!.find((c) => c.name === 'customer_id')!;
+    expect(col.isPrimaryKey).toBe(true);
+    expect(col.isForeignKey).toBeUndefined();
+    const fct = markDraftKeys(seedModelFromDbt('fct_orders', y)!, dbtTestsOf(y).unique, [
+      { fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id', cardinality: 'one-to-many' },
+    ]);
+    expect(fct.columns!.find((c) => c.name === 'customer_id')!.isForeignKey).toBe(true);
   });
 
   it('marks no PK when a composite key exists', () => {

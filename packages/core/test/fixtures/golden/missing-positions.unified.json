@@ -271,49 +271,119 @@
         "fromColumn": "task_key",
         "toModel": "dim_task",
         "toColumn": "task_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 0
+        },
+        "stored": {
+          "fromModel": "fct_task_event",
+          "fromColumn": "task_key",
+          "toModel": "dim_task",
+          "toColumn": "task_key"
+        }
       },
       {
         "fromModel": "dim_task",
         "fromColumn": "project_key",
         "toModel": "dim_project",
         "toColumn": "project_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 1
+        },
+        "stored": {
+          "fromModel": "dim_task",
+          "fromColumn": "project_key",
+          "toModel": "dim_project",
+          "toColumn": "project_key"
+        }
       },
       {
         "fromModel": "fct_task_event",
         "fromColumn": "project_key",
         "toModel": "dim_project",
         "toColumn": "project_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 2
+        },
+        "stored": {
+          "fromModel": "fct_task_event",
+          "fromColumn": "project_key",
+          "toModel": "dim_project",
+          "toColumn": "project_key"
+        }
       },
       {
         "fromModel": "dim_project",
         "fromColumn": "parent_project_key",
         "toModel": "dim_project",
         "toColumn": "project_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 3
+        },
+        "stored": {
+          "fromModel": "dim_project",
+          "fromColumn": "parent_project_key",
+          "toModel": "dim_project",
+          "toColumn": "project_key"
+        }
       },
       {
         "fromModel": "fct_order",
         "fromColumn": "project_key",
         "toModel": "dim_project",
         "toColumn": "project_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 4
+        },
+        "stored": {
+          "fromModel": "fct_order",
+          "fromColumn": "project_key",
+          "toModel": "dim_project",
+          "toColumn": "project_key"
+        }
       },
       {
         "fromModel": "fct_task_event",
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 5
+        },
+        "stored": {
+          "fromModel": "fct_task_event",
+          "fromColumn": "customer_key",
+          "toModel": "dim_customer",
+          "toColumn": "customer_key"
+        }
       },
       {
         "fromModel": "fct_order",
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 6
+        },
+        "stored": {
+          "fromModel": "fct_order",
+          "fromColumn": "customer_key",
+          "toModel": "dim_customer",
+          "toColumn": "customer_key"
+        }
       }
     ]
   },

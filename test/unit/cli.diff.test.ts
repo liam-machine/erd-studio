@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { relationshipKey } from '@erd-studio/core';
+import { linkKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
 import { fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
@@ -226,7 +226,7 @@ describe('fixesFromPlan — a new relationship is written on its many side (#133
         { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-many' },
       ],
     };
-    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Set(), addToLibrary: true });
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Map(), addToLibrary: true });
     expect(fix).toMatchObject({
       kind: 'add-relationship', model: 'fct_order', column: 'customer_key', file: '.erd-studio/logical-models/fct_order.yml',
       relationship: { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
@@ -263,10 +263,84 @@ describe('fixesFromPlan', () => {
 
   it('names the from-model yml for a relationship stored in the model library (#126)', () => {
     const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
-      inLibrary: new Set([relationshipKey({ fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' })]),
+      inLibrary: new Map([[linkKey({ fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' }), 'f']]),
       addToLibrary: true,
     });
     expect(fixes.find((f) => f.kind === 'set-cardinality')).toMatchObject({ file: '.erd-studio/logical-models/f.yml' });
+  });
+
+  it('finds a library relationship by link, whichever way round and in whichever file it is stored (#133)', () => {
+    // Stored the old way, on its "one" side, in m's file.
+    const removePlan: SyncPlan = {
+      ...plan, columns: [],
+      relationships: [
+        { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k', discrepancyStatus: 'extra', groundTruth: 'physical', action: 'remove-relationship-from-logical', sourceCardinality: 'many-to-one' },
+      ],
+    };
+    const [fix] = fixesFromPlan(removePlan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
+      inLibrary: new Map([[linkKey({ fromModel: 'm', fromColumn: 'k', toModel: 'f', toColumn: 'k' }), 'm']]),
+      addToLibrary: true,
+    });
+    expect(fix).toMatchObject({ kind: 'remove-relationship', file: '.erd-studio/logical-models/m.yml' });
+  });
+});
+
+describe('fixesFromPlan — set-cardinality is written as it should be stored (D10)', () => {
+  const toOneToMany: SyncPlan = {
+    generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+    modelContext: {}, models: [], columns: [], requiresCompile: false,
+    relationships: [
+      { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', discrepancyStatus: 'cardinality-mismatch', groundTruth: 'physical', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many' },
+    ],
+  };
+  const key = linkKey({ fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' });
+
+  it('a one-to-many target is turned round to many-to-one and moves to the other model\'s file', () => {
+    const [fix] = fixesFromPlan(toOneToMany, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
+      inLibrary: new Map([[key, 'fct_order']]), addToLibrary: true,
+    });
+    expect(fix).toMatchObject({
+      kind: 'set-cardinality',
+      model: 'dim_customer', column: 'customer_key',
+      relationship: { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' },
+      // Read in the direction of `relationship`: the logical side is one-to-many from dim_customer.
+      from: 'one-to-many', to: 'many-to-one',
+      file: '.erd-studio/logical-models/dim_customer.yml',
+      movesFrom: '.erd-studio/logical-models/fct_order.yml',
+    });
+    expect(fix.explain).toMatch(/take it out of \.erd-studio\/logical-models\/fct_order\.yml and add it to \.erd-studio\/logical-models\/dim_customer\.yml/);
+  });
+
+  it('in a domain file it stays in that file, turned round', () => {
+    const [fix] = fixesFromPlan(toOneToMany, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
+      inLibrary: new Map(), addToLibrary: false,
+    });
+    expect(fix).toMatchObject({
+      relationship: { fromModel: 'dim_customer', toModel: 'fct_order', cardinality: 'many-to-one' },
+      to: 'many-to-one', file: '.erd-studio/silver/d.json',
+    });
+    expect(fix.movesFrom).toBeUndefined();
+    expect(fix.explain).toMatch(/replacing the old entry/);
+  });
+
+  it('never tells anyone to write one-to-many', () => {
+    for (const home of [{ inLibrary: new Map([[key, 'fct_order']]), addToLibrary: true }, { inLibrary: new Map<string, string>(), addToLibrary: false }]) {
+      const fixes = fixesFromPlan(toOneToMany, '.erd-studio/silver/d.json', '.erd-studio', [], [], home);
+      for (const f of fixes) {
+        expect(f.to).not.toBe('one-to-many');
+        expect(f.relationship?.cardinality).not.toBe('one-to-many');
+      }
+    }
+  });
+
+  it('a non-turning change keeps the ends and the file', () => {
+    const plan: SyncPlan = { ...toOneToMany, relationships: [{ ...toOneToMany.relationships[0], targetCardinality: 'one-to-one' }] };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Map([[key, 'fct_order']]), addToLibrary: true });
+    expect(fix).toMatchObject({
+      model: 'fct_order', from: 'many-to-one', to: 'one-to-one', file: '.erd-studio/logical-models/fct_order.yml',
+      relationship: { fromModel: 'fct_order', toModel: 'dim_customer', cardinality: 'one-to-one' },
+    });
+    expect(fix.movesFrom).toBeUndefined();
   });
 });
 
@@ -351,6 +425,9 @@ describe('end to end: inventory → logical model → diff exits 0', () => {
     expect(d.counts.matchedRelationships).toBe(inventory.relationships.length);
     // Only STRING stand-ins for columns dbt has no type for may remain, and only as advisories.
     for (const f of d.fixes) { expect(f).toMatchObject({ severity: 'advisory', kind: 'set-type', from: 'STRING', to: '' }); }
+    // What the skill's recipe writes passes the relationship checks too (#133).
+    expect(d.integrity).toEqual([]);
+    expect((await run(['check', '--strict', '--json'], root)).code).toBe(0);
 
     // --all agrees, and --strict turns advisories into blockers.
     expect((await run(['diff', '--all', '--json'], root)).code).toBe(0);
@@ -387,6 +464,10 @@ describe('end to end, relationships in the model library (#126): inventory → l
     expect(d.fixes.filter((f) => f.severity === 'blocking')).toEqual([]);
     expect(diff.code).toBe(0);
     expect(d.counts.matchedRelationships).toBe(inventory.relationships.length);
+    expect(d.integrity).toEqual([]);
+    const check = await run(['check', '--strict', '--json'], root);
+    expect(check.code).toBe(0);
+    expect(JSON.parse(check.out)).toMatchObject({ mode: 'library', findings: [] });
 
     // Drift in the library is caught, and the fix names the model file, not the domain.
     const dropped = canonicalRelationship(inventory.relationships[0]);

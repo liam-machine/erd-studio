@@ -96,14 +96,34 @@
         "fromColumn": "customer_ref",
         "toModel": "raw_customers",
         "toColumn": "customer_ref",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 0
+        },
+        "stored": {
+          "fromModel": "raw_orders",
+          "fromColumn": "customer_ref",
+          "toModel": "raw_customers",
+          "toColumn": "customer_ref"
+        }
       },
       {
         "fromModel": "raw_refunds",
         "fromColumn": "order_line_id",
         "toModel": "raw_orders",
         "toColumn": "order_line_id",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 1
+        },
+        "stored": {
+          "fromModel": "raw_refunds",
+          "fromColumn": "order_line_id",
+          "toModel": "raw_orders",
+          "toColumn": "order_line_id"
+        }
       }
     ],
     "viewConfig": {
@@ -150,7 +170,8 @@
     "positionDraggable": true,
     "stubColumns": [
       "raw_refunds"
-    ]
+    ],
+    "relationshipHome": "domain"
   },
   "welcomeDismissed": false
 }

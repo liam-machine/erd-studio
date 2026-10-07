@@ -1,16 +1,27 @@
 /**
  * A dragged relationship points from the column that refers to a key at the
  * key (issue #133), so the drag that starts on a dimension's key still opens
- * the dialog with the fact as "from" — the many side, which stores it.
+ * the dialog with the fact as "from" — the many side, which stores it. The
+ * webview helper is a thin wrapper over core's `resolveDirection`: it turns a
+ * drag round only on certain or likely evidence, and reads only the
+ * *declared* foreign-key flag, never the FK badge relationships set (D2).
  */
 
 import { describe, it, expect } from 'vitest';
 
-import { isReferencedKey, orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
+import {
+  directionFor,
+  isReferencedKey,
+  orientDrag,
+  orientDraggedRelationship,
+} from '../../webview/lib/relationshipDirection';
 
-const col = (name: string, keys: { pk?: boolean; nk?: boolean; fk?: boolean } = {}) => ({
+/** `fk` is a foreign key the model file declares (the badge is set too, as the host does). */
+const col = (name: string, keys: { pk?: boolean; nk?: boolean; fk?: boolean; badge?: boolean } = {}) => ({
   name, dataType: 'string', description: '',
-  isPrimaryKey: keys.pk ?? false, isNaturalKey: keys.nk ?? false, isForeignKey: keys.fk ?? false,
+  isPrimaryKey: keys.pk ?? false, isNaturalKey: keys.nk ?? false,
+  isForeignKey: (keys.fk || keys.badge) ?? false,
+  ...(keys.fk ? { isForeignKeyDeclared: true } : {}),
 });
 const MODELS = [
   { name: 'dim_customer', columns: [col('customer_key', { pk: true }), col('customer_code', { nk: true })] },
@@ -80,5 +91,90 @@ describe('orientDraggedRelationship (#133)', () => {
     expect(orientDraggedRelationship(noTarget, MODELS)).toBe(noTarget);
     const unknown = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'nope' };
     expect(orientDraggedRelationship(unknown, MODELS)).toBe(unknown);
+  });
+});
+
+describe('orientDrag — evidence, never drag order (#133)', () => {
+  it('reports that it turned a drag round, and why', () => {
+    const { prefill, turned, verdict } = orientDrag(
+      { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_daily', toColumn: 'customer_key' },
+      [...MODELS, FCT_GRAIN],
+    );
+    expect(turned).toBe(true);
+    expect(prefill.fromModel).toBe('fct_daily');
+    expect(verdict?.confidence).toBe('certain');
+    expect(verdict?.reasons.join(' ')).toMatch(/primary key/);
+  });
+
+  it('a likely verdict (one end unknown) still turns the drag round', () => {
+    const { turned, verdict } = orientDrag(
+      { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key' },
+      MODELS,
+    );
+    expect(turned).toBe(true);
+    expect(verdict?.confidence).toBe('likely');
+  });
+
+  it('an ambiguous drag (no keys at all) is left as dragged, whichever end it starts on', () => {
+    const plain = [
+      { name: 'a', columns: [col('x')] },
+      { name: 'b', columns: [col('y')] },
+    ];
+    const ab = orientDrag({ fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'y' }, plain);
+    const ba = orientDrag({ fromModel: 'b', fromColumn: 'y', toModel: 'a', toColumn: 'x' }, plain);
+    expect(ab.turned).toBe(false);
+    expect(ba.turned).toBe(false);
+    expect(ab.verdict?.confidence).toBe('ambiguous');
+    // The verdict itself does not depend on which end the drag started on.
+    expect(ab.verdict).toEqual(ba.verdict);
+  });
+
+  it('the FK badge alone is not evidence (D2): a wrongly drawn relationship cannot confirm itself', () => {
+    // dim_customer.customer_key carries the FK badge only because some
+    // relationship was drawn from it; it is still the dimension's whole key.
+    const models = [
+      { name: 'dim_customer', columns: [col('customer_key', { pk: true, badge: true })] },
+      { name: 'fct_order', columns: [col('order_key', { pk: true }), col('customer_key')] },
+    ];
+    const { prefill, turned } = orientDrag(
+      { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key' },
+      models,
+    );
+    expect(turned).toBe(true);
+    expect(prefill.fromModel).toBe('fct_order');
+    expect(isReferencedKey({ isPrimaryKey: true, isNaturalKey: false })).toBe(true);
+  });
+
+  it('dbt evidence decides when keys say nothing (likely)', () => {
+    const models = [
+      { name: 'customers', columns: [{ ...col('id'), dbtEvidence: { unique: true } }] },
+      { name: 'orders', columns: [{ ...col('customer_id'), dbtEvidence: { relationshipsTest: true } }] },
+    ];
+    const verdict = directionFor(models, { fromModel: 'customers', fromColumn: 'id', toModel: 'orders', toColumn: 'customer_id' });
+    expect(verdict?.confidence).toBe('likely');
+    expect(verdict?.from.model).toBe('orders');
+    expect(orientDraggedRelationship(
+      { fromModel: 'customers', fromColumn: 'id', toModel: 'orders', toColumn: 'customer_id' },
+      models,
+    ).fromModel).toBe('orders');
+  });
+
+  it('keys and dbt disagreeing is ambiguous with a conflict, and the drag is left alone', () => {
+    const models = [
+      { name: 'dim_customer', columns: [{ ...col('customer_key', { pk: true }), dbtEvidence: { unique: false } }] },
+      { name: 'fct_order', columns: [col('customer_key')] },
+    ];
+    const { turned, verdict } = orientDrag(
+      { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key' },
+      models,
+    );
+    expect(verdict?.confidence).toBe('ambiguous');
+    expect(verdict?.conflict).toBe(true);
+    expect(turned).toBe(false);
+  });
+
+  it('finds models without case', () => {
+    expect(directionFor(MODELS, { fromModel: 'DIM_CUSTOMER', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key' }))
+      .toBeDefined();
   });
 });

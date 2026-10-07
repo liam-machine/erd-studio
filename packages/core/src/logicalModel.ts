@@ -7,10 +7,10 @@
  * same file the same way.
  */
 
-import { parseDocument, isAlias, isMap, isPair, isScalar, isSeq, visit } from 'yaml';
+import { LineCounter, parseDocument, isAlias, isMap, isPair, isScalar, isSeq, visit } from 'yaml';
 import type { Alias, Document, Node, Pair } from 'yaml';
 
-import type { Cardinality, ColumnDef, ModelRelationship, SemanticModel } from './types/semantic.js';
+import type { Cardinality, ColumnDef, ModelRelationship, RelationshipReadIssue, SemanticModel } from './types/semantic.js';
 import { readMeta } from './meta.js';
 import { checkLimit } from './limits.js';
 import { normaliseRelationshipRole } from './relationships.js';
@@ -169,13 +169,13 @@ export function parseLogicalModelTextWithUsage(
   const { maxNodes = Infinity, maxChars = Infinity } = opts;
   checkLimit('parseLogicalModelText', 'maxNodes', maxNodes);
   checkLimit('parseLogicalModelText', 'maxChars', maxChars);
-  const { raw, state } = parseModelFile(text, maxNodes, maxChars);
+  const { raw, state, relationshipLine } = parseModelFile(text, maxNodes, maxChars);
   const nodes = maxNodes === Infinity ? 0 : maxNodes - state.remaining;
   const chars = maxChars === Infinity ? 0 : maxChars - state.remainingChars;
   if (!raw || raw.name === undefined || raw.name === null || raw.name === '') {
     return { model: null, nodes, chars };
   }
-  return { model: yamlToModel(raw, fallbackName), nodes, chars };
+  return { model: yamlToModel(raw, fallbackName, relationshipLine), nodes, chars };
 }
 
 /**
@@ -230,8 +230,9 @@ function parseModelFile(
   content: string,
   maxNodes: number,
   maxChars: number,
-): { raw: YamlModel | null; state: ToPlainState } {
-  const doc = parseDocument(content);
+): { raw: YamlModel | null; state: ToPlainState; relationshipLine: (index: number) => number | undefined } {
+  const lineCounter = new LineCounter();
+  const doc = parseDocument(content, { lineCounter });
   if (doc.errors.length > 0) {
     throw doc.errors[0];
   }
@@ -243,10 +244,16 @@ function parseModelFile(
     maxChars,
   };
   const raw = toPlain(doc, doc.contents, state);
+  /** 1-based line of entry `index` of a literal `relationships:` sequence. */
+  const relationshipLine = (index: number): number | undefined => {
+    const seq = isMap(doc.contents) ? doc.contents.get('relationships', true) : undefined;
+    const offset = isSeq(seq) ? (seq.items[index] as Node | undefined)?.range?.[0] : undefined;
+    return offset === undefined ? undefined : lineCounter.linePos(offset).line;
+  };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { raw: null, state };
+    return { raw: null, state, relationshipLine };
   }
-  return { raw: raw as YamlModel, state };
+  return { raw: raw as YamlModel, state, relationshipLine };
 }
 
 /** Convert a node tree to plain JS, preserving scalar source text for non-string values. */
@@ -322,7 +329,11 @@ function scalarValue(node: { value: unknown; source?: string }): unknown {
   return node.source ?? String(v);
 }
 
-function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
+function yamlToModel(
+  raw: YamlModel,
+  fallbackName: string,
+  relationshipLine: (index: number) => number | undefined = () => undefined,
+): SemanticModel {
   const str = (v: unknown): string | undefined =>
     v === undefined || v === null ? undefined : String(v);
   const bool = (v: unknown): boolean =>
@@ -376,8 +387,9 @@ function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
       });
   }
 
-  const relationships = readRelationships(raw.relationships);
+  const { relationships, issues } = readRelationships(raw.relationships, model.name, relationshipLine);
   if (relationships.length > 0) model.relationships = relationships;
+  if (issues.length > 0) model.relationshipIssues = issues;
 
   return model;
 }
@@ -386,28 +398,61 @@ const CARDINALITIES: ReadonlySet<string> = new Set<Cardinality>(['many-to-one', 
 
 /**
  * A model file's `relationships:` list (issue #126). An entry without the three
- * string endpoints is skipped; an unrecognised cardinality reads as
- * many-to-one, as it does in a domain file.
+ * string endpoints is skipped; an unrecognised or missing cardinality reads as
+ * many-to-one, as it does in a domain file. Every entry not read exactly as
+ * written is reported in `issues` (finding REL008), so nothing is dropped
+ * silently — and a writer can tell an entry it must leave alone.
  */
-function readRelationships(value: unknown): ModelRelationship[] {
-  if (!Array.isArray(value)) return [];
+function readRelationships(
+  value: unknown,
+  modelName: string,
+  lineOf: (index: number) => number | undefined,
+): { relationships: ModelRelationship[]; issues: RelationshipReadIssue[] } {
   const relationships: ModelRelationship[] = [];
-  for (const entry of value) {
+  const issues: RelationshipReadIssue[] = [];
+  if (!Array.isArray(value)) return { relationships, issues };
+  value.forEach((entry, index) => {
+    const issue = (reason: RelationshipReadIssue['reason'], skipped: boolean, message: string): void => {
+      const line = lineOf(index);
+      issues.push({ index, reason, skipped, ...(line !== undefined ? { line } : {}), message });
+    };
     const r = entry as Record<string, unknown> | null;
-    if (!r || typeof r !== 'object' || Array.isArray(r)) continue;
+    if (!r || typeof r !== 'object' || Array.isArray(r)) {
+      issue('not-a-mapping', true, `Relationship entry ${index + 1} of ${modelName} is not a mapping and was skipped`);
+      return;
+    }
     const { fromColumn, toModel, toColumn, cardinality } = r;
-    if (typeof fromColumn !== 'string' || typeof toModel !== 'string' || typeof toColumn !== 'string') continue;
-    if (!fromColumn || !toModel || !toColumn) continue;
+    const missing = (['fromColumn', 'toModel', 'toColumn'] as const).filter((key) => typeof r[key] !== 'string' || r[key] === '');
+    if (missing.length > 0) {
+      issue('missing-endpoint', true, `Relationship entry ${index + 1} of ${modelName} has no ${missing.join(', ')} and was skipped`);
+      return;
+    }
+    if (r.fromModel !== undefined) {
+      const named = typeof r.fromModel === 'string' ? ` (${JSON.stringify(r.fromModel)})` : '';
+      issue('stray-from-model', false,
+        `Relationship entry ${index + 1} of ${modelName} has a fromModel key${named}; a model file's relationships always leave ${modelName}`);
+    }
+    let read: Cardinality = 'many-to-one';
+    if (typeof cardinality === 'string' && CARDINALITIES.has(cardinality)) {
+      read = cardinality as Cardinality;
+    } else if (cardinality === undefined || cardinality === null) {
+      issue('missing-cardinality', false, `Relationship entry ${index + 1} of ${modelName} has no cardinality; read as many-to-one`);
+    } else {
+      issue('unknown-cardinality', false,
+        `Relationship entry ${index + 1} of ${modelName} has cardinality ${JSON.stringify(cardinality)}, which is not one of ` +
+        'many-to-one, one-to-one, one-to-many or many-to-many; read as many-to-one');
+    }
+    if (r.role !== undefined && r.role !== null && typeof r.role !== 'string') {
+      issue('invalid-role', false, `Relationship entry ${index + 1} of ${modelName} has a role that is not text; it was ignored`);
+    }
     const role = normaliseRelationshipRole(r.role);
     relationships.push({
-      fromColumn,
-      toModel,
-      toColumn,
-      cardinality: typeof cardinality === 'string' && CARDINALITIES.has(cardinality)
-        ? cardinality as Cardinality
-        : 'many-to-one',
+      fromColumn: fromColumn as string,
+      toModel: toModel as string,
+      toColumn: toColumn as string,
+      cardinality: read,
       ...(role ? { role } : {}),
     });
-  }
-  return relationships;
+  });
+  return { relationships, issues };
 }

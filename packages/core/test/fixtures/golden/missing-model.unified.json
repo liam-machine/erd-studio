@@ -46,14 +46,34 @@
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "many-to-one"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 0
+        },
+        "stored": {
+          "fromModel": "dim_missing",
+          "fromColumn": "customer_key",
+          "toModel": "dim_customer",
+          "toColumn": "customer_key"
+        }
       },
       {
         "fromModel": "broken",
         "fromColumn": "customer_key",
         "toModel": "dim_customer",
         "toColumn": "customer_key",
-        "cardinality": "one-to-one"
+        "cardinality": "one-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 1
+        },
+        "stored": {
+          "fromModel": "broken",
+          "fromColumn": "customer_key",
+          "toModel": "dim_customer",
+          "toColumn": "customer_key"
+        }
       }
     ]
   },

@@ -16,9 +16,16 @@ import * as path from 'path';
 import { Document, parseDocument, isAlias, isMap, isPair, isScalar, isSeq } from 'yaml';
 import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
 
-import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
-import type { ModelLoadErrorKind } from '@erd-studio/core';
-import type { ColumnDef, SemanticModel } from '../types/semantic';
+import {
+  LOGICAL_MODELS_DIR,
+  RATIONALE_KEYS,
+  classifyModelLoadError,
+  linkKey,
+  normaliseRelationshipRole,
+  parseLogicalModelText,
+} from '@erd-studio/core';
+import type { CheckLibraryModel, CheckUnreadableModel, ModelLoadErrorKind } from '@erd-studio/core';
+import type { Cardinality, ColumnDef, ModelRelationship, SemanticModel } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
@@ -96,8 +103,26 @@ export interface ModelFileEntry {
   readonly shadowedBy?: string;
 }
 
-/** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
-const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns', 'relationships'] as const;
+/**
+ * Keys ERD Studio owns on a model file. Unknown keys are left untouched.
+ * `relationships` is owned too, but synced entry by entry
+ * (`syncRelationships`), never through the generic key sync.
+ */
+const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns'] as const;
+
+/** The four cardinalities a relationship entry may hold. */
+const CARDINALITIES: ReadonlySet<string> = new Set<Cardinality>(['many-to-one', 'one-to-one', 'one-to-many', 'many-to-many']);
+
+/** Options for rendering a model file (`serializeModel`, `serializeModelAt`, `saveModel`). */
+export interface SerializeModelOptions {
+  /**
+   * Indices into `model.relationships` of the entries an edit wrote (see
+   * `planRelationshipCommit`'s `written`). Each is rewritten in full — a
+   * cardinality the reader could not read, a stray `fromModel:` key — where
+   * every other entry keeps whatever it does not need to change.
+   */
+  relationshipTargets?: readonly number[];
+}
 const COLUMN_KEYS = [
   'name', 'dataType', 'description',
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
@@ -383,6 +408,37 @@ export class LogicalModelService {
   }
 
   /**
+   * Every model file as `checkRelationships` (`@erd-studio/core`) takes it:
+   * the readable ones with their file, and the ones that exist but cannot be
+   * read. A shadowed duplicate is skipped, as everywhere else. `fileName`
+   * names a file in findings (e.g. project-relative); the default is its path.
+   * This is the one lookup the canvas, its notification and Repair
+   * Relationships… share, so all three see the same findings (D11).
+   */
+  relationshipCheckModels(fileName: (filePath: string) => string = (p) => p): {
+    libraryModels: CheckLibraryModel[];
+    unreadableModels: CheckUnreadableModel[];
+  } {
+    const libraryModels: CheckLibraryModel[] = [];
+    const unreadableModels: CheckUnreadableModel[] = [];
+    for (const entry of this.listModelFiles()) {
+      if (entry.shadowedBy) continue;
+      try {
+        const model = this.readModelFile(entry.filePath, entry.name);
+        if (model) libraryModels.push({ model, file: fileName(entry.filePath) });
+      } catch (err) {
+        const error = describeModelFileError(entry.name, entry.filePath, err);
+        unreadableModels.push({
+          name: entry.name,
+          file: fileName(entry.filePath),
+          ...(error.line !== undefined ? { line: error.line } : {}),
+        });
+      }
+    }
+    return { libraryModels, unreadableModels };
+  }
+
+  /**
    * List model names (without reading full content), each once even when a
    * name is present in more than one folder.
    */
@@ -441,10 +497,10 @@ export class LogicalModelService {
    * uses `serializeModel()`), so the yml change is undoable together with the
    * domain change. Use this for non-editor callers (migration, seeding, CLI).
    */
-  saveModel(model: SemanticModel, folder?: string): void {
+  saveModel(model: SemanticModel, folder?: string, options: SerializeModelOptions = {}): void {
     const filePath = this.modelPath(model.name, folder);
     this.ensureDir(filePath);
-    this.writeAtomic(filePath, this.renderModel(model, filePath));
+    this.writeAtomic(filePath, this.renderModel(model, filePath, options));
   }
 
   /**
@@ -460,8 +516,8 @@ export class LogicalModelService {
    * file does not exist yet, so without it the document would be regenerated
    * from scratch and everything hand-written in the old file would be lost.
    */
-  serializeModel(model: SemanticModel, fromName?: string): string {
-    return this.renderModel(model, this.modelPath(fromName ?? model.name));
+  serializeModel(model: SemanticModel, fromName?: string, options: SerializeModelOptions = {}): string {
+    return this.renderModel(model, this.modelPath(fromName ?? model.name), options);
   }
 
   /**
@@ -470,8 +526,8 @@ export class LogicalModelService {
    * the file that WINS a duplicated name, so the copy that is ignored can only
    * be addressed by its path.
    */
-  serializeModelAt(model: SemanticModel, sourcePath: string): string {
-    return this.renderModel(model, sourcePath);
+  serializeModelAt(model: SemanticModel, sourcePath: string, options: SerializeModelOptions = {}): string {
+    return this.renderModel(model, sourcePath, options);
   }
 
   /**
@@ -479,10 +535,10 @@ export class LogicalModelService {
    * `filePath` edited in place when it can be parsed, otherwise a fresh
    * document generated from the model.
    */
-  private renderModel(model: SemanticModel, filePath: string): string {
+  private renderModel(model: SemanticModel, filePath: string, options: SerializeModelOptions = {}): string {
     const doc = this.loadEditableDocument(filePath) ?? new Document(this.modelToPlain(model));
     if (isMap(doc.contents)) {
-      this.applyModel(doc, doc.contents, model);
+      this.applyModel(doc, doc.contents, model, options, filePath);
     }
     return doc.toString(STRINGIFY_OPTIONS);
   }
@@ -734,8 +790,15 @@ export class LogicalModelService {
    * Apply a model onto an existing document, touching only managed keys
    * whose value differs. Keys ERD Studio does not know about are preserved.
    */
-  private applyModel(doc: Document, root: YAMLMap, model: SemanticModel): void {
+  private applyModel(
+    doc: Document,
+    root: YAMLMap,
+    model: SemanticModel,
+    options: SerializeModelOptions,
+    filePath: string,
+  ): void {
     this.syncMap(doc, root, this.modelToPlain(model), MODEL_KEYS);
+    this.syncRelationships(doc, root, model, new Set(options.relationshipTargets ?? []), filePath);
   }
 
   /**
@@ -764,10 +827,6 @@ export class LogicalModelService {
       }
       if (key === 'columns' && isSeq(existing) && Array.isArray(value)) {
         this.syncColumns(doc, existing, value as Record<string, unknown>[]);
-        continue;
-      }
-      if (key === 'relationships' && isSeq(existing) && this.sameMetaValue(doc, existing, value)) {
-        // Unchanged: leave the list (and its comments and flow style) alone.
         continue;
       }
       if (key === 'meta' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {
@@ -896,6 +955,212 @@ export class LogicalModelService {
       }
       return doc.createNode(col);
     });
+  }
+
+  /**
+   * Bring a model file's `relationships:` list in line with
+   * `model.relationships`, entry by entry (issue #133, R6) — never by
+   * re-emitting the list:
+   *
+   * - an entry the reader could not read (not a mapping, an endpoint missing)
+   *   is kept exactly as written, wherever it is;
+   * - a readable entry is matched to a wanted one by link (`linkKey`, from =
+   *   this file's model) and occurrence, and only the fields whose value
+   *   differs from what the reader made of it are written — so comments,
+   *   unknown keys, quoting and a cardinality the reader defaulted
+   *   (`one_to_many` read as many-to-one) all stay, unless the entry is one
+   *   of `targets` (the one an edit wrote), which is written in full;
+   * - a readable entry no longer wanted is removed; a new one is appended.
+   *
+   * An entry an edit targets that cannot be edited in place (an alias, say)
+   * is refused with the file and the entry named.
+   */
+  private syncRelationships(
+    doc: Document,
+    root: YAMLMap,
+    model: SemanticModel,
+    targets: ReadonlySet<number>,
+    filePath: string,
+  ): void {
+    const desired = (model.relationships ?? []).map((rel) => this.relationshipToPlain(rel));
+    const file = path.basename(filePath);
+    const existing = root.get('relationships', true);
+    if (existing === undefined || (isScalar(existing) && existing.value === null)) {
+      if (desired.length > 0) root.set('relationships', doc.createNode(desired));
+      return;
+    }
+    if (!isSeq(existing)) {
+      // Nothing was read from it, so nothing an edit could have changed.
+      if (desired.length === 0) return;
+      throw new Error(`${file}: "relationships:" is not a list, so ERD Studio cannot write to it. Fix it by hand first.`);
+    }
+
+    // What the reader made of each entry, and its link.
+    const occurrences = new Map<string, number>();
+    const readable = new Map<number, { read: ModelRelationship; key: string; occ: number }>();
+    existing.items.forEach((item, pos) => {
+      const read = this.readRelationshipEntry(this.nodeToPlain(doc, item));
+      if (!read) return;
+      const key = linkKey({ fromModel: model.name, ...read });
+      const occ = occurrences.get(key) ?? 0;
+      occurrences.set(key, occ + 1);
+      readable.set(pos, { read, key, occ });
+    });
+
+    // Pass 1: match each wanted entry to the same link's entry (by occurrence).
+    const wanted = new Map<string, number>();
+    const posFor = new Map<number, number>(); // desired index -> sequence position
+    const claimed = new Set<number>();
+    desired.forEach((entry, i) => {
+      const key = linkKey({ fromModel: model.name, fromColumn: entry.fromColumn, toModel: entry.toModel, toColumn: entry.toColumn });
+      const occ = wanted.get(key) ?? 0;
+      wanted.set(key, occ + 1);
+      for (const [pos, r] of readable) {
+        if (!claimed.has(pos) && r.key === key && r.occ === occ) {
+          claimed.add(pos);
+          posFor.set(i, pos);
+          break;
+        }
+      }
+    });
+    // Pass 2: an entry whose ends changed (an edit, a column or model rename)
+    // takes over the unclaimed entry at its own place among the readable ones,
+    // keeping that entry's comments, unknown keys and position.
+    // Only where that keeps the list in the wanted order.
+    const readableOrder = [...readable.keys()];
+    const inOrder = (i: number, pos: number): boolean =>
+      [...posFor].every(([j, p]) => (j < i ? p < pos : p > pos));
+    desired.forEach((_, i) => {
+      if (posFor.has(i)) return;
+      const pos = readableOrder[i];
+      if (pos !== undefined && !claimed.has(pos) && inOrder(i, pos)) {
+        claimed.add(pos);
+        posFor.set(i, pos);
+      }
+    });
+
+    const desiredAt = new Map([...posFor].map(([i, pos]) => [pos, i]));
+    const items: unknown[] = [];
+    existing.items.forEach((item, pos) => {
+      const r = readable.get(pos);
+      if (!r) {
+        items.push(item); // unreadable: never deleted
+        return;
+      }
+      const i = desiredAt.get(pos);
+      if (i === undefined) return; // readable and no longer wanted
+      items.push(this.updateRelationshipNode(doc, item, r.read, desired[i], targets.has(i), `${file}, relationship entry ${pos + 1}`));
+    });
+    desired.forEach((entry, i) => {
+      if (!posFor.has(i)) items.push(doc.createNode(entry));
+    });
+
+    if (items.length === 0) {
+      root.delete('relationships');
+      return;
+    }
+    existing.items = items;
+  }
+
+  /** A relationship entry as written to a model file (no `fromModel`, no runtime fields). */
+  private relationshipToPlain(rel: ModelRelationship): ModelRelationship {
+    return {
+      fromColumn: rel.fromColumn,
+      toModel: rel.toModel,
+      toColumn: rel.toColumn,
+      cardinality: rel.cardinality,
+      ...(rel.role ? { role: rel.role } : {}),
+    };
+  }
+
+  /**
+   * What the reader (core's `readRelationships`) makes of one entry, or null
+   * for an entry it skips: not a mapping, or an endpoint missing or blank.
+   */
+  private readRelationshipEntry(value: unknown): ModelRelationship | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const r = value as Record<string, unknown>;
+    for (const key of ['fromColumn', 'toModel', 'toColumn'] as const) {
+      if (typeof r[key] !== 'string' || r[key] === '') return null;
+    }
+    const cardinality = typeof r.cardinality === 'string' && CARDINALITIES.has(r.cardinality)
+      ? (r.cardinality as Cardinality)
+      : 'many-to-one';
+    const role = normaliseRelationshipRole(r.role);
+    return {
+      fromColumn: r.fromColumn as string,
+      toModel: r.toModel as string,
+      toColumn: r.toColumn as string,
+      cardinality,
+      ...(role ? { role } : {}),
+    };
+  }
+
+  /** A node as plain data, the way the reader sees it: scalars as source text, aliases resolved. */
+  private nodeToPlain(doc: Document, node: unknown, depth = 0): unknown {
+    if (depth > 64) return null;
+    if (isAlias(node)) return this.nodeToPlain(doc, node.resolve(doc), depth + 1);
+    if (isMap(node)) {
+      const obj: Record<string, unknown> = {};
+      for (const pair of node.items) {
+        Object.defineProperty(obj, String(this.nodeToPlain(doc, pair.key, depth + 1)), {
+          value: this.nodeToPlain(doc, pair.value, depth + 1), enumerable: true, writable: true, configurable: true,
+        });
+      }
+      return obj;
+    }
+    if (isSeq(node)) return node.items.map((item) => this.nodeToPlain(doc, item, depth + 1));
+    if (isScalar(node)) return this.scalarValue(node);
+    return node ?? null;
+  }
+
+  /**
+   * Update one readable relationship entry in place. A field is written only
+   * when the wanted value differs from what the reader made of it — or, for a
+   * `target`, from what is written — so an untouched entry is left byte for
+   * byte. A target also loses a stray `fromModel:` key.
+   */
+  private updateRelationshipNode(
+    doc: Document,
+    node: unknown,
+    read: ModelRelationship,
+    want: ModelRelationship,
+    target: boolean,
+    where: string,
+  ): unknown {
+    const unchanged = (['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role'] as const).every((k) => read[k] === want[k]);
+    if (!isMap(node)) {
+      if (target) throw new Error(`${where} cannot be edited in place (it is not a plain mapping). Edit it by hand.`);
+      return unchanged ? node : doc.createNode(this.relationshipToPlain(want));
+    }
+    // A name the parser coerced (`toColumn: 007` is the number 7) is read as
+    // its source text; pin it to that text so writing the file back cannot
+    // turn the relationship into one to column `7`.
+    for (const key of ['fromColumn', 'toModel', 'toColumn', 'role'] as const) {
+      const value = node.get(key, true);
+      if (isScalar(value) && typeof value.value !== 'string' && typeof this.scalarValue(value) === 'string'
+        && this.scalarValue(value) === read[key]) {
+        value.value = this.scalarValue(value);
+      }
+    }
+    if (unchanged && !target) return node;
+    const written = (key: string): unknown => {
+      const value = node.get(key, true);
+      return isScalar(value) ? this.scalarValue(value) : value === undefined ? undefined : this.nodeToPlain(doc, value);
+    };
+    for (const key of ['fromColumn', 'toModel', 'toColumn', 'cardinality'] as const) {
+      const differs = target ? written(key) !== want[key] : read[key] !== want[key];
+      if (differs) node.set(key, want[key]);
+    }
+    const roleDiffers = target
+      ? (want.role === undefined ? node.has('role') : written('role') !== want.role)
+      : read.role !== want.role;
+    if (roleDiffers) {
+      if (want.role) node.set('role', want.role);
+      else node.delete('role');
+    }
+    if (target && node.has('fromModel')) node.delete('fromModel');
+    return node;
   }
 
   private isScalarLike(value: unknown): boolean {

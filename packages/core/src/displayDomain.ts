@@ -3,7 +3,7 @@
  */
 
 import type { ModelTemplate, NodePosition, Relationship, SemanticDomain, ViewConfig } from './types/semantic.js';
-import type { DisplayDomain, ExistingModelPreview, ManifestModelPreview } from './types/display.js';
+import type { DisplayDomain, DisplayRelationshipIssue, ExistingModelPreview, ManifestModelPreview } from './types/display.js';
 import type { LayerConfig } from './types/layer.js';
 import { computeNewModelPositions } from './positions.js';
 import { modelLoadErrorOf } from './types/semantic.js';
@@ -47,35 +47,43 @@ export interface ToDisplayDomainOptions {
   readOnly: boolean;
   /** Templates and addable models, when the host offers editing. */
   editorPayload?: DisplayDomainEditorPayload;
+  /** Where a new relationship is stored (editable logical payload only). */
+  relationshipHome?: 'library' | 'domain';
+  /** Relationship findings for the canvas banner (editable logical payload only); omitted when empty. */
+  relationshipIssues?: DisplayRelationshipIssue[];
 }
 
 /**
  * Convert a SemanticDomain to a DisplayDomain for the canvas.
  *
- * A column is a foreign key when it says so or when it is the `from` side of
- * a relationship.
+ * A column shows the FK badge (`isForeignKey`) when its model file says so or
+ * when it is the `from` side of a relationship; `isForeignKeyDeclared` is set
+ * only by the model file, so it can serve as evidence. Relationships keep
+ * their runtime-only `source`, `stored` and `issues`.
  */
 export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomainOptions): DisplayDomain {
-  const { viewConfig, stubColumns, layerConfig, readOnly, editorPayload } = options;
+  const { viewConfig, stubColumns, layerConfig, readOnly, editorPayload, relationshipHome, relationshipIssues } = options;
 
-  // Build FK column set for isForeignKey computation
+  // Build FK column set for isForeignKey computation (names without case).
   const fkColumnsByModel = new Map<string, Set<string>>();
   for (const rel of domain.relationships) {
-    if (!fkColumnsByModel.has(rel.fromModel)) {
-      fkColumnsByModel.set(rel.fromModel, new Set());
+    const model = rel.fromModel.toLowerCase();
+    if (!fkColumnsByModel.has(model)) {
+      fkColumnsByModel.set(model, new Set());
     }
-    fkColumnsByModel.get(rel.fromModel)!.add(rel.fromColumn);
+    fkColumnsByModel.get(model)!.add(rel.fromColumn.toLowerCase());
   }
 
   const models = domain.models.map((model) => {
     const loadError = modelLoadErrorOf(model);
-    const fkCols = fkColumnsByModel.get(model.name) ?? new Set<string>();
+    const fkCols = fkColumnsByModel.get(model.name.toLowerCase()) ?? new Set<string>();
     const columns = (model.columns ?? []).map((col) => ({
       name: col.name,
       dataType: col.dataType,
       description: col.description,
       isPrimaryKey: col.isPrimaryKey === true,
-      isForeignKey: col.isForeignKey === true || fkCols.has(col.name),
+      isForeignKey: col.isForeignKey === true || fkCols.has(col.name.toLowerCase()),
+      ...(col.isForeignKey === true ? { isForeignKeyDeclared: true } : {}),
       isNaturalKey: col.isNaturalKey === true,
       ...(col.scdType != null ? { scdType: col.scdType } : {}),
       ...(col.additiveType ? { additiveType: col.additiveType } : {}),
@@ -103,6 +111,9 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
     toColumn: rel.toColumn,
     cardinality: rel.cardinality,
     ...(rel.role ? { role: rel.role } : {}),
+    ...(rel.source ? { source: { ...rel.source } } : {}),
+    ...(rel.stored ? { stored: { ...rel.stored } } : {}),
+    ...(rel.issues && rel.issues.length > 0 ? { issues: [...rel.issues] } : {}),
   }));
 
   return {
@@ -126,5 +137,7 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
     readOnly,
     positionDraggable: true,
     ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
+    ...(relationshipHome ? { relationshipHome } : {}),
+    ...(relationshipIssues && relationshipIssues.length > 0 ? { relationshipIssues } : {}),
   };
 }

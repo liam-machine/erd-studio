@@ -230,6 +230,65 @@ export function isValidRelationshipRole(value: unknown): value is string | undef
   return value === undefined || (typeof value === 'string' && value.trim().length <= RELATIONSHIP_ROLE_MAX_LENGTH);
 }
 
+// ---------------------------------------------------------------------------
+// Relationship payloads (issue #133)
+// ---------------------------------------------------------------------------
+
+/** Longest model or column name accepted in a relationship payload. */
+const RELATIONSHIP_END_MAX_LENGTH = 256;
+
+const isEndName = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim() !== '' && value.length <= RELATIONSHIP_END_MAX_LENGTH && !value.includes('\0');
+
+/**
+ * The four ends of a relationship: non-blank text of reasonable length. The
+ * names are not held to the authoring pattern — a relationship may end at a
+ * model added from dbt, whose name dbt allows but the pattern does not.
+ */
+export function isValidRelationshipEnds(value: unknown): value is { fromModel: string; fromColumn: string; toModel: string; toColumn: string } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return isEndName(v.fromModel) && isEndName(v.fromColumn) && isEndName(v.toModel) && isEndName(v.toColumn);
+}
+
+/**
+ * A relationship payload's optional `stored` ends — the record's ends as on
+ * disk, which name the same link as the ends drawn. Absent, or four ends.
+ */
+export function validateStoredEnds(value: unknown): string | null {
+  if (value === undefined) return null;
+  return isValidRelationshipEnds(value) ? null : 'The stored ends of the relationship are not valid.';
+}
+
+/**
+ * The New / Edit Relationship dialog's optional `markKey` — "mark this column
+ * as its model's key" in the same commit: absent, or `{ model, column }`.
+ * Whether it is an end of the relationship is checked by the commit.
+ */
+export function validateMarkKey(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'The key to mark must name a model and a column.';
+  }
+  const v = value as Record<string, unknown>;
+  return isEndName(v.model) && isEndName(v.column) && Object.keys(v).every((k) => k === 'model' || k === 'column')
+    ? null
+    : 'The key to mark must name a model and a column.';
+}
+
+/**
+ * Validate a `repairRelationships` payload: the canvas banner's "Repair
+ * Relationships…", which only runs the command. It carries nothing — only an
+ * absent payload or an empty object passes.
+ */
+export function validateRepairRelationshipsPayload(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Repair Relationships takes no payload.';
+  }
+  return null;
+}
+
 export const MODEL_ROLES: readonly ModelRole[] = [
   'conformed-dim',
   'domain-dim',

@@ -10,7 +10,10 @@ import type { ManifestData, ManifestRelationshipTest } from '../../src/types/man
 import type { YmlData } from '../../src/types/ymlData';
 import type { CatalogColumn, CatalogData, CatalogNodeInfo } from '../../src/types/catalog';
 import { normaliseName } from '../../src/services/nameUtils';
+import { compare } from '../../src/services/discrepancyService';
+import { buildLogicalDisplayDomain } from '../../src/services/stageDisplay';
 import type { UnifiedDomain, StageData } from '../../src/types/semantic';
+import { stripRelationshipProvenance } from '@erd-studio/core';
 
 /** Empty YmlData — forces buildPhysicalDomain to use the manifest-only fallback. */
 const EMPTY_YML_DATA: YmlData = {
@@ -387,6 +390,28 @@ describe('DomainService', () => {
         disabledModels: new Set(),
       };
     }
+
+    it('draws a link dbt tests from both ends once, and the comparison reports it once (#133, D9)', () => {
+      const manifest = createManifestWithBothModels();
+      // The manifest tests it from the fact; the yml from the dimension, back at the fact.
+      const yml: YmlData = {
+        ...EMPTY_YML_DATA,
+        relationshipTests: [
+          { fromModel: 'dim_customer', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id' },
+        ],
+      };
+      const unified = createUnifiedDomain();
+      const physical = service.buildPhysicalDomain(unified, yml, manifest);
+      expect(physical.relationships).toEqual([
+        { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id', cardinality: 'many-to-one' },
+      ]);
+
+      const logical = buildLogicalDisplayDomain(DomainService.toLogicalStage(unified), unified.viewConfig);
+      const report = compare(logical, physical);
+      expect(report.relationships).toEqual([
+        { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id', status: 'matched' },
+      ]);
+    });
 
     it('creates a physical DisplayDomain with stage=physical and readOnly=true', () => {
       const result = service.buildPhysicalDomain(createUnifiedDomain(), EMPTY_YML_DATA, createManifest());
@@ -1101,6 +1126,39 @@ describe('DomainService', () => {
       const result = derivePhysicalRelationships([], models, new Map(), new Map());
       expect(result).toEqual([]);
     });
+
+    describe('a link tested from both ends draws one line (#133, D9)', () => {
+      const unique = new Map([['dim_customer', new Set(['customer_id'])]]);
+      const fromFact = { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' };
+      const fromDim = { fromModel: 'dim_customer', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id' };
+      const factEdge = { ...fromFact, cardinality: 'many-to-one' };
+
+      it('keeps the child-side test whichever order the tests come in', () => {
+        expect(derivePhysicalRelationships([fromFact, fromDim], models, unique, new Map())).toEqual([factEdge]);
+        expect(derivePhysicalRelationships([fromDim, fromFact], models, unique, new Map())).toEqual([factEdge]);
+      });
+
+      it('matches the two ends without case', () => {
+        const shouty = { fromModel: 'DIM_CUSTOMER', fromColumn: 'CUSTOMER_ID', toModel: 'FCT_ORDERS', toColumn: 'Customer_Id' };
+        expect(derivePhysicalRelationships([shouty, fromFact], models, unique, new Map())).toEqual([factEdge]);
+      });
+
+      it('keeps the first test when neither reading is better', () => {
+        const result = derivePhysicalRelationships([fromDim, fromFact], models, new Map(), new Map());
+        expect(result).toEqual([{ ...fromDim, cardinality: 'many-to-many' }]);
+      });
+
+      it('still draws a lone test declared on the dimension, as dbt reads it', () => {
+        expect(derivePhysicalRelationships([fromDim], models, unique, new Map())).toEqual([
+          { ...fromDim, cardinality: 'one-to-many' },
+        ]);
+      });
+
+      it('keeps two different links between the same pair of models', () => {
+        const other = { fromModel: 'fct_orders', fromColumn: 'billing_customer_id', toModel: 'dim_customer', toColumn: 'customer_id' };
+        expect(derivePhysicalRelationships([fromFact, other, fromDim], models, unique, new Map())).toHaveLength(2);
+      });
+    });
   });
 
   describe('relationshipReferencesColumn', () => {
@@ -1141,6 +1199,15 @@ describe('DomainService', () => {
 
     it('handles relationships with missing endpoint fields without throwing', () => {
       expect(relationshipReferencesColumn({}, 'fct_orders', 'customer_id')).toBe(false);
+    });
+
+    it('matches an end spelled in another case (#133, D7)', () => {
+      expect(relationshipReferencesColumn(rel, 'FCT_Orders', 'Customer_ID')).toBe(true);
+      expect(relationshipReferencesColumn({ ...rel, toModel: 'DIM_CUSTOMER' }, 'dim_customer', 'customer_id')).toBe(true);
+    });
+
+    it('never matches an end that is not text', () => {
+      expect(relationshipReferencesColumn({ fromModel: 42, fromColumn: 'customer_id' }, '42', 'customer_id')).toBe(false);
     });
   });
 });
@@ -1250,7 +1317,7 @@ describe('DomainService format handling', () => {
           models: ['dim_a', 'fct_b'],
           relationships: [
             { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
-            { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'lots-to-few' },
+            { fromModel: 'fct_b', fromColumn: 'a2_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'lots-to-few' },
             { fromModel: 'dim_a' },
             'garbage',
             null,
@@ -1260,10 +1327,32 @@ describe('DomainService format handling', () => {
         viewConfig: {},
       });
       const domain = service.getDomain(filePath);
-      expect(domain.logical.relationships).toEqual([
+      expect(domain.logical.relationships.map(stripRelationshipProvenance)).toEqual([
         { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
-        { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
+        { fromModel: 'fct_b', fromColumn: 'a2_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
       ]);
+    });
+
+    it('draws two copies of one link once, flagged REL001 (#133)', () => {
+      const filePath = writeDomain('dupes', {
+        schemaVersion: 5,
+        domain: 'dupes',
+        layer: 'silver',
+        logical: {
+          models: ['dim_a', 'fct_b'],
+          relationships: [
+            { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
+            { fromModel: 'dim_a', fromColumn: 'a_id', toModel: 'fct_b', toColumn: 'a_id', cardinality: 'one-to-many' },
+          ],
+        },
+        viewConfig: {},
+      });
+      const [rel, ...rest] = service.getDomain(filePath).logical.relationships;
+      expect(rest).toEqual([]);
+      expect(stripRelationshipProvenance(rel)).toEqual(
+        { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
+      );
+      expect(rel.issues).toContain('REL001');
     });
 
     it('keeps only viewConfig.positions entries with finite numeric x/y', () => {

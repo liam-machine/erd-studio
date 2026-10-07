@@ -120,6 +120,17 @@ describe('buildSyncPlan', () => {
     expect(plan.modelContext).toEqual({});
   });
 
+  it('finds a relationship row from a key naming the link the other way round or in another case (#133)', () => {
+    const plan = buildSyncPlan(report(), { 'rel:DIM_CUSTOMER:Customer_Id:fct_order:customer_id': 'physical' }, ctx);
+    // The row's own ends are carried: its cardinalities are read in its direction.
+    expect(plan.relationships).toEqual([{
+      fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id',
+      discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical',
+      sourceCardinality: undefined, targetCardinality: 'many-to-one',
+    }]);
+    expect(Object.keys(plan.modelContext).sort()).toEqual(['dim_customer', 'fct_order']);
+  });
+
   it('prefers the yml path, then the manifest path, for dbt file context', () => {
     const manifest = { ...emptyManifest, models: new Map([['dim_missing', { originalFilePath: 'models/dims/dim_missing.sql' }]]) } as unknown as ManifestData;
     const ymlData = { models: new Map([['dim_extra', { filePath: '/proj/models/schema.yaml' }]]) } as unknown as YmlData;

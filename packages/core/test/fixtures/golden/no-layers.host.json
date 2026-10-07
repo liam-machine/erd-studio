@@ -27,6 +27,7 @@
             "description": "Account",
             "isPrimaryKey": false,
             "isForeignKey": true,
+            "isForeignKeyDeclared": true,
             "isNaturalKey": false
           },
           {
@@ -60,7 +61,7 @@
             "dataType": "INT",
             "description": "Surrogate key",
             "isPrimaryKey": true,
-            "isForeignKey": true,
+            "isForeignKey": false,
             "isNaturalKey": false,
             "scdType": 0
           },
@@ -118,6 +119,7 @@
             "description": "Account",
             "isPrimaryKey": false,
             "isForeignKey": true,
+            "isForeignKeyDeclared": true,
             "isNaturalKey": false
           },
           {
@@ -148,14 +150,20 @@
         "fromColumn": "account_key",
         "toModel": "dim_account",
         "toColumn": "account_key",
-        "cardinality": "many-to-one"
-      },
-      {
-        "fromModel": "dim_account",
-        "fromColumn": "account_key",
-        "toModel": "fct_txn",
-        "toColumn": "account_key",
-        "cardinality": "one-to-many"
+        "cardinality": "many-to-one",
+        "source": {
+          "kind": "domain",
+          "index": 0
+        },
+        "stored": {
+          "fromModel": "fct_txn",
+          "fromColumn": "account_key",
+          "toModel": "dim_account",
+          "toColumn": "account_key"
+        },
+        "issues": [
+          "REL001"
+        ]
       }
     ],
     "viewConfig": {
@@ -194,7 +202,16 @@
       "order": 2
     },
     "readOnly": false,
-    "positionDraggable": true
+    "positionDraggable": true,
+    "relationshipHome": "domain",
+    "relationshipIssues": [
+      {
+        "code": "REL001",
+        "severity": "warning",
+        "message": "Relationship fct_txn.account_key → dim_account.account_key is stored 2 times (.erd-studio/gold/accounts.json entry 1, .erd-studio/gold/accounts.json entry 2)",
+        "link": "dim_account.account_key\u0000fct_txn.account_key"
+      }
+    ]
   },
   "welcomeDismissed": false
 }

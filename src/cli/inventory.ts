@@ -294,7 +294,7 @@ function describeModels(ctx: CliContext, names: readonly string[], summary: bool
       columnCount: m.columns.length,
       provenance: m.provenance ?? null,
       keyCandidates: { unique, compositeUnique: compositeByModel.get(key) ?? [] },
-      foreignKeys: [...new Set(relationships.filter((r) => r.fromModel === m.name).map((r) => r.fromColumn))],
+      foreignKeys: [...new Set(relationships.filter((r) => normaliseName(r.fromModel) === normaliseName(m.name)).map((r) => r.fromColumn))],
     };
     // dbt's meta, the schema yml winning per key (the manifest is a compiled
     // copy of it, plus any project-level `+meta` config).

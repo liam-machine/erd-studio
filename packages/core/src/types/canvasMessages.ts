@@ -90,17 +90,22 @@ export interface RelationshipKey {
 }
 
 /**
- * Request to remove an FK relationship.
- * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
+ * Request to remove an FK relationship, named by its ends as drawn.
+ *
+ * The host finds the record by `stored` (its ends exactly as on disk, from
+ * `DisplayRelationship.stored`) when given, else by the link either way round
+ * and without case (`linkKey`), and removes every copy of that link.
  */
 export interface RemoveRelationshipMessage {
   type: 'removeRelationship';
-  payload: RelationshipKey;
+  payload: RelationshipKey & { stored?: RelationshipKey };
 }
 
 /**
- * Request to update a relationship's cardinality.
- * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
+ * Request to update a relationship's cardinality, read in the direction of the
+ * ends as drawn (the host stores the result canonically — a `one-to-many`
+ * becomes `many-to-one` on the other model). `stored` as on
+ * {@link RemoveRelationshipMessage}.
  */
 export interface UpdateRelationshipMessage {
   type: 'updateRelationship';
@@ -110,6 +115,46 @@ export interface UpdateRelationshipMessage {
     toModel: string;
     toColumn: string;
     cardinality: Cardinality;
+    stored?: RelationshipKey;
+  };
+}
+
+/**
+ * A column to mark as its model's primary key in the same commit as a
+ * relationship (the New / Edit Relationship dialog's "Mark <col> as <model>'s
+ * key" tick, issue #133) — one undo step with the relationship. It must be an
+ * end of the relationship.
+ */
+export interface RelationshipMarkKeyPayload {
+  model: string;
+  column: string;
+}
+
+/**
+ * Request to edit a relationship: any of its ends, its cardinality and its
+ * role. `original*` are the ends as drawn; `stored` as on
+ * {@link RemoveRelationshipMessage}. The new ends set the direction.
+ */
+export interface EditRelationshipMessage {
+  type: 'editRelationship';
+  payload: {
+    /** Original composite key to find the relationship */
+    originalFromModel: string;
+    originalFromColumn: string;
+    originalToModel: string;
+    originalToColumn: string;
+    /** New values (may be same as original) */
+    fromModel: string;
+    fromColumn: string;
+    toModel: string;
+    toColumn: string;
+    cardinality: Cardinality;
+    /** The label after the edit; '' or absent clears it. */
+    role?: string;
+    /** Optional: the edited record's ends as on disk. */
+    stored?: RelationshipKey;
+    /** Optional: also mark this end's column as its model's key (same undo step). */
+    markKey?: RelationshipMarkKeyPayload;
   };
 }
 
@@ -269,6 +314,7 @@ export type CanvasEditMessage =
   | RemoveModelMessage
   | RemoveRelationshipMessage
   | UpdateRelationshipMessage
+  | EditRelationshipMessage
   | ToggleColumnKeyMessage
   | UpdateModelRationaleMessage
   | UpdateModelDescriptionMessage

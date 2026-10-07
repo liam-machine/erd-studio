@@ -7,7 +7,18 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { AnnotationColor, Cardinality, Layer, Meta, ModelLoadError, ModelRole, Stage } from '@erd-studio/core';
+import type {
+  AnnotationColor,
+  Cardinality,
+  Layer,
+  Meta,
+  ModelLoadError,
+  ModelRole,
+  RelationshipEnds,
+  RelationshipIssueCode,
+  RelationshipSource,
+  Stage,
+} from '@erd-studio/core';
 import type { LayerConfig } from '@erd-studio/core';
 import type { ModelDiscrepancy } from '@erd-studio/core';
 import type { PhysicalProvenance } from '@erd-studio/core';
@@ -148,6 +159,16 @@ export type FkEdgeData = {
   readOnly?: boolean;
   /** True when source === target — renders a loop arc over the top-right corner. */
   isSelfLoop?: boolean;
+  /**
+   * The record's ends exactly as stored on disk (logical stage, issue #133).
+   * Sent beside the drawn ends as the original key of an update, edit or
+   * remove, so the host finds the record however it was written.
+   */
+  stored?: RelationshipEnds;
+  /** Codes of what is wrong with this link (logical stage); drives the edge's "?" badge. */
+  issues?: RelationshipIssueCode[];
+  /** Where the relationship was read from (logical stage): a model file or the domain file. */
+  source?: RelationshipSource;
   /** Index signature required by React Flow's Edge generic. */
   [key: string]: unknown;
 };

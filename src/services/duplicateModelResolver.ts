@@ -107,11 +107,15 @@ export function repointDomainModel(doc: Record<string, unknown>, oldName: string
   if (idx === -1) return false;
   models[idx] = newName;
 
+  // Relationship ends name the model in any case (#133, D7): `Date` and
+  // `date` are one model, so an end spelled either way is repointed. Ends
+  // that are not text are left exactly as written.
+  const isOld = (end: unknown): boolean => typeof end === 'string' && sameName(end, oldName);
   if (Array.isArray(logical.relationships)) {
     for (const rel of logical.relationships as Array<Record<string, unknown>>) {
       if (!rel || typeof rel !== 'object') continue;
-      if (rel.fromModel === oldName) rel.fromModel = newName;
-      if (rel.toModel === oldName) rel.toModel = newName;
+      if (isOld(rel.fromModel)) rel.fromModel = newName;
+      if (isOld(rel.toModel)) rel.toModel = newName;
     }
   }
 

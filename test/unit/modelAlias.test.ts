@@ -332,6 +332,26 @@ describe('duplicate model files', () => {
     });
   });
 
+  it('repoints relationship ends spelled in another case, and leaves non-text ends alone (#133, D7)', () => {
+    const doc: Record<string, unknown> = {
+      schemaVersion: 5,
+      logical: {
+        models: ['fct_sale', 'date'],
+        relationships: [
+          { fromModel: 'fct_sale', fromColumn: 'date_key', toModel: 'DATE', toColumn: 'date_key' },
+          { fromModel: 'Date', fromColumn: 'date_key', toModel: 'fct_sale', toColumn: 'date_key', cardinality: 'one-to-many' },
+          { fromModel: 42, toModel: null },
+        ],
+      },
+    };
+    expect(repointDomainModel(doc, 'date', 'gold_date')).toBe(true);
+    expect((doc.logical as { relationships: unknown[] }).relationships).toEqual([
+      { fromModel: 'fct_sale', fromColumn: 'date_key', toModel: 'gold_date', toColumn: 'date_key' },
+      { fromModel: 'gold_date', fromColumn: 'date_key', toModel: 'fct_sale', toColumn: 'date_key', cardinality: 'one-to-many' },
+      { fromModel: 42, toModel: null },
+    ]);
+  });
+
   it('leaves a domain that does not use the name, or has inline (v4) models, alone', () => {
     const other = { logical: { models: ['fct_sale'], relationships: [] } };
     expect(repointDomainModel(other, 'date', 'gold_date')).toBe(false);

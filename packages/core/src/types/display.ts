@@ -9,6 +9,7 @@
 
 import type { Cardinality, Layer, Meta, ModelLoadError, ModelRole, ModelTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
 import type { LayerConfig } from './layer.js';
+import type { RelationshipEnds, RelationshipIssueCode, RelationshipSeverity, RelationshipSource } from '../relationships.js';
 
 // ---------------------------------------------------------------------------
 // Existing model preview (for Add Existing Model dialog)
@@ -44,14 +45,41 @@ export interface ExistingModelPreview extends ManifestModelPreview {
 // Display column
 // ---------------------------------------------------------------------------
 
+/**
+ * What a dbt project's tests say about one column — evidence for which way a
+ * relationship points (`resolveDirection`). Each field is absent when dbt
+ * says nothing either way.
+ */
+export interface DbtColumnEvidence {
+  /** true: a `unique` test covers the column alone. false: dbt is known to treat it as not unique. */
+  unique?: boolean;
+  /** The column is one of several in a `unique_combination_of_columns` test. */
+  inCompositeUnique?: boolean;
+  /** A `relationships` test on this column points at another model. */
+  relationshipsTest?: boolean;
+}
+
 /** Column ready for webview display. */
 export interface DisplayColumn {
   name: string;
   dataType: string;
   description: string;
   isPrimaryKey: boolean;
+  /**
+   * The FK badge: true when the model file marks the column as a foreign key
+   * or the column is the `from` end of a drawn relationship.
+   */
   isForeignKey: boolean;
+  /**
+   * True only when the model file itself says `isForeignKey` (logical stage).
+   * Unlike `isForeignKey` it is never inferred from relationships, so a wrong
+   * relationship cannot reinforce itself — key evidence (`resolveDirection`)
+   * reads this one. Absent when false.
+   */
+  isForeignKeyDeclared?: boolean;
   isNaturalKey: boolean;
+  /** What the dbt project's tests say about this column, when the host knows (logical stage, editable). */
+  dbtEvidence?: DbtColumnEvidence;
   scdType?: 0 | 1 | 2;
   additiveType?: 'additive' | 'semi-additive' | 'non-additive';
   /** Structured metadata from the model file (logical stage only). */
@@ -138,6 +166,24 @@ export interface DisplayRelationship {
   cardinality: Cardinality;
   /** Optional label for the link, e.g. `ship date` (see `Relationship.role`). */
   role?: string;
+  /** Where the relationship was read from (logical stage; see `Relationship.source`). */
+  source?: RelationshipSource;
+  /**
+   * The record's ends exactly as stored on disk (logical stage). The webview
+   * sends these as the original key of an update, edit or remove.
+   */
+  stored?: RelationshipEnds;
+  /** Codes of what is wrong with this link, for an edge badge (logical stage). */
+  issues?: RelationshipIssueCode[];
+}
+
+/** A relationship finding summarised for the canvas banner. */
+export interface DisplayRelationshipIssue {
+  code: RelationshipIssueCode;
+  severity: RelationshipSeverity;
+  message: string;
+  /** The `linkKey` it is about, when it is about one link. */
+  link?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,4 +225,11 @@ export interface DisplayDomain {
    * compiled, so this is what tells the webview to say so instead.
    */
   physicalSources?: { yml: boolean; manifest: boolean; catalog: boolean };
+  /**
+   * Where a new relationship drawn on this canvas is stored (editable logical
+   * payload only): the model library, or this domain file.
+   */
+  relationshipHome?: 'library' | 'domain';
+  /** Relationship findings for this domain (editable logical payload only); absent when there are none. */
+  relationshipIssues?: DisplayRelationshipIssue[];
 }

@@ -191,6 +191,30 @@ describe('HarnessService', () => {
       }
     });
 
+    it('all formats teach one relationship identity and direction, and the check command with its fallback (#133)', () => {
+      for (const target of HARNESS_TARGETS) {
+        const content = service.generateContent(target.id);
+        expect(content).toContain('Never write \`one-to-many\`');
+        expect(content).toContain('A \`one-to-one\` is written from the model holding the foreign key');
+        expect(content).toContain('whichever way round and ignoring case');
+        expect(content).toContain('Always write \`cardinality\`');
+        expect(content).toContain('~/.erd-studio-cli/bin/erd-studio check --json --semantic-dir .erd-studio');
+        expect(content).toContain('Unknown command "check"');
+        expect(content).toContain('doctor --json');
+        expect(content).toContain('Repair Relationships…');
+        for (const code of ['REL001', 'REL002', 'REL003', 'REL004', 'REL005', 'REL006', 'REL008', 'REL009']) {
+          expect(content).toContain(code);
+        }
+      }
+    });
+
+    it('the check command follows a custom semanticDir, and leaves the launcher path alone', () => {
+      const custom = new HarnessService('docs/erd');
+      const content = custom.generateContent('claude');
+      expect(content).toContain('~/.erd-studio-cli/bin/erd-studio check --json --semantic-dir docs/erd');
+      expect(content).not.toContain('--semantic-dir .erd-studio');
+    });
+
     it('all formats embed a version marker', () => {
       for (const target of HARNESS_TARGETS) {
         const content = service.generateContent(target.id);

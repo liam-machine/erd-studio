@@ -75,6 +75,12 @@ describe('loadDisplayDomain matches the extension host golden output', () => {
       delete expected.templates;
       delete expected.manifestModels;
       delete expected.existingModels;
+      // Editor-only relationship context the host adds to an editable canvas (#133).
+      delete expected.relationshipHome;
+      delete expected.relationshipIssues;
+      for (const model of (expected.models ?? []) as Array<{ columns?: Array<Record<string, unknown>> }>) {
+        for (const column of model.columns ?? []) delete column.dbtEvidence;
+      }
 
       // postMessage serialises the payload, which drops undefined values.
       expect(JSON.parse(JSON.stringify(domain))).toEqual(expected);

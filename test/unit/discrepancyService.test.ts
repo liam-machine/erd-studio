@@ -612,6 +612,24 @@ describe('DiscrepancyService.compare — a link matches whichever end each stage
     ]);
   });
 
+  it('reports a link stored twice on one side once, never as a second row (D9)', () => {
+    const report = compare(
+      makeDomain({ models, relationships: [fromFact('many-to-one'), fromDim('one-to-many')] }),
+      makeDomain({ stage: 'physical', models, relationships: [fromDim('one-to-many'), fromFact('many-to-one')] }),
+    );
+    expect(report.relationships).toEqual([
+      { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', status: 'matched' },
+    ]);
+  });
+
+  it('reports a link only one side has once, however many copies that side holds', () => {
+    const report = compare(
+      makeDomain({ models, relationships: [fromFact('many-to-one'), fromDim('one-to-many')] }),
+      makeDomain({ stage: 'physical', models, relationships: [] }),
+    );
+    expect(report.relationships.map((r) => r.status)).toEqual(['extra']);
+  });
+
   it('reports a real cardinality difference once, in the source\'s direction', () => {
     expect(run(fromFact('one-to-one'), fromDim('one-to-many'))).toEqual([
       {

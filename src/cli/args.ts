@@ -8,9 +8,9 @@
  * because a silently dropped `--domain` would diff the wrong thing.
  */
 
-export type CliCommand = 'doctor' | 'inventory' | 'diff' | 'version' | 'help';
+export type CliCommand = 'doctor' | 'inventory' | 'diff' | 'check' | 'version' | 'help';
 
-export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff', 'version', 'help'];
+export const CLI_COMMANDS: readonly CliCommand[] = ['doctor', 'inventory', 'diff', 'check', 'version', 'help'];
 
 export interface CliOptions {
   command: CliCommand;
@@ -36,7 +36,7 @@ export interface CliOptions {
   domains: string[];
   /** diff: every domain under the semantic dir. */
   all: boolean;
-  /** diff: advisory rows block too. */
+  /** diff: advisory rows block too. check: warnings fail the run too. */
   strict: boolean;
 }
 
@@ -64,7 +64,7 @@ const FLAGS: Record<string, FlagSpec> = {
   '--models': { takesValue: true, commands: ['inventory'] },
   '--domain': { takesValue: true, commands: ['diff'] },
   '--all': { takesValue: false, commands: ['diff'] },
-  '--strict': { takesValue: false, commands: ['diff'] },
+  '--strict': { takesValue: false, commands: ['diff', 'check'] },
 };
 
 export const DEFAULT_CLI_SEMANTIC_DIR = '.erd-studio';
@@ -120,7 +120,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
     if (arg.startsWith('-') && arg !== '-') { throw new CliUsageError(`Unknown option ${arg}.`); }
     if (command !== null) { throw new CliUsageError(`Unexpected argument "${arg}".`); }
     if (!(CLI_COMMANDS as readonly string[]).includes(arg)) {
-      throw new CliUsageError(`Unknown command "${arg}". Expected one of: doctor, inventory, diff, version.`);
+      throw new CliUsageError(`Unknown command "${arg}". Expected one of: doctor, inventory, diff, check, version.`);
     }
     command = arg as CliCommand;
   }
@@ -186,7 +186,16 @@ Usage:
   erd-studio doctor    [--json] [--no-dbt] [--dbt <path>] [--trust-venv]
   erd-studio inventory [--json] [--summary] [--models a,b,c]
   erd-studio diff      [--json] (--domain <path> | --all) [--strict]
+  erd-studio check     [--json] [--strict]
   erd-studio version
+
+Commands:
+  doctor     what is installed, how fresh dbt's files are, and what to do next
+  inventory  every dbt model, its columns, keys and tested relationships
+  diff       compare a diagram's logical model with dbt (the canvas's Diff button)
+  check      check every relationship in the ERD Studio files: stored twice,
+             saved on the wrong side, pointing at a missing model or column,
+             or unreadable. --strict also fails on warnings
 
 Shared options:
   --project <dir>       dbt project folder (default: found from the current folder)
@@ -195,5 +204,6 @@ Shared options:
   --quiet               no human-readable output (exit code only)
   --verbose             show internal diagnostics on stderr
 
-Exit codes: 0 ok · 1 diff found drift · 2 usage error · 3 project/domain problem · 4 internal error
+Exit codes: 0 ok · 1 diff found drift, or check found errors · 2 usage error
+            3 project/domain problem · 4 internal error
 `;

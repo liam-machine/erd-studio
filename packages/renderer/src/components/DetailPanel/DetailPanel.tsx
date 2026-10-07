@@ -21,6 +21,7 @@ import { useEditorStore } from '../../store/editorStore';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import type { DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
 import type { FkEdgeData } from '../../types/graph';
+import { relationshipStoredIn, removeRelationshipRequest } from '../../lib/relationshipActions';
 import './DetailPanel.css';
 
 // ---------------------------------------------------------------------------
@@ -189,15 +190,8 @@ export function DetailPanel() {
 
   const handleDeleteRelationship = useCallback(
     (rel: DisplayRelationship) => {
-      host.postMessage({
-        type: 'removeRelationship',
-        payload: {
-          fromModel: rel.fromModel,
-          fromColumn: rel.fromColumn,
-          toModel: rel.toModel,
-          toColumn: rel.toColumn,
-        },
-      });
+      // The stored ends travel with it, so the copy on disk is the one removed (#133).
+      host.postMessage(removeRelationshipRequest(rel));
     },
     [host],
   );
@@ -213,6 +207,10 @@ export function DetailPanel() {
         cardinality: rel.cardinality,
         // Carried so Edit opens with it — the dialog saves what it shows.
         ...(rel.role ? { role: rel.role } : {}),
+        // How the record is written on disk, so the menu's edits find it (#133).
+        ...(rel.stored ? { stored: rel.stored } : {}),
+        ...(rel.source ? { source: rel.source } : {}),
+        ...(rel.issues && rel.issues.length > 0 ? { issues: rel.issues } : {}),
       };
       openEdgeContextMenu(x, y, edgeData);
     },
@@ -230,8 +228,11 @@ export function DetailPanel() {
     if (!domain || !selectedNode) {
       return { outgoing: [] as DisplayRelationship[], incoming: [] as DisplayRelationship[] };
     }
-    const outgoing = domain.relationships.filter((r) => r.fromModel === selectedNode);
-    const incoming = domain.relationships.filter((r) => r.toModel === selectedNode);
+    // Without case, like the canvas draws them (#133): an endpoint spelt
+    // differently from the node is still this model's relationship.
+    const selected = selectedNode.toLowerCase();
+    const outgoing = domain.relationships.filter((r) => r.fromModel.toLowerCase() === selected);
+    const incoming = domain.relationships.filter((r) => r.toModel.toLowerCase() === selected);
     return { outgoing, incoming };
   }, [domain, selectedNode]);
 
@@ -248,6 +249,11 @@ export function DetailPanel() {
   }
 
   const { outgoing, incoming } = relationships;
+  // Row hover text: what a click does, and which file holds the relationship (#133).
+  const rowTitle = (rel: DisplayRelationship): string => {
+    const storedIn = relationshipStoredIn(rel.source, domain);
+    return storedIn ? `Click to edit cardinality\nStored in ${storedIn}` : 'Click to edit cardinality';
+  };
   const totalRelationships = outgoing.length + incoming.length;
 
   // --- Render ------------------------------------------------------------
@@ -449,7 +455,7 @@ export function DetailPanel() {
                     handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
                   }
                 }}
-                title={viewer ? undefined : 'Click to edit cardinality'}
+                title={viewer ? undefined : rowTitle(rel)}
               >
                 <span className="detail-panel__rel-direction" title="Outgoing FK">
                   →
@@ -496,7 +502,7 @@ export function DetailPanel() {
                     handleRelationshipClick(rect.left + rect.width / 2, rect.top + rect.height / 2, rel);
                   }
                 }}
-                title={viewer ? undefined : 'Click to edit cardinality'}
+                title={viewer ? undefined : rowTitle(rel)}
               >
                 <span className="detail-panel__rel-direction" title="Incoming FK">
                   ←

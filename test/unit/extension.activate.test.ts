@@ -551,6 +551,64 @@ describe('erdStudio.organizeModelLibrary (issue #76)', () => {
   });
 });
 
+describe('erdStudio.repairRelationships (issue #133)', () => {
+  const lib = () => path.join(root, '.erd-studio', 'logical-models');
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  it('is a post-rename command: contributed, registered once, with no dbtSemantic alias, in the Model Library … menu', async () => {
+    expect(NO_LEGACY_ALIAS.has('erdStudio.repairRelationships')).toBe(true);
+    expect(CONTRIBUTED).toContain('erdStudio.repairRelationships');
+    const contributes = packageJson.contributes as unknown as {
+      commands: Array<{ command: string; title: string; category?: string }>;
+      menus: { 'view/title': Array<{ command: string; when: string; group: string }> };
+    };
+    expect(contributes.commands.find((c) => c.command === 'erdStudio.repairRelationships')).toMatchObject({
+      title: 'Repair Relationships…',
+      category: 'ERD Studio',
+    });
+    const entry = contributes.menus['view/title'].find((m) => m.command === 'erdStudio.repairRelationships');
+    expect(entry?.when).toBe('view == erdStudio.modelLibrary');
+    // Not "navigation": the view's … menu.
+    expect(entry?.group.startsWith('navigation')).toBe(false);
+    await activate(context);
+    expect(count('erdStudio.repairRelationships')).toBe(1);
+    expect(count('dbtSemantic.repairRelationships')).toBe(0);
+  });
+
+  it('runs the repair against the project: previews, and writes nothing until confirmed', async () => {
+    fs.writeFileSync(path.join(lib(), 'zz_one_sided.yml'), [
+      'name: zz_one_sided',
+      'columns:',
+      '  - name: id',
+      '    dataType: string',
+      '    isPrimaryKey: true',
+      'relationships:',
+      '  - fromColumn: id',
+      '    toModel: zz_many',
+      '    toColumn: one_sided_id',
+      '    cardinality: one-to-many',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(lib(), 'zz_many.yml'), 'name: zz_many\ncolumns:\n  - name: one_sided_id\n    dataType: string\n');
+    const before = fs.readFileSync(path.join(lib(), 'zz_many.yml'), 'utf-8');
+    await activate(context);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+
+    await vscode.commands.executeCommand('erdStudio.repairRelationships');
+
+    const modal = info.mock.calls.find((c) => (c[1] as { modal?: boolean } | undefined)?.modal);
+    expect(modal).toBeDefined();
+    expect((modal![1] as { detail: string }).detail).toContain('logical-models/zz_many.yml');
+    expect(error.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('Repair Relationships'))).toEqual([]);
+    expect(fs.readFileSync(path.join(lib(), 'zz_many.yml'), 'utf-8')).toBe(before);
+  });
+});
+
 describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two layers)', () => {
   const erd = () => path.join(root, '.erd-studio');
   const lib = () => path.join(erd(), 'logical-models');

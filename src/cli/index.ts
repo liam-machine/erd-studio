@@ -1,23 +1,27 @@
 /**
  * `erd-studio` CLI entry point (dist/cli.js) — the read-only helper the
- * `/erd-studio-setup` skill drives: `doctor`, `inventory`, `diff`, `version`.
+ * `/erd-studio-setup` skill drives: `doctor`, `inventory`, `diff`, `check`,
+ * `version`.
  *
  * Launched through the ~/.erd-studio-cli shims (cliLauncherService), under
  * plain Node or VS Code's own Electron with ELECTRON_RUN_AS_NODE. It never
  * writes a file (spec D5): Claude makes every `.erd-studio` edit itself.
  *
- * Exit codes: 0 ok · 1 diff found blocking drift · 2 usage · 3 environment
- * (no project, bad domain file) · 4 internal. 5 is reserved for the shim.
+ * Exit codes: 0 ok · 1 diff found blocking drift, or check found errors ·
+ * 2 usage · 3 environment (no project, bad domain file) · 4 internal. 5 is
+ * reserved for the shim.
  */
 
 import { redactPaths } from '../types/feedback';
 import { parseArgs, USAGE, type CliOptions } from './args';
+import { runCheck } from './check';
 import { buildCliContext, CLI_VERSION, CliEnvError } from './context';
 import { runDiff } from './diff';
 import { runDoctor, runtimeInfo } from './doctor';
-import { colourEnabled, formatDiff, formatDoctor, formatInventory, makePaint } from './format';
+import { colourEnabled, formatCheck, formatDiff, formatDoctor, formatInventory, makePaint } from './format';
 import { runInventory } from './inventory';
 
+/** `drift` (1) is also `check`'s "found errors". */
 export const EXIT = { ok: 0, drift: 1, usage: 2, env: 3, internal: 4 } as const;
 
 export interface CliIo {
@@ -109,6 +113,12 @@ export async function main(argv: readonly string[], io: CliIo = processIo()): Pr
         const ctx = await buildCliContext({ project: opts.project, semanticDir: opts.semanticDir, cwd: io.cwd });
         const { result, exitCode } = runDiff(ctx, { domains: opts.domains, all: opts.all, strict: opts.strict, cwd: io.cwd });
         out(result, () => formatDiff(result, paint));
+        return exitCode;
+      }
+
+      case 'check': {
+        const { result, exitCode } = runCheck({ project: opts.project, semanticDir: opts.semanticDir, strict: opts.strict, cwd: io.cwd });
+        out(result, () => formatCheck(result, paint));
         return exitCode;
       }
 

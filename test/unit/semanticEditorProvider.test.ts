@@ -1339,9 +1339,10 @@ describe('addModelsFromDbt', () => {
     const rels = onDisk.logical.relationships.map((r: any) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`).sort();
     expect(rels).toEqual([
       'dim_task.project_key->dim_project.project_key',
-      'dim_task.task_key->fct_sale.amount',
       'fct_order.customer_key->dim_customer.customer_key',
       'fct_order.project_key->dim_project.project_key',
+      // Declared on dim_task (the unique side), so it is stored on the many side (#133, D1).
+      'fct_sale.amount->dim_task.task_key',
       'fct_sale.sale_id->dim_project.project_key',
     ]);
     // Still a fresh layout: no stored position, so the webview runs ELK.

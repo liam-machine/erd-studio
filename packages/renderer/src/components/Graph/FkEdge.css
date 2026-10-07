@@ -192,3 +192,31 @@
   background: var(--button-bg);
   color: var(--button-fg);
 }
+
+/* -----------------------------------------------------------------------
+   Issue badge (#133): an amber "?" beside the midpoint of a relationship
+   that is stored twice, stored on its "one" side, or points against its
+   keys. Hover text lists the problems; Repair Relationships… fixes them.
+   ----------------------------------------------------------------------- */
+
+.fk-edge__issue-badge {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--warning-fg);
+  border-radius: 50%;
+  background: var(--panel-bg);
+  color: var(--warning-fg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  pointer-events: all;
+}
+
+.fk-edge__issue-badge--dimmed {
+  opacity: 0.25;
+}

@@ -28,6 +28,7 @@ import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
+import { stripRelationshipProvenance } from '@erd-studio/core';
 import type { Relationship } from '../../src/types/semantic';
 
 const FCT_ORDER = {
@@ -124,7 +125,8 @@ async function createHarness(ownRelationships: Relationship[] = []): Promise<Har
     readDomain: (name) => JSON.parse(fs.readFileSync(domainPath(name), 'utf-8')),
     shown: (name) => {
       logicalModelService.invalidateCache();
-      return domainService.getDomain(domainPath(name)).logical.relationships;
+      // What is drawn, without the runtime-only provenance (#133).
+      return domainService.getDomain(domainPath(name)).logical.relationships.map((rel) => stripRelationshipProvenance(rel) as Relationship);
     },
   };
 }
@@ -321,20 +323,20 @@ describe('relationships stored once in the model library (#126)', () => {
       expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([{ ...FCT_ENTRY, cardinality: 'one-to-one' }]);
     });
 
-    it('offers, once, to move relationships saved on their one side to the fact', async () => {
+    it('offers, once, to repair relationships saved on their one side (REL002)', async () => {
       const dim = h.logicalModelService.getModel('dim_customer')!;
       h.logicalModelService.saveModel({ ...dim, relationships: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }] });
-      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Review the Move…' as never);
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Repair Relationships…' as never);
       const run = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
       await (await h.open('orders')).send({ type: 'ready' });
       await (await h.open('reporting')).send({ type: 'ready' });
-      await vi.waitFor(() => expect(run).toHaveBeenCalledWith('erdStudio.moveRelationshipsToLibrary'));
+      await vi.waitFor(() => expect(run).toHaveBeenCalledWith('erdStudio.repairRelationships'));
 
-      const offers = info.mock.calls.filter(([text]) => String(text).includes('Store each with the model that holds the foreign key'));
+      const offers = info.mock.calls.filter(([text]) => String(text).includes('Repair Relationships…?'));
       expect(offers).toHaveLength(1);
-      expect(offers[0][0]).toBe('1 relationship is saved in the file of the model it points at (dim_customer.yml). '
-        + 'Store each with the model that holds the foreign key, so adding a fact never means editing its dimensions?');
-      expect(offers[0].slice(1)).toEqual(['Review the Move…', 'Not Now', "Don't Ask Again"]);
+      expect(offers[0][0]).toBe('1 relationship needs attention (1 saved in the file of the model it points at). '
+        + 'Review the fixes with Repair Relationships…? Nothing changes until you confirm.');
+      expect(offers[0].slice(1)).toEqual(['Repair Relationships…', 'Not Now', "Don't Ask Again"]);
     });
 
     it('offers nothing when every library relationship is already on its many side', async () => {
@@ -343,7 +345,7 @@ describe('relationships stored once in the model library (#126)', () => {
       const info = vi.spyOn(vscode.window, 'showInformationMessage');
       await (await h.open('reporting')).send({ type: 'ready' });
       await new Promise((r) => setTimeout(r, 20));
-      expect(info.mock.calls.filter(([text]) => String(text).includes('Store each with the model'))).toEqual([]);
+      expect(info.mock.calls.filter(([text]) => String(text).includes('Repair Relationships…?'))).toEqual([]);
     });
 
     it('lifecycle: every relationship edit, across two diagrams, keeps one definition on the many side', async () => {

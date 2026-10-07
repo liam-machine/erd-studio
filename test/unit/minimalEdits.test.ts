@@ -67,9 +67,10 @@ function expectSameModel(input: string, output: string, relationships: readonly 
   const before = parse(input)!;
   const after = parse(output)!;
   expect(after.relationships ?? []).toEqual(relationships);
-  const { relationships: _a, ...restBefore } = before;
-  const { relationships: _b, ...restAfter } = after;
-  void _a; void _b;
+  // `relationshipIssues` describes the relationships list being replaced (#133), so it goes with it.
+  const { relationships: _a, relationshipIssues: _ai, ...restBefore } = before;
+  const { relationships: _b, relationshipIssues: _bi, ...restAfter } = after;
+  void _a; void _b; void _ai; void _bi;
   expect(restAfter).toEqual(restBefore);
 }
 

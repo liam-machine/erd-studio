@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { buildUnifiedDomain, mergeLibraryRelationships, relationshipKey } from '../../src/domain';
+import { stripRelationshipProvenance } from '../../src/relationships';
 import { parseLogicalModelText } from '../../src/logicalModel';
 import type { Relationship, SemanticModel } from '../../src/types/semantic';
 
@@ -26,6 +27,9 @@ const TO_PRODUCT: Relationship = {
   fromModel: 'fct_order', fromColumn: 'product_key', toModel: 'dim_product', toColumn: 'product_key', cardinality: 'many-to-one',
 };
 
+/** What a domain draws, without the runtime-only provenance (checked separately). */
+const plain = (rels: Relationship[]): Relationship[] => rels.map((r) => stripRelationshipProvenance(r));
+
 function relationshipsOf(models: string[], own: Relationship[] = [], warn = vi.fn()): Relationship[] {
   const doc = { schemaVersion: 5, domain: 'd', layer: 'silver', logical: { models, relationships: own }, viewConfig: {} };
   return buildUnifiedDomain(doc, 'v5', {
@@ -45,24 +49,32 @@ describe('a relationship stored in a model file (#126)', () => {
     [['fct_order'], []],
     [['dim_customer', 'dim_product'], []],
   ])('is drawn only by a domain holding both ends: %j', (models, expected) => {
-    expect(relationshipsOf(models)).toEqual(expected);
+    expect(plain(relationshipsOf(models))).toEqual(expected);
   });
 
   it('is drawn once next to the same relationship in the domain file, with the library cardinality, and says so', () => {
     const warn = vi.fn();
     const own = [{ ...TO_CUSTOMER, cardinality: 'one-to-one' as const }];
-    expect(relationshipsOf(['fct_order', 'dim_customer'], own, warn)).toEqual([TO_CUSTOMER]);
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/logical-models\/ defines it as many-to-one/));
+    const drawn = relationshipsOf(['fct_order', 'dim_customer'], own, warn);
+    expect(plain(drawn)).toEqual([TO_CUSTOMER]);
+    expect(drawn[0].source).toEqual({ kind: 'library', model: 'fct_order', index: 0 });
+    expect(drawn[0].issues).toEqual(['REL001']);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/copies disagree \(.* many-to-one in entry 1 of fct_order's model file; .* one-to-one in entry 1 of silver\/d\.json\)/));
   });
 
   it('keeps the domain file\'s own relationships first and in order', () => {
     const own: Relationship = { fromModel: 'dim_product', fromColumn: 'x', toModel: 'dim_customer', toColumn: 'y', cardinality: 'one-to-many' };
-    expect(relationshipsOf(['fct_order', 'dim_customer', 'dim_product'], [own])).toEqual([own, TO_CUSTOMER, TO_PRODUCT]);
+    // The domain's one-to-many is drawn turned round, as it would be stored (#133).
+    const turned: Relationship = { fromModel: 'dim_customer', fromColumn: 'y', toModel: 'dim_product', toColumn: 'x', cardinality: 'many-to-one' };
+    expect(plain(relationshipsOf(['fct_order', 'dim_customer', 'dim_product'], [own]))).toEqual([turned, TO_CUSTOMER, TO_PRODUCT]);
   });
 
-  it('leaves a domain with no library relationships exactly as its file says', () => {
-    const own = [TO_CUSTOMER, TO_CUSTOMER];
-    expect(mergeLibraryRelationships([{ name: 'fct_order' }], own)).toEqual(own);
+  it('draws a domain with no library relationships as its file says, once per link', () => {
+    const warn = vi.fn();
+    const drawn = mergeLibraryRelationships([{ name: 'fct_order' }], [TO_CUSTOMER, TO_CUSTOMER], 'd.json', warn);
+    expect(plain(drawn)).toEqual([TO_CUSTOMER]);
+    expect(drawn[0].source).toEqual({ kind: 'domain', index: 0 });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/is stored 2 times/));
   });
 
   it('matches endpoints without case', () => {

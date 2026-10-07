@@ -144,7 +144,7 @@
         "fromModel": {
           "type": "string",
           "minLength": 1,
-          "description": "Model holding the FK (the \"many\" side of many-to-one)."
+          "description": "Model holding the FK (the \"many\" side of many-to-one). A relationship is its two model.column ends, either way round and ignoring case: store each one once."
         },
         "fromColumn": {
           "type": "string",
@@ -163,7 +163,7 @@
         },
         "cardinality": {
           "type": "string",
-          "description": "Relationship cardinality, read from fromModel to toModel.",
+          "description": "Relationship cardinality, read from fromModel to toModel. Write many-to-one, one-to-one or many-to-many: a one-to-many is the same relationship stored the other way round, as many-to-one from the other model (still read, but `erd-studio check` reports it in a model file as REL002). A one-to-one runs from the model holding the foreign key. Always write it: an entry without it is drawn as many-to-one (and, in a model file, reported as REL008).",
           "enum": [
             "many-to-one",
             "one-to-one",

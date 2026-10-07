@@ -6,6 +6,8 @@
  * domain at a particular design stage (logical or physical).
  */
 
+import type { RelationshipEnds, RelationshipIssueCode, RelationshipSource } from '../relationships.js';
+
 /**
  * Layer identifier type - dynamic string validated at runtime.
  * Layer configuration is managed by LayerService and stored in layers.json.
@@ -118,7 +120,7 @@ export interface Rationale {
  * The stage is determined by the section (logical) within
  * the unified domain file, not by a field on the model.
  */
-export interface SemanticModel {
+export interface SemanticModel extends SemanticModelRuntimeFields {
   name: string;
   /** Schema the model will be materialised in. */
   schema?: string;
@@ -148,6 +150,47 @@ export interface SemanticModel {
    * from `logical-models/*.yml` only — never from inline v4 models.
    */
   relationships?: ModelRelationship[];
+}
+
+/**
+ * Fields a reader adds to a model at runtime. Never written to a model file;
+ * kept apart so `SemanticModel`'s own members stay the on-disk shape.
+ */
+export interface SemanticModelRuntimeFields {
+  /**
+   * Entries of the file's `relationships:` list the reader skipped or read
+   * with a default (finding REL008). Absent when every entry was read as
+   * written.
+   */
+  relationshipIssues?: RelationshipReadIssue[];
+}
+
+/** Why a model file's `relationships:` entry was not read exactly as written. */
+export type RelationshipReadIssueReason =
+  /** The entry is not a mapping (skipped). */
+  | 'not-a-mapping'
+  /** `fromColumn`, `toModel` or `toColumn` is missing, blank or not text (skipped). */
+  | 'missing-endpoint'
+  /** No `cardinality` (read as many-to-one). */
+  | 'missing-cardinality'
+  /** A `cardinality` that is not one of the four, e.g. `one_to_many` (read as many-to-one). */
+  | 'unknown-cardinality'
+  /** A `role` that is not text (dropped). */
+  | 'invalid-role'
+  /** A `fromModel:` key, which a model file does not use: the entry always leaves the file's own model. */
+  | 'stray-from-model';
+
+/** One entry of a model file's `relationships:` list that was skipped or defaulted. */
+export interface RelationshipReadIssue {
+  /** Position of the entry in the file's `relationships:` sequence (0-based, counting every entry). */
+  index: number;
+  reason: RelationshipReadIssueReason;
+  /** True when the entry was left out of `relationships`; false when it was read with a default. */
+  skipped: boolean;
+  /** 1-based line of the entry in the file, when known. */
+  line?: number;
+  /** One plain sentence about the entry, quoting only its own values. */
+  message: string;
 }
 
 /**
@@ -209,11 +252,32 @@ export interface DesignModel {
 export type Cardinality = 'many-to-one' | 'one-to-one' | 'one-to-many' | 'many-to-many';
 
 /**
+ * Fields a reader adds to a relationship at runtime (issue #133). Never
+ * written to a file: writers strip them (`stripRelationshipProvenance`). Kept
+ * in their own interface so `Relationship`'s own members stay the on-disk
+ * shape the JSON Schemas describe.
+ */
+export interface RelationshipRuntimeFields {
+  /** Where this relationship was read from, set by `normaliseRelationships` on every relationship a domain draws. */
+  source?: RelationshipSource;
+  /**
+   * The record's ends exactly as they are on disk (before it was turned round
+   * or respelled). Writers locate the record by these, with `source`, falling
+   * back to `linkKey`.
+   */
+  stored?: RelationshipEnds;
+  /** Codes of what is wrong with this link (see `RelationshipIssueCode`). */
+  issues?: RelationshipIssueCode[];
+}
+
+/**
  * An FK relationship between two models in a domain.
  *
- * Identity is the composite key: (fromModel, fromColumn, toModel, toColumn).
+ * Identity is the link — its two column ends, either way round, without case
+ * (`linkKey`). Stored canonically: `fromModel` is the "many" (foreign-key)
+ * side, and a `one-to-many` is turned round (`canonicalRelationship`).
  */
-export interface Relationship {
+export interface Relationship extends RelationshipRuntimeFields {
   fromModel: string;
   fromColumn: string;
   toModel: string;

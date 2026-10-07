@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildServices } from '../services.js';
+import { namesEqual } from '../../../src/services/nameUtils.js';
 
 export const list_manifest_models = {
   name: 'list_manifest_models',
@@ -54,8 +55,9 @@ export const list_manifest_models = {
                 description: info.description ?? null,
                 column_count: info.columns?.length ?? 0,
                 unique_columns: Array.from(manifest.uniqueColumns.get(name) ?? []),
+                // Tests declared on this model, as dbt has them (names in any case).
                 relationships: manifest.relationshipTests
-                  .filter((t) => t.fromModel === name)
+                  .filter((t) => namesEqual(t.fromModel, name))
                   .map((t) => ({
                     from_column: t.fromColumn,
                     to_model: t.toModel,

@@ -11,6 +11,7 @@
  *                         toggleDiscrepancy, requestFeedbackContext,
  *                         analyzeFeedback, setFeedbackProvider, submitFeedback,
  *                         copyFeedbackReport, openFeedbackLink,
+ *                         repairRelationships (runs the command),
  *                         layoutFinished (usage telemetry only)
  *
  * All message types use a discriminated union pattern with a `type` field,
@@ -47,6 +48,8 @@ import type {
   RelationshipKey,
   RemoveRelationshipMessage,
   UpdateRelationshipMessage,
+  EditRelationshipMessage,
+  RelationshipMarkKeyPayload,
   ToggleColumnKeyMessage,
   UpdateModelRationaleMessage,
   UpdateModelDescriptionMessage,
@@ -73,6 +76,8 @@ export type {
   RelationshipKey,
   RemoveRelationshipMessage,
   UpdateRelationshipMessage,
+  EditRelationshipMessage,
+  RelationshipMarkKeyPayload,
   ColumnKeyType,
   ToggleColumnKeyMessage,
   UpdateModelRationaleMessage,
@@ -281,7 +286,9 @@ export interface AddModelMessage {
 }
 
 /**
- * Request to add an FK relationship between two models.
+ * Request to add an FK relationship between two models. The host stores it
+ * once, canonical (never `one-to-many`), where the project keeps
+ * relationships (`DisplayDomain.relationshipHome`).
  */
 export interface AddRelationshipMessage {
   type: 'addRelationship';
@@ -293,8 +300,18 @@ export interface AddRelationshipMessage {
     cardinality: Cardinality;
     /** Optional label, e.g. `ship date`. Blank or absent means none. */
     role?: string;
+    /** Optional: also mark this end's column as its model's key (same undo step). */
+    markKey?: RelationshipMarkKeyPayload;
   };
 }
+
+/**
+ * The record's ends exactly as stored on disk (`DisplayRelationship.stored`),
+ * which a remove / update / edit may carry beside the ends as drawn. Both
+ * name the same link (`linkKey`), so it is optional: a payload without it is
+ * found by its drawn ends.
+ */
+export type StoredRelationshipEnds = RelationshipKey;
 
 /**
  * Request to remove multiple models from the domain in a single edit.
@@ -316,30 +333,20 @@ export interface RemoveModelsMessage {
 export interface RemoveRelationshipsMessage {
   type: 'removeRelationships';
   payload: {
-    relationships: RelationshipKey[];
+    /** Each the ends as drawn, optionally with the record's ends as on disk. */
+    relationships: Array<RelationshipKey & { stored?: StoredRelationshipEnds }>;
   };
 }
 
 /**
- * Request to edit a relationship (change any field including the composite key).
+ * Run "Repair Relationships…" (`erdStudio.repairRelationships`): the logical
+ * canvas banner shown while `DisplayDomain.relationshipIssues` holds REL003,
+ * REL004 or REL008. No payload. The command itself asks before changing any
+ * file; the message is still a schema mutation, so it is NOT on the physical
+ * stage allowlist.
  */
-export interface EditRelationshipMessage {
-  type: 'editRelationship';
-  payload: {
-    /** Original composite key to find the relationship */
-    originalFromModel: string;
-    originalFromColumn: string;
-    originalToModel: string;
-    originalToColumn: string;
-    /** New values (may be same as original) */
-    fromModel: string;
-    fromColumn: string;
-    toModel: string;
-    toColumn: string;
-    cardinality: Cardinality;
-    /** The label after the edit; '' or absent clears it. */
-    role?: string;
-  };
+export interface RepairRelationshipsMessage {
+  type: 'repairRelationships';
 }
 
 /**
@@ -738,6 +745,7 @@ export type WebviewMessage =
   | RemoveAnnotationMessage
   | RemoveAnnotationsMessage
   | OpenModelFileMessage
+  | RepairRelationshipsMessage
   | LayoutFinishedMessage;
 
 // ---------------------------------------------------------------------------

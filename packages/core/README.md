@@ -50,6 +50,16 @@ Every limit is off by default. The four-class contract above holds for input wit
 
 Each occurrence of a model is its own object, but occurrences share the parsed strings. The result keeps `undefined` values; serialise it (for example `JSON.parse(JSON.stringify(domain))`) if you need them dropped. Serialising writes out every occurrence's text, so the serialised size grows with the number of times the domain lists a model (within `maxYamlNodes` and `maxYamlChars` when they are set).
 
+## Relationships
+
+A relationship is identified by its **link**: its two `model.column` ends, either way round, without case — `linkKey(ends)` / `sameLink(a, b)`. It is stored canonically: `fromModel` is the "many" (foreign-key) side, and a `one-to-many` is turned round into a `many-to-one` (`canonicalRelationship`); `one-to-one` keeps its direction (`fromModel` holds the foreign key) and `many-to-many` keeps the order it was drawn in.
+
+- `normaliseRelationships({ models, own, filePath? })` is the one read path every host uses (and `buildUnifiedDomain` / `loadDisplayDomain` call): it draws one canonical relationship per link from a domain's own relationships and its models' library entries, fixes case-only spellings, picks a deterministic winner when a link is stored more than once, and returns `diagnostics` with stable codes (`REL001` duplicate, `REL002` one-to-many in a model file, `REL005` case-only match, `REL006` direction against key evidence, `REL008` model file entry skipped or defaulted, `REL009` domain copy of a library link). Every drawn relationship carries runtime-only `source`, `stored` (its ends as on disk) and `issues`; strip them with `stripRelationshipProvenance` before writing. `mergeLibraryRelationships` remains as a thin wrapper.
+- `checkRelationships({ libraryModels, domains, unreadableModels? })` checks everything a host loaded and returns findings `REL001`–`REL009` with the files, line and records involved.
+- `resolveDirection(a, b)` decides which way a relationship between two columns points from key flags (certain) and dbt tests (likely), or says it is ambiguous; build each end with `endEvidenceFromModel` / `endEvidenceFromDisplay`.
+
+`parseLogicalModelText` reports `relationships:` entries it skipped or read with a default in `relationshipIssues` (with their line), and `toDisplayDomain` sets `isForeignKeyDeclared` only for columns the model file marks as foreign keys (the `isForeignKey` badge is also set by relationships).
+
 ## Development
 
 This package lives in the `packages/core` workspace of the ERD Studio repository. Inside the repository it is consumed from source (TypeScript `paths` and vitest aliases); the published package ships only `dist/`.

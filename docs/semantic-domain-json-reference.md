@@ -219,11 +219,13 @@ A relationship is stored in exactly one place: the YAML of the model holding its
 | `cardinality` | string | Yes | One of `"many-to-one"`, `"one-to-one"`, `"one-to-many"`, `"many-to-many"`. `"one-to-many"` is still read, but ERD Studio never writes it into a model YAML (see the direction convention). |
 | `role` | string | No | A label for what the link means, e.g. `"order date"` and `"ship date"` for two columns pointing at the same date dimension. Trimmed, at most 60 characters, drawn on the line. A label only: not part of the identity. |
 
-**Identity key:** the composite `(fromModel, fromColumn, toModel, toColumn)` must be unique within the domain — and the same two columns may not be joined twice in opposite directions either: that is one link, drawn once.
+**Identity:** a relationship is its two `model.column` ends, **unordered and compared without case** (`linkKey` / `sameLink` in `@erd-studio/core`, issue #133). `fct_order_line.customer_id → dim_customer.customer_id` and its reverse are one relationship; so are two entries that differ only in capital letters. `cardinality` and `role` are not part of the identity. Each identity is stored once per project in a library project, and once per domain file in a per-domain one. (The key is shaped so that composite keys can be added later without a format change.)
 
-**Direction convention:** `fromModel` holds the FK (the "many" side), `toModel` holds the PK. A `one-to-many` is the same relationship read from the other end, so it is stored with its ends swapped as `many-to-one` (`canonicalRelationship` in `@erd-studio/core`, issue #133). `one-to-one` and `many-to-many` keep the direction they were drawn in.
+**Direction convention:** `fromModel` holds the FK (the "many" side), `toModel` holds the PK. A `one-to-many` is the same relationship read from the other end, so it is stored with its ends swapped as `many-to-one` (`canonicalRelationship` in `@erd-studio/core`) — in a model YAML and in a domain file. A `one-to-one` is stored from the model that holds the foreign key; a `many-to-many` keeps the direction it was drawn in. Where a relationship is stored follows from the record alone — never from the key flags. The key flags (`isPrimaryKey`, `isNaturalKey`, `isForeignKey`) and dbt's `unique` / `relationships` tests are evidence the editor uses when you *draw* a relationship (`resolveDirection`): when they settle which side is the "one" side the dialog fills it in, and when they do not it asks rather than guessing from the order you dragged.
 
-Entries missing any of the four string endpoints are dropped on read with a console warning; an unrecognised `cardinality` falls back to `many-to-one`.
+Entries missing any of the four string endpoints are skipped on read; an unrecognised `cardinality` (e.g. `one_to_many`) or a missing one is drawn as `many-to-one`. In a model YAML each skipped or defaulted entry is reported with its line (`REL008`, below), and saving the model never deletes or rewrites it — model YAML `relationships:` are saved entry by entry, keeping comments, unknown keys and unreadable entries exactly as written.
+
+**Provenance is runtime-only.** When a domain is read, every drawn relationship carries `source` (`{ kind: "library", model, index }` or `{ kind: "domain", index }`), `stored` (its four ends exactly as on disk) and `issues` (the check codes that concern it). The canvas uses them to edit the right record. They are never written to a file — do not add them by hand.
 
 ### Where relationships live
 
@@ -251,7 +253,30 @@ Every domain whose `logical.models` holds both `fct_order_line` and `dim_custome
 
 **Which one applies** is decided by what is on disk, like layer folders: the library is used once **any** model file holds a `relationships:` list, or when **no** domain file holds a `logical.relationships` entry.
 
-**Reading.** A domain draws its own `logical.relationships` first, in order, then the library relationships between its models. When both define the same endpoints (ignoring case) it is drawn once, with the library's cardinality, and a warning names the disagreement. When they join the same two columns in opposite directions, it is drawn once, as the library stores it.
+**Reading** (`normaliseRelationships` in `@erd-studio/core`, the one read path the canvas, the CLI, the MCP server and the viewer share). Every record is put in its canonical direction, and each end is respelled to the real model and column name when it matches only without case. Records with the same identity are drawn **once**, and the winner never depends on the order of `logical.models` or of the files: a library record beats a domain record; among library records, the one stored in its canonical home, then the lowest model name, then the earliest entry; among domain records, the earliest entry. The drawn order is the domain file's own relationships in file order, then the library-only ones. Nothing is dropped silently — each duplicate, one-to-many in a model file and case-only match becomes a diagnostic.
+
+**Editing.** Every canvas relationship edit (add, ⇄, cardinality, the edit dialog, delete) goes through one planner (`planRelationshipCommit`): it removes **every** copy of the link from the two endpoint model files and the open domain file, then writes one canonical record at its home — the many-side model's YAML in a library project, the domain file in a per-domain one — as one undo step. An edit never moves a relationship between the library and the domain files; only **Move Relationships to Model Library** and **Repair Relationships…** do that, and only after the user confirms.
+
+### Relationship checks
+
+`checkRelationships` in `@erd-studio/core` checks every model file and domain file a host has loaded. The codes are stable; the canvas, the **Repair Relationships…** command and the `erd-studio check` CLI all use them.
+
+| Code | Severity | Meaning |
+|------|----------|---------|
+| `REL001` | error if the copies disagree (cardinality, role, or a one-to-one's direction), else warning | The same link is stored more than once — in two model files, twice in one file, or twice in one domain file. In a per-domain project, one copy in each of two domain files is **not** a duplicate |
+| `REL002` | warning | A `one-to-many` stored in a model YAML (it belongs in the other model's file, as `many-to-one`) |
+| `REL003` | error | An endpoint model is not in the model library (not reported for a model whose file is unreadable, or a `stubColumns` model) |
+| `REL004` | error | An endpoint column is missing from its model (same exceptions) |
+| `REL005` | warning | An endpoint matches its model or column only when case is ignored |
+| `REL006` | info | The stored direction contradicts certain key evidence, e.g. the `fromColumn` is its model's whole primary key. Never fails a check run |
+| `REL008` | error | A model-file entry was skipped or defaulted on read (missing end, missing or unknown cardinality, a non-text role, a stray `fromModel:`), with its line |
+| `REL009` | info | In a library project, a domain file repeats a relationship the library already holds, saying the same thing |
+
+`erd-studio check [--strict] [--json]` runs them over the whole project: exit `0` with no errors, `1` with errors (or warnings under `--strict`), `3` when the project or the ERD Studio folder is missing. `erd-studio doctor` counts them (and suggests `fix-relationships`), and `erd-studio diff` lists the ones that concern each domain under `integrity` — advisory, never changing its result.
+
+### Repair Relationships…
+
+**ERD Studio: Repair Relationships…** (`erdStudio.repairRelationships`, also in the Model Library view's `…` menu) fixes what the checks find, with consent. It first shows every file and every change it will make; nothing is written until you confirm. Without asking it fixes the unambiguous cases: a `one-to-many` moved to its many side (`REL002`), a name respelled (`REL005`) and identical duplicates removed, keeping the copy in its home (`REL001`). Everything else is one question each — copies that disagree (`REL001`), a missing model or column (`REL003` / `REL004`: point it elsewhere, remove it, or leave it), a direction the keys contradict (`REL006`: swap, or leave it) — and every question has **Leave as is**; Esc cancels the whole repair. An entry that could not be read (`REL008`) is never touched: the command opens the file at its line instead. The files are written directly, all or nothing, refusing any that has unsaved edits; afterwards every written file is read back, and the repair is rolled back unless everything outside the relationships is byte-for-byte unchanged and the planned findings are gone. Running it twice does nothing the second time. **Move Relationships to Model Library** is the same engine with the per-domain → library move switched on. Opening a diagram offers Repair (once a session, with its own **Don't Ask Again**) when `REL001`, `REL002`, `REL003`, `REL004` or `REL008` are present, and an editable logical canvas shows a banner for `REL003` / `REL004` / `REL008`.
 
 ## View Config (`viewConfig`)
 
@@ -489,7 +514,7 @@ Red Hat YAML matches paths with dot-folders skipped, so a project inside a hidde
 2. `layer` must match an `id` in `layers.json`.
 3. Every entry in `logical.models` must be a string. Mixed string/object arrays are rejected.
 4. Each referenced model should have a `logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`; a missing file renders as a placeholder with a warning.
-5. Relationship identity `(fromModel, fromColumn, toModel, toColumn)` must be unique, in either direction, and both models should be in `logical.models`.
+5. A relationship's identity — its two `model.column` ends, either way round, ignoring case — must be unique, and both models should be in `logical.models`. `erd-studio check` reports violations with the codes above.
 6. `viewConfig` must be at the root of the document.
 
 ## Complete Example

@@ -46,8 +46,12 @@
   "missing-positions.host": [],
   "missing-positions.persist": [],
   "missing-positions.unified": [],
-  "no-layers.host": [],
-  "no-layers.unified": [],
+  "no-layers.host": [
+    "warn: [DomainService] Relationship fct_txn.account_key → dim_account.account_key is stored 2 times (entry 1 of <root>/.erd-studio/gold/accounts.json, entry 2 of <root>/.erd-studio/gold/accounts.json); drawing the one in entry 1 of <root>/.erd-studio/gold/accounts.json"
+  ],
+  "no-layers.unified": [
+    "warn: [DomainService] Relationship fct_txn.account_key → dim_account.account_key is stored 2 times (entry 1 of <root>/.erd-studio/gold/accounts.json, entry 2 of <root>/.erd-studio/gold/accounts.json); drawing the one in entry 1 of <root>/.erd-studio/gold/accounts.json"
+  ],
   "showcase.host": [],
   "showcase.stage-logical": [],
   "showcase.unified": [],

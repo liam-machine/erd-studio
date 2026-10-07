@@ -16,13 +16,14 @@
 
 import * as path from 'path';
 
+import { canonicalRelationship, linkKey } from '@erd-studio/core';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
 import type { Cardinality, ColumnDef, Relationship, SemanticModel } from '../types/semantic';
 import type { YmlData } from '../types/ymlData';
 import type { ManifestData } from '../types/manifest';
 import { validateModelNameSafety } from '../providers/payloadValidation';
 import { derivePhysicalRelationships, mergeCompositeGroups, mergeUniqueMaps } from './domainService';
-import { normaliseName } from './nameUtils';
+import { namesEqual, normaliseName } from './nameUtils';
 
 /** Most models one draft (or one batch add) will create — a readable first diagram. */
 export const DRAFT_MODEL_LIMIT = 15;
@@ -251,15 +252,25 @@ export function listDraftModels(input: DraftSourceInput): DraftModelEntry[] {
     || a.name.localeCompare(b.name));
 }
 
-/** Relationship tests from yml and manifest (union, deduped case-insensitively) plus merged uniqueness tests. */
+/**
+ * Relationship tests from yml and manifest (union, deduped case-insensitively)
+ * plus merged uniqueness tests. The same test listed by both sources is kept
+ * once; a link tested from BOTH ends (the fact's test and the dimension's
+ * test back to it) keeps both tests here — each is read in its own direction
+ * for cardinality — and becomes one relationship in
+ * {@link relationshipsForAddedModels}.
+ */
 export function dbtTestsOf(ymlData?: YmlData, manifest?: ManifestData): DbtTestIndex {
-  const seen = new Set<string>();
+  // linkKey → the `from` ends already kept for that link (#133: core identity).
+  const seen = new Map<string, DraftRelationshipTest[]>();
   const relationshipTests: DraftRelationshipTest[] = [];
   for (const t of [...(ymlData?.relationshipTests ?? []), ...(manifest?.relationshipTests ?? [])]) {
-    const key = testKey(t);
-    if (seen.has(key)) { continue; }
-    seen.add(key);
-    relationshipTests.push({ fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.toModel, toColumn: t.toColumn });
+    const key = linkKey(t);
+    const kept = seen.get(key) ?? [];
+    if (kept.some((k) => namesEqual(k.fromModel, t.fromModel) && namesEqual(k.fromColumn, t.fromColumn))) { continue; }
+    const test = { fromModel: t.fromModel, fromColumn: t.fromColumn, toModel: t.toModel, toColumn: t.toColumn };
+    seen.set(key, [...kept, test]);
+    relationshipTests.push(test);
   }
   return {
     relationshipTests,
@@ -270,18 +281,19 @@ export function dbtTestsOf(ymlData?: YmlData, manifest?: ManifestData): DbtTestI
   };
 }
 
-function testKey(t: DraftRelationshipTest): string {
-  return [t.fromModel, t.fromColumn, t.toModel, t.toColumn].map(normaliseName).join('\0');
-}
-
 /** Order names most-connected first (edges within `names`), then by name. */
 function byConnectedness(names: readonly string[], tests: readonly DraftRelationshipTest[]): string[] {
   const inScope = new Set(names.map(normaliseName));
   const degree = new Map<string, number>();
+  const counted = new Set<string>();
   for (const t of tests) {
     const from = normaliseName(t.fromModel);
     const to = normaliseName(t.toModel);
     if (from === to || !inScope.has(from) || !inScope.has(to)) { continue; }
+    // A link tested from both ends is one connection, not two.
+    const link = linkKey(t);
+    if (counted.has(link)) { continue; }
+    counted.add(link);
     degree.set(from, (degree.get(from) ?? 0) + 1);
     degree.set(to, (degree.get(to) ?? 0) + 1);
   }
@@ -465,7 +477,12 @@ export function seedModelFromDbt(name: string, ymlData?: YmlData, manifest?: Man
  * Key flags for a seeded model, from what dbt tests today: a column is the
  * primary key when it is the model's ONLY column with a standalone `unique`
  * test (and no composite key is declared); a column is a foreign key when a
- * draft relationship leaves from it. Returns a new model; existing flags win.
+ * draft relationship leaves from it — in its stored direction, so a test
+ * declared on the dimension marks the fact's column, not the dimension's.
+ * A column that is (or becomes) the primary key is never also marked a
+ * foreign key (#133, D1): a wrongly flagged key would read as "this model
+ * holds the foreign key" and turn later drags round. Returns a new model;
+ * existing flags win.
  */
 export function markDraftKeys(
   model: SemanticModel,
@@ -483,6 +500,7 @@ export function markDraftKeys(
   }
   const pk = !hasComposite && uniqueCols.size === 1 ? [...uniqueCols][0] : undefined;
   const fks = new Set(relationships
+    .map((r) => canonicalRelationship(r))
     .filter((r) => normaliseName(r.fromModel) === key)
     .map((r) => normaliseName(r.fromColumn)));
 
@@ -492,7 +510,7 @@ export function markDraftKeys(
       const col = { ...c };
       const name = normaliseName(c.name);
       if (pk === name && col.isPrimaryKey === undefined) { col.isPrimaryKey = true; }
-      if (fks.has(name) && col.isForeignKey === undefined) { col.isForeignKey = true; }
+      if (fks.has(name) && col.isForeignKey === undefined && col.isPrimaryKey !== true) { col.isForeignKey = true; }
       return col;
     }),
   };
@@ -505,13 +523,18 @@ export function markDraftKeys(
 /**
  * Logical relationships for models being added to a domain: every
  * relationship test between an added model and any model that will be in the
- * domain (existing or added), deduped against the domain's relationships.
+ * domain (existing or added), one per link, deduped against the domain's
+ * relationships whichever way round those are stored (core `linkKey`).
  *
  * Cardinality comes from `derivePhysicalRelationships()` (the physical stage's
- * inference from `unique` / `unique_combination_of_columns` tests), narrowed
- * to what a relationship test can mean for a draft: both ends unique is
- * `one-to-one`, anything else `many-to-one` (the test names the "one" side).
- * Endpoints use the spelling of the names passed in.
+ * inference from `unique` / `unique_combination_of_columns` tests). Each
+ * result is first put in the stored form (`canonicalRelationship`): a test
+ * declared on the dimension — `dim.id` tested against `fct.dim_id`, read as
+ * `one-to-many` — becomes `fct.dim_id → dim.id many-to-one`, so it is stored
+ * on the fact (#133, D1). Only then is it narrowed: a `many-to-many` (no
+ * uniqueness test on either end) becomes `many-to-one` in the test's own
+ * direction, because a relationship test names its "one" side. Both ends
+ * unique stays `one-to-one`. Endpoints use the spelling of the names passed in.
  */
 export function relationshipsForAddedModels(
   existingNamesInDomain: readonly string[],
@@ -522,8 +545,11 @@ export function relationshipsForAddedModels(
 ): Relationship[] {
   const added = new Set(addedNames.map(normaliseName));
   const domainNames = new Set<string>([...existingNamesInDomain, ...addedNames]);
-  const seen = new Set(existingRelationships.map(testKey));
+  // Entries a hand-edited domain file holds without four text ends are no link.
+  const seen = new Set(existingRelationships.filter(hasTextEnds).map(linkKey));
 
+  // One edge per link already: a test declared on both ends is drawn once,
+  // the child-side reading preferred (derivePhysicalRelationships, D9).
   const derived = derivePhysicalRelationships(
     [...tests],
     domainNames,
@@ -534,19 +560,25 @@ export function relationshipsForAddedModels(
   const out: Relationship[] = [];
   for (const rel of derived) {
     if (!added.has(normaliseName(rel.fromModel)) && !added.has(normaliseName(rel.toModel))) { continue; }
-    const key = testKey(rel);
+    const key = linkKey(rel);
     if (seen.has(key)) { continue; }
     seen.add(key);
-    const cardinality: Cardinality = rel.cardinality === 'one-to-one' ? 'one-to-one' : 'many-to-one';
-    out.push({
+    const stored = canonicalRelationship({
       fromModel: rel.fromModel,
       fromColumn: rel.fromColumn,
       toModel: rel.toModel,
       toColumn: rel.toColumn,
-      cardinality,
+      cardinality: rel.cardinality,
     });
+    const cardinality: Cardinality = stored.cardinality === 'one-to-one' ? 'one-to-one' : 'many-to-one';
+    out.push({ ...stored, cardinality });
   }
   return out;
+}
+
+/** Whether a relationship-shaped value has four text ends (a parsed domain file may hold anything). */
+function hasTextEnds(rel: DraftRelationshipTest): boolean {
+  return [rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].every((end) => typeof end === 'string');
 }
 
 // ---------------------------------------------------------------------------

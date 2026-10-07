@@ -67,6 +67,7 @@ import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus
 import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
+import { repairRelationships } from './commands/repairRelationships';
 import { saveDocumentByUri } from './providers/documentSave';
 
 /**
@@ -387,6 +388,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.selectDbtProject',
   'erdStudio.resolveDuplicateModel',
   'erdStudio.moveRelationshipsToLibrary',
+  'erdStudio.repairRelationships',
 ]);
 
 /**
@@ -942,6 +944,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     logicalModelService,
   );
   editorProviderForFeedback = editorProvider;
+
+  // What "Repair Relationships…" and "Move Relationships to Model Library"
+  // read and refresh: the same services the canvas checks with (D11).
+  const relationshipRepairDeps = () => ({
+    workspaceRoot,
+    semanticDir,
+    domainService,
+    logicalModelService,
+    onWritten: async (domainPaths: string[]) => {
+      for (const domainPath of domainPaths) treeProvider.invalidateDomain(domainPath);
+      modelLibraryProvider.refresh();
+      treeProvider.refresh();
+      selectorsService.scheduleRegenerate();
+      await editorProvider.refreshAllOpenDomains();
+    },
+  });
 
   // Report tracking is constructed here, before refreshContextKeys() is defined
   // and called below, so nothing can reference a service that does not exist
@@ -1528,19 +1546,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Store every domain file's relationships once, in their from-models'
     // library files (#126). The opt-in for a project that keeps them per domain.
     vscode.commands.registerCommand('erdStudio.moveRelationshipsToLibrary', () =>
-      moveRelationshipsToLibrary({
-        workspaceRoot,
-        semanticDir,
-        domainService,
-        logicalModelService,
-        onWritten: async (domainPaths) => {
-          for (const domainPath of domainPaths) treeProvider.invalidateDomain(domainPath);
-          modelLibraryProvider.refresh();
-          treeProvider.refresh();
-          selectorsService.scheduleRegenerate();
-          await editorProvider.refreshAllOpenDomains();
-        },
-      })),
+      moveRelationshipsToLibrary(relationshipRepairDeps())),
+    // Settle what the relationship checks find (#133): the same engine as the
+    // move, without moving domain-file relationships. Shows every change and
+    // asks before writing; the canvas banner and notification run it.
+    vscode.commands.registerCommand('erdStudio.repairRelationships', () =>
+      repairRelationships(relationshipRepairDeps())),
     vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: ModelLibraryNode | undefined) => {
       if (!node || node.type !== 'model') {
         void vscode.window.showErrorMessage('Reveal in Explorer: No model selected. Right-click a model in the Model Library.');

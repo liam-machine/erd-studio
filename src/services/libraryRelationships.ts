@@ -1,22 +1,44 @@
 /**
- * Relationships stored once in the model library (issue #126).
+ * Relationships stored once in the model library (issue #126), and the one
+ * write path every canvas relationship edit takes (issue #133).
  *
- * A relationship lives in its from-model's `logical-models/*.yml` under
- * `relationships:`, and every domain that holds both ends draws it (the read
- * side is `mergeLibraryRelationships` in `@erd-studio/core`). These helpers are
- * the write side: each takes library models, edits their `relationships` in
- * place and returns the models it changed, which the editor saves through the
- * same WorkspaceEdit as the domain file.
+ * A relationship lives in the file of the model holding its foreign key — its
+ * canonical `fromModel` — under `relationships:`, and every domain that holds
+ * both ends draws it (the read side is `normaliseRelationships` in
+ * `@erd-studio/core`). A project that still keeps relationships in its domain
+ * files stores them there instead, in the same canonical direction.
+ * `planRelationshipCommit` is the write side of both: it takes the endpoint
+ * models and the domain file's list, edits them in place and says what
+ * changed, which the editor saves through one WorkspaceEdit.
+ *
+ * "The same relationship" always means the same link — core's `linkKey`: the
+ * two `model.column` ends, either way round, without case.
  *
  * Pure: no `vscode`, no file access.
  */
 
-import { canonicalRelationship, relationshipKey } from '@erd-studio/core';
-import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
+import {
+  canonicalRelationship,
+  linkKey,
+  normaliseRelationshipRole,
+  sameLink,
+  type DisplayRelationshipIssue,
+  type RelationshipEnds,
+  type RelationshipFinding,
+  type RelationshipIssueCode,
+} from '@erd-studio/core';
+import type { Cardinality, ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 
-type RelationshipEnds = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
+export type { RelationshipEnds };
 
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+/** Whether `model.column` is the `side` end of `rel`, without case. */
+function endIs(rel: RelationshipEnds, side: 'from' | 'to', model: string, column?: string): boolean {
+  const m = side === 'from' ? rel.fromModel : rel.toModel;
+  const c = side === 'from' ? rel.fromColumn : rel.toColumn;
+  return same(m, model) && (column === undefined || same(c, column));
+}
 
 /**
  * Whether new relationships go to the model library. Like layer folders this
@@ -26,6 +48,10 @@ const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCas
  * has no per-domain convention to keep. A project that keeps relationships in
  * its domain files carries on doing so — a teammate on a version before this
  * one would not see an edge stored in the library.
+ *
+ * Evaluated before an edit, never changed by one (R3): a commit writes where
+ * this says, and only "Move Relationships to Model Library" / "Repair
+ * Relationships…" move relationships between the two.
  */
 export function usesLibraryRelationships(
   models: readonly SemanticModel[],
@@ -39,26 +65,23 @@ export function libraryRelationshipsOf(model: SemanticModel): Relationship[] {
   return (model.relationships ?? []).map((rel) => ({ fromModel: model.name, ...rel }));
 }
 
-/** Whether `model`'s library file defines a relationship with these ends. */
+/** Whether `model`'s library file stores the link these ends draw (either way round). */
 export function hasLibraryRelationship(model: SemanticModel, ends: RelationshipEnds): boolean {
-  const key = relationshipKey(ends);
-  return libraryRelationshipsOf(model).some((rel) => relationshipKey(rel) === key);
+  return libraryRelationshipsOf(model).some((rel) => sameLink(rel, ends));
 }
 
 /**
  * Whether two relationships join the same two columns, in either direction
  * (issue #133): `dim.id → fct.dim_id` and `fct.dim_id → dim.id` are one link,
- * so a second one would draw a duplicate line.
+ * so a second one would draw a duplicate line. Core's `sameLink`, kept under
+ * its first name for existing callers.
  */
-export function sameColumnPair(a: RelationshipEnds, b: RelationshipEnds): boolean {
-  const reversed = { fromModel: b.toModel, fromColumn: b.toColumn, toModel: b.fromModel, toColumn: b.fromColumn };
-  return relationshipKey(a) === relationshipKey(b) || relationshipKey(a) === relationshipKey(reversed);
-}
+export const sameColumnPair: (a: RelationshipEnds, b: RelationshipEnds) => boolean = sameLink;
 
 /** The relationship any library model stores between these two columns, either way round. */
 export function findLibraryColumnPair(models: readonly SemanticModel[], ends: RelationshipEnds): Relationship | undefined {
   for (const model of models) {
-    const found = libraryRelationshipsOf(model).find((rel) => sameColumnPair(rel, ends));
+    const found = libraryRelationshipsOf(model).find((rel) => sameLink(rel, ends));
     if (found) return found;
   }
   return undefined;
@@ -66,7 +89,8 @@ export function findLibraryColumnPair(models: readonly SemanticModel[], ends: Re
 
 /**
  * The library entry for `rel`, without `fromModel`: the four stored fields,
- * plus `role` when it has one.
+ * plus `role` when it has one. Runtime-only fields (`source`, `stored`,
+ * `issues`) are never copied.
  */
 function libraryEntry(rel: Relationship): ModelRelationship {
   return {
@@ -78,29 +102,43 @@ function libraryEntry(rel: Relationship): ModelRelationship {
   };
 }
 
+/** A domain-file entry for `rel`: the five stored fields, plus `role` when it has one. */
+function domainEntry(rel: Relationship): Relationship {
+  return {
+    fromModel: rel.fromModel,
+    fromColumn: rel.fromColumn,
+    toModel: rel.toModel,
+    toColumn: rel.toColumn,
+    cardinality: rel.cardinality,
+    ...(rel.role ? { role: rel.role } : {}),
+  };
+}
+
 /**
  * Add or replace a relationship on its from-model (`model.name` must be
  * `rel.fromModel`, already in its stored direction — see
- * `canonicalRelationship`). Returns false when an identical one is already
- * there.
+ * `canonicalRelationship`). An entry for the same link (either way round) is
+ * replaced in place; any further copy of it in this file is dropped. Returns
+ * false when an identical one is already there.
  */
 export function upsertLibraryRelationship(model: SemanticModel, rel: Relationship): boolean {
-  const key = relationshipKey(rel);
+  const key = linkKey(rel);
   const list = model.relationships ?? [];
-  const index = list.findIndex((r) => relationshipKey({ fromModel: model.name, ...r }) === key);
   const entry = libraryEntry(rel);
+  const index = list.findIndex((r) => linkKey({ fromModel: model.name, ...r }) === key);
   if (index === -1) {
     model.relationships = [...list, entry];
     return true;
   }
   const current = list[index];
-  if (current.cardinality === entry.cardinality && current.fromColumn === entry.fromColumn
-    && current.toModel === entry.toModel && current.toColumn === entry.toColumn
-    && current.role === entry.role) {
+  const duplicates = list.filter((r, i) => i !== index && linkKey({ fromModel: model.name, ...r }) === key).length;
+  const identical = (['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role'] as const).every((k) => current[k] === entry[k]);
+  if (duplicates === 0 && identical) {
     return false;
   }
-  list[index] = entry;
-  model.relationships = list;
+  model.relationships = list
+    .map((r, i) => (i === index ? entry : r))
+    .filter((r, i) => i === index || linkKey({ fromModel: model.name, ...r }) !== key);
   return true;
 }
 
@@ -121,13 +159,13 @@ function dropWhere(models: readonly SemanticModel[], drop: (rel: Relationship) =
   return changed;
 }
 
-/** Remove the relationships with these ends from the library. */
+/** Remove every library copy of the links these ends draw (either way round, without case). */
 export function removeLibraryRelationships(
   models: readonly SemanticModel[],
   ends: readonly RelationshipEnds[],
 ): SemanticModel[] {
-  const keys = new Set(ends.map(relationshipKey));
-  return dropWhere(models, (rel) => keys.has(relationshipKey(rel)));
+  const keys = new Set(ends.map(linkKey));
+  return dropWhere(models, (rel) => keys.has(linkKey(rel)));
 }
 
 /** Remove every library relationship that starts or ends at `model.column`. */
@@ -136,14 +174,12 @@ export function removeColumnRelationships(
   modelName: string,
   column: string,
 ): SemanticModel[] {
-  return dropWhere(models, (rel) =>
-    (same(rel.fromModel, modelName) && same(rel.fromColumn, column))
-    || (same(rel.toModel, modelName) && same(rel.toColumn, column)));
+  return dropWhere(models, (rel) => endIs(rel, 'from', modelName, column) || endIs(rel, 'to', modelName, column));
 }
 
 /**
  * Follow a column rename: the model's own relationships leaving that column,
- * and every other model's relationships pointing at it.
+ * and every other model's relationships pointing at it (names without case).
  */
 export function renameColumnInRelationships(
   models: readonly SemanticModel[],
@@ -155,11 +191,11 @@ export function renameColumnInRelationships(
   for (const model of models) {
     let touched = false;
     for (const rel of model.relationships ?? []) {
-      if (same(model.name, modelName) && rel.fromColumn === oldColumn) {
+      if (same(model.name, modelName) && same(rel.fromColumn, oldColumn)) {
         rel.fromColumn = newColumn;
         touched = true;
       }
-      if (same(rel.toModel, modelName) && rel.toColumn === oldColumn) {
+      if (same(rel.toModel, modelName) && same(rel.toColumn, oldColumn)) {
         rel.toColumn = newColumn;
         touched = true;
       }
@@ -169,7 +205,7 @@ export function renameColumnInRelationships(
   return changed;
 }
 
-/** Follow a model rename in every other model's relationships that point at it. */
+/** Follow a model rename in every other model's relationships that point at it (name without case). */
 export function renameModelInRelationships(
   models: readonly SemanticModel[],
   oldName: string,
@@ -179,7 +215,7 @@ export function renameModelInRelationships(
   for (const model of models) {
     let touched = false;
     for (const rel of model.relationships ?? []) {
-      if (rel.toModel === oldName) {
+      if (same(rel.toModel, oldName)) {
         rel.toModel = newName;
         touched = true;
       }
@@ -196,7 +232,8 @@ export function renameModelInRelationships(
  * `libraryModel`, which must return a copy the caller may change. A
  * relationship whose from-model has neither stays in `kept`, for the domain
  * file. `changed` lists every model to save, new ones included only when they
- * gained a relationship.
+ * gained a relationship. A link either end's file already stores (either way
+ * round) is left as it is: that entry already draws it.
  */
 export function routeToLibrary(
   relationships: readonly Relationship[],
@@ -207,10 +244,11 @@ export function routeToLibrary(
   const changed = new Map<string, SemanticModel>();
   const loaded = new Map<string, SemanticModel | null>();
   const modelFor = (name: string): SemanticModel | null => {
-    const fresh = newModels.find((m) => m.name === name);
+    const fresh = newModels.find((m) => same(m.name, name));
     if (fresh) return fresh;
-    if (!loaded.has(name)) loaded.set(name, libraryModel(name));
-    return loaded.get(name) ?? null;
+    const key = name.toLowerCase();
+    if (!loaded.has(key)) loaded.set(key, libraryModel(name));
+    return loaded.get(key) ?? null;
   };
   for (const drawn of relationships) {
     const rel = canonicalRelationship(drawn);
@@ -219,172 +257,368 @@ export function routeToLibrary(
       kept.push(drawn);
       continue;
     }
-    // Already stored the other way round (by hand, or before #133): that
-    // entry already draws this link, so a second would only duplicate it.
+    // Already stored, here or on the other end (by hand, or before #133):
+    // that entry already draws this link, so a second would only duplicate it.
     const other = modelFor(rel.toModel);
-    if (other && libraryRelationshipsOf(other).some((r) => sameColumnPair(r, rel))) continue;
-    if (upsertLibraryRelationship(model, rel)) changed.set(model.name, model);
+    if ([model, other].some((m) => m !== null && hasLibraryRelationship(m, rel))) continue;
+    if (upsertLibraryRelationship(model, { ...rel, fromModel: model.name })) changed.set(model.name, model);
   }
   return { kept, changed: [...changed.values()] };
 }
 
-/** One relationship that domain files define in more than one way. */
-export interface RelationshipConflict {
-  /** Its ends, with the `role` a domain file gave it, if any. */
-  relationship: RelationshipEnds & { role?: string };
-  /** Each cardinality in use, with the domain files that use it. */
-  definitions: Array<{ cardinality: Relationship['cardinality']; domains: string[] }>;
-}
+// ---------------------------------------------------------------------------
+// The one write path (issue #133, R4)
+// ---------------------------------------------------------------------------
 
-/** What moving domain-file relationships into the library would do. */
-export interface MoveToLibraryPlan {
-  /** Relationships to add to their from-model, one per set of ends. */
-  toLibrary: Relationship[];
-  /**
-   * Per domain file, the entries to take out of `logical.relationships`
-   * (by ends) — every entry whose relationship moves.
-   */
-  removeFromDomains: Map<string, Set<string>>;
-  /** Defined with different cardinalities: the user picks one (`resolveConflict`) or leaves them in place. */
-  conflicts: RelationshipConflict[];
-  /** From-model has no library file (or cannot be read): left in the domain file. */
-  skippedNoModel: Relationship[];
-  /**
-   * Library entries stored on their "one" side (`one-to-many`, written before
-   * #133 or by hand): each moves to the model on its many side as
-   * `many-to-one` — `stored` is taken out of `from`'s file and `to` added,
-   * unless that file already holds the link. The canvas draws the same line.
-   */
-  rehome: RelationshipRehome[];
-}
+/** Where a project keeps relationships: the model library, or each domain file. */
+export type RelationshipMode = 'library' | 'domain';
 
-/** One library entry moving to its many side's file (see `MoveToLibraryPlan.rehome`). */
-export interface RelationshipRehome {
-  /** The model whose file holds it now. */
-  from: string;
-  /** The entry as stored there, with `fromModel` = `from`. */
-  stored: Relationship;
-  /** The same relationship as it will be stored: `canonicalRelationship(stored)`. */
-  to: Relationship;
+/** A column the same commit marks as its model's primary key (the dialog's "Mark … as … key"). */
+export interface RelationshipMarkKey {
+  model: string;
+  column: string;
 }
 
 /**
- * Library entries stored the wrong way round (#133): a `one-to-many` sits in
- * the file of its "one" side, but belongs with the model holding the foreign
- * key. Entries whose many side has no library file stay where they are.
+ * One relationship edit from the canvas.
+ *
+ * - `add` — a new link (`rel` as drawn; stored canonical).
+ * - `update` — a new cardinality for the link `stored` names (the ⇄ swap and
+ *   the context menu). The cardinality is read in the direction the link is
+ *   drawn — the canonical direction of the record a reader draws — so a
+ *   `one-to-many` turns it round. The role is kept.
+ * - `edit` — the dialog: the link `stored` names becomes `next` (ends,
+ *   cardinality and role; a blank role clears it).
+ * - `remove` — every link `stored` names.
+ *
+ * `stored` may be the ends as drawn or as on disk: both name the same link.
  */
-export function planRehome(
-  libraryModels: readonly SemanticModel[],
-  libraryModel: (name: string) => SemanticModel | null,
-): RelationshipRehome[] {
-  const rehome: RelationshipRehome[] = [];
-  for (const model of libraryModels) {
-    for (const stored of libraryRelationshipsOf(model)) {
-      const to = canonicalRelationship(stored);
-      if (to === stored) continue;
-      if (!libraryModel(to.fromModel)) continue;
-      rehome.push({ from: model.name, stored, to });
-    }
+export type RelationshipCommitOp =
+  | { kind: 'add'; rel: Relationship; markKey?: RelationshipMarkKey }
+  | { kind: 'update'; stored: RelationshipEnds; cardinality: Cardinality }
+  | { kind: 'edit'; stored: RelationshipEnds; next: Relationship; markKey?: RelationshipMarkKey }
+  | { kind: 'remove'; stored: readonly RelationshipEnds[] };
+
+export interface RelationshipCommitInput {
+  /** Where the project keeps relationships, decided before the edit (`usesLibraryRelationships`; always `domain` for a v4 domain). */
+  mode: RelationshipMode;
+  op: RelationshipCommitOp;
+  /**
+   * Copies of the models at the ends of the link(s) — for an edit that
+   * changes ends, the old and the new ones — already read. Edited in place.
+   * Their `relationships` are only read and written in `library` mode.
+   */
+  endpointModels: readonly SemanticModel[];
+  /** The current domain file's `logical.relationships`. Not edited; the result carries the new list. */
+  domainRelationships: readonly Relationship[];
+  /**
+   * The project's other domain files (library mode, remove only): those that
+   * still hold their own copy of a removed link are named in
+   * `otherDomainCopies`.
+   */
+  otherDomains?: ReadonlyArray<{ label: string; models: readonly string[]; relationships: readonly Relationship[] }>;
+  /** The message for a home model that is not among `endpointModels` (library mode). */
+  describeMissingModel?: (name: string) => string;
+}
+
+export interface RelationshipCommitPlan {
+  /**
+   * Endpoint models to save: those whose `relationships` (or, for `markKey`,
+   * columns) changed, and the model a record was written to.
+   */
+  changedModels: SemanticModel[];
+  /** The domain file's `logical.relationships` after the commit. */
+  domainRelationships: Relationship[];
+  /** Whether `domainRelationships` differs from the input. */
+  domainChanged: boolean;
+  /**
+   * The record written (add / update / edit): in `model`'s `relationships` at
+   * `index` (library mode), or at `index` of `domainRelationships`. A model
+   * file save passes it on so the entry is rewritten in full, a cardinality
+   * the reader could not read included.
+   */
+  written?: { where: 'library'; model: string; index: number } | { where: 'domain'; index: number };
+  /** Other domain files (by label) still holding their own copy of a removed link. */
+  otherDomainCopies?: string[];
+}
+
+/** A commit the canvas must refuse; the message is for the user. */
+export class RelationshipCommitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RelationshipCommitError';
   }
-  return rehome;
+}
+
+/** One stored record of a link, where a commit found it. */
+type Copy =
+  | { where: 'library'; model: SemanticModel; index: number; rel: Relationship }
+  | { where: 'domain'; index: number; rel: Relationship };
+
+/** The copy a reader draws first (core's `normaliseRelationships` order): library, at home, by holder, by index. */
+function rankCopies(a: Copy, b: Copy): number {
+  if (a.where !== b.where) return a.where === 'library' ? -1 : 1;
+  if (a.where === 'library' && b.where === 'library') {
+    const aHome = same(canonicalRelationship(a.rel).fromModel, a.model.name);
+    const bHome = same(canonicalRelationship(b.rel).fromModel, b.model.name);
+    if (aHome !== bHome) return aHome ? -1 : 1;
+    const ma = a.model.name.toLowerCase();
+    const mb = b.model.name.toLowerCase();
+    if (ma !== mb) return ma < mb ? -1 : 1;
+  }
+  return a.index - b.index;
 }
 
 /**
- * Plan "Move Relationships to Model Library": every relationship in a v5
- * domain file goes to its from-model's library file, once, unless the domain
- * files disagree about its cardinality — those are `conflicts`, which only the
- * user settles (`resolveConflict` with their pick), never this code. A relationship the library already defines is
- * taken out of the domain file; its cardinality is the library's, which every
- * domain already shows.
+ * Plan one relationship edit (R4). Every copy of the link — in the endpoint
+ * models' files (library mode) and in the current domain file — is taken out,
+ * then (add / update / edit) ONE canonical record is written at its home: the
+ * canonical from-model's file in library mode, the domain file in domain
+ * mode. A record already at home keeps its place in the list; anything else
+ * is appended. Nothing else is touched. Throws `RelationshipCommitError` for
+ * a duplicate (adding or re-keying onto a link stored elsewhere), a link that
+ * is not found, or a home model that is missing.
  */
-export function planMoveToLibrary(
-  domains: ReadonlyArray<{ label: string; relationships: readonly Relationship[] }>,
-  libraryModel: (name: string) => SemanticModel | null,
-  libraryModels: readonly SemanticModel[] = [],
-): MoveToLibraryPlan {
-  const byKey = new Map<string, { rel: Relationship; uses: Array<{ label: string; cardinality: Relationship['cardinality'] }> }>();
-  for (const domain of domains) {
-    for (const rel of domain.relationships) {
-      const key = relationshipKey(rel);
-      const entry = byKey.get(key) ?? { rel, uses: [] };
-      // The first role any domain gives it is the one kept.
-      if (!entry.rel.role && rel.role) entry.rel = { ...entry.rel, role: rel.role };
-      entry.uses.push({ label: domain.label, cardinality: rel.cardinality });
-      byKey.set(key, entry);
-    }
-  }
+export function planRelationshipCommit(input: RelationshipCommitInput): RelationshipCommitPlan {
+  const { mode, op } = input;
+  const library = mode === 'library';
+  // Distinct models (a self-reference names one model twice).
+  const models: SemanticModel[] = [];
+  for (const m of input.endpointModels) if (!models.includes(m)) models.push(m);
+  const findModel = (name: string): SemanticModel | undefined =>
+    models.find((m) => m.name === name) ?? models.find((m) => same(m.name, name));
+  const before = new Map(models.map((m) => [m, JSON.stringify({ r: m.relationships ?? [], c: m.columns ?? [] })]));
+  let domain = input.domainRelationships.map((rel) => rel);
 
-  const plan: MoveToLibraryPlan = {
-    toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [],
-    rehome: planRehome(libraryModels, libraryModel),
+  const copiesOf = (key: string): Copy[] => {
+    const found: Copy[] = [];
+    if (library) {
+      for (const model of models) {
+        (model.relationships ?? []).forEach((entry, index) => {
+          const rel = { fromModel: model.name, ...entry };
+          if (linkKey(rel) === key) found.push({ where: 'library', model, index, rel });
+        });
+      }
+    }
+    domain.forEach((rel, index) => {
+      if (linkKey(rel) === key) found.push({ where: 'domain', index, rel });
+    });
+    return found.sort(rankCopies);
   };
-  for (const [key, { rel, uses }] of byKey) {
-    // Stored on its many side (#133); a conflict is turned round once the user picks.
-    const stored = canonicalRelationship(rel);
-    const model = libraryModel(stored.fromModel);
-    if (!model) {
-      plan.skippedNoModel.push(rel);
-      continue;
-    }
-    const other = libraryModel(stored.toModel);
-    const alreadyShared = hasLibraryRelationship(model, stored)
-      || (other !== null && libraryRelationshipsOf(other).some((r) => sameColumnPair(r, stored)));
-    const cardinalities = [...new Set(uses.map((u) => u.cardinality))];
-    if (!alreadyShared && cardinalities.length > 1) {
-      plan.conflicts.push({
-        relationship: {
-          fromModel: rel.fromModel, fromColumn: rel.fromColumn, toModel: rel.toModel, toColumn: rel.toColumn,
-          ...(rel.role ? { role: rel.role } : {}),
-        },
-        definitions: cardinalities.map((cardinality) => ({
-          cardinality,
-          domains: [...new Set(uses.filter((u) => u.cardinality === cardinality).map((u) => u.label))],
-        })),
-      });
-      continue;
-    }
-    if (!alreadyShared) {
-      plan.toLibrary.push({ ...stored, fromModel: model.name });
-    } else if (stored.role) {
-      // The library already draws it but has no role: the domain's label is
-      // the only copy of it, and the domain entry is about to go.
-      const entry = [model, other].flatMap((m) => (m ? libraryRelationshipsOf(m) : [])).find((r) => sameColumnPair(r, stored));
-      if (entry && !entry.role) plan.toLibrary.push({ ...entry, role: stored.role });
-    }
-    for (const use of uses) {
-      const keys = plan.removeFromDomains.get(use.label) ?? new Set<string>();
-      keys.add(key);
-      plan.removeFromDomains.set(use.label, keys);
-    }
-  }
-  return plan;
-}
 
-/**
- * Settle a conflict the way the user picked: the relationship goes to the
- * library with `cardinality`, and every domain file's copy is taken out, so
- * each diagram now draws the one definition. Returns the plan unchanged for a
- * conflict it does not hold.
- */
-export function resolveConflict(
-  plan: MoveToLibraryPlan,
-  conflict: RelationshipConflict,
-  cardinality: Relationship['cardinality'],
-): MoveToLibraryPlan {
-  if (!plan.conflicts.includes(conflict)) return plan;
-  const key = relationshipKey(conflict.relationship);
-  const removeFromDomains = new Map([...plan.removeFromDomains].map(([label, keys]) => [label, new Set(keys)]));
-  for (const domain of conflict.definitions.flatMap((d) => d.domains)) {
-    const keys = removeFromDomains.get(domain) ?? new Set<string>();
-    keys.add(key);
-    removeFromDomains.set(domain, keys);
+  // --- What is cleared, and what is checked --------------------------------
+  const cleared = new Set(
+    op.kind === 'remove' ? op.stored.map(linkKey) : [linkKey(op.kind === 'add' ? op.rel : op.stored)],
+  );
+  const copies = [...cleared].flatMap(copiesOf);
+  let next: Relationship | null = null;
+  switch (op.kind) {
+    case 'add': {
+      if (copies.length > 0) throw new RelationshipCommitError('This relationship already exists.');
+      const role = normaliseRelationshipRole(op.rel.role);
+      next = { ...ends(op.rel), cardinality: op.rel.cardinality, ...(role ? { role } : {}) };
+      break;
+    }
+    case 'update': {
+      const drawn = copies[0];
+      if (!drawn) throw new RelationshipCommitError('Relationship not found.');
+      const role = normaliseRelationshipRole(drawn.rel.role);
+      next = { ...ends(canonicalRelationship(drawn.rel)), cardinality: op.cardinality, ...(role ? { role } : {}) };
+      break;
+    }
+    case 'edit': {
+      if (copies.length === 0) throw new RelationshipCommitError('Relationship not found.');
+      const nextKey = linkKey(op.next);
+      if (!cleared.has(nextKey) && copiesOf(nextKey).length > 0) {
+        throw new RelationshipCommitError('A relationship with this key already exists.');
+      }
+      const role = normaliseRelationshipRole(op.next.role);
+      next = { ...ends(op.next), cardinality: op.next.cardinality, ...(role ? { role } : {}) };
+      break;
+    }
+    case 'remove':
+      if (copies.length === 0) throw new RelationshipCommitError('Relationship not found.');
+      break;
   }
+
+  // --- The canonical record, spelled as the models spell themselves --------
+  let record: Relationship | null = null;
+  let home: SemanticModel | undefined;
+  if (next) {
+    record = respell(canonicalRelationship(next), findModel);
+    if (library) {
+      home = findModel(record.fromModel);
+      if (!home) {
+        throw new RelationshipCommitError(
+          input.describeMissingModel?.(record.fromModel) ?? `Model "${record.fromModel}" not found in logical-models/.`,
+        );
+      }
+      record = { ...record, fromModel: home.name };
+    }
+  }
+
+  // A key to mark in the same commit: an end of the record, checked before
+  // anything is changed.
+  const markKey = op.kind === 'add' || op.kind === 'edit' ? op.markKey : undefined;
+  let markColumn: NonNullable<SemanticModel['columns']>[number] | undefined;
+  if (markKey && record) {
+    const atEnd = endIs(record, 'from', markKey.model, markKey.column) || endIs(record, 'to', markKey.model, markKey.column);
+    const model = atEnd ? findModel(markKey.model) : undefined;
+    markColumn = model?.columns?.find((c) => c.name === markKey.column) ?? model?.columns?.find((c) => same(c.name, markKey.column));
+    if (!markColumn) {
+      throw new RelationshipCommitError(`Can't mark ${markKey.model}.${markKey.column} as a key: it is not an end of this relationship.`);
+    }
+  }
+
+  // Where a record already at home sits: the written one keeps that place.
+  const homeIndex = home
+    ? copies.filter((c) => c.where === 'library' && c.model === home).map((c) => c.index).sort((a, b) => a - b)[0]
+    : copies.filter((c) => c.where === 'domain').map((c) => c.index).sort((a, b) => a - b)[0];
+
+  // --- Take every copy out ---------------------------------------------------
+  if (library) dropWhere(models, (rel) => cleared.has(linkKey(rel)));
+  domain = domain.filter((rel) => !cleared.has(linkKey(rel)));
+
+  // --- Write the one record at its home --------------------------------------
+  let written: RelationshipCommitPlan['written'];
+  if (record) {
+    if (home) {
+      const list = [...(home.relationships ?? [])];
+      const index = homeIndex ?? list.length;
+      list.splice(index, 0, libraryEntry(record));
+      home.relationships = list;
+      written = { where: 'library', model: home.name, index };
+    } else {
+      const index = homeIndex ?? domain.length;
+      domain.splice(index, 0, domainEntry(record));
+      written = { where: 'domain', index };
+    }
+  }
+
+  if (markColumn) markColumn.isPrimaryKey = true;
+
+  // --- Other domains still drawing a removed link from their own copy --------
+  let otherDomainCopies: string[] | undefined;
+  if (op.kind === 'remove' && library && input.otherDomains) {
+    const labels = input.otherDomains
+      .filter((d) => {
+        const names = new Set(d.models.map((m) => m.toLowerCase()));
+        return d.relationships.some((rel) => cleared.has(linkKey(rel))
+          && names.has(rel.fromModel.toLowerCase()) && names.has(rel.toModel.toLowerCase()));
+      })
+      .map((d) => d.label);
+    if (labels.length > 0) otherDomainCopies = [...new Set(labels)].sort();
+  }
+
+  const domainChanged = JSON.stringify(domain) !== JSON.stringify(input.domainRelationships);
+  // The home model is always saved when a record was written there, even when
+  // the parsed list looks the same: the entry on disk may hold what the reader
+  // defaulted (`one_to_many` read as many-to-one), and the save rewrites it.
+  const changedModels = models.filter((m) => m === home
+    || before.get(m) !== JSON.stringify({ r: m.relationships ?? [], c: m.columns ?? [] }));
   return {
-    ...plan,
-    toLibrary: [...plan.toLibrary, canonicalRelationship({ ...conflict.relationship, cardinality })],
-    removeFromDomains,
-    conflicts: plan.conflicts.filter((c) => c !== conflict),
+    changedModels,
+    domainRelationships: domain,
+    domainChanged,
+    ...(written ? { written } : {}),
+    ...(otherDomainCopies ? { otherDomainCopies } : {}),
   };
+}
+
+/** Just the four ends of a relationship (no cardinality, role or runtime fields). */
+function ends(rel: RelationshipEnds): RelationshipEnds {
+  return { fromModel: rel.fromModel, fromColumn: rel.fromColumn, toModel: rel.toModel, toColumn: rel.toColumn };
+}
+
+/**
+ * `rel` with each end spelled as its model spells itself: the model's real
+ * name when one of `findModel`'s models matches without case, and the real
+ * column name when that model has the column (REL005 is never written).
+ */
+function respell(rel: Relationship, findModel: (name: string) => SemanticModel | undefined): Relationship {
+  const fix = (modelName: string, column: string): [string, string] => {
+    const model = findModel(modelName);
+    if (!model) return [modelName, column];
+    const real = model.columns?.find((c) => c.name === column) ?? model.columns?.find((c) => same(c.name, column));
+    return [model.name, real?.name ?? column];
+  };
+  const [fromModel, fromColumn] = fix(rel.fromModel, rel.fromColumn);
+  const [toModel, toColumn] = fix(rel.toModel, rel.toColumn);
+  return { ...rel, fromModel, fromColumn, toModel, toColumn };
+}
+
+// ---------------------------------------------------------------------------
+// Findings a canvas shows, and when to offer a repair (issue #133)
+// ---------------------------------------------------------------------------
+
+/** Codes that make the canvas offer "Repair Relationships…" (banner and notification). */
+export const REPAIR_OFFER_CODES: readonly RelationshipIssueCode[] = ['REL001', 'REL002', 'REL003', 'REL004', 'REL008'];
+
+/** The findings worth offering a repair for: REL001 / REL002 / REL003 / REL004 / REL008. */
+export function findingsNeedingRepair(findings: readonly RelationshipFinding[]): RelationshipFinding[] {
+  return findings.filter((f) => REPAIR_OFFER_CODES.includes(f.code));
+}
+
+/**
+ * The project findings (`checkRelationships`) that concern one domain: those
+ * naming its file, those about a link whose two models it holds, and those
+ * about a model file it shows that could not be read in full (REL008) or that
+ * points at a missing model or column (REL003 / REL004). `domain.modelFiles`
+ * are the domain's models' file names as the findings spell them.
+ */
+export function findingsForDomain(
+  findings: readonly RelationshipFinding[],
+  domain: { filePath: string; models: readonly string[]; modelFiles: readonly string[] },
+): RelationshipFinding[] {
+  const models = new Set(domain.models.map((m) => m.toLowerCase()));
+  const modelFiles = new Set(domain.modelFiles);
+  const holds = (name: string): boolean => models.has(name.toLowerCase());
+  return findings.filter((f) => {
+    if (f.files.includes(domain.filePath)) return true;
+    const records = f.records ?? [];
+    if (records.length === 0) return f.files.some((file) => modelFiles.has(file));
+    return records.some((r) => {
+      if (r.source.kind !== 'library') return false;
+      if (f.code === 'REL003' || f.code === 'REL004') return holds(r.source.model);
+      return holds(r.stored.fromModel) && holds(r.stored.toModel);
+    });
+  });
+}
+
+/** Findings as the canvas payload carries them (`DisplayDomain.relationshipIssues`), without repeats. */
+export function toDisplayRelationshipIssues(findings: readonly RelationshipFinding[]): DisplayRelationshipIssue[] {
+  const seen = new Set<string>();
+  const issues: DisplayRelationshipIssue[] = [];
+  for (const f of findings) {
+    const id = `${f.code}\u0000${f.message}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    issues.push({ code: f.code, severity: f.severity, message: f.message, ...(f.link ? { link: f.link } : {}) });
+  }
+  return issues;
+}
+
+/**
+ * The notification offering "Repair Relationships…": how many relationships
+ * need attention and, briefly, why. Null when nothing does.
+ */
+export function describeRepairOffer(findings: readonly RelationshipFinding[]): string | null {
+  const needing = findingsNeedingRepair(findings);
+  if (needing.length === 0) return null;
+  const reasons: Array<[RelationshipIssueCode, string]> = [
+    ['REL001', 'stored more than once'],
+    ['REL002', 'saved in the file of the model it points at'],
+    ['REL003', 'pointing at a model that is not in the model library'],
+    ['REL004', 'pointing at a column its model does not have'],
+    ['REL008', 'could not be read'],
+  ];
+  const parts = reasons
+    .map(([code, words]) => [needing.filter((f) => f.code === code).length, words] as const)
+    .filter(([n]) => n > 0)
+    .map(([n, words]) => `${n} ${words}`);
+  const n = needing.length;
+  return `${n === 1 ? '1 relationship needs' : `${n} relationships need`} attention (${parts.join('; ')}). ` +
+    'Review the fixes with Repair Relationships…? Nothing changes until you confirm.';
 }
 
 /**
@@ -402,81 +636,8 @@ export function sharedRelationshipCount(
     for (const rel of domain.relationships) {
       const holders = lowerModels.filter((models) =>
         models.has(rel.fromModel.toLowerCase()) && models.has(rel.toModel.toLowerCase())).length;
-      if (holders > 1) keys.add(relationshipKey(rel));
+      if (holders > 1) keys.add(linkKey(rel));
     }
   }
   return keys.size;
-}
-
-const describeEnds = (rel: RelationshipEnds): string =>
-  `${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn}`;
-
-const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
-
-/**
- * The modal's detail for "Move Relationships to Model Library": why the move
- * helps, where each relationship will live (`fileOf` names a model's file,
- * e.g. `logical-models/fct_order.yml`), and what happens to conflicts.
- */
-export function describeMovePlan(plan: MoveToLibraryPlan, fileOf: (model: string) => string = (m) => `logical-models/${m}.yml`): string {
-  const movesDomains = plan.removeFromDomains.size > 0 || plan.conflicts.length > 0;
-  const lines: string[] = movesDomains
-    ? [
-      'Why: today each diagram keeps its own copy of a relationship, so two diagrams can draw the same link ' +
-      'differently, and a new diagram has to draw it again. After the move each relationship is defined once, and ' +
-      'every diagram that holds both models draws it. A change made in one diagram shows in all of them.',
-    ]
-    : [];
-
-  // Where each relationship will live — a conflict too, once its cardinality is picked.
-  const byFile = new Map<string, RelationshipEnds[]>();
-  for (const rel of [...plan.toLibrary, ...plan.conflicts.map((c) => c.relationship)]) {
-    const file = fileOf(rel.fromModel);
-    byFile.set(file, [...(byFile.get(file) ?? []), rel]);
-  }
-  const diagrams = new Set([...plan.removeFromDomains.keys(), ...plan.conflicts.flatMap((c) => c.definitions.flatMap((d) => d.domains))]);
-  if (byFile.size > 0) {
-    lines.push('', 'Where: in the file of the model that holds the foreign key, under "relationships:".');
-    for (const [file, rels] of [...byFile].slice(0, 6)) {
-      lines.push(`• ${file} — ${rels.slice(0, 2).map(describeEnds).join(', ')}${rels.length > 2 ? ` and ${rels.length - 2} more` : ''}`);
-    }
-    if (byFile.size > 6) lines.push(`• …and ${byFile.size - 6} more model files`);
-    lines.push(`Each is then taken out of the diagram files that held a copy (${plural(diagrams.size, 'diagram')}).`);
-  }
-
-  if (plan.conflicts.length > 0) {
-    lines.push(
-      '',
-      `Conflicts: ${plural(plan.conflicts.length, 'relationship is', 'relationships are')} drawn differently in different ` +
-      'diagrams. Next you pick the cardinality to keep for each — or leave it as it is in each diagram for now:',
-    );
-    for (const conflict of plan.conflicts.slice(0, 5)) {
-      const uses = conflict.definitions.map((d) => `${d.cardinality} in ${d.domains.join(', ')}`).join('; ');
-      lines.push(`• ${describeEnds(conflict.relationship)}: ${uses}`);
-    }
-    if (plan.conflicts.length > 5) lines.push(`• …and ${plan.conflicts.length - 5} more`);
-  }
-  if (plan.skippedNoModel.length > 0) {
-    lines.push(
-      '',
-      `${plural(plan.skippedNoModel.length, 'relationship starts', 'relationships start')} at a model with no readable ` +
-      'file in logical-models/ and will stay in the diagram files.',
-    );
-  }
-  if (plan.rehome.length > 0) {
-    lines.push(
-      '',
-      `Turned round: ${plural(plan.rehome.length, 'relationship is', 'relationships are')} stored in the file of the ` +
-      'model it points at. Each moves to the file of the model holding the foreign key, as many-to-one, so adding a ' +
-      'new fact never means editing its dimensions. The diagrams draw the same lines:',
-    );
-    for (const { stored, to } of plan.rehome.slice(0, 5)) {
-      lines.push(`• ${describeEnds(stored)} → ${fileOf(to.fromModel)}`);
-    }
-    if (plan.rehome.length > 5) lines.push(`• …and ${plan.rehome.length - 5} more`);
-  }
-  if (movesDomains) {
-    lines.push('', 'Teammates on an older ERD Studio version will not see relationships stored in the model library until they update.');
-  }
-  return lines.join('\n').replace(/^\n/, '');
 }

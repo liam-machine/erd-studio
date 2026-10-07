@@ -245,11 +245,21 @@ describe('buildUnifiedDomain', () => {
       },
       { warn },
     );
-    expect(u.logical.relationships).toEqual([good, { ...good, cardinality: 'many-to-one' }]);
+    // The defaulted copy is the same link as `good`: drawn once (the first),
+    // and the disagreement is reported rather than dropped silently (#133).
+    expect(u.logical.relationships).toEqual([
+      {
+        ...good,
+        source: { kind: 'domain', index: 0 },
+        stored: { fromModel: 'a', fromColumn: 'k', toModel: 'b', toColumn: 'k' },
+        issues: ['REL001'],
+      },
+    ]);
     expect(warn.mock.calls.map((c) => c[0])).toEqual([
       `Relationship a.k → b.k in ${FILE} has invalid cardinality "sometimes"; defaulting to many-to-one`,
       `Skipping malformed relationship entry in ${FILE}: {"fromModel":"a"}`,
       `Skipping malformed relationship entry in ${FILE}: "nope"`,
+      expect.stringMatching(/^Relationship a\.k → b\.k is stored 2 times and the copies disagree/),
     ]);
   });
 

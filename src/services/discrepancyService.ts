@@ -16,21 +16,12 @@ import type {
   ColumnDiscrepancy,
   RelationshipDiscrepancy,
 } from '../types/discrepancy';
-import { normaliseName } from './nameUtils';
+import { linkKey, type RelationshipEnds } from '@erd-studio/core';
+import { namesEqual, normaliseName } from './nameUtils';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Composite key for matching relationships across stages.
- * Model and column names are matched case-insensitively (dbt identifiers are
- * case-insensitive on most warehouses); raw names are preserved on the
- * resulting discrepancy entries for display.
- */
-function relationshipKey(r: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }): string {
-  return [r.fromModel, r.fromColumn, r.toModel, r.toColumn].map(normaliseName).join('|');
-}
 
 /**
  * Alias map: the spellings dbt adapters actually emit → canonical type name.
@@ -329,16 +320,15 @@ function compareColumns(
 }
 
 /**
- * Identity of the link a relationship draws: its two column ends, in either
- * order (#133). `fct.customer_key → dim.customer_key many-to-one` and
- * `dim.customer_key → fct.customer_key one-to-many` are the same link — the
- * logical model stores it on its many side, while dbt may test it from the
- * other end.
+ * Whether two records of one link are read from the same end. A link is
+ * matched by core's `linkKey` — its two column ends in either order, without
+ * case (#133): `fct.customer_key → dim.customer_key many-to-one` and
+ * `dim.customer_key → fct.customer_key one-to-many` are the same link, which
+ * the logical model stores on its many side while dbt may test it from the
+ * other end. Raw names are preserved on the resulting discrepancy entries.
  */
-function linkKey(r: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }): string {
-  const from = [r.fromModel, r.fromColumn].map(normaliseName).join('.');
-  const to = [r.toModel, r.toColumn].map(normaliseName).join('.');
-  return from <= to ? `${from}|${to}` : `${to}|${from}`;
+function readsSameWay(a: RelationshipEnds, b: RelationshipEnds): boolean {
+  return namesEqual(a.fromModel, b.fromModel) && namesEqual(a.fromColumn, b.fromColumn);
 }
 
 /** `cardinality` as read from the other end (many-to-one ↔ one-to-many). */
@@ -366,9 +356,12 @@ function compareRelationships(
 
   for (const rel of sourceRels) {
     const key = linkKey(rel);
+    // One row per link (#133, D9): a second record of a link already compared
+    // (a copy stored the other way round) would only repeat the first row.
+    if (visited.has(key)) continue;
     const found = targetMap.get(key);
     visited.add(key);
-    const targetRel = found && relationshipKey(found) !== relationshipKey(rel)
+    const targetRel = found && !readsSameWay(found, rel)
       ? { ...found, cardinality: readFromOtherEnd(found.cardinality) }
       : found;
 
