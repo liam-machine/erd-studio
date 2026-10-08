@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Visual ERD designer for dbt: draw your models on a canvas, keep the design as YAML in your repo, compare it with dbt.",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -627,7 +627,7 @@
   },
   "dependencies": {
     "@erd-studio/core": "0.1.2",
-    "@erd-studio/renderer": "0.1.1",
+    "@erd-studio/renderer": "0.1.2",
     "@xyflow/react": "^12.4.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",
