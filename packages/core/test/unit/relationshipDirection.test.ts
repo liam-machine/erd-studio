@@ -335,6 +335,19 @@ describe('endEvidence', () => {
     expect(endEvidenceFromDisplay(displayed, 'x')).toMatchObject({ isForeignKeyDeclared: true, dbt: { unique: true } });
   });
 
+  it('skips a column with no text name instead of throwing (hand-edited v4 inline models)', () => {
+    // v4 inline columns come straight from the domain JSON, so a name can be
+    // missing or a number; files like that drew before #133 and must still draw.
+    const columns = [
+      { dataType: 'INT' },
+      { name: 123, dataType: 'INT' },
+      { name: 'Customer_Key', dataType: 'INT', isPrimaryKey: true },
+    ] as unknown as ColumnDef[];
+    const model: SemanticModel = { name: 'stg_customers', columns };
+    expect(endEvidenceFromModel(model, 'customer_key')).toMatchObject({ column: 'Customer_Key', isPrimaryKey: true });
+    expect(endEvidenceFromModel(model, 'nope')).toBeUndefined();
+  });
+
   it('takes any column shape with a caller-chosen declared flag', () => {
     const e = endEvidence('m', [{ name: 'k', fk: true }], 'k', (c) => c.fk);
     expect(e?.isForeignKeyDeclared).toBe(true);

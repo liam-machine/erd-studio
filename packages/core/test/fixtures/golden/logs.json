@@ -31,6 +31,14 @@
   "errors.noversion.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field"
   ],
+  "library-relationships.host": [
+    "warn: [DomainService] Relationship fct_order.customer_key → dim_customer.customer_key is stored in entry 1 of dim_customer's model file as one-to-many; it belongs in fct_order's model file as many-to-one",
+    "warn: [DomainService] Relationship fct_order.order_date_key → dim_date.date_key is stored 2 times (entry 1 of fct_order's model file, entry 1 of dim_date's model file); the copy in entry 1 of dim_date's model file is the same relationship saved backwards (the shape ERD Studio 1.6.7 saved for a line drawn from a dimension to a fact) — Repair Relationships… removes it; drawing the one in entry 1 of fct_order's model file"
+  ],
+  "library-relationships.unified": [
+    "warn: [DomainService] Relationship fct_order.customer_key → dim_customer.customer_key is stored in entry 1 of dim_customer's model file as one-to-many; it belongs in fct_order's model file as many-to-one",
+    "warn: [DomainService] Relationship fct_order.order_date_key → dim_date.date_key is stored 2 times (entry 1 of fct_order's model file, entry 1 of dim_date's model file); the copy in entry 1 of dim_date's model file is the same relationship saved backwards (the shape ERD Studio 1.6.7 saved for a line drawn from a dimension to a fact) — Repair Relationships… removes it; drawing the one in entry 1 of fct_order's model file"
+  ],
   "missing-model.host": [
     "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
     "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
@@ -72,5 +80,11 @@
     "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: {\"fromModel\":\"raw_refunds\",\"fromColumn\":\"order_line_id\",\"toModel\":\"raw_orders\"}",
     "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: \"not-a-relationship\"",
     "warn: [DomainService] Skipping inline model without a string \"name\" in <root>/.erd-studio/bronze/orders.json"
+  ],
+  "v4-nameless-column.host": [
+    "warn: [DomainService] Relationship stg_orders.customer_key → stg_customers.Customer_Key in entry 1 of <root>/.erd-studio/silver/orders.json names CUSTOMER_KEY → customer_key, customer_key → Customer_Key only when case is ignored; drawn with the real names"
+  ],
+  "v4-nameless-column.unified": [
+    "warn: [DomainService] Relationship stg_orders.customer_key → stg_customers.Customer_Key in entry 1 of <root>/.erd-studio/silver/orders.json names CUSTOMER_KEY → customer_key, customer_key → Customer_Key only when case is ignored; drawn with the real names"
   ]
 }

@@ -12,6 +12,7 @@
 
 import type { Cardinality, SemanticModel } from './types/semantic.js';
 import type { DbtColumnEvidence } from './types/display.js';
+import { findColumnByName } from './columnLookup.js';
 
 /** Everything known about one end of a relationship. */
 export interface EndEvidence {
@@ -336,7 +337,7 @@ export function endEvidence<C extends EvidenceColumn>(
   column: string,
   declaredForeignKey: (col: C) => boolean,
 ): EndEvidence | undefined {
-  const col = columns.find((c) => c.name === column) ?? columns.find((c) => c.name.toLowerCase() === column.toLowerCase());
+  const col = findColumnByName(columns, column);
   if (!col) return undefined;
   return {
     model,

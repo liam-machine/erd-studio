@@ -7,6 +7,7 @@ import type { DisplayDomain, DisplayRelationshipIssue, ExistingModelPreview, Man
 import type { LayerConfig } from './types/layer.js';
 import { computeNewModelPositions } from './positions.js';
 import { modelLoadErrorOf } from './types/semantic.js';
+import { findColumnByName } from './columnLookup.js';
 
 /**
  * Detect models in logical.models that lack entries in viewConfig.positions
@@ -84,8 +85,7 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
     const owner = byExact.get(rel.fromModel) ?? byLower.get(rel.fromModel.toLowerCase());
     if (!owner) continue;
     const columns = owner.columns ?? [];
-    const column = columns.find((c) => c.name === rel.fromColumn)
-      ?? columns.find((c) => c.name.toLowerCase() === rel.fromColumn.toLowerCase());
+    const column = findColumnByName(columns, rel.fromColumn);
     if (!column) continue;
     if (!fkColumnsByModel.has(owner.name)) {
       fkColumnsByModel.set(owner.name, new Set());

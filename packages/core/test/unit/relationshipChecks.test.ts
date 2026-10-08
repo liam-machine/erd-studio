@@ -199,6 +199,25 @@ describe('checkRelationships — stable codes (#133)', () => {
     expect(checkRelationships({ libraryModels: [entry(fctOrder([rel('customer_key', 'empty', 'k')])), entry({ name: 'empty' })], domains: [] })).toEqual([]);
   });
 
+  it('checks a v4 domain whose inline columns have no text name without throwing', () => {
+    // Hand-edited v4 files can hold `{ "dataType": "INT" }` or `{ "name": 123 }`;
+    // they drew before #133, so a case-only endpoint match must skip those columns.
+    const inline = (name: string, columns: unknown[]): SemanticModel => ({ name, columns: columns as SemanticModel['columns'] });
+    const findings = checkRelationships({
+      libraryModels: [],
+      domains: [domain({
+        mode: 'domain',
+        olderFormat: true,
+        models: [
+          inline('fct_order', [{ dataType: 'INT' }, { name: 123 }, col('customer_key')]),
+          inline('dim_customer', [{ dataType: 'VARCHAR' }, col('Customer_Key', { isPrimaryKey: true })]),
+        ],
+        relationships: [own({ fromColumn: 'CUSTOMER_KEY' })],
+      })],
+    });
+    expect(summary(findings)).toEqual(['REL005:warning']);
+  });
+
   it('REL005: an endpoint that matches only without case', () => {
     const findings = checkRelationships({ libraryModels: [entry(fctOrder([rel('Customer_Key', 'DIM_customer', 'customer_key')])), entry(dimCustomer())], domains: [] });
     expect(findings).toMatchObject([{ code: 'REL005', severity: 'warning', fix: 'respell' }]);

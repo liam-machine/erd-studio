@@ -27,6 +27,7 @@ import {
   type RelationshipSource,
 } from './relationships.js';
 import { endEvidenceFromModel, resolveDirection, type EndEvidence } from './relationshipDirection.js';
+import { findColumnByName } from './columnLookup.js';
 
 export interface NormaliseRelationshipsInput {
   /**
@@ -129,8 +130,7 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
   const findModel = (name: string): SemanticModel | undefined => byExact.get(name) ?? byLower.get(name.toLowerCase());
   const realColumn = (model: SemanticModel | undefined, column: string): string => {
     const columns = model?.columns ?? [];
-    if (columns.some((c) => c.name === column)) return column;
-    return columns.find((c) => c.name.toLowerCase() === column.toLowerCase())?.name ?? column;
+    return findColumnByName(columns, column)?.name ?? column;
   };
 
   /** Respell a record's endpoints; returns the respelled record and what changed. */

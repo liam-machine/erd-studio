@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 5,
+  "domain": "sales",
+  "layer": "gold",
+  "description": "Relationships in the model library in the shapes released extensions wrote, plus a domain-file copy that disagrees",
+  "logical": {
+    "models": [
+      {
+        "name": "fct_order",
+        "schema": "gold",
+        "alias": "orders",
+        "description": "One row per order line",
+        "modelRole": "fact",
+        "columns": [
+          {
+            "name": "order_line_id",
+            "dataType": "BIGINT",
+            "description": "",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "customer_key",
+            "dataType": "INT",
+            "description": ""
+          },
+          {
+            "name": "order_date_key",
+            "dataType": "INT",
+            "description": "",
+            "isForeignKey": true
+          },
+          {
+            "name": "product_key",
+            "dataType": "INT",
+            "description": ""
+          },
+          {
+            "name": "amount",
+            "dataType": "DECIMAL(18,2)",
+            "description": "",
+            "additiveType": "additive"
+          }
+        ],
+        "relationships": [
+          {
+            "fromColumn": "order_date_key",
+            "toModel": "dim_date",
+            "toColumn": "date_key",
+            "cardinality": "many-to-one"
+          }
+        ]
+      },
+      {
+        "name": "dim_customer",
+        "schema": "gold",
+        "alias": "customer",
+        "modelRole": "dimension",
+        "columns": [
+          {
+            "name": "customer_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "customer_name",
+            "dataType": "VARCHAR",
+            "description": ""
+          }
+        ],
+        "relationships": [
+          {
+            "fromColumn": "customer_key",
+            "toModel": "fct_order",
+            "toColumn": "customer_key",
+            "cardinality": "one-to-many"
+          }
+        ]
+      },
+      {
+        "name": "dim_date",
+        "schema": "gold",
+        "modelRole": "dimension",
+        "columns": [
+          {
+            "name": "date_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "calendar_date",
+            "dataType": "DATE",
+            "description": ""
+          }
+        ],
+        "relationships": [
+          {
+            "fromColumn": "date_key",
+            "toModel": "fct_order",
+            "toColumn": "order_date_key",
+            "cardinality": "many-to-one"
+          }
+        ]
+      },
+      {
+        "name": "dim_product",
+        "schema": "gold",
+        "modelRole": "dimension",
+        "columns": [
+          {
+            "name": "product_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": true
+          },
+          {
+            "name": "product_name",
+            "dataType": "VARCHAR",
+            "description": ""
+          }
+        ],
+        "relationships": [
+          {
+            "fromColumn": "product_key",
+            "toModel": "fct_order",
+            "toColumn": "product_key",
+            "cardinality": "many-to-one"
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromColumn": "customer_key",
+        "toModel": "dim_customer",
+        "toColumn": "customer_key",
+        "cardinality": "many-to-one",
+        "fromModel": "fct_order",
+        "source": {
+          "kind": "library",
+          "model": "dim_customer",
+          "index": 0
+        },
+        "stored": {
+          "fromModel": "dim_customer",
+          "fromColumn": "customer_key",
+          "toModel": "fct_order",
+          "toColumn": "customer_key"
+        },
+        "issues": [
+          "REL002",
+          "REL009"
+        ]
+      },
+      {
+        "fromColumn": "product_key",
+        "toModel": "fct_order",
+        "toColumn": "product_key",
+        "cardinality": "many-to-one",
+        "fromModel": "dim_product",
+        "source": {
+          "kind": "library",
+          "model": "dim_product",
+          "index": 0
+        },
+        "stored": {
+          "fromModel": "dim_product",
+          "fromColumn": "product_key",
+          "toModel": "fct_order",
+          "toColumn": "product_key"
+        },
+        "issues": [
+          "REL006"
+        ]
+      },
+      {
+        "fromColumn": "order_date_key",
+        "toModel": "dim_date",
+        "toColumn": "date_key",
+        "cardinality": "many-to-one",
+        "fromModel": "fct_order",
+        "source": {
+          "kind": "library",
+          "model": "fct_order",
+          "index": 0
+        },
+        "stored": {
+          "fromModel": "fct_order",
+          "fromColumn": "order_date_key",
+          "toModel": "dim_date",
+          "toColumn": "date_key"
+        },
+        "issues": [
+          "REL001"
+        ]
+      }
+    ]
+  },
+  "viewConfig": {
+    "positions": {
+      "fct_order": {
+        "x": 400,
+        "y": 200
+      },
+      "dim_customer": {
+        "x": 40,
+        "y": 40
+      },
+      "dim_date": {
+        "x": 40,
+        "y": 360
+      },
+      "dim_product": {
+        "x": 760,
+        "y": 200
+      }
+    }
+  }
+}

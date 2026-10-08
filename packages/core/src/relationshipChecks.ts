@@ -24,6 +24,7 @@ import {
   type RelationshipSource,
 } from './relationships.js';
 import { isStoredBackwards, keyEvidenceContradiction } from './normaliseRelationships.js';
+import { findColumnByName } from './columnLookup.js';
 
 /** A model file in the library, as read. */
 export interface CheckLibraryModel {
@@ -333,7 +334,7 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
       if (found.model.name !== modelName) respelled.push(`${modelName} → ${found.model.name}`);
       const columns = found.model.columns ?? [];
       const exact = columns.some((c) => c.name === columnName);
-      const loose = columns.find((c) => c.name.toLowerCase() === columnName.toLowerCase());
+      const loose = findColumnByName(columns, columnName);
       if (!exact && loose) respelled.push(`${columnName} → ${loose.name}`);
       if (!exact && !loose && columns.length > 0 && !stubs.has(lower) && !unreadable.has(lower)) {
         push({
