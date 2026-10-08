@@ -374,10 +374,17 @@ export type RelationshipWritePlan =
     /** Single links an add or edit took into a composite key (#133 L2), for the success message. */
     grouped?: { count: number; compositeKey: string };
   }
-  | { ok: false; error: string; /** Set when the home model has no readable file. */ missingModel?: string };
+  | {
+    ok: false;
+    error: string;
+    /** Set when the home model has no readable file. */
+    missingModel?: string;
+    /** `keysWin`: ⇄ would make a whole key the "many" side (#133 F3b). For usage telemetry only. */
+    reason?: 'keysWin';
+  };
 
-const refuse = (error: string, missingModel?: string): RelationshipWritePlan =>
-  ({ ok: false, error, ...(missingModel ? { missingModel } : {}) });
+const refuse = (error: string, missingModel?: string, reason?: 'keysWin'): RelationshipWritePlan =>
+  ({ ok: false, error, ...(missingModel ? { missingModel } : {}), ...(reason ? { reason } : {}) });
 
 /**
  * What one canvas relationship edit writes (#133) — the only place the
@@ -513,7 +520,7 @@ function planLinkWrite(op: RelationshipWriteOp, input: RelationshipWriteInput): 
     const model = modelOf(asMany[0].fromModel)?.name ?? asMany[0].fromModel;
     const cols = asMany.map((m) => m.fromColumn);
     const what = cols.length === 1 ? `${model}.${cols[0]} is ${model}'s key` : `(${cols.join(', ')}) is ${model}'s key`;
-    return refuse(`${what}, so each value appears only once — it can't be the "many" side. Unmark it as a key first, then try again.`);
+    return refuse(`${what}, so each value appears only once — it can't be the "many" side. Unmark it as a key first, then try again.`, undefined, 'keysWin');
   }
 
   const replaceKeys = new Set([...oldKeys, ...members.map(linkKey)]);

@@ -228,6 +228,7 @@ const FEATURES = [
   'relMoveDisagreementLeft',
   'relMoveFileLocked',
   'relMoveKeptLibrary',
+  'relMoveGroupLeft',
   'relStateStoredTwice',
   'relStateOneToMany',
   'relStateBackwards',
@@ -303,6 +304,8 @@ const ERROR_CODES = [
   'relInvOtherChanged',
   'relInvDuplicateInFile',
   'relInvDrawnTwice',
+  'relInvGroupBroken',
+  'relInvKeyNotMarked',
   'relInvCheckFailed',
 ];
 

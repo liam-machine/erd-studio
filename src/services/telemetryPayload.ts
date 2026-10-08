@@ -165,13 +165,15 @@ export const FEATURES = [
   // one-to-many to its many side, turned a backwards many-to-one round, showed
   // a conflict picker, left two disagreeing model-file copies, left a model
   // file alone (it would lose a comment or an unreadable entry), kept the
-  // model library's version over a diagram copy that differed.
+  // model library's version over a diagram copy that differed, left a
+  // composite key whole in the diagrams because it could not move.
   'relMoveRehomed',
   'relMoveTurned',
   'relMoveConflictShown',
   'relMoveDisagreementLeft',
   'relMoveFileLocked',
   'relMoveKeptLibrary',
+  'relMoveGroupLeft',
   // The state of the user's relationships, once a day each, on canvas open
   // (relationshipHealth.surveyLibrary). Their files, not our failures — a
   // write that produces one of these is caught by a relInv* error instead.
@@ -269,7 +271,8 @@ export const ERROR_CODES = [
   // link is not one canonical copy in its home, not the cardinality or
   // direction asked for, lost its role; a deleted (or re-keyed) link left a
   // copy; another link vanished or changed; a file gained a duplicate entry;
-  // the canvas draws a link twice; the check itself threw.
+  // the canvas draws a link twice; a composite key is no longer one valid
+  // group; "Mark as primary key" did not flag the key; the check itself threw.
   'relInvNotCanonical',
   'relInvNotAsIntended',
   'relInvRoleLost',
@@ -278,6 +281,8 @@ export const ERROR_CODES = [
   'relInvOtherChanged',
   'relInvDuplicateInFile',
   'relInvDrawnTwice',
+  'relInvGroupBroken',
+  'relInvKeyNotMarked',
   'relInvCheckFailed',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];

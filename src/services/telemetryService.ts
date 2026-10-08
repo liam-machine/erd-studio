@@ -308,6 +308,10 @@ export const telemetry = {
     const found = surveyFeatures(survey);
     if (found.length > 0) active?.update(s => found.reduce(recordFeatureOnce, s));
   },
+  /** A relationship write or Move that succeeded: each new behaviour it used (`relationshipWriteUsage`, `moveUsage`). */
+  relationshipUsage(used: readonly TelemetryFeature[]): void {
+    if (used.length > 0) active?.update(s => used.reduce(recordFeature, s));
+  },
   /** After a relationship write: one error per invariant it broke (`checkRelationshipWrite`). */
   relationshipInvariants(broken: readonly RelationshipInvariant[]): void {
     const codes = invariantErrorCodes(broken);

@@ -819,6 +819,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Once per broken file per session (the service never re-reports a path, #113).
     notifyModelFileError(error);
   };
+  // A model file's relationships: list could not be rewritten in place, so an edit was refused.
+  logicalModelService.onSyncRefused = () => telemetry.error('relSyncRefused');
   domainService.setLogicalModelService(logicalModelService);
   // Set once a manifest's (re)appearance has been counted, cleared when it is
   // seen missing again, so a manifest with no canvas to reload it (isMissing
