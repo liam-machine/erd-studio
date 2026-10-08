@@ -11,12 +11,12 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 ## Unreleased
 
 ### Changed
-- **A relationship now always lives with the model that holds the foreign key** ([#133](https://github.com/liam-machine/erd-studio/issues/133)). Until now it was saved in the file of whichever model the line was drawn *from*, so drawing from a dimension to a fact put it in the dimension's file, and adding a new fact meant editing every dimension it joins. Now, however you draw it, it is saved in the fact's file (the "many" side), as many-to-one. Dragging from a key column to the column that points at it opens the New Relationship dialog the right way round, and the ⇄ swap moves a relationship to whichever model becomes the many side.
-- **Move Relationships to Model Library tidies up relationships saved the old way.** Run it once and every relationship stored in a dimension's file as one-to-many moves to the fact's file as many-to-one. The diagrams draw exactly the same lines; only the files change. It asks first, changes nothing but the relationships, and puts everything back if any file cannot be written.
-- The same two columns joined in both directions are one relationship: a diagram draws one line for them, adding the reverse is refused as a duplicate, and **Compare to Physical** / `erd-studio diff` match a relationship whichever end dbt tests it from. `erd-studio diff` names the fact's file for a relationship to add.
-- The AI helper files (harness v26) and the JSON schemas describe where relationships live and the new `role` key.
+- **A relationship is saved with the model that points** ([#133](https://github.com/liam-machine/erd-studio/issues/133)): the "many" side, such as the fact, however you draw it — dimension → fact, fact → dimension, or with the line's ⇄ swap. Until now it was saved in the file of whichever model the line was drawn *from*, so adding a new fact could mean editing every dimension it joins. One-to-one and many-to-many relationships are saved as drawn. **Draw from dbt** now does the same, reading which side is "one" from dbt's `unique` tests, so a relationship test declared on the dimension no longer lands backwards in the dimension's file or marks its key as a foreign key.
+- **Move Relationships to Model Library** also moves relationships ERD Studio 1.6.6 / 1.6.7 saved on the dimension side to the fact's file. Where the two models each hold a copy of a link and the copies disagree, it keeps both and lists them for you; it also leaves alone any model file whose `relationships:` list has comments or entries it cannot read, and names it. It previews everything first and writes all the files or none.
+- **Compare to Physical** and `erd-studio diff` match a relationship whichever end dbt tests it from.
 
 ### Fixed
+- **The same link saved at both ends is drawn once**, from the fact's copy whatever the file order, and adding the same link the other way round is refused as a duplicate. **Deleting the line removes both copies**, so it no longer comes back.
 - **Editing a model on the canvas no longer rewrites its `relationships:` list.** Renaming a column or changing a description used to rewrite the whole list in the model's file, deleting entries ERD Studio could not read (a typo such as `one_to_many`, an entry missing an end), comments inside the list and any extra keys on an entry. A save now leaves the list exactly as written unless the relationships themselves change, and then edits only the entries that changed. Entries it cannot read are always kept, and an edit it cannot make safely (for example when `relationships:` is not a list) is refused with the file and line named.
 - **Unsaved edits in a model file are no longer overwritten.** If a model file is open in a tab with unsaved changes, a canvas edit that would rewrite or delete it now stops and names the file, instead of replacing your unsaved text.
 - **A broken file no longer changes where new relationships are saved.** A diagram or model file that could not be read (for example during a merge conflict) used to count as holding no relationships, which could switch a project between keeping relationships in each diagram and keeping them in the model library. Such a file is now counted by what its text shows.
@@ -30,10 +30,10 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - **A diagram is no longer mistaken for another project's on Windows and macOS.** The check that a diagram belongs to the open dbt project compared folder paths letter for letter, so the same folder spelled in another case could be refused. It now compares them the way the operating system does.
 
 ### Added
-- **Relationship roles.** Give a relationship an optional label in the New / Edit Relationship dialog, such as *order date* and *ship date* for two columns pointing at the same date dimension. The label is drawn on the line and saved as `role:`.
+- **Relationship roles.** Give a relationship an optional label in the New / Edit Relationship dialog, such as *order date* and *ship date* for two columns pointing at the same date dimension. It is saved as `role:` and drawn on the line. The AI helper files (harness v26) and the JSON schemas describe it.
 
 ### Upgrading a team
-- Teammates on 1.6.7 or earlier still see every relationship, but they **drop a model's `role` labels** whenever they change that model on the canvas, and a line they draw from a dimension is still saved the old way. Update everyone before relying on roles; running **Move Relationships to Model Library** afterwards tidies up any relationship saved the old way.
+- Teammates on 1.6.7 still see every relationship, but they **drop a model's `role:` labels** when they save that model, and a line they draw from a dimension is still saved the old way. Update everyone before relying on roles, then run **Move Relationships to Model Library** to tidy up.
 
 ## 1.6.7 — 2026-10-04
 
