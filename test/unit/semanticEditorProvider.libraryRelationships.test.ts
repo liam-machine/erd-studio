@@ -362,6 +362,45 @@ describe('relationships stored once in the model library (#126)', () => {
       expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([{ ...FCT_ENTRY, cardinality: 'one-to-one' }]);
     });
 
+    it('lifecycle: every relationship edit, across two diagrams, keeps one definition on the many side', async () => {
+      const files = () => ({
+        fct: h.logicalModelService.getModel('fct_order')?.relationships,
+        dim: h.logicalModelService.getModel('dim_customer')?.relationships,
+      });
+      const orders = await h.open('orders');
+      const reporting = await h.open('reporting');
+
+      // 1. Added from the dimension end with a role: stored on the fact.
+      await orders.send({ type: 'addRelationship', payload: { ...REVERSED, cardinality: 'one-to-many', role: 'buyer' } });
+      expect(files()).toEqual({ fct: [{ ...FCT_ENTRY, role: 'buyer' }], dim: undefined });
+      expect(h.shown('reporting')).toEqual([{ ...EDGE, cardinality: 'many-to-one', role: 'buyer' }]);
+
+      // 2. ⇄ swap in the other diagram: the dimension is now the many side, so it moves there, role and all.
+      await reporting.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-many' } });
+      expect(files()).toEqual({ fct: undefined, dim: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' }] });
+
+      // 3. ⇄ swap back: home again.
+      await orders.send({ type: 'updateRelationship', payload: { ...REVERSED, cardinality: 'one-to-many' } });
+      expect(files()).toEqual({ fct: [{ ...FCT_ENTRY, role: 'buyer' }], dim: undefined });
+
+      // 4. Edit: new cardinality and role, same ends.
+      const original = { originalFromModel: EDGE.fromModel, originalFromColumn: EDGE.fromColumn, originalToModel: EDGE.toModel, originalToColumn: EDGE.toColumn };
+      await reporting.send({ type: 'editRelationship', payload: { ...original, ...EDGE, cardinality: 'one-to-one', role: 'account owner' } });
+      expect(files().fct).toEqual([{ ...FCT_ENTRY, cardinality: 'one-to-one', role: 'account owner' }]);
+
+      // 5. Renaming the model it points at keeps it, role included.
+      await orders.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([
+        { ...FCT_ENTRY, toModel: 'dim_client', cardinality: 'one-to-one', role: 'account owner' },
+      ]);
+
+      // 6. Removing the fact's column removes the relationship everywhere.
+      await orders.send({ type: 'removeColumn', payload: { modelName: 'fct_order', columnName: 'customer_key' } });
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
+      expect(h.shown('reporting')).toEqual([]);
+      expect([orders.errors(), reporting.errors()]).toEqual([[], []]);
+    });
+
     it('refuses a role that is not text', async () => {
       const orders = await h.open('orders');
       await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one', role: 7 } });
