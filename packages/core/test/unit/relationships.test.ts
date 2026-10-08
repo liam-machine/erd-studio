@@ -79,3 +79,19 @@ describe('mergeLibraryRelationships — one line per link (#133)', () => {
     ]);
   });
 });
+
+describe('mergeLibraryRelationships — the same copy wins whatever the file order (#133)', () => {
+  const FACT = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' as const, role: 'buyer' };
+  const { fromModel: _f, ...stored } = FACT;
+  const fact = { name: 'fct_order', columns: [], relationships: [stored] };
+  it.each(['one-to-many', 'many-to-one'] as const)('a 1.6.7 copy on the dimension (%s) loses to the fact\'s', async (cardinality) => {
+    const { mergeLibraryRelationships } = await import('../../src/domain');
+    const dim = {
+      name: 'dim_customer',
+      columns: [{ name: 'customer_key', dataType: 'int', description: '', isPrimaryKey: true }],
+      relationships: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality }],
+    };
+    expect(mergeLibraryRelationships([dim, fact], [])).toEqual([FACT]);
+    expect(mergeLibraryRelationships([fact, dim], [])).toEqual([FACT]);
+  });
+});

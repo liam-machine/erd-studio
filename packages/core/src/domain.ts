@@ -415,15 +415,22 @@ export function mergeLibraryRelationships(
   warn: (message: string) => void = () => { /* silent */ },
 ): Relationship[] {
   const inDomain = new Set(models.map((m) => m.name.toLowerCase()));
-  const library = new Map<string, Relationship>();
+  // A link stored twice is drawn from the same copy whatever the file order
+  // (#133): one in its home (not one-to-many), then one not leaving its
+  // model's whole primary key, then the lowest model name, then the first.
+  const ranked = new Map<string, { rel: Relationship; rank: string }>();
   for (const model of models) {
-    for (const rel of model.relationships ?? []) {
-      if (!inDomain.has(rel.toModel.toLowerCase())) continue;
-      const full: Relationship = { fromModel: model.name, ...rel };
-      const key = linkKey(full);
-      if (!library.has(key)) library.set(key, full);
-    }
+    const pk = (model.columns ?? []).filter((c) => c.isPrimaryKey);
+    (model.relationships ?? []).forEach((rel, index) => {
+      if (!inDomain.has(rel.toModel.toLowerCase())) return;
+      const fromKey = pk.length === 1 && pk[0].name.toLowerCase() === rel.fromColumn.toLowerCase();
+      const rank = `${rel.cardinality === 'one-to-many' ? 1 : 0}${fromKey ? 1 : 0}${model.name.toLowerCase()}\u0000${String(index).padStart(6, '0')}`;
+      const key = linkKey({ fromModel: model.name, ...rel });
+      const held = ranked.get(key);
+      if (!held || rank < held.rank) ranked.set(key, { rel: { fromModel: model.name, ...rel }, rank });
+    });
   }
+  const library = new Map([...ranked].map(([key, { rel }]) => [key, rel]));
   if (library.size === 0) return [...own];
 
   const merged: Relationship[] = [];
