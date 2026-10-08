@@ -364,6 +364,39 @@ import {
 } from './payloadValidation';
 import { sameName } from '../types/naming';
 
+/** A parsed domain file's `logical.relationships`, as a list the rename helpers can rewrite in place. */
+function stageRelationships(parsed: Record<string, unknown>): Array<Record<string, unknown>> {
+  const logical = parsed.logical as Record<string, unknown> | undefined;
+  return logical && Array.isArray(logical.relationships) ? logical.relationships as Array<Record<string, unknown>> : [];
+}
+
+/**
+ * Follow a model rename in another v5 domain file, in place (#133 L5): its
+ * `logical.models` entry, its stored position and its own relationship
+ * copies, matched without case. Returns whether anything changed.
+ */
+function renameModelInDomain(parsed: Record<string, unknown>, oldName: string, newName: string): boolean {
+  let touched = false;
+  const logical = parsed.logical as Record<string, unknown> | undefined;
+  if (logical && Array.isArray(logical.models)) {
+    logical.models = (logical.models as unknown[]).map((m) => {
+      if (typeof m !== 'string' || !sameName(m, oldName)) return m;
+      touched = true;
+      return newName;
+    });
+  }
+  const positions = ((parsed.viewConfig ?? {}) as Record<string, unknown>).positions as Record<string, unknown> | undefined;
+  if (positions && typeof positions === 'object') {
+    const key = Object.keys(positions).find((k) => sameName(k, oldName));
+    if (key !== undefined && !(newName in positions)) {
+      positions[newName] = positions[key];
+      delete positions[key];
+      touched = true;
+    }
+  }
+  return renameModelInDomainRelationships(stageRelationships(parsed), oldName, newName) || touched;
+}
+
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
@@ -1767,6 +1800,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     domainMutator?: (section: Record<string, unknown>, parsed: Record<string, unknown>) => void,
     /** Other library models changed alongside (relationships pointing at this one). */
     alsoSave: readonly SemanticModel[] = [],
+    /** Other diagrams' own relationship copies to rewrite in the same edit (see applyDomainEdit). */
+    otherDomains?: (parsed: Record<string, unknown>) => boolean,
   ): Promise<boolean> {
     const model = this.logicalModelService.getModel(modelName);
     if (!model) {
@@ -1787,6 +1822,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         webview,
         stage: 'logical',
         modelFiles: { save: [{ model }, ...alsoSave.map((other) => ({ model: other }))] },
+        ...(otherDomains ? { otherDomains } : {}),
       },
     );
   }
@@ -1942,6 +1978,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * - `options.modelFiles` adds logical-models/*.yml writes/deletes to the same
    *   WorkspaceEdit so the domain change and the model file change are atomic
    *   and share one undo step.
+   * - `options.otherDomains` is run on every OTHER v5 domain file of the
+   *   project (parsed); each one it changes (returns true) is rewritten in the
+   *   same WorkspaceEdit — how a rename reaches the copies other diagrams keep
+   *   of their own (#133 L5). A file open with unsaved edits is refused by
+   *   name, before anything is written; an unreadable one is left alone.
    */
   private async applyDomainEdit(
     document: vscode.TextDocument,
@@ -1951,6 +1992,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       webview?: vscode.Webview;
       stage: 'logical';
       modelFiles?: ModelFileOps;
+      otherDomains?: (parsed: Record<string, unknown>) => boolean;
       errorLabel?: string;
       onSuccess?: () => void;
     },
@@ -1972,6 +2014,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // from disk: refuse by name (the handler reports it), before anything is written.
     const dirty = this.dirtyModelFile(modelFiles);
     if (dirty) throw new Error(`${dirty} has unsaved changes. Save or revert it, then try again.`);
+    const otherDomains = options.otherDomains ? this.rewriteOtherDomains(document.uri.fsPath, options.otherDomains) : [];
 
     const updatedText = JSON.stringify(parsed, null, 2) + '\n';
     const edit = new vscode.WorkspaceEdit();
@@ -1986,6 +2029,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // Layer folders are opt-in: a flat library stays flat (see groupsByFolder).
       modelFiles?.save?.length ? this.newModelFolder(document.uri.fsPath) : undefined,
     );
+    const otherDomainDocs: vscode.TextDocument[] = [];
+    for (const { filePath, text: newText } of otherDomains) {
+      const otherDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+      edit.replace(otherDoc.uri, new vscode.Range(otherDoc.positionAt(0), otherDoc.positionAt(otherDoc.getText().length)), newText);
+      otherDomainDocs.push(otherDoc);
+    }
 
     this.pendingUpdates.set(panelKey, true);
     try {
@@ -2015,10 +2064,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         this.ownWriteTracker.recordDelete(filePath);
       }
       const ourPaths = this.editedModelPaths.get(panelKey) ?? new Set<string>();
-      for (const modelDoc of modelDocs) {
-        // Remember which yml documents WE edited for this domain, so an
-        // undo/redo only ever flushes those (never a buffer the user is
-        // hand-editing in another tab).
+      for (const modelDoc of [...modelDocs, ...otherDomainDocs]) {
+        // Remember which yml (and other domain) documents WE edited for this
+        // domain, so an undo/redo only ever flushes those (never a buffer the
+        // user is hand-editing in another tab).
         ourPaths.add(modelDoc.uri.fsPath);
         // Re-fetched by URI: VS Code may have disposed the handle opened
         // before the edit, and the edit then landed in a fresh copy (#126).
@@ -2061,9 +2110,46 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       uri: document.uri,
       modelLibraryChanged: created.length > 0 || deleted.length > 0,
     });
+    for (const otherDoc of otherDomainDocs) {
+      this._onDidWriteDomain.fire({ uri: otherDoc.uri, modelLibraryChanged: false });
+      // An open canvas of that diagram shows the rewrite (its own save is suppressed at the watcher).
+      const other = this.openPanels.get(otherDoc.uri.toString());
+      if (other && !this.disposedWebviews.has(other.webview)) await this.sendDomainData(other.document, other.webview, otherDoc.uri.toString());
+    }
 
     onSuccess?.();
     return true;
+  }
+
+  /**
+   * The other v5 domain files `rewrite` changes, with their new text (#133
+   * L5). Read from disk, as the next canvas load would; a file that does not
+   * parse is left alone. Throws, naming it, when a file it would change is
+   * open with unsaved edits.
+   */
+  private rewriteOtherDomains(
+    currentPath: string,
+    rewrite: (parsed: Record<string, unknown>) => boolean,
+  ): Array<{ filePath: string; text: string }> {
+    const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.logicalModelService.getModelsDir()));
+    const out: Array<{ filePath: string; text: string }> = [];
+    for (const summary of this.domainService.listDomains(this.workspaceRoot, semanticDir)) {
+      if (samePath(summary.filePath, currentPath)) continue;
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== 'object' || detectDomainFormat(parsed) !== 'v5') continue;
+      if (!rewrite(parsed)) continue;
+      if (dirtyFiles([summary.filePath]).length > 0) {
+        const name = path.relative(this.workspaceRoot, summary.filePath).split(path.sep).join('/');
+        throw new Error(`${name} has unsaved changes. Save or revert it, then try again.`);
+      }
+      out.push({ filePath: summary.filePath, text: JSON.stringify(parsed, null, 2) + '\n' });
+    }
+    return out;
   }
 
   /** The error shown when files an edit changed could not be saved. */
@@ -2738,7 +2824,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // Library relationships in other models that point at the renamed column (#126).
           ? renameColumnInRelationships(
             this.otherLibraryModels(payload.modelName), payload.modelName, payload.oldColumnName, payload.column.name)
-          : []);
+          : [],
+        // And the copies other diagrams keep of their own (#133 L5).
+        columnRenamed ? (other) => renameColumnInDomainRelationships(
+          stageRelationships(other), payload.modelName, payload.oldColumnName, payload.column.name) : undefined);
         if (!ok) {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to update column.' } });
         }
@@ -3199,6 +3288,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               ],
               delete: [payload.oldName],
             },
+            // Every other diagram that names the model follows the rename —
+            // its model list, position and own relationship copies (#133 L5).
+            otherDomains: (other) => renameModelInDomain(other, payload.oldName, trimmedNew),
           },
         );
 

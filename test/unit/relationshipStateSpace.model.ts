@@ -236,14 +236,17 @@ export function hostRoute(w: World, dbt: Relationship): Outcome {
   return { world: res };
 }
 
-/** Column rename in `model` from D1 (handleUpdateColumn, v5). */
+/** Column rename in `model` from D1 (handleUpdateColumn, v5): the library, D1 and the other diagrams' own copies. */
 export function hostRenameColumn(w: World, model: ModelName, oldName: string, newName: string): Outcome {
   const models = libModels(w);
   const own = models.find((m) => m.name === model)!;
   renameColumnInRelationships([own], model, oldName, newName);
   renameColumnInRelationships(models.filter((m) => m.name !== model), model, oldName, newName);
   const out = withLib(w, models);
-  renameColumnInDomainRelationships(out.dom.D1 as unknown as Array<Record<string, unknown>>, model, oldName, newName);
+  // The open diagram, and every other diagram's own copies, in the same edit (#133 L5).
+  for (const d of ['D1', 'D2', 'D3'] as const) {
+    renameColumnInDomainRelationships(out.dom[d] as unknown as Array<Record<string, unknown>>, model, oldName, newName);
+  }
   return { world: out };
 }
 

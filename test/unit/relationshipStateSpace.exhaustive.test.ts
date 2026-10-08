@@ -19,19 +19,11 @@ import {
 import type { Ends, Found, State, Violation, World } from './relationshipStateSpace.model';
 
 /**
- * Violations still accepted, by signature, each owned by a later item of the
- * #133 fix list (or out of its scope) — remove an entry when its item lands.
+ * Violations still accepted, by signature, each with its reason. Empty: every
+ * item of the #133 fix list has landed (L4's case-only renames, L5's renames
+ * of another diagram's own copy).
  */
-const ALLOWED: Record<string, string> = {
-  'R rename-follows (in another diagram) :: rename dim.k → key':
-    'Out of #133 scope: a column rename rewrites the open diagram and the model library; another diagram file keeps its own per-diagram copy, as before 1.6.6.',
-  'R rename-follows (in another diagram) :: rename fct.k → key':
-    'Out of #133 scope: a column rename rewrites the open diagram and the model library; another diagram file keeps its own per-diagram copy, as before 1.6.6.',
-  'R rename-follows (in another diagram) [dup-in-file] :: rename dim.k → key':
-    'Out of #133 scope: as above, with the open diagram holding two copies.',
-  'R rename-follows (in another diagram) [dup-in-file] :: rename fct.k → key':
-    'Out of #133 scope: as above, with the open diagram holding two copies.',
-};
+const ALLOWED: Record<string, string> = {};
 
 const signature = (s: State, inv: string, op: string): string => {
   const dupInFile = new Set(s.copies.map((c) => c.where)).size < s.copies.length;

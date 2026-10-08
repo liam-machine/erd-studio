@@ -615,3 +615,59 @@ describe('composite foreign keys on the canvas (#133 L2)', () => {
     expect(h.logicalModelService.getModel('pit_customer')?.relationships).toBeUndefined();
   });
 });
+
+describe('a rename reaches the copies other diagrams keep of their own (#133 L5)', () => {
+  let h: Harness;
+  beforeEach(() => { _resetMockWorkspace(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(h.root, { recursive: true, force: true });
+  });
+  // A per-diagram project: orders and reporting each keep their own copy, reporting's spelled in another case.
+  const OWN: Relationship = { ...EDGE, cardinality: 'many-to-one' };
+  async function perDiagram() {
+    h = await createHarness([OWN]);
+    const reporting = JSON.parse(fs.readFileSync(h.domainPath('reporting'), 'utf-8'));
+    reporting.logical.relationships = [{ ...OWN, toModel: 'Dim_Customer', toColumn: 'CUSTOMER_KEY', role: 'buyer' }];
+    fs.writeFileSync(h.domainPath('reporting'), JSON.stringify(reporting, null, 2) + '\n');
+    return h.open('orders');
+  }
+  const files = (edit: { _ops: Array<{ uri?: { fsPath: string } }> }) => [...new Set(edit._ops.map((op) => path.basename(op.uri?.fsPath ?? '')))].sort();
+
+  it('a column rename rewrites the other diagram\'s copy in the same WorkspaceEdit — one undo step', async () => {
+    const orders = await perDiagram();
+    await orders.send({ type: 'updateColumn', payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'customer_sk', dataType: 'string', description: '' } } });
+    expect(orders.errors()).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(files(_appliedEdits[0] as never)).toEqual(['dim_customer.yml', 'orders.json', 'reporting.json']);
+    expect(h.readDomain('orders').logical.relationships).toEqual([{ ...OWN, toColumn: 'customer_sk' }]);
+    expect(h.readDomain('reporting').logical.relationships).toEqual([{ ...OWN, toModel: 'Dim_Customer', toColumn: 'customer_sk', role: 'buyer' }]);
+    expect(h.shown('reporting')).toEqual([{ ...OWN, toColumn: 'customer_sk', role: 'buyer' }]);
+    // The diagram that does not hold the link is not touched.
+    expect(h.readDomain('finance').logical.relationships).toEqual([]);
+  });
+
+  it('a model rename rewrites the other diagram\'s model list, position and copy', async () => {
+    const orders = await perDiagram();
+    await orders.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });
+    expect(orders.errors()).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    const reporting = JSON.parse(fs.readFileSync(h.domainPath('reporting'), 'utf-8'));
+    expect(reporting.logical.models).toEqual(['fct_order', 'dim_client', 'dim_date']);
+    expect(Object.keys(reporting.viewConfig.positions).sort()).toEqual(['dim_client', 'dim_date', 'fct_order']);
+    expect(reporting.logical.relationships).toEqual([{ ...OWN, toModel: 'dim_client', toColumn: 'CUSTOMER_KEY', role: 'buyer' }]);
+    expect(h.readDomain('finance').logical.models).toEqual(['fct_order', 'dim_date']);
+  });
+
+  it('is refused, naming the file, when the other diagram is open with unsaved edits', async () => {
+    const orders = await perDiagram();
+    const onDisk = fs.readFileSync(h.domainPath('reporting'), 'utf-8');
+    const tab = await vscode.workspace.openTextDocument(vscode.Uri.file(h.domainPath('reporting'))) as unknown as { _setText: (t: string) => void };
+    tab._setText(onDisk.replace('"description": ""', '"description": "draft"'));
+    _appliedEdits.length = 0;
+    await orders.send({ type: 'updateColumn', payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'customer_sk', dataType: 'string', description: '' } } });
+    expect(orders.errors()).toEqual([expect.stringContaining('.erd-studio/silver/reporting.json has unsaved changes. Save or revert it, then try again.')]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(fs.readFileSync(h.domainPath('reporting'), 'utf-8')).toBe(onDisk);
+  });
+});
