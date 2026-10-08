@@ -26,7 +26,7 @@ import type {
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
-import { linkKey, normaliseRelationshipRole } from './relationships.js';
+import { keyEvidence, linkKey, normaliseRelationshipRole } from './relationships.js';
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.
@@ -414,31 +414,55 @@ export function mergeLibraryRelationships(
   filePath = '',
   warn: (message: string) => void = () => { /* silent */ },
 ): Relationship[] {
-  const inDomain = new Set(models.map((m) => m.name.toLowerCase()));
-  // A link stored twice is drawn from the same copy whatever the file order
-  // (#133): one in its home (not one-to-many), then one not leaving its
-  // model's whole primary key, then the lowest model name, then the first.
+  const byName = new Map(models.map((m) => [m.name.toLowerCase(), m]));
+  const modelOf = (name: string): SemanticModel | undefined => byName.get(name.toLowerCase());
+  // A link stored twice is drawn from the same copy whatever the file or
+  // entry order (#133): one in its home (not one-to-many), then one not
+  // leaving its model's whole key (`keyEvidence` — choosing between copies
+  // changes no data, so this needs no evidence about the other end), then the
+  // lowest model name, then the lowest content.
+  const rankOf = (rel: Relationship, index: number): string => [
+    `${rel.cardinality === 'one-to-many' ? 1 : 0}${keyEvidence(modelOf(rel.fromModel), rel.fromColumn) === 'whole-key' ? 1 : 0}`,
+    ...[rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()),
+    // A copy with a role before its unlabelled twin: the label is information.
+    rel.cardinality, rel.role ? `0${rel.role}` : '1',
+    // Spelling only splits copies that differ in case; then the index splits identical ones.
+    rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn, String(index).padStart(6, '0'),
+  ].join('\u0000');
   const ranked = new Map<string, { rel: Relationship; rank: string }>();
+  const keep = (map: Map<string, { rel: Relationship; rank: string }>, rel: Relationship, rank: string): void => {
+    const key = linkKey(rel);
+    const held = map.get(key);
+    if (!held || rank < held.rank) map.set(key, { rel, rank });
+  };
   for (const model of models) {
-    const pk = (model.columns ?? []).filter((c) => c.isPrimaryKey);
-    (model.relationships ?? []).forEach((rel, index) => {
-      if (!inDomain.has(rel.toModel.toLowerCase())) return;
-      const fromKey = pk.length === 1 && pk[0].name.toLowerCase() === rel.fromColumn.toLowerCase();
-      const rank = `${rel.cardinality === 'one-to-many' ? 1 : 0}${fromKey ? 1 : 0}${model.name.toLowerCase()}\u0000${String(index).padStart(6, '0')}`;
-      const key = linkKey({ fromModel: model.name, ...rel });
-      const held = ranked.get(key);
-      if (!held || rank < held.rank) ranked.set(key, { rel: { fromModel: model.name, ...rel }, rank });
+    (model.relationships ?? []).forEach((entry, index) => {
+      if (!byName.has(entry.toModel.toLowerCase())) return;
+      const rel = { fromModel: model.name, ...entry };
+      keep(ranked, rel, rankOf(rel, index));
     });
   }
   const library = new Map([...ranked].map(([key, { rel }]) => [key, rel]));
-  if (library.size === 0) return [...own];
+  // The domain file's own copies of one link are drawn once too, from the
+  // same ranking, at the place of the first.
+  const ownRanked = new Map<string, { rel: Relationship; rank: string }>();
+  own.forEach((rel, index) => keep(ownRanked, rel, rankOf(rel, index)));
+  if (library.size === 0) {
+    const drawn: Relationship[] = [];
+    for (const rel of own) {
+      const winner = ownRanked.get(linkKey(rel));
+      if (winner && !drawn.includes(winner.rel)) drawn.push(winner.rel);
+    }
+    return drawn;
+  }
 
   const merged: Relationship[] = [];
   const seen = new Set<string>();
-  for (const rel of own) {
-    const key = linkKey(rel);
+  for (const first of own) {
+    const key = linkKey(first);
     if (seen.has(key)) continue;
     seen.add(key);
+    const rel = ownRanked.get(key)!.rel;
     const shared = library.get(key);
     // Stored the other way round in the library (#133): the same link, read
     // from the other end. The library's entry is the one drawn.

@@ -1266,7 +1266,7 @@ describe('DomainService format handling', () => {
           models: ['dim_a', 'fct_b'],
           relationships: [
             { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
-            { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'lots-to-few' },
+            { fromModel: 'fct_b', fromColumn: 'b_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'lots-to-few' },
             { fromModel: 'dim_a' },
             'garbage',
             null,
@@ -1278,7 +1278,7 @@ describe('DomainService format handling', () => {
       const domain = service.getDomain(filePath);
       expect(domain.logical.relationships).toEqual([
         { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
-        { fromModel: 'fct_b', fromColumn: 'a_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
+        { fromModel: 'fct_b', fromColumn: 'b_id', toModel: 'dim_a', toColumn: 'a_id', cardinality: 'many-to-one' },
       ]);
     });
 

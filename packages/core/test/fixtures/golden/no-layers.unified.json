@@ -115,13 +115,6 @@
         "toModel": "dim_account",
         "toColumn": "account_key",
         "cardinality": "many-to-one"
-      },
-      {
-        "fromModel": "dim_account",
-        "fromColumn": "account_key",
-        "toModel": "fct_txn",
-        "toColumn": "account_key",
-        "cardinality": "one-to-many"
       }
     ]
   },

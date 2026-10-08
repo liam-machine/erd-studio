@@ -114,3 +114,22 @@ describe('mergeLibraryRelationships — the same copy wins whatever the file ord
     expect(mergeLibraryRelationships([fact, dim], [])).toEqual([FACT]);
   });
 });
+
+describe('keyEvidence — the one key check relationship direction reads (#133)', () => {
+  it('says whole-key, not-key or unknown from the key flags', async () => {
+    const { keyEvidence, contradictsKeys, keyedRelationship } = await import('../../src/relationships');
+    const col = (name: string, flags: Record<string, boolean> = {}) => ({ name, ...flags });
+    const dim = { columns: [col('k', { isPrimaryKey: true })] };
+    const fct = { columns: [col('id', { isPrimaryKey: true }), col('K')] };
+    const bare = { columns: [col('k')] };
+    const composite = { columns: [col('k', { isPrimaryKey: true }), col('v', { isPrimaryKey: true })] };
+    const natural = { columns: [col('k', { isNaturalKey: true })] };
+    expect([keyEvidence(dim, 'K'), keyEvidence(fct, 'k'), keyEvidence(bare, 'k'), keyEvidence(composite, 'k'), keyEvidence(natural, 'k'), keyEvidence(null, 'k')])
+      .toEqual(['whole-key', 'not-key', 'unknown', 'unknown', 'whole-key', 'unknown']);
+    const models: Record<string, { columns: Array<{ name: string }> }> = { dim, fct, bare };
+    const back = { fromModel: 'dim', fromColumn: 'k', toModel: 'fct', toColumn: 'k', cardinality: 'many-to-one' as const };
+    expect(contradictsKeys(back, (n) => models[n])).toBe(true);
+    expect(contradictsKeys({ ...back, toModel: 'bare' }, (n) => models[n])).toBe(false);
+    expect(keyedRelationship(back, (n) => models[n])).toEqual({ fromModel: 'fct', fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'many-to-one' });
+  });
+});

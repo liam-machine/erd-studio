@@ -240,14 +240,14 @@ describe('buildUnifiedDomain', () => {
         schemaVersion: 5,
         logical: {
           models: [],
-          relationships: [good, { ...good, cardinality: 'sometimes' }, { fromModel: 'a' }, 'nope'],
+          relationships: [good, { ...good, fromColumn: 'k2', cardinality: 'sometimes' }, { fromModel: 'a' }, 'nope'],
         },
       },
       { warn },
     );
-    expect(u.logical.relationships).toEqual([good, { ...good, cardinality: 'many-to-one' }]);
+    expect(u.logical.relationships).toEqual([good, { ...good, fromColumn: 'k2', cardinality: 'many-to-one' }]);
     expect(warn.mock.calls.map((c) => c[0])).toEqual([
-      `Relationship a.k → b.k in ${FILE} has invalid cardinality "sometimes"; defaulting to many-to-one`,
+      `Relationship a.k2 → b.k in ${FILE} has invalid cardinality "sometimes"; defaulting to many-to-one`,
       `Skipping malformed relationship entry in ${FILE}: {"fromModel":"a"}`,
       `Skipping malformed relationship entry in ${FILE}: "nope"`,
     ]);
