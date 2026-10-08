@@ -42,6 +42,7 @@ import type { DbtKeyIndex } from '@erd-studio/core';
 import { relationshipsRewriteLoses, setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
+import { checkLibraryRewrite, moveUsage } from '../services/relationshipHealth';
 import { detectDomainFormat } from '../types/semantic';
 import type { Relationship, SemanticModel } from '../types/semantic';
 import type { DomainService } from '../services/domainService';
@@ -245,6 +246,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
 
   // Each conflict is the user's to settle: which version every diagram draws.
   const conflicts = plan.conflicts;
+  if (conflicts.length > 0) telemetry.feature('relMoveConflictShown');
   for (const [index, conflict] of conflicts.entries()) {
     const { fromModel, fromColumn, toModel, toColumn } = conflict.relationship;
     const picked = await vscode.window.showQuickPick(
@@ -285,6 +287,9 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   // disk now — after the modal and the QuickPicks, which may have taken a
   // while — changing only its relationships.
   const writes: Array<{ filePath: string; original: string; text: string }> = [];
+  // Every target file as read and as it will be written, for the self-check below.
+  const readModels: SemanticModel[] = [];
+  const nextModels: SemanticModel[] = [];
   for (const target of moveTargets(plan)) {
     const name = libraryModel(target)?.name ?? target;
     const filePath = logicalModelService.modelPath(name);
@@ -295,6 +300,8 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     const model = parseLogicalModelText(original, name);
     if (!model) throw new Error(`${relPath(filePath)} could not be read as a model file.`);
     const copy: SemanticModel = { ...model, relationships: model.relationships ? [...model.relationships] : undefined };
+    readModels.push(model);
+    nextModels.push(copy);
     if (!applyMoveToModel(plan, copy)) continue;
     const text = setYamlRelationships(original, copy.relationships ?? []);
     if (text !== original) writes.push({ filePath, original, text });
@@ -318,6 +325,13 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
 
   if (refuseIfDirty(writes.map((w) => w.filePath), relPath)) return;
 
+  // Self-check of the planned rewrite (#133 telemetry): recorded and logged, never blocking it.
+  const broken = checkLibraryRewrite(readModels, nextModels, [...plan.toLibrary, ...plan.rehome.map((r) => r.to)]);
+  if (broken.length > 0) {
+    telemetry.relationshipInvariants(broken);
+    console.warn(`[moveRelationshipsToLibrary] relationship self-check: ${broken.join(', ')}`);
+  }
+
   // All or nothing: if one write fails, every file already written is put back.
   const written: typeof writes = [];
   for (const write of writes) {
@@ -335,6 +349,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
       }
       logicalModelService.invalidateCache();
       telemetry.error('relMoveWriteFailed');
+      if (unrestored.length > 0) telemetry.error('relMoveRestoreFailed');
       void vscode.window.showErrorMessage(
         `${TITLE}: could not write ${relPath(write.filePath)} (${errorText(err)}). ` +
         (unrestored.length === 0
@@ -363,6 +378,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   const unsettled = plan.disagreements.length + plan.lockedFiles.length;
   telemetry.feature('relMoveCompleted');
   if (left + unsettled > 0) telemetry.feature('relMoveLeftover');
+  telemetry.relationshipUsage(moveUsage(plan));
   const parts = [
     ...(moved > 0 || !turned ? [`Moved ${moved} relationship${moved === 1 ? '' : 's'} into the model library — each is now defined once.`] : []),
     ...(turned > 0 ? [`${turned} relationship${turned === 1 ? ' is' : 's are'} now stored with the model holding the foreign key.`] : []),

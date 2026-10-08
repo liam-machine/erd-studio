@@ -168,7 +168,10 @@ import {
   sharedRelationshipCount,
   usesLibraryRelationships,
 } from '../services/libraryRelationships';
-import type { RelationshipWriteOp } from '../services/libraryRelationships';
+import type { RelationshipWriteInput, RelationshipWriteOp } from '../services/libraryRelationships';
+import { auditRelationshipWrite, surveyLibrary } from '../services/relationshipHealth';
+import type { RelationshipAudit } from '../services/relationshipHealth';
+import { RelationshipsRewriteRefused } from '../services/logicalModelService';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
 import { normaliseName } from '../services/nameUtils';
 
@@ -332,6 +335,18 @@ class EditAborted extends Error {
   constructor() {
     super('edit aborted');
     this.name = 'EditAborted';
+  }
+}
+
+/**
+ * A refusal the user is told about in plain words — a file open with unsaved
+ * edits, a relationship edit the planner turns down. Not a failure: usage
+ * telemetry counts only the throws that are not one of these.
+ */
+class EditRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EditRefused';
   }
 }
 import {
@@ -2052,6 +2067,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       otherDomains?: (parsed: Record<string, unknown>) => boolean;
       errorLabel?: string;
       onSuccess?: () => void;
+      /** Called when the edit applied but a file could not be saved (usage telemetry). */
+      onUnsaved?: () => void;
     },
   ): Promise<boolean> {
     const { refreshWebview = true, webview, stage, modelFiles, errorLabel, onSuccess } = options;
@@ -2070,7 +2087,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // A model file open with unsaved edits would be replaced by text rendered
     // from disk: refuse by name (the handler reports it), before anything is written.
     const dirty = this.dirtyModelFile(modelFiles);
-    if (dirty) throw new Error(`${dirty} has unsaved changes. Save or revert it, then try again.`);
+    if (dirty) throw new EditRefused(`${dirty} has unsaved changes. Save or revert it, then try again.`);
     const otherDomains = options.otherDomains ? this.rewriteOtherDomains(document.uri.fsPath, options.otherDomains) : [];
 
     // Re-rendered as before, in the file's own line endings.
@@ -2137,6 +2154,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       if (unsaved.length > 0) {
         telemetry.error('saveFailed');
+        options.onUnsaved?.();
         webview?.postMessage({ type: 'error', payload: { message: this.describeUnsaved(unsaved) } });
       }
       for (const filePath of created) {
@@ -2205,7 +2223,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!rewrite(parsed)) continue;
       if (dirtyFiles([summary.filePath]).length > 0) {
         const name = path.relative(this.workspaceRoot, summary.filePath).split(path.sep).join('/');
-        throw new Error(`${name} has unsaved changes. Save or revert it, then try again.`);
+        throw new EditRefused(`${name} has unsaved changes. Save or revert it, then try again.`);
       }
       // Only the renamed strings change: the file keeps its layout and line endings.
       const text = rewriteJsonScalars(original, parsed)
@@ -2408,6 +2426,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       telemetry.featureOnce(stage === 'logical' ? 'manifestMissingCanvas' : 'manifestMissingPhysical');
     }
     telemetry.catalog(hasCatalog);
+    if (stage === 'logical') this.recordRelationshipState(document);
+  }
+
+  /**
+   * Usage telemetry for a logical canvas's first load (#133): which states the
+   * relationships it reads are in — counts only, at most once a day each.
+   */
+  private recordRelationshipState(document: vscode.TextDocument): void {
+    try {
+      const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
+      const section = this.getStageSection(parsed, 'logical');
+      const v5 = this.isDomainV5(parsed);
+      const models = v5 ? this.logicalModelService.listModels() : ((section.models ?? []) as SemanticModel[]).filter((m) => !!m && typeof m === 'object');
+      const unreadableEntries = v5 && this.logicalModelService.hasUnreadableRelationships() ? 1 : 0;
+      telemetry.relationshipState(surveyLibrary(models, (section.relationships ?? []) as Relationship[], { unreadableEntries }));
+    } catch (err) {
+      console.error('[SemanticEditorProvider] relationship survey failed:', err);
+    }
   }
 
   /**
@@ -3193,6 +3229,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
+      this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to add relationship: ${message}` } });
     }
   }
@@ -3222,27 +3259,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Filled by the mutator, which applyDomainEdit runs before it reads modelFiles.
     const save: Array<{ model: SemanticModel }> = [];
     let grouped: { count: number; compositeKey: string } | undefined;
+    let audit: RelationshipAudit | undefined;
     const success = await this.applyDomainEdit(
       document,
       (section) => {
-        const plan = planRelationshipWrite(op, {
-          home, models, domainRelationships: (section.relationships ?? []) as Relationship[], dbt,
-        });
-        if (!plan.ok) throw new Error(plan.missingModel ? this.modelUnavailableMessage(plan.missingModel) : plan.error);
+        const input: RelationshipWriteInput = { home, models, domainRelationships: (section.relationships ?? []) as Relationship[], dbt };
+        const plan = planRelationshipWrite(op, input);
+        if (!plan.ok) {
+          if (plan.reason === 'keysWin') telemetry.feature('relSwapRefusedKey');
+          throw new EditRefused(plan.missingModel ? this.modelUnavailableMessage(plan.missingModel) : plan.error);
+        }
+        // Self-check of the planned result (#133 telemetry): recorded and logged, never blocking or altering the edit.
+        audit = auditRelationshipWrite(op, input, plan, v5 ? models : (section.models ?? []) as SemanticModel[]);
+        if (audit.broken.length > 0) {
+          telemetry.relationshipInvariants(audit.broken);
+          console.warn(`[SemanticEditorProvider] relationship self-check (${op.kind}): ${audit.broken.join(', ')}`);
+        }
         if (plan.inlineMarkKey) {
           // A v4 domain keeps its models inline: the key is marked there.
           const inline = ((section.models ?? []) as SemanticModel[]).findIndex((m) => sameName(m.name, plan.inlineMarkKey!.model));
-          if (inline === -1) throw new Error(`Model "${plan.inlineMarkKey.model}" not found.`);
+          if (inline === -1) throw new EditRefused(`Model "${plan.inlineMarkKey.model}" not found.`);
           const marked = markPrimaryKey((section.models as SemanticModel[])[inline], plan.inlineMarkKey.columns);
-          if (typeof marked === 'string') throw new Error(marked.replace('{was}', op.kind === 'add' ? 'added' : 'changed'));
+          if (typeof marked === 'string') throw new EditRefused(marked.replace('{was}', op.kind === 'add' ? 'added' : 'changed'));
           (section.models as SemanticModel[])[inline] = marked;
         }
         if (plan.domainRelationships) section.relationships = plan.domainRelationships;
         save.push(...plan.changed.map((model) => ({ model })));
         grouped = plan.grouped;
       },
-      { webview, stage, errorLabel, modelFiles: { save } },
+      { webview, stage, errorLabel, modelFiles: { save }, onUnsaved: () => telemetry.error('relWriteFailed') },
     );
+    if (success) telemetry.relationshipUsage(audit?.usage ?? []);
+    else telemetry.error('relWriteFailed');
     if (success && grouped) {
       // Single links taken into a composite key (#133 L2), e.g. after a 1.6.7 save split it.
       void vscode.window.showInformationMessage(
@@ -3586,6 +3634,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Remove ${label} failed: ${message}`);
+      this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to remove ${label}: ${message}` } });
     }
   }
@@ -3604,6 +3653,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         .filter((d) => !samePath(d.filePath, document.uri.fsPath));
       const labels = diagramsStillDrawing(keys, others);
       if (labels.length === 0) return;
+      telemetry.feature('relDeleteStillDrawn');
       const what = keys.length === 1 ? 'this relationship' : 'one of these relationships';
       void vscode.window.showInformationMessage(labels.length === 1
         ? `Deleted. The diagram ${labels[0]} still draws ${what} from a copy of its own. Delete it there too if it should go everywhere.`
@@ -3612,6 +3662,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       console.error('[SemanticEditorProvider] Could not check other diagrams after a delete:', err);
     }
+  }
+
+  /** Usage telemetry: a relationship handler threw something other than a refusal it explained. */
+  private recordRelationshipFailure(err: unknown): void {
+    if (err instanceof EditRefused || err instanceof RelationshipsRewriteRefused) return;
+    telemetry.error('relHandlerFailed');
   }
 
   private async handleUpdateRelationship(
@@ -3627,6 +3683,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Update relationship failed: ${message}`);
+      this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to update relationship: ${message}` } });
     }
   }
@@ -3664,6 +3721,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Edit relationship failed: ${message}`);
+      this.recordRelationshipFailure(err);
       webview.postMessage({ type: 'error', payload: { message: `Failed to edit relationship: ${message}` } });
     }
   }

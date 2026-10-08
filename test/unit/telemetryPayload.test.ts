@@ -282,13 +282,17 @@ describe('buildHeartbeat', () => {
     });
   });
 
-  it('stays under the Worker\'s 4 KB body limit with every counter and list set', () => {
+  it('stays under the Worker\'s body limit with every counter and list set', () => {
+    // The Worker 413s anything larger, so a heartbeat over it would be lost whole.
+    const worker = fs.readFileSync(path.join(__dirname, '../../telemetry/src/index.js'), 'utf8');
+    const limit = Number(/const MAX_BODY_BYTES = (\d+);/.exec(worker)?.[1]);
+    expect(limit).toBeGreaterThan(0);
     let s = recordActivation(emptyCounters('2026-09-24'), { outcome: 'project_found', hasSemanticDir: true, domainCount: 99 });
     for (const f of FEATURES) s = repeat(s, 150, x => recordFeature(x, f));
     for (const e of ERROR_CODES) s = repeat(s, 150, x => recordError(x, e));
     s = recordHarnesses(recordAssistants(s, ASSISTANTS), HARNESSES);
     s = stampEnv(s, { extVersion: '10.10.10', vscodeVersion: '1.999.9', host: 'vscodeInsiders', remote: 'codespaces', dev: true });
-    expect(JSON.stringify(buildHeartbeat(s, ENV)).length).toBeLessThan(4096);
+    expect(new TextEncoder().encode(JSON.stringify(buildHeartbeat(s, ENV))).byteLength).toBeLessThan(limit);
   });
 });
 
@@ -389,6 +393,22 @@ describe('allowlists agree with the Worker', () => {
     for (const code of ERROR_CODES) expect(code).not.toMatch(/Cancel|NoModels|NotFound|NoGit/);
     // `layoutFailed` predates the split and stays a feature too (the layout-time bucket).
     expect(FEATURES.filter(f => /Failed$/.test(f))).toEqual(['layoutFailed']);
+  });
+
+  it('keeps the relationship states with the features and the invariant checks with the errors', () => {
+    // A state of the user's files is not something of ours that broke; a write
+    // that breaks an invariant is.
+    expect(ERROR_CODES.filter(e => e.startsWith('relState'))).toEqual([]);
+    expect(FEATURES.filter(f => f.startsWith('relInv'))).toEqual([]);
+    expect(ERROR_CODES.filter(e => e.startsWith('relInv'))).toHaveLength(11);
+    expect(FEATURES.filter(f => f.startsWith('relState'))).toHaveLength(8);
+  });
+
+  it('appends the relationship keys after every existing one, so no index moves', () => {
+    expect(FEATURES.indexOf('relDragTurned')).toBe(FEATURES.indexOf('relMoveLeftover') + 1);
+    expect(FEATURES[FEATURES.length - 1]).toBe('relStateDomainCopy');
+    expect(ERROR_CODES.indexOf('relWriteFailed')).toBe(ERROR_CODES.indexOf('saveFailed') + 1);
+    expect(ERROR_CODES[ERROR_CODES.length - 1]).toBe('relInvCheckFailed');
   });
 
   it('telemetry.json documents every feature key', () => {

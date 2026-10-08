@@ -115,6 +115,18 @@ const COLUMN_READ_DEFAULTS: Readonly<Record<string, unknown>> = { name: '', data
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * A model file's `relationships:` list that cannot be rewritten in place
+ * (not a list, an alias, an entry the reader cannot use): the edit is refused,
+ * naming file and line, rather than lose what is written there.
+ */
+export class RelationshipsRewriteRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RelationshipsRewriteRefused';
+  }
+}
+
 export class LogicalModelService {
   private readonly modelsDir: string;
 
@@ -135,6 +147,12 @@ export class LogicalModelService {
    * {@link getModelFileError}, which always reflects the live state.
    */
   onParseFailure?: (error: ModelFileError) => void;
+  /**
+   * Told each time a save is refused because a model file's `relationships:`
+   * list cannot be rewritten in place ({@link RelationshipsRewriteRefused}).
+   * Set by the extension host for usage telemetry; unset elsewhere.
+   */
+  onSyncRefused?: () => void;
   /** The last failure per file path, until the file reads cleanly again. */
   private readonly failedPaths = new Map<string, ModelFileError>();
   /** Paths already reported to {@link onParseFailure}; never cleared in a session. */
@@ -793,7 +811,8 @@ export class LogicalModelService {
       const offset = isNode(node) ? node.range?.[0] ?? 0 : 0;
       const line = fs.readFileSync(filePath, 'utf-8').slice(0, offset).split('\n').length;
       const file = `${LOGICAL_MODELS_DIR}/${path.relative(this.modelsDir, filePath).split(path.sep).join('/')}`;
-      return new Error(`${file}, line ${line}: ${why}, so ERD Studio cannot change it. Fix it by hand first.`);
+      this.onSyncRefused?.();
+      return new RelationshipsRewriteRefused(`${file}, line ${line}: ${why}, so ERD Studio cannot change it. Fix it by hand first.`);
     };
     if (!isSeq(list)) {
       if (desired.length === 0) return; // nothing was read from it, so nothing changed
