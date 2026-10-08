@@ -24,6 +24,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { VALID_CARDINALITIES, parseLogicalModelText, relationshipKey } from '@erd-studio/core';
+import { dirtyFiles } from '../providers/dirtyDocuments';
 import { describeMovePlan, planMoveToLibrary, resolveConflict, upsertLibraryRelationship } from '../services/libraryRelationships';
 import { setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
 import { ownWrites } from '../services/ownWriteTracker';
@@ -108,10 +109,7 @@ const errorText = (err: unknown): string => (err instanceof Error ? err.message 
  * longer matches disk. Returns true (and has told the user) when refused.
  */
 function refuseIfDirty(filePaths: Iterable<string>, relPath: (filePath: string) => string): boolean {
-  const targets = new Set([...filePaths].map((p) => path.resolve(p)));
-  const dirty = vscode.workspace.textDocuments
-    .filter((doc) => doc.isDirty && targets.has(path.resolve(doc.uri.fsPath)))
-    .map((doc) => relPath(doc.uri.fsPath));
+  const dirty = dirtyFiles(filePaths).map(relPath);
   if (dirty.length === 0) return false;
   telemetry.error('relMoveDirtyFiles');
   const shown = dirty.slice(0, 5).join(', ') + (dirty.length > 5 ? ` and ${dirty.length - 5} more` : '');

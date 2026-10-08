@@ -287,6 +287,47 @@ describe('moveRelationshipsToLibrary — writes disk directly (#126)', () => {
     expect(info.mock.calls.some(([text]) => String(text).startsWith('Define each relationship once'))).toBe(false);
   });
 
+  it('keeps CRLF in a model file written as one flow mapping', async () => {
+    acceptModal();
+    // model_04 (LF in the fixture) rewritten as `{ … }`, which the move re-emits whole.
+    const flow = [
+      '{',
+      '  name: model_04,',
+      '  columns: [{ name: id, dataType: string }, { name: parent_id, dataType: string }]',
+      '}',
+      '',
+    ].join('\r\n');
+    fs.writeFileSync(p.modelPath(4), flow);
+
+    await p.run();
+
+    const after = fs.readFileSync(p.modelPath(4), 'utf-8');
+    expect(p.logicalModelService.getModel(modelName(4))?.relationships).toHaveLength(1);
+    expect(after.endsWith('\r\n')).toBe(true);
+    expect(after.replace(/\r\n/g, '')).not.toMatch(/\n/);
+  });
+
+  it('finds a target open with unsaved edits when VS Code spells its path in another case', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      acceptModal();
+      const error = vi.spyOn(vscode.window, 'showErrorMessage');
+      // VS Code writes a Windows drive letter in lower case; path.resolve does not.
+      const doc = createMockTextDocument(p.modelPath(3).toUpperCase(), p.originals.get(p.modelPath(3))!);
+      doc._setText(`${doc.getText()}# unsaved\n`);
+      vscode.workspace.textDocuments.push(doc as never);
+
+      await p.run();
+
+      expect(messages(error)).toHaveLength(1);
+      expect(messages(error)[0]).toContain('logical-models/model_03.yml');
+      for (const [filePath, text] of p.originals) expect(fs.readFileSync(filePath, 'utf-8')).toBe(text);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('puts every file back when a write fails mid-move', async () => {
     const info = acceptModal();
     const error = vi.spyOn(vscode.window, 'showErrorMessage');

@@ -17,6 +17,7 @@ import * as path from 'path';
 
 import { LogicalModelService } from './logicalModelService';
 import { LayerService } from './layerService';
+import { keepLineEndings } from './lineEndings';
 import type { SemanticModel, Relationship, ViewConfig } from '../types/semantic';
 import { CURRENT_SCHEMA_VERSION, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 
@@ -378,7 +379,8 @@ export class MigrationService {
           parsed.viewConfig = {};
         }
 
-        const updatedContent = JSON.stringify(parsed, null, 2) + '\n';
+        // The file keeps its own line endings (CRLF stays CRLF).
+        const updatedContent = keepLineEndings(JSON.stringify(parsed, null, 2) + '\n', content);
         fs.writeFileSync(filePath, updatedContent, 'utf-8');
         result.domainsConverted++;
       } catch (err) {

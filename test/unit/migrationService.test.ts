@@ -321,6 +321,22 @@ describe('MigrationService (domain format → v5)', () => {
     expect(fs.existsSync(path.join(workspaceRoot, '.erd-studio', 'logical-models', 'silver', 'dim_a.yml'))).toBe(true);
   });
 
+  it('keeps a CRLF domain file CRLF when it converts it', () => {
+    const p = writeDomain('crlf', {
+      schemaVersion: 4, domain: 'crlf', layer: 'silver',
+      logical: { models: [{ name: 'dim_a', columns: [{ name: 'a_id', dataType: 'INT', description: '' }] }], relationships: [] },
+      viewConfig: {},
+    });
+    fs.writeFileSync(p, fs.readFileSync(p, 'utf-8').replace(/\n/g, '\r\n') + '\r\n');
+
+    expect(migration.migrate().domainsConverted).toBe(1);
+
+    const text = fs.readFileSync(p, 'utf-8');
+    expect(readJson(p).schemaVersion).toBe(5);
+    expect(text.endsWith('}\r\n')).toBe(true);
+    expect(text.replace(/\r\n/g, '')).not.toMatch(/\n/);
+  });
+
   it('extracts a model inlined in domains of two layers to the top level', () => {
     const inline = (domain: string, layer: string, models: string[]) => {
       const dir = path.join(workspaceRoot, '.erd-studio', layer);

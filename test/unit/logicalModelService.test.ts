@@ -1098,6 +1098,22 @@ describe('LogicalModelService — a save keeps the relationships: list it did no
     ].join('\n'));
   });
 
+  it('gives a new link no comment or unknown key from a removed link that shares neither end', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships = [
+      { fromColumn: 'order_key', toModel: 'dim_store', toColumn: 'store_key', cardinality: 'many-to-one' },
+      model.relationships![1],
+    ];
+    service.saveModel(model);
+    const text = fs.readFileSync(file, 'utf-8');
+    expect(text).not.toContain('role: billing');
+    expect(text).not.toContain('# typo');
+    expect(text).not.toContain('toModel: dim_customer');
+    const saved = service.getModel('fct_order')!.relationships!;
+    expect(saved).toHaveLength(2);
+    expect(saved).toEqual(expect.arrayContaining(model.relationships));
+  });
+
   it('refuses an edit to a relationships: value it cannot read, naming the file and line', () => {
     fs.writeFileSync(file, 'name: fct_order\nrelationships: see the wiki\n');
     const model = service.getModel('fct_order')!;
@@ -1112,5 +1128,84 @@ describe('LogicalModelService — a save keeps the relationships: list it did no
     expect(service.hasUnreadableRelationships()).toBe(true);
     fs.writeFileSync(file, 'name: fct_order\n  bad: indent\n');
     expect(service.hasUnreadableRelationships()).toBe(false);
+  });
+});
+
+describe('LogicalModelService — a save adds nothing the user did not change', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  let file: string;
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    file = service.modelPath('dim_customer');
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  it('does not write dataType: unknown into a column that has no type', () => {
+    const yml = [
+      'name: dim_customer',
+      'columns:',
+      '  - name: customer_key',
+      '  - name: region # typed later',
+      '    dataType:',
+      '  - name: email',
+      '    dataType: string',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('dim_customer')!;
+    expect(model.columns!.map((c) => c.dataType)).toEqual(['unknown', 'unknown', 'string']);
+
+    model.description = 'Customers';
+    service.saveModel(model);
+
+    expect(fs.readFileSync(file, 'utf-8')).toBe(`${yml}description: Customers\n`);
+  });
+
+  it('still writes a type the user gives a column that had none', () => {
+    fs.writeFileSync(file, 'name: dim_customer\ncolumns:\n  - name: customer_key\n');
+    const model = service.getModel('dim_customer')!;
+    model.columns![0].dataType = 'integer';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe('name: dim_customer\ncolumns:\n  - name: customer_key\n    dataType: integer\n');
+  });
+});
+
+describe('LogicalModelService — a direct write keeps the file\'s line endings', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  const CRLF = ['# kept', 'name: dim_customer', 'columns:', '  - name: customer_key', '    dataType: string', ''].join('\r\n');
+  const isCrlfOnly = (text: string): boolean => text.includes('\r\n') && !/(?<!\r)\n/.test(text);
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    fs.writeFileSync(service.modelPath('dim_customer'), CRLF);
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  it('saveModel keeps CRLF', () => {
+    const model = service.getModel('dim_customer')!;
+    model.description = 'Customers';
+    service.saveModel(model);
+    const text = fs.readFileSync(service.modelPath('dim_customer'), 'utf-8');
+    expect(text).toContain('description: Customers\r\n');
+    expect(isCrlfOnly(text)).toBe(true);
+  });
+
+  it('renameModel carries CRLF to the new file', () => {
+    service.renameModel('dim_customer', 'dim_client');
+    const text = fs.readFileSync(service.modelPath('dim_client'), 'utf-8');
+    expect(text).toContain('name: dim_client\r\n');
+    expect(isCrlfOnly(text)).toBe(true);
+  });
+
+  it('serializeModel renders a CRLF file with CRLF, and a new file with LF', () => {
+    expect(isCrlfOnly(service.serializeModel(service.getModel('dim_customer')!))).toBe(true);
+    expect(service.serializeModel({ name: 'dim_new', columns: [] })).toBe('name: dim_new\n');
   });
 });

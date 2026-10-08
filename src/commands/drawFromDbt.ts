@@ -28,6 +28,7 @@ import {
   type DraftSkipped,
 } from '../services/dbtDraft';
 import { pickDraftScope } from '../providers/dbtDraftPicker';
+import { dirtyFiles } from '../providers/dirtyDocuments';
 import { routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
 import { ownWrites } from '../services/ownWriteTracker';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../services/recoveryService';
@@ -58,7 +59,10 @@ export interface DrawFromDbtDeps {
   modelPaths: readonly string[];
   layerService: Pick<LayerService, 'getValidLayerIds' | 'getCreatableLayers' | 'getAllLayers' | 'saveConfig'>;
   domainService: Pick<DomainService, 'listDomains' | 'countDomainFileRelationships'>;
-  logicalModelService: Pick<LogicalModelService, 'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel' | 'hasUnreadableRelationships'>;
+  logicalModelService: Pick<
+    LogicalModelService,
+    'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel' | 'hasUnreadableRelationships' | 'modelPath' | 'getModelsDir'
+  >;
   /** Schema yml and manifest; either may be undefined (no yml, never compiled). */
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
@@ -160,6 +164,34 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     return undefined;
   }
 
+  // Decided once, before the first file lands: an empty library would
+  // otherwise read as "flat" after one top-level write. A flat library stays
+  // flat; one already grouped by layer gets this layer's folder.
+  const folder = logicalModelService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
+  // Relationships go to their from-models' library files when the project
+  // keeps them there (#126) — decided, like the folder, before any write.
+  const routed = usesLibraryRelationships(
+    logicalModelService.listModels(),
+    domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
+    logicalModelService.hasUnreadableRelationships(),
+  )
+    ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
+    : { kept: draft.relationships, changed: [] };
+  // A model file it would write that is open with unsaved edits stops the
+  // draw before anything is written, as a canvas edit does.
+  const dirty = dirtyFiles([
+    ...draft.newModels.map((m) => logicalModelService.modelPath(m.name, folder)),
+    ...routed.changed.map((m) => logicalModelService.modelPath(m.name)),
+  ]);
+  if (dirty.length > 0) {
+    const libraryRoot = path.dirname(logicalModelService.getModelsDir());
+    const file = path.relative(libraryRoot, dirty[0]).split(path.sep).join('/');
+    void vscode.window.showErrorMessage(
+      `${TITLE}: ${file} has unsaved changes. Save or revert it, then try again. Nothing was changed.`,
+    );
+    return undefined;
+  }
+
   // Writes start here. A project with no ERD folder yet gets the default
   // layers.json first, exactly as Set Up Semantic Domains Directory writes it.
   const written: string[] = [];
@@ -169,19 +201,6 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     }
     fs.mkdirSync(layerDir, { recursive: true });
 
-    // Decided once, before the first file lands: an empty library would
-    // otherwise read as "flat" after one top-level write. A flat library stays
-    // flat; one already grouped by layer gets this layer's folder.
-    const folder = logicalModelService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
-    // Relationships go to their from-models' library files when the project
-    // keeps them there (#126) — decided, like the folder, before any write.
-    const routed = usesLibraryRelationships(
-      logicalModelService.listModels(),
-      domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
-      logicalModelService.hasUnreadableRelationships(),
-    )
-      ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
-      : { kept: draft.relationships, changed: [] };
     for (const model of draft.newModels) {
       logicalModelService.saveModel(model, folder);
       written.push(model.name);

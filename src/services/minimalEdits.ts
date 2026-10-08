@@ -11,17 +11,13 @@ import { isMap, isPair, isScalar, isSeq, parseDocument, stringify } from 'yaml';
 import type { Node, Pair } from 'yaml';
 
 import type { ModelRelationship, Relationship } from '../types/semantic';
+import { detectEol, keepLineEndings } from './lineEndings';
 
 const BOM = '﻿';
 
 /** Split a leading BOM off `text`. */
 function splitBom(text: string): { bom: string; body: string } {
   return text.startsWith(BOM) ? { bom: BOM, body: text.slice(1) } : { bom: '', body: text };
-}
-
-/** The file's own line ending: CRLF when it uses one anywhere, else LF. */
-function detectEol(text: string): string {
-  return text.includes('\r\n') ? '\r\n' : '\n';
 }
 
 /** Index of the start of the line containing `offset`. */
@@ -102,7 +98,7 @@ export function setYamlRelationships(text: string, relationships: readonly Model
     else doc.set('relationships', relationships.map((r) => ({
       fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn, cardinality: r.cardinality,
     })));
-    return bom + doc.toString();
+    return bom + keepLineEndings(doc.toString(), body);
   }
 
   const pairs = root.items.filter(isPair) as Pair[];

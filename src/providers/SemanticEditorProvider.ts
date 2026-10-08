@@ -125,6 +125,7 @@ import type { NodePosition, Relationship, SemanticModel, UnifiedDomain } from '.
 import { describeUnsupportedDomainFormat, detectDomainFormat, getRawDomainModelNames } from '../types/semantic';
 import { telemetry } from '../services/telemetryService';
 import { saveDocument, saveDocumentByUri } from './documentSave';
+import { dirtyFiles } from './dirtyDocuments';
 import { domainLoadErrorCode, layoutFeature, type DomainLoadFailure, type TelemetryFeature } from '../services/telemetryPayload';
 import { openModelFileAt } from '../commands/openModelFile';
 import {
@@ -1802,7 +1803,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // The file addModelFileEdits would replace, read from or delete.
       if (!this.logicalModelService.modelExists(name)) continue;
       const filePath = this.logicalModelService.modelPath(name);
-      if (vscode.workspace.textDocuments.some((d) => d.isDirty && path.resolve(d.uri.fsPath) === path.resolve(filePath))) {
+      if (dirtyFiles([filePath]).length > 0) {
         return `logical-models/${path.relative(this.logicalModelService.getModelsDir(), filePath).split(path.sep).join('/')}`;
       }
     }

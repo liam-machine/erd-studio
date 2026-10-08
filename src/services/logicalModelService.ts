@@ -23,6 +23,7 @@ import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
 import { sameName } from '../types/naming';
+import { keepLineEndings } from './lineEndings';
 
 // The directory name and the YAML -> SemanticModel parsing live in
 // @erd-studio/core; re-exported so existing imports of this module keep working.
@@ -107,6 +108,8 @@ const COLUMN_KEYS = [
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
   'scdType', 'additiveType', 'meta',
 ] as const;
+/** What core's reader fills in for a column key the file leaves out or leaves empty. */
+const COLUMN_READ_DEFAULTS: Readonly<Record<string, unknown>> = { name: '', dataType: 'unknown' };
 
 // ---------------------------------------------------------------------------
 // Service
@@ -498,14 +501,23 @@ export class LogicalModelService {
   /**
    * Produce the full YAML text for a model: the existing document at
    * `filePath` edited in place when it can be parsed, otherwise a fresh
-   * document generated from the model.
+   * document generated from the model. Line endings follow the file's own.
    */
   private renderModel(model: SemanticModel, filePath: string): string {
     const doc = this.loadEditableDocument(filePath) ?? new Document(this.modelToPlain(model));
     if (isMap(doc.contents)) {
       this.applyModel(doc, doc.contents, model, filePath);
     }
-    return doc.toString(STRINGIFY_OPTIONS);
+    return keepLineEndings(doc.toString(STRINGIFY_OPTIONS), this.readExisting(filePath));
+  }
+
+  /** The text of `filePath`, or undefined when there is none to read. */
+  private readExisting(filePath: string): string | undefined {
+    try {
+      return fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -562,12 +574,13 @@ export class LogicalModelService {
     // to the new file rather than regenerating it from the parsed model.
     // The renamed file stays in the folder the old one was in.
     const folder = this.modelFolder(oldName) ?? '';
-    const doc = this.loadEditableDocument(this.modelPath(oldName));
+    const oldPath = this.modelPath(oldName);
+    const doc = this.loadEditableDocument(oldPath);
     if (doc) {
       const target = this.modelPath(newName, folder);
       this.ensureDir(target);
       doc.set('name', newName);
-      this.writeAtomic(target, doc.toString(STRINGIFY_OPTIONS));
+      this.writeAtomic(target, keepLineEndings(doc.toString(STRINGIFY_OPTIONS), this.readExisting(oldPath)));
     } else {
       model.name = newName;
       this.saveModel(model, folder);
@@ -797,9 +810,14 @@ export class LogicalModelService {
 
     // A changed entry keeps its node (comments, unknown keys): first one with
     // the same ends (a cardinality change), then — only when as many entries
-    // changed as went, as in a column or model rename — the rest in order.
+    // changed as went, as in a column or model rename — the rest in order,
+    // each only from an entry that shares one of its ends (a rename changes
+    // one end; an unrelated link must not inherit another's comment or role).
     const sameEnds = (r: ModelRelationship | null | undefined, want: Record<string, unknown>): boolean =>
       !!r && r.fromColumn === want.fromColumn && r.toModel === want.toModel && r.toColumn === want.toColumn;
+    const shareAnEnd = (r: ModelRelationship | null | undefined, want: Record<string, unknown>): boolean =>
+      !!r && (sameName(r.fromColumn, String(want.fromColumn))
+        || (sameName(r.toModel, String(want.toModel)) && sameName(r.toColumn, String(want.toColumn))));
     const takeOver = (d: number, at: number): void => {
       const node = list.items[at];
       if (!isMap(node)) throw refuse(node, 'this relationship entry is not written out in full');
@@ -813,7 +831,9 @@ export class LogicalModelService {
     });
     const gone = read.flatMap((r, j) => (r && !claimed.has(j) ? [j] : []));
     const changed = matchOf.flatMap((i, d) => (i === -1 ? [d] : []));
-    if (gone.length === changed.length) changed.forEach((d, k) => takeOver(d, gone[k]));
+    if (gone.length === changed.length) {
+      changed.forEach((d, k) => { if (shareAnEnd(read[gone[k]], desired[d])) takeOver(d, gone[k]); });
+    }
 
     const items = list.items.filter((_, i) => read[i] === null || claimed.has(i));
     desired.forEach((want, d) => { if (matchOf[d] === -1) items.push(doc.createNode(want)); });
@@ -852,8 +872,10 @@ export class LogicalModelService {
     map: YAMLMap,
     desired: Record<string, unknown>,
     managedKeys: readonly string[],
+    leaveAlone: ReadonlySet<string> = new Set(),
   ): void {
     for (const key of managedKeys) {
+      if (leaveAlone.has(key)) continue;
       if (!(key in desired)) {
         if (map.has(key)) map.delete(key);
         continue;
@@ -990,11 +1012,26 @@ export class LogicalModelService {
     seq.items = desired.map((col, i) => {
       const node = matches[i];
       if (node) {
-        this.syncMap(doc, node, col, COLUMN_KEYS);
+        this.syncMap(doc, node, col, COLUMN_KEYS, this.readDefaultsLeftOut(node, col));
         return node;
       }
       return doc.createNode(col);
     });
+  }
+
+  /**
+   * Keys `node` leaves out (or empty) whose desired value is only what the
+   * reader fills in for them — `dataType: unknown` for a column with no type.
+   * A save leaves those alone, so it never adds a default nobody typed.
+   */
+  private readDefaultsLeftOut(node: YAMLMap, desired: Record<string, unknown>): Set<string> {
+    const keys = new Set<string>();
+    for (const [key, fallback] of Object.entries(COLUMN_READ_DEFAULTS)) {
+      const existing = node.get(key, true);
+      const empty = existing === undefined || existing === null || (isScalar(existing) && existing.value === null);
+      if (empty && desired[key] === fallback) keys.add(key);
+    }
+    return keys;
   }
 
   private isScalarLike(value: unknown): boolean {
