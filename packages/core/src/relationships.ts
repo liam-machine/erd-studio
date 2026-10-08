@@ -5,6 +5,24 @@
 
 import type { Relationship } from './types/semantic.js';
 
+type Ends = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
+
+/**
+ * The link a relationship draws: its two `model.column` ends in either order,
+ * without case (#133). A relationship and the same one read from the other
+ * end share it, so one line is drawn, not two.
+ */
+export function linkKey(rel: Ends): string {
+  const from = `${rel.fromModel}.${rel.fromColumn}`.toLowerCase();
+  const to = `${rel.toModel}.${rel.toColumn}`.toLowerCase();
+  return from <= to ? `${from}\u0000${to}` : `${to}\u0000${from}`;
+}
+
+/** Whether two relationships join the same two columns, either way round. */
+export function sameLink(a: Ends, b: Ends): boolean {
+  return linkKey(a) === linkKey(b);
+}
+
 /**
  * The direction a relationship is stored in (issue #133): the "many" end —
  * the model holding the foreign key — is always `fromModel`, so a relationship

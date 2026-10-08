@@ -82,6 +82,7 @@ import {
   computeMissingPositions,
   DomainValidationError,
   normaliseRelationshipRole,
+  sameLink,
   setMetaEntry,
   toDisplayDomain,
 } from '@erd-studio/core';
@@ -154,7 +155,6 @@ import {
   renameColumnInRelationships,
   renameModelInRelationships,
   routeToLibrary,
-  sameColumnPair,
   sharedRelationshipCount,
   upsertLibraryRelationship,
   usesLibraryRelationships,
@@ -3054,9 +3054,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const models = this.logicalModelService.listModels();
     if (!this.relationshipsInLibrary(models)) return false;
 
-    const sameEnds = (a: RelationshipKey, b: RelationshipKey): boolean =>
-      a.fromModel === b.fromModel && a.fromColumn === b.fromColumn &&
-      a.toModel === b.toModel && a.toColumn === b.toColumn;
     const section = this.getStageSection(parsed, 'logical');
     const domainRels = (section.relationships ?? []) as Relationship[];
     const changed = new Map<string, SemanticModel>();
@@ -3064,7 +3061,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // An update (⇄ swap, context-menu cardinality) carries no role: keep the
     // one already stored. An add or edit carries the dialog's, '' clearing it.
     const storedRole = original
-      ? (findLibraryColumnPair(models, original) ?? domainRels.find((rel) => sameEnds(rel, original)))?.role
+      ? (findLibraryColumnPair(models, original) ?? domainRels.find((rel) => sameLink(rel, original)))?.role
       : undefined;
     const role = action === 'update' ? normaliseRelationshipRole(storedRole) : normaliseRelationshipRole(drawn.role);
     // Stored on its many side, however it was drawn (#133).
@@ -3072,15 +3069,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const next: Relationship = { ...ends, ...(role ? { role } : {}) };
 
     if (original) {
-      const inDomain = domainRels.some((rel) => sameEnds(rel, original));
+      const inDomain = domainRels.some((rel) => sameLink(rel, original));
       const removed = removeLibraryRelationships(models, [original]);
       if (!inDomain && removed.length === 0) throw new Error('Relationship not found.');
       for (const model of removed) changed.set(model.name, model);
     }
-    const rekeyed = !original || !sameEnds(original, next);
+    const rekeyed = !original || !sameLink(original, next);
     if (rekeyed) {
       // The same two columns joined either way round is the same link.
-      const taken = domainRels.some((rel) => !(original && sameEnds(rel, original)) && sameColumnPair(rel, next))
+      const taken = domainRels.some((rel) => !(original && sameLink(rel, original)) && sameLink(rel, next))
         || findLibraryColumnPair(models, next) !== undefined;
       if (taken) {
         throw new Error(action === 'add' ? 'This relationship already exists.' : 'A relationship with this key already exists.');
@@ -3096,7 +3093,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       document,
       (sec) => {
         const rels = (sec.relationships ?? []) as RelationshipKey[];
-        const kept = rels.filter((rel) => !sameEnds(rel, next) && !(original && sameEnds(rel, original)));
+        const kept = rels.filter((rel) => !sameLink(rel, next) && !(original && sameLink(rel, original)));
         if (kept.length !== rels.length) sec.relationships = kept;
       },
       { webview, stage: 'logical', modelFiles: { save: [...changed.values()].map((model) => ({ model })) } },
@@ -3446,16 +3443,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await this.applyDomainEdit(
         document,
         (section) => {
-          const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
-          const matches = (rel: Record<string, unknown>) =>
-            keys.some(
-              (k) =>
-                rel.fromModel === k.fromModel &&
-                rel.fromColumn === k.fromColumn &&
-                rel.toModel === k.toModel &&
-                rel.toColumn === k.toColumn,
-            );
-          const remaining = relationships.filter((rel) => !matches(rel));
+          const relationships = (section.relationships ?? []) as RelationshipKey[];
+          // Every copy of the link, either way round (#133).
+          const remaining = relationships.filter((rel) => !keys.some((k) => sameLink(rel, k)));
           if (remaining.length === relationships.length && fromLibrary.length === 0) {
             throw new Error('Relationship not found.');
           }

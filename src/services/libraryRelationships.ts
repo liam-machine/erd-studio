@@ -11,7 +11,7 @@
  * Pure: no `vscode`, no file access.
  */
 
-import { canonicalRelationship, relationshipKey } from '@erd-studio/core';
+import { canonicalRelationship, linkKey, relationshipKey } from '@erd-studio/core';
 import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 
 type RelationshipEnds = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
@@ -124,13 +124,17 @@ function dropWhere(models: readonly SemanticModel[], drop: (rel: Relationship) =
   return changed;
 }
 
-/** Remove the relationships with these ends from the library. */
+/**
+ * Remove every library copy of these links, either way round (#133): the
+ * many side's entry and any reverse copy an older version left on the other
+ * end, so a deleted line does not come back.
+ */
 export function removeLibraryRelationships(
   models: readonly SemanticModel[],
   ends: readonly RelationshipEnds[],
 ): SemanticModel[] {
-  const keys = new Set(ends.map(relationshipKey));
-  return dropWhere(models, (rel) => keys.has(relationshipKey(rel)));
+  const keys = new Set(ends.map(linkKey));
+  return dropWhere(models, (rel) => keys.has(linkKey(rel)));
 }
 
 /** Remove every library relationship that starts or ends at `model.column`. */

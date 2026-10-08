@@ -26,7 +26,7 @@ import type {
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
-import { normaliseRelationshipRole } from './relationships.js';
+import { linkKey, normaliseRelationshipRole } from './relationships.js';
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.
@@ -390,18 +390,6 @@ export function describeModelLoadError(error: ModelLoadError): string {
   return error.line !== undefined
     ? `logical-models file has a YAML error on line ${error.line}`
     : 'logical-models file has a YAML error';
-}
-
-/**
- * The link a relationship draws: its two column ends in either order, without
- * case (#133). A relationship and the same one read from the other end — a
- * library entry on the many side, a domain copy drawn the other way — share it,
- * so one line is drawn, not two.
- */
-function linkKey(rel: Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>): string {
-  const from = `${rel.fromModel}.${rel.fromColumn}`.toLowerCase();
-  const to = `${rel.toModel}.${rel.toColumn}`.toLowerCase();
-  return from <= to ? `${from}\u0000${to}` : `${to}\u0000${from}`;
 }
 
 /** Identity of a relationship: its four endpoints, compared without case. */

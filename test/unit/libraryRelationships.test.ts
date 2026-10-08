@@ -8,6 +8,7 @@ import {
   planMoveToLibrary,
   planRehome,
   removeColumnRelationships,
+  removeLibraryRelationships,
   resolveConflict,
   sharedRelationshipCount,
   renameColumnInRelationships,
@@ -233,6 +234,13 @@ describe('stored on the many side (#133)', () => {
     expect(rehome).toEqual([{ from: 'dim_customer', stored: REVERSED, to: REL }]);
     expect(describeMovePlan({ toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [], rehome }))
       .toMatch(/^Turned round: 1 relationship is stored in the file of the model it points at/);
+  });
+
+  it('removing a link drops every copy, in both model files, whichever end the line was drawn from', () => {
+    const fact = fct([STORED]);
+    const dimension = dim([{ fromColumn: 'CUSTOMER_KEY', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' }]);
+    expect(removeLibraryRelationships([fact, dimension], [REVERSED])).toEqual([fact, dimension]);
+    expect([fact.relationships, dimension.relationships]).toEqual([undefined, undefined]);
   });
 
   it('upsertLibraryRelationship writes and compares the role', () => {
