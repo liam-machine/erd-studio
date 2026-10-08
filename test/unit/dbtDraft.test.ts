@@ -22,10 +22,16 @@ import {
 import { CHOOSE_MODELS_LABEL, pickDraftScope } from '../../src/providers/dbtDraftPicker';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import { ManifestService } from '../../src/services/manifestService';
+import { CatalogService } from '../../src/services/catalogService';
+import { DomainService } from '../../src/services/domainService';
+import { LayerService } from '../../src/services/layerService';
+import { normaliseName } from '../../src/services/nameUtils';
 import { detectDomainFormat } from '../../src/types/semantic';
 import { isFreshLayout } from '../../src/providers/SemanticEditorProvider';
 import type { YmlData, YmlModelInfo } from '../../src/types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../../src/types/manifest';
+import type { CatalogData, CatalogNodeInfo } from '../../src/types/catalog';
+import type { UnifiedDomain } from '../../src/types/semantic';
 
 const ROOT = path.resolve(__dirname, '../fixtures/dbt-project');
 
@@ -226,8 +232,112 @@ describe('seedModelFromDbt', () => {
   it('falls back to the manifest and returns undefined when neither has it', () => {
     const m = emptyManifest();
     m.models.set('x', manifestModel('x', 'models/x.sql', [['id', null]]));
-    expect(seedModelFromDbt('x', undefined, m)!.columns).toEqual([{ name: 'id', dataType: 'unknown', description: 'id doc' }]);
+    // No source has a type: empty, never an invented 'unknown'.
+    expect(seedModelFromDbt('x', undefined, m)!.columns).toEqual([{ name: 'id', dataType: '', description: 'id doc' }]);
     expect(seedModelFromDbt('nope', shopYml(), m)).toBeUndefined();
+  });
+});
+
+describe('seedModelFromDbt — column types from catalog.json', () => {
+  function catalogOf(nodes: Array<Pick<CatalogNodeInfo, 'uniqueId' | 'name' | 'columns'>>): CatalogData {
+    const full: CatalogNodeInfo[] = nodes.map((n) => ({
+      ...n, resourceType: 'model', relationName: n.name.toUpperCase(), schema: 'ANALYTICS', database: 'PROD', comment: null,
+    }));
+    return {
+      byUniqueId: new Map(full.map((n) => [n.uniqueId, n])),
+      byName: new Map(full.map((n) => [normaliseName(n.name), n])),
+      generatedAt: '2026-09-01T00:00:00Z',
+      partial: false,
+    };
+  }
+  const col = (name: string, index: number, dataType: string | null) => ({ name, index, dataType, comment: null });
+
+  // The erd-studio-sample shape: the yml lists columns with no data_type, so the
+  // manifest (a compiled copy of it) has none either; only the catalog does.
+  function untypedProject() {
+    const y = emptyYml();
+    y.models.set('fct_orders', ymlModel('fct_orders', 'marts', [['order_id', null], ['customer_id', null], ['note', null]]));
+    const m = emptyManifest();
+    m.models.set('fct_orders', manifestModel('fct_orders', 'models/marts/fct_orders.sql', [['order_id', null], ['customer_id', null], ['note', null]]));
+    const c = catalogOf([{
+      uniqueId: 'model.p.fct_orders', name: 'fct_orders',
+      // Warehouse order and UPPERCASE spelling, plus a column dbt never declared.
+      columns: [col('CUSTOMER_ID', 0, 'NUMBER(38,0)'), col('ORDER_ID', 1, 'NUMBER(38,0)'), col('LOADED_AT', 2, 'TIMESTAMP_NTZ'), col('NOTE', 3, null)],
+    }]);
+    return { y, m, c };
+  }
+
+  it('fills types from the catalog, keeping the declared names and order and adding no column', () => {
+    const { y, m, c } = untypedProject();
+    expect(seedModelFromDbt('fct_orders', y, m, c)!.columns!.map((x) => [x.name, x.dataType])).toEqual([
+      ['order_id', 'NUMBER(38,0)'],
+      ['customer_id', 'NUMBER(38,0)'],
+      ['note', ''],
+    ]);
+  });
+
+  it('leaves types empty without a catalog — the gap this closes', () => {
+    const { y, m } = untypedProject();
+    expect(seedModelFromDbt('fct_orders', y, m)!.columns!.map((x) => x.dataType)).toEqual(['', '', '']);
+  });
+
+  it('resolves catalog, then yml data_type, then manifest — as the physical stage does', () => {
+    const y = emptyYml();
+    y.models.set('dim_x', ymlModel('dim_x', 'marts', [['a', 'int'], ['b', 'int'], ['c', null]]));
+    const m = emptyManifest();
+    m.models.set('dim_x', manifestModel('dim_x', 'models/marts/dim_x.sql', [['a', 'm_a'], ['b', 'm_b'], ['c', 'bigint']]));
+    const c = catalogOf([{ uniqueId: 'model.p.dim_x', name: 'dim_x', columns: [col('A', 0, 'NUMBER')] }]);
+    expect(seedModelFromDbt('dim_x', y, m, c)!.columns!.map((x) => x.dataType)).toEqual(['NUMBER', 'int', 'bigint']);
+  });
+
+  it('joins the catalog by manifest unique_id first, by name without a manifest', () => {
+    const y = emptyYml();
+    y.models.set('orders', ymlModel('orders', 'marts', [['id', null]]));
+    const m = emptyManifest();
+    m.models.set('orders', { ...manifestModel('orders', 'models/marts/orders.sql', [['id', null]]), uniqueId: 'model.p.orders.v2' });
+    const c = catalogOf([
+      { uniqueId: 'model.p.orders.v2', name: 'orders', columns: [col('ID', 0, 'v2type')] },
+      { uniqueId: 'model.p.orders.v1', name: 'orders', columns: [col('ID', 0, 'v1type')] },
+    ]);
+    expect(seedModelFromDbt('orders', y, m, c)!.columns![0].dataType).toBe('v2type');
+    expect(seedModelFromDbt('orders', y, undefined, c)!.columns![0].dataType).toBe('v1type');
+  });
+
+  it('buildDbtDraft passes the catalog to its default seeding', () => {
+    const { y, m, c } = untypedProject();
+    const draft = buildDbtDraft({ modelNames: ['fct_orders'], ymlData: y, manifest: m, catalog: c, libraryHas: () => false });
+    expect(draft.newModels[0].columns!.map((x) => x.dataType)).toEqual(['NUMBER(38,0)', 'NUMBER(38,0)', '']);
+  });
+
+  it('seeds the fixture project with the same types the physical stage shows', async () => {
+    const ymlData = await new YmlParserService().loadYmlData(ROOT);
+    const manifest = await new ManifestService({ parseInProcess: true }).loadManifest(ROOT);
+    const catalog = await new CatalogService().loadCatalog(ROOT);
+    expect(catalog).toBeDefined();
+    // fct_task_event's yml declares no data_type; the catalog has the warehouse types.
+    const seeded = seedModelFromDbt('fct_task_event', ymlData, manifest, catalog)!;
+    expect(seeded.columns!.map((x) => [x.name, x.dataType])).toEqual([
+      ['event_id', 'integer'],
+      ['task_key', 'integer'],
+      ['event_date', 'timestamp without time zone'],
+      ['amount', 'numeric(15,2)'],
+    ]);
+
+    // One rule: the physical stage resolves every column of every drawable model identically.
+    const names = listDraftModels({ ymlData, manifest, projectRoot: ROOT, modelPaths: ['models'] }).map((e) => e.name);
+    const models = names.map((n) => seedModelFromDbt(n, ymlData, manifest, catalog)!);
+    const unified: UnifiedDomain = {
+      schemaVersion: 4, domain: 'parity', layer: 'silver', description: '',
+      logical: { models, relationships: [] }, viewConfig: {},
+    };
+    const physical = new DomainService(new LayerService(ROOT)).buildPhysicalDomain(unified, ymlData, manifest, catalog);
+    for (const model of models) {
+      const shown = physical.models.find((pm) => pm.name === model.name)!;
+      const shownTypes = new Map(shown.columns.map((pc) => [normaliseName(pc.name), pc.dataType]));
+      for (const column of model.columns ?? []) {
+        expect([model.name, column.name, column.dataType]).toEqual([model.name, column.name, shownTypes.get(normaliseName(column.name))]);
+      }
+    }
   });
 });
 

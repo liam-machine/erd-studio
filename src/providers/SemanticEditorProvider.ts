@@ -3860,7 +3860,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
         let seededModel: import('../types/semantic').SemanticModel | undefined;
         if (!this.logicalModelService.modelExists(payload.modelName)) {
-          const seed = seedModelFromDbt(payload.modelName, ymlData, manifest);
+          const seed = seedModelFromDbt(payload.modelName, ymlData, manifest, await this.loadCatalog());
           if (!seed) {
             webview.postMessage({ type: 'error', payload: { message: `Model "${payload.modelName}" not found in .yml files, manifest, or logical-models/.` } });
             return;
@@ -3919,6 +3919,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V4: legacy inline path — try yml first, fall back to manifest
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const catalog = await this.loadCatalog();
       const ymlModel = ymlData.models.get(payload.modelName);
       const manifestModel = manifest.models.get(payload.modelName);
 
@@ -3952,18 +3953,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           const existingPositions = (viewConfig.positions ?? {}) as Record<string, NodePosition>;
           const newPosition = findOpenPosition(existingPositions);
 
-          // Build columns from yml (primary) or manifest (fallback)
-          const columns = ymlModel
-            ? ymlModel.columns.map((col) => ({
-                name: col.name,
-                dataType: col.dataType ?? manifestModel?.columns.find((mc) => mc.name === col.name)?.data_type ?? 'unknown',
-                description: col.description || '',
-              }))
-            : manifestModel!.columns.map((col) => ({
-                name: col.name,
-                dataType: col.data_type ?? 'unknown',
-                description: col.description,
-              }));
+          // Columns from yml (primary) or manifest (fallback), types as the
+          // physical stage resolves them — the same seeding as the v5 path.
+          const columns = seedModelFromDbt(payload.modelName, ymlData, manifest, catalog)?.columns ?? [];
 
           models.push({
             name: payload.modelName,
@@ -4099,6 +4091,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         modelNames,
         ymlData,
         manifest,
+        // Column types as the physical stage resolves them (catalog first).
+        catalog: await this.loadCatalog(),
         libraryHas: (name) => this.logicalModelService.modelExists(name),
         existingModelNames: existingNames,
         existingRelationships: (section.relationships ?? []) as Relationship[],

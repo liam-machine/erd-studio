@@ -1580,7 +1580,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         loadDbt: async () => {
           const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
           const manifest = await manifestService.loadManifest(workspaceRoot);
-          return { ymlData, manifest: manifestService.isMissing ? undefined : manifest };
+          // The catalog only fills column types; undefined when there is none.
+          const catalog = await catalogService.loadCatalog(workspaceRoot);
+          return { ymlData, manifest: manifestService.isMissing ? undefined : manifest, catalog };
         },
         validateDomainName: (value, layer) => validateDomainSlug(value, layer, existingDomains()),
         onWritten: ({ domainPath, modelNames }) => {
