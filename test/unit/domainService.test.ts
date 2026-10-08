@@ -1173,6 +1173,22 @@ describe('DomainService format handling', () => {
     vi.restoreAllMocks();
   });
 
+  describe('countDomainFileRelationships', () => {
+    it('counts a domain file that does not parse but still lists relationships', () => {
+      const filePath = writeDomain('orders', {
+        schemaVersion: 5, domain: 'orders', layer: 'silver',
+        logical: { models: ['a', 'b'], relationships: [{ fromModel: 'a', fromColumn: 'x', toModel: 'b', toColumn: 'x' }] },
+      });
+      writeDomain('empty', { schemaVersion: 5, domain: 'empty', layer: 'silver', logical: { models: [], relationships: [] } });
+      expect(service.countDomainFileRelationships(tmpRoot)).toBe(1);
+      // A merge conflict must not make the project look like it keeps none.
+      fs.appendFileSync(filePath, '\n<<<<<<< HEAD\n');
+      expect(service.countDomainFileRelationships(tmpRoot)).toBe(1);
+      fs.writeFileSync(filePath, '{ "logical": { "relationships": [] ,');
+      expect(service.countDomainFileRelationships(tmpRoot)).toBe(0);
+    });
+  });
+
   describe('legacy (pre-v4) documents', () => {
     it('throws a clear error naming the migration command instead of loading an empty domain', () => {
       const filePath = writeDomain('legacy', {

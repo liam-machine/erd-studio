@@ -35,6 +35,9 @@ describe('usesLibraryRelationships — opt-in per project, the default for a new
   it('is on once the library holds one, whatever the domain files hold', () => {
     expect(usesLibraryRelationships([fct([STORED])], 3)).toBe(true);
   });
+  it('counts a model file that holds relationships but does not parse, so a broken file cannot switch it off', () => {
+    expect(usesLibraryRelationships([fct()], 3, true)).toBe(true);
+  });
 });
 
 describe('library relationship edits', () => {

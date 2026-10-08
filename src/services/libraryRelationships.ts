@@ -30,8 +30,11 @@ const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCas
 export function usesLibraryRelationships(
   models: readonly SemanticModel[],
   domainFileRelationshipCount: number,
+  /** A model file that does not parse still lists some (`hasUnreadableRelationships`). */
+  unreadableModelRelationships = false,
 ): boolean {
-  return domainFileRelationshipCount === 0 || models.some((m) => (m.relationships?.length ?? 0) > 0);
+  return domainFileRelationshipCount === 0 || unreadableModelRelationships
+    || models.some((m) => (m.relationships?.length ?? 0) > 0);
 }
 
 /** The full relationships stored in `model`'s library file. */

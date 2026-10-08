@@ -21,6 +21,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { findLegacySemanticDir } from './migrationService';
+import { pathKey } from './pathKey';
 
 /** Directories never descended into when searching for a nested dbt project. */
 const DBT_SEARCH_SKIP_DIRS = new Set(['node_modules', 'dbt_packages', '.git', 'target', '.venv', 'venv']);
@@ -195,7 +196,7 @@ export function findOwningDbtProject(filePath: string, stopAt?: string): string 
   }
 }
 
-/** Whether two paths name the same location once resolved. */
-export function samePath(a: string, b: string): boolean {
-  return path.resolve(a) === path.resolve(b);
+/** Whether two paths name the same location once resolved, ignoring case where the file system does. */
+export function samePath(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
+  return pathKey(a, platform) === pathKey(b, platform);
 }

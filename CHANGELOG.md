@@ -8,6 +8,21 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+- **Editing a model on the canvas no longer rewrites its `relationships:` list.** Renaming a column or changing a description used to rewrite the whole list in the model's file, deleting entries ERD Studio could not read (a typo such as `one_to_many`, an entry missing an end), comments inside the list and any extra keys on an entry. A save now leaves the list exactly as written unless the relationships themselves change, and then edits only the entries that changed. Entries it cannot read are always kept, and an edit it cannot make safely (for example when `relationships:` is not a list) is refused with the file and line named.
+- **Unsaved edits in a model file are no longer overwritten.** If a model file is open in a tab with unsaved changes, a canvas edit that would rewrite or delete it now stops and names the file, instead of replacing your unsaved text.
+- **A broken file no longer changes where new relationships are saved.** A diagram or model file that could not be read (for example during a merge conflict) used to count as holding no relationships, which could switch a project between keeping relationships in each diagram and keeping them in the model library. Such a file is now counted by what its text shows.
+- **The unsaved-edits check now works on Windows and macOS.** It compared file paths letter for letter, so a tab whose path VS Code spelled in a different case (a lower-case drive letter such as `c:` on Windows, for example) was missed and its unsaved text could be overwritten. Paths are now compared the way the operating system compares them. The same check protects **Move Relationships to Model Library**.
+- **Draw from dbt no longer overwrites unsaved edits in a model file.** When it would add a relationship to a model file that is open with unsaved changes, it now stops before writing anything and names the file.
+- **Saving a model no longer adds `dataType: unknown` to columns that have no type.** A column written without a `dataType` stays that way unless you give it one.
+- **Files keep their Windows (CRLF) line endings.** Saving a model from Draw from dbt, renaming one, the v4 → v5 migration and Move Relationships to Model Library could turn a file's CRLF line endings into LF, changing every line in the diff. Each file now keeps the line endings it had.
+- **A new relationship no longer inherits another's comment or `role:`.** When one save removed a relationship and added an unrelated one to the same model file, the new entry took over the removed entry's comments and extra keys. It now does so only when the two share an end, as in a column or model rename.
+- **Renaming a column no longer writes `cardinality: many-to-one` into its relationship entries.** An entry with no `cardinality:` keeps it unwritten when a rename changes one of its ends.
+- **Stripping legacy domain tags keeps your dbt schema files' line endings.** A schema `.yml` with Windows (CRLF) line endings stays CRLF.
+- **A diagram is no longer mistaken for another project's on Windows and macOS.** The check that a diagram belongs to the open dbt project compared folder paths letter for letter, so the same folder spelled in another case could be refused. It now compares them the way the operating system does.
+
 ## 1.6.7 — 2026-10-04
 
 ### Fixed
