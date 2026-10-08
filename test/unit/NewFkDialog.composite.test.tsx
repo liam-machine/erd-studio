@@ -60,6 +60,36 @@ describe('NewFkDialog — composite foreign keys (#133 L2)', () => {
     }]);
   });
 
+  it('a dragged pair of two partial keys opens many-to-many; adding the pair that completes the key re-reads it as many-to-one', () => {
+    setDomain();
+    // What a drag between pit_customer.customer_hk and sat_customer.customer_hk prefills: each is only part of a key.
+    useEditorStore.getState().openFkDialogWithPrefill({
+      fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', cardinality: 'many-to-many',
+    } as never);
+    render(<NewFkDialog />);
+    const cardinality = () => (screen.getByLabelText('Cardinality') as HTMLSelectElement).value;
+    expect(cardinality()).toBe('many-to-many');
+    fireEvent.click(screen.getByText('+ Add another column pair'));
+    pick('Source column 2', 'as_of_date');
+    pick('Target column 2', 'load_date');
+    expect(cardinality()).toBe('many-to-one');
+    expect(screen.queryByText("A composite key can't be many-to-many — pick many-to-one or one-to-one")).toBeNull();
+    expect(submit().disabled).toBe(false);
+    // Back to the one pair: the evidence for it alone again.
+    fireEvent.click(screen.getByLabelText('Remove column pair 2'));
+    expect(cardinality()).toBe('many-to-many');
+  });
+
+  it('a cardinality the user picked in the dialog is kept when pairs change', () => {
+    setDomain();
+    openNew();
+    fireEvent.change(screen.getByLabelText('Cardinality'), { target: { value: 'one-to-one' } });
+    fireEvent.click(screen.getByText('+ Add another column pair'));
+    pick('Source column 2', 'as_of_date');
+    pick('Target column 2', 'load_date');
+    expect((screen.getByLabelText('Cardinality') as HTMLSelectElement).value).toBe('one-to-one');
+  });
+
   it('with two or more pairs, many-to-many is disabled and refused', () => {
     setDomain();
     openNew();

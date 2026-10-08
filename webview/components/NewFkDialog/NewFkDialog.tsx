@@ -150,6 +150,10 @@ export function NewFkDialog() {
   // The other column pairs of a composite foreign key, after the first (#133 L2).
   const [extraPairs, setExtraPairs] = useState<Array<{ fromColumn: string; toColumn: string }>>([]);
   const [cardinality, setCardinality] = useState<Cardinality>('many-to-one');
+  // The user picked the cardinality in this dialog session: key evidence no longer sets it.
+  const [cardinalityChosen, setCardinalityChosen] = useState(false);
+  // A column pair was added, removed or changed: the cardinality follows the whole column set (#133 L2).
+  const [pairsEdited, setPairsEdited] = useState(false);
   const [role, setRole] = useState('');
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   // Which side holds the foreign key, when the user had to pick it: the link and its from end.
@@ -275,6 +279,14 @@ export function NewFkDialog() {
     if (orientation) pickDirection(orientation.from, orientation.to);
   }, [orientation, pickDirection]);
 
+  // Once the column pairs change, the key evidence across the whole set
+  // decides the cardinality, as it does for a drag — two partial keys read
+  // many-to-many, but together they may be the target's composite key —
+  // unless the user has picked one in this dialog (#133 L2).
+  useEffect(() => {
+    if (pairsEdited && !cardinalityChosen && orientation) setCardinality(orientation.cardinality);
+  }, [pairsEdited, cardinalityChosen, orientation]);
+
   // "Mark as primary key" (#133 L1): offered when the "one" side's model
   // flags no key and nothing says the columns are not its key; ticked when
   // dbt says they are unique.
@@ -332,6 +344,8 @@ export function NewFkDialog() {
     setToColumn('');
     setExtraPairs([]);
     setCardinality('many-to-one');
+    setCardinalityChosen(false);
+    setPairsEdited(false);
     setRole('');
     setTouched({});
     setChosenDirection(null);
@@ -406,11 +420,18 @@ export function NewFkDialog() {
   }, []);
 
   // "+ Add another column pair" and its rows (#133 L2).
-  const addPair = useCallback(() => setExtraPairs((pairs) => [...pairs, { fromColumn: '', toColumn: '' }]), []);
+  const addPair = useCallback(() => {
+    setPairsEdited(true);
+    setExtraPairs((pairs) => [...pairs, { fromColumn: '', toColumn: '' }]);
+  }, []);
   const setPair = useCallback((index: number, end: 'fromColumn' | 'toColumn', value: string) => {
+    setPairsEdited(true);
     setExtraPairs((pairs) => pairs.map((p, i) => (i === index ? { ...p, [end]: value } : p)));
   }, []);
-  const removePair = useCallback((index: number) => setExtraPairs((pairs) => pairs.filter((_, i) => i !== index)), []);
+  const removePair = useCallback((index: number) => {
+    setPairsEdited(true);
+    setExtraPairs((pairs) => pairs.filter((_, i) => i !== index));
+  }, []);
 
   // Apply prefill when dialog opens with prefill data (from drag-to-connect).
   // Reset form first to clear any stale state from previous sessions.
@@ -418,6 +439,8 @@ export function NewFkDialog() {
     if (isOpen && fkDialogPrefill) {
       // Reset non-prefilled form state; the cardinality key evidence suggests, if any.
       setCardinality(fkDialogPrefill.cardinality ?? 'many-to-one');
+      setCardinalityChosen(false);
+      setPairsEdited(false);
       setRole('');
       setTouched({});
       setChosenDirection(null);
@@ -436,6 +459,8 @@ export function NewFkDialog() {
   useEffect(() => {
     if (isOpen && fkDialogEditData) {
       setTouched({});
+      setCardinalityChosen(false);
+      setPairsEdited(false);
       setChosenDirection(null);
       setMarkKeyChoice(null);
       // A one-to-many (stored before #133) opens turned round, as the many-to-one
@@ -661,7 +686,10 @@ export function NewFkDialog() {
             id="cardinality"
             className="new-fk-dialog__select"
             value={cardinality}
-            onChange={(e) => setCardinality(e.target.value as Cardinality)}
+            onChange={(e) => {
+              setCardinality(e.target.value as Cardinality);
+              setCardinalityChosen(true);
+            }}
           >
             <option value="many-to-one">Many-to-One (*→1)</option>
             <option value="one-to-one">One-to-One (1→1)</option>
