@@ -59,7 +59,8 @@ Each fix:
 | `model`, `column` | Where |
 | `file` | The file to edit, relative to the project folder: the model's yml under `logical-models/` (its real folder, when the library is grouped by layer) or the domain JSON. For a relationship it is wherever that relationship is defined — the yml of the model holding the foreign key when it is stored in the model library |
 | `from`, `to` | Current logical value and the dbt value, for types and cardinalities. **Write `to`** |
-| `relationship` | The connection, for relationship fixes |
+| `relationship` | The connection, for relationship fixes — the entry exactly as it belongs in `file` (in a yml, always on its many side, never `one-to-many`) |
+| `movesFrom` | `set-cardinality` only: the file the relationship is stored in now, when the fix moves it to `file` |
 | `explain` | One plain-English sentence — use it when describing the fix to the user |
 
 ## 2. Fix kinds → exact edits
@@ -71,8 +72,8 @@ Each fix:
 | `remove-column` | Delete the column from the yml, **and** delete every relationship that names it: in the domain JSON (`fromModel`/`fromColumn` or `toModel`/`toColumn`), in this model's own `relationships:` (`fromColumn`), and in any other model yml's `relationships:` that points at it (`toModel`/`toColumn`) |
 | `set-type` | Set the column's `dataType` to `to` |
 | `add-relationship` | Add `relationship` (with its `cardinality`) where the project keeps relationships — the `fromModel`'s yml `relationships:` (without `fromModel`) or `logical.relationships` in the domain JSON, by the `/erd-studio` skill's "Where relationships live" — then set `isForeignKey: true` on the `fromColumn` in that yml if it is not already. `relationship` is already on its many side; if you ever see a `one-to-many`, swap the ends and write `many-to-one` in the other model's yml |
-| `remove-relationship` | Remove the matching entry from wherever it is defined — a model yml's `relationships:` (either end's, for one written before relationships were always stored on the many side) or `logical.relationships`. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 |
-| `set-cardinality` | Set `cardinality` on the matching relationship to `to`, in the file `file` names — a model yml's `relationships:` or the domain JSON. Setting it to `one-to-many` in a yml means moving it: take it out, swap the ends and add it to the other model's yml as `many-to-one`. A yml change shows in every diagram holding both models |
+| `remove-relationship` | Remove the entry `relationship` names from `file` — a model yml's `relationships:` or `logical.relationships` — and any other copy of the same two columns (either way round) in the other model's yml. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 |
+| `set-cardinality` | Write `relationship` (its `cardinality` is the one to store) in `file`, replacing the entry for the same two columns there. When `movesFrom` is set, take the entry for those two columns out of that file too — the fix moves it to the model on its many side. A yml change shows in every diagram holding both models |
 | `resolve-phantom` | Always a question: rename it in `logical.models` (and its relationships — in the domain JSON and in any model yml's `relationships:` whose `toModel` names it) to the real dbt model name, or remove it from this domain. **Never** delete its `logical-models/*.yml` — other domains may use it |
 
 For `missingModelFiles`: if the model exists in dbt, write its yml from `inventory --models

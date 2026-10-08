@@ -13,6 +13,7 @@ import type { InventoryResult } from '../../src/cli/inventory';
 import { computeDomainDiff } from '../../src/services/stageDiff';
 import { allSelections, buildSyncPlan } from '../../src/services/syncPlanBuilder';
 import type { SyncPlan } from '../../src/types/syncPlan';
+import type { Relationship } from '../../src/types/semantic';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const PROJECT = path.join(FIXTURES, 'dbt-project');
@@ -226,7 +227,7 @@ describe('fixesFromPlan — a new relationship is written on its many side (#133
         { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-many' },
       ],
     };
-    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Set(), addToLibrary: true });
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Map(), addToLibrary: true });
     expect(fix).toMatchObject({
       kind: 'add-relationship', model: 'fct_order', column: 'customer_key', file: '.erd-studio/logical-models/fct_order.yml',
       relationship: { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
@@ -261,12 +262,42 @@ describe('fixesFromPlan', () => {
     expect(fixes[fixes.length - 1].severity).toBe('advisory');
   });
 
+  const F_TO_M = { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' };
+  const stored = (rel: Relationship) => ({ inLibrary: new Map([[linkKey(rel), rel]]), addToLibrary: true });
+
   it('names the from-model yml for a relationship stored in the model library (#126)', () => {
-    const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
-      inLibrary: new Set([linkKey({ fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' })]),
-      addToLibrary: true,
-    });
+    const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], stored({ ...F_TO_M, cardinality: 'one-to-one' }));
     expect(fixes.find((f) => f.kind === 'set-cardinality')).toMatchObject({ file: '.erd-studio/logical-models/f.yml' });
+    expect(fixes.find((f) => f.kind === 'set-cardinality')).not.toHaveProperty('movesFrom');
+  });
+
+  it('never asks for a one-to-many in a yml: it names the canonical entry, its file and the file it moves from (D5)', () => {
+    const toOneToMany: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many' }] };
+    const [fix] = fixesFromPlan(toOneToMany, '.erd-studio/silver/d.json', '.erd-studio', [], [], stored({ ...F_TO_M, cardinality: 'many-to-one' }));
+    expect(fix).toMatchObject({
+      kind: 'set-cardinality', model: 'm', file: '.erd-studio/logical-models/m.yml', movesFrom: '.erd-studio/logical-models/f.yml',
+      relationship: { fromModel: 'm', fromColumn: 'k', toModel: 'f', toColumn: 'k', cardinality: 'many-to-one' },
+    });
+  });
+
+  it('names a backwards copy\'s file as the one to move from, and keeps a one-to-one where it is stored (D5)', () => {
+    const backwards = { fromModel: 'm', fromColumn: 'k', toModel: 'f', toColumn: 'k', cardinality: 'many-to-one' as const };
+    const toManyToOne: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], sourceCardinality: 'one-to-many', targetCardinality: 'many-to-one' }] };
+    expect(fixesFromPlan(toManyToOne, 'd.json', '.erd-studio', [], [], stored(backwards))[0]).toMatchObject({
+      file: '.erd-studio/logical-models/f.yml', movesFrom: '.erd-studio/logical-models/m.yml', relationship: { ...F_TO_M, cardinality: 'many-to-one' },
+    });
+    const toOneToOne: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], sourceCardinality: 'one-to-many', targetCardinality: 'one-to-one' }] };
+    const [fix] = fixesFromPlan(toOneToOne, 'd.json', '.erd-studio', [], [], stored(backwards));
+    expect(fix).toMatchObject({ file: '.erd-studio/logical-models/m.yml', relationship: { ...backwards, cardinality: 'one-to-one' } });
+    expect(fix).not.toHaveProperty('movesFrom');
+  });
+
+  it('names the stored entry and its file for a remove (D5)', () => {
+    const removing: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], discrepancyStatus: 'extra', action: 'remove-relationship-from-logical' }] };
+    const backwards = { fromModel: 'm', fromColumn: 'k', toModel: 'f', toColumn: 'k', cardinality: 'many-to-one' as const };
+    expect(fixesFromPlan(removing, 'd.json', '.erd-studio', [], [], stored(backwards))[0]).toMatchObject({
+      kind: 'remove-relationship', model: 'm', file: '.erd-studio/logical-models/m.yml', relationship: backwards,
+    });
   });
 });
 

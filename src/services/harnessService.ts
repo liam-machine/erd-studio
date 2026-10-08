@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '26';
+export const HARNESS_VERSION = '27';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -450,7 +450,7 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 | \`cardinality\` | Yes | \`many-to-one\`, \`one-to-one\`, or \`many-to-many\` (\`one-to-many\` is still read, but never write it — see Direction) |
 | \`role\` | No | A label for what the link means, e.g. \`order date\` and \`ship date\` for two columns pointing at the same date dimension. At most 60 characters. A label only — not part of the relationship's identity |
 
-**Direction:** \`fromModel\` is always the many (FK) side, \`toModel\` the side it points at (PK). Never write \`one-to-many\`: swap the ends and write \`many-to-one\`, in the other model's file — it is the same relationship. \`one-to-one\` and \`many-to-many\` keep the direction they were drawn in. FK column names should match the PK column name of the referenced table.
+**Direction:** \`fromModel\` is always the many (FK) side, \`toModel\` the side it points at (PK). Never write \`one-to-many\`: swap the ends and write \`many-to-one\`, in the other model's file — it is the same relationship. \`one-to-one\` and \`many-to-many\` keep the direction they were drawn in. Keys win: the many side is never its model's whole primary or natural key while the other end is a column of a model with a different key — ERD Studio reads such a \`many-to-one\` the other way round (**Move Relationships to Model Library** stores it so), and the canvas refuses a ⇄ that would write it. FK column names should match the PK column name of the referenced table.
 
 ### Where relationships live
 

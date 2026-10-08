@@ -199,7 +199,7 @@
         "toModel": {
           "type": "string",
           "minLength": 1,
-          "description": "Referenced model (PK side)."
+          "description": "Referenced model (PK side). A relationship whose toModel has no model file is not drawn."
         },
         "toColumn": {
           "type": "string",
@@ -208,12 +208,18 @@
         },
         "cardinality": {
           "type": "string",
-          "description": "Relationship cardinality, read from fromModel to toModel.",
+          "description": "Relationship cardinality, read from fromModel to toModel. In a model file, write many-to-one, one-to-one or many-to-many: one-to-many is deprecated here.",
           "enum": [
             "many-to-one",
             "one-to-one",
             "one-to-many",
             "many-to-many"
+          ],
+          "enumDescriptions": [
+            "Many rows of this model point at one row of toModel. This model holds the foreign key.",
+            "One row of this model points at one row of toModel. This model holds the foreign key.",
+            "Deprecated in model files: still read, but it is the same relationship as a many-to-one stored on toModel. ERD Studio writes it that way round, in toModel's file, and Move Relationships to Model Library moves it there.",
+            "Many rows on each side."
           ]
         },
         "role": {

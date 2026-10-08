@@ -778,13 +778,14 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 26 (relationships stored on their many side, with an optional role, #133)', () => {
-      expect(HARNESS_VERSION).toBe('26');
+    it('is 27 (keys win over a relationship direction, and diff fixes name the entry to write, #133)', () => {
+      expect(HARNESS_VERSION).toBe('27');
     });
 
     it('tells assistants to store a relationship on its many side and never write one-to-many (#133)', () => {
       const SCHEMA_CONTENT = service.generateContent('claude');
       expect(SCHEMA_CONTENT).toContain('Never write `one-to-many`: swap the ends and write `many-to-one`');
+      expect(SCHEMA_CONTENT).toContain('Keys win: the many side is never its model\'s whole primary or natural key');
       expect(SCHEMA_CONTENT).toContain('| `role` | No |');
       expect(SCHEMA_CONTENT).toContain('not once in each direction');
       expect(SCHEMA_CONTENT).not.toMatch(/from-model's/);

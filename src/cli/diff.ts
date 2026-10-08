@@ -14,13 +14,13 @@ import * as path from 'path';
 
 import type { DiscrepancyReport } from '../types/discrepancy';
 import { redactPaths } from '../types/feedback';
-import type { Cardinality, UnifiedDomain } from '../types/semantic';
+import type { Cardinality, Relationship, UnifiedDomain } from '../types/semantic';
 import { detectDomainFormat } from '../types/semantic';
 import type { SyncPlan } from '../types/syncPlan';
 import { DomainFileError } from '../services/domainService';
 import type { ModelFileError, ModelFileErrorKind } from '../services/logicalModelService';
-import { libraryRelationshipsOf, usesLibraryRelationships } from '../services/libraryRelationships';
-import { canonicalRelationship, linkKey } from '@erd-studio/core';
+import { usesLibraryRelationships } from '../services/libraryRelationships';
+import { canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship } from '@erd-studio/core';
 import { computeDomainDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
@@ -40,7 +40,13 @@ export interface Fix {
   /** Types (set-type) or cardinalities (set-cardinality). */
   from?: string;
   to?: string;
+  /**
+   * Relationship fixes: the entry exactly as it belongs in `file` — on its
+   * many side in a model yml (#133), never a `one-to-many` there.
+   */
   relationship?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality?: Cardinality };
+  /** set-cardinality: the file the link is stored in now, when the fix moves it to `file`. */
+  movesFrom?: string;
   /** fix-model-yaml: where the parser stopped (1-based). */
   line?: number;
   explain: string;
@@ -172,6 +178,9 @@ function describeDomainError(ctx: CliContext, file: string, err: unknown): { cod
 
 const SEVERITY_ORDER: Record<Fix['severity'], number> = { blocking: 0, advisory: 1 };
 
+const pickRelationship = (r: NonNullable<Fix['relationship']>): NonNullable<Fix['relationship']> =>
+  ({ fromModel: r.fromModel, fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn, ...(r.cardinality ? { cardinality: r.cardinality } : {}) });
+
 function sortFixes(fixes: Fix[]): Fix[] {
   return fixes.sort((a, b) =>
     SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
@@ -182,8 +191,8 @@ function sortFixes(fixes: Fix[]): Fix[] {
 
 /** Where a domain's relationships are defined, so a relationship fix names the right file. */
 export interface RelationshipHome {
-  /** `linkKey`s of the relationships this domain draws from model yml files. */
-  inLibrary: ReadonlySet<string>;
+  /** The model-library entry this domain draws for each link it draws from a yml, by `linkKey`. */
+  inLibrary: ReadonlyMap<string, Relationship>;
   /** Whether a new relationship goes to the from-model's yml (`usesLibraryRelationships`). */
   addToLibrary: boolean;
 }
@@ -201,7 +210,7 @@ export function fixesFromPlan(
   semanticDir: string,
   phantoms: DomainDiff['phantoms'],
   unreadable: UnreadableModelFile[] = [],
-  relationshipHome: RelationshipHome = { inLibrary: new Set(), addToLibrary: false },
+  relationshipHome: RelationshipHome = { inLibrary: new Map(), addToLibrary: false },
 ): Fix[] {
   const ymlFile = (model: string): string =>
     plan.modelContext[model]?.logicalModelPath ?? `${semanticDir}/logical-models/${model}.yml`;
@@ -212,6 +221,7 @@ export function fixesFromPlan(
     (adding ? relationshipHome.addToLibrary : relationshipHome.inLibrary.has(linkKey(r)))
       ? ymlFile(r.fromModel)
       : domainFile;
+  const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
   const fixes: Fix[] = [];
   // A phantom is one question (rename it or drop it), not one fix per column
   // and edge: from the logical side compare() reports it 'extra' with every
@@ -276,21 +286,44 @@ export function fixesFromPlan(
         });
         break;
       }
-      case 'remove-relationship-from-logical':
+      case 'remove-relationship-from-logical': {
+        // The entry as it is stored, so it can be found in its file.
+        const stored = relationshipHome.inLibrary.get(linkKey(rel));
+        const entry = stored ?? { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) };
         fixes.push({
-          severity: 'blocking', kind: 'remove-relationship', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, false),
-          relationship: { ...rel, ...(r.sourceCardinality ? { cardinality: r.sourceCardinality } : {}) },
+          severity: 'blocking', kind: 'remove-relationship', model: entry.fromModel, column: entry.fromColumn, file: relationshipFile(entry, false),
+          relationship: pickRelationship(entry),
           explain: `The logical model draws ${link}, but dbt has no relationships test for it — remove it, or add the test to dbt.`,
         });
         break;
-      case 'update-cardinality-in-logical':
+      }
+      case 'update-cardinality-in-logical': {
+        // In the model library, the entry to write is the canonical one (#133),
+        // in the file of its many side — which may be the other model's.
+        const stored = relationshipHome.inLibrary.get(linkKey(rel));
+        let entry: Relationship = { ...rel, cardinality: r.targetCardinality ?? 'many-to-one' };
+        let movesFrom: string | undefined;
+        if (stored) {
+          // One-to-one and many-to-many keep the direction they are stored in.
+          if (entry.cardinality !== 'many-to-one' && entry.cardinality !== 'one-to-many' && !same(stored.fromModel, entry.fromModel)) {
+            entry = reverseRelationship(entry);
+          }
+          entry = canonicalRelationship(entry);
+          if (!same(stored.fromModel, entry.fromModel)) movesFrom = ymlFile(stored.fromModel);
+        }
+        const file = stored ? ymlFile(entry.fromModel) : domainFile;
         fixes.push({
-          severity: 'blocking', kind: 'set-cardinality', model: r.fromModel, column: r.fromColumn, file: relationshipFile(rel, false),
+          severity: 'blocking', kind: 'set-cardinality', model: entry.fromModel, column: entry.fromColumn, file,
           from: r.sourceCardinality, to: r.targetCardinality,
-          relationship: { ...rel, ...(r.targetCardinality ? { cardinality: r.targetCardinality } : {}) },
-          explain: `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — change it to ${r.targetCardinality}.`,
+          relationship: pickRelationship(entry),
+          ...(movesFrom ? { movesFrom } : {}),
+          explain: `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — ` +
+            (movesFrom
+              ? `store it as ${entry.fromModel}.${entry.fromColumn} → ${entry.toModel}.${entry.toColumn} ${entry.cardinality} in ${file}, and take it out of ${movesFrom}.`
+              : `change it to ${entry.cardinality}${stored && entry.cardinality !== r.targetCardinality ? ` (stored from ${entry.fromModel})` : ''}.`),
         });
         break;
+      }
       default:
         break;
     }
@@ -388,8 +421,10 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
     modelFolder: (name) => ctx.logicalModelService.modelFolder(name),
   });
   const unreadableModelFiles = unreadableModels(ctx, unified);
+  // The entry each link is drawn from (core's read winner), keyed by link.
+  const libraryLines = mergeLibraryRelationships(unified.logical.models, []);
   const relationshipHome: RelationshipHome = {
-    inLibrary: new Set(unified.logical.models.flatMap(libraryRelationshipsOf).map(linkKey)),
+    inLibrary: new Map(libraryLines.map((line) => [linkKey(line), line])),
     addToLibrary: usesLibraryRelationships(
       ctx.logicalModelService.listModels(),
       ctx.domainService.countDomainFileRelationships(ctx.root, ctx.semanticDir),
