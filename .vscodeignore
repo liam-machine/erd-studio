@@ -87,3 +87,6 @@ telemetry.json
 
 # LinkedIn explainer video pipeline (not part of the extension)
 social-video/**
+
+# Issue before/after videos and their demo projects (local only)
+videos/**
