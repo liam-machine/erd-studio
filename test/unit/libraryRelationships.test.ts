@@ -15,7 +15,9 @@ import {
   removeLibraryRelationships,
   resolveConflict,
   sharedRelationshipCount,
+  renameColumnInDomainRelationships,
   renameColumnInRelationships,
+  renameModelInDomainRelationships,
   renameModelInRelationships,
   routeToLibrary,
   upsertLibraryRelationship,
@@ -66,6 +68,44 @@ describe('library relationship edits', () => {
     renameColumnInRelationships([model], 'dim_customer', 'customer_key', 'customer_sk');
     renameModelInRelationships([model], 'dim_customer', 'dim_client');
     expect(model.relationships).toEqual([{ ...STORED, toModel: 'dim_client', toColumn: 'customer_sk' }]);
+  });
+
+  it('follows a rename into a differently-cased entry, writing the new name as typed (#133 L4)', () => {
+    const own = { name: 'Fct_Order', columns: [], relationships: [{ ...STORED, fromColumn: 'CUSTOMER_KEY' }] } as SemanticModel;
+    const other = fct([{ ...STORED, toModel: 'Dim_Customer', toColumn: 'Customer_Key' }]);
+    renameColumnInRelationships([own], 'fct_order', 'customer_key', 'customer_sk');
+    renameColumnInRelationships([other], 'dim_customer', 'customer_key', 'customer_sk');
+    renameModelInRelationships([other], 'DIM_customer', 'dim_client');
+    expect(own.relationships).toEqual([{ ...STORED, fromColumn: 'customer_sk' }]);
+    expect(other.relationships).toEqual([{ ...STORED, toModel: 'dim_client', toColumn: 'customer_sk' }]);
+  });
+
+  it('follows a rename into a domain file\'s own entries, without case, leaving other entries alone', () => {
+    const rels: Array<Record<string, unknown>> = [
+      { ...REL, fromModel: 'FCT_ORDER', fromColumn: 'Customer_Key' },
+      { ...REL, toColumn: 'CUSTOMER_KEY' },
+      { note: 'not a relationship' },
+    ];
+    expect(renameColumnInDomainRelationships(rels, 'fct_order', 'customer_key', 'customer_sk')).toBe(true);
+    expect(renameModelInDomainRelationships(rels, 'Dim_Customer', 'dim_client')).toBe(true);
+    expect(rels).toEqual([
+      { ...REL, fromModel: 'FCT_ORDER', fromColumn: 'customer_sk', toModel: 'dim_client' },
+      { ...REL, fromColumn: 'customer_sk', toModel: 'dim_client', toColumn: 'CUSTOMER_KEY' },
+      { note: 'not a relationship' },
+    ]);
+    expect(renameColumnInDomainRelationships(rels, 'nope', 'customer_key', 'x')).toBe(false);
+  });
+
+  it('routes a link whose ends are spelled in another case to one model object (#133 L4)', () => {
+    const library = fct();
+    const loads: string[] = [];
+    const { changed } = routeToLibrary(
+      [{ ...REL, fromModel: 'FCT_ORDER', toColumn: 'x' }, { ...REL, fromModel: 'fct_order', toColumn: 'y' }], [],
+      (name) => { loads.push(name); return name.toLowerCase() === 'fct_order' ? library : null; },
+    );
+    expect(changed).toEqual([library]);
+    expect(library.relationships).toHaveLength(2);
+    expect(loads.filter((n) => n.toLowerCase() === 'fct_order')).toHaveLength(1);
   });
 
   it('routes added relationships to their from-models, keeping those without a file', () => {

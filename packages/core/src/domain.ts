@@ -26,7 +26,7 @@ import type {
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
-import { keyEvidence, linkKey, normaliseRelationshipRole } from './relationships.js';
+import { keyEvidence, linkKey, normaliseRelationshipRole, respellRelationship } from './relationships.js';
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.
@@ -339,7 +339,7 @@ function parseStageData(
     }
   }
 
-  return { models, relationships };
+  return { models, relationships: relationships.map((rel) => respellRelationship(rel, models)) };
 }
 
 /** The YAML parser's error codes, grouped into the kinds the UI and telemetry use. */
@@ -447,13 +447,15 @@ export function mergeLibraryRelationships(
   // same ranking, at the place of the first.
   const ownRanked = new Map<string, { rel: Relationship; rank: string }>();
   own.forEach((rel, index) => keep(ownRanked, rel, rankOf(rel, index)));
+  // Every end is drawn with the real model and column spelling (L4).
+  const spelled = (rels: Relationship[]): Relationship[] => rels.map((rel) => respellRelationship(rel, models));
   if (library.size === 0) {
     const drawn: Relationship[] = [];
     for (const rel of own) {
       const winner = ownRanked.get(linkKey(rel));
       if (winner && !drawn.includes(winner.rel)) drawn.push(winner.rel);
     }
-    return drawn;
+    return spelled(drawn);
   }
 
   const merged: Relationship[] = [];
@@ -481,7 +483,7 @@ export function mergeLibraryRelationships(
   for (const [key, rel] of library) {
     if (!seen.has(key)) merged.push(rel);
   }
-  return merged;
+  return spelled(merged);
 }
 
 /**

@@ -309,6 +309,14 @@ describe('DiscrepancyService.compare', () => {
       expect(report.relationships[0].sourceCardinality).toBe('many-to-one');
       expect(report.relationships[0].targetCardinality).toBe('one-to-one');
     });
+
+    it('matches a link whose model and column differ only in case (#133 L4)', () => {
+      const source = makeDomain({ relationships: [makeRel(['Fct_Orders', 'Customer_ID'], ['DIM_CUSTOMER', 'id'])] });
+      const target = makeDomain({ relationships: [makeRel(['fct_orders', 'customer_id'], ['dim_customer', 'ID'])] });
+
+      const report = compare(source, target);
+      expect(report.relationships.map((r) => r.status)).toEqual(['matched']);
+    });
   });
 
   describe('report metadata', () => {

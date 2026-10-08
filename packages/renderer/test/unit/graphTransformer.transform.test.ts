@@ -364,3 +364,15 @@ describe('transformDomain discrepancy overlay', () => {
     expect(nodeById(result, 'fact_order').data).not.toHaveProperty('discrepancySourceStage');
   });
 });
+
+describe('transformDomain — ends spelled in another case (#133 L4)', () => {
+  it('a relationship core has respelled produces an edge; the transformer itself matches exactly', async () => {
+    const { mergeLibraryRelationships } = await import('@erd-studio/core');
+    const written = { fromModel: 'Fact_Order', fromColumn: 'DIM_CUSTOMER_ID', toModel: 'dim_CUSTOMER', toColumn: 'Dim_Customer_Id', cardinality: 'many-to-one' as const };
+    const models = [model('fact_order', { columns: [column('dim_customer_id')] }), model('dim_customer')];
+    expect(fkEdges(transformDomain(domain({ models, relationships: [written] })))).toEqual([]);
+    const drawn = mergeLibraryRelationships(models.map((m) => ({ ...m, columns: m.columns })), [written]);
+    const edges = fkEdges(transformDomain(domain({ models, relationships: drawn })));
+    expect(edges.map((e) => [e.source, e.target])).toEqual([['fact_order', 'dim_customer']]);
+  });
+});

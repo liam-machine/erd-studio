@@ -1050,6 +1050,21 @@ describe('LogicalModelService — a save keeps the relationships: list it did no
     expect(listText(text)).toBe(listText(YML));
   });
 
+  it('a respelled entry keeps its comment and unknown keys, changing only the spelling (#133 L4)', () => {
+    fs.writeFileSync(file, YML.replace('    toModel: dim_customer\n    toColumn: customer_key', '    toModel: Dim_Customer # mis-cased\n    toColumn: CUSTOMER_KEY\n    note: kept'));
+    service.invalidateCache();
+    const model = service.getModel('fct_order')!;
+    model.relationships = model.relationships!.map((r) => (r.toModel === 'Dim_Customer' ? { ...r, toModel: 'dim_customer', toColumn: 'customer_key' } : r));
+    // A second change in the same save, so only a match by ends (not by position) can keep the node.
+    model.relationships.push({ fromColumn: 'customer_key', toModel: 'dim_region', toColumn: 'region_key', cardinality: 'many-to-one' });
+    service.saveModel(model);
+    const text = fs.readFileSync(file, 'utf-8');
+    expect(listText(text)).toBe(listText(YML)
+      .replace('    toModel: dim_customer\n', '    toModel: dim_customer # mis-cased\n')
+      .replace('    toColumn: customer_key\n    cardinality: one_to_many', '    toColumn: customer_key\n    note: kept\n    cardinality: one_to_many')
+      + '  - fromColumn: customer_key\n    toModel: dim_region\n    toColumn: region_key\n    cardinality: many-to-one\n');
+  });
+
   it('edits only the entry that changed, keeping comments, unknown keys and skipped entries', () => {
     const model = service.getModel('fct_order')!;
     model.relationships = model.relationships!.filter((r) => r.toModel !== 'dim_date');

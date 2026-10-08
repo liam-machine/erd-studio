@@ -80,6 +80,7 @@ import { computeNewModelPositions, findOpenPosition } from '../services/position
 import {
   computeMissingPositions,
   DomainValidationError,
+  sameLink,
   setMetaEntry,
   toDisplayDomain,
 } from '@erd-studio/core';
@@ -150,7 +151,9 @@ import {
   drawnDiagramCopies,
   planRelationshipWrite,
   removeColumnRelationships,
+  renameColumnInDomainRelationships,
   renameColumnInRelationships,
+  renameModelInDomainRelationships,
   renameModelInRelationships,
   routeToLibrary,
   sharedRelationshipCount,
@@ -2658,15 +2661,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.isDomainV5(parsed)) {
         const columnRenamed = payload.oldColumnName !== payload.column.name;
         const domainMutator = columnRenamed ? (section: Record<string, unknown>) => {
-          const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
-          for (const rel of relationships) {
-            if (rel.fromModel === payload.modelName && rel.fromColumn === payload.oldColumnName) {
-              rel.fromColumn = payload.column.name;
-            }
-            if (rel.toModel === payload.modelName && rel.toColumn === payload.oldColumnName) {
-              rel.toColumn = payload.column.name;
-            }
-          }
+          renameColumnInDomainRelationships(
+            (section.relationships ?? []) as Array<Record<string, unknown>>,
+            payload.modelName, payload.oldColumnName, payload.column.name,
+          );
         } : undefined;
 
         const ok = await this.applyModelEdit(document, webview, payload.modelName, (model) => {
@@ -2753,17 +2751,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             ...(newAdditive ? { additiveType: newAdditive } : {}),
           };
 
-          // Cascade column rename into relationships
+          // Cascade column rename into relationships (matched without case)
           if (payload.oldColumnName !== payload.column.name) {
-            const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
-            for (const rel of relationships) {
-              if (rel.fromModel === payload.modelName && rel.fromColumn === payload.oldColumnName) {
-                rel.fromColumn = payload.column.name;
-              }
-              if (rel.toModel === payload.modelName && rel.toColumn === payload.oldColumnName) {
-                rel.toColumn = payload.column.name;
-              }
-            }
+            renameColumnInDomainRelationships(
+              (section.relationships ?? []) as Array<Record<string, unknown>>,
+              payload.modelName, payload.oldColumnName, payload.column.name,
+            );
           }
         },
         { webview, stage, errorLabel: 'Failed to update column.' },
@@ -3118,11 +3111,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             const idx = names.indexOf(payload.oldName);
             if (idx !== -1) names[idx] = trimmedNew;
 
-            const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
-            for (const rel of relationships) {
-              if (rel.fromModel === payload.oldName) rel.fromModel = trimmedNew;
-              if (rel.toModel === payload.oldName) rel.toModel = trimmedNew;
-            }
+            renameModelInDomainRelationships(
+              (sec.relationships ?? []) as Array<Record<string, unknown>>, payload.oldName, trimmedNew);
 
             const vc = (p.viewConfig ?? {}) as Record<string, unknown>;
             const positions = (vc.positions ?? {}) as Record<string, unknown>;
@@ -3173,11 +3163,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
           model.name = trimmedNew;
 
-          const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
-          for (const rel of relationships) {
-            if (rel.fromModel === payload.oldName) { rel.fromModel = trimmedNew; }
-            if (rel.toModel === payload.oldName) { rel.toModel = trimmedNew; }
-          }
+          renameModelInDomainRelationships(
+            (sec.relationships ?? []) as Array<Record<string, unknown>>, payload.oldName, trimmedNew);
 
           const viewConfig = (p.viewConfig ?? {}) as Record<string, unknown>;
           const positions = (viewConfig.positions ?? {}) as Record<string, unknown>;
@@ -3235,6 +3222,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     const namesSet = new Set(payload.modelNames);
     if (namesSet.size === 0) return;
+    // A relationship spelling a removed model in another case goes with it (#133 L4).
+    const namesLower = new Set(payload.modelNames.map((n) => n.toLowerCase()));
     const isSingle = namesSet.size === 1;
     const errorLabel = isSingle ? 'model' : 'models';
 
@@ -3251,9 +3240,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
             const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
             sec.relationships = relationships.filter(
-              (rel) =>
-                !namesSet.has(rel.fromModel as string) &&
-                !namesSet.has(rel.toModel as string),
+              (rel) => !namesLower.has(String(rel.fromModel).toLowerCase()) && !namesLower.has(String(rel.toModel).toLowerCase()),
             );
 
             pruneViewConfigForRemovedModels(p, namesSet);
@@ -3317,9 +3304,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
           const relationships = (sec.relationships ?? []) as Array<Record<string, unknown>>;
           sec.relationships = relationships.filter(
-            (rel) =>
-              !namesSet.has(rel.fromModel as string) &&
-              !namesSet.has(rel.toModel as string),
+            (rel) => !namesLower.has(String(rel.fromModel).toLowerCase()) && !namesLower.has(String(rel.toModel).toLowerCase()),
           );
 
           pruneViewConfigForRemovedModels(p, namesSet);
@@ -3768,8 +3753,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             if (test.fromModel !== payload.modelName && test.toModel !== payload.modelName) continue;
             if (!modelNames.has(test.fromModel) || !modelNames.has(test.toModel)) continue;
             const alreadyExists = relationships.some(
-              (r) => r.fromModel === test.fromModel && r.fromColumn === test.fromColumn &&
-                      r.toModel === test.toModel && r.toColumn === test.toColumn,
+              (r) => typeof r.fromModel === 'string' && typeof r.fromColumn === 'string'
+                && typeof r.toModel === 'string' && typeof r.toColumn === 'string'
+                && sameLink(r as unknown as RelationshipKey, test),
             );
             if (!alreadyExists) {
               relationships.push({

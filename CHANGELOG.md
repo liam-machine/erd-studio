@@ -32,6 +32,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - **A new relationship no longer inherits another's comment or `role:`.** When one save removed a relationship and added an unrelated one to the same model file, the new entry took over the removed entry's comments and extra keys. It now does so only when the two share an end, as in a column or model rename.
 - **Renaming a column no longer writes `cardinality: many-to-one` into its relationship entries.** An entry with no `cardinality:` keeps it unwritten when a rename changes one of its ends.
 - **Stripping legacy domain tags keeps your dbt schema files' line endings.** A schema `.yml` with Windows (CRLF) line endings stays CRLF.
+- **Relationships whose names differ only in case now draw.** An entry such as `toModel: Dim_Customer` for the model `dim_customer`, or a column spelled `Customer_ID` for `customer_id`, used to be missing from the canvas even though Compare to Physical matched it. It is now drawn with the real names, and the next time you change that relationship it is saved with them too (its comments and extra keys stay). Renaming or removing a column or model now also follows entries that spell it in another case.
 - **A diagram is no longer mistaken for another project's on Windows and macOS.** The check that a diagram belongs to the open dbt project compared folder paths letter for letter, so the same folder spelled in another case could be refused. It now compares them the way the operating system does.
 
 ### Added

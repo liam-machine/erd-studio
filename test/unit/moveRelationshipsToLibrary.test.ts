@@ -587,6 +587,29 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     expect(messages(info)[0]).toMatch(/nothing to move/);
   });
 
+  it('Dim_Customer and dim_customer resolve to one model object: one read of the real file, one write (#133 L4)', async () => {
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), DIM.replace('toModel: fct_order', 'toModel: FCT_Order') + [
+      '  - fromColumn: customer_key',
+      '    toModel: fct_order',
+      '    toColumn: alt_customer_key',
+      '    cardinality: one-to-many',
+      '',
+    ].join('\n'));
+    const reads = vi.spyOn(logicalModelService, 'getModel');
+    const writes: string[] = [];
+    acceptModal();
+    await moveRelationshipsToLibrary({
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService: new DomainService(new LayerService(root, SEMANTIC_DIR)),
+      logicalModelService, onWritten: vi.fn(async () => undefined),
+      writeFile: (filePath, text) => { writes.push(path.basename(filePath)); writeFileAtomic(filePath, text); },
+    });
+    // Each file read by its real name, once, whichever spelling asked for it.
+    expect(reads.mock.calls.map(([name]) => name).sort()).toEqual(['dim_customer', 'fct_order']);
+    expect(writes.sort()).toEqual(['dim_customer.yml', 'fct_order.yml']);
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('fct_order')?.relationships?.map((r) => r.fromColumn)).toEqual(['customer_key', 'alt_customer_key']);
+  });
+
   it('drops the reversed copy when the fact already stores the link', async () => {
     fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT + [
       'relationships:',

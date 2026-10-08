@@ -358,3 +358,43 @@ describe('toLogicalStage', () => {
     expect('modelFolder' in toLogicalStage(build({ schemaVersion: 5 }))).toBe(false);
   });
 });
+
+describe('relationship ends spelled in another case are drawn (#133 L4)', () => {
+  const models: Record<string, SemanticModel> = {
+    dim_customer: { name: 'dim_customer', columns: [{ name: 'customer_id', dataType: 'int', description: '', isPrimaryKey: true }] },
+    fct_order: {
+      name: 'fct_order',
+      columns: [{ name: 'customer_id', dataType: 'int', description: '' }],
+      relationships: [{ fromColumn: 'Customer_ID', toModel: 'Dim_Customer', toColumn: 'CUSTOMER_ID', cardinality: 'many-to-one' }],
+    },
+  };
+  const getModel = (name: string): SemanticModel | null => models[name] ?? null;
+  const REAL = { fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' };
+
+  it('a library entry with toModel Dim_Customer is drawn as dim_customer, and badges the column', () => {
+    const u = build({ schemaVersion: 5, logical: { models: ['dim_customer', 'fct_order'] } }, { getModel });
+    expect(u.logical.relationships).toEqual([{ ...REAL, cardinality: 'many-to-one' }]);
+    const display = toDisplayDomain(toLogicalStage(u), { viewConfig: {}, layerConfig: undefined, readOnly: false });
+    expect(display.models.find((m) => m.name === 'fct_order')!.columns[0].isForeignKey).toBe(true);
+  });
+
+  it('a domain file\'s own mis-cased entry is drawn with the real names (no library entries)', () => {
+    const own = { fromModel: 'FCT_ORDER', fromColumn: 'customer_ID', toModel: 'dim_Customer', toColumn: 'Customer_id', cardinality: 'many-to-one' };
+    const u = build(
+      { schemaVersion: 5, logical: { models: ['dim_customer', 'fct_order'], relationships: [own, { ...own, fromColumn: 'CUSTOMER_ID' }] } },
+      { getModel: (n) => ({ ...getModel(n)!, relationships: undefined }) },
+    );
+    expect(u.logical.relationships).toEqual([{ ...REAL, cardinality: 'many-to-one' }]);
+  });
+
+  it('a v4 domain\'s inline relationships are respelled too', () => {
+    const u = build({
+      schemaVersion: 4,
+      logical: {
+        models: [models.dim_customer, { name: 'fct_order', columns: models.fct_order.columns }],
+        relationships: [{ fromModel: 'Fct_Order', fromColumn: 'CUSTOMER_ID', toModel: 'DIM_CUSTOMER', toColumn: 'Customer_Id', cardinality: 'many-to-one' }],
+      },
+    });
+    expect(u.logical.relationships).toEqual([{ ...REAL, cardinality: 'many-to-one' }]);
+  });
+});

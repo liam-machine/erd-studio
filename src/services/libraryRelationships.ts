@@ -13,7 +13,7 @@
 
 import {
   canonicalRelationship, contradictsKeys, keyedRelationship, linkKey, mergeLibraryRelationships, normaliseRelationshipRole,
-  relationshipKey, reverseRelationship, sameLink,
+  relationshipKey, respellRelationship, reverseRelationship, sameLink,
 } from '@erd-studio/core';
 import type { KeyedModel } from '@erd-studio/core';
 import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
@@ -129,7 +129,8 @@ export function removeColumnRelationships(
 
 /**
  * Follow a column rename: the model's own relationships leaving that column,
- * and every other model's relationships pointing at it.
+ * and every other model's relationships pointing at it — matched without
+ * case, written as the user typed the new name (#133 L4).
  */
 export function renameColumnInRelationships(
   models: readonly SemanticModel[],
@@ -141,11 +142,11 @@ export function renameColumnInRelationships(
   for (const model of models) {
     let touched = false;
     for (const rel of model.relationships ?? []) {
-      if (same(model.name, modelName) && rel.fromColumn === oldColumn) {
+      if (same(model.name, modelName) && same(rel.fromColumn, oldColumn)) {
         rel.fromColumn = newColumn;
         touched = true;
       }
-      if (same(rel.toModel, modelName) && rel.toColumn === oldColumn) {
+      if (same(rel.toModel, modelName) && same(rel.toColumn, oldColumn)) {
         rel.toColumn = newColumn;
         touched = true;
       }
@@ -155,7 +156,7 @@ export function renameColumnInRelationships(
   return changed;
 }
 
-/** Follow a model rename in every other model's relationships that point at it. */
+/** Follow a model rename in every other model's relationships that point at it (matched without case). */
 export function renameModelInRelationships(
   models: readonly SemanticModel[],
   oldName: string,
@@ -165,7 +166,7 @@ export function renameModelInRelationships(
   for (const model of models) {
     let touched = false;
     for (const rel of model.relationships ?? []) {
-      if (rel.toModel === oldName) {
+      if (same(rel.toModel, oldName)) {
         rel.toModel = newName;
         touched = true;
       }
@@ -173,6 +174,54 @@ export function renameModelInRelationships(
     if (touched) changed.push(model);
   }
   return changed;
+}
+
+/**
+ * Follow a column rename in a domain file's own `logical.relationships`, in
+ * place: every end at `model.oldColumn`, matched without case (#133 L4).
+ * Entries that are not relationships are left alone. Returns whether any
+ * entry changed.
+ */
+export function renameColumnInDomainRelationships(
+  relationships: ReadonlyArray<Record<string, unknown>>,
+  modelName: string,
+  oldColumn: string,
+  newColumn: string,
+): boolean {
+  let touched = false;
+  for (const rel of relationships) {
+    if (!isEnds(rel)) continue;
+    if (same(rel.fromModel, modelName) && same(rel.fromColumn, oldColumn)) {
+      rel.fromColumn = newColumn;
+      touched = true;
+    }
+    if (same(rel.toModel, modelName) && same(rel.toColumn, oldColumn)) {
+      rel.toColumn = newColumn;
+      touched = true;
+    }
+  }
+  return touched;
+}
+
+/** Follow a model rename in a domain file's own `logical.relationships`, in place, matched without case. */
+export function renameModelInDomainRelationships(
+  relationships: ReadonlyArray<Record<string, unknown>>,
+  oldName: string,
+  newName: string,
+): boolean {
+  let touched = false;
+  for (const rel of relationships) {
+    if (!isEnds(rel)) continue;
+    if (same(rel.fromModel, oldName)) {
+      rel.fromModel = newName;
+      touched = true;
+    }
+    if (same(rel.toModel, oldName)) {
+      rel.toModel = newName;
+      touched = true;
+    }
+  }
+  return touched;
 }
 
 /** One canvas edit of a relationship, as the webview sends it. */
@@ -372,12 +421,14 @@ export function routeToLibrary(
   const heldByDiagrams = new Set(diagramCopies.map(linkKey));
   const kept: Relationship[] = [];
   const changed = new Map<string, SemanticModel>();
+  // One object per model whatever the spelling, so two ends spelled
+  // differently never edit two copies of one file (#133 L4).
   const loaded = new Map<string, SemanticModel | null>();
   const modelFor = (name: string): SemanticModel | null => {
-    const fresh = newModels.find((m) => m.name === name);
+    const fresh = newModels.find((m) => same(m.name, name));
     if (fresh) return fresh;
-    if (!loaded.has(name)) loaded.set(name, libraryModel(name));
-    return loaded.get(name) ?? null;
+    if (!loaded.has(name.toLowerCase())) loaded.set(name.toLowerCase(), libraryModel(name));
+    return loaded.get(name.toLowerCase()) ?? null;
   };
   for (const drawn of relationships) {
     const rel = canonicalRelationship(drawn);
@@ -617,11 +668,14 @@ export function planMoveToLibrary(
   };
 
   // Every diagram copy of each link, however it was drawn (#133).
+  // Stored with the models' real spelling (#133 L4).
   const byKey = new Map<string, Array<{ label: string; drawn: Relationship; stored: Relationship }>>();
   for (const domain of domains) {
     for (const drawn of domain.relationships) {
       const key = linkKey(drawn);
-      byKey.set(key, [...(byKey.get(key) ?? []), { label: domain.label, drawn, stored: moveForm(drawn, libraryModel) }]);
+      const ends = [libraryModel(drawn.fromModel), libraryModel(drawn.toModel)].filter((m): m is SemanticModel => !!m);
+      const stored = moveForm(respellRelationship(drawn, ends), libraryModel);
+      byKey.set(key, [...(byKey.get(key) ?? []), { label: domain.label, drawn, stored }]);
     }
   }
 
@@ -724,7 +778,9 @@ export function resolveConflict(
 
 /** The model files a settled plan writes, by model name. */
 export function moveTargets(plan: Pick<MoveToLibraryPlan, 'toLibrary' | 'rehome'>): string[] {
-  return [...new Set([...plan.toLibrary.map((r) => r.fromModel), ...plan.rehome.flatMap((r) => [r.from, r.to.fromModel])])];
+  const names = [...plan.toLibrary.map((r) => r.fromModel), ...plan.rehome.flatMap((r) => [r.from, r.to.fromModel])];
+  // One write per file, however its model is spelled.
+  return names.filter((name, i) => names.findIndex((n) => same(n, name)) === i);
 }
 
 /**

@@ -27,6 +27,7 @@ import {
   moveTargets,
   planMoveToLibrary,
   planRelationshipWrite,
+  renameColumnInDomainRelationships,
   renameColumnInRelationships,
   resolveConflict,
   routeToLibrary,
@@ -242,10 +243,7 @@ export function hostRenameColumn(w: World, model: ModelName, oldName: string, ne
   renameColumnInRelationships([own], model, oldName, newName);
   renameColumnInRelationships(models.filter((m) => m.name !== model), model, oldName, newName);
   const out = withLib(w, models);
-  for (const rel of out.dom.D1) {
-    if (rel.fromModel === model && rel.fromColumn === oldName) rel.fromColumn = newName;
-    if (rel.toModel === model && rel.toColumn === oldName) rel.toColumn = newName;
-  }
+  renameColumnInDomainRelationships(out.dom.D1 as unknown as Array<Record<string, unknown>>, model, oldName, newName);
   return { world: out };
 }
 

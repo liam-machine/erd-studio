@@ -24,6 +24,36 @@ export function sameLink(a: Ends, b: Ends): boolean {
   return linkKey(a) === linkKey(b);
 }
 
+/** The parts of a model `respellRelationship` reads. */
+interface SpelledModel {
+  name: string;
+  columns?: ReadonlyArray<{ name?: unknown }>;
+}
+
+/**
+ * `rel` with each end spelled as the domain's models and columns spell it
+ * (#133 L4): `toModel: Dim_Customer` for model `dim_customer` is drawn — and
+ * written back, the next time that entry changes — as `dim_customer`. Exact
+ * match first, then without case. An end that matches nothing keeps its
+ * written spelling. Returns `rel` itself when nothing changes.
+ */
+export function respellRelationship<T extends Ends>(rel: T, models: readonly SpelledModel[]): T {
+  const lower = (s: string): string => s.toLowerCase();
+  const spell = (modelName: string, column: string): [string, string] => {
+    const model = models.find((m) => m.name === modelName) ?? models.find((m) => lower(m.name) === lower(modelName));
+    if (!model) return [modelName, column];
+    const names = (model.columns ?? []).map((c) => c?.name).filter((n): n is string => typeof n === 'string');
+    const real = names.find((n) => n === column) ?? names.find((n) => lower(n) === lower(column));
+    return [model.name, real ?? column];
+  };
+  const [fromModel, fromColumn] = spell(rel.fromModel, rel.fromColumn);
+  const [toModel, toColumn] = spell(rel.toModel, rel.toColumn);
+  if (fromModel === rel.fromModel && fromColumn === rel.fromColumn && toModel === rel.toModel && toColumn === rel.toColumn) {
+    return rel;
+  }
+  return { ...rel, fromModel, fromColumn, toModel, toColumn };
+}
+
 /**
  * The direction a relationship is stored in (issue #133): the "many" end —
  * the model holding the foreign key — is always `fromModel`, so a relationship

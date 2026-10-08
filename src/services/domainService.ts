@@ -673,17 +673,19 @@ export function derivePhysicalRelationships(
 }
 
 /**
- * True if a relationship references the given (model, column) on either endpoint.
- * Used to cascade-delete relationships when a column is removed.
+ * True if a relationship references the given (model, column) on either
+ * endpoint, matched without case (#133 L4). Used to cascade-delete
+ * relationships when a column is removed.
  */
 export function relationshipReferencesColumn(
   rel: { fromModel?: unknown; fromColumn?: unknown; toModel?: unknown; toColumn?: unknown },
   modelName: string,
   columnName: string,
 ): boolean {
+  const same = (a: unknown, b: string): boolean => typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
   return (
-    (rel.fromModel === modelName && rel.fromColumn === columnName) ||
-    (rel.toModel === modelName && rel.toColumn === columnName)
+    (same(rel.fromModel, modelName) && same(rel.fromColumn, columnName)) ||
+    (same(rel.toModel, modelName) && same(rel.toColumn, columnName))
   );
 }
 

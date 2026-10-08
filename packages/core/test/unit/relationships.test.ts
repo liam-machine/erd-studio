@@ -3,7 +3,8 @@ import { describe, it, expect } from 'vitest';
 import { relationshipKey } from '../../src/domain';
 import { parseLogicalModelText } from '../../src/logicalModel';
 import {
-  canonicalRelationship, linkKey, normaliseRelationshipRole, RELATIONSHIP_ROLE_MAX_LENGTH, reverseRelationship, sameLink,
+  canonicalRelationship, linkKey, normaliseRelationshipRole, RELATIONSHIP_ROLE_MAX_LENGTH, respellRelationship, reverseRelationship,
+  sameLink,
 } from '../../src/relationships';
 import type { Cardinality, Relationship } from '../../src/types/semantic';
 
@@ -131,5 +132,32 @@ describe('keyEvidence — the one key check relationship direction reads (#133)'
     expect(contradictsKeys(back, (n) => models[n])).toBe(true);
     expect(contradictsKeys({ ...back, toModel: 'bare' }, (n) => models[n])).toBe(false);
     expect(keyedRelationship(back, (n) => models[n])).toEqual({ fromModel: 'fct', fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'many-to-one' });
+  });
+});
+
+describe('respellRelationship — ends spelled as the models spell them (#133 L4)', () => {
+  const models = [
+    { name: 'dim_customer', columns: [{ name: 'customer_id' }, { name: 'Code' }] },
+    { name: 'fct_order', columns: [{ name: 'customer_id' }, {}, { name: 42 }] },
+  ];
+
+  it('uses the model\'s and column\'s real spelling, keeping every other field', () => {
+    const written = { fromModel: 'FCT_order', fromColumn: 'Customer_ID', toModel: 'Dim_Customer', toColumn: 'CUSTOMER_ID', cardinality: 'many-to-one' as const, role: 'buyer' };
+    expect(respellRelationship(written, models)).toEqual({
+      fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id', cardinality: 'many-to-one', role: 'buyer',
+    });
+  });
+
+  it('returns the same object when nothing changes, and keeps an end that matches nothing', () => {
+    const exact = { fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'Code', cardinality: 'many-to-one' as const };
+    expect(respellRelationship(exact, models)).toBe(exact);
+    const unknown = { fromModel: 'fct_order', fromColumn: 'gone', toModel: 'Nowhere', toColumn: 'X', cardinality: 'many-to-one' as const };
+    expect(respellRelationship(unknown, models)).toBe(unknown);
+  });
+
+  it('tries the exact spelling first, so two spellings that differ only in case resolve stably', () => {
+    const twins = [{ name: 'm', columns: [{ name: 'Key' }, { name: 'key' }] }, { name: 'n', columns: [{ name: 'k' }] }];
+    const rel = { fromModel: 'm', fromColumn: 'key', toModel: 'n', toColumn: 'K', cardinality: 'many-to-one' as const };
+    expect(respellRelationship(rel, twins)).toMatchObject({ fromColumn: 'key', toColumn: 'k' });
   });
 });

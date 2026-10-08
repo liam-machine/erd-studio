@@ -411,3 +411,48 @@ describe('relationships stored once in the model library (#126)', () => {
     });
   });
 });
+
+describe('relationship ends spelled in another case (#133 L4)', () => {
+  let h: Harness;
+  beforeEach(() => { _resetMockWorkspace(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(h.root, { recursive: true, force: true });
+  });
+
+  it('⇄ on Dim_Customer.Customer_Key rewrites only that entry, spelled dim_customer.customer_key, its comment kept', async () => {
+    h = await createHarness();
+    const file = h.logicalModelService.modelPath('fct_order');
+    const head = fs.readFileSync(file, 'utf-8');
+    const other = '  - fromColumn: order_key # untouched\n    toModel: Dim_Date\n    toColumn: DATE_KEY\n    cardinality: many-to-one\n';
+    fs.writeFileSync(file, `${head}relationships:\n  - fromColumn: Customer_Key # the buyer\n    toModel: Dim_Customer\n    toColumn: CUSTOMER_KEY\n    cardinality: many-to-one\n${other}`);
+    h.logicalModelService.invalidateCache();
+    expect(h.shown('orders')).toEqual([{ ...EDGE, cardinality: 'many-to-one' }]);
+
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(orders.errors()).toEqual([]);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(
+      `${head}relationships:\n  - fromColumn: customer_key # the buyer\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: one-to-one\n${other}`,
+    );
+  });
+
+  it('per-diagram ⇄, edit and delete find an entry spelled in another case', async () => {
+    const own: Relationship = { fromModel: 'FCT_ORDER', fromColumn: 'Customer_Key', toModel: 'Dim_Customer', toColumn: 'customer_KEY', cardinality: 'many-to-one' };
+    h = await createHarness([{ ...own, note: 'kept' } as Relationship]);
+    expect(h.shown('orders')).toEqual([{ ...EDGE, cardinality: 'many-to-one', note: 'kept' }]);
+    const orders = await h.open('orders');
+
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+    expect(h.readDomain('orders').logical.relationships).toEqual([{ ...EDGE, cardinality: 'one-to-one', note: 'kept' }]);
+
+    const original = { originalFromModel: 'fct_order', originalFromColumn: 'customer_key', originalToModel: 'dim_customer', originalToColumn: 'customer_key' };
+    await orders.send({ type: 'editRelationship', payload: { ...original, ...EDGE, cardinality: 'many-to-one', role: 'buyer' } });
+    expect(h.readDomain('orders').logical.relationships).toEqual([{ ...EDGE, cardinality: 'many-to-one', role: 'buyer', note: 'kept' }]);
+
+    await orders.send({ type: 'removeRelationship', payload: { ...EDGE, fromModel: 'Fct_Order', toColumn: 'CUSTOMER_KEY' } });
+    expect(h.readDomain('orders').logical.relationships).toEqual([]);
+    expect(orders.errors()).toEqual([]);
+    expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
+  });
+});

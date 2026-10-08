@@ -52,7 +52,8 @@ export interface MoveRelationshipsDeps {
   workspaceRoot: string;
   semanticDir: string;
   domainService: Pick<DomainService, 'listDomains'>;
-  logicalModelService: Pick<LogicalModelService, 'getModel' | 'listModels' | 'modelPath' | 'invalidateCache' | 'getModelsDir'>;
+  logicalModelService: Pick<LogicalModelService, 'getModel' | 'listModels' | 'modelPath' | 'invalidateCache' | 'getModelsDir'>
+    & Partial<Pick<LogicalModelService, 'findModelNameIgnoringCase'>>;
   /** Refresh the trees, open canvases and selectors once the files are written. */
   onWritten: (domainPaths: string[]) => Promise<void>;
   /** Test seam: how one file is written. Defaults to {@link writeFileAtomic}. */
@@ -159,14 +160,20 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   const domains = readDomainRelationships(domainService, workspaceRoot, semanticDir)
     .filter((d) => d.relationships.length > 0);
 
+  // One object per model, whatever the spelling an entry uses (#133 L4):
+  // `Dim_Customer` reaches dim_customer.yml on a case-sensitive file system,
+  // and both spellings in one plan edit the same copy.
   const models = new Map<string, SemanticModel | null>();
   const libraryModel = (name: string): SemanticModel | null => {
-    if (!models.has(name)) models.set(name, logicalModelService.getModel(name));
-    return models.get(name) ?? null;
+    const key = name.toLowerCase();
+    if (!models.has(key)) models.set(key, logicalModelService.getModel(logicalModelService.findModelNameIgnoringCase?.(name) ?? name));
+    return models.get(key) ?? null;
   };
+  /** The model's file, by its real name. */
+  const pathOf = (name: string): string => logicalModelService.modelPath(libraryModel(name)?.name ?? name);
   const libraryRoot = path.dirname(logicalModelService.getModelsDir());
   const relPath = (filePath: string): string => path.relative(libraryRoot, filePath).split(path.sep).join('/');
-  const fileOf = (model: string): string => relPath(logicalModelService.modelPath(model));
+  const fileOf = (model: string): string => relPath(pathOf(model));
   // A file whose relationships list holds comments or unreadable entries is
   // never rewritten: re-rendering the list would lose them.
   const lockedFiles = new Map<string, boolean>();
@@ -174,7 +181,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     if (!lockedFiles.has(name)) {
       let loses = false;
       try {
-        loses = relationshipsRewriteLoses(fs.readFileSync(logicalModelService.modelPath(name), 'utf-8'));
+        loses = relationshipsRewriteLoses(fs.readFileSync(pathOf(name), 'utf-8'));
       } catch {
         // Unreadable: the plan already leaves a model with no readable file alone.
       }
@@ -204,10 +211,10 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   // turned away; checked again before writing, in case a file was edited
   // while the dialog was open.
   const candidates = [
-    ...plan.toLibrary.map((r) => logicalModelService.modelPath(r.fromModel)),
+    ...plan.toLibrary.map((r) => pathOf(r.fromModel)),
     // A conflict lands at either end, depending on the cardinality picked.
-    ...plan.conflicts.flatMap((c) => [c.relationship.fromModel, c.relationship.toModel]).map((m) => logicalModelService.modelPath(m)),
-    ...plan.rehome.flatMap((r) => [r.from, r.to.fromModel]).map((m) => logicalModelService.modelPath(m)),
+    ...plan.conflicts.flatMap((c) => [c.relationship.fromModel, c.relationship.toModel]).map(pathOf),
+    ...plan.rehome.flatMap((r) => [r.from, r.to.fromModel]).map(pathOf),
     ...domains
       .filter((d) => plan.removeFromDomains.has(d.label) || plan.conflicts.some((c) => c.definitions.some((def) => def.domains.includes(d.label))))
       .map((d) => d.filePath),
@@ -272,7 +279,8 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   // disk now — after the modal and the QuickPicks, which may have taken a
   // while — changing only its relationships.
   const writes: Array<{ filePath: string; original: string; text: string }> = [];
-  for (const name of moveTargets(plan)) {
+  for (const target of moveTargets(plan)) {
+    const name = libraryModel(target)?.name ?? target;
     const filePath = logicalModelService.modelPath(name);
     const original = fs.readFileSync(filePath, 'utf-8');
     if (relationshipsRewriteLoses(original)) {

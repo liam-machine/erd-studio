@@ -815,8 +815,10 @@ export class LogicalModelService {
     // changed as went, as in a column or model rename — the rest in order,
     // each only from an entry that shares one of its ends (a rename changes
     // one end; an unrelated link must not inherit another's comment or role).
+    // Without case: an entry respelled to the real names (#133 L4) keeps its node.
     const sameEnds = (r: ModelRelationship | null | undefined, want: Record<string, unknown>): boolean =>
-      !!r && r.fromColumn === want.fromColumn && r.toModel === want.toModel && r.toColumn === want.toColumn;
+      !!r && sameName(r.fromColumn, String(want.fromColumn)) && sameName(r.toModel, String(want.toModel))
+      && sameName(r.toColumn, String(want.toColumn));
     const shareAnEnd = (r: ModelRelationship | null | undefined, want: Record<string, unknown>): boolean =>
       !!r && (sameName(r.fromColumn, String(want.fromColumn))
         || (sameName(r.toModel, String(want.toModel)) && sameName(r.toColumn, String(want.toColumn))));

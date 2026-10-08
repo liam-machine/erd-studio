@@ -45,9 +45,9 @@
     "relationships": [
       {
         "fromModel": "stg_orders",
-        "fromColumn": "CUSTOMER_KEY",
+        "fromColumn": "customer_key",
         "toModel": "stg_customers",
-        "toColumn": "customer_key",
+        "toColumn": "Customer_Key",
         "cardinality": "many-to-one"
       },
       {

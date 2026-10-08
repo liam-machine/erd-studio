@@ -22,12 +22,7 @@ import type { Ends, Found, State, Violation, World } from './relationshipStateSp
  * Violations still accepted, by signature, each owned by a later item of the
  * #133 fix list (or out of its scope) — remove an entry when its item lands.
  */
-const L4 = 'L4 (case-only name differences): a column rename follows only entries spelled in the same case.';
 const ALLOWED: Record<string, string> = {
-  'R rename-follows (spelled in another case) :: rename dim.k → key': L4,
-  'R rename-follows (spelled in another case) :: rename fct.k → key': L4,
-  'R rename-follows (spelled in another case) [dup-in-file] :: rename dim.k → key': L4,
-  'R rename-follows (spelled in another case) [dup-in-file] :: rename fct.k → key': L4,
   'R rename-follows (in another diagram) :: rename dim.k → key':
     'Out of #133 scope: a column rename rewrites the open diagram and the model library; another diagram file keeps its own per-diagram copy, as before 1.6.6.',
   'R rename-follows (in another diagram) :: rename fct.k → key':
@@ -98,7 +93,8 @@ describe('relationship storage — bounded exhaustive check (#133)', () => {
             && storedCopies(w).some((c) => linkKey(c.rel) === L_KEY && c.rel.role === l3.role)
             && factText(factOf({ ...l3, role: undefined })) === factText(factOf(line))))) vs.push(['I6 swap-round-trip', `${factText(factOf(line))} → ${l3 ? factText(factOf(l3)) : 'nothing'}`]);
           else if (libraryMode(w)) {
-            const libL = (x: World) => storedCopies(x).filter((c) => c.file.endsWith('.yml') && linkKey(c.rel) === L_KEY).map((c) => `${c.file}:${JSON.stringify(c.rel)}`);
+            // Spelling aside: a write respells the entry it touches (L4, checked by C2).
+            const libL = (x: World) => storedCopies(x).filter((c) => c.file.endsWith('.yml') && linkKey(c.rel) === L_KEY).map((c) => `${c.file}:${JSON.stringify(c.rel)}`.toLowerCase());
             const canonicalBefore = libL(w).length === 1 && w.dom.D1.every((r) => linkKey(r) !== L_KEY) && line.cardinality === 'many-to-one';
             if (canonicalBefore && JSON.stringify(libL(twice.world)) !== JSON.stringify(libL(w))) {
               vs.push(['I6 swap-round-trip', `stored ${libL(w)} became ${libL(twice.world)}`]);
