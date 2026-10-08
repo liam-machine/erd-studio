@@ -1,0 +1,137 @@
+# Publishes @erd-studio/core and @erd-studio/renderer to npm whenever a change
+# to them lands on main, so the Confluence app (private repo
+# liam-machine/erd-studio-pro, which pins both exactly) can always take the
+# renderer and loader the extension ships.
+#
+# Versioning (scripts/release-packages.mjs decides; see its header):
+#   - a package whose shipped files changed since its last release tag gets a
+#     PATCH bump; the renderer is re-pinned to the new core and bumped with it;
+#   - a package.json version already ahead of npm is published as is — that is
+#     how a PR declares a MINOR release (a breaking change while 0.x);
+#   - test-only changes publish nothing.
+# The bump is committed and pushed to main BEFORE publishing (as deploy.yml does
+# for the extension), so main never falls behind npm and a rerun retries the
+# exact versions that were planned.
+#
+# Auth is npm trusted publishing (OIDC): there is no npm token. Each package
+# has this repository + `publish-packages.yml` registered as its trusted
+# publisher on npmjs.com (Settings → Trusted publishing → GitHub Actions, with
+# "npm publish" allowed). Renaming this file breaks publishing until both
+# packages are re-registered.
+
+name: Publish npm packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/**'
+      - 'scripts/release-packages.mjs'
+      - '.github/workflows/publish-packages.yml'
+  # Manual run: retries a failed publish, or releases a pinned version.
+  workflow_dispatch:
+
+# One release at a time, never cancelled halfway.
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the version bump commit and release tags
+  id-token: write # npm trusted publishing (OIDC) and provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0 # release tags drive change detection
+
+      # Trusted publishing needs Node >= 22.14 and npm >= 11.5.1. No npm cache:
+      # a release build installs exactly what the lockfile says.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install npm with trusted publishing support
+        run: npm install -g npm@11.6.2
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run compile
+
+      - name: Build packages
+        run: npm run build:packages
+
+      # The full suite: the golden parity tests that hold core's loader to the
+      # extension host live at the root, not in packages/.
+      - name: Run tests
+        run: npm test
+
+      - name: Plan release
+        id: plan
+        run: |
+          PLAN="${RUNNER_TEMP}/package-plan.json"
+          node scripts/release-packages.mjs plan --out "$PLAN"
+          echo "plan=${PLAN}" >> "$GITHUB_OUTPUT"
+          COUNT=$(jq '[.[] | select(.next != null)] | length' "$PLAN")
+          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
+          {
+            echo '### npm packages'
+            echo
+            echo '| Package | npm | Release | Why |'
+            echo '|---|---|---|---|'
+            jq -r '.[] | "| `\(.name)` | \(.published // "—") | \(.next // "skipped") | \(.reason) |"' "$PLAN"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Commit and push the bump BEFORE publishing so a failed publish never
+      # leaves main behind npm; a rerun then sees package.json ahead of npm and
+      # publishes the same versions.
+      - name: Commit version bump
+        if: steps.plan.outputs.count != '0'
+        run: |
+          node scripts/release-packages.mjs apply --plan "${{ steps.plan.outputs.plan }}"
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if git diff --quiet; then
+            echo "Versions already match the plan; nothing to commit"
+            exit 0
+          fi
+          RELEASES=$(jq -r '[.[] | select(.next != null) | "\(.name)@\(.next)"] | join(", ")' "${{ steps.plan.outputs.plan }}")
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json packages/*/package.json
+          git commit -m "chore: release ${RELEASES} [packages]"
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}); rebasing onto origin/main and retrying"
+            git pull --rebase origin main
+          done
+          echo "::error::Could not push the version bump after 3 attempts"
+          exit 1
+
+      # Dependency order (core before the renderer that pins it). `prepack`
+      # rebuilds each dist/. A version already on npm (a rerun) is skipped, and
+      # each release is tagged `<name>@<version>` on the commit it was built from.
+      - name: Publish to npm
+        if: steps.plan.outputs.count != '0'
+        run: |
+          jq -r '.[] | select(.next != null) | "\(.name) \(.next)"' "${{ steps.plan.outputs.plan }}" |
+          while read -r NAME VERSION; do
+            if [ -n "$(npm view "${NAME}@${VERSION}" version 2>/dev/null)" ]; then
+              echo "${NAME}@${VERSION} is already on npm; skipping"
+            else
+              npm publish -w "$NAME" --provenance --access public
+            fi
+            TAG="${NAME}@${VERSION}"
+            if ! git rev-parse --quiet --verify "refs/tags/${TAG}" >/dev/null; then
+              git tag "$TAG"
+              git push origin "refs/tags/${TAG}"
+            fi
+            echo "- \`${TAG}\` — https://www.npmjs.com/package/${NAME}/v/${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          done

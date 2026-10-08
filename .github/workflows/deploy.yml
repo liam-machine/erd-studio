@@ -16,6 +16,12 @@ on:
       - '.github/**'
       - 'social-video/**'
       - '.claude/**'
+      # npm package release tooling (publish-packages.yml); nothing in the VSIX.
+      - 'scripts/release-packages.mjs'
+      - 'test/unit/releasePackages.test.ts'
+      # A sibling project, never in the VSIX. A change to the src/services it
+      # imports still triggers a release through src/.
+      - 'mcp-server/**'
 
 concurrency:
   group: deploy-main
