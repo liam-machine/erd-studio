@@ -676,6 +676,32 @@ describe('a rename reaches the copies other diagrams keep of their own (#133 L5)
     expect(fs.readFileSync(ymlPath, 'utf-8')).toBe(ymlBefore);
   });
 
+  it('rewrites only the renamed names in the other diagram: its layout and CRLF line endings stay', async () => {
+    const orders = await perDiagram();
+    // reporting.json as a teammate on Windows formats it.
+    const reporting = JSON.parse(fs.readFileSync(h.domainPath('reporting'), 'utf-8'));
+    const handWritten = JSON.stringify(reporting, null, 4).replace(/\n/g, '\r\n') + '\r\n';
+    fs.writeFileSync(h.domainPath('reporting'), handWritten);
+    await orders.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });
+    expect(orders.errors()).toEqual([]);
+    expect(fs.readFileSync(h.domainPath('reporting'), 'utf-8')).toBe(handWritten
+      .replace('"dim_customer",\r\n', '"dim_client",\r\n')
+      .replace('"dim_customer": {', '"dim_client": {')
+      .replace('"toModel": "Dim_Customer"', '"toModel": "dim_client"'));
+  });
+
+  it('the open diagram keeps its CRLF line endings when an edit rewrites it', async () => {
+    h = await createHarness([OWN]);
+    const crlf = fs.readFileSync(h.domainPath('orders'), 'utf-8').replace(/\n/g, '\r\n');
+    fs.writeFileSync(h.domainPath('orders'), crlf);
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateColumn', payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'customer_sk', dataType: 'string', description: '' } } });
+    expect(orders.errors()).toEqual([]);
+    const written = fs.readFileSync(h.domainPath('orders'), 'utf-8');
+    expect(written).toContain('"customer_sk"');
+    expect(written.replace(/\r\n/g, '')).not.toContain('\n');
+  });
+
   it('a model rename rewrites the other diagram\'s model list, position and copy', async () => {
     const orders = await perDiagram();
     await orders.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });

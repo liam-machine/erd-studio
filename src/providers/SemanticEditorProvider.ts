@@ -87,6 +87,8 @@ import {
 } from '@erd-studio/core';
 import type { DbtKeyIndex } from '@erd-studio/core';
 import { dbtKeyIndexOf, withDbtKeyHints } from '../services/stageDisplay';
+import { keepLineEndings } from '../services/lineEndings';
+import { rewriteJsonScalars } from '../services/minimalEdits';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import {
@@ -2071,7 +2073,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (dirty) throw new Error(`${dirty} has unsaved changes. Save or revert it, then try again.`);
     const otherDomains = options.otherDomains ? this.rewriteOtherDomains(document.uri.fsPath, options.otherDomains) : [];
 
-    const updatedText = JSON.stringify(parsed, null, 2) + '\n';
+    // Re-rendered as before, in the file's own line endings.
+    const updatedText = keepLineEndings(JSON.stringify(parsed, null, 2) + '\n', text);
     const edit = new vscode.WorkspaceEdit();
     const fullRange = new vscode.Range(
       document.positionAt(0),
@@ -2190,9 +2193,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const out: Array<{ filePath: string; text: string }> = [];
     for (const summary of this.domainService.listDomains(this.workspaceRoot, semanticDir)) {
       if (samePath(summary.filePath, currentPath)) continue;
+      let original: string;
       let parsed: Record<string, unknown>;
       try {
-        parsed = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as Record<string, unknown>;
+        original = fs.readFileSync(summary.filePath, 'utf-8');
+        parsed = JSON.parse(original) as Record<string, unknown>;
       } catch {
         continue;
       }
@@ -2202,7 +2207,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const name = path.relative(this.workspaceRoot, summary.filePath).split(path.sep).join('/');
         throw new Error(`${name} has unsaved changes. Save or revert it, then try again.`);
       }
-      out.push({ filePath: summary.filePath, text: JSON.stringify(parsed, null, 2) + '\n' });
+      // Only the renamed strings change: the file keeps its layout and line endings.
+      const text = rewriteJsonScalars(original, parsed)
+        ?? keepLineEndings(JSON.stringify(parsed, null, 2) + '\n', original);
+      out.push({ filePath: summary.filePath, text });
     }
     return out;
   }
