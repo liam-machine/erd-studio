@@ -627,7 +627,7 @@
   },
   "dependencies": {
     "@erd-studio/core": "0.1.2",
-    "@erd-studio/renderer": "0.1.1",
+    "@erd-studio/renderer": "0.1.2",
     "@xyflow/react": "^12.4.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",
