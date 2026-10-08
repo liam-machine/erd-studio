@@ -196,7 +196,7 @@
 /* -----------------------------------------------------------------------
    Issue badge (#133): an amber "?" beside the midpoint of a relationship
    that is stored twice, stored on its "one" side, or points against its
-   keys. Hover text lists the problems; Repair Relationships… fixes them.
+   keys. Hover text lists the problems and what Repair Relationships… does.
    ----------------------------------------------------------------------- */
 
 .fk-edge__issue-badge {

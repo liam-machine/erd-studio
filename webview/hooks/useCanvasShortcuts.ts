@@ -28,6 +28,14 @@ import { relationshipTarget, type ModelFlowNode, type AnnotationFlowNode } from 
 import type { WebviewMessage, RelationshipKey, StoredRelationshipEnds } from '../../src/types/messages';
 import type { AnnotationColor } from '../../src/types/semantic';
 
+/** The canvas's dialogs: a key pressed with focus inside one is the dialog's. */
+const DIALOG_SELECTOR = '.new-fk-dialog, .new-model-dialog, .add-existing-model-dialog, [role="dialog"]';
+
+/** Whether `el` (the focused element) is inside one of the canvas's dialogs. */
+export function focusInDialog(el: Element | null): boolean {
+  return typeof el?.closest === 'function' && el.closest(DIALOG_SELECTOR) !== null;
+}
+
 /** Module-level clipboard for annotation copy/paste (not in Zustand — never drives rendering). */
 type CopiedAnnotation = { text: string; color: AnnotationColor; width?: number; height?: number; linkedModel?: string };
 let _copiedAnnotation: CopiedAnnotation | null = null;
@@ -237,10 +245,13 @@ export function useCanvasShortcuts(): void {
       // DELETE KEY: Delete selected design models, annotations, or edges
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!domain || domain.readOnly) return;
-        // A dialog is open: focus may sit on one of its buttons (Swap sides,
-        // a direction choice), which the text-entry guard above lets through.
-        // The key belongs to the dialog, never to the selection behind it.
-        if (s.newFkDialogOpen || s.newModelDialogOpen || s.addExistingModelDialogOpen || s.feedbackDialogOpen) return;
+        // Focus on one of a dialog's buttons (Swap sides, a direction
+        // choice), which the text-entry guard above lets through: the key
+        // belongs to the dialog, never to the selection behind it. The
+        // relationship, new-model and add-model dialogs are panels without a
+        // backdrop, so with focus on the canvas behind one the key still
+        // deletes the selection; the feedback dialog is modal.
+        if (s.feedbackDialogOpen || focusInDialog(document.activeElement)) return;
 
         const { selectedEdges, selectedNode, selectedColumns, detailPanelOpen } = s;
 

@@ -18,6 +18,8 @@ export * from './positions.js';
 export * from './domain.js';
 export * from './relationships.js';
 export {
+  isStoredBackwards,
+  keyEvidenceContradiction,
   normaliseRelationships,
   type NormaliseRelationshipsInput,
   type NormalisedRelationships,

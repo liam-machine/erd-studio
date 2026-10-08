@@ -96,10 +96,17 @@ describe('edge issues', () => {
     const title = edgeIssueTitle(['REL001', 'REL002']);
     expect(title.split('\n')).toHaveLength(3);
     expect(title).toContain('REL002');
+    // Repair only removes exact copies; it never picks between copies that disagree.
+    expect(title).toContain('copies that disagree are listed for you to settle');
+  });
+  it('REL006 says what Repair Relationships… does about the 1.6.7 shape, and what ⇄ does otherwise (#133)', () => {
+    const title = edgeIssueTitle(['REL006']);
+    expect(title).toContain('Repair Relationships… turns it round');
+    expect(title).toContain('⇄ turns it round');
   });
   it('on an older-format (v4) diagram, never promises what Repair Relationships… does not do there', () => {
     const title = edgeIssueTitle(['REL001'], { olderFormat: true });
-    expect(title).not.toContain('Repair Relationships… keeps one copy');
+    expect(title).not.toContain(edgeIssueTitle(['REL001']).split('\n')[1].slice('• REL001: '.length));
     expect(title).toContain('Migrate Domains to Central Model Store');
     // Edit / ⇄ keep one copy only when the copies agree: a commit refuses copies that disagree (#133 review).
     expect(title).not.toContain('or use Edit or ⇄ on the line, which keeps one copy');

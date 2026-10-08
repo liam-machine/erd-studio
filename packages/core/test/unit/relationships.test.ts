@@ -89,8 +89,9 @@ describe('mergeLibraryRelationships — one line per link (#133)', () => {
         fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer',
         source: { kind: 'library', model: 'fct_order', index: 0 },
         stored: { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' },
-        // The domain copy has no role, so the two copies say different things.
-        issues: ['REL001'],
+        // The domain copy has no role, so it says something else — and is
+        // ignored: the library's copy is drawn (REL009, never REL001).
+        issues: ['REL009'],
       },
     ]);
   });

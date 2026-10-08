@@ -319,7 +319,7 @@ describe('NewFkDialog — per-domain projects and edit', () => {
     renderDialog();
     expect(text()).toContain('Saved in this diagram');
     const why = screen.getByText('Why here?').getAttribute('title');
-    expect(why).toBe('This diagram is in the older format, so its relationships live in its own file. Run "ERD Studio: Migrate Domains to Central Model Store" to store them with their models.');
+    expect(why).toBe('This diagram is in the older format, so its relationships live in its own file. Run "ERD Studio: Migrate Domains to Central Model Store" to bring it up to date.');
     expect(why).not.toContain('Move Relationships to Model Library');
   });
 

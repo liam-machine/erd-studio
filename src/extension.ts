@@ -37,6 +37,7 @@ import { describeDuplicateFix, planDuplicateFix, planLibraryRepoint, repointDoma
 import { validateModelName } from './providers/payloadValidation';
 import { sameName } from './types/naming';
 import { describeRemovedRelationships, removeRelationshipsToModels } from './services/libraryRelationships';
+import { deleteModelWithRelationships } from './services/modelDeletion';
 import { parseLogicalModelText } from '@erd-studio/core';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 import { submitFeedback } from './services/feedbackService';
@@ -1381,11 +1382,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           );
           return;
         }
-        try {
-          for (const model of changed) logicalModelService.saveModel(model);
-          logicalModelService.deleteModel(node.name);
-        } catch (err) {
-          void vscode.window.showErrorMessage(`Delete Model: ${err instanceof Error ? err.message : String(err)}`);
+        // All or nothing: every file rendered first, any write put back on failure.
+        const outcome = deleteModelWithRelationships(logicalModelService, node.name, changed);
+        if (!outcome.ok) {
+          void vscode.window.showErrorMessage(`Delete Model: ${outcome.message}`);
         }
         logicalModelService.invalidateCache();
         modelLibraryProvider.refresh();
@@ -1694,16 +1694,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return { ymlData, manifest: manifestService.isMissing ? undefined : manifest };
         },
         validateDomainName: (value, layer) => validateDomainSlug(value, layer, existingDomains()),
-        onWritten: ({ domainPath, modelNames }) => {
+        onWritten: ({ domainPath, modelNames, changedModelNames }) => {
           // Every file was recorded as an own write, so the watchers stay
           // quiet; issue their refreshes here, as createDomain does.
           layerService.invalidateCache();
           treeProvider.invalidateDomain(domainPath);
           treeProvider.refresh();
-          if (modelNames.length > 0) { modelLibraryProvider.refresh(); }
+          if (modelNames.length > 0 || changedModelNames.length > 0) { modelLibraryProvider.refresh(); }
           // A new model file may be one an open diagram already references
-          // (a placeholder until now); the model watcher skipped the own write.
-          void editorProvider.refreshDomainsReferencingModels(modelNames);
+          // (a placeholder until now), and an existing one that gained a
+          // relationship changes what every diagram showing it draws; the
+          // model watcher skipped both own writes.
+          void editorProvider.refreshDomainsReferencingModels([...modelNames, ...changedModelNames]);
           layerDecorationProvider.refresh();
           decorationProvider.refresh();
           refreshContextKeys();

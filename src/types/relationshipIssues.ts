@@ -1,9 +1,8 @@
 /**
  * How many relationships a list of relationship findings is about (#133).
  *
- * Shared by the canvas banner ("N relationships need attention") and the
- * host's "Repair Relationships…" notification, so the two always say the
- * same number. One relationship can carry several findings — a missing
+ * Used by the canvas banner ("N relationships need attention"), so it says
+ * how many relationships, not how many findings. One relationship can carry several findings — a missing
  * column on each end is two REL004s, a missing model plus a missing column
  * is a REL003 and a REL004, and the same link stored in two files is counted
  * per record — so the number counts distinct links (`link`, core's

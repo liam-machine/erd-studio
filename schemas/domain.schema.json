@@ -82,7 +82,7 @@
         },
         "relationships": {
           "type": "array",
-          "description": "FK relationships. (fromModel, fromColumn, toModel, toColumn) must be unique within the domain.",
+          "description": "FK relationships drawn by this domain. The same two model.column ends — either way round, ignoring case — at most once per domain file; a relationship the model library already holds is not repeated here.",
           "items": {
             "$ref": "#/definitions/relationship"
           }

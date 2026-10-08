@@ -47,7 +47,7 @@ import {
   type Envelope,
 } from './context';
 import { MODEL_YAML_HINTS, toUnreadableModelFile, type UnreadableModelFile } from './diff';
-import { checkProjectRelationships, countFindings, type UncheckedFile } from './relationshipCheck';
+import { checkProjectRelationships, countFindings, repairableNotes, type UncheckedFile } from './relationshipCheck';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
@@ -118,6 +118,12 @@ export interface DoctorRelationships {
   errors: number;
   warnings: number;
   info: number;
+  /**
+   * Of `info`, the notes Repair Relationships… settles on its own (a
+   * relationship saved backwards in the 1.6.7 shape, a diagram file's copy of
+   * a model-library one that says the same) — `repairableNotes`.
+   */
+  repairable: number;
   byCode: Partial<Record<RelationshipIssueCode, number>>;
   /** Files whose relationships could not be checked at all (domain files, model files that do not parse, an unusable layers.json). */
   unchecked: number;
@@ -127,7 +133,7 @@ export interface DoctorRelationships {
   failed?: string;
 }
 
-const NO_RELATIONSHIP_CHECK: DoctorRelationships = { checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, byCode: {}, unchecked: 0, uncheckedFiles: [] };
+const NO_RELATIONSHIP_CHECK: DoctorRelationships = { checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, repairable: 0, byCode: {}, unchecked: 0, uncheckedFiles: [] };
 
 /** Plain words per code, for the `fix-relationships` step. */
 const RELATIONSHIP_REASONS: Array<[RelationshipIssueCode, string]> = [
@@ -222,7 +228,8 @@ function relationshipSummary(ctx: CliContext, semanticDirExists: boolean): Docto
     const project = checkProjectRelationships(ctx);
     const { error, warning, info, byCode } = countFindings(project.findings);
     return {
-      checked: true, mode: project.mode, stored: project.checked.relationships, errors: error, warnings: warning, info, byCode,
+      checked: true, mode: project.mode, stored: project.checked.relationships, errors: error, warnings: warning, info,
+      repairable: repairableNotes(project.findings), byCode,
       unchecked: project.unchecked.length,
       uncheckedFiles: project.unchecked,
     };
@@ -315,22 +322,27 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
     steps.push({
       id: 'migrate-v5',
       title: 'Migrate older domain files',
-      why: `${r.erd.domainFormatIssues.length} domain file(s) use an older format; run "ERD Studio: Migrate to v5" in VS Code before changing them.`,
+      why: `${r.erd.domainFormatIssues.length} domain file(s) use an older format; run "ERD Studio: Migrate Domains to Central Model Store" in VS Code before changing them.`,
       command: null,
     });
   }
   const problems = r.relationships.errors + r.relationships.warnings;
-  if (problems > 0) {
+  const repairable = r.relationships.repairable;
+  if (problems + repairable > 0) {
     const reasons = RELATIONSHIP_REASONS
       .map(([code, words]) => [r.relationships.byCode[code] ?? 0, words] as const)
       .filter(([n]) => n > 0)
       .map(([n, words]) => `${n} ${words}`);
+    if (repairable > 0) reasons.push(`${repairable} that Repair Relationships… can tidy up on its own (saved the wrong way round, or an unneeded copy in a diagram file)`);
+    const title = problems > 0
+      ? `Fix ${problems === 1 ? '1 relationship problem' : `${problems} relationship problems`}`
+      : `Tidy up ${repairable === 1 ? '1 relationship' : `${repairable} relationships`}`;
     steps.push({
       id: 'fix-relationships',
-      title: `Fix ${problems === 1 ? '1 relationship problem' : `${problems} relationship problems`}`,
+      title,
       why: `${reasons.length > 0 ? `${reasons.join('; ')}. ` : ''}`
         + 'Run `erd-studio check` for the list with files and lines. In VS Code, "ERD Studio: Repair Relationships…" '
-        + 'fixes most of them, showing every change before it writes anything.',
+        + 'fixes the clear-cut ones, showing every change before it writes anything, and lists the rest with their files.',
       command: null,
     });
   }

@@ -1,11 +1,12 @@
 /**
  * ERD Studio: Repair Relationships… — the command (issue #133, R10).
  *
- * The dialogs and the writes around the engine: refuse unsaved files before
- * asking anything, one QuickPick per decision (Esc cancels everything), a
- * modal preview naming every file, all-or-nothing disk writes, and a read-back
- * check that puts every file back when the result is not exactly what was
- * planned. An entry the reader could not read is opened at its line.
+ * The dialogs and the writes around the engine: no questions — refuse unsaved
+ * files before the preview, one modal preview naming every file and every
+ * relationship left for the user (one confirm button; Cancel writes
+ * nothing), all-or-nothing disk writes, and a read-back check that puts every
+ * file back when the result is not exactly what was planned. What is left is
+ * listed with Open File, which lands on the entry's line.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -202,7 +203,7 @@ describe('Repair Relationships… — automatic fixes', () => {
     const first = f.run();
     await new Promise((r) => setTimeout(r, 0));
     await f.run();
-    expect(texts(info)).toContain('Repair Relationships is already running — answer or cancel its dialog first.');
+    expect(texts(info)).toContain('Repair Relationships is already running — confirm or cancel its preview first.');
     release(undefined);
     await first;
     expect(f.read('logical-models/dim_customer.yml')).toBe(DIM);
@@ -269,20 +270,17 @@ describe('Repair Relationships… — automatic fixes', () => {
     expect(f.read('logical-models/dim_customer.yml')).toBe(DIM_ONE_SIDED);
   });
 
-  it('refuses before the preview when a file the answers decided to write gained unsaved edits meanwhile', async () => {
+  it('refuses before the preview when the file a relationship turned round is written to has unsaved edits', async () => {
     const fctWithKey = FCT.replace('    dataType: string', '    dataType: string\n    isForeignKey: true');
     fs.writeFileSync(f.at('logical-models/fct_order.yml'), fctWithKey);
+    // The 1.6.7 shape: stored in the dimension's file, turned round into fct_order.yml, which holds no copy today.
     fs.writeFileSync(f.at('logical-models/dim_customer.yml'),
       `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: many-to-one\n`);
     const info = acceptModal();
     const error = vi.spyOn(vscode.window, 'showErrorMessage');
-    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ id: string }>) => {
-      // While the question is open, fct_order.yml — where the swap stores it — is edited and left unsaved.
-      const doc = createMockTextDocument(f.at('logical-models/fct_order.yml'), fctWithKey, { persist: true });
-      doc._setText(`${fctWithKey}# unsaved\n`);
-      vscode.workspace.textDocuments.push(doc as never);
-      return items.find((i) => i.id === 'swap');
-    }) as never);
+    const doc = createMockTextDocument(f.at('logical-models/fct_order.yml'), fctWithKey, { persist: true });
+    doc._setText(`${fctWithKey}# unsaved\n`);
+    vscode.workspace.textDocuments.push(doc as never);
 
     await f.run();
 
@@ -293,7 +291,7 @@ describe('Repair Relationships… — automatic fixes', () => {
     expect(f.read('logical-models/fct_order.yml')).toBe(fctWithKey);
   });
 
-  it('names a file it cannot edit in place, changing nothing — before any question, not as an error', async () => {
+  it('names a file it cannot edit in place, changing nothing — listed, not an error', async () => {
     fs.writeFileSync(f.at('logical-models/dim_customer.yml'),
       `${DIM}relationships: [{ fromColumn: customer_key, toModel: fct_order, toColumn: customer_key, cardinality: one-to-many }]\n`);
     acceptModal();
@@ -301,51 +299,83 @@ describe('Repair Relationships… — automatic fixes', () => {
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
     const warn = vi.spyOn(vscode.window, 'showWarningMessage');
     await f.run();
-    // Found before any question and reported as left, by name — never an
-    // error that throws away every other fix of the run (#133 review).
+    // Reported as left, by name — never an error that throws away every
+    // other fix of the run (#133 review).
     expect(texts(error)).toEqual([]);
     expect(texts(warn)).toEqual([]);
     expect(texts(info)).toEqual([
-      'Repair Relationships: nothing it can change here. fct_order.customer_key → dim_customer.customer_key: ' +
+      'Repair Relationships: nothing it can fix on its own. 1 relationship needs your attention and was left as it was: ' +
+      'fct_order.customer_key → dim_customer.customer_key: ' +
       'logical-models/dim_customer.yml: "relationships:" is not a list with one "- " entry per line — left as it is; change it by hand.',
     ]);
+    expect(info.mock.calls[0].slice(1)).toEqual(['Open File']);
     expect(f.read('logical-models/fct_order.yml')).toBe(FCT);
   });
 });
 
-describe('Repair Relationships… — decisions', () => {
+describe('Repair Relationships… — what needs a decision is listed, never asked', () => {
+  const FCT_WITH_COPY = `${FCT}relationships:\n  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n`;
   beforeEach(() => {
-    f = fixture({
-      'logical-models/dim_customer.yml': DIM_ONE_SIDED,
-      'logical-models/fct_order.yml': `${FCT}relationships:\n  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
-    });
+    // The dimension's one-sided copy says "buyer"; the fact's does not: they disagree.
+    f = fixture({ 'logical-models/dim_customer.yml': DIM_ONE_SIDED, 'logical-models/fct_order.yml': FCT_WITH_COPY });
   });
 
-  it('asks one QuickPick per conflict, titled with its position and the relationship', async () => {
-    acceptModal();
-    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string }>) =>
-      items.find((i) => i.label.includes('"buyer"'))) as never);
+  it('asks no question, writes nothing, and says what needs attention with Open File at the entry', async () => {
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) =>
+      (args.includes('Open File') ? 'Open File' : undefined)) as never);
+    const open = vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({} as never);
+    const show = vi.spyOn(vscode.window, 'showTextDocument').mockResolvedValue(undefined as never);
 
     await f.run();
 
-    expect(pick).toHaveBeenCalledTimes(1);
-    const options = pick.mock.calls[0][1] as { title: string; placeHolder: string };
-    expect(options.title).toBe('Repair Relationships (1 of 1): fct_order.customer_key → dim_customer.customer_key');
-    expect(options.placeHolder).toContain('Esc cancels everything');
-    expect(f.read('logical-models/dim_customer.yml')).toBe(DIM);
-    expect(f.read('logical-models/fct_order.yml')).toContain('    cardinality: many-to-one\n    role: buyer\n');
-  });
-
-  it('Esc cancels everything', async () => {
-    const info = acceptModal();
-    vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue(undefined as never);
-    const before = f.read('logical-models/fct_order.yml');
-
-    await f.run();
-
-    expect(texts(info)).toEqual(['Repair Relationships: cancelled — nothing was changed.']);
+    expect(pick).not.toHaveBeenCalled();
+    expect(info.mock.calls.some((c) => (c[1] as { modal?: boolean } | undefined)?.modal)).toBe(false);
+    expect(texts(info)).toEqual([expect.stringMatching(
+      /^Repair Relationships: nothing it can fix on its own\. 1 relationship needs your attention and was left as it was: fct_order\.customer_key → dim_customer\.customer_key: its copies disagree/,
+    )]);
     expect(f.read('logical-models/dim_customer.yml')).toBe(DIM_ONE_SIDED);
+    expect(f.read('logical-models/fct_order.yml')).toBe(FCT_WITH_COPY);
+    expect((open.mock.calls[0][0] as { fsPath: string }).fsPath).toBe(f.at('logical-models/dim_customer.yml'));
+    const selection = (show.mock.calls[0][1] as { selection: { start: { line: number } } }).selection;
+    expect(selection.start.line).toBe(6);
+  });
+
+  it('lists it in the preview beside the automatic fixes; Open File… there writes nothing and opens the file', async () => {
+    fs.writeFileSync(f.at('logical-models/dim_date.yml'), 'name: dim_date\ncolumns:\n  - name: date_key\n    dataType: date\n    isPrimaryKey: true\n');
+    fs.appendFileSync(f.at('logical-models/fct_order.yml'),
+      '  - fromColumn: customer_key\n    toModel: DIM_DATE\n    toColumn: date_key\n    cardinality: many-to-one\n');
+    const withRespell = f.read('logical-models/fct_order.yml');
+    const calls: Array<{ message: string; detail?: string; buttons: unknown[] }> = [];
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) => {
+      const options = args[1] as { modal?: boolean; detail?: string } | undefined;
+      const modal = !!(options && typeof options === 'object' && options.modal);
+      calls.push({ message: String(args[0]), detail: modal ? options!.detail : undefined, buttons: args.slice(modal ? 2 : 1) });
+      return modal ? 'Open File…' : undefined;
+    }) as never);
+    vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({} as never);
+    const show = vi.spyOn(vscode.window, 'showTextDocument').mockResolvedValue(undefined as never);
+
+    await f.run();
+
+    expect(calls[0].message).toBe('Repair Relationships: change 1 file?');
+    expect(calls[0].buttons).toEqual(['Open File…', 'Repair Relationships']);
+    expect(calls[0].detail).toContain('changes fct_order.customer_key → DIM_DATE.date_key to fct_order.customer_key → dim_date.date_key');
+    expect(calls[0].detail).toContain('Needs your attention — not changed by this repair:\n• fct_order.customer_key → dim_customer.customer_key: its copies disagree');
+    // Open File… instead of confirming: nothing is written, and the one listed item's file opens.
+    expect(f.read('logical-models/fct_order.yml')).toBe(withRespell);
+    expect(show).toHaveBeenCalledTimes(1);
+  });
+
+  it('Cancel writes nothing', async () => {
+    fs.appendFileSync(f.at('logical-models/fct_order.yml'),
+      '  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: Customer_Key\n    cardinality: many-to-many\n');
+    const before = f.read('logical-models/fct_order.yml');
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await f.run();
+    expect(info.mock.calls.some((c) => (c[1] as { modal?: boolean } | undefined)?.modal)).toBe(true);
     expect(f.read('logical-models/fct_order.yml')).toBe(before);
+    expect(f.read('logical-models/dim_customer.yml')).toBe(DIM_ONE_SIDED);
   });
 });
 
@@ -361,7 +391,7 @@ describe('Repair Relationships… — entries that could not be read', () => {
 
     await f.run();
 
-    expect(texts(info)[0]).toContain('nothing to repair');
+    expect(texts(info)[0]).toContain('nothing it can fix on its own');
     expect(texts(info)[0]).toContain('1 relationship entry could not be read and is left untouched');
     expect(texts(info)[0]).toContain('logical-models/fct_order.yml:6');
     expect((open.mock.calls[0][0] as { fsPath: string }).fsPath).toBe(f.at('logical-models/fct_order.yml'));
@@ -384,7 +414,7 @@ describe('Repair Relationships… — the closing message (#133 review 8)', () =
     void f.run();
     await new Promise((r) => setTimeout(r, 0));
     expect(texts(info).some((t) => t.includes('already running'))).toBe(false);
-    expect(texts(info).some((t) => t.includes('nothing to repair'))).toBe(true);
+    expect(texts(info).some((t) => t.includes('nothing it can fix on its own'))).toBe(true);
   });
 
   it('names an unreadable entry at its line after the repair moved the entries above it', async () => {
@@ -429,7 +459,7 @@ describe('Repair Relationships… — problems it cannot reach are never an all-
     await f.run();
     expect(texts(info)).toHaveLength(1);
     expect(texts(info)[0]).not.toContain('every relationship is stored once');
-    expect(texts(info)[0]).toMatch(/^Repair Relationships: nothing it can change here\. gold\/legacy\.json has 1 relationship problem but is still in the older format/);
+    expect(texts(info)[0]).toMatch(/^Repair Relationships: nothing it can fix on its own\. Not changed: gold\/legacy\.json has 1 relationship problem but is still in the older format/);
     expect(texts(info)[0]).toContain('Migrate Domains to Central Model Store');
   });
 
@@ -437,7 +467,7 @@ describe('Repair Relationships… — problems it cannot reach are never an all-
     f = fixture({ 'logical-models/dim_customer.yml': DIM, 'gold/broken.json': '{ "nope' });
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
     await f.run();
-    expect(texts(info)[0]).toMatch(/nothing it can change here\. gold\/broken\.json was not checked: it could not be read/);
+    expect(texts(info)[0]).toMatch(/nothing it can fix on its own\. Not changed: gold\/broken\.json was not checked: it could not be read/);
   });
 });
 
@@ -451,7 +481,7 @@ describe('Repair Relationships… — a model file it could not read is never an
     await f.run();
     expect(texts(info)).toHaveLength(1);
     expect(texts(info)[0]).not.toContain('every relationship is stored once');
-    expect(texts(info)[0]).toMatch(/^Repair Relationships: nothing it can change here\. logical-models\/fct_order\.yml was not checked: it has a YAML error on line \d+/);
+    expect(texts(info)[0]).toMatch(/^Repair Relationships: nothing it can fix on its own\. Not changed: logical-models\/fct_order\.yml was not checked: it has a YAML error on line \d+/);
   });
 });
 
@@ -471,11 +501,13 @@ describe('Repair Relationships… — relationships it must leave for the user a
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
     await f.run();
     const text = texts(info)[0];
-    expect(text).toMatch(/^Repair Relationships: nothing it can change here\./);
+    expect(text).toMatch(/^Repair Relationships: nothing it can fix on its own\. 4 relationships need your attention/);
     expect(text).not.toContain('every relationship is stored once');
     expect(text).toContain('fct_order.c1 → dim_customer.customer_key');
     expect(text).toContain('fct_order.c3 → dim_customer.customer_key');
-    expect(text).toContain('…and 1 more left as they are.');
+    expect(text).toContain('…and 1 more.');
+    // Every one of them is in the list Show Items… opens.
+    expect(info.mock.calls[0].slice(1)).toEqual(['Show Items…']);
     expect(f.read('logical-models/fct_order.yml')).toBe(fct);
   });
 });

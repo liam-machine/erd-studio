@@ -93,6 +93,18 @@ export function countFindings(findings: readonly RelationshipFinding[]): Severit
   return counts;
 }
 
+/**
+ * Notes (info findings) Repair Relationships… settles on its own: a
+ * model-library record in the 1.6.7 shape (REL006 `fix: 'rehome'`) and a
+ * diagram file's copy that says what the model library says (REL009
+ * `fix: 'remove-domain-copy'`). Not problems, but worth the Repair hint —
+ * never "no problems" with nothing to do.
+ */
+export function repairableNotes(findings: readonly RelationshipFinding[]): number {
+  return findings.filter((f) => f.severity === 'info'
+    && ((f.code === 'REL006' && f.fix === 'rehome') || (f.code === 'REL009' && f.fix === 'remove-domain-copy'))).length;
+}
+
 /** layers.json, when it could not be used: the domain files in layer folders it names may have been skipped. */
 function layersUnchecked(src: RelationshipCheckSources): UncheckedFile[] {
   const error = src.layerService?.getLoadError();

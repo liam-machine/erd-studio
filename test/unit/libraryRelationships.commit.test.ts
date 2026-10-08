@@ -12,13 +12,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { countAffectedRelationships } from '../../src/types/relationshipIssues';
 import { canonicalRelationship, checkRelationships, linkKey, parseLogicalModelText, type RelationshipEnds } from '@erd-studio/core';
 
 import {
   RelationshipCommitError,
-  describeRepairOffer,
+  describeOtherDiagramCopies,
   findingsForDomain,
-  findingsNeedingRepair,
   planRelationshipCommit,
   removeLibraryRelationships,
   renameColumnInRelationships,
@@ -193,6 +193,86 @@ describe('planRelationshipCommit — library mode', () => {
       ],
     });
     expect(result.otherDomainCopies).toEqual(['silver/sales.json']);
+    expect(result.ignoredDomainCopies).toBeUndefined();
+  });
+
+  const OTHERS = [
+    { label: 'silver/sales.json', models: ['fct_order', 'dim_customer'], relationships: [{ ...REVERSED, cardinality: 'one-to-many' as const }] },
+    { label: 'silver/finance.json', models: ['fct_order', 'dim_customer'], relationships: [{ ...EDGE, cardinality: 'one-to-one' as const }] },
+    { label: 'gold/reporting.json', models: ['fct_order', 'dim_customer'], relationships: [] },
+  ];
+
+  it.each([
+    ['add', { kind: 'add', rel: { ...EDGE, cardinality: 'many-to-one' } }, [FCT(), DIM()]],
+    ['update (⇄ / context menu)', { kind: 'update', stored: EDGE, cardinality: 'many-to-one' }, [{ ...FCT(), relationships: [{ ...ENTRY, cardinality: 'one-to-one' as const }] }, DIM()]],
+    ['edit', { kind: 'edit', stored: EDGE, next: { ...EDGE, cardinality: 'many-to-one' } }, [{ ...FCT(), relationships: [{ ...ENTRY, role: 'r' }] }, DIM()]],
+  ] as const)('%s: names every other diagram file keeping its own copy of the link now in the library, and whether it differs', (_label, op, models) => {
+    const result = planRelationshipCommit({
+      mode: 'library', op: op as RelationshipCommitOp, endpointModels: structuredClone(models) as SemanticModel[], domainRelationships: [], otherDomains: OTHERS,
+    });
+    expect(result.written?.where).toBe('library');
+    expect(result.ignoredDomainCopies).toEqual([
+      { label: 'silver/finance.json', differs: true },
+      { label: 'silver/sales.json', differs: false },
+    ]);
+    expect(result.otherDomainCopies).toBeUndefined();
+  });
+
+  it('an edit that moves the link to other ends names both: the old link still drawn there, the new one ignored', () => {
+    const fct = { ...FCT(), relationships: [{ ...ENTRY }] };
+    const toShip: Relationship = { fromModel: 'fct_order', fromColumn: 'ship_date_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const result = planRelationshipCommit({
+      mode: 'library', op: { kind: 'edit', stored: EDGE, next: toShip }, endpointModels: [fct, DIM()], domainRelationships: [],
+      otherDomains: [
+        { label: 'silver/sales.json', models: ['fct_order', 'dim_customer'], relationships: [{ ...EDGE, cardinality: 'many-to-one' }] },
+        { label: 'silver/ship.json', models: ['fct_order', 'dim_customer'], relationships: [toShip] },
+      ],
+    });
+    expect(result.otherDomainCopies).toEqual(['silver/sales.json']);
+    expect(result.ignoredDomainCopies).toEqual([{ label: 'silver/ship.json', differs: false }]);
+  });
+
+  it('domain mode names nothing: each diagram owns its copies', () => {
+    const result = planRelationshipCommit({
+      mode: 'domain', op: { kind: 'add', rel: { ...EDGE, cardinality: 'many-to-one' } }, endpointModels: [FCT(), DIM()], domainRelationships: [], otherDomains: OTHERS,
+    });
+    expect(result.ignoredDomainCopies).toBeUndefined();
+    expect(result.otherDomainCopies).toBeUndefined();
+  });
+});
+
+describe('describeOtherDiagramCopies — one notice for other diagram files\' own copies (#133)', () => {
+  it('says nothing when there is nothing to say', () => {
+    expect(describeOtherDiagramCopies({})).toBeNull();
+    expect(describeOtherDiagramCopies({ ignoredDomainCopies: [], otherDomainCopies: [] })).toBeNull();
+  });
+
+  it('identical copies: ignored, and Repair removes them', () => {
+    expect(describeOtherDiagramCopies({ ignoredDomainCopies: [{ label: 'silver/a.json', differs: false }] })).toBe(
+      'silver/a.json still keeps its own copy of this relationship, which is ignored because the model library defines it — ' +
+      'Repair Relationships… removes identical copies.',
+    );
+    expect(describeOtherDiagramCopies({ ignoredDomainCopies: [{ label: 'a.json', differs: false }, { label: 'b.json', differs: false }, { label: 'c.json', differs: false }] }))
+      .toMatch(/^a\.json, b\.json and c\.json still keep their own copy of this relationship, which is ignored/);
+  });
+
+  it('a copy that says something else is named as such, never promised to Repair', () => {
+    expect(describeOtherDiagramCopies({ ignoredDomainCopies: [{ label: 'silver/a.json', differs: true }] })).toBe(
+      'silver/a.json still keeps its own copy of this relationship, which is ignored because the model library defines it — ' +
+      'it says something different, so delete it there if it is wrong.',
+    );
+    expect(describeOtherDiagramCopies({ ignoredDomainCopies: [{ label: 'a.json', differs: false }, { label: 'b.json', differs: true }] })).toBe(
+      'a.json and b.json still keep their own copy of this relationship, which is ignored because the model library defines it — ' +
+      'the one in b.json says something different, so delete it there if it is wrong; Repair Relationships… removes the identical ones.',
+    );
+  });
+
+  it('a removed link still drawn from other diagrams\' own copies, in the same notice', () => {
+    expect(describeOtherDiagramCopies({ otherDomainCopies: ['silver/a.json'], ignoredDomainCopies: [{ label: 'silver/b.json', differs: false }] })).toBe(
+      'silver/b.json still keeps its own copy of this relationship, which is ignored because the model library defines it — ' +
+      'Repair Relationships… removes identical copies. silver/a.json still keeps its own copy of the relationship taken out here, ' +
+      'so it is still drawn there — delete it there too if it should go.',
+    );
   });
 });
 
@@ -256,15 +336,12 @@ describe('findings the canvas shows', () => {
     { model: { name: 'dim_other', columns: [col('id')] }, file: 'lm/dim_other.yml' },
   ];
 
-  it('keeps what concerns the domain and names why a repair is offered', () => {
+  it('keeps what concerns the domain', () => {
     const findings = checkRelationships({ libraryModels: libraryModels(), domains: [] });
     const mine = findingsForDomain(findings, { filePath: 'silver/orders.json', models: ['fct_order', 'dim_customer'], modelFiles: ['lm/fct_order.yml', 'lm/dim_customer.yml'] });
     expect(mine.map((f) => f.code).sort()).toEqual(['REL002', 'REL003']);
     const elsewhere = findingsForDomain(findings, { filePath: 'silver/other.json', models: ['dim_other', 'dim_customer'], modelFiles: [] });
     expect(elsewhere).toEqual([]);
-    expect(findingsNeedingRepair(findings).map((f) => f.code).sort()).toEqual(['REL002', 'REL003']);
-    expect(describeRepairOffer(findings)).toBe('2 relationships need attention (1 saved in the file of the model it points at; ' +
-      '1 pointing at a model that is missing (from the model library, or from the diagram that stores it)). Review the fixes with Repair Relationships…? Nothing changes until you confirm.');
     expect(toDisplayRelationshipIssues(mine).map((i) => Object.keys(i).sort())).toEqual([
       ['code', 'link', 'message', 'severity'], ['code', 'link', 'message', 'severity'],
     ]);
@@ -294,13 +371,8 @@ describe('findings the canvas shows', () => {
       ],
       domains: [],
     });
-    expect(findingsNeedingRepair(findings).map((f) => f.code)).toEqual(['REL004', 'REL004']);
-    expect(describeRepairOffer(findings)).toBe('1 relationship needs attention (1 pointing at a column its model does not have). ' +
-      'Review the fixes with Repair Relationships…? Nothing changes until you confirm.');
-  });
-
-  it('offers nothing for info-only findings', () => {
-    expect(describeRepairOffer([{ code: 'REL006', severity: 'info', message: 'x', files: [] }])).toBeNull();
+    expect(findings.map((f) => f.code)).toEqual(['REL004', 'REL004']);
+    expect(countAffectedRelationships(findings)).toBe(1);
   });
 });
 
@@ -692,9 +764,25 @@ describe('planRelationshipCommit — copies compared as the readers read them (#
     expect(result.domainRelationships).toEqual([]);
   });
 
-  it('a domain-file copy whose role really differs is still refused', () => {
-    expect(() => plan('library', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [withRole(), DIM()],
-      [{ ...EDGE, cardinality: 'many-to-one', role: 'bill to' }])).toThrow(/copies disagree/);
+  it('library mode: the open diagram\'s own copy that really differs is ignored for drawing, so the change goes ahead and takes it out', () => {
+    const fct = withRole();
+    const result = plan('library', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [fct, DIM()],
+      [{ ...EDGE, cardinality: 'many-to-one', role: 'bill to' }]);
+    // The library's copy — the one every diagram draws — is what changes; its role is kept.
+    expect(fct.relationships).toEqual([{ ...ENTRY, cardinality: 'one-to-one', role: 'ship to' }]);
+    expect(result.domainRelationships).toEqual([]);
+    expect(result.domainChanged).toBe(true);
+  });
+
+  it('library mode: two model library copies that disagree are still refused (REL001)', () => {
+    const dim = { ...DIM(), relationships: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' as const, role: 'bill to' }] };
+    expect(() => plan('library', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [withRole(), dim])).toThrow(/copies disagree/);
+    expect(() => plan('library', { kind: 'edit', stored: EDGE, next: { ...EDGE, cardinality: 'one-to-one' } }, [withRole(), dim])).toThrow(/copies disagree/);
+  });
+
+  it('library mode with no library copy: two of the diagram\'s own copies that disagree are still refused', () => {
+    expect(() => plan('library', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [FCT(), DIM()],
+      [{ ...EDGE, cardinality: 'many-to-one' }, { ...EDGE, cardinality: 'many-to-one', role: 'bill to' }])).toThrow(/copies disagree/);
   });
 
   it('domain mode: two copies that read the same (one without a cardinality) are not refused', () => {
@@ -719,9 +807,8 @@ describe('planRelationshipCommit — copies that disagree in an older-format dia
     }
     expect(message).toBe(
       'This relationship is stored more than once and the copies disagree (entry 1 of legacy.json and entry 2 of legacy.json), ' +
-      'so changing it here would throw away what the other copies say. This diagram is in the older format: run ' +
-      '"ERD Studio: Migrate Domains to Central Model Store", then "Repair Relationships…" to choose which one is right — ' +
-      'or remove the extra entry from legacy.json by hand.',
+      'so changing it here would throw away what the other copies say. ' +
+      'This diagram is in the older format: remove the copy that is wrong from legacy.json by hand, then try again.',
     );
   });
 });

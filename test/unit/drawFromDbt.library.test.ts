@@ -140,6 +140,21 @@ describe('Draw from dbt — a model file the save would refuse (#133 review)', (
     expect(written).not.toHaveBeenCalled();
   });
 
+  it('names the existing model files it saved a relationship into, so open diagrams showing them are refreshed (#133)', async () => {
+    models.saveModel({ name: 'dim_customer', columns: [col('customer_key', { isPrimaryKey: true }), col('region_key')] });
+    state.draft = regionDraft();
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
+    const written = vi.fn();
+
+    await drawFromDbt({ ...deps(), onWritten: written });
+
+    expect(models.getModel('dim_customer')?.relationships).toEqual([
+      expect.objectContaining({ fromColumn: 'region_key', toModel: 'dim_region', toColumn: 'region_key' }),
+    ]);
+    expect(written).toHaveBeenCalledTimes(1);
+    expect(written.mock.calls[0][0]).toMatchObject({ modelNames: ['dim_region'], changedModelNames: ['dim_customer'] });
+  });
+
   it('puts back everything it wrote when a write fails after the diagram file landed', async () => {
     models.saveModel({ name: 'dim_customer', columns: [col('customer_key', { isPrimaryKey: true }), col('region_key')] });
     const file = models.modelPath('dim_customer');

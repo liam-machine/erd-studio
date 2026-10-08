@@ -153,14 +153,23 @@ import {
 } from '../services/dbtDraft';
 import { pickDraftScope } from './dbtDraftPicker';
 import { readDomainRelationships } from '../commands/moveRelationshipsToLibrary';
-import { linksTheMoveStores, readRepairSnapshot, scanDomainFiles, toCheckDomains } from '../services/relationshipRepair';
+import {
+  describeRepairOffer,
+  linksTheMoveStores,
+  mayHaveAutomaticRepair,
+  planRelationshipRepair,
+  readRepairSnapshot,
+  scanDomainFiles,
+  toCheckDomains,
+  type RepairSnapshot,
+} from '../services/relationshipRepair';
 import { yamlEntryExtras } from '../services/relationshipEntryExtras';
 import {
   RelationshipCommitError,
-  describeRepairOffer,
   findingsForDomain,
   mergeDomainRelationships,
   planRelationshipCommit,
+  describeOtherDiagramCopies,
   removeColumnRelationships,
   removeRelationshipsToModels,
   describeRemovedRelationships,
@@ -259,6 +268,15 @@ export const REPAIR_RELATIONSHIPS_COMMAND = 'erdStudio.repairRelationships';
 export const LIBRARY_MODE_ENDED_MESSAGE =
   'The model library no longer holds any relationship, but some diagram files still hold their own, so new relationships ' +
   'will now be saved in each diagram\'s file. To keep them in the model library, move the diagram files\' relationships there.';
+
+/**
+ * Shown when an edit took the last relationship out of the diagram files of a
+ * project that kept them there, so new ones now go to the model library (#133).
+ */
+export const LIBRARY_MODE_STARTED_MESSAGE =
+  'No diagram file holds a relationship any more, so new relationships will now be saved with their models in the model ' +
+  'library (in the file of the model that holds the foreign key), and every diagram showing both models draws them. ' +
+  'Undo puts the relationship back and returns to saving them in each diagram\'s file.';
 
 /** Shown when an undo would rewind a Repair / Move that saved files directly (#133 review 8). */
 export const UNDO_BARRIER_MESSAGE =
@@ -1000,7 +1018,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // The initial load is the one refresh path allowed to persist
             // auto-computed positions for models that lack them.
             await this.sendDomainData(document, webviewPanel.webview, panelKey, { persistPositions: true });
-            void this.maybeOfferRelationshipMove();
+            // After the canvas has its payload: the offer may read the whole
+            // project, and the extension host must deliver the diagram first.
+            setTimeout(() => { void this.maybeOfferRelationshipMove(); }, 0);
             break;
           case 'requestReload':
             // Webview detected it was orphaned (e.g. extension update before
@@ -1771,6 +1791,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Whether this project keeps relationships in the model library (#126) —
    * see `usesLibraryRelationships` for the opt-in rule.
    */
+  /** Whether the project keeps relationships in the model library now, or undefined when that cannot be read. */
+  private projectKeepsRelationshipsInLibrary(): boolean | undefined {
+    try {
+      this.logicalModelService.invalidateCache();
+      const inputs = this.logicalModelService.relationshipModeInputs();
+      return this.relationshipsInLibrary(inputs.models, inputs.unreadableWithRelationships);
+    } catch (err) {
+      console.warn('[SemanticEditorProvider] Relationship mode check failed:', err);
+      return undefined;
+    }
+  }
+
   private relationshipsInLibrary(models: readonly SemanticModel[], unreadableWithRelationships: number): boolean {
     // Library evidence already in hand settles it: no need to read every
     // domain file for a count that cannot change the answer.
@@ -1863,15 +1895,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * - a project that keeps relationships per diagram, with at least one
    *   shared by two diagrams, is offered the move to the model library
    *   (#126);
-   * - otherwise, when the project checks find relationships stored twice,
-   *   saved on their one side, pointing at a missing model or column, or not
-   *   readable (REL001 / REL002 / REL003 / REL004 / REL008), "Repair
-   *   Relationships…" is offered (#133) — with the same lookup the command
-   *   uses (`relationshipFindings`), so the two never disagree (D11).
+   * - otherwise, when Repair Relationships… has something to fix on its own
+   *   (a relationship saved on its one side or the wrong way round, stored
+   *   twice, or spelled in another case), it is offered (#133) — from the
+   *   very plan the command would make, so the two never disagree (D11). A
+   *   problem only the user can settle is not nagged about: the canvas shows
+   *   it (badges, banner) and `erd-studio check` lists it.
    */
   private async maybeOfferRelationshipMove(): Promise<void> {
     if (this.relationshipMoveOffered) return;
     this.relationshipMoveOffered = true;
+    let snapshot: RepairSnapshot | undefined;
     try {
       const library = this.logicalModelService.relationshipModeInputs();
       if (!this.relationshipsInLibrary(library.models, library.unreadableWithRelationships)
@@ -1881,24 +1915,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // where it is (a stub-only end, no readable model file, an entry's
         // own keys) is no reason to offer it — the offer would come back
         // every session for a move that can never act (#133).
-        const movable = sharedKeys.size > 0
-          ? linksTheMoveStores(readRepairSnapshot({
-            workspaceRoot: this.workspaceRoot,
-            semanticDir: this.semanticDirName(),
-            domainService: this.domainService,
-            logicalModelService: this.logicalModelService,
-          }))
-          : new Set<string>();
+        snapshot = sharedKeys.size > 0 ? this.offerSnapshot() : undefined;
+        const movable = snapshot ? linksTheMoveStores(snapshot) : new Set<string>();
         const shared = [...sharedKeys].filter((key) => movable.has(key)).length;
         if (shared > 0) {
           await this.offerRelationshipMove(shared);
           return;
         }
       }
-      await this.maybeOfferRepair();
+      await this.maybeOfferRepair(snapshot);
     } catch (err) {
       console.warn('[SemanticEditorProvider] Relationship move offer skipped:', err);
     }
+  }
+
+  /** The project as the offers read it: like the commands, but keeping the model cache the canvas just filled. */
+  private offerSnapshot(): RepairSnapshot {
+    return readRepairSnapshot({
+      workspaceRoot: this.workspaceRoot,
+      semanticDir: this.semanticDirName(),
+      domainService: this.domainService,
+      logicalModelService: this.logicalModelService,
+      keepCache: true,
+    });
   }
 
   /** The #126 offer: move a per-diagram project's relationships into the model library. */
@@ -1932,15 +1971,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * Offer "Repair Relationships…" when the project checks find something it
-   * can help with (REL001 / REL002 / REL003 / REL004 / REL008). Writes
-   * nothing — the command shows every change and asks first. Its own
-   * "Don't Ask Again" (RELATIONSHIP_REHOME_DECLINED_KEY, kept from #133's
-   * first offer); the `relMove*` usage features are reused.
+   * Offer "Repair Relationships…" when it has an automatic fix to make — the
+   * plan the command itself would make, so an offer is never followed by
+   * "nothing to repair". Writes nothing — the command shows every change and
+   * asks first. Its own "Don't Ask Again" (RELATIONSHIP_REHOME_DECLINED_KEY,
+   * kept from #133's first offer); the `relMove*` usage features are reused.
    */
-  private async maybeOfferRepair(): Promise<void> {
+  private async maybeOfferRepair(snapshot?: RepairSnapshot): Promise<void> {
     if (this.context.workspaceState?.get<boolean>(RELATIONSHIP_REHOME_DECLINED_KEY)) return;
-    const offer = describeRepairOffer(this.relationshipFindings().findings);
+    // The findings every payload has already computed (and cached) first: only
+    // a project with something Repair might settle on its own is read and
+    // planned in full — never a clean one, on every first open of a session.
+    if (!snapshot && !mayHaveAutomaticRepair(this.relationshipFindings().findings)) return;
+    const offer = describeRepairOffer(planRelationshipRepair(snapshot ?? this.offerSnapshot()));
     if (!offer) return;
     telemetry.feature('relMoveOffered');
     const choice = await vscode.window.showInformationMessage(offer, 'Repair Relationships…', 'Not Now', "Don't Ask Again");
@@ -2344,6 +2387,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     if (verdict === 'nothing') return;
     this.pendingUpdates.set(panelKey, true);
     try {
+      const libraryBefore = this.projectKeepsRelationshipsInLibrary();
       await vscode.commands.executeCommand(command);
       await document.save();
       this.ownWriteTracker.recordWrite(document.uri.fsPath);
@@ -2356,7 +2400,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // applyDomainEdit does after the edit being undone.
       const names = new Set(reverted.map((filePath) => path.basename(filePath).replace(/\.ya?ml$/i, '')));
       this.invalidateRelationshipFindings();
-      await this.refreshDomainsReferencingModels(names, panelKey);
+      // Undoing the removal of the model library's last relationship (or
+      // redoing it) changes where every diagram's relationships come from:
+      // every open diagram is re-sent, as the edit itself did.
+      if (libraryBefore !== undefined && libraryBefore !== this.projectKeepsRelationshipsInLibrary()) {
+        await this.refreshAllOpenDomains(panelKey);
+      } else {
+        await this.refreshDomainsReferencingModels(names, panelKey);
+      }
       this._onDidWriteDomain.fire({ uri: document.uri, modelLibraryChanged: true });
     } finally {
       this.pendingUpdates.delete(panelKey);
@@ -2866,13 +2917,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Called by extension.ts when manifest changes.
    * Stage-aware: panels viewing physical stage get physical data.
    */
-  async refreshAllOpenDomains(): Promise<void> {
+  async refreshAllOpenDomains(exceptPanelKey?: string): Promise<void> {
+    // Called after writes made behind the editor (Repair Relationships…, the
+    // move, a reorganised library): the project findings are read again, never
+    // reused because two writes landed within one file-time tick.
+    this.invalidateRelationshipFindings();
     for (const [panelKey, { document, webview, activeStage }] of Array.from(this.openPanels.entries())) {
       // The snapshot may include a panel that was disposed while an earlier
       // iteration awaited — skip it rather than refreshing a dead webview.
       if (this.disposedWebviews.has(webview) || !this.openPanels.has(panelKey)) {
         continue;
       }
+      // The panel that made an edit has already been refreshed by it.
+      if (exceptPanelKey !== undefined && panelKey === exceptPanelKey) continue;
       try {
         if (activeStage === 'physical') {
           await this.handleSwitchStage(panelKey, document, webview, 'physical');
@@ -2909,7 +2966,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * open domain editor that references any of them is re-sent exactly once.
    */
   async refreshDomainsReferencingModels(modelNames: Iterable<string>, exceptPanelKey?: string): Promise<void> {
-    const names = new Set(modelNames);
+    // Without case: on a case-insensitive file system a domain may list a
+    // model in another case than its file name and still draw its links — a
+    // panel refreshed once too often costs nothing, one left stale misleads.
+    const names = new Set([...modelNames].map((n) => n.toLowerCase()));
     if (names.size === 0) return;
     // A model file changed (on disk, by us or by someone else): the findings
     // are read again once, then shared by every panel re-sent below.
@@ -2931,7 +2991,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // Check if this domain references the changed model. The shared
         // format-agnostic extractor handles v5 name strings, v4/hybrid inline
         // objects and legacy top-level `models` — and tolerates junk entries.
-        const referencesModel = getRawDomainModelNames(parsed).some((name) => names.has(name));
+        const referencesModel = getRawDomainModelNames(parsed).some((name) => names.has(name.toLowerCase()));
 
         if (referencesModel) {
           await this.sendDomainData(document, webview, panelKey);
@@ -3645,12 +3705,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const resolveLibrary = (name: string): SemanticModel | undefined => resolveEndpointModels([name], libraryModels)[0];
         const writable = mode === 'library' ? endpointNames : markKey ? [markKey.model] : [];
         const checked = new Set<string>();
-        // Every model file the commit may write is checked, each once.
+        // Every model file the commit may write must read: one that does not
+        // could hold a copy of the link the plan cannot see. Unsaved changes
+        // matter only in a file the plan really writes (checked once it is
+        // made, below): drawing a fact's line while its dimension's file is
+        // open with an unsaved edit writes only the fact's file.
         for (const name of writable) {
           const realName = resolveLibrary(name)?.name ?? this.logicalModelService.findModelNameIgnoringCase(name);
           if (!realName || checked.has(realName)) continue;
           checked.add(realName);
-          const refusal = this.relationshipWriteRefusal(realName);
+          const refusal = this.logicalModelService.findModelFile(realName) ? this.unreadableModelRefusal(realName) : null;
           if (refusal) {
             fail(refusal);
             return;
@@ -3659,8 +3723,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       // Every commit in library mode: a remove names diagrams still drawing
-      // the link from their own copy, an add / update / edit those whose own
-      // copy now disagrees with what it wrote (#133 review 8).
+      // the link from their own copy, an add / update / edit those keeping a
+      // copy the model library's now overrides (ignored there, REL009) — one
+      // notice either way, never a write to another diagram's file.
       const otherDomains = mode === 'library'
         ? readDomainRelationships(this.domainService, this.workspaceRoot, this.semanticDirName())
           .filter((d) => !samePath(d.filePath, document.uri.fsPath))
@@ -3703,6 +3768,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // Entries the reader could not use keep their slot (and their "entry N").
           if (plan.domainChanged) section.relationships = mergeDomainRelationships(current, wellFormed, plan.domainRelationships);
           if (v5 && plan.changedModels.length > 0) {
+            // A model file the commit rewrites must not be open with unsaved
+            // changes: the edit would replace the text on screen.
+            for (const model of plan.changedModels) {
+              const filePath = this.logicalModelService.findModelFile(model.name);
+              if (filePath && this.isDirtyOnScreen(filePath)) throw new RelationshipCommitError(this.unsavedModelRefusal(filePath));
+            }
             const written = plan.written;
             modelFiles.save = plan.changedModels.map((model) => ({
               model,
@@ -3712,8 +3783,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         },
         { webview, stage: 'logical', modelFiles, errorLabel: `Failed to ${action} ${label}.` },
       );
-      if (success && plan?.otherDomainCopies?.length) this.reportOtherDomainCopies(plan.otherDomainCopies);
-      if (success && plan?.disagreeingDomainCopies?.length) this.reportDisagreeingDomainCopies(plan.disagreeingDomainCopies);
+      if (success && plan) this.reportOtherDiagramCopies(plan);
       // The mode is read from disk (R3): taking the model library's last
       // relationship out while a diagram file still holds one of its own
       // switches where new ones go. That is never left for the next add to
@@ -3721,9 +3791,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (success && mode === 'library') {
         const after = this.logicalModelService.relationshipModeInputs();
         if (!this.relationshipsInLibrary(after.models, after.unreadableWithRelationships)) {
+          // Every diagram now draws its own copies and saves new ones in its
+          // file: each open one is re-sent, not only those showing the models.
+          await this.refreshAllOpenDomains(document.uri.toString());
           void vscode.window.showInformationMessage(LIBRARY_MODE_ENDED_MESSAGE, 'Move Relationships to Model Library').then((choice) => {
             if (choice) void vscode.commands.executeCommand('erdStudio.moveRelationshipsToLibrary');
           });
+        }
+      }
+      // The other way round: taking the last relationship out of the diagram
+      // files of a project that kept them there makes the model library their
+      // home (`usesLibraryRelationships`). Said, and every open diagram re-sent
+      // (its "Saved in this diagram" hint is stale) — never left for the next
+      // line drawn to land somewhere the user did not expect.
+      if (success && v5 && mode === 'domain') {
+        const after = this.logicalModelService.relationshipModeInputs();
+        if (this.relationshipsInLibrary(after.models, after.unreadableWithRelationships)) {
+          await this.refreshAllOpenDomains(document.uri.toString());
+          void vscode.window.showInformationMessage(LIBRARY_MODE_STARTED_MESSAGE);
         }
       }
     } catch (err) {
@@ -3754,17 +3839,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return yamlEntryExtras(text).get(raw) ?? [];
   }
 
-  /**
-   * Why a relationship commit may not write `modelName`'s file, or null: the
-   * file is open with unsaved changes, or exists but cannot be read.
-   */
-  private relationshipWriteRefusal(modelName: string): string | null {
-    const filePath = this.logicalModelService.findModelFile(modelName);
-    if (!filePath) return null;
-    if (this.isDirtyOnScreen(filePath)) return this.unsavedModelRefusal(filePath);
-    return this.unreadableModelRefusal(modelName);
-  }
-
   /** Whether `filePath` is open in an editor with unsaved changes. */
   private isDirtyOnScreen(filePath: string): boolean {
     return vscode.workspace.textDocuments.some((doc) => doc.isDirty && samePath(doc.uri.fsPath, filePath));
@@ -3789,36 +3863,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * After a remove in a library project: other domain files that still draw
-   * the link from their own copy (REL009 leftovers). Non-blocking; offers the
-   * repair that removes them.
+   * After any commit in a library project (add, ⇄, edit, remove): the other
+   * diagram files that keep their own copy of the link, in ONE non-blocking
+   * notice — a commit edits the model library and the open diagram's file,
+   * never another diagram's. A copy of a link now in the model library is
+   * ignored there (every diagram draws the library's — REL009); one that says
+   * something else is named as such, since only the user knows whether it is
+   * wrong. A copy of a link the commit took out of the library draws there
+   * again. Writes nothing; only identical copies are Repair's to remove.
    */
-  private reportOtherDomainCopies(labels: readonly string[]): void {
-    const where = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
-    void Promise.resolve(vscode.window.showInformationMessage(
-      `Still drawn in ${where} from ${labels.length === 1 ? 'its' : 'their'} own copy — Repair Relationships… removes it.`,
-      'Repair Relationships…',
-    )).then(async (choice) => {
+  private reportOtherDiagramCopies(plan: RelationshipCommitPlan): void {
+    const message = describeOtherDiagramCopies(plan);
+    if (!message) return;
+    const offerRepair = (plan.ignoredDomainCopies ?? []).some((c) => !c.differs);
+    const shown = offerRepair
+      ? vscode.window.showInformationMessage(message, 'Repair Relationships…')
+      : vscode.window.showInformationMessage(message);
+    void Promise.resolve(shown).then(async (choice) => {
       if (choice !== 'Repair Relationships…') return;
       await this.runRepairCommand();
     }).catch((err) => console.warn('[SemanticEditorProvider] Other-copies notice failed:', err));
-  }
-
-  /**
-   * After an add / update / edit in a library project: other diagram files
-   * whose own copy of the link now says something else are stored twice and
-   * disagreeing there (REL001). Named, with the command that settles it.
-   */
-  private reportDisagreeingDomainCopies(labels: readonly string[]): void {
-    const where = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
-    void Promise.resolve(vscode.window.showInformationMessage(
-      `${where} ${labels.length === 1 ? 'keeps its' : 'keep their'} own copy of this relationship, which now says something different — ` +
-      'Repair Relationships… lets you choose which one is right.',
-      'Repair Relationships…',
-    )).then(async (choice) => {
-      if (choice !== 'Repair Relationships…') return;
-      await this.runRepairCommand();
-    }).catch((err) => console.warn('[SemanticEditorProvider] Disagreeing-copies notice failed:', err));
   }
 
   /**
@@ -3827,7 +3891,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * diagram file keeping its own copy of a relationship to the old name
    * (a project that keeps relationships per diagram, or a leftover copy) is
    * not rewritten — it now points at something that is gone (REL003 /
-   * REL004 there). Named, with the command that repoints or removes it
+   * REL004 there). Named, with the command that lists it with the file to open
    * (#133 review 8). Writes nothing.
    */
   private reportOtherDiagramReferences(
@@ -3857,7 +3921,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const target = column === undefined ? model : `${model}.${column}`;
     void Promise.resolve(vscode.window.showInformationMessage(
       `${where} ${labels.length === 1 ? 'keeps its' : 'keep their'} own relationship to ${target}, which this ${what} did not change — ` +
-      'Repair Relationships… can point it at the new name or remove it.',
+      'Repair Relationships… lists it, with the file to open.',
       'Repair Relationships…',
     )).then(async (choice) => {
       if (choice !== 'Repair Relationships…') return;

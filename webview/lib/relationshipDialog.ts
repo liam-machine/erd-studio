@@ -43,14 +43,14 @@ export const BRIDGE_HINT =
 export const WHY_HERE_LIBRARY =
   'Relationships live with the model holding the foreign key, so adding a fact never edits its dimensions.';
 export const WHY_HERE_DOMAIN =
-  "This project keeps each diagram's relationships in the diagram's own file. Move Relationships to Model Library… stores them with their models instead.";
+  "This project keeps each diagram's relationships in the diagram's own file. Move Relationships to Model Library stores them with their models instead.";
 /**
  * An older-format (v4, inline-model) diagram keeps its relationships in its
  * own file whatever the project does, and neither the move nor Repair
  * Relationships… writes it: only the migration changes that.
  */
 export const WHY_HERE_OLDER_FORMAT =
-  'This diagram is in the older format, so its relationships live in its own file. Run "ERD Studio: Migrate Domains to Central Model Store" to store them with their models.';
+  'This diagram is in the older format, so its relationships live in its own file. Run "ERD Studio: Migrate Domains to Central Model Store" to bring it up to date.';
 
 /** The sentence at the top of the direction section. */
 export function relationshipSentence(ends: DialogEnds, cardinality: Cardinality): string {

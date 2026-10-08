@@ -61,13 +61,42 @@ describe('checkRelationships — stable codes (#133)', () => {
     expect(summary(library)).toEqual(['REL001:warning']);
   });
 
-  it('REL001 for a domain copy that disagrees with the library; REL009 for one that agrees', () => {
+  it('REL009 (info, never REL001) for a library project\'s domain copy of a library link, saying whether it differs', () => {
     const lib = entry(fctOrder([TO_CUSTOMER]));
     const disagree = checkRelationships({ libraryModels: [lib, entry(dimCustomer())], domains: [domain({ relationships: [own({ cardinality: 'one-to-one' })] })] });
-    expect(summary(disagree)).toEqual(['REL001:error']);
+    expect(summary(disagree)).toEqual(['REL009:info']);
+    expect(disagree[0]).toMatchObject({ fix: 'ignored-domain-copy', files: ['.erd-studio/silver/orders.json', 'logical-models/fct_order.yml'] });
+    expect(disagree[0].message).toMatch(/differs on cardinality \(model library: many-to-one; here: one-to-one\); diagrams draw the model library's copy and ignore this one/);
     const agree = checkRelationships({ libraryModels: [lib, entry(dimCustomer())], domains: [domain({ relationships: [own()] })] });
     expect(summary(agree)).toEqual(['REL009:info']);
     expect(agree[0]).toMatchObject({ fix: 'remove-domain-copy', files: ['.erd-studio/silver/orders.json', 'logical-models/fct_order.yml'] });
+    expect(agree[0].message).toMatch(/so this diagram file's copy is not needed — Repair Relationships… removes it/);
+    // Stored the other way round (a one-to-one) and with another role: both said.
+    const turned = checkRelationships({
+      libraryModels: [entry(fctOrder([rel('customer_key', 'dim_customer', 'customer_key', { cardinality: 'one-to-one' })])), entry(dimCustomer())],
+      domains: [domain({ relationships: [own({ fromModel: 'dim_customer', toModel: 'fct_order', cardinality: 'one-to-one', role: 'buyer' })] })],
+    });
+    expect(summary(turned).filter((c) => c.startsWith('REL009') || c.startsWith('REL001'))).toEqual(['REL009:info']);
+    expect(turned.find((f) => f.code === 'REL009')!.message).toMatch(/differs on direction and role \(model library: one-to-one; here: one-to-one "buyer" dim_customer\.customer_key → fct_order\.customer_key\)/);
+  });
+
+  it('a library project\'s domain file holding two copies of a library link: one REL009 naming both, no REL001', () => {
+    const lib = entry(fctOrder([TO_CUSTOMER]));
+    const findings = checkRelationships({
+      libraryModels: [lib, entry(dimCustomer())], domains: [domain({ relationships: [own(), own({ role: 'buyer' })] })],
+    });
+    expect(summary(findings)).toEqual(['REL009:info']);
+    expect(findings[0].records).toHaveLength(3);
+    expect(findings[0].message).toMatch(/keeps its own 2 copies, which differs on role/);
+  });
+
+  it('REL001 between two model library copies stays an error beside a domain copy (REL009)', () => {
+    const findings = checkRelationships({
+      libraryModels: [entry(fctOrder([TO_CUSTOMER])), entry(dimCustomer([rel('customer_key', 'fct_order', 'customer_key', { cardinality: 'one-to-many', role: 'buyer' })]))],
+      domains: [domain({ relationships: [own()] })],
+    });
+    expect(summary(findings)).toEqual(['REL001:error', 'REL002:warning', 'REL009:info']);
+    expect(findings[0].files).toEqual(['logical-models/fct_order.yml', 'logical-models/dim_customer.yml']);
   });
 
   it('a v4 diagram\'s own copy is never compared with the library: it never draws the library\'s', () => {
@@ -182,7 +211,42 @@ describe('checkRelationships — stable codes (#133)', () => {
       libraryModels: [entry(fctOrder()), entry(dimCustomer([rel('customer_key', 'fct_order', 'customer_key')]))],
       domains: [],
     });
+    // The fact has its own key: the 1.6.7 shape beyond doubt, which Repair turns round.
+    expect(findings).toMatchObject([{ code: 'REL006', severity: 'info', fix: 'rehome' }]);
+    expect(findings[0].message).toMatch(/Repair Relationships… turns it round$/);
+  });
+
+  it('REL006: a reading the keys leave open is the user\'s (fix: swap) — a key pointing at a model with no key of its own', () => {
+    // A one-to-one aggregate at the dimension's grain, the dimension unflagged (#133).
+    const agg: SemanticModel = {
+      name: 'agg_customer_ltv',
+      columns: [col('customer_id', { isPrimaryKey: true, isForeignKey: true }), col('ltv')],
+      relationships: [rel('customer_id', 'dim_customer', 'customer_id')],
+    };
+    const dim: SemanticModel = { name: 'dim_customer', columns: [col('customer_id'), col('name')] };
+    const findings = checkRelationships({ libraryModels: [entry(agg), entry(dim)], domains: [] });
     expect(findings).toMatchObject([{ code: 'REL006', severity: 'info', fix: 'swap' }]);
+    expect(findings[0].message).not.toMatch(/Repair Relationships/);
+  });
+
+  it('REL006: a domain file\'s copy in the 1.6.7 shape is the user\'s (fix: swap) — Repair never turns a diagram copy round', () => {
+    const findings = checkRelationships({
+      libraryModels: [entry(fctOrder()), entry(dimCustomer())],
+      domains: [domain({ models: ['fct_order', 'dim_customer'], relationships: [own({ fromModel: 'dim_customer', toModel: 'fct_order' })] })],
+    });
+    expect(findings.find((f) => f.code === 'REL006')).toMatchObject({ fix: 'swap' });
+  });
+
+  it('REL001: a model-library copy that is the 1.6.7 shape of the other is a warning naming it, never copies to choose between', () => {
+    const findings = checkRelationships({
+      libraryModels: [entry(fctOrder([TO_CUSTOMER])), entry(dimCustomer([rel('customer_key', 'fct_order', 'customer_key')]))],
+      domains: [],
+    });
+    const dup = findings.find((f) => f.code === 'REL001')!;
+    expect(dup).toMatchObject({ severity: 'warning', fix: 'remove-duplicates' });
+    // The fact's copy is the one kept (named first), however the holders sort.
+    expect(dup.records?.[0].source).toEqual({ kind: 'library', model: 'fct_order', index: 0 });
+    expect(dup.message).toMatch(/the copy in logical-models\/dim_customer\.yml is the same relationship saved backwards .* Repair Relationships… removes it$/);
   });
 
   it('REL006: a many-to-one from a whole primary key is flagged even when the other end has no key flags (1.6.7 dim → fact drag)', () => {
@@ -191,10 +255,12 @@ describe('checkRelationships — stable codes (#133)', () => {
       libraryModels: [entry(plainFact), entry(dimCustomer([rel('customer_key', 'fct_order', 'customer_key')]))],
       domains: [],
     });
-    expect(findings).toMatchObject([{ code: 'REL006', severity: 'info', fix: 'swap', files: ['logical-models/dim_customer.yml'] }]);
+    expect(findings).toMatchObject([{ code: 'REL006', severity: 'info', fix: 'rehome', files: ['logical-models/dim_customer.yml'] }]);
     expect(findings[0].message).toMatch(/dim_customer\.customer_key is dim_customer's primary key, so its values are unique and it cannot be the many side/);
-    // Only one end's key is known: it never claims which fix is right (#133 review 8).
-    expect(findings[0].message).toMatch(/either the relationship runs the other way, or both sides are unique and it is one-to-one$/);
+    // Only one end's key is known: it never claims which fix is right (#133 review 8)…
+    expect(findings[0].message).toMatch(/either the relationship runs the other way, or both sides are unique and it is one-to-one\./);
+    // …but the fact's own key on another column settles it: the 1.6.7 shape, which Repair turns round.
+    expect(findings[0].message).toMatch(/1\.6\.7 saved for a line drawn from a dimension to a fact — Repair Relationships… turns it round$/);
     // The same link stored the right way round is clean, and a one-to-one from a key is not a contradiction.
     expect(checkRelationships({
       libraryModels: [entry({ ...plainFact, relationships: [TO_CUSTOMER] }), entry(dimCustomer())], domains: [],
@@ -253,7 +319,8 @@ describe('checkRelationships — stable codes (#133)', () => {
       ],
       domains: [domain({ relationships: [own(), own()] })],
     });
-    expect(summary(findings)).toEqual(['REL003:error', 'REL005:warning', 'REL001:warning', 'REL009:info'].sort((a, b) => {
+    // The domain file's two copies of a library link are one note (REL009), not a duplicate.
+    expect(summary(findings)).toEqual(['REL003:error', 'REL005:warning', 'REL009:info'].sort((a, b) => {
       const order = { error: 0, warning: 1, info: 2 } as Record<string, number>;
       return order[a.split(':')[1]] - order[b.split(':')[1]] || a.localeCompare(b);
     }));

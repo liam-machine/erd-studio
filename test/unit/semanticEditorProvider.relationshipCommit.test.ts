@@ -24,7 +24,7 @@ import {
   type MockTextDocument,
   type WorkspaceEdit as MockWorkspaceEdit,
 } from '../__mocks__/vscode';
-import { LIBRARY_MODE_ENDED_MESSAGE, PHYSICAL_READ_ONLY_MESSAGE, SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { LIBRARY_MODE_ENDED_MESSAGE, LIBRARY_MODE_STARTED_MESSAGE, PHYSICAL_READ_ONLY_MESSAGE, SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { ManifestService } from '../../src/services/manifestService';
@@ -57,6 +57,7 @@ interface Panel {
 
 interface Harness {
   root: string;
+  provider: SemanticEditorProvider;
   domainService: DomainService;
   models: LogicalModelService;
   domainPath: (name: string) => string;
@@ -106,6 +107,7 @@ async function createHarness(options: { orders?: Relationship[]; reporting?: Rel
 
   return {
     root,
+    provider,
     domainService,
     models,
     domainPath,
@@ -185,6 +187,31 @@ describe('one write path, in the project\'s mode', () => {
     info.mockClear();
     await again.send({ type: 'removeRelationship', payload: EDGE });
     expect(info.mock.calls.map((c) => c[0])).not.toContain(LIBRARY_MODE_ENDED_MESSAGE);
+  });
+
+  it('says so, and re-sends every open diagram, when removing the diagram files\' last relationship sends new ones to the model library (#133)', async () => {
+    const own: Relationship = { ...EDGE, cardinality: 'many-to-one' };
+    h = await createHarness({ orders: [own] });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    const reporting = await h.open('reporting');
+    info.mockClear();
+    reporting.posted().length = 0;
+    await orders.send({ type: 'removeRelationship', payload: EDGE });
+    expect(orders.errors()).toEqual([]);
+    expect(h.readDomain('orders').logical.relationships).toEqual([]);
+    expect(info.mock.calls.map((c) => c[0])).toContain(LIBRARY_MODE_STARTED_MESSAGE);
+    expect(reporting.posted().some((m) => m.type === 'domainLoaded')).toBe(true);
+
+    // A remove that leaves a diagram file holding one says nothing.
+    fs.rmSync(h.root, { recursive: true, force: true });
+    const other: Relationship = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    h = await createHarness({ orders: [own, other] });
+    const again = await h.open('orders');
+    info.mockClear();
+    await again.send({ type: 'removeRelationship', payload: EDGE });
+    expect(again.errors()).toEqual([]);
+    expect(info.mock.calls.map((c) => c[0])).not.toContain(LIBRARY_MODE_STARTED_MESSAGE);
   });
 
   it('removing by the stored ends (the dimension\'s one-to-many) works the same', async () => {
@@ -329,7 +356,7 @@ describe('one write path, in the project\'s mode', () => {
     expect(fs.readFileSync(fctPath, 'utf-8')).toBe(fctText);
   });
 
-  it('after an update, names other diagrams whose own copy now disagrees (#133 review 8)', async () => {
+  it('after an update (⇄), names other diagrams whose own copy is now ignored and says something different', async () => {
     h = await createHarness({ library: { fct_order: [{ ...ENTRY }] }, reporting: [{ ...REVERSED, cardinality: 'one-to-many' }] });
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
     const orders = await h.open('orders');
@@ -337,20 +364,45 @@ describe('one write path, in the project\'s mode', () => {
 
     expect(orders.errors()).toEqual([]);
     expect(h.model('fct_order')?.relationships).toEqual([{ ...ENTRY, cardinality: 'one-to-one' }]);
+    // Only the open diagram's own copy is ever taken out; another diagram's is named, not touched.
+    expect(h.readDomain('reporting').logical.relationships).toEqual([{ ...REVERSED, cardinality: 'one-to-many' }]);
     expect(info).toHaveBeenCalledWith(
-      'silver/reporting.json keeps its own copy of this relationship, which now says something different — ' +
-      'Repair Relationships… lets you choose which one is right.',
-      'Repair Relationships…',
+      'silver/reporting.json still keeps its own copy of this relationship, which is ignored because the model library defines it — ' +
+      'it says something different, so delete it there if it is wrong.',
     );
+    // It is a note there (REL009), never a duplicate (REL001): the library's copy is what reporting draws.
+    expect(h.shown('reporting')).toEqual([{ ...EDGE, cardinality: 'one-to-one' }]);
   });
 
-  it('an update the other diagram\'s own copy still agrees with says nothing', async () => {
+  it('after an update the other diagram\'s own copy agrees with, says it is ignored and Repair removes it', async () => {
     h = await createHarness({ library: { fct_order: [{ ...ENTRY, cardinality: 'one-to-one' }] }, reporting: [{ ...EDGE, cardinality: 'many-to-one' }] });
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
     const orders = await h.open('orders');
     await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
     expect(orders.errors()).toEqual([]);
-    expect(info.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('own copy'))).toEqual([]);
+    expect(info).toHaveBeenCalledWith(
+      'silver/reporting.json still keeps its own copy of this relationship, which is ignored because the model library defines it — ' +
+      'Repair Relationships… removes identical copies.',
+      'Repair Relationships…',
+    );
+  });
+
+  it.each([
+    ['add', (o: Panel) => o.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } })],
+    ['edit (the dialog)', (o: Panel) => o.send({ type: 'editRelationship', payload: {
+      originalFromModel: EDGE.fromModel, originalFromColumn: EDGE.fromColumn, originalToModel: EDGE.toModel, originalToColumn: EDGE.toColumn,
+      ...EDGE, cardinality: 'many-to-one', role: 'buyer',
+    } })],
+  ] as const)('%s in a library project names the other diagram\'s own copy — never a silent duplicate there', async (_label, act) => {
+    const library = _label === 'add' ? { fct_order: [{ fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' as const }] } : { fct_order: [{ ...ENTRY }] };
+    h = await createHarness({ library, reporting: [{ ...EDGE, cardinality: 'many-to-one' }] });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    await act(orders);
+    expect(orders.errors()).toEqual([]);
+    const notices = info.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('own copy'));
+    expect(notices).toEqual([expect.stringMatching(/^silver\/reporting\.json still keeps its own copy of this relationship, which is ignored because the model library defines it/)]);
+    expect(h.readDomain('reporting').logical.relationships).toHaveLength(1);
   });
 
   it('per-domain project: a column rename or removal names other diagrams whose own relationship still uses the old column (#133 review 8)', async () => {
@@ -365,7 +417,7 @@ describe('one write path, in the project\'s mode', () => {
     expect(h.readDomain('orders').logical.relationships[0].toColumn).toBe('cust_key');
     expect(info).toHaveBeenCalledWith(
       'silver/reporting.json keeps its own relationship to dim_customer.customer_key, which this rename did not change — ' +
-      'Repair Relationships… can point it at the new name or remove it.',
+      'Repair Relationships… lists it, with the file to open.',
       'Repair Relationships…',
     );
     info.mockClear();
@@ -396,8 +448,7 @@ describe('one write path, in the project\'s mode', () => {
 
     expect(orders.errors()).toEqual([]);
     expect(info).toHaveBeenCalledWith(
-      'Still drawn in silver/reporting.json from its own copy — Repair Relationships… removes it.',
-      'Repair Relationships…',
+      'silver/reporting.json still keeps its own copy of the relationship taken out here, so it is still drawn there — delete it there too if it should go.',
     );
     expect(h.readDomain('reporting').logical.relationships).toHaveLength(1);
   });
@@ -626,6 +677,102 @@ describe('undo (R12)', () => {
     } finally {
       undo.dispose();
     }
+  });
+});
+
+describe('every open diagram drawing the link refreshes after a model library write (#133)', () => {
+  const lastLoaded = (panel: Panel): DisplayDomain | undefined =>
+    panel.posted().filter((m) => m.type === 'domainLoaded').pop()?.payload as DisplayDomain | undefined;
+  const writeDateOnly = () => fs.writeFileSync(h.domainPath('calendar'), JSON.stringify({
+    schemaVersion: 5, domain: 'calendar', layer: 'silver', description: '',
+    logical: { models: ['dim_date'], relationships: [] },
+    viewConfig: { positions: { dim_date: { x: 0, y: 0 } } },
+  }, null, 2) + '\n');
+  const undoStack = () => {
+    const stack: Array<Map<string, string>> = [];
+    const apply = vscode.workspace.applyEdit.bind(vscode.workspace);
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      const before = new Map<string, string>();
+      for (const op of (edit as unknown as MockWorkspaceEdit)._ops) {
+        if (op.kind !== 'replace') continue;
+        before.set(op.uri.fsPath, (await vscode.workspace.openTextDocument(op.uri.fsPath)).getText());
+      }
+      const ok = await apply(edit);
+      if (ok && before.has(h.domainPath('orders'))) stack.push(before);
+      return ok;
+    });
+    return vscode.commands.registerCommand('undo', async () => {
+      for (const [file, text] of stack.pop() ?? []) {
+        (await vscode.workspace.openTextDocument(file) as unknown as MockTextDocument)._setText(text);
+      }
+    });
+  };
+
+  it.each([
+    ['add', { type: 'addRelationship', payload: { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' } }],
+    ['⇄ / cardinality', { type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } }],
+    ['edit', { type: 'editRelationship', payload: {
+      originalFromModel: EDGE.fromModel, originalFromColumn: EDGE.fromColumn, originalToModel: EDGE.toModel, originalToColumn: EDGE.toColumn,
+      ...EDGE, cardinality: 'many-to-one', role: 'buyer',
+    } }],
+    ['delete', { type: 'removeRelationship', payload: EDGE }],
+  ] as const)('%s: the other diagram showing both models is re-sent with what it now draws; one showing neither is not', async (label, message) => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }, { fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }].filter((e, i) => label !== 'add' || i === 0) } });
+    writeDateOnly();
+    const orders = await h.open('orders');
+    const reporting = await h.open('reporting');
+    const calendar = await h.open('calendar');
+    reporting.posted().length = 0;
+    calendar.posted().length = 0;
+    await orders.send(message);
+    expect(orders.errors()).toEqual([]);
+
+    const drawn = (lastLoaded(reporting)?.relationships ?? []).map((r) => stripRelationshipProvenance(r as Relationship));
+    expect(drawn).toEqual(h.shown('reporting'));
+    expect(calendar.posted().filter((m) => m.type === 'domainLoaded')).toEqual([]);
+  });
+
+  it('the model library\'s last relationship taken out (the project goes back to per-diagram): every open diagram is re-sent; its undo does the same', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] }, reporting: [{ fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }] });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    writeDateOnly();
+    const undo = undoStack();
+    try {
+      const orders = await h.open('orders');
+      const calendar = await h.open('calendar');
+      calendar.posted().length = 0;
+      await orders.send({ type: 'removeRelationship', payload: EDGE });
+      expect(orders.errors()).toEqual([]);
+      // calendar shows neither model, but where its new relationships go changed.
+      expect(lastLoaded(calendar)?.relationshipHome).toBe('domain');
+
+      calendar.posted().length = 0;
+      await orders.send({ type: 'undo' });
+      expect(orders.errors()).toEqual([]);
+      expect(h.model('fct_order')?.relationships).toEqual([ENTRY]);
+      expect(lastLoaded(calendar)?.relationshipHome).toBe('library');
+    } finally {
+      undo.dispose();
+    }
+  });
+
+  it('a refresh after a write behind the editor (Repair, the move) reads the findings again even when no file time moved', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] } });
+    const file = h.modelPath('fct_order');
+    const when = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(file, when, when);
+    const orders = await h.open('orders');
+    await orders.send({ type: 'ready' });
+    expect(lastLoaded(orders)?.relationshipIssues ?? []).toEqual([]);
+
+    // Same size, same modification time — only the text differs (a case-only name: REL005).
+    const text = fs.readFileSync(file, 'utf-8');
+    fs.writeFileSync(file, text.replace('toModel: dim_customer', 'toModel: DIM_CUSTOMER'));
+    fs.utimesSync(file, when, when);
+    h.models.invalidateCache();
+    orders.posted().length = 0;
+    await h.provider.refreshAllOpenDomains();
+    expect(lastLoaded(orders)?.relationshipIssues?.map((i) => i.code)).toEqual(['REL005']);
   });
 });
 
@@ -908,7 +1055,7 @@ describe('a model file with a YAML error never switches where relationships are 
 });
 
 describe('an older-format (v4) diagram with copies that disagree (#133 review)', () => {
-  it('refuses the change by pointing at the migration, never at Repair Relationships… alone', async () => {
+  it('refuses the change, naming the file to fix by hand, never pointing at Repair Relationships… (which does not change it)', async () => {
     h = await createHarness();
     const copy = { ...EDGE, cardinality: 'many-to-one' };
     fs.writeFileSync(h.domainPath('legacy'), JSON.stringify({
@@ -920,7 +1067,9 @@ describe('an older-format (v4) diagram with copies that disagree (#133 review)',
     const legacy = await h.open('legacy');
     await legacy.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
     expect(legacy.errors()).toHaveLength(1);
-    expect(legacy.errors()[0]).toMatch(/older format: run "ERD Studio: Migrate Domains to Central Model Store", then "Repair Relationships…".*remove the extra entry from legacy\.json by hand\./);
+    expect(legacy.errors()[0]).toMatch(/This diagram is in the older format: remove the copy that is wrong from legacy\.json by hand, then try again\.$/);
+    // Repair Relationships… never writes an older-format diagram, nor picks between copies.
+    expect(legacy.errors()[0]).not.toContain('Repair Relationships');
     expect(fs.readFileSync(h.domainPath('legacy'), 'utf-8')).toBe(before);
   });
 });

@@ -33,6 +33,7 @@ import {
 } from '../../src/extension';
 import { GETTING_STARTED_VIEW_TYPE, GettingStartedPanel } from '../../src/providers/GettingStartedPanel';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
+import { LogicalModelService } from '../../src/services/logicalModelService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -571,6 +572,36 @@ describe('erdStudio.deleteLogicalModel (#133 review 8)', () => {
     expect(String(warn.mock.calls[0][0])).toContain('It also removes the relationship other model files keep to it: zz_fct.dim_id → zz_dim.id.');
     expect(fs.existsSync(path.join(lib(), 'zz_dim.yml'))).toBe(false);
     expect(fs.readFileSync(path.join(lib(), 'zz_fct.yml'), 'utf-8')).toBe('# the fact\nname: zz_fct\ncolumns:\n  - name: dim_id\n    dataType: string\n');
+  });
+
+  it('all or nothing: a file whose relationships cannot be edited in place stops it before any write (#133)', async () => {
+    const aliased = 'name: zz_g_fct\ncolumns:\n  - name: dim_id\n    dataType: string\nshared: &shared\n  - fromColumn: dim_id\n    toModel: zz_dim\n    toColumn: id\n    cardinality: many-to-one\nrelationships: *shared\n';
+    fs.writeFileSync(path.join(lib(), 'zz_g_fct.yml'), aliased);
+    const fctText = fs.readFileSync(path.join(lib(), 'zz_fct.yml'), 'utf-8');
+    await activate(context);
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Delete' as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.deleteLogicalModel', { type: 'model', name: 'zz_dim', filePath: path.join(lib(), 'zz_dim.yml') });
+
+    expect(error.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/^Delete Model: .*zz_g_fct.*Nothing was changed\.$/)]);
+    expect(fs.existsSync(path.join(lib(), 'zz_dim.yml'))).toBe(true);
+    expect(fs.readFileSync(path.join(lib(), 'zz_fct.yml'), 'utf-8')).toBe(fctText);
+    expect(fs.readFileSync(path.join(lib(), 'zz_g_fct.yml'), 'utf-8')).toBe(aliased);
+  });
+
+  it('all or nothing: a delete that fails puts back the files already rewritten (#133)', async () => {
+    const fctText = fs.readFileSync(path.join(lib(), 'zz_fct.yml'), 'utf-8');
+    await activate(context);
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Delete' as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    vi.spyOn(LogicalModelService.prototype, 'deleteModel').mockImplementation(() => { throw new Error('EACCES: permission denied'); });
+
+    await vscode.commands.executeCommand('erdStudio.deleteLogicalModel', { type: 'model', name: 'zz_dim', filePath: path.join(lib(), 'zz_dim.yml') });
+
+    expect(error.mock.calls.map((c) => String(c[0]))).toEqual(['Delete Model: EACCES: permission denied. Nothing was changed.']);
+    expect(fs.existsSync(path.join(lib(), 'zz_dim.yml'))).toBe(true);
+    expect(fs.readFileSync(path.join(lib(), 'zz_fct.yml'), 'utf-8')).toBe(fctText);
   });
 
   it('changes nothing while a model file it would rewrite has unsaved edits', async () => {

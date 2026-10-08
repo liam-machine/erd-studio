@@ -86,7 +86,7 @@
       "files": [],
       "expectations": [
         "States early that existing logical models will not be changed without asking",
-        "Mentions that some existing domains use an older format and suggests 'ERD Studio: Migrate to v5'",
+        "Mentions that some existing domains use an older format and suggests 'ERD Studio: Migrate Domains to Central Model Store'",
         "Does not overwrite any logical-models/*.yml file that existed before the session unless the user agreed",
         "Asks a single grouped question about drift on pre-existing models, recommending 'keep' because the user asked not to change their existing designs (the usual default is 'match dbt')",
         "Never deletes a logical-models/*.yml file",

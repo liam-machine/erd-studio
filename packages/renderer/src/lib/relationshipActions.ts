@@ -134,9 +134,11 @@ export const EDGE_ISSUE_CODES: readonly RelationshipIssueCode[] = ['REL001', 'RE
 
 /** One plain sentence per edge issue code. */
 const EDGE_ISSUE_TEXT: Partial<Record<RelationshipIssueCode, string>> = {
-  REL001: 'Saved more than once — Repair Relationships… keeps one copy.',
+  REL001: 'Saved more than once — Repair Relationships… removes exact copies; copies that disagree are listed for you to settle.',
   REL002: 'Saved as one-to-many in the "one" model\'s file — Repair Relationships… moves it to the many side.',
-  REL006: 'Its direction disagrees with the key columns — check which side is "many".',
+  REL006: 'Its direction disagrees with the key columns — check which side is "many": ⇄ turns it round, or make it one-to-one if both '
+    + 'sides are unique. When a model file holds it in the shape ERD Studio 1.6.7 saved (a dimension\'s key as the many side of a fact '
+    + 'that has its own key), Repair Relationships… turns it round for you.',
 };
 
 /** The edge-badge issues of a relationship, in code order (empty when none). */
@@ -152,7 +154,7 @@ export function edgeIssues(issues: readonly RelationshipIssueCode[] | undefined)
  * refuses copies that disagree), so the badge never offers it unqualified.
  */
 const OLDER_FORMAT_EDGE_ISSUE_TEXT: Partial<Record<RelationshipIssueCode, string>> = {
-  REL001: 'Saved more than once — this diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store" first; after that, Repair Relationships… settles the copies. Edit or ⇄ on the line keeps one copy only when every copy says the same — copies that disagree are refused there.',
+  REL001: 'Saved more than once — this diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store" first; after that, Repair Relationships… removes exact copies and lists the rest. Edit or ⇄ on the line keeps one copy only when every copy says the same — copies that disagree are refused there.',
   REL002: 'Saved as one-to-many in the "one" model\'s file — this diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store" first.',
 };
 

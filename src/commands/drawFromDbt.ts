@@ -68,8 +68,14 @@ export interface DrawFromDbtDeps {
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
-  /** Every file is written; refresh the tree, model library, context keys and selectors. */
-  onWritten: (written: { domainPath: string; modelNames: string[] }) => void;
+  /**
+   * Every file is written; refresh the tree, model library, context keys,
+   * selectors and every open diagram showing a model whose file changed:
+   * `modelNames` are the model files created, `changedModelNames` the
+   * existing ones that gained a relationship (both own writes the model
+   * watcher skips).
+   */
+  onWritten: (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }) => void;
 }
 
 export interface DrawFromDbtResult {
@@ -253,7 +259,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     return undefined;
   }
 
-  deps.onWritten({ domainPath, modelNames: written });
+  deps.onWritten({ domainPath, modelNames: written, changedModelNames: savedExisting.map((s) => s.modelName) });
   telemetry.feature('drawFromDbt');
 
   await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(domainPath), DOMAIN_EDITOR_VIEW_TYPE);
@@ -319,6 +325,7 @@ function routeDraftRelationships(
 
 /** An existing library model file the draw will rewrite: its new text, and its bytes before. */
 interface ExistingModelSave {
+  modelName: string;
   filePath: string;
   label: string;
   text: string;
@@ -351,7 +358,7 @@ function renderExistingModelSaves(
       const reason = err instanceof Error ? err.message : String(err);
       throw new DrawRefusal(`Cannot save the new relationship into ${label}. ${reason}`);
     }
-    saves.push({ filePath, label, text, before });
+    saves.push({ modelName: model.name, filePath, label, text, before });
   }
   return saves;
 }

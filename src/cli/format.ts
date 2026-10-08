@@ -8,6 +8,7 @@ import type { CheckResult } from './check';
 import { describeUnreadable, type DiffResult, type DomainDiff, type Fix } from './diff';
 import type { DoctorResult } from './doctor';
 import type { InventoryResult } from './inventory';
+import { repairableNotes } from './relationshipCheck';
 
 export interface Paint {
   red(s: string): string;
@@ -64,7 +65,7 @@ function fixLine(f: Fix, p: Paint): string {
 function domainBlock(d: DomainDiff, p: Paint): string[] {
   const head = `${d.domain} (${d.layer})`;
   if (d.error) { return [`${head} — ${p.red('could not be compared')}: ${d.error.message}`]; }
-  if (d.needsMigration) { return [`${head} — ${p.yellow('older (v4) format')}: run "ERD Studio: Migrate to v5" first`]; }
+  if (d.needsMigration) { return [`${head} — ${p.yellow('older (v4) format')}: run "ERD Studio: Migrate Domains to Central Model Store" first`]; }
   const { blocking, advisory } = d.counts;
   const summary = blocking === 0 && advisory === 0
     ? p.green('matches dbt')
@@ -135,9 +136,9 @@ export function formatCheck(r: CheckResult, p: Paint): string {
   lines.push(`${parts.join(', ')} (${scope})`);
   lines.push(...notChecked);
   for (const f of r.findings) { lines.push(findingLine(f, p)); }
-  if (errors + warnings > 0) {
+  if (errors + warnings + repairableNotes(r.findings) > 0) {
     const older = r.olderFormat.filter((file) => r.findings.some((f) => f.severity !== 'info' && f.files.includes(file)));
-    lines.push('', 'In VS Code, "ERD Studio: Repair Relationships…" fixes most of these, showing every change first.');
+    lines.push('', 'In VS Code, "ERD Studio: Repair Relationships…" fixes the clear-cut ones, showing every change first, and lists the rest with their files.');
     if (older.length > 0) {
       lines.push(`It does not change diagrams still in the older format (${older.join(', ')}): run "ERD Studio: Migrate Domains to Central Model Store" first.`);
     }
@@ -179,8 +180,11 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
   if (r.relationships.checked) {
     const rel = r.relationships;
     const problems = rel.errors + rel.warnings;
-    lines.push(`${ok(problems === 0 && rel.unchecked === 0)} relationships: ${plural(rel.stored, 'stored entry', 'stored entries')}`
-      + (problems === 0 ? ', no problems' : `, ${[rel.errors ? plural(rel.errors, 'error') : '', rel.warnings ? plural(rel.warnings, 'warning') : ''].filter(Boolean).join(', ')}`)
+    const tidy = rel.repairable > 0 ? `${rel.repairable} Repair Relationships… can tidy up` : '';
+    lines.push(`${ok(problems === 0 && rel.repairable === 0 && rel.unchecked === 0)} relationships: ${plural(rel.stored, 'stored entry', 'stored entries')}`
+      + (problems === 0 && !tidy
+        ? ', no problems'
+        : `, ${[rel.errors ? plural(rel.errors, 'error') : '', rel.warnings ? plural(rel.warnings, 'warning') : '', tidy].filter(Boolean).join(', ')}`)
       + (rel.unchecked > 0 ? `; ${describeUncheckedFiles(rel.uncheckedFiles)} could not be checked (run erd-studio check)` : ''));
   } else if (r.relationships.failed) {
     // The checks crashed: say so, never just leave the line out.

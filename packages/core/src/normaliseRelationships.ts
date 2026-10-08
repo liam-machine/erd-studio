@@ -18,6 +18,7 @@ import {
   canonicalRelationship,
   linkKey,
   relationshipEnds,
+  relationshipDifferences,
   relationshipFilePositions,
   sameRelationshipMeaning,
   type RelationshipDiagnostic,
@@ -92,18 +93,23 @@ interface Candidate {
  * name (case-insensitive among the domain's models) and to the real column
  * name when that model has it, group records by `linkKey`, and draw one per
  * link. The winner is deterministic: a library record beats a domain-file
- * one; among library records, the one in its canonical home file, then the
+ * one; among library records, the one in its canonical home file, then one
+ * whose direction the key flags do not contradict (REL006), then the
  * lowest lowercased holding-model name, then the exact name, then the lowest index; among domain
  * records, the lowest index.
  *
- * Diagnostics: REL001 (a link stored more than once: an error when the copies
- * differ in cardinality, role or one-to-one direction, else a warning),
+ * Diagnostics: REL001 (a link stored more than once — twice in the library,
+ * or, for a link the library does not hold, twice in the domain file: an
+ * error when the copies differ in cardinality, role or one-to-one direction,
+ * else a warning),
  * REL003 (a domain-file record naming a model the domain does not hold — kept,
  * but there is nothing to draw it between),
  * REL002 (a `one-to-many` in a model file), REL005 (a case-only spelling
  * match), REL006 (the drawn direction contradicts certain key evidence),
- * REL008 (model file entries skipped or defaulted on read) and REL009 (a
- * domain-file copy agreeing with the library's).
+ * REL008 (model file entries skipped or defaulted on read) and REL009 (the
+ * domain file's own copy of a link the library holds — whatever it says, the
+ * library's is drawn and the copy ignored; the message says whether it
+ * differs).
  */
 export function normaliseRelationships(input: NormaliseRelationshipsInput): NormalisedRelationships {
   const { own } = input;
@@ -215,10 +221,27 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
     else groups.set(key, [c]);
   }
 
+  // Whether the key flags contradict a record's direction (REL006), asked
+  // only of records that compete for a link.
+  const contradictedCache = new Map<Candidate, boolean>();
+  const contradicted = (c: Candidate): boolean => {
+    let known = contradictedCache.get(c);
+    if (known === undefined) {
+      known = keyEvidenceContradiction(c.rel, findModel) !== null;
+      contradictedCache.set(c, known);
+    }
+    return known;
+  };
   const rank = (a: Candidate, b: Candidate): number => {
     if (a.source.kind !== b.source.kind) return a.source.kind === 'library' ? -1 : 1;
     if (a.source.kind === 'library') {
       if (a.atHome !== b.atHome) return a.atHome ? -1 : 1;
+      // Two copies both at home (a fact's and a dimension's, after a merge
+      // with a 1.6.7 teammate's branch): the one the key flags agree with is
+      // drawn, never the backwards one because its holder sorts first.
+      const ca = contradicted(a);
+      const cb = contradicted(b);
+      if (ca !== cb) return ca ? 1 : -1;
       if (a.holder !== b.holder) return a.holder < b.holder ? -1 : 1;
       // Two models whose names differ only in case (`Dd` and `DD`): the exact
       // name decides, so the winner never depends on the domain's model order.
@@ -270,25 +293,48 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
     }
 
     if (ordered.length > 1) {
-      const others = ordered.slice(1);
       const library = ordered.filter((c) => c.source.kind === 'library');
       const domain = ordered.filter((c) => c.source.kind === 'domain');
-      const differs = others.some((c) => !sameRelationshipMeaning(c.rel, winner.rel));
-      if (differs || library.length > 1 || domain.length > 1) {
-        const sites = ordered.map((c) => place(c.source));
+      // A duplicate is two copies a reader chooses between: two in the model
+      // library, or — for a link the library does not hold — two in this
+      // domain file. The domain file's own copy of a library link is never
+      // one: the library's is drawn on every diagram and the copy ignored
+      // (REL009), whatever it says.
+      const contenders = library.length > 0 ? library : domain;
+      if (contenders.length > 1) {
+        // A model-library copy in the 1.6.7 shape of the drawn one says the
+        // same thing turned round: Repair Relationships… removes it on its
+        // own, so it is a warning, never copies to choose between.
+        const backwardsCopy = (c: Candidate): boolean => c.source.kind === 'library'
+          && !sameRelationshipMeaning(c.rel, winner.rel)
+          && isStoredBackwards(c.rel, findModel)
+          && sameRelationshipMeaning(turnedRoundRelationship(c.rel), winner.rel);
+        const differs = contenders.some((c) => !sameRelationshipMeaning(c.rel, winner.rel) && !backwardsCopy(c));
+        const backwards = differs ? [] : contenders.filter(backwardsCopy);
         note('REL001', differs ? 'error' : 'warning',
           differs
-            ? `Relationship ${describe(winner.rel)} is stored ${ordered.length} times and the copies disagree ` +
-              `(${ordered.map(copy).join('; ')}); ` +
+            ? `Relationship ${describe(winner.rel)} is stored ${contenders.length} times and the copies disagree ` +
+              `(${contenders.map(copy).join('; ')}); ` +
               `drawing the one in ${place(winner.source)}`
-            : `Relationship ${describe(winner.rel)} is stored ${ordered.length} times (${sites.join(', ')}); ` +
+            : `Relationship ${describe(winner.rel)} is stored ${contenders.length} times (${contenders.map((c) => place(c.source)).join(', ')}); ` +
+              (backwards.length > 0
+                ? `the copy in ${backwards.map((c) => place(c.source)).join(' and ')} is the same relationship saved backwards ` +
+                  '(the shape ERD Studio 1.6.7 saved for a line drawn from a dimension to a fact) — Repair Relationships… removes it; '
+                : '') +
               `drawing the one in ${place(winner.source)}`,
-          ordered);
+          contenders);
       }
-      if (!differs && library.length > 0 && domain.length > 0) {
+      if (library.length > 0 && domain.length > 0) {
+        const differences = [...new Set(domain.flatMap((c) => relationshipDifferences(c.rel, winner.rel)))];
+        const here = domain.length === 1 ? `its own copy (${place(domain[0].source)})` : `its own ${domain.length} copies`;
         note('REL009', 'info',
-          `Relationship ${describe(winner.rel)} is in the model library (${place(winner.source)}) and also in ${fileName}; ` +
-          'the domain file copy is not needed', ordered);
+          differences.length === 0
+            ? `Relationship ${describe(winner.rel)} is in the model library (${place(winner.source)}) and ${fileName} keeps ${here}, ` +
+              'which says the same; the model library\'s is drawn, so the domain file copy is not needed — Repair Relationships… removes it'
+            : `Relationship ${describe(winner.rel)} is in the model library (${place(winner.source)}) and ${fileName} keeps ${here}, ` +
+              `which differs on ${differences.join(' and ')} (${[winner, ...domain.filter((c) => !sameRelationshipMeaning(c.rel, winner.rel))].map(copy).join('; ')}); ` +
+              'the model library\'s is drawn and the domain file copy ignored — delete it if it is wrong',
+          [winner, ...domain]);
       }
     }
 
@@ -321,6 +367,11 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
   relationships.push(...rest);
 
   return { relationships, diagnostics };
+}
+
+/** `rel` with its two ends swapped (cardinality and role kept). */
+function turnedRoundRelationship(rel: Relationship): Relationship {
+  return { ...rel, fromModel: rel.toModel, fromColumn: rel.toColumn, toModel: rel.fromModel, toColumn: rel.fromColumn };
 }
 
 /**
@@ -376,4 +427,40 @@ export function keyEvidenceContradiction(
     `makes ${canonical.fromModel} the ${canonical.cardinality === 'one-to-one' ? 'foreign-key' : 'many'} side, but ` +
     `${verdict.reasons.join('; ')}`
   );
+}
+
+/**
+ * Whether `rel` is, beyond reasonable doubt, the shape ERD Studio 1.6.7 saved
+ * for a line drawn from a dimension to a fact — stored backwards, so turning
+ * it round changes nothing the user meant. Read canonically (a `one-to-many`
+ * is turned first): a many-to-one whose from-column is its model's whole
+ * primary or natural key, whose to-column is no primary or natural key,
+ * **and** whose to-model has its own whole primary or natural key on another
+ * column (a fact with its own key) or whose to-column is declared a foreign
+ * key. REL006 (`keyEvidenceContradiction`) is wider: it
+ * also covers a one-to-one aggregate at a dimension's grain pointing at an
+ * unflagged dimension, or an SCD2 dimension's natural key pointing at an
+ * unflagged source — readings only the user can settle, so they are listed,
+ * never turned round on their own (Repair Relationships…, the move, `check`'s
+ * `fix: 'rehome'` and the reader's choice between copies all ask this).
+ */
+export function isStoredBackwards(
+  rel: Relationship,
+  findModel: (name: string) => SemanticModel | undefined,
+): boolean {
+  const canonical = canonicalRelationship(rel);
+  if (canonical.cardinality !== 'many-to-one') return false;
+  const fromModel = findModel(canonical.fromModel);
+  const toModel = findModel(canonical.toModel);
+  if (!fromModel || !toModel || modelLoadErrorOf(fromModel) || modelLoadErrorOf(toModel)) return false;
+  const a = endEvidenceFromModel(fromModel, canonical.fromColumn);
+  const b = endEvidenceFromModel(toModel, canonical.toColumn);
+  if (!a || !b) return false;
+  const fromWholeKey = (a.isPrimaryKey && a.pkColumnCount === 1) || (a.isNaturalKey && a.nkColumnCount === 1);
+  if (!fromWholeKey || b.isPrimaryKey || b.isNaturalKey) return false;
+  // The to-model's own key on a column other than the one pointed at, or the
+  // to-column declared a foreign key: either says the to-model is the many side.
+  const toOwnKey = b.pkColumnCount === 1 || b.nkColumnCount === 1;
+  if (!toOwnKey && !b.isForeignKeyDeclared) return false;
+  return keyEvidenceContradiction(canonical, findModel) !== null;
 }

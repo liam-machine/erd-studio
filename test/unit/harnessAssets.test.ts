@@ -81,6 +81,13 @@ describe('harnessAssets', () => {
   });
 
   describe('SKILL.md', () => {
+    it('Stage 2 hands doctor\'s relationship steps to the user, never to the assistant\'s own edits (#133)', () => {
+      const stage2 = skill.content.slice(skill.content.indexOf('## Stage 2'), skill.content.indexOf('## Stage 3'));
+      expect(stage2).toContain('**`fix-relationships` / `check-relationships`**');
+      expect(stage2).toContain('ERD Studio: Repair Relationships…');
+      expect(stage2).toContain('Never edit them yourself.');
+    });
+
     it('is under 500 lines', () => {
       expect(skill.content.split('\n').length).toBeLessThan(500);
     });

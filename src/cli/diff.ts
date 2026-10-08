@@ -178,7 +178,7 @@ export interface DomainDiff {
   /** Absent for a v4 domain or a domain that could not be read. */
   report?: DiscrepancyReport;
   plan?: SyncPlan;
-  /** A v4 (inline-model) domain: run "ERD Studio: Migrate to v5" before fixing anything. */
+  /** A v4 (inline-model) domain: run "ERD Studio: Migrate Domains to Central Model Store" before fixing anything. */
   needsMigration?: boolean;
   /** Why this domain could not be compared (`--all` only; a single `--domain` exits 3 instead). */
   error?: { code: string; message: string };

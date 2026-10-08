@@ -31,7 +31,7 @@ style offer after the canvas; eval 7 states its style up front and takes the ful
 | 2 | venv-dbt-core | `dbt-project` | Core in `.venv`, dbt run by path, `$ARGUMENTS` honoured, end-to-end clean diff |
 | 3 | fusion | `dbt-project` | Triggers without the slash command; Fusion's `compile --write-catalog` |
 | 4 | cloud-cli | `dbt-project` | No `profiles.yml` demanded; remote artefacts; file-only fallback |
-| 5 | existing-user-with-logical-models | `dbt-project` (as is) | Pre-existing models asked about once, never rewritten; v4 domains → Migrate to v5 |
+| 5 | existing-user-with-logical-models | `dbt-project` (as is) | Pre-existing models asked about once, never rewritten; v4 domains → Migrate Domains to Central Model Store |
 | 6 | thin-project-sql-only | `dbt-project` minus every yml | Thin-project branch, drafted columns, honest success line |
 | 7 | modelling-kimball | `dbt-project` | Approach given up front (beats the detection, no confirm question), lookup + named source, playback, saved `modelling-approach.md`, valid `modelRole`s, still a clean diff, conformance review |
 | 8 | modelling-data-vault | `dbt-project` | Detected style confirmed with evidence, then overridden in the user's words; Data Vault mapped onto the closest roles via `rationale.roleChoice`, never an invalid `modelRole` |

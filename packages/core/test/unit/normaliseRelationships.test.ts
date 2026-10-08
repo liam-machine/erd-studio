@@ -74,6 +74,21 @@ describe('normaliseRelationships — one read path (#133)', () => {
     }
   });
 
+  it('a fact\'s copy and a dimension\'s 1.6.7-shaped copy: draws the fact\'s, and says the other is the backwards duplicate (REL001 warning)', () => {
+    const backwards = lib(m2o('dim_customer', 'customer_key', 'fct_order', 'customer_key'));
+    for (const models of [[fct([lib(TO_CUSTOMER)]), dim([backwards])], [dim([backwards]), fct([lib(TO_CUSTOMER)])]]) {
+      const { relationships, diagnostics } = normaliseRelationships({ models, own: [] });
+      expect(relationships).toHaveLength(1);
+      expect(stripRelationshipProvenance(relationships[0])).toEqual(TO_CUSTOMER);
+      expect(relationships[0].source).toEqual({ kind: 'library', model: 'fct_order', index: 0 });
+      const dup = diagnostics.find((d) => d.code === 'REL001')!;
+      expect(dup.severity).toBe('warning');
+      expect(dup.message).toMatch(/entry 1 of dim_customer's model file is the same relationship saved backwards .* Repair Relationships… removes it/);
+      // The drawn copy agrees with its keys: no REL006 on the line.
+      expect(relationships[0].issues).toEqual(['REL001']);
+    }
+  });
+
   it('reports disagreeing copies as an error and draws the deterministic winner', () => {
     const one2one = { ...TO_CUSTOMER, cardinality: 'one-to-one' as Cardinality };
     const { relationships, diagnostics } = normaliseRelationships({
@@ -100,7 +115,27 @@ describe('normaliseRelationships — one read path (#133)', () => {
     expect(relationships).toHaveLength(1);
     expect(relationships[0].source).toEqual({ kind: 'library', model: 'fct_order', index: 0 });
     expect(diagnostics.map((d) => [d.code, d.severity])).toEqual([['REL009', 'info']]);
-    expect(diagnostics[0].message).toMatch(/also in gold\/x\.json/);
+    expect(diagnostics[0].message).toMatch(/gold\/x\.json keeps its own copy \(entry 1 of gold\/x\.json\), which says the same; .* Repair Relationships… removes it/);
+  });
+
+  it('a domain copy that disagrees with the library is ignored for drawing: REL009 info saying on what, never REL001', () => {
+    const { relationships, diagnostics } = normaliseRelationships({
+      models: [fct([lib(TO_CUSTOMER)]), dim()], own: [{ ...TO_CUSTOMER, cardinality: 'one-to-one', role: 'buyer' }], filePath: 'gold/x.json',
+    });
+    expect(relationships).toHaveLength(1);
+    expect(stripRelationshipProvenance(relationships[0])).toEqual(TO_CUSTOMER);
+    expect(relationships[0].issues).toEqual(['REL009']);
+    expect(diagnostics.map((d) => [d.code, d.severity])).toEqual([['REL009', 'info']]);
+    expect(diagnostics[0].message).toMatch(/differs on cardinality and role .*one-to-one "buyer" in entry 1 of gold\/x\.json\); the model library's is drawn and the domain file copy ignored/);
+  });
+
+  it('two copies in the model library are REL001 (only those two); a domain copy beside them is REL009', () => {
+    const { diagnostics } = normaliseRelationships({
+      models: [fct([lib(TO_CUSTOMER), lib({ ...TO_CUSTOMER, role: 'buyer' })]), dim()], own: [TO_CUSTOMER], filePath: 'gold/x.json',
+    });
+    expect(diagnostics.map((d) => [d.code, d.severity])).toEqual([['REL001', 'error'], ['REL009', 'info']]);
+    expect(diagnostics[0].sources.every((s) => s.kind === 'library')).toBe(true);
+    expect(diagnostics[0].message).toMatch(/stored 2 times and the copies disagree/);
   });
 
   it('fixes endpoint spelling to the real names (REL005) — a case-only match is drawn, not lost', () => {

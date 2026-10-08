@@ -194,33 +194,59 @@ describe('useCanvasShortcuts', () => {
     expect(useEditorStore.getState().detailPanelOpen).toBe(true);
   });
 
-  it('Delete / Backspace while a dialog is open (focus on one of its buttons) never removes the selection behind it (#133 review 8)', () => {
+  it('Delete / Backspace with focus on one of a dialog\'s buttons never removes the selection behind it (#133 review 8)', () => {
     renderHook(() => useCanvasShortcuts());
     act(() => {
       useEditorStore.getState().setSelectedEdges([edgeId(REL_AB)]);
       useEditorStore.getState().setNewFkDialogOpen(true);
     });
-    const button = document.createElement('button');
-    button.textContent = 'Swap sides';
-    document.body.appendChild(button);
-    button.focus();
-    press('Backspace');
-    press('Delete');
-    expect(sent()).toEqual([]);
-    for (const open of ['setNewModelDialogOpen', 'setAddExistingModelDialogOpen'] as const) {
-      act(() => {
-        useEditorStore.getState().setNewFkDialogOpen(false);
-        useEditorStore.getState()[open](true);
-      });
+    for (const dialogClass of ['new-fk-dialog', 'new-model-dialog', 'add-existing-model-dialog']) {
+      const dialog = document.createElement('div');
+      dialog.className = dialogClass;
+      const button = document.createElement('button');
+      button.textContent = 'Swap sides';
+      dialog.appendChild(button);
+      document.body.appendChild(dialog);
+      button.focus();
+      press('Backspace');
       press('Delete');
       expect(sent()).toEqual([]);
-      act(() => { useEditorStore.getState()[open](false); });
+      button.blur();
+      dialog.remove();
     }
-    // Closed again: the same key deletes the selected line.
+    // Focus back on the canvas: the same key deletes the selected line.
+    act(() => { useEditorStore.getState().setNewFkDialogOpen(false); });
     press('Delete');
     expect(sent()).toEqual([
       { type: 'removeRelationship', payload: { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id' } },
     ]);
+  });
+
+  it('Delete still works on the canvas while the (non-modal) relationship dialog stays open with focus outside it (#133)', () => {
+    renderHook(() => useCanvasShortcuts());
+    const dialog = document.createElement('div');
+    dialog.className = 'new-fk-dialog';
+    document.body.appendChild(dialog);
+    act(() => {
+      useEditorStore.getState().setSelectedEdges([edgeId(REL_AB)]);
+      useEditorStore.getState().setNewFkDialogOpen(true);
+    });
+    expect(document.activeElement).toBe(document.body);
+    press('Delete');
+    expect(sent()).toEqual([
+      { type: 'removeRelationship', payload: { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id' } },
+    ]);
+    dialog.remove();
+  });
+
+  it('Delete never reaches the selection while the modal feedback dialog is open', () => {
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.getState().setSelectedEdges([edgeId(REL_AB)]);
+      useEditorStore.setState({ feedbackDialogOpen: true });
+    });
+    press('Delete');
+    expect(sent()).toEqual([]);
   });
 
   it('does nothing on Delete when the domain is read-only or the user is typing', () => {

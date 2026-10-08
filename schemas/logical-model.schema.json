@@ -52,8 +52,8 @@
       "$ref": "#/definitions/meta"
     },
     "relationships": {
-      "type": "array",
-      "description": "Relationships that leave this model, defined once for the whole project: every domain that holds both this model and toModel draws the edge. They live with the model holding the foreign key (the \"many\" side), so a new fact never means editing its dimensions: ERD Studio stores a one-to-many the other way round, as many-to-one on the other model. The same fields as a domain file's relationship, without fromModel (it is this model).",
+      "type": ["array", "null"],
+      "description": "Relationships that leave this model, defined once for the whole project: every domain that holds both this model and toModel draws the edge. They live with the model holding the foreign key (the \"many\" side), so a new fact never means editing its dimensions: ERD Studio stores a one-to-many the other way round, as many-to-one on the other model. The same fields as a domain file's relationship, without fromModel (it is this model). An empty key (Repair Relationships… leaves one holding your comments when it moves the last entry out) means none.",
       "items": {
         "$ref": "#/definitions/relationship"
       }

@@ -2,11 +2,12 @@
  * Repair Relationships… — the vscode-free engine (issue #133, R10).
  *
  * Each case builds a small project on disk, reads it with the same lookup the
- * canvas uses, plans with scripted answers, writes the planned texts and
- * holds the result to `verifyRepair`: nothing outside the relationships
- * changes, every planned finding is gone, nothing new appears, and every
- * diagram draws what it drew (except where the user chose). Then a second run
- * must have nothing left to do.
+ * canvas uses, plans (the engine asks nothing: it makes only the automatic
+ * fixes and lists everything else), writes the planned texts and holds the
+ * result to `verifyRepair`: nothing outside the relationships changes, every
+ * planned finding is gone, nothing new appears, and every diagram draws what
+ * it drew (except a link turned round on purpose). Then a second run must
+ * have nothing left to do.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,21 +20,24 @@ import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import { usesLibraryRelationships } from '../../src/services/libraryRelationships';
 import {
-  LEAVE_AS_IS,
   RepairEditError,
   analyseRepair,
   checkPlannedTexts,
+  clearForeignKeyFlags,
+  describeRepairOffer,
   describeRepairPlan,
   editDomainRelationships,
   editYamlRelationships,
   linksTheMoveStores,
   planRelationshipRepair,
   readRepairSnapshot,
+  repairReportItems,
+  reportItemLine,
   scanDomainFiles,
   verifyRepair,
   type RepairOptions,
   type RepairPlan,
-  type RepairQuestion,
+  type RepairReportItem,
   type RepairSnapshot,
   type RepairSnapshotDeps,
 } from '../../src/services/relationshipRepair';
@@ -78,31 +82,24 @@ function project(files: Record<string, string>): Project {
   };
 }
 
-type Answer = string | undefined | ((q: RepairQuestion) => string | undefined);
-
 interface Run {
   before: RepairSnapshot;
-  plan: RepairPlan | null;
-  questions: RepairQuestion[];
+  plan: RepairPlan;
   problems: string[];
-  after?: RepairSnapshot;
+  after: RepairSnapshot;
 }
 
-/** Plan with scripted answers (in order; a function decides per question), write the result, verify it. */
-async function repair(p: Project, answers: Answer[] = [], options: RepairOptions = {}): Promise<Run> {
+/** Plan (no questions: automatic fixes only), write the result, verify it. */
+async function repair(p: Project, options: RepairOptions = {}): Promise<Run> {
   const before = readRepairSnapshot(p.deps);
-  const questions: RepairQuestion[] = [];
-  const plan = await planRelationshipRepair(before, options, async (q) => {
-    questions.push(q);
-    const next = answers.length > 0 ? answers.shift() : LEAVE_AS_IS;
-    return typeof next === 'function' ? next(q) : next;
-  });
-  if (!plan) return { before, plan, questions, problems: [] };
+  const plan = planRelationshipRepair(before, options);
   expect(checkPlannedTexts(plan)).toEqual([]);
   for (const change of plan.changes) fs.writeFileSync(change.filePath, change.text);
   const after = readRepairSnapshot(p.deps);
-  return { before, plan, questions, problems: verifyRepair(before, after, plan), after };
+  return { before, plan, problems: verifyRepair(before, after, plan), after };
 }
+
+const messages = (items: readonly RepairReportItem[]): string[] => items.map((i) => i.message);
 
 const codes = (s: RepairSnapshot): string[] => s.findings.map((f) => f.code).sort();
 const domainJson = (name: string, models: string[], relationships: unknown[] = []): string =>
@@ -159,9 +156,8 @@ describe('automatic fixes', () => {
     });
     const run = await repair(p);
     expect(codes(run.before)).toContain('REL002');
-    expect(run.questions).toEqual([]);
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.rehomed).toBe(1);
+    expect(run.plan.counts.rehomed).toBe(1);
     expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
     expect(p.read('logical-models/fct_order.yml')).toBe(`${FCT}${[
       '  - fromColumn: customer_key',
@@ -170,7 +166,7 @@ describe('automatic fixes', () => {
       '    cardinality: many-to-one',
       '    role: buyer',
     ].join('\n')}\n`);
-    expect(codes(run.after!)).not.toContain('REL002');
+    expect(codes(run.after)).not.toContain('REL002');
   });
 
   it('REL005: respells an endpoint in place, keeping the comment on its line', async () => {
@@ -186,7 +182,7 @@ describe('automatic fixes', () => {
     expect(p.read('logical-models/fct_order.yml')).toBe(
       `${FCT}  - fromColumn: customer_key\n    toModel: dim_customer   # odd case\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
     );
-    expect(codes(run.after!)).not.toContain('REL005');
+    expect(codes(run.after)).not.toContain('REL005');
   });
 
   it('REL001: keeps the copy in its canonical home and removes identical ones (in the same file and on the one side)', async () => {
@@ -198,11 +194,10 @@ describe('automatic fixes', () => {
     });
     const run = await repair(p);
     expect(codes(run.before)).toEqual(expect.arrayContaining(['REL001', 'REL002']));
-    expect(run.questions).toEqual([]);
     expect(run.problems).toEqual([]);
     expect(p.read('logical-models/fct_order.yml')).toBe(`${FCT}${entry}  # a comment between entries stays\n`);
     expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
-    expect(codes(run.after!)).toEqual([]);
+    expect(codes(run.after)).toEqual([]);
   });
 
   it('REL009: removes a library project\'s domain-file copy that says what the library says, and nothing else in that file', async () => {
@@ -219,9 +214,89 @@ describe('automatic fixes', () => {
     expect(run.before.mode).toBe('library');
     expect(codes(run.before)).toContain('REL009');
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.domainCopiesRemoved).toBe(1);
+    expect(run.plan.counts.domainCopiesRemoved).toBe(1);
     expect(JSON.parse(p.read('gold/orders.json')).logical.relationships).toEqual([kept]);
     expect(p.read('logical-models/fct_order.yml')).toBe(FCT);
+  });
+
+  it('REL009: a diagram copy that says something else is left exactly as it is and listed; the identical copy elsewhere goes', async () => {
+    const date = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    const differing = domainJson('sales', ['fct_order', 'dim_date'], [{ ...date, cardinality: 'one-to-one', role: 'ship' }]);
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'gold/orders.json': domainJson('orders', ['fct_order', 'dim_date'], [date]),
+      'gold/sales.json': differing,
+    });
+    const run = await repair(p);
+    // Both copies are notes, never duplicates: the library's copy is drawn by both diagrams.
+    expect(run.before.findings.filter((f) => f.code === 'REL009').map((f) => [f.files[0], f.fix])).toEqual([
+      ['gold/orders.json', 'remove-domain-copy'],
+      ['gold/sales.json', 'ignored-domain-copy'],
+    ]);
+    expect(codes(run.before)).not.toContain('REL001');
+    expect(run.problems).toEqual([]);
+    expect(run.plan.counts.domainCopiesRemoved).toBe(1);
+    expect(JSON.parse(p.read('gold/orders.json')).logical.relationships).toEqual([]);
+    expect(p.read('gold/sales.json')).toBe(differing);
+    expect(p.read('logical-models/fct_order.yml')).toBe(FCT);
+    expect(run.plan.left).toHaveLength(1);
+    expect(run.plan.left[0]).toMatchObject({ file: 'gold/sales.json' });
+    expect(run.plan.left[0].message).toBe(
+      'fct_order.date_key → dim_date.date_key: gold/sales.json keeps its own copy, which says ' +
+      'fct_order.date_key → dim_date.date_key (one-to-one, "ship") where the model library says ' +
+      'fct_order.date_key → dim_date.date_key (many-to-one). Diagrams draw the model library\'s copy and ignore this one, ' +
+      'so it is left as it is — delete it from gold/sales.json if it is wrong.',
+    );
+    // Offered for the identical copy only — said as what it is.
+    expect(describeRepairOffer(run.plan)).toBe(
+      '1 relationship can be tidied up automatically (1 kept as an unused copy in a diagram file). ' +
+      'Review the fixes with Repair Relationships…? Nothing changes until you confirm.',
+    );
+    // Nothing left to do on a second run; the differing copy is still listed, still untouched — and never offered.
+    const again = await repair(p);
+    expect(again.plan.changes).toEqual([]);
+    expect(messages(again.plan.left)).toEqual(messages(run.plan.left));
+    expect(describeRepairOffer(again.plan)).toBeNull();
+  });
+
+  it('a diagram copy that says something else never holds back the library\'s own fix (REL002 moved to its many side)', async () => {
+    const differing = domainJson('orders', ['fct_order', 'dim_customer'], [
+      { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'one-to-one' },
+    ]);
+    const p = project({
+      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: one-to-many\n`,
+      'logical-models/fct_order.yml': FCT,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'gold/orders.json': differing,
+    });
+    const run = await repair(p);
+    expect(codes(run.before)).toEqual(expect.arrayContaining(['REL002', 'REL009']));
+    expect(run.problems).toEqual([]);
+    expect(run.plan.counts.rehomed).toBe(1);
+    expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
+    expect(p.read('gold/orders.json')).toBe(differing);
+    expect(codes(run.after)).toEqual(['REL009']);
+    expect(run.after.findings[0].fix).toBe('ignored-domain-copy');
+  });
+
+  it('library copies that disagree still leave the whole link — every copy, the diagram\'s included', async () => {
+    const date = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    const orders = domainJson('orders', ['fct_order', 'dim_date'], [date]);
+    const dimDate = `${DIM_DATE}relationships:\n  - fromColumn: date_key\n    toModel: fct_order\n    toColumn: date_key\n    cardinality: one-to-many\n    role: shipped\n`;
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT,
+      'logical-models/dim_date.yml': dimDate,
+      'gold/orders.json': orders,
+    });
+    const run = await repair(p);
+    expect(run.before.findings.find((f) => f.code === 'REL001')).toMatchObject({ severity: 'error', files: ['logical-models/fct_order.yml', 'logical-models/dim_date.yml'] });
+    expect(run.plan.changes).toEqual([]);
+    expect(p.read('gold/orders.json')).toBe(orders);
+    expect(p.read('logical-models/dim_date.yml')).toBe(dimDate);
+    expect(messages(run.plan.left).join('\n')).toMatch(/its copies disagree/);
   });
 
   it('is idempotent: a second run has nothing to do', async () => {
@@ -232,9 +307,9 @@ describe('automatic fixes', () => {
     });
     const first = await repair(p);
     expect(first.problems).toEqual([]);
-    expect(first.plan!.changes.length).toBeGreaterThan(0);
+    expect(first.plan.changes.length).toBeGreaterThan(0);
     const second = await repair(p);
-    expect(second.plan!.changes).toEqual([]);
+    expect(second.plan.changes).toEqual([]);
     expect(analyseRepair(readRepairSnapshot(p.deps)).tasks).toEqual([]);
   });
 
@@ -245,7 +320,7 @@ describe('automatic fixes', () => {
       'logical-models/dim_date.yml': DIM_DATE,
     });
     const before = readRepairSnapshot(p.deps);
-    const plan = (await planRelationshipRepair(before, {}, async () => LEAVE_AS_IS))!;
+    const plan = planRelationshipRepair(before);
     const detail = describeRepairPlan(plan);
     expect(detail).toContain('• logical-models/dim_customer.yml');
     expect(detail).toContain('• logical-models/fct_order.yml');
@@ -253,170 +328,272 @@ describe('automatic fixes', () => {
   });
 });
 
-describe('questions only the user can answer', () => {
+describe('left for the user: listed with its file, never changed', () => {
   const conflicted = (): Project => project({
     'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: one-to-many\n    role: buyer\n`,
     'logical-models/fct_order.yml': `${FCT}  - fromColumn: customer_key   # by hand\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
     'logical-models/dim_date.yml': DIM_DATE,
   });
 
-  it('REL001 copies that disagree: one question, the copies as options, then Leave as is', async () => {
-    const p = conflicted();
-    const run = await repair(p, [(q) => q.options.find((o) => o.label.includes('"buyer"'))!.id]);
-    expect(run.questions).toHaveLength(1);
-    expect(run.questions[0].code).toBe('REL001');
-    expect(run.questions[0].options.map((o) => o.label)).toEqual([
-      'fct_order.customer_key → dim_customer.customer_key (many-to-one)',
-      'fct_order.customer_key → dim_customer.customer_key (many-to-one, "buyer")',
-      'Leave as is',
-    ]);
-    expect(run.problems).toEqual([]);
-    // The kept entry gains the role in place; the one-side copy goes.
-    expect(p.read('logical-models/fct_order.yml')).toBe(
-      `${FCT}  - fromColumn: customer_key   # by hand\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n    role: buyer\n`,
-    );
-    expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
-    expect(run.plan!.counts.settled).toBe(1);
-  });
-
-  it('REL001: "Leave as is" changes nothing, and Esc cancels the whole repair', async () => {
+  it('REL001 copies that disagree: no copy is chosen or removed; the relationship is listed with the file to open', async () => {
     const p = conflicted();
     const files = ['logical-models/dim_customer.yml', 'logical-models/fct_order.yml'].map((f) => [f, p.read(f)] as const);
-    const left = await repair(p, [LEAVE_AS_IS]);
-    expect(left.plan!.changes).toEqual([]);
-    expect(left.plan!.left[0]).toContain('its copies disagree');
-    const cancelled = await repair(p, [undefined]);
-    expect(cancelled.plan).toBeNull();
-    for (const [f, text] of files) expect(p.read(f)).toBe(text);
-  });
-
-  it('REL003: remove, point at another model, or leave', async () => {
-    const files = {
-      'logical-models/dim_customer.yml': DIM,
-      'logical-models/dim_date.yml': DIM_DATE,
-      'logical-models/fct_order.yml': `${FCT}  - fromColumn: customer_key\n    toModel: dim_client\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
-    };
-    const removed = project(files);
-    const run = await repair(removed, ['remove']);
-    expect(run.questions.map((q) => q.code)).toEqual(['REL003']);
-    expect(run.questions[0].options.map((o) => o.label)).toEqual([
-      'Remove this relationship',
-      'Point it at dim_customer.customer_key',
-      'Leave as is',
-    ]);
+    const run = await repair(p);
     expect(run.problems).toEqual([]);
-    expect(removed.read('logical-models/fct_order.yml')).toBe(FCT);
-
-    const repointed = project(files);
-    const again = await repair(repointed, [(q) => q.options[1].id]);
-    expect(again.problems).toEqual([]);
-    expect(repointed.read('logical-models/fct_order.yml')).toBe(
-      `${FCT}  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.fixed).toBe(0);
+    expect(run.plan.left).toHaveLength(1);
+    const [item] = run.plan.left;
+    expect(item.message).toBe(
+      'fct_order.customer_key → dim_customer.customer_key: its copies disagree ('
+      + 'fct_order.customer_key → dim_customer.customer_key (many-to-one) in logical-models/fct_order.yml; '
+      + 'fct_order.customer_key → dim_customer.customer_key (many-to-one, "buyer") in logical-models/dim_customer.yml'
+      + ') — keep the right one and delete the others. Left as it is.',
     );
-
-    const left = project(files);
-    const third = await repair(left, [LEAVE_AS_IS]);
-    expect(third.plan!.changes).toEqual([]);
+    // Open File goes to the copy that differs from the one the canvas draws, at its entry.
+    expect(item.filePath).toBe(p.at('logical-models/dim_customer.yml'));
+    expect(reportItemLine(item)).toBe(8);
+    for (const [f, text] of files) expect(p.read(f)).toBe(text);
+    expect(describeRepairPlan(run.plan)).toContain('Needs your attention — not changed by this repair:\n• fct_order.customer_key');
+    // Nothing to fix on its own, so the canvas does not offer the repair.
+    expect(describeRepairOffer(run.plan)).toBeNull();
   });
 
-  it('REL004: offers the model\'s columns, nearest first', async () => {
+  it('REL003: a missing model is listed, never removed or repointed', async () => {
+    const fct = `${FCT}  - fromColumn: customer_key\n    toModel: dim_client\n    toColumn: customer_key\n    cardinality: many-to-one\n`;
     const p = project({
-      'logical-models/dim_customer.yml': `${DIM}  - name: customer_name\n    dataType: string\n`,
-      'logical-models/dim_date.yml': DIM_DATE,
-      'logical-models/fct_order.yml': `${FCT}  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer\n    cardinality: many-to-one\n`,
-    });
-    const run = await repair(p, [(q) => q.options.find((o) => o.label === 'Point it at dim_customer.customer_key')!.id]);
-    expect(run.questions[0].code).toBe('REL004');
-    // The model's own spelling, never capitalised into a name that does not exist.
-    expect(run.questions[0].prompt).toBe('Model dim_customer has no column customer. What should happen to this relationship? (Esc cancels everything)');
-    expect(run.questions[0].prompt).not.toContain('Dim_customer');
-    expect(run.questions[0].options.map((o) => o.label)).toEqual([
-      'Remove this relationship',
-      'Point it at dim_customer.customer_key',
-      'Point it at dim_customer.customer_name',
-      'Leave as is',
-    ]);
-    expect(run.problems).toEqual([]);
-    expect(p.read('logical-models/fct_order.yml')).toContain('    toColumn: customer_key\n    cardinality: many-to-one\n');
-  });
-
-  it('REL006: swapping the ends moves the relationship to the model the keys say holds the foreign key', async () => {
-    const fct = FCT.replace('  - name: customer_key\n    dataType: string', '  - name: customer_key\n    dataType: string\n    isForeignKey: true');
-    const p = project({
-      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
+      'logical-models/dim_customer.yml': DIM,
       'logical-models/dim_date.yml': DIM_DATE,
       'logical-models/fct_order.yml': fct,
     });
-    const run = await repair(p, ['swap']);
-    expect(run.questions.map((q) => q.code)).toEqual(['REL006']);
-    expect(run.questions[0].options[0].label).toBe('Swap ends — make fct_order the many side');
-    expect(run.problems).toEqual([]);
-    expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
-    expect(p.read('logical-models/fct_order.yml')).toContain('  - fromColumn: customer_key\n    toModel: dim_customer\n');
-    expect(codes(run.after!)).not.toContain('REL006');
+    const run = await repair(p);
+    expect(codes(run.before)).toEqual(['REL003']);
+    expect(run.plan.changes).toEqual([]);
+    expect(messages(run.plan.left)).toEqual([
+      'fct_order.customer_key → dim_client.customer_key: model dim_client is not in the model library — point it at the right model and column, or delete it. Left as it is.',
+    ]);
+    expect(run.plan.left[0].file).toBe('logical-models/fct_order.yml');
+    expect(p.read('logical-models/fct_order.yml')).toBe(fct);
   });
 
-  it('REL006: a 1.6.7 dim → fact line on an unflagged fact column is offered the swap and lands in the fact\'s file', async () => {
+  it('REL004: a missing column is named with the model as it is spelt, never capitalised', async () => {
     const p = project({
-      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
+      'logical-models/dim_customer.yml': `${DIM}  - name: customer_name\n    dataType: string\n`,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'logical-models/fct_order.yml': `${FCT}  - fromColumn: Customer_Key\n    toModel: dim_customer\n    toColumn: customer\n    cardinality: many-to-one\n`,
+    });
+    const before = p.read('logical-models/fct_order.yml');
+    const run = await repair(p);
+    // The respelling of the same entry waits too: a link that needs a decision is left whole.
+    expect(codes(run.before)).toEqual(['REL004', 'REL005']);
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.left[0].message).toContain('model dim_customer has no column customer');
+    expect(run.plan.left[0].message).not.toContain('Dim_customer');
+    expect(p.read('logical-models/fct_order.yml')).toBe(before);
+  });
+
+  it('REL006 other than the 1.6.7 shape (the other end is part of a key) is listed, never turned round', async () => {
+    // dim_customer.customer_key → brg_customer_date.customer_key many-to-one: the bridge's column is part of its key.
+    const dim = `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: brg_customer_date\n    toColumn: customer_key\n    cardinality: many-to-one\n`;
+    const bridge = 'name: brg_customer_date\ncolumns:\n  - name: customer_key\n    isPrimaryKey: true\n  - name: date_key\n    isPrimaryKey: true\n';
+    const p = project({
+      'logical-models/dim_customer.yml': dim, 'logical-models/brg_customer_date.yml': bridge,
+      'logical-models/dim_date.yml': DIM_DATE, 'logical-models/fct_order.yml': FCT,
+    });
+    const run = await repair(p);
+    expect(codes(run.before)).toEqual(['REL006']);
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.left[0].message).toMatch(/the keys suggest it runs the other way — if so, use ⇄ on the canvas; if both sides are unique, make it one-to-one/);
+    expect(p.read('logical-models/dim_customer.yml')).toBe(dim);
+  });
+});
+
+describe('the 1.6.7 shape: a dimension → fact line stored backwards in the dimension\'s file', () => {
+  const backwards = `relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: many-to-one\n`;
+  const inFact = '  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n';
+
+  it('is turned round into the fact\'s file automatically, and a second run does nothing', async () => {
+    const p = project({
+      'logical-models/dim_customer.yml': `${DIM}${backwards}`,
       'logical-models/dim_date.yml': DIM_DATE,
       'logical-models/fct_order.yml': FCT,
     });
     expect(codes(readRepairSnapshot(p.deps))).toEqual(['REL006']);
-    const run = await repair(p, ['swap']);
-    expect(run.questions.map((q) => q.code)).toEqual(['REL006']);
+    const run = await repair(p);
     expect(run.problems).toEqual([]);
+    expect(run.plan.counts.swapped).toBe(1);
+    expect(run.plan.expect.redrawn.size).toBe(1);
     expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
-    expect(p.read('logical-models/fct_order.yml')).toContain('  - fromColumn: customer_key\n    toModel: dim_customer\n');
-    expect(codes(run.after!)).toEqual([]);
+    expect(p.read('logical-models/fct_order.yml')).toBe(`${FCT}${inFact}`);
+    expect(codes(run.after)).toEqual([]);
+    expect(describeRepairOffer(run.plan)).toBe(
+      '1 relationship can be tidied up automatically (1 saved the wrong way round (its key column as the "many" side)). '
+      + 'Review the fixes with Repair Relationships…? Nothing changes until you confirm.',
+    );
+    expect((await repair(p)).plan.changes).toEqual([]);
   });
 
-  it('REL006: a swap that would take out a commented entry is left, and the respelling still goes ahead (a second run does nothing)', async () => {
-    const p = project({
-      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key   # hand note\n    toModel: FCT_ORDER\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
-      'logical-models/dim_date.yml': DIM_DATE,
-      'logical-models/fct_order.yml': FCT,
-    });
-    const run = await repair(p, ['swap']);
-    expect(run.problems).toEqual([]);
-    expect(run.plan!.left.join(' ')).toMatch(/the keys suggest the other direction, but .*which turning it round would remove/);
-    expect(p.read('logical-models/dim_customer.yml')).toContain('  - fromColumn: customer_key   # hand note\n    toModel: fct_order\n');
-    const second = await repair(p, []);
-    expect(second.plan?.changes ?? []).toEqual([]);
-  });
-
-  it('REL006: the file a swap writes is among the files checked for unsaved edits before any question', async () => {
+  it('also when the fact\'s column is marked as a foreign key', async () => {
     const fct = FCT.replace('  - name: customer_key\n    dataType: string', '  - name: customer_key\n    dataType: string\n    isForeignKey: true');
-    const p = project({
-      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
-      'logical-models/dim_date.yml': DIM_DATE,
-      'logical-models/fct_order.yml': fct,
-    });
-    const analysis = analyseRepair(readRepairSnapshot(p.deps));
-    const run = await repair(p, ['swap']);
-    const written = run.plan!.changes.map((c) => c.filePath);
-    expect(written).toContain(p.at('logical-models/fct_order.yml'));
-    for (const file of written) expect(analysis.involvedFiles).toContain(file);
+    const p = project({ 'logical-models/dim_customer.yml': `${DIM}${backwards}`, 'logical-models/dim_date.yml': DIM_DATE, 'logical-models/fct_order.yml': fct });
+    const run = await repair(p);
+    expect(run.problems).toEqual([]);
+    expect(p.read('logical-models/fct_order.yml')).toBe(`${fct}${inFact}`);
+    expect(codes(run.after)).toEqual([]);
   });
 
-  it('REL003 on the from side: the model file a repoint makes the home is checked for unsaved edits before any question', async () => {
-    const gone = { fromModel: 'fct_ordr', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+  it('(c) takes off the isForeignKey 1.6.7\'s Draw from dbt left on the dimension\'s key, and nothing else', async () => {
+    const dimFk = `${DIM}    isForeignKey: true\n`;
+    const p = project({ 'logical-models/dim_customer.yml': `${dimFk}${backwards}`, 'logical-models/dim_date.yml': DIM_DATE, 'logical-models/fct_order.yml': FCT });
+    const run = await repair(p);
+    expect(run.problems).toEqual([]);
+    expect(run.plan.counts.foreignKeysCleared).toBe(1);
+    expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
+    expect(p.read('logical-models/fct_order.yml')).toBe(`${FCT}${inFact}`);
+    expect(describeRepairPlan(run.plan)).toContain('takes isForeignKey off dim_customer.customer_key');
+  });
+
+  it('(c) keeps the flag when the key is also the foreign-key end of another relationship (a subtype of a party)', async () => {
+    const party = 'name: dim_party\ncolumns:\n  - name: party_key\n    dataType: string\n    isPrimaryKey: true\n';
+    const dim = `${DIM}    isForeignKey: true\n${backwards}  - fromColumn: customer_key\n    toModel: dim_party\n    toColumn: party_key\n    cardinality: one-to-one\n`;
+    const p = project({
+      'logical-models/dim_customer.yml': dim, 'logical-models/dim_party.yml': party,
+      'logical-models/dim_date.yml': DIM_DATE, 'logical-models/fct_order.yml': FCT,
+    });
+    const run = await repair(p);
+    expect(run.problems).toEqual([]);
+    expect(run.plan.counts).toMatchObject({ swapped: 1, foreignKeysCleared: 0 });
+    expect(p.read('logical-models/dim_customer.yml')).toContain('    isForeignKey: true\n');
+    expect(p.read('logical-models/dim_customer.yml')).toContain('toModel: dim_party');
+    expect(p.read('logical-models/fct_order.yml')).toBe(`${FCT}${inFact}`);
+  });
+
+  it('(c) a flag with a comment on its line is left and said; the turn still goes ahead', async () => {
+    const dim = `${DIM}    isForeignKey: true   # from dbt\n${backwards}`;
+    const p = project({ 'logical-models/dim_customer.yml': dim, 'logical-models/dim_date.yml': DIM_DATE, 'logical-models/fct_order.yml': FCT });
+    const run = await repair(p);
+    expect(run.problems).toEqual([]);
+    expect(run.plan.counts).toMatchObject({ swapped: 1, foreignKeysCleared: 0 });
+    expect(messages(run.plan.left)).toEqual([expect.stringMatching(
+      /^dim_customer\.customer_key is its primary key but is still marked isForeignKey: true — .*shares its line with something else.*take the flag off by hand/,
+    )]);
+    expect(p.read('logical-models/dim_customer.yml')).toBe(`${DIM}    isForeignKey: true   # from dbt\n`);
+  });
+
+  it('an entry carrying a comment is left whole, and says why (a second run does nothing either)', async () => {
+    const dim = `${DIM}relationships:\n  - fromColumn: customer_key   # hand note\n    toModel: FCT_ORDER\n    toColumn: customer_key\n    cardinality: many-to-one\n`;
+    const p = project({ 'logical-models/dim_customer.yml': dim, 'logical-models/dim_date.yml': DIM_DATE, 'logical-models/fct_order.yml': FCT });
+    const run = await repair(p);
+    expect(run.problems).toEqual([]);
+    expect(run.plan.changes).toEqual([]);
+    expect(messages(run.plan.left).join(' ')).toMatch(/logical-models\/dim_customer\.yml entry 1 has comments, which this change would remove — left as it is/);
+    expect(p.read('logical-models/dim_customer.yml')).toBe(dim);
+  });
+
+  it('in a diagram file of a per-diagram project it is listed, never turned round (use ⇄ on the canvas)', async () => {
+    const typo = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const a = domainJson('a', ['dim_customer', 'fct_order'], [typo]);
     const p = project({
       'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT_HEAD + '\n',
       'logical-models/dim_date.yml': DIM_DATE,
+      'gold/a.json': a,
+    });
+    const run = await repair(p);
+    expect(run.before.mode).toBe('domain');
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.left[0].message).toBe(
+      'dim_customer.customer_key → fct_order.customer_key: the keys suggest it runs the other way — if so, use ⇄ on the canvas; '
+      + 'if both sides are unique, make it one-to-one. Left as it is.',
+    );
+    expect(run.plan.left[0].filePath).toBe(p.at('gold/a.json'));
+    // The entry's `{` is on the line above its first key.
+    expect(reportItemLine(run.plan.left[0])).toBe(a.split('\n').findIndex((l) => l.includes('"fromModel": "dim_customer"')));
+    expect(p.read('gold/a.json')).toBe(a);
+  });
+
+  it('the move leaves a diagram copy of it where it is, with the ⇄ hint — never turned round, never moved into the dimension\'s file', async () => {
+    const typo = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const a = domainJson('a', ['dim_customer', 'fct_order'], [typo]);
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT_HEAD + '\n',
+      'logical-models/dim_date.yml': DIM_DATE,
+      'gold/a.json': a,
+      'gold/b.json': domainJson('b', ['dim_customer', 'fct_order']),
+    });
+    const run = await repair(p, { moveDomainsToLibrary: true });
+    expect(run.problems).toEqual([]);
+    expect(run.plan.counts).toMatchObject({ moved: 0, swapped: 0 });
+    expect(run.plan.changes).toEqual([]);
+    expect(messages(run.plan.left)).toEqual([expect.stringMatching(
+      /^dim_customer\.customer_key → fct_order\.customer_key: the keys say it runs the other way .*use ⇄ on the canvas/,
+    )]);
+    expect(p.read('gold/a.json')).toBe(a);
+    expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
+    // A second run is the same: nothing to do, the same item left.
+    const again = await repair(p, { moveDomainsToLibrary: true });
+    expect(again.plan.changes).toEqual([]);
+  });
+
+  it('Repair in a library project leaves copies of it in two diagram files as they are (never turned round)', async () => {
+    const typo = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const a = domainJson('a', ['dim_customer', 'fct_order'], [typo]);
+    const b = domainJson('b', ['dim_customer', 'fct_order'], [typo]);
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
       'logical-models/fct_order.yml': FCT,
-      'gold/a.json': domainJson('a', ['fct_ordr', 'dim_customer'], [gone]),
-      'gold/b.json': domainJson('b', ['fct_ordr', 'dim_customer'], [gone]),
+      'logical-models/dim_date.yml': DIM_DATE,
+      'gold/a.json': a,
+      'gold/b.json': b,
+    });
+    const run = await repair(p);
+    expect(run.before.mode).toBe('library');
+    expect(run.plan.counts.swapped).toBe(0);
+    expect(run.plan.changes.filter((c) => c.kind === 'domain')).toEqual([]);
+    expect(p.read('gold/a.json')).toBe(a);
+    expect(p.read('gold/b.json')).toBe(b);
+    expect(messages(run.plan.left).join(' ')).toContain('use ⇄ on the canvas');
+  });
+
+  it('a diagram copy stored backwards next to the right model-library record is listed as ignored, never removed as a copy', async () => {
+    const typo = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const a = domainJson('a', ['dim_customer', 'fct_order'], [typo]);
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': `${FCT}${inFact}`,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'gold/a.json': a,
     });
     const snapshot = readRepairSnapshot(p.deps);
-    expect(snapshot.mode).toBe('library');
-    const analysis = analyseRepair(snapshot);
-    expect(analysis.tasks.some((t) => t.scope === 'library')).toBe(true);
-    const run = await repair(p, [(q) => q.options.find((o) => o.label.includes('fct_order'))!.id]);
-    expect(run.questions.map((q) => q.code)).toEqual(['REL003']);
-    const written = run.plan!.changes.map((c) => c.filePath);
-    expect(written).toContain(p.at('logical-models/fct_order.yml'));
-    for (const file of written) expect(analysis.involvedFiles).toContain(file);
+    expect(snapshot.findings.find((f) => f.code === 'REL009')?.fix).toBe('ignored-domain-copy');
+    const plan = planRelationshipRepair(snapshot);
+    expect(plan.changes).toEqual([]);
+    expect(describeRepairOffer(plan)).toBeNull();
+    expect(messages(plan.left)).toEqual([expect.stringMatching(/gold\/a\.json keeps its own copy.*delete it from gold\/a\.json if it is wrong/)]);
+  });
+
+  it('a one-to-one aggregate at a dimension\'s grain pointing at an unflagged dimension is listed, never turned round (#133)', async () => {
+    const agg = 'name: agg_customer_ltv\ncolumns:\n  - name: customer_id\n    dataType: string\n    isPrimaryKey: true\n    isForeignKey: true\n  - name: ltv\n    dataType: number\n'
+      + 'relationships:\n  - fromColumn: customer_id\n    toModel: dim_customer\n    toColumn: customer_id\n    cardinality: many-to-one\n';
+    const dim = 'name: dim_customer\ncolumns:\n  - name: customer_id\n    dataType: string\n  - name: name\n    dataType: string\n';
+    const p = project({ 'logical-models/agg_customer_ltv.yml': agg, 'logical-models/dim_customer.yml': dim });
+    const snapshot = readRepairSnapshot(p.deps);
+    expect(snapshot.findings.find((f) => f.code === 'REL006')?.fix).toBe('swap');
+    const plan = planRelationshipRepair(snapshot);
+    expect(plan.changes).toEqual([]);
+    expect(describeRepairOffer(plan)).toBeNull();
+    expect(messages(plan.left)).toEqual([expect.stringContaining('the keys suggest it runs the other way')]);
+  });
+
+  it('an SCD2 dimension\'s natural key pointing at an unflagged source model is listed, never turned round (#133)', async () => {
+    const dim = 'name: dim_customer\ncolumns:\n  - name: customer_sk\n    dataType: string\n    isPrimaryKey: true\n  - name: customer_id\n    dataType: string\n    isNaturalKey: true\n'
+      + 'relationships:\n  - fromColumn: customer_id\n    toModel: src_customers\n    toColumn: id\n    cardinality: many-to-one\n';
+    const src = 'name: src_customers\ncolumns:\n  - name: id\n    dataType: string\n  - name: name\n    dataType: string\n';
+    const p = project({ 'logical-models/dim_customer.yml': dim, 'logical-models/src_customers.yml': src });
+    const plan = planRelationshipRepair(readRepairSnapshot(p.deps));
+    expect(plan.changes).toEqual([]);
+    expect(describeRepairOffer(plan)).toBeNull();
   });
 });
 
@@ -431,7 +608,7 @@ describe('what the repair never touches', () => {
     const analysis = analyseRepair(readRepairSnapshot(p.deps));
     expect(analysis.unreadableEntries).toHaveLength(1);
     expect(analysis.unreadableEntries[0].line).toBe(16);
-    expect(analysis.blocked[0]).toContain('could not be read in full');
+    expect(analysis.left[0].message).toContain('could not be read in full');
     const run = await repair(p);
     expect(run.problems).toEqual([]);
     // The date entry is respelled; the typo entry is exactly as written; the dimension's copy stays.
@@ -472,31 +649,22 @@ describe('what the repair never touches', () => {
     expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([{ ...rel, description: 'KEEP ME' }]);
   });
 
-  it('per-domain project: copies that disagree in one file store the pick, in the copy carrying its own keys', async () => {
+  it('per-domain project: copies that disagree in one file are both kept and listed', async () => {
     const rel = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
-    const picked = { ...rel, cardinality: 'one-to-one', description: 'KEEP ME' };
+    const other = { ...rel, cardinality: 'one-to-one', description: 'KEEP ME' };
+    const a = domainJson('a', ['fct_order', 'dim_customer'], [rel, other]);
     const p = project({
       'logical-models/dim_customer.yml': DIM,
       'logical-models/dim_date.yml': DIM_DATE,
       'logical-models/fct_order.yml': FCT_HEAD + '\n',
-      'gold/a.json': domainJson('a', ['fct_order', 'dim_customer'], [rel, picked]),
+      'gold/a.json': a,
     });
-    const run = await repair(p, [(q) => q.options.find((o) => o.label.includes('one-to-one'))!.id]);
-    expect(run.questions.map((q) => q.code)).toEqual(['REL001']);
+    const run = await repair(p);
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.settled).toBe(1);
-    expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([picked]);
-
-    // And picking the other copy keeps that one's meaning, with the extras of the entry kept.
-    const q = project({
-      'logical-models/dim_customer.yml': DIM,
-      'logical-models/dim_date.yml': DIM_DATE,
-      'logical-models/fct_order.yml': FCT_HEAD + '\n',
-      'gold/a.json': domainJson('a', ['fct_order', 'dim_customer'], [rel, picked]),
-    });
-    const other = await repair(q, [(question) => question.options.find((o) => o.label.includes('(many-to-one)'))!.id]);
-    expect(other.problems).toEqual([]);
-    expect(JSON.parse(q.read('gold/a.json')).logical.relationships).toEqual([{ ...rel, description: 'KEEP ME' }]);
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.left[0].message).toContain('its copies disagree');
+    expect(run.plan.left[0].file).toBe('gold/a.json');
+    expect(p.read('gold/a.json')).toBe(a);
   });
 
   it('a library project\'s domain copy whose domain does not show both models (so draws nothing) goes too', async () => {
@@ -515,7 +683,7 @@ describe('what the repair never touches', () => {
 });
 
 describe('the move: domain → library', () => {
-  it('asks once about a relationship two diagrams define differently, then stores the pick once', async () => {
+  it('leaves a relationship two diagrams define differently in both diagrams, and lists it', async () => {
     const rel = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
     const p = project({
       'logical-models/dim_customer.yml': DIM,
@@ -524,16 +692,35 @@ describe('the move: domain → library', () => {
       'gold/a.json': domainJson('a', ['fct_order', 'dim_customer'], [rel]),
       'gold/b.json': domainJson('b', ['fct_order', 'dim_customer'], [{ ...rel, cardinality: 'one-to-one' }]),
     });
-    const run = await repair(p, [(q) => q.options.find((o) => o.label.includes('one-to-one'))!.id], { moveDomainsToLibrary: true });
-    expect(run.questions).toHaveLength(1);
-    expect(run.questions[0].options.map((o) => o.description)).toEqual(['as in gold/a', 'as in gold/b', 'decide later']);
+    const before = { a: p.read('gold/a.json'), b: p.read('gold/b.json') };
+    const run = await repair(p, { moveDomainsToLibrary: true });
     expect(run.problems).toEqual([]);
-    expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([]);
-    expect(JSON.parse(p.read('gold/b.json')).logical.relationships).toEqual([]);
-    expect(p.read('logical-models/fct_order.yml')).toBe(
-      `${FCT_HEAD}\nrelationships:\n  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: one-to-one\n`,
-    );
-    expect(run.plan!.counts.moved).toBe(1);
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.counts.moved).toBe(0);
+    expect(run.plan.movedLinks.size).toBe(0);
+    expect(run.plan.left[0].message).toMatch(/its copies disagree \(.*\(many-to-one\) in gold\/a\.json; .*\(one-to-one\) in gold\/b\.json\)/);
+    expect(p.read('gold/a.json')).toBe(before.a);
+    expect(p.read('gold/b.json')).toBe(before.b);
+    expect(p.read('logical-models/fct_order.yml')).toBe(FCT_HEAD + '\n');
+  });
+
+  it('moves the relationships that agree and leaves only the one that does not', async () => {
+    const rel = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const date = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'logical-models/fct_order.yml': FCT_HEAD + '\n',
+      'gold/a.json': domainJson('a', ['fct_order', 'dim_customer', 'dim_date'], [rel, date]),
+      'gold/b.json': domainJson('b', ['fct_order', 'dim_customer', 'dim_date'], [{ ...rel, cardinality: 'one-to-one' }, date]),
+    });
+    const run = await repair(p, { moveDomainsToLibrary: true });
+    expect(run.problems).toEqual([]);
+    expect(run.plan.counts.moved).toBe(1);
+    expect(run.plan.left).toHaveLength(1);
+    expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([rel]);
+    expect(JSON.parse(p.read('gold/b.json')).logical.relationships).toEqual([{ ...rel, cardinality: 'one-to-one' }]);
+    expect(p.read('logical-models/fct_order.yml')).toContain('toModel: dim_date');
   });
 });
 
@@ -548,7 +735,7 @@ describe('verifyRepair', () => {
       'gold/orders.json': domainJson('orders', ['fct_order', 'dim_date', 'dim_customer'], [copy, own]),
     });
     const before = readRepairSnapshot(p.deps);
-    const plan = (await planRelationshipRepair(before, {}, async () => LEAVE_AS_IS))!;
+    const plan = planRelationshipRepair(before);
     expect(plan.changes.map((c) => c.file)).toEqual(['gold/orders.json']);
     // Write the plan, but also drop the domain's own relationship and touch its description.
     const tampered = JSON.parse(plan.changes[0].text);
@@ -600,7 +787,7 @@ describe('verifyRepair: an entry\'s own keys', () => {
       'gold/a.json': domainJson('a', ['fct_order', 'dim_customer', 'dim_date'], [rel, rel, dated]),
     });
     const before = readRepairSnapshot(p.deps);
-    const plan = (await planRelationshipRepair(before, {}, async () => LEAVE_AS_IS))!;
+    const plan = planRelationshipRepair(before);
     expect(plan.changes.map((c) => c.file)).toEqual(['gold/a.json']);
     const written = JSON.parse(plan.changes[0].text);
     expect(written.logical.relationships).toEqual([rel, dated]);
@@ -700,7 +887,7 @@ describe('a diagram file changes entry by entry (#133 review)', () => {
     });
     const run = await repair(p);
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.domainCopiesRemoved).toBe(1);
+    expect(run.plan.counts.domainCopiesRemoved).toBe(1);
     expect(p.read('gold/orders.json')).toBe(`${head}${kept},\n${unreadable}${tail}`);
   });
 
@@ -714,7 +901,7 @@ describe('a diagram file changes entry by entry (#133 review)', () => {
       'gold/orders.json': `${head}${kept},\n${third}${tail}`,
     });
     const before = readRepairSnapshot(p.deps);
-    const plan = (await planRelationshipRepair(before, {}, async () => LEAVE_AS_IS))!;
+    const plan = planRelationshipRepair(before);
     const change = plan.changes.find((c) => c.kind === 'domain')!;
     // What the old whole-array rewrite produced: the kept entry re-rendered.
     const rewritten = change.text.replace(kept, kept.replace('1.50', '1.5'));
@@ -754,15 +941,16 @@ describe('the repair and the checks read the same domains', () => {
     expect(snapshot.findings.map((f) => f.code)).toEqual(['REL004']);
     const analysis = analyseRepair(snapshot);
     expect(analysis.tasks).toEqual([]);
-    expect(analysis.outOfReach).toEqual([
+    expect(messages(analysis.outOfReach)).toEqual([
       expect.stringMatching(/^gold\/legacy\.json has 1 relationship problem but is still in the older format .*Migrate Domains to Central Model Store/),
     ]);
+    expect(analysis.outOfReach[0].filePath).toBe(p.at('gold/legacy.json'));
   });
 
   it('a domain file that cannot be read is out of reach, named', () => {
     const p = project({ 'logical-models/dim_customer.yml': DIM, 'gold/broken.json': '{ "nope' });
     const analysis = analyseRepair(readRepairSnapshot(p.deps));
-    expect(analysis.outOfReach).toEqual([expect.stringMatching(/^gold\/broken\.json was not checked: it could not be read/)]);
+    expect(messages(analysis.outOfReach)).toEqual([expect.stringMatching(/^gold\/broken\.json was not checked: it could not be read/)]);
   });
 });
 
@@ -780,34 +968,14 @@ describe('the move and stub columns', () => {
         viewConfig: {},
       }, null, 2) + '\n',
     });
-    const run = await repair(p, [], { moveDomainsToLibrary: true });
-    expect(run.questions).toEqual([]);
+    const run = await repair(p, { moveDomainsToLibrary: true });
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.moved).toBe(1);
-    expect(run.plan!.left).toEqual([
+    expect(run.plan.counts.moved).toBe(1);
+    expect(messages(run.plan.left)).toEqual([
       expect.stringMatching(/^fct_order\.customer_code → dim_customer\.customer_code: left in gold\/a\.json — it uses dim_customer\.customer_code, which dim_customer's model file does not list/),
     ]);
     expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([stubbed]);
     expect(p.read('logical-models/fct_order.yml')).toContain('toModel: dim_date');
-  });
-});
-
-describe('two questions never both repoint onto one new link', () => {
-  it('once one relationship is pointed at a column, the next question no longer offers it', async () => {
-    const p = project({
-      'logical-models/dim_customer.yml': DIM,
-      'logical-models/dim_date.yml': DIM_DATE,
-      'logical-models/fct_order.yml': `${FCT}  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: cust_key\n    cardinality: many-to-one\n  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: custkey\n    cardinality: many-to-one\n`,
-    });
-    const target = 'Point it at dim_customer.customer_key';
-    const run = await repair(p, [
-      (q) => q.options.find((o) => o.label === target)!.id,
-      (q) => q.options.find((o) => o.label === target)?.id ?? 'remove',
-    ]);
-    expect(run.questions).toHaveLength(2);
-    expect(run.questions[0].options.map((o) => o.label)).toContain(target);
-    expect(run.questions[1].options.map((o) => o.label)).not.toContain(target);
-    expect(run.problems).toEqual([]);
   });
 });
 
@@ -900,23 +1068,30 @@ describe('review findings (#133): nothing lost, nothing rolled back for somethin
     expect(rel001.map((f) => f.files)).toEqual([['silver/legacy.json']]);
     expect(run.problems).toEqual([]);
     expect(JSON.parse(p.read('gold/orders.json')).logical.relationships).toEqual([]);
-    expect(run.plan!.outOfReach.join(' ')).toContain('silver/legacy.json');
+    expect(messages(run.plan.outOfReach).join(' ')).toContain('silver/legacy.json');
   });
 
-  it('an entry the user chose to remove takes its own keys with it — and verification still guards every other entry\'s', async () => {
+  it('a missing column\'s entry keeps its own keys — and verification guards every entry\'s own keys', async () => {
     const fct = `${FCT}  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: no_such_column\n    cardinality: many-to-one\n    description: kept by hand\n`;
     const p = project({ 'logical-models/dim_customer.yml': DIM, 'logical-models/fct_order.yml': fct, 'logical-models/dim_date.yml': DIM_DATE });
-    const run = await repair(p, ['remove']);
-    expect(run.questions.map((q) => q.code)).toEqual(['REL004']);
+    const listed = await repair(p);
+    expect(codes(listed.before)).toEqual(['REL004']);
+    expect(listed.plan.changes).toEqual([]);
+    expect(p.read('logical-models/fct_order.yml')).toBe(fct);
+
+    // A REL002 fix that writes fct_order.yml: a plan that took out the other entry's `note` is reported.
+    const q = project({
+      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: one-to-many\n`,
+      'logical-models/fct_order.yml': FCT,
+      'logical-models/dim_date.yml': DIM_DATE,
+    });
+    const run = await repair(q);
     expect(run.problems).toEqual([]);
-    expect(p.read('logical-models/fct_order.yml')).toBe(FCT);
-    // The other entry's own key (`note`) is still guarded: a plan that took it out is reported.
-    const lost = { ...run.plan!, expect: { ...run.plan!.expect } };
-    const change = lost.changes.find((c) => c.file === 'logical-models/fct_order.yml')!;
+    const change = run.plan.changes.find((c) => c.file === 'logical-models/fct_order.yml')!;
     const tampered = { ...change, text: change.text.replace('    note: an unknown key the repair must keep\n', '') };
     fs.writeFileSync(change.filePath, tampered.text);
-    const after = readRepairSnapshot(p.deps);
-    expect(verifyRepair(run.before, after, { ...lost, changes: [tampered] })).toContain('logical-models/fct_order.yml: an entry\'s own key note is gone');
+    const after = readRepairSnapshot(q.deps);
+    expect(verifyRepair(run.before, after, { ...run.plan, changes: [tampered] })).toContain('logical-models/fct_order.yml: an entry\'s own key note is gone');
   });
 
   it('a v4 diagram\'s single copy that differs from the library\'s is no finding: the two are never drawn together', () => {
@@ -946,8 +1121,8 @@ describe('review findings (#133): nothing lost, nothing rolled back for somethin
     const p = project({ 'logical-models/dim_customer.yml': dim, 'logical-models/fct_order.yml': FCT, 'logical-models/dim_date.yml': DIM_DATE });
     const run = await repair(p);
     expect(codes(run.before)).toContain('REL002');
-    expect(run.plan!.changes).toEqual([]);
-    expect(run.plan!.left.join(' ')).toMatch(/logical-models\/dim_customer\.yml entry 1 has its own keys description, tests and comments, which this change would remove — left as it is/);
+    expect(run.plan.changes).toEqual([]);
+    expect(messages(run.plan.left).join(' ')).toMatch(/logical-models\/dim_customer\.yml entry 1 has its own keys description, tests and comments, which this change would remove — left as it is/);
     expect(p.read('logical-models/dim_customer.yml')).toBe(dim);
   });
 
@@ -958,9 +1133,9 @@ describe('review findings (#133): nothing lost, nothing rolled back for somethin
       'logical-models/fct_order.yml': FCT_HEAD + '\n',
       'gold/orders.json': domainJson('orders', ['fct_order', 'dim_customer'], [{ ...CUSTOMER_REL, description: 'd1', label: 'L' }]),
     });
-    const run = await repair(p, [], { moveDomainsToLibrary: true });
-    expect(run.plan!.changes).toEqual([]);
-    expect(run.plan!.left.join(' ')).toContain('gold/orders.json entry 1 has its own keys description, label');
+    const run = await repair(p, { moveDomainsToLibrary: true });
+    expect(run.plan.changes).toEqual([]);
+    expect(messages(run.plan.left).join(' ')).toContain('gold/orders.json entry 1 has its own keys description, label');
   });
 
   it('a comment above an entry stays when every entry of the list goes', async () => {
@@ -978,7 +1153,7 @@ describe('review findings (#133): nothing lost, nothing rolled back for somethin
     const p = project({ 'logical-models/dim_customer.yml': DIM, 'logical-models/fct_order.yml': fct, 'logical-models/dim_date.yml': DIM_DATE });
     const run = await repair(p);
     expect(codes(run.before)).toEqual(expect.arrayContaining(['REL005', 'REL008']));
-    expect(run.plan!.changes).toEqual([]);
+    expect(run.plan.changes).toEqual([]);
     expect(p.read('logical-models/fct_order.yml')).toBe(fct);
 
     const domain = domainJson('orders', ['fct_order', 'dim_customer'], [{ ...CUSTOMER_REL, toModel: 'DIM_customer', role: long }]);
@@ -986,12 +1161,12 @@ describe('review findings (#133): nothing lost, nothing rolled back for somethin
       'logical-models/dim_customer.yml': DIM, 'logical-models/fct_order.yml': FCT_HEAD + '\n', 'logical-models/dim_date.yml': DIM_DATE,
       'gold/orders.json': domain,
     });
-    const moved = await repair(q, [], { moveDomainsToLibrary: true });
-    expect(moved.plan!.changes).toEqual([]);
+    const moved = await repair(q, { moveDomainsToLibrary: true });
+    expect(moved.plan.changes).toEqual([]);
     expect(q.read('gold/orders.json')).toBe(domain);
   });
 
-  it('REL003: a diagram\'s own relationship to a model the diagram does not hold is asked about, and repointed only within it', async () => {
+  it('REL003: a diagram\'s own relationship to a model the diagram does not hold is listed, never changed', async () => {
     const p = project({
       'logical-models/dim_customer.yml': DIM,
       'logical-models/dim_date.yml': DIM_DATE,
@@ -1001,13 +1176,11 @@ describe('review findings (#133): nothing lost, nothing rolled back for somethin
     const before = readRepairSnapshot(p.deps);
     expect(before.mode).toBe('domain');
     expect(before.findings.map((f) => f.code)).toEqual(['REL003']);
-    const run = await repair(p, ['remove']);
-    expect(run.questions.map((q) => q.code)).toEqual(['REL003']);
-    expect(run.questions[0].prompt).toMatch(/^Model dim_customer is not one of gold\/orders\.json's models/);
-    // No "point it at" choice outside the diagram (dim_customer is the only model with that column).
-    expect(run.questions[0].options.map((o) => o.id)).toEqual(['remove', LEAVE_AS_IS]);
-    expect(run.problems).toEqual([]);
-    expect(JSON.parse(p.read('gold/orders.json')).logical.relationships).toEqual([]);
+    const orders = p.read('gold/orders.json');
+    const run = await repair(p);
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.left[0].message).toMatch(/^fct_order\.customer_key → dim_customer\.customer_key: model dim_customer is not one of gold\/orders\.json's models/);
+    expect(p.read('gold/orders.json')).toBe(orders);
   });
 });
 
@@ -1025,11 +1198,10 @@ describe('review findings (#133): the move never plans what it cannot store and 
     const p = project(base([good, ghost]));
     const before = readRepairSnapshot(p.deps);
     expect([...linksTheMoveStores(before)]).toHaveLength(1);
-    const run = await repair(p, [], { moveDomainsToLibrary: true });
-    expect(run.questions).toEqual([]);
+    const run = await repair(p, { moveDomainsToLibrary: true });
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.moved).toBe(1);
-    expect(run.plan!.left).toEqual([
+    expect(run.plan.counts.moved).toBe(1);
+    expect(messages(run.plan.left)).toEqual([
       expect.stringMatching(/^fct_order\.date_key → dim_ghost\.ghost_key: left in gold\/a\.json — it points at dim_ghost, which has no readable file in logical-models\//),
     ]);
     expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([ghost]);
@@ -1040,10 +1212,10 @@ describe('review findings (#133): the move never plans what it cannot store and 
     const empty = { ...good, fromColumn: 'date_key', toColumn: '' };
     const p = project(base([good, empty], [good]));
     expect([...linksTheMoveStores(readRepairSnapshot(p.deps))]).toHaveLength(1);
-    const run = await repair(p, [], { moveDomainsToLibrary: true });
+    const run = await repair(p, { moveDomainsToLibrary: true });
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.moved).toBe(1);
-    expect(run.plan!.left).toEqual([expect.stringMatching(/its toColumn is empty, which a model file cannot hold/)]);
+    expect(run.plan.counts.moved).toBe(1);
+    expect(messages(run.plan.left)).toEqual([expect.stringMatching(/its toColumn is empty, which a model file cannot hold/)]);
     expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([empty]);
   });
 
@@ -1055,17 +1227,17 @@ describe('review findings (#133): the move never plans what it cannot store and 
       'gold/a.json': domainJson('a', ['fct_order', 'dim_customer', 'stg_x'], [good, stray]),
       'gold/b.json': domainJson('b', ['fct_order', 'dim_customer'], [good]),
     });
-    const run = await repair(p, [], { moveDomainsToLibrary: true });
+    const run = await repair(p, { moveDomainsToLibrary: true });
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts).toMatchObject({ moved: 1, left: 1, noHome: 1 });
-    expect(run.plan!.left).toEqual([
+    expect(run.plan.counts.moved).toBe(1);
+    expect(messages(run.plan.left)).toEqual([
       'stg_x.customer_key → dim_customer.customer_key: stg_x has no readable file in logical-models/, so it stays where it is.',
     ]);
-    expect(describeRepairPlan(run.plan!)).toContain('stg_x has no readable file in logical-models/');
+    expect(describeRepairPlan(run.plan)).toContain('stg_x has no readable file in logical-models/');
     expect(JSON.parse(p.read('gold/a.json')).logical.relationships).toEqual([stray]);
   });
 
-  it('copies that disagree with no home are not asked about, and count as left, never as settled', async () => {
+  it('copies that disagree with no home are listed once, as having no home', async () => {
     const stray = { fromModel: 'stg_x', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
     const p = project({
       'logical-models/dim_customer.yml': DIM,
@@ -1073,17 +1245,15 @@ describe('review findings (#133): the move never plans what it cannot store and 
       'gold/a.json': domainJson('a', ['fct_order', 'dim_customer', 'stg_x'], [good, stray]),
       'gold/b.json': domainJson('b', ['fct_order', 'dim_customer', 'stg_x'], [good, { ...stray, cardinality: 'many-to-many' }]),
     });
-    const run = await repair(p, [(q) => q.options[0].id], { moveDomainsToLibrary: true });
-    expect(run.questions).toEqual([]);
+    const run = await repair(p, { moveDomainsToLibrary: true });
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts).toMatchObject({ moved: 1, settled: 0, left: 1, noHome: 1 });
-    expect(run.plan!.expect.userChanged.size).toBe(0);
+    expect(run.plan.counts.moved).toBe(1);
+    expect(messages(run.plan.left)).toEqual([
+      'stg_x.customer_key → dim_customer.customer_key: stg_x has no readable file in logical-models/, so it stays where it is.',
+    ]);
   });
 
-  it('a conflict picked, then left for want of a home, takes back its "settled" count', async () => {
-    // A library project with the link in two diagram files, from a model that
-    // has no file (REL003): the pick is asked, then the endpoint, and with
-    // "Leave as is" there the link has nowhere to go.
+  it('in a library project, copies that disagree and point at a missing model are listed with both reasons', async () => {
     const stray = { fromModel: 'stg_x', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
     const p = project({
       'logical-models/dim_customer.yml': DIM,
@@ -1092,18 +1262,16 @@ describe('review findings (#133): the move never plans what it cannot store and 
       'gold/b.json': domainJson('b', ['dim_customer', 'stg_x'], [{ ...stray, cardinality: 'many-to-many' }]),
     });
     expect(readRepairSnapshot(p.deps).mode).toBe('library');
-    const run = await repair(p, [(q) => q.options[0].id, LEAVE_AS_IS]);
-    expect(run.questions.map((q) => q.kind)).toEqual(['conflict', 'endpoint']);
+    const run = await repair(p);
     expect(run.problems).toEqual([]);
-    expect(run.plan!.changes).toEqual([]);
-    expect(run.plan!.counts).toMatchObject({ settled: 0, left: 1 });
-    expect(run.plan!.left).toEqual(['stg_x.customer_key → dim_customer.customer_key: stg_x has no readable file in logical-models/, so it stays where it is.']);
-    expect(run.plan!.expect.userChanged.size).toBe(0);
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.left).toHaveLength(1);
+    expect(run.plan.left[0].message).toMatch(/its copies disagree .*; model stg_x is not in the model library/);
   });
 });
 
-describe('review findings (#133): repoint in a per-diagram project', () => {
-  it('offers the obvious repoint although another diagram holds that link: each diagram keeps its own copy', async () => {
+describe('review findings (#133): a per-diagram project', () => {
+  it('a missing column in one diagram\'s own copy is listed with that file; the other diagram\'s copy is not touched', async () => {
     const right = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
     const p = project({
       'logical-models/dim_customer.yml': DIM,
@@ -1112,24 +1280,15 @@ describe('review findings (#133): repoint in a per-diagram project', () => {
       'gold/b.json': domainJson('b', ['fct_order', 'dim_customer'], [{ ...right, toColumn: 'cust_key' }]),
     });
     expect(readRepairSnapshot(p.deps).mode).toBe('domain');
-    const run = await repair(p, [(q) => q.options.find((o) => o.id.startsWith('repoint:'))?.id ?? LEAVE_AS_IS]);
-    expect(run.questions[0].options.map((o) => o.label)).toEqual([
-      'Remove this relationship', 'Point it at dim_customer.customer_key', 'Leave as is',
-    ]);
-    expect(run.problems).toEqual([]);
-    expect(JSON.parse(p.read('gold/b.json')).logical.relationships).toEqual([right]);
-    expect(run.after!.findings).toEqual([]);
-  });
-
-  it('still never repoints onto a link the same diagram file already holds', async () => {
-    const right = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
-    const p = project({
-      'logical-models/dim_customer.yml': DIM,
-      'logical-models/fct_order.yml': FCT_HEAD + '\n',
-      'gold/b.json': domainJson('b', ['fct_order', 'dim_customer'], [right, { ...right, toColumn: 'cust_key' }]),
-    });
+    const files = { a: p.read('gold/a.json'), b: p.read('gold/b.json') };
     const run = await repair(p);
-    expect(run.questions[0].options.map((o) => o.label)).toEqual(['Remove this relationship', 'Leave as is']);
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.left.map((i) => [i.file, i.message])).toEqual([[
+      'gold/b.json',
+      'fct_order.customer_key → dim_customer.cust_key: model dim_customer has no column cust_key — point it at the right model and column, or delete it. Left as it is.',
+    ]]);
+    expect(p.read('gold/a.json')).toBe(files.a);
+    expect(p.read('gold/b.json')).toBe(files.b);
   });
 });
 
@@ -1141,15 +1300,17 @@ describe('review findings (#133): never an all-clear over files it did not read'
     });
     const analysis = analyseRepair(readRepairSnapshot(p.deps));
     expect(analysis.tasks).toEqual([]);
-    expect(analysis.outOfReach).toEqual([
+    expect(messages(analysis.outOfReach)).toEqual([
       expect.stringMatching(/^logical-models\/fct_order\.yml was not checked: it has a YAML error on line \d+, so the relationships in it were not looked at/),
     ]);
+    expect(analysis.outOfReach[0].filePath).toBe(p.at('logical-models/fct_order.yml'));
+    expect(analysis.outOfReach[0].line).toBeGreaterThan(0);
   });
 
   it('a layers.json that cannot be used is out of reach', () => {
     const p = project({ 'logical-models/dim_customer.yml': DIM });
     const analysis = analyseRepair(readRepairSnapshot({ ...p.deps, layerService: { getLoadError: () => 'Invalid JSON' } }));
-    expect(analysis.outOfReach).toEqual([expect.stringMatching(/^layers\.json could not be used \(Invalid JSON\)/)]);
+    expect(messages(analysis.outOfReach)).toEqual([expect.stringMatching(/^layers\.json could not be used \(Invalid JSON\)/)]);
   });
 });
 
@@ -1164,33 +1325,15 @@ describe('#133 review 6', () => {
       'gold/a.json': a,
       'gold/b.json': domainJson('b', ['dim_customer', 'fct_order']),
     });
-    const run = await repair(p, [], { moveDomainsToLibrary: true });
+    const run = await repair(p, { moveDomainsToLibrary: true });
     // Read as many-to-one from the dimension's primary key: also REL006 (a
     // unique column cannot be the many side), left as it is by the answer.
     expect(codes(run.before)).toEqual(['REL006', 'REL008']);
     expect(p.read('gold/a.json')).toBe(a);
     expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
-    if (run.plan) {
-      expect(run.plan.changes.map((c) => c.file)).not.toContain('gold/a.json');
-      expect(run.problems).toEqual([]);
-      expect(codes(run.after!)).toEqual(['REL006', 'REL008']);
-    }
-  });
-
-  it('a direction question never claims swapping is right: the link may be a one-to-one (#133 review 8)', async () => {
-    const typo = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' };
-    const p = project({
-      'logical-models/dim_customer.yml': DIM,
-      'logical-models/fct_order.yml': FCT_HEAD + '\n',
-      'logical-models/dim_date.yml': DIM_DATE,
-      'gold/a.json': domainJson('a', ['dim_customer', 'fct_order'], [typo]),
-    });
-    const run = await repair(p);
-    const question = run.questions.find((q) => q.code === 'REL006');
-    expect(question?.prompt).toBe(
-      'The keys do not fit this relationship\'s direction. Swap its ends if it runs the other way; '
-      + 'if both sides are unique, leave it and make it one-to-one on the canvas. (Esc cancels everything)',
-    );
+    expect(run.plan.changes.map((c) => c.file)).not.toContain('gold/a.json');
+    expect(run.problems).toEqual([]);
+    expect(codes(run.after)).toEqual(['REL006', 'REL008']);
   });
 
   it('repair never removes a defaulted diagram entry as a duplicate of a good copy', async () => {
@@ -1206,7 +1349,7 @@ describe('#133 review 6', () => {
     const run = await repair(p);
     expect(codes(run.before)).toContain('REL008');
     expect(p.read('gold/a.json')).toBe(a);
-    if (run.plan) expect(run.plan.left.join('\n')).toMatch(/could not be read in full/);
+    expect(messages(run.plan.left).join('\n')).toMatch(/could not be read in full/);
   });
 
   it('a role written as a block scalar is left exactly as written when the respell does not change it', async () => {
@@ -1252,11 +1395,11 @@ describe('#133 review 6', () => {
     });
     const run = await repair(p);
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.moved).toBe(1);
-    expect(run.plan!.alsoDrawn).toEqual([
+    expect(run.plan.counts.moved).toBe(1);
+    expect(run.plan.alsoDrawn).toEqual([
       'gold/c.json will also draw fct_order.customer_key → dim_customer.customer_key: it holds both models, and the relationship is now in the model library',
     ]);
-    expect(describeRepairPlan(run.plan!)).toContain('Diagrams that will start drawing a relationship:\n• gold/c.json will also draw');
+    expect(describeRepairPlan(run.plan)).toContain('Diagrams that will start drawing a relationship:\n• gold/c.json will also draw');
   });
 });
 
@@ -1275,17 +1418,16 @@ describe('a model file the repair cannot edit in place never takes the whole run
     expect(codes(before)).toEqual(expect.arrayContaining(['REL002', 'REL009']));
     const analysis = analyseRepair(before);
     expect(analysis.tasks).toHaveLength(1);
-    expect(analysis.blocked).toEqual([
+    expect(messages(analysis.left)).toEqual([
       'fct_order.customer_key → dim_customer.customer_key: logical-models/fct_order.yml: "relationships:" is not a list with one "- " entry per line — left as it is; change it by hand.',
     ]);
     const run = await repair(p);
-    expect(run.plan).not.toBeNull();
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.domainCopiesRemoved).toBe(1);
-    expect(run.plan!.left).toEqual(analysis.blocked);
+    expect(run.plan.counts.domainCopiesRemoved).toBe(1);
+    expect(messages(run.plan.left)).toEqual(messages(analysis.left));
     expect(p.read('logical-models/fct_order.yml')).toBe(fct);
     expect(JSON.parse(p.read('gold/orders.json')).logical.relationships).toEqual([]);
-    expect(codes(run.after!)).toContain('REL002');
+    expect(codes(run.after)).toContain('REL002');
   });
 
   it('the move does not count a link whose home it cannot write', () => {
@@ -1322,11 +1464,10 @@ describe('a model file the repair cannot edit in place never takes the whole run
     });
     const run = await repair(p);
     expect(codes(run.before)).toEqual(expect.arrayContaining(['REL005', 'REL009']));
-    expect(run.plan).not.toBeNull();
     expect(run.problems).toEqual([]);
-    expect(run.plan!.counts.domainCopiesRemoved).toBe(1);
-    expect(run.plan!.counts.respelled).toBe(0);
-    expect(run.plan!.left).toEqual([
+    expect(run.plan.counts.domainCopiesRemoved).toBe(1);
+    expect(run.plan.counts.respelled).toBe(0);
+    expect(messages(run.plan.left)).toEqual([
       'fct_order.date_key → dim_date.date_key: logical-models/fct_order.yml: relationship entry 2: "cardinality" is not a plain value — left as it is; change it by hand.',
     ]);
     expect(p.read('logical-models/fct_order.yml')).toBe(fct);
@@ -1343,22 +1484,29 @@ describe('a repair never switches where new relationships are saved without sayi
     'gold/orders.json': domainJson('orders', ['fct_order', 'dim_customer', 'dim_date'], [own]),
   });
 
-  it('removing the last model-library relationship while a diagram keeps its own is named in the preview, and verify holds it to that', async () => {
+  it('never takes out the model library\'s last relationship: one pointing at a missing model is listed and the mode stays', async () => {
     const p = setUp();
-    const run = await repair(p, ['remove']);
+    const fct = p.read('logical-models/fct_order.yml');
+    const run = await repair(p);
     expect(run.before.mode).toBe('library');
-    expect(run.after!.mode).toBe('domain');
-    expect(run.problems).toEqual([]);
-    expect(run.plan!.modeChange).toMatch(/goes back to keeping relationships in each diagram's file/);
-    expect(describeRepairPlan(run.plan!)).toContain('Where new relationships are saved: After this no model file holds a relationship');
+    expect(run.after.mode).toBe('library');
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.modeChange).toBeUndefined();
+    expect(run.plan.left[0].message).toContain('model dim_gone is not in the model library');
+    expect(p.read('logical-models/fct_order.yml')).toBe(fct);
   });
 
   it('verify refuses a mode the plan did not say', async () => {
-    const p = setUp();
-    const run = await repair(p, ['remove']);
-    const silent: RepairPlan = { ...run.plan!, expect: { ...run.plan!.expect, modeAfter: 'library' } };
-    expect(verifyRepair(run.before, run.after!, silent))
-      .toContain("the project would go back to keeping relationships in each diagram's file, which the plan did not say");
+    const p = project({
+      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: one-to-many\n`,
+      'logical-models/fct_order.yml': FCT,
+      'logical-models/dim_date.yml': DIM_DATE,
+    });
+    const run = await repair(p);
+    expect(run.problems).toEqual([]);
+    const silent: RepairPlan = { ...run.plan, expect: { ...run.plan.expect, modeAfter: 'domain' } };
+    expect(verifyRepair(run.before, run.after, silent))
+      .toContain('the project would switch to keeping relationships in the model library, which the plan did not say');
   });
 
   it('a plan that keeps the mode says nothing about it', async () => {
@@ -1368,13 +1516,13 @@ describe('a repair never switches where new relationships are saved without sayi
       'logical-models/dim_date.yml': DIM_DATE,
     });
     const run = await repair(p);
-    expect(run.plan!.modeChange).toBeUndefined();
-    expect(run.plan!.expect.modeAfter).toBe('library');
+    expect(run.plan.modeChange).toBeUndefined();
+    expect(run.plan.expect.modeAfter).toBe('library');
   });
 });
 
 describe('a name only in stubColumns does not put a model on the diagram (#133 review)', () => {
-  it('Repair asks about the REL003 check reports for it, and removing it verifies', async () => {
+  it('Repair lists the REL003 the check reports for it, and changes nothing', async () => {
     const rel = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
     const p = project({
       'logical-models/dim_customer.yml': DIM,
@@ -1384,11 +1532,76 @@ describe('a name only in stubColumns does not put a model on the diagram (#133 r
         logical: { models: ['fct_order'], relationships: [rel] }, viewConfig: {},
       }, null, 2) + '\n',
     });
-    const run = await repair(p, ['remove']);
+    const a = p.read('gold/a.json');
+    const run = await repair(p);
     expect(codes(run.before)).toEqual(['REL003']);
-    expect(run.questions).toHaveLength(1);
-    expect(run.questions[0].prompt).toMatch(/not one of gold\/a\.json's models/);
-    expect(run.problems).toEqual([]);
-    expect(codes(run.after!)).toEqual([]);
+    expect(run.plan.changes).toEqual([]);
+    expect(run.plan.left[0].message).toMatch(/model dim_customer is not one of gold\/a\.json's models/);
+    expect(p.read('gold/a.json')).toBe(a);
+  });
+});
+
+describe('what the canvas offers, and where Open File goes', () => {
+  it('describeRepairOffer counts each relationship once, by what is wrong with it', async () => {
+    const p = project({
+      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: FCT_order\n    toColumn: customer_key\n    cardinality: one-to-many\n`,
+      'logical-models/fct_order.yml': FCT,
+      'logical-models/dim_date.yml': DIM_DATE,
+    });
+    const plan = planRelationshipRepair(readRepairSnapshot(p.deps));
+    expect(plan.fixed).toBe(1);
+    expect(describeRepairOffer(plan)).toBe(
+      '1 relationship can be tidied up automatically (1 saved in the file of the model it points at; 1 spelled with different capital letters). '
+      + 'Review the fixes with Repair Relationships…? Nothing changes until you confirm.',
+    );
+  });
+
+  it('offers nothing when everything left needs a decision', () => {
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'logical-models/fct_order.yml': `${FCT}  - fromColumn: customer_key\n    toModel: dim_client\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
+    });
+    const plan = planRelationshipRepair(readRepairSnapshot(p.deps));
+    expect(plan.left).toHaveLength(1);
+    expect(describeRepairOffer(plan)).toBeNull();
+  });
+
+  it('reportItemLine finds the entry in the file as it is now, after other entries above it moved', async () => {
+    const fct = `${FCT}  - fromColumn: customer_key\n    toModel: dim_client\n    toColumn: customer_key\n    cardinality: many-to-one\n`;
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'logical-models/fct_order.yml': fct,
+    });
+    const [item] = planRelationshipRepair(readRepairSnapshot(p.deps)).left;
+    expect(reportItemLine(item)).toBe(16);
+    // An entry above it goes (by hand): the item still lands on its entry.
+    p.write('logical-models/fct_order.yml', fct.replace(FCT_DATE_REL, 'relationships:'));
+    expect(reportItemLine(item)).toBe(11);
+  });
+
+  it('repairReportItems names unreadable entries with their file and line, after what is left', () => {
+    const fct = `${FCT}  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: one_to_many\n`;
+    const p = project({ 'logical-models/dim_customer.yml': DIM, 'logical-models/dim_date.yml': DIM_DATE, 'logical-models/fct_order.yml': fct });
+    const snapshot = readRepairSnapshot(p.deps);
+    const items = repairReportItems(planRelationshipRepair(snapshot), snapshot);
+    expect(items).toEqual([expect.objectContaining({ file: 'logical-models/fct_order.yml', filePath: p.at('logical-models/fct_order.yml'), line: 16 })]);
+  });
+});
+
+describe('clearForeignKeyFlags', () => {
+  const text = 'name: dim\ncolumns:\n  - name: id\n    dataType: int\n    isForeignKey: true\n    isPrimaryKey: true\n  - name: other\n    isForeignKey: true\n';
+
+  it('takes only the named column\'s flag line off', () => {
+    expect(clearForeignKeyFlags(text, ['id'])).toBe(text.replace('    dataType: int\n    isForeignKey: true\n', '    dataType: int\n'));
+    expect(clearForeignKeyFlags(text, [])).toBe(text);
+  });
+
+  it('refuses a flag it cannot take off in place, naming the file', () => {
+    expect(() => clearForeignKeyFlags(text.replace('isForeignKey: true\n    isPrimaryKey', 'isForeignKey: true # dbt\n    isPrimaryKey'), ['id'], 'dim.yml'))
+      .toThrow(/dim\.yml: column id's isForeignKey shares its line/);
+    expect(() => clearForeignKeyFlags('name: dim\ncolumns:\n  - { name: id, isForeignKey: true }\n', ['id'], 'dim.yml')).toThrow(RepairEditError);
+    expect(() => clearForeignKeyFlags('name: dim\ncolumns:\n  - isForeignKey: true\n    name: id\n', ['id'], 'dim.yml')).toThrow(/starts with isForeignKey/);
   });
 });

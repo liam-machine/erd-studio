@@ -15,6 +15,7 @@ import {
   canonicalRelationship,
   linkKey,
   relationshipEnds,
+  relationshipDifferences,
   relationshipFilePositions,
   sameRelationshipMeaning,
   type RelationshipEnds,
@@ -22,7 +23,7 @@ import {
   type RelationshipSeverity,
   type RelationshipSource,
 } from './relationships.js';
-import { keyEvidenceContradiction } from './normaliseRelationships.js';
+import { isStoredBackwards, keyEvidenceContradiction } from './normaliseRelationships.js';
 
 /** A model file in the library, as read. */
 export interface CheckLibraryModel {
@@ -86,12 +87,18 @@ export type RelationshipFixKind =
   | 'choose'
   /** The endpoint is missing: point it somewhere else, remove it, or leave it. */
   | 'repoint'
-  /** The direction contradicts key evidence: swap the ends, or leave it. */
+  /** The direction contradicts key evidence: the user swaps the ends (⇄), makes it one-to-one, or leaves it. */
   | 'swap'
   /** The entry could not be read: open the file at the line. */
   | 'open-file'
-  /** A domain-file copy the library also holds: remove the domain copy. */
-  | 'remove-domain-copy';
+  /** A domain-file copy saying what the library's says: remove the domain copy. */
+  | 'remove-domain-copy'
+  /**
+   * A domain-file copy that says something else than the library's: diagrams
+   * draw the library's and ignore it; never removed automatically — the user
+   * deletes it if it is wrong.
+   */
+  | 'ignored-domain-copy';
 
 /** One stored record a finding is about. */
 export interface RelationshipRecordRef {
@@ -130,6 +137,10 @@ interface Rec {
   domain?: CheckDomain;
   /** Library only: stored in the file of its canonical from-model. */
   atHome: boolean;
+  /** The key flags contradict its direction (REL006). */
+  contradicted?: boolean;
+  /** A model-library record in the 1.6.7 shape (`isStoredBackwards`): Repair Relationships… turns it round. */
+  backwards?: boolean;
 }
 
 const SEVERITY_ORDER: Record<RelationshipSeverity, number> = { error: 0, warning: 1, info: 2 };
@@ -137,10 +148,10 @@ const SEVERITY_ORDER: Record<RelationshipSeverity, number> = { error: 0, warning
 /**
  * Check every relationship the host loaded. Findings:
  *
- * - REL001 the same link stored more than once — within the library, within
- *   one domain file, across domain files of a library project, or as a
- *   domain copy that disagrees with the library. An error when the copies
- *   differ in cardinality, role or one-to-one direction, else a warning. In a
+ * - REL001 the same link stored more than once — within the library, or,
+ *   for a link the library does not hold, within one domain file or across
+ *   domain files of a library project. An error when the copies differ in
+ *   cardinality, role or one-to-one direction, else a warning. In a
  *   per-domain project each domain file keeps its own copy, so copies in
  *   different domain files are not a finding.
  * - REL002 a `one-to-many` stored in a model file (warning).
@@ -151,11 +162,17 @@ const SEVERITY_ORDER: Record<RelationshipSeverity, number> = { error: 0, warning
  * - REL004 an endpoint column missing from its model (error; not for an
  *   unreadable model, a stub, or a model with no columns yet).
  * - REL005 an endpoint that matches only when case is ignored (warning).
- * - REL006 the stored direction contradicts certain key evidence (info).
+ * - REL006 the stored direction contradicts certain key evidence (info);
+ *   `fix: 'rehome'` for a model-library record in the 1.6.7 shape
+ *   (`isStoredBackwards`), which Repair Relationships… turns round, else
+ *   `fix: 'swap'` (the user's to judge).
  * - REL008 a model file or domain file entry skipped or defaulted on read
  *   (error, with the line where known).
  * - REL009 a domain-file copy of a link the library also holds, in a library
- *   project, saying the same thing (info).
+ *   project (info) — one per domain file, whatever its copies say: every
+ *   diagram draws the library's copy, so the domain file's is ignored. The
+ *   message says whether it differs (and on what); Repair Relationships…
+ *   removes only the copies that say the same (`fix: 'remove-domain-copy'`).
  *
  * Findings are sorted errors first, then by code, file and line.
  */
@@ -344,13 +361,21 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
 
     const contradiction = keyEvidenceContradiction(r.rel, (name) => resolve(name)?.model);
     if (contradiction) {
+      r.contradicted = true;
+      // Only a model-library record is turned round by Repair Relationships…,
+      // and only when the keys leave no other reading; anything else is the
+      // user's to judge (⇄ on the line, or one-to-one).
+      r.backwards = r.ref.source.kind === 'library' && isStoredBackwards(r.rel, (name) => resolve(name)?.model);
       push({
         code: 'REL006',
         severity: 'info',
-        message: `${where}: ${contradiction}`,
+        message: r.backwards
+          ? `${where}: ${contradiction}. It is the shape ERD Studio 1.6.7 saved for a line drawn from a dimension to a fact — ` +
+            'Repair Relationships… turns it round'
+          : `${where}: ${contradiction}`,
         files: [r.ref.file],
         link: linkKey(r.rel),
-        fix: 'swap',
+        fix: r.backwards ? 'rehome' : 'swap',
         records: [r.ref],
       });
     }
@@ -375,11 +400,15 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
       else domains.set(r.domain, [r]);
     }
 
+    // A library project's diagram file copies of a link the library holds
+    // are ignored for drawing (the library's copy wins on every canvas): they
+    // are REL009, never a duplicate of the library's or of each other.
+    const ignoredHere = (d: CheckDomain): boolean => library.length > 0 && d.mode === 'library' && !isOlderFormat(d);
     // The library's copies, against each other.
     if (library.length > 1) duplicate(key, library, push);
     // Each domain file's copies, against each other.
-    for (const list of domains.values()) {
-      if (list.length > 1) duplicate(key, list, push);
+    for (const [d, list] of domains) {
+      if (list.length > 1 && !ignoredHere(d)) duplicate(key, list, push);
     }
     // Copies across domain files: only a finding in a library project.
     const libraryProjectDomains = [...domains.entries()].filter(([d]) => d.mode === 'library');
@@ -393,20 +422,13 @@ export function checkRelationships(input: CheckRelationshipsInput): Relationship
       const kept = library[0];
       for (const [domain, list] of domains) {
         if (isOlderFormat(domain)) continue;
-        const first = list[0];
-        if (!sameRelationshipMeaning(first.rel, kept.rel)) {
-          duplicate(key, [kept, first], push);
-        } else if (domain.mode === 'library') {
-          push({
-            code: 'REL009',
-            severity: 'info',
-            message: `${domain.filePath}: relationship ${describeLink(kept.rel)} is also in ${kept.ref.file}; the domain file copy is not needed`,
-            files: [domain.filePath, kept.ref.file],
-            link: key,
-            fix: 'remove-domain-copy',
-            records: [kept.ref, first.ref],
-          });
+        if (!ignoredHere(domain)) {
+          // A per-domain project holds no library copies (`usesLibraryRelationships`);
+          // should one meet a domain copy anyway, a disagreement is still said.
+          if (!sameRelationshipMeaning(list[0].rel, kept.rel)) duplicate(key, [kept, list[0]], push);
+          continue;
         }
+        push(ignoredDomainCopy(key, kept, domain, list));
       }
     }
   }
@@ -432,10 +454,55 @@ function isOlderFormat(domain: CheckDomain): boolean {
   return domain.olderFormat === true || domain.models.some((m) => typeof m !== 'string');
 }
 
+/**
+ * REL009: a library project's domain file holding its own copies (`list`) of
+ * a link the library also holds (`kept`, the copy every diagram draws). Says
+ * whether they differ, and on what; only copies that say the same are for
+ * Repair Relationships… to remove.
+ */
+function ignoredDomainCopy(key: string, kept: Rec, domain: CheckDomain, list: readonly Rec[]): RelationshipFinding {
+  const differences = [...new Set(list.flatMap((r) => relationshipDifferences(r.rel, kept.rel)))];
+  const copies = list.length === 1 ? 'copy' : `${list.length} copies`;
+  const own = list.length === 1 ? 'its own copy' : `its own ${list.length} copies`;
+  const says = (r: Rec): string => {
+    const c = canonicalRelationship(r.rel);
+    return `${c.cardinality}${r.ref.role ? ` "${r.ref.role}"` : ''}`;
+  };
+  const differing = list.filter((r) => !sameRelationshipMeaning(r.rel, kept.rel));
+  const named = canonicalRelationship(kept.rel);
+  const namedFrom = `${named.fromModel}.${named.fromColumn}`.toLowerCase();
+  const sayDomain = differing.map((r) => {
+    const c = canonicalRelationship(r.rel);
+    const turned = c.cardinality !== 'many-to-many' && `${c.fromModel}.${c.fromColumn}`.toLowerCase() !== namedFrom
+      ? ` ${c.fromModel}.${c.fromColumn} → ${c.toModel}.${c.toColumn}` : '';
+    return `${says(r)}${turned}`;
+  });
+  return {
+    code: 'REL009',
+    severity: 'info',
+    message: differences.length === 0
+      ? `${domain.filePath}: relationship ${describeLink(kept.rel)} is also in ${kept.ref.file}; diagrams draw the model library's copy, ` +
+        `so this diagram file's ${copies} ${list.length === 1 ? 'is' : 'are'} not needed — Repair Relationships… removes ${list.length === 1 ? 'it' : 'them'}`
+      : `${domain.filePath}: relationship ${describeLink(kept.rel)} is also in ${kept.ref.file}, and this diagram file keeps ${own}, ` +
+        `which differs on ${differences.join(' and ')} (model library: ${says(kept)}; here: ${sayDomain.join(', ')}); ` +
+        "diagrams draw the model library's copy and ignore this one — delete it if it is wrong",
+    files: [domain.filePath, kept.ref.file],
+    link: key,
+    fix: differing.length === 0 ? 'remove-domain-copy' : 'ignored-domain-copy',
+    records: [kept.ref, ...list.map((r) => r.ref)],
+  };
+}
+
 /** A REL001 finding over records of one link, the first of which a reader draws. */
 function duplicate(key: string, list: readonly Rec[], push: (f: RelationshipFinding) => void): void {
   const [kept, ...others] = list;
-  const differs = others.some((r) => !sameRelationshipMeaning(r.rel, kept.rel));
+  // A model-library copy in the 1.6.7 shape of the kept one says the same
+  // thing turned round: Repair Relationships… removes it on its own.
+  const backwardsCopy = (r: Rec): boolean => r.backwards === true && kept.ref.source.kind === 'library'
+    && !sameRelationshipMeaning(r.rel, kept.rel)
+    && sameRelationshipMeaning(turnedRound(r.rel), kept.rel);
+  const differs = others.some((r) => !sameRelationshipMeaning(r.rel, kept.rel) && !backwardsCopy(r));
+  const backwards = differs ? [] : others.filter(backwardsCopy);
   // Two copies in one file are told apart by their entry number rather than naming the file twice.
   const repeated = new Set(list.map((r) => r.ref.file).filter((f, i, all) => all.indexOf(f) !== i));
   const where = (r: Rec): string => repeated.has(r.ref.file)
@@ -472,7 +539,11 @@ function duplicate(key: string, list: readonly Rec[], push: (f: RelationshipFind
     severity: differs ? 'error' : 'warning',
     message: differs
       ? `Relationship ${describeLink(kept.rel)} is stored ${list.length} times and the copies disagree${onWhat} (${sites.join('; ')})`
-      : `Relationship ${describeLink(kept.rel)} is stored ${list.length} times (${list.map(where).join(', ')})`,
+      : `Relationship ${describeLink(kept.rel)} is stored ${list.length} times (${list.map(where).join(', ')})` +
+        (backwards.length > 0
+          ? `; the copy in ${backwards.map(where).join(' and ')} is the same relationship saved backwards ` +
+            '(the shape ERD Studio 1.6.7 saved for a line drawn from a dimension to a fact) — Repair Relationships… removes it'
+          : ''),
     files: [...new Set(list.map((r) => r.ref.file))],
     link: key,
     fix: differs ? 'choose' : 'remove-duplicates',
@@ -483,6 +554,7 @@ function duplicate(key: string, list: readonly Rec[], push: (f: RelationshipFind
 /** Library records in the order a reader prefers them (see `normaliseRelationships`). */
 function libraryRank(a: Rec, b: Rec): number {
   if (a.atHome !== b.atHome) return a.atHome ? -1 : 1;
+  if ((a.contradicted === true) !== (b.contradicted === true)) return a.contradicted ? 1 : -1;
   const ma = (a.ref.source as { model: string }).model.toLowerCase();
   const mb = (b.ref.source as { model: string }).model.toLowerCase();
   if (ma !== mb) return ma < mb ? -1 : 1;
@@ -491,6 +563,11 @@ function libraryRank(a: Rec, b: Rec): number {
   const eb = (b.ref.source as { model: string }).model;
   if (ea !== eb) return ea < eb ? -1 : 1;
   return (a.ref.source as { index: number }).index - (b.ref.source as { index: number }).index;
+}
+
+/** `rel` with its two ends swapped (cardinality and role kept). */
+function turnedRound(rel: Relationship): Relationship {
+  return { ...rel, fromModel: rel.toModel, fromColumn: rel.toColumn, toModel: rel.fromModel, toColumn: rel.fromColumn };
 }
 
 function describeLink(rel: Relationship): string {

@@ -12,11 +12,11 @@
  * same runner (`./repairRelationships`). That brings the move the repair's
  * guarantees — the model lookup the canvas notification uses (D11), a copy
  * that disagrees with another (cardinality, role, or the direction of a
- * one-to-one) always asked about, never silently dropped (D12), one QuickPick
- * per conflict with "Leave as is" (Esc cancels everything), a preview of every
- * file and change, disk-only all-or-nothing writes that refuse unsaved files,
- * and a read-back check that puts every file back unless only the
- * relationships changed and every diagram draws what it did.
+ * one-to-one) never silently dropped but left where it is and listed (D12),
+ * no questions, one preview of every file and change and of everything left
+ * (Cancel or Esc writes nothing), disk-only all-or-nothing writes that refuse
+ * unsaved files, and a read-back check that puts every file back unless only
+ * the relationships changed and every diagram draws what it did.
  *
  * Disk is the one source of truth, and the files are written directly — not
  * through a WorkspaceEdit: 1.6.6 edited them through VS Code's documents, and

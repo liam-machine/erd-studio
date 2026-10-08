@@ -280,7 +280,7 @@ describe('moveRelationshipsToLibrary — writes disk directly (#126)', () => {
     const preview = info.mock.calls.find((c) => (c[1] as { modal?: boolean } | undefined)?.modal)!;
     expect(String((preview[1] as { detail: string }).detail)).toContain('not_in_library.a → model_00.id: not_in_library has no readable file in logical-models/');
     const done = all.find((m) => SUCCESS.test(m))!;
-    expect(done).toMatch(/1 stayed as it was/);
+    expect(done).toMatch(/1 relationship needs your attention and was left as it was/);
     expect(done).toContain('not_in_library has no readable file in logical-models/');
     expect(JSON.parse(fs.readFileSync(p.domainPaths[0], 'utf-8')).logical.relationships).toEqual([kept]);
   });
@@ -546,41 +546,17 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     '',
   ].join('\n');
 
-  it('asks which copy to keep when the fact already stores the link without the role — never drops one silently (D12)', async () => {
+  it('never picks between copies that disagree (the fact stores the link without the role): both stay, and it is listed (D12)', async () => {
     fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT_WITH_COPY);
-    acceptModal();
-    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string }>) =>
-      items.find((i) => i.label.includes('"buyer"'))) as never);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const pick = vi.spyOn(vscode.window, 'showQuickPick');
     await run();
 
-    expect(pick).toHaveBeenCalledTimes(1);
-    const labels = (pick.mock.calls[0][0] as unknown as Array<{ label: string }>).map((i) => i.label);
-    expect(labels).toEqual([
-      'fct_order.customer_key → dim_customer.customer_key (many-to-one)',
-      'fct_order.customer_key → dim_customer.customer_key (many-to-one, "buyer")',
-      'Leave as is',
-    ]);
-    logicalModelService.invalidateCache();
-    expect(logicalModelService.getModel('dim_customer')?.relationships).toBeUndefined();
-    expect(logicalModelService.getModel('fct_order')?.relationships).toEqual([
-      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' },
-    ]);
-    // The kept entry is changed in place: its comment stays.
-    expect(fs.readFileSync(logicalModelService.modelPath('fct_order'), 'utf-8')).toContain('customer_key   # stored by hand');
-  });
-
-  it('leaves both copies as they are when the user picks "Leave as is"', async () => {
-    fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT_WITH_COPY);
-    const info = acceptModal();
-    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string }>) =>
-      items.find((i) => i.label === 'Leave as is')) as never);
-    await run();
-
+    expect(pick).not.toHaveBeenCalled();
     expect(fs.readFileSync(logicalModelService.modelPath('fct_order'), 'utf-8')).toBe(FCT_WITH_COPY);
     expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(DIM);
-    // It says why: the copies disagree and were left as they are.
     expect(messages(info)).toContainEqual(expect.stringMatching(
-      /^Move Relationships to Model Library: nothing was changed\. .*its copies disagree — left as they are\.$/,
+      /^Move Relationships to Model Library: nothing it can fix on its own\. 1 relationship needs your attention .*its copies disagree \(.*\(many-to-one\) in logical-models\/fct_order\.yml; .*\(many-to-one, "buyer"\) in logical-models\/dim_customer\.yml\)/,
     ));
   });
 });

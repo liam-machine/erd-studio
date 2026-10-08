@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import { z } from 'zod';
 import { buildServices } from '../services.js';
 import { isInitialized, NOT_INITIALIZED_TIP } from '../lib/setup.js';
+import { drawnRelationships } from '../lib/relationships.js';
 
 export const read_domain = {
   name: 'read_domain',
@@ -11,7 +12,8 @@ export const read_domain = {
     description:
       'Read a full ERD domain by name + layer. Returns the logical stage: ' +
       'models with columns (data types, PK/FK/NK flags, SCD types), grain, model role, ' +
-      'rationale, and the relationships drawn between them with cardinality. ' +
+      'rationale, and the relationships drawn between them with cardinality (each with `issues` — ' +
+      '`erd-studio check` codes — when something is wrong with it). ' +
       'This is the design source-of-truth. For what dbt actually built, see list_manifest_models.',
     inputSchema: {
       project_path: z
@@ -83,14 +85,7 @@ export const read_domain = {
                   ...(c.additiveType ? { additive_type: c.additiveType } : {}),
                 })),
               })),
-              relationships: stage.relationships.map((r) => ({
-                from_model: r.fromModel,
-                from_column: r.fromColumn,
-                to_model: r.toModel,
-                to_column: r.toColumn,
-                cardinality: r.cardinality,
-                ...(r.role ? { role: r.role } : {}),
-              })),
+              relationships: drawnRelationships(stage.relationships),
               view_config: unified.viewConfig ?? {},
             },
             null,

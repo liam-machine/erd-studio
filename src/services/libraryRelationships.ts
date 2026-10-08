@@ -30,10 +30,8 @@ import {
   type DisplayRelationshipIssue,
   type RelationshipEnds,
   type RelationshipFinding,
-  type RelationshipIssueCode,
 } from '@erd-studio/core';
 import type { Cardinality, ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
-import { countAffectedRelationships } from '../types/relationshipIssues';
 import { describeExtras, domainObjectExtras } from './relationshipEntryExtras';
 
 export type { RelationshipEnds };
@@ -404,10 +402,11 @@ export interface RelationshipCommitInput {
   /** The current domain file's `logical.relationships`. Not edited; the result carries the new list. */
   domainRelationships: readonly Relationship[];
   /**
-   * The project's other domain files (library mode): those that still hold
-   * their own copy of a removed link are named in `otherDomainCopies`, and
-   * those whose own copy disagrees with the record an add / update / edit
-   * wrote in `disagreeingDomainCopies`.
+   * The project's other (v5) domain files (library mode): those that still
+   * hold their own copy of a removed link are named in `otherDomainCopies`,
+   * and those holding their own copy of the link an add / update / edit wrote
+   * to the model library — ignored there from now on, whatever it says — in
+   * `ignoredDomainCopies`.
    */
   otherDomains?: ReadonlyArray<{ label: string; models: readonly string[]; relationships: readonly Relationship[] }>;
   /** The message for a home model that is not among `endpointModels` (library mode). */
@@ -451,14 +450,20 @@ export interface RelationshipCommitPlan {
    * the reader could not read included.
    */
   written?: { where: 'library'; model: string; index: number } | { where: 'domain'; index: number };
-  /** Other domain files (by label) still holding their own copy of a removed link. */
+  /**
+   * Other domain files (by label) still holding their own copy of a link the
+   * commit took out of the model library (a remove, or an edit that moved
+   * the link to other ends): with no library copy left, each draws its own.
+   */
   otherDomainCopies?: string[];
   /**
-   * Other domain files (by label) whose own copy of the link just written to
-   * the model library now says something else — stored twice and disagreeing
-   * (REL001) there until Repair Relationships… settles it.
+   * Other domain files (by label) holding their own copy of the link just
+   * written to the model library. Every diagram draws the library's copy, so
+   * theirs is ignored (REL009 there, never a duplicate); `differs` says
+   * whether it says something else — Repair Relationships… removes only the
+   * copies that say the same.
    */
-  disagreeingDomainCopies?: string[];
+  ignoredDomainCopies?: Array<{ label: string; differs: boolean }>;
 }
 
 /** A commit the canvas must refuse; the message is for the user. */
@@ -579,24 +584,29 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
   // draws. When the link is stored more than once and the copies disagree
   // (REL001, an error), writing it would silently drop what the other copies
   // say — a role, a cardinality, a one-to-one's direction the user never saw.
-  // That choice is the repair's, where the user picks; a remove takes every
-  // copy out by design and is not refused.
+  // That choice is the user's; a remove takes every copy out by design and is
+  // not refused. In a library project the diagram file's own copy of a link
+  // the model library holds is not one of those: the library's is what every
+  // diagram draws and the copy is ignored (REL009, whatever it says), so it
+  // goes with the edit like any other copy of the open diagram.
   if (op.kind === 'update' || op.kind === 'edit') {
+    const libraryCopies = copies.filter((c) => c.where === 'library');
+    const contenders = libraryCopies.length > 0 ? libraryCopies : copies;
     // Compared as every reader reads them: a domain-file copy is the entry as
     // written, a library copy the parsed record, so a missing or unknown
     // cardinality reads as many-to-one and a role is normalised on both sides
     // — exactly core's REL001 "copies disagree", never a difference of spelling.
-    const disagreeing = copies.filter((c) => !sameRelationshipMeaning(asRead(c.rel), asRead(copies[0].rel)));
+    const disagreeing = contenders.filter((c) => !sameRelationshipMeaning(asRead(c.rel), asRead(contenders[0].rel)));
     if (disagreeing.length > 0) {
-      const sites = [copies[0], ...disagreeing].map(placeOf).join(' and ');
+      const sites = [contenders[0], ...disagreeing].map(placeOf).join(' and ');
       throw new RelationshipCommitError(
         `This relationship is stored more than once and the copies disagree (${sites}), ` +
         'so changing it here would throw away what the other copies say. ' +
+        // Only the user knows which copy is right: Repair Relationships…
+        // never picks one (it lists them), and never writes an older-format diagram.
         (input.olderFormat
-          // Repair Relationships… never writes an older-format diagram.
-          ? `This diagram is in the older format: run "ERD Studio: Migrate Domains to Central Model Store", then ` +
-            `"Repair Relationships…" to choose which one is right — or remove the extra entry from ${domainLabel} by hand.`
-          : 'Run "Repair Relationships…" to choose which one is right, then try again.'),
+          ? `This diagram is in the older format: remove the copy that is wrong from ${domainLabel} by hand, then try again.`
+          : 'Delete the copy that is wrong (Repair Relationships… lists them, with the file to open), then try again.'),
       );
     }
   }
@@ -751,11 +761,15 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
 
   if (markColumn) markColumn.isPrimaryKey = true;
 
-  // --- Other domains still drawing a removed link from their own copy --------
+  // --- Other diagram files' own copies -------------------------------------
+  // A commit edits the model library and the open diagram's file, never
+  // another diagram's: what that leaves in other diagram files is named.
   // A remove, or an edit that moved the link to other ends: a copy of the old
-  // link in another diagram file keeps drawing it there.
+  // link in another diagram file showing both models draws it there now. An
+  // add / update / edit written to the model library: another diagram file's
+  // own copy of that link is ignored from now on (REL009), whatever it says.
   let otherDomainCopies: string[] | undefined;
-  let disagreeingDomainCopies: string[] | undefined;
+  let ignoredDomainCopies: RelationshipCommitPlan['ignoredDomainCopies'];
   if (library && input.otherDomains) {
     const recordKey = record ? linkKey(record) : undefined;
     const shows = (d: { models: readonly string[] }, rel: Relationship): boolean => {
@@ -766,16 +780,19 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
       .filter((d) => d.relationships.some((rel) => cleared.has(linkKey(rel)) && linkKey(rel) !== recordKey && shows(d, rel)))
       .map((d) => d.label);
     if (labels.length > 0) otherDomainCopies = [...new Set(labels)].sort();
-    // An add / update / edit written to the model library: another diagram
-    // file's own copy that now says something else (a cardinality, a role)
-    // is a REL001 there — named now, not found later (#133 review 8).
     if (record && recordKey !== undefined && written?.where === 'library') {
       const kept = record;
-      const differing = input.otherDomains
-        .filter((d) => d.relationships.some((rel) => linkKey(rel) === recordKey && shows(d, rel)
-          && !sameRelationshipMeaning(asRead(rel), asRead(kept))))
-        .map((d) => d.label);
-      if (differing.length > 0) disagreeingDomainCopies = [...new Set(differing)].sort();
+      const byLabel = new Map<string, boolean>();
+      for (const d of input.otherDomains) {
+        const own = d.relationships.filter((rel) => linkKey(rel) === recordKey);
+        if (own.length === 0) continue;
+        const differs = own.some((rel) => !sameRelationshipMeaning(asRead(rel), asRead(kept)));
+        byLabel.set(d.label, (byLabel.get(d.label) ?? false) || differs);
+      }
+      if (byLabel.size > 0) {
+        ignoredDomainCopies = [...byLabel].map(([label, differs]) => ({ label, differs }))
+          .sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+      }
     }
   }
 
@@ -791,8 +808,55 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
     domainChanged,
     ...(written ? { written } : {}),
     ...(otherDomainCopies ? { otherDomainCopies } : {}),
-    ...(disagreeingDomainCopies ? { disagreeingDomainCopies } : {}),
+    ...(ignoredDomainCopies ? { ignoredDomainCopies } : {}),
   };
+}
+
+/** "a.json", "a.json and b.json", "a.json, b.json and c.json". */
+function listOf(labels: readonly string[]): string {
+  return labels.length <= 1 ? (labels[0] ?? '') : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/**
+ * The one notice after a library-project commit about other diagram files'
+ * own copies of the link (`otherDomainCopies`, `ignoredDomainCopies`), or
+ * null when there are none. Plain sentences; the canvas shows it without
+ * blocking, with a Repair Relationships… button only when some of the
+ * ignored copies say the same (the only ones Repair removes).
+ */
+export function describeOtherDiagramCopies(
+  plan: Pick<RelationshipCommitPlan, 'otherDomainCopies' | 'ignoredDomainCopies'>,
+): string | null {
+  const sentences: string[] = [];
+  const ignored = plan.ignoredDomainCopies ?? [];
+  if (ignored.length > 0) {
+    const labels = ignored.map((c) => c.label);
+    const differing = ignored.filter((c) => c.differs).map((c) => c.label);
+    const one = labels.length === 1;
+    const parts: string[] = [];
+    if (differing.length > 0) {
+      const all = differing.length === labels.length;
+      const many = all ? !one : differing.length > 1;
+      const who = all ? (one ? 'it' : 'they') : `the ${many ? 'ones' : 'one'} in ${listOf(differing)}`;
+      parts.push(`${who} ${many ? 'say' : 'says'} something different, so delete ${many ? 'them' : 'it'} there if ${many ? 'they are' : 'it is'} wrong`);
+    }
+    if (differing.length < labels.length) {
+      parts.push(differing.length > 0 ? 'Repair Relationships… removes the identical ones' : 'Repair Relationships… removes identical copies');
+    }
+    sentences.push(
+      `${listOf(labels)} still ${one ? 'keeps its' : 'keep their'} own copy of this relationship, ` +
+      `which is ignored because the model library defines it — ${parts.join('; ')}.`,
+    );
+  }
+  const drawn = plan.otherDomainCopies ?? [];
+  if (drawn.length > 0) {
+    const one = drawn.length === 1;
+    sentences.push(
+      `${listOf(drawn)} still ${one ? 'keeps its' : 'keep their'} own copy of the relationship taken out here, ` +
+      `so ${one ? 'it is' : 'they are'} still drawn there — delete it there too if it should go.`,
+    );
+  }
+  return sentences.length > 0 ? sentences.join(' ') : null;
 }
 
 /**
@@ -859,16 +923,8 @@ function respell(rel: Relationship, findModel: (name: string) => SemanticModel |
 }
 
 // ---------------------------------------------------------------------------
-// Findings a canvas shows, and when to offer a repair (issue #133)
+// Findings a canvas shows (issue #133)
 // ---------------------------------------------------------------------------
-
-/** Codes that make the canvas offer "Repair Relationships…" (banner and notification). */
-export const REPAIR_OFFER_CODES: readonly RelationshipIssueCode[] = ['REL001', 'REL002', 'REL003', 'REL004', 'REL008'];
-
-/** The findings worth offering a repair for: REL001 / REL002 / REL003 / REL004 / REL008. */
-export function findingsNeedingRepair(findings: readonly RelationshipFinding[]): RelationshipFinding[] {
-  return findings.filter((f) => REPAIR_OFFER_CODES.includes(f.code));
-}
 
 /**
  * The project findings (`checkRelationships`) that concern one domain: those
@@ -912,31 +968,6 @@ export function toDisplayRelationshipIssues(findings: readonly RelationshipFindi
     issues.push({ code: f.code, severity: f.severity, message: f.message, ...(f.link ? { link: f.link } : {}) });
   }
   return issues;
-}
-
-/**
- * The notification offering "Repair Relationships…": how many relationships
- * need attention and, briefly, why. Null when nothing does.
- */
-export function describeRepairOffer(findings: readonly RelationshipFinding[]): string | null {
-  const needing = findingsNeedingRepair(findings);
-  if (needing.length === 0) return null;
-  const reasons: Array<[RelationshipIssueCode, string]> = [
-    ['REL001', 'stored more than once'],
-    ['REL002', 'saved in the file of the model it points at'],
-    ['REL003', 'pointing at a model that is missing (from the model library, or from the diagram that stores it)'],
-    ['REL004', 'pointing at a column its model does not have'],
-    ['REL008', 'could not be read'],
-  ];
-  // Relationships, not findings — as the canvas banner counts them: one
-  // relationship missing a column on each end is one relationship.
-  const parts = reasons
-    .map(([code, words]) => [countAffectedRelationships(needing.filter((f) => f.code === code)), words] as const)
-    .filter(([n]) => n > 0)
-    .map(([n, words]) => `${n} ${words}`);
-  const n = countAffectedRelationships(needing);
-  return `${n === 1 ? '1 relationship needs' : `${n} relationships need`} attention (${parts.join('; ')}). ` +
-    'Review the fixes with Repair Relationships…? Nothing changes until you confirm.';
 }
 
 /**

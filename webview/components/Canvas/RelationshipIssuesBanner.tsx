@@ -9,7 +9,9 @@
  * REL004 (an endpoint column is missing) and REL008 (a model file entry could
  * not be read and was skipped or defaulted). While any is present, this strip
  * offers **Repair Relationships…**, which posts `repairRelationships`; the
- * command itself previews every change and asks before writing. A diagram in
+ * command never changes these (only the user can say what a relationship to
+ * something missing should be) — it lists each with **Open File**, beside
+ * any automatic fixes it previews before writing. A diagram in
  * the older (v4) format is never changed by that command, so there the strip
  * points at the migration instead of offering it.
  *
@@ -37,7 +39,7 @@ export function bannerIssues(issues: readonly DisplayRelationshipIssue[] | undef
 
 /** What the banner says instead of offering a repair, on a diagram in the older (v4) format. */
 export const OLDER_FORMAT_HINT =
-  'This diagram is in the older format — run "ERD Studio: Migrate Domains to Central Model Store" first, then Repair Relationships… can fix them.';
+  'This diagram is in the older format, which Repair Relationships… does not change — hover for what each needs, and run "ERD Studio: Migrate Domains to Central Model Store" to bring it up to date.';
 
 /**
  * "1 relationship needs attention" / "N relationships need attention".

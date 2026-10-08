@@ -342,6 +342,22 @@ export function domainRelationshipElementTexts(text: string): string[] | null {
   }
 }
 
+/**
+ * The 1-based line each element of a domain file's `logical.relationships`
+ * starts on, or null when the file is not JSON or the list is not an array.
+ * What "Open File" uses to land on an entry.
+ */
+export function domainRelationshipElementLines(text: string): number[] | null {
+  const { body } = splitBom(text);
+  try {
+    JSON.parse(body);
+    const array = domainRelationshipsArray(body);
+    return array ? array.elements.map(([start]) => body.slice(0, start).split('\n').length) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The fields of a relationship entry an edit sets, in the order they are added when missing. */
 const RELATIONSHIP_FIELDS = ['fromModel', 'fromColumn', 'toModel', 'toColumn', 'cardinality', 'role'] as const;
 

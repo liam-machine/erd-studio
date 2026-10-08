@@ -5,22 +5,23 @@
  * The plan comes from `src/services/relationshipRepair.ts` (no `vscode`);
  * this file owns the dialogs and the writes:
  *
- * 1. Read the project fresh and plan. Nothing to do → say so (and point at
- *    any entry that could not be read, opening its file at the line).
- * 2. Refuse, before asking anything, when a file the repair might change is
- *    open with unsaved edits.
- * 3. One QuickPick per relationship only the user can settle, each with
- *    "Leave as is"; Esc cancels everything.
- * 4. A modal preview naming every file and change (plus "Show Full Diff…",
- *    a read-only diff of one file, asked about without a modal so the diff
- *    can be read); nothing is written until it is confirmed.
- * 5. Disk only, like the move since 1.6.7: each new text is computed from the
+ * 1. Read the project fresh and plan the automatic fixes — it never asks a
+ *    question. Nothing to fix → say so, listing what is left for the user
+ *    (each with **Open File**).
+ * 2. Refuse, before the preview, when a file it would change is open with
+ *    unsaved edits or cannot be written.
+ * 3. One modal preview naming every file and change and everything left for
+ *    the user, with one confirm button (plus "Show Full Diff…", a read-only
+ *    diff of one file asked about without a modal so the diff can be read,
+ *    and "Open File…" to go to a listed item instead). Cancel or Esc writes
+ *    nothing.
+ * 4. Disk only, like the move since 1.6.7: each new text is computed from the
  *    file's bytes as read, a file changed on disk since is refused, and the
  *    writes are all-or-nothing.
- * 6. Read everything back and check it (`verifyRepair`): if anything outside
+ * 5. Read everything back and check it (`verifyRepair`): if anything outside
  *    the relationships changed, a planned finding is still there, a new one
- *    appeared, or a diagram draws something the user did not choose, every
- *    file is put back.
+ *    appeared, or a diagram draws something the plan did not say, every file
+ *    is put back.
  */
 
 import * as fs from 'fs';
@@ -29,22 +30,22 @@ import * as vscode from 'vscode';
 
 import {
   RepairEditError,
-  analyseRepair,
   checkPlannedTexts,
   describeRepairPlan,
   describeUnreadableEntries,
   planRelationshipRepair,
   readRepairSnapshot,
+  repairReportItems,
+  reportItemLine,
   verifyRepair,
-  type RepairAsk,
   type RepairCounts,
   type RepairPlan,
+  type RepairReportItem,
   type RepairSnapshot,
   type RepairSnapshotDeps,
 } from '../services/relationshipRepair';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
-import type { RelationshipFinding } from '@erd-studio/core';
 
 export const REPAIR_TITLE = 'Repair Relationships';
 export const MOVE_TITLE = 'Move Relationships to Model Library';
@@ -146,7 +147,7 @@ let running: string | null = null;
 
 async function runGuarded(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<void> {
   if (running) {
-    void vscode.window.showInformationMessage(`${running} is already running — answer or cancel its dialog first.`);
+    void vscode.window.showInformationMessage(`${running} is already running — confirm or cancel its preview first.`);
     return;
   }
   running = mode.title;
@@ -180,7 +181,7 @@ type ClosingReport = () => Promise<void>;
  * What the read-back check compares, for every file the run did not plan to
  * change: each model's relationships, read issues and key columns, each
  * diagram's models and relationships. Positions and descriptions are left out,
- * so moving a box while a question is open does not stop the run.
+ * so moving a box while the preview is open does not stop the run.
  */
 function relationshipSignature(s: RepairSnapshot): string {
   const models = s.modelFiles.map((m) => JSON.stringify([
@@ -227,55 +228,24 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<Clo
   const modelsDir = deps.logicalModelService.getModelsDir();
   const label = (filePath: string): string => path.relative(path.dirname(modelsDir), filePath).split(path.sep).join('/');
 
+  // One plan, asking nothing: the automatic fixes, and a list of everything
+  // left for the user.
   const before = readRepairSnapshot(deps);
-  const analysis = analyseRepair(before, { moveDomainsToLibrary: mode.move });
-  if (analysis.tasks.length === 0) {
-    telemetry.feature('relMoveNothingToMove');
-    return () => reportNothingToDo(before, analysis.unreadableEntries, [...analysis.blocked, ...analysis.noHome], analysis.outOfReach, mode);
-  }
-  // Checked before asking anything, so nobody settles conflicts only to be
-  // turned away; checked again before writing.
-  if (refuseIfDirty(analysis.involvedFiles, label, mode)) return;
-
-  const ask: RepairAsk = async (question, position) => {
-    const picked = await vscode.window.showQuickPick(
-      question.options.map((o) => ({ label: o.label, description: o.description, detail: o.detail, id: o.id })),
-      {
-        title: `${mode.title} (${position.index} of ${position.total}): ${question.subject}`,
-        placeHolder: question.prompt,
-        ignoreFocusOut: true,
-      },
-    );
-    return picked?.id;
-  };
-
-  let plan: RepairPlan | null;
+  let plan: RepairPlan;
   try {
-    plan = await planRelationshipRepair(before, { moveDomainsToLibrary: mode.move }, ask, analysis);
+    plan = planRelationshipRepair(before, { moveDomainsToLibrary: mode.move });
   } catch (err) {
     if (!(err instanceof RepairEditError)) throw err;
     telemetry.error('relMoveFailed');
     void vscode.window.showErrorMessage(`${mode.title}: ${err.message} Nothing was changed.`);
     return;
   }
-  if (!plan) {
-    telemetry.feature('relMoveCancelled');
-    void vscode.window.showInformationMessage(`${mode.title}: cancelled — nothing was changed.`);
-    return;
-  }
   if (plan.changes.length === 0) {
-    telemetry.feature('relMoveCancelled');
-    // Say why: every relationship it looked at was left as it is, each for a reason.
-    const why = [
-      ...plan.left.slice(0, 3),
-      ...(plan.left.length > 3 ? [`…and ${plan.left.length - 3} more left as they are.`] : []),
-    ];
-    void vscode.window.showInformationMessage(`${mode.title}: nothing was changed.${why.length > 0 ? ` ${why.join(' ')}` : ''}`);
-    return;
+    telemetry.feature('relMoveNothingToMove');
+    return () => reportNothingToDo(before, plan, mode);
   }
-  // Every file the answers decided to write — an answer can move a record to
-  // a file no copy was in — is checked for unsaved edits before the preview,
-  // so nobody confirms a plan only to be turned away.
+  // Every file it would write is checked for unsaved edits and write access
+  // before the preview, so nobody confirms a plan only to be turned away.
   if (refuseIfDirty(plan.changes.map((c) => c.filePath), label, mode)) return;
   const readOnly = unwritableFiles(plan.changes.map((c) => c.filePath));
   if (readOnly.length > 0) {
@@ -293,12 +263,15 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<Clo
     return;
   }
 
-  if (!(await confirmPlan(plan, mode))) {
+  const items = repairReportItems(plan, before);
+  const answer = await confirmPlan(plan, items, mode);
+  if (answer !== 'confirm') {
     telemetry.feature('relMoveCancelled');
+    if (answer === 'open') return () => pickAndOpen(items);
     return;
   }
 
-  // The plan is final; the dialogs may have taken a while.
+  // The preview may have been open a while.
   if (refuseIfDirty(plan.changes.map((c) => c.filePath), label, mode)) return;
   const changedOnDisk = plan.changes.filter((c) => {
     try {
@@ -385,7 +358,7 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<Clo
   deps.logicalModelService.invalidateCache();
   const domainPaths = before.domains
     .map((d) => d.filePath)
-    .filter((p) => plan!.changes.some((c) => c.kind === 'domain' && c.filePath === p));
+    .filter((p) => plan.changes.some((c) => c.kind === 'domain' && c.filePath === p));
   try {
     await deps.onWritten(domainPaths);
   } catch (err) {
@@ -394,7 +367,7 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<Clo
   }
 
   telemetry.feature('relMoveCompleted');
-  if (plan.counts.left > 0) telemetry.feature('relMoveLeftover');
+  if (plan.left.length > 0) telemetry.feature('relMoveLeftover');
   // Entries that could not be read are named at their place in the files as
   // written: moving an entry out of a file shifts the ones below it.
   const finalSnapshot = after ?? before;
@@ -404,9 +377,14 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<Clo
   return () => reportDone(finalSnapshot, finalPlan, mode);
 }
 
-/** The modal preview, with "Show Full Diff…" where the editor supports it. True when confirmed. */
-async function confirmPlan(plan: RepairPlan, mode: RunnerMode): Promise<boolean> {
-  const movesDomains = mode.move && plan.counts.moved + plan.counts.domainCopiesRemoved + plan.counts.noHome > 0;
+/**
+ * The one modal preview: every file and change, and everything left for the
+ * user. One confirm button; "Show Full Diff…" where the editor supports it,
+ * and "Open File…" to go to something it leaves (nothing is written then).
+ * Cancel or Esc writes nothing.
+ */
+async function confirmPlan(plan: RepairPlan, items: readonly RepairReportItem[], mode: RunnerMode): Promise<'confirm' | 'open' | 'cancel'> {
+  const movesDomains = mode.move && plan.counts.moved + plan.counts.domainCopiesRemoved > 0;
   const message = mode.move
     ? (movesDomains
       ? 'Define each relationship once, in the model library?'
@@ -428,6 +406,8 @@ async function confirmPlan(plan: RepairPlan, mode: RunnerMode): Promise<boolean>
     : [];
   const detail = [
     ...why,
+    'Only fixes that cannot change what a relationship means are made here; anything that needs your judgement is listed and left as it is.',
+    '',
     describeRepairPlan(plan),
     ...after,
     '',
@@ -435,15 +415,18 @@ async function confirmPlan(plan: RepairPlan, mode: RunnerMode): Promise<boolean>
   ].join('\n');
   const confirm = mode.move ? 'Move Relationships' : 'Repair Relationships';
   const diff = 'Show Full Diff…';
+  const open = 'Open File…';
+  const openable = items.some((item) => item.filePath);
   const canDiff = typeof (vscode.workspace as { registerTextDocumentContentProvider?: unknown }).registerTextDocumentContentProvider === 'function';
   const preview = canDiff ? previewProvider(plan) : undefined;
   const another = 'Show Another File…';
   try {
     for (;;) {
-      const buttons = preview ? [diff, confirm] : [confirm];
+      const buttons = [...(preview ? [diff] : []), ...(openable ? [open] : []), confirm];
       const choice = await vscode.window.showInformationMessage(message, { modal: true, detail }, ...buttons);
-      if (choice === confirm) return true;
-      if (choice !== diff || !preview) return false;
+      if (choice === confirm) return 'confirm';
+      if (choice === open) return 'open';
+      if (choice !== diff || !preview) return 'cancel';
       // While a diff is open the question is asked without a modal: a modal
       // blocks the whole window, so the diff behind it could not be scrolled.
       // A QuickPick that ignores focus loss stays on screen while the diff is
@@ -461,8 +444,8 @@ async function confirmPlan(plan: RepairPlan, mode: RunnerMode): Promise<boolean>
           },
         );
         const next = picked?.label;
-        if (next === confirm) return true;
-        if (next !== another) return false;
+        if (next === confirm) return 'confirm';
+        if (next !== another) return 'cancel';
       }
     }
   } finally {
@@ -510,110 +493,108 @@ function previewProvider(plan: RepairPlan): { show: () => Promise<boolean>; disp
   };
 }
 
-/** Nothing to repair: say so, and point at entries that could not be read. */
-async function reportNothingToDo(
-  snapshot: RepairSnapshot,
-  unreadable: readonly RelationshipFinding[],
-  blocked: readonly string[],
-  outOfReach: readonly string[],
-  mode: RunnerMode,
-): Promise<void> {
-  // Never an all-clear while something the checks found is out of this
-  // command's reach (a v4 diagram, a diagram file that could not be read) or
-  // was left for the user to change by hand first (`blocked`).
-  const base = outOfReach.length > 0 || blocked.length > 0
-    ? `${mode.title}: nothing it can change here.`
+/** Nothing it can fix on its own: say so, and list what is left for the user, each with its file. */
+async function reportNothingToDo(snapshot: RepairSnapshot, plan: RepairPlan, mode: RunnerMode): Promise<void> {
+  const items = repairReportItems(plan, snapshot);
+  // Never an all-clear while something the checks found is left for the
+  // user or out of this command's reach.
+  const base = items.length > 0
+    ? `${mode.title}: nothing it can fix on its own.`
     : mode.move
     ? `${MOVE_TITLE}: nothing to move — ${snapshot.domains.some((d) => d.relationships.length > 0)
       ? 'every relationship in the diagram files is already in the model library, or starts at a model with no readable file in logical-models/.'
       : 'no diagram file holds a relationship of its own, and every relationship in the model library is stored with the model holding the foreign key.'}`
     : `${REPAIR_TITLE}: nothing to repair — every relationship is stored once, in its home.`;
-  const extra = [
-    ...outOfReach.slice(0, 3),
-    ...(outOfReach.length > 3 ? [`…and ${outOfReach.length - 3} more.`] : []),
-    ...blocked.slice(0, 3),
-    ...(blocked.length > 3 ? [`…and ${blocked.length - 3} more left as they are.`] : []),
-    ...(unreadable.length > 0 ? [describeUnreadableEntries(unreadable)] : []),
-  ];
-  await showWithOpenFile(`${base}${extra.length > 0 ? ` ${extra.join(' ')}` : ''}`, snapshot, unreadable);
+  await showWithItems(`${base}${describeItems(plan)}`, items);
 }
 
-/** The closing message: what changed, what was left, and entries that could not be read. */
+/** The closing message: what changed, and what is left for the user. */
 async function reportDone(snapshot: RepairSnapshot, plan: RepairPlan, mode: RunnerMode): Promise<void> {
   const c = plan.counts;
-  const leftCount = c.left;
   let text: string;
   if (mode.move) {
-    const moved = c.moved;
-    const turned = c.rehomed;
     const parts = [
       // Only what happened: a run that only removed diagram-file copies of
       // library relationships (or respelled entries) moved nothing.
-      ...(moved > 0 ? [`Moved ${moved} relationship${moved === 1 ? '' : 's'} into the model library — each is now defined once.`] : []),
-      ...(turned > 0 ? [`${turned} relationship${turned === 1 ? ' is' : 's are'} now stored with the model holding the foreign key.`] : []),
+      ...(c.moved > 0 ? [`Moved ${plural(c.moved, 'relationship')} into the model library — each is now defined once.`] : []),
+      ...(c.rehomed > 0 ? [`${c.rehomed} relationship${c.rehomed === 1 ? ' is' : 's are'} now stored with the model holding the foreign key.`] : []),
       ...describeOtherFixes(c, ['moved', 'rehomed']),
     ];
     if (parts.length === 0) parts.push(`${MOVE_TITLE}: changed ${plural(plan.changes.length, 'file')}.`);
-    text = parts.join(' ') +
-      (leftCount > 0 ? ` ${leftCount} stayed as ${leftCount === 1 ? 'it was' : 'they were'}; run this command again to settle ${leftCount === 1 ? 'it' : 'them'}.` : '');
+    text = parts.join(' ');
   } else {
-    const fixes = describeOtherFixes(c, []);
-    text = `${REPAIR_TITLE}: changed ${plural(plan.changes.length, 'file')}. ${fixes.join(' ')}` +
-      (leftCount > 0 ? ` ${leftCount} left as ${leftCount === 1 ? 'it was' : 'they were'}; run Repair Relationships… again to settle ${leftCount === 1 ? 'it' : 'them'}.` : '');
+    text = `${REPAIR_TITLE}: changed ${plural(plan.changes.length, 'file')}. ${describeOtherFixes(c, []).join(' ')}`.trim();
   }
-  // Name what stayed, not only how many: "run again" does not settle a
-  // relationship whose home model has no readable file.
-  if (plan.left.length > 0) text += ` Left as it is: ${plan.left.slice(0, 2).join(' ')}${plan.left.length > 2 ? ` …and ${plan.left.length - 2} more.` : ''}`;
-  if (plan.outOfReach.length > 0) text += ` Not changed: ${plan.outOfReach.slice(0, 2).join(' ')}${plan.outOfReach.length > 2 ? ` …and ${plan.outOfReach.length - 2} more.` : ''}`;
-  if (plan.unreadableEntries.length > 0) text += ` ${describeUnreadableEntries(plan.unreadableEntries)}`;
-  await showWithOpenFile(text.trim(), snapshot, plan.unreadableEntries);
+  await showWithItems(`${text}${describeItems(plan)}`, repairReportItems(plan, snapshot));
+}
+
+/** " N need your attention: …" for a closing message, or ''. */
+function describeItems(plan: RepairPlan): string {
+  const parts: string[] = [];
+  if (plan.left.length > 0) {
+    parts.push(`${plural(plan.left.length, 'relationship')} ${plan.left.length === 1 ? 'needs' : 'need'} your attention and ` +
+      `${plan.left.length === 1 ? 'was' : 'were'} left as ${plan.left.length === 1 ? 'it was' : 'they were'}: ` +
+      `${plan.left.slice(0, 3).map((i) => i.message).join(' ')}${plan.left.length > 3 ? ` …and ${plan.left.length - 3} more.` : ''}`);
+  }
+  if (plan.outOfReach.length > 0) {
+    parts.push(`Not changed: ${plan.outOfReach.slice(0, 2).map((i) => i.message).join(' ')}${plan.outOfReach.length > 2 ? ` …and ${plan.outOfReach.length - 2} more.` : ''}`);
+  }
+  if (plan.unreadableEntries.length > 0) parts.push(describeUnreadableEntries(plan.unreadableEntries));
+  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
 }
 
 function describeOtherFixes(c: RepairCounts, skip: ReadonlyArray<keyof RepairCounts>): string[] {
   const sentences: Array<[keyof RepairCounts, (n: number) => string]> = [
     ['moved', (n) => `${plural(n, 'relationship')} moved into the model library.`],
     ['rehomed', (n) => `${plural(n, 'relationship')} now stored with the model holding the foreign key.`],
+    ['swapped', (n) => `${plural(n, 'relationship')} saved the wrong way round turned round.`],
+    ['foreignKeysCleared', (n) => `${plural(n, 'key column')} no longer marked as a foreign key by mistake.`],
     ['deduplicated', (n) => `${plural(n, 'relationship')} stored more than once now stored once.`],
     ['domainCopiesRemoved', (n) => `${plural(n, 'diagram-file copy', 'diagram-file copies')} of library relationships removed.`],
     ['respelled', (n) => `${plural(n, 'relationship')} respelled to the real model or column names.`],
-    ['settled', (n) => `${plural(n, 'disagreement')} settled as you picked.`],
-    ['removed', (n) => `${plural(n, 'relationship')} removed.`],
-    ['repointed', (n) => `${plural(n, 'relationship')} pointed at another model or column.`],
-    ['swapped', (n) => `${plural(n, 'relationship')} turned round.`],
   ];
   return sentences.filter(([key]) => !skip.includes(key) && c[key] > 0).map(([key, sentence]) => sentence(c[key]));
 }
 
 /**
- * Show `text`; when entries could not be read, offer to open the file at the
- * entry's line (one entry), or to pick which (several).
+ * Show `text`; when something is left for the user in a file, offer to open
+ * it — "Open File" for one, "Show Items…" (a list, each opening its file at
+ * the entry) for several.
  */
-async function showWithOpenFile(text: string, snapshot: RepairSnapshot, unreadable: readonly RelationshipFinding[]): Promise<void> {
-  const located = unreadable.filter((f) => f.files.length > 0);
+async function showWithItems(text: string, items: readonly RepairReportItem[]): Promise<void> {
+  const located = items.filter((item) => item.filePath);
   if (located.length === 0) {
     void vscode.window.showInformationMessage(text);
     return;
   }
-  const button = located.length === 1 ? 'Open File' : 'Show Entries…';
+  const button = located.length === 1 ? 'Open File' : 'Show Items…';
   const choice = await vscode.window.showInformationMessage(text, button);
   if (choice !== button) return;
-  let finding: RelationshipFinding | undefined = located[0];
-  if (located.length > 1) {
-    const picked = await vscode.window.showQuickPick(
-      located.map((f) => ({ label: `${f.files[0]}${f.line !== undefined ? `:${f.line}` : ''}`, detail: f.message, finding: f })),
-      { title: 'Relationship entries that could not be read', placeHolder: 'Open which one?' },
-    );
-    finding = picked?.finding;
-  }
-  if (finding) await openAtLine(snapshot, finding);
+  await pickAndOpen(located);
 }
 
-/** Open the model or diagram file a REL008 finding names, at its line (the top when it has none). */
-async function openAtLine(snapshot: RepairSnapshot, finding: RelationshipFinding): Promise<void> {
-  const file = [...snapshot.modelFiles, ...snapshot.domains, ...snapshot.olderFormat].find((m) => m.file === finding.files[0]);
-  if (!file) return;
-  const line = Math.max(0, (finding.line ?? 1) - 1);
-  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file.filePath));
+/** Open the one item's file, or let the user pick which (each at its entry's line). */
+async function pickAndOpen(items: readonly RepairReportItem[]): Promise<void> {
+  const located = items.filter((item) => item.filePath);
+  let item: RepairReportItem | undefined = located[0];
+  if (located.length > 1) {
+    const picked = await vscode.window.showQuickPick(
+      located.map((i) => {
+        const line = reportItemLine(i);
+        return { label: `${i.file ?? i.filePath}${line !== undefined ? `:${line}` : ''}`, detail: i.message, item: i };
+      }),
+      { title: 'Relationships that need your attention', placeHolder: 'Open which one?', matchOnDetail: true },
+    );
+    item = picked?.item;
+  }
+  if (item) await openItem(item);
+}
+
+/** Open an item's file at its entry's line (the top when it has none). */
+async function openItem(item: RepairReportItem): Promise<void> {
+  if (!item.filePath) return;
+  const line = Math.max(0, (reportItemLine(item) ?? 1) - 1);
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(item.filePath));
   const at = new vscode.Position(line, 0);
   await vscode.window.showTextDocument(doc, { selection: new vscode.Range(at, at) });
 }

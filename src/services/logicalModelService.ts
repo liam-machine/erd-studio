@@ -1105,6 +1105,12 @@ export class LogicalModelService {
       if (desired.length === 0) return;
       throw new Error(`${file}: "relationships:" is not a list, so ERD Studio cannot write to it. Fix it by hand first.`);
     }
+    // An empty `relationships: []` (an AI assistant's or a hand-written start)
+    // is written out one entry per line once it gains one, as a missing key
+    // would be: kept as a one-line flow list, the entries could no longer be
+    // edited by Repair Relationships… or the move to the model library, which
+    // change model files only entry by entry, line by line.
+    if (existing.flow && existing.items.length === 0 && desired.length > 0) existing.flow = false;
 
     // What the reader made of each entry, and its link.
     const occurrences = new Map<string, number>();

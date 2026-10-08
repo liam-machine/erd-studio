@@ -57,7 +57,7 @@ interface Harness {
   logicalModelService: LogicalModelService;
   domainPath: (name: string) => string;
   /** Open a domain in a canvas panel; its messages go through `send`. */
-  open: (name: string) => Promise<{ send: (message: unknown) => Promise<void>; errors: () => string[] }>;
+  open: (name: string) => Promise<{ send: (message: unknown) => Promise<void>; errors: () => string[]; posted: () => Array<{ type: string }> }>;
   readDomain: (name: string) => { logical: { models: string[]; relationships: Relationship[] } };
   shown: (name: string) => Relationship[];
 }
@@ -120,6 +120,7 @@ async function createHarness(ownRelationships: Relationship[] = []): Promise<Har
         errors: () => panel._postedMessages
           .filter((m): m is { type: 'error'; payload: { message: string } } => (m as { type: string }).type === 'error')
           .map((m) => m.payload.message),
+        posted: () => panel._postedMessages as Array<{ type: string }>,
       };
     },
     readDomain: (name) => JSON.parse(fs.readFileSync(domainPath(name), 'utf-8')),
@@ -349,9 +350,29 @@ describe('relationships stored once in the model library (#126)', () => {
 
       const offers = info.mock.calls.filter(([text]) => String(text).includes('Repair Relationships…?'));
       expect(offers).toHaveLength(1);
-      expect(offers[0][0]).toBe('1 relationship needs attention (1 saved in the file of the model it points at). '
+      expect(offers[0][0]).toBe('1 relationship can be tidied up automatically (1 saved in the file of the model it points at). '
         + 'Review the fixes with Repair Relationships…? Nothing changes until you confirm.');
       expect(offers[0].slice(1)).toEqual(['Repair Relationships…', 'Not Now', "Don't Ask Again"]);
+    });
+
+    it('offers to turn round a relationship 1.6.7 saved from the dimension\'s key (the only fix it needs)', async () => {
+      const dim = h.logicalModelService.getModel('dim_customer')!;
+      h.logicalModelService.saveModel({ ...dim, relationships: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' }] });
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+      await (await h.open('orders')).send({ type: 'ready' });
+      await vi.waitFor(() => expect(info.mock.calls.filter(([text]) => String(text).includes('Repair Relationships…?'))).toHaveLength(1));
+      expect(String(info.mock.calls.find(([text]) => String(text).includes('Repair Relationships…?'))![0]))
+        .toContain('1 saved the wrong way round (its key column as the "many" side)');
+    });
+
+    it('does not nag about a relationship only the user can settle (a missing column) — the canvas shows it instead', async () => {
+      const fct = h.logicalModelService.getModel('fct_order')!;
+      h.logicalModelService.saveModel({ ...fct, relationships: [{ fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'no_such_column', cardinality: 'many-to-one' }] });
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+      const orders = await h.open('orders');
+      await orders.send({ type: 'ready' });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(info.mock.calls.filter(([text]) => String(text).includes('Repair Relationships…?'))).toEqual([]);
     });
 
     it('offers nothing for a diagram relationship its stub columns allow — the command would find nothing (D11)', async () => {
@@ -369,6 +390,33 @@ describe('relationships stored once in the model library (#126)', () => {
       await (await h.open('stubs')).send({ type: 'ready' });
       await new Promise((r) => setTimeout(r, 20));
       expect(info.mock.calls).toEqual([]);
+    });
+
+    it('makes the offer after the canvas has its payload, and never reads the whole project for a clean one (#133)', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      const invalidate = vi.spyOn(h.logicalModelService, 'invalidateCache');
+      const scans = vi.spyOn(h.logicalModelService, 'relationshipCheckModels');
+      const reporting = await h.open('reporting');
+      await reporting.send({ type: 'ready' });
+      const scansDuringReady = scans.mock.calls.length;
+      await new Promise((r) => setTimeout(r, 20));
+      // The offer ran (a tick later) on the findings the payload already
+      // computed: no model cache dropped, and no full project read — at most
+      // the cached mode check (a repair snapshot would be a second).
+      expect(invalidate).not.toHaveBeenCalled();
+      expect(scans.mock.calls.length - scansDuringReady).toBeLessThanOrEqual(1);
+    });
+
+    it('a project with something to repair is offered it a tick after the canvas payload, not before', async () => {
+      const dim = h.logicalModelService.getModel('dim_customer')!;
+      h.logicalModelService.saveModel({ ...dim, relationships: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }] });
+      const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+      const orders = await h.open('orders');
+      await orders.send({ type: 'ready' });
+      expect(orders.posted().some((m) => m.type === 'domainLoaded')).toBe(true);
+      expect(info.mock.calls.filter(([text]) => String(text).includes('Repair Relationships…?'))).toEqual([]);
+      await vi.waitFor(() => expect(info.mock.calls.filter(([text]) => String(text).includes('Repair Relationships…?'))).toHaveLength(1));
     });
 
     it('offers nothing when every library relationship is already on its many side', async () => {

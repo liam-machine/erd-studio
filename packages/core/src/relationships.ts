@@ -126,6 +126,24 @@ export function sameRelationshipMeaning(a: Relationship, b: Relationship): boole
 }
 
 /**
+ * What two records of one link disagree on, in reading order: `cardinality`,
+ * `direction` (the same one-to-one or many-to-one stored the other way round)
+ * and `role`. Empty when they say the same (`sameRelationshipMeaning`).
+ * Compared canonically, so a `one-to-many` and the `many-to-one` it reads as
+ * from the other end do not differ.
+ */
+export function relationshipDifferences(a: Relationship, b: Relationship): Array<'cardinality' | 'direction' | 'role'> {
+  const ca = canonicalRelationship(a);
+  const cb = canonicalRelationship(b);
+  const out: Array<'cardinality' | 'direction' | 'role'> = [];
+  if (ca.cardinality !== cb.cardinality) out.push('cardinality');
+  else if (ca.cardinality !== 'many-to-many'
+    && `${ca.fromModel}.${ca.fromColumn}`.toLowerCase() !== `${cb.fromModel}.${cb.fromColumn}`.toLowerCase()) out.push('direction');
+  if ((ca.role ?? '') !== (cb.role ?? '')) out.push('role');
+  return out;
+}
+
+/**
  * A relationship without the runtime-only fields `normaliseRelationships`
  * adds (`source`, `stored`, `issues`) — what a writer may put on disk.
  */

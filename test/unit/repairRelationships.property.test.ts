@@ -4,14 +4,17 @@
  * Random projects — models with keys and foreign keys, library entries stored
  * on either side with random cardinalities, roles, case variants, duplicates,
  * typos (REL008), missing models and columns, and domain files with their own
- * copies — each repaired with random answers. For every world:
+ * copies, and the 1.6.7 shape (a dimension's key stored as the many side,
+ * sometimes with `isForeignKey` on that key) — each repaired. For every world:
  *
  * - the result passes `verifyRepair`: nothing outside the relationships
- *   changed, every planned finding is gone, nothing new appeared, and every
- *   diagram draws what it drew except where the user chose;
- * - repairing twice is repairing once: a second run that leaves every
- *   question unanswered changes nothing;
- * - an entry the reader could not read is still there, byte for byte.
+ *   changed (but a 1.6.7 key flag), every planned finding is gone, nothing
+ *   new appeared, and every diagram draws what it drew except a link turned
+ *   round on purpose;
+ * - repairing twice is repairing once: a second run changes nothing;
+ * - an entry the reader could not read is still there, byte for byte;
+ * - a relationship the plan leaves for the user is listed, and nothing it
+ *   names as left is changed: every one of its copies keeps its exact text.
  *
  * No new dependency: a small seeded generator (mulberry32).
  */
@@ -25,7 +28,6 @@ import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import {
-  LEAVE_AS_IS,
   RepairEditError,
   checkPlannedTexts,
   planRelationshipRepair,
@@ -79,7 +81,7 @@ function makeWorld(seed: number): World {
     columnYaml.set(name, cols.flatMap((c) => [
       `  - name: ${c}`,
       '    dataType: string',
-      ...(c === 'id' && chance(0.7) ? ['    isPrimaryKey: true'] : []),
+      ...(c === 'id' && chance(0.7) ? ['    isPrimaryKey: true', ...(chance(0.3) ? ['    isForeignKey: true'] : [])] : []),
       ...(c.endsWith('_id') && chance(0.35) ? ['    isForeignKey: true'] : []),
     ]));
   }
@@ -92,12 +94,14 @@ function makeWorld(seed: number): World {
   for (let k = 0; k < linkCount; k++) {
     const holder = pick(names);
     const other = chance(0.1) ? holder : pick(names.filter((m) => m !== holder));
-    const fromColumn = pick(columns.get(holder)!);
+    // The 1.6.7 shape: from the holder's key to a column of the other model.
+    const legacy = chance(0.2);
+    const fromColumn = legacy ? 'id' : pick(columns.get(holder)!);
     let toModel = other;
-    let toColumn = pick(columns.get(other)!);
+    let toColumn = legacy ? `${holder}_id` : pick(columns.get(other)!);
     if (chance(0.05)) toModel = 'ghost_model';
     else if (chance(0.05)) toColumn = 'no_such_column';
-    const cardinality = chance(0.06) ? 'one_to_many' : pick(CARDINALITIES);
+    const cardinality = legacy ? 'many-to-one' : chance(0.06) ? 'one_to_many' : pick(CARDINALITIES);
     const role = chance(0.2) ? pick(['buyer', 'seller']) : undefined;
     const lines = [
       `  - fromColumn: ${fromColumn}${chance(0.3) ? '   # hand note' : ''}`,
@@ -164,19 +168,31 @@ function makeWorld(seed: number): World {
   };
 }
 
-/** One run with answers from `answer`; returns the plan's change count and verification problems. */
+/** One run; returns the plan's change count, the entries it left, and verification problems. */
 async function runOnce(
   world: World,
-  answer: (options: string[]) => string,
   options: RepairOptions = {},
-): Promise<{ changes: number; problems: string[] }> {
+): Promise<{ changes: number; problems: string[]; leftUntouched: string[]; swapped: number; cleared: number }> {
   const before = readRepairSnapshot(world.deps);
-  const plan = await planRelationshipRepair(before, options, async (q) => answer(q.options.map((o) => o.id)));
-  expect(plan).not.toBeNull();
-  expect(checkPlannedTexts(plan!)).toEqual([]);
-  for (const change of plan!.changes) fs.writeFileSync(change.filePath, change.text);
-  const problems = verifyRepair(before, readRepairSnapshot(world.deps), plan!);
-  return { changes: plan!.changes.length, problems };
+  const plan = planRelationshipRepair(before, options);
+  expect(checkPlannedTexts(plan)).toEqual([]);
+  for (const change of plan.changes) fs.writeFileSync(change.filePath, change.text);
+  const after = readRepairSnapshot(world.deps);
+  const problems = verifyRepair(before, after, plan);
+  // Every relationship listed as left still has its entry, exactly as it was read.
+  const leftUntouched: string[] = [];
+  for (const item of plan.left) {
+    if (!item.entry || !item.filePath) continue;
+    const want = item.entry.rel;
+    const holds = item.entry.kind === 'model'
+      ? after.modelFiles.find((m) => m.filePath === item.filePath)?.model.relationships?.some((r) =>
+        r.fromColumn === want.fromColumn && r.toModel === want.toModel && r.toColumn === want.toColumn && r.cardinality === want.cardinality)
+      : after.domains.find((d) => d.filePath === item.filePath)?.relationships.some((r) =>
+        r.fromModel === want.fromModel && r.fromColumn === want.fromColumn && r.toModel === want.toModel && r.toColumn === want.toColumn
+        && r.cardinality === want.cardinality);
+    if (!holds) leftUntouched.push(item.message);
+  }
+  return { changes: plan.changes.length, problems, leftUntouched, swapped: plan.counts.swapped, cleared: plan.counts.foreignKeysCleared };
 }
 
 describe('Repair Relationships — seeded worlds', () => {
@@ -185,12 +201,13 @@ describe('Repair Relationships — seeded worlds', () => {
     it(`${name}: keeps every promise over ${WORLDS} random projects, and a second run changes nothing`, async () => {
       let repaired = 0;
       let refused = 0;
+      let swapped = 0;
+      let cleared = 0;
       for (let seed = 1; seed <= WORLDS; seed++) {
         const world = makeWorld(seed + (move ? 100_000 : 0));
-        const rand = mulberry32(seed * 7919);
-        let first: { changes: number; problems: string[] };
+        let first: Awaited<ReturnType<typeof runOnce>>;
         try {
-          first = await runOnce(world, (ids) => ids[Math.floor(rand() * ids.length)], { moveDomainsToLibrary: move });
+          first = await runOnce(world, { moveDomainsToLibrary: move });
         } catch (err) {
           // Only a file the engine says it cannot edit in place may stop it.
           expect(err, `seed ${seed}`).toBeInstanceOf(RepairEditError);
@@ -198,8 +215,11 @@ describe('Repair Relationships — seeded worlds', () => {
           continue;
         }
         expect(first.problems, `seed ${seed}: ${JSON.stringify(first.problems)}`).toEqual([]);
+        expect(first.leftUntouched, `seed ${seed}: a relationship listed as left was changed`).toEqual([]);
         if (first.changes > 0) repaired++;
-        const second = await runOnce(world, () => LEAVE_AS_IS, { moveDomainsToLibrary: move });
+        swapped += first.swapped;
+        cleared += first.cleared;
+        const second = await runOnce(world, { moveDomainsToLibrary: move });
         expect(second.changes, `seed ${seed}: a second run changed something`).toBe(0);
         for (const [file, texts] of world.typos) {
           const now = fs.readFileSync(file, 'utf-8');
@@ -208,6 +228,8 @@ describe('Repair Relationships — seeded worlds', () => {
       }
       // The generator really exercises the engine.
       expect(repaired).toBeGreaterThan(WORLDS / 3);
+      expect(swapped).toBeGreaterThan(0);
+      expect(cleared).toBeGreaterThan(0);
       expect(refused).toBe(0);
     }, 120_000);
   }

@@ -183,7 +183,8 @@ nothing else — a drafted extra column would show up as drift.
     `toModel`, `toColumn`, `cardinality`), a `one-to-many` turned round to `many-to-one` there too.
   - Never write one in both places, and never move existing relationships from one place to the
     other yourself — that is the user's choice, made with **ERD Studio: Move Relationships to
-    Model Library**, which explains the move and lets them settle conflicts.
+    Model Library**, which shows every change first and leaves a relationship two diagrams
+    define differently where it is, for the user to settle.
   - A relationship is its two columns, whichever way round: never write the same two columns
     twice, spell every model and column exactly as its file does, and always write `cardinality`.
     Then run `check` (verify-and-fix.md section 8) — it finds anything stored twice, saved on the

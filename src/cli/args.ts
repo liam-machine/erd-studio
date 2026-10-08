@@ -204,6 +204,7 @@ Shared options:
   --quiet               no human-readable output (exit code only)
   --verbose             show internal diagnostics on stderr
 
-Exit codes: 0 ok · 1 diff found drift, or check found errors · 2 usage error
-            3 project/domain problem · 4 internal error
+Exit codes: 0 ok · 1 diff found drift, or check found errors or a file it
+            could not check · 2 usage error · 3 project/domain problem
+            4 internal error
 `;

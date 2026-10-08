@@ -40,7 +40,7 @@ Per domain (`domains[i]`):
 |---|---|
 | `file`, `domain`, `layer` | Which diagram this is |
 | `error` | Set when this one domain could not be checked; explain it and move on |
-| `needsMigration` | The domain uses the older (v4) format. There are no fixes; suggest **ERD Studio: Migrate to v5** from the Command Palette, then re-run |
+| `needsMigration` | The domain uses the older (v4) format. There are no fixes; suggest **ERD Studio: Migrate Domains to Central Model Store** from the Command Palette, then re-run |
 | `clean` | No blocking differences in this domain |
 | `counts.blocking` / `counts.advisory` | How many differences of each kind |
 | `counts.matchedModels` / `matchedColumns` / `matchedRelationships` | What matched — use these in the success line |
@@ -250,7 +250,8 @@ and clicking **⊕ Diff** as soon as they can.
 Checks every relationship in the ERD Studio files — the model library and every domain file —
 with the same rules the canvas uses. It reads no dbt files, so it is quick. Exit code 0 means no
 errors, 1 means errors (with `--strict`, warnings too) or a file it could not check at all,
-3 means the project or the ERD Studio folder was not found. If it answers *Unknown command "check"*, the helper is older than these
+3 means the project or the ERD Studio folder was not found. It runs in a project without dbt
+too (the folder holding the ERD Studio folder) — never create a `dbt_project.yml` to make it run. If it answers *Unknown command "check"*, the helper is older than these
 checks: run `doctor --json` instead and re-read your relationships against the schema skill's
 rules.
 
@@ -279,8 +280,12 @@ a `line` when known and `records[]` (each stored entry: its `file`, its ends as 
 | `REL005` | A name matches only when case is ignored | Spell it exactly as the model's file does |
 | `REL006` | A note: the direction contradicts the keys (e.g. the `fromColumn` is its model's whole primary key) | Check the direction against the schema skill's rule; ask when unsure. Never fails a run |
 | `REL008` | An entry could not be read as written (no `cardinality`, an unknown one such as `one_to_many`, a missing end, a stray `fromModel:` in a yml, a `role` longer than 60 characters), in a model yml or a domain JSON, or a `relationships:` that is not a list; `line` says where in a yml, the message names the entry's position in a domain JSON | Fix that entry; ERD Studio never rewrites it for you |
-| `REL009` | A note: a domain file repeats a relationship the model library already holds | Remove the domain file's copy if you wrote it |
+| `REL009` | A note: a domain file repeats a relationship the model library already holds. Every diagram draws the library's copy and ignores the domain file's, even when it says something different; the message says whether it differs | Remove the domain file's copy if you wrote it |
 
 Fix only what is in files you wrote this session. Anything else is the user's: list it in plain
-words and suggest **ERD Studio: Repair Relationships…** from the Command Palette, which shows
-every change before it writes anything. Re-run `check` after your edits.
+words. **ERD Studio: Repair Relationships…** in the Command Palette shows one preview and then
+fixes only what cannot change a relationship's meaning — `REL002`, `REL005`, exact copies
+(`REL001` / `REL009`) and the backwards shape ERD Studio 1.6.7 saved in a dimension's model
+file when the fact has its own key (`REL006` with `fix: "rehome"`). Everything else (copies that disagree, `REL003`, `REL004`, `REL008`, other `REL006`
+notes) it only lists with the file to open, so say what each one needs. Re-run `check` after
+your edits.

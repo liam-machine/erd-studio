@@ -7,7 +7,8 @@
  * REL002 saved on its "one" side, REL003 / REL004 a missing model / column,
  * REL005 a case-only name match, REL006 a direction the keys contradict,
  * REL008 an entry that could not be read, REL009 a domain copy the library
- * also holds. It reads only ERD Studio's own files — no manifest, no dbt —
+ * also holds (a note: the library's copy is drawn, whatever the domain's
+ * says). It reads only ERD Studio's own files — no manifest, no dbt —
  * and writes nothing: the fixes are the user's, through "ERD Studio: Repair
  * Relationships…" or by hand.
  *
@@ -25,7 +26,8 @@ import { DomainService } from '../services/domainService';
 import { LayerService } from '../services/layerService';
 import { LogicalModelService } from '../services/logicalModelService';
 import type { RelationshipMode } from '../services/libraryRelationships';
-import { CliEnvError, makeEnvelope, requireProjectRoot, type Envelope } from './context';
+import { redactPaths } from '../types/feedback';
+import { CliEnvError, makeEnvelope, relPath, resolveProjectRoot, type Envelope } from './context';
 import { checkProjectRelationships, countFindings, type ProjectRelationshipCheck, type RelationshipCheckSources } from './relationshipCheck';
 
 export interface CheckResult extends Envelope {
@@ -63,12 +65,47 @@ export interface CheckOptions {
  * check is quick on a project with a 40 MB one.
  */
 function checkSources(opts: CheckOptions): RelationshipCheckSources {
-  const root = requireProjectRoot(opts.project, opts.cwd);
+  const root = checkRoot(opts);
   const layerService = new LayerService(root, opts.semanticDir);
   const logicalModelService = new LogicalModelService(root, opts.semanticDir);
   const domainService = new DomainService(layerService);
   domainService.setLogicalModelService(logicalModelService);
   return { root, semanticDir: opts.semanticDir, logicalModelService, domainService, layerService };
+}
+
+/**
+ * The folder to check. A dbt project when there is one (`resolveProjectRoot`);
+ * otherwise — ERD Studio also runs without dbt (`erdStudio.projectPath` may
+ * name any folder, #111) and the checks read no dbt file — the folder that
+ * holds the ERD Studio folder: `--project` itself, or the current folder or
+ * the nearest one above it.
+ */
+function checkRoot(opts: CheckOptions): string {
+  const cwd = opts.cwd ?? process.cwd();
+  const dbtRoot = resolveProjectRoot(opts.project, cwd);
+  if (dbtRoot) return dbtRoot;
+  const holdsErdData = (dir: string): boolean => {
+    try {
+      return fs.statSync(path.join(dir, opts.semanticDir)).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  if (opts.project) {
+    const dir = path.resolve(cwd, opts.project);
+    if (holdsErdData(dir)) return dir;
+  } else {
+    for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+      if (holdsErdData(dir)) return dir;
+      if (path.dirname(dir) === dir) break;
+    }
+  }
+  throw new CliEnvError(
+    'no-project',
+    opts.project
+      ? `No dbt_project.yml or ${opts.semanticDir}/ folder in ${redactPaths(relPath(cwd, path.resolve(cwd, opts.project)))} (--project must be the folder that holds one of them).`
+      : `No dbt_project.yml or ${opts.semanticDir}/ folder found here or above. Run this from your project folder, or pass --project <dir>.`,
+  );
 }
 
 /** Run the checks. A missing project or ERD Studio folder is a `CliEnvError` (exit 3). */

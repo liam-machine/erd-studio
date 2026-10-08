@@ -307,6 +307,24 @@ describe('erd-studio check', () => {
     expect(wrongDir.code).toBe(3);
   });
 
+  it('runs in a project without dbt (erdStudio.projectPath may name any folder): --project, or from that folder (#133)', async () => {
+    const root = makeProject({ 'dim_customer.yml': DIM_CUSTOMER, 'fct_order.yml': SOUND_FACT, 'dim_date.yml': DIM_DATE });
+    fs.rmSync(path.join(root, 'dbt_project.yml'));
+    const named = await run(['check', '--json', '--project', root], tmp);
+    expect(named.err).toBe('');
+    expect(named.code).toBe(0);
+    expect(JSON.parse(named.out).clean).toBe(true);
+    const fromInside = await run(['check', '--json'], path.join(root, '.erd-studio', 'logical-models'));
+    expect(fromInside.code).toBe(0);
+    expect(JSON.parse(fromInside.out).projectRoot).toBe(root);
+    // A folder with neither is still exit 3, naming both.
+    const empty = path.join(tmp, 'empty');
+    fs.mkdirSync(empty);
+    const none = await run(['check', '--json', '--project', empty], tmp);
+    expect(none.code).toBe(3);
+    expect(JSON.parse(none.out).error).toMatchObject({ code: 'no-project', message: expect.stringContaining('No dbt_project.yml or .erd-studio/ folder') });
+  });
+
   it('an empty ERD Studio folder is exit 3 (nothing to check)', async () => {
     const root = makeProject({});
     const { code, out } = await run(['check', '--json', '--project', root], tmp);
@@ -376,12 +394,34 @@ describe('doctor — relationships', () => {
     expect(out).toMatch(/relationships: 2 stored entries, 1 error, 1 warning/);
   });
 
+  it('the 1.6.7 backwards shape is never "no problems": doctor and check both point at Repair Relationships… (#133)', async () => {
+    const root = makeProject({
+      'dim_customer.yml': `${DIM_CUSTOMER}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
+      'dim_date.yml': DIM_DATE,
+      'fct_order.yml': fact('  []\n').replace('relationships:\n  []\n', '').replace('    isForeignKey: true\n', ''),
+    }, { 'silver/orders.json': domain(['fct_order', 'dim_customer']) });
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
+    expect(r.relationships).toMatchObject({ errors: 0, warnings: 0, info: 1, repairable: 1 });
+    const step = r.nextSteps.find((s) => s.id === 'fix-relationships')!;
+    expect(step.title).toBe('Tidy up 1 relationship');
+    expect(step.why).toContain('Repair Relationships…');
+    const doctor = await run(['doctor', '--no-dbt', '--project', root], tmp);
+    expect(doctor.out).toMatch(/relationships: 1 stored entry, 1 Repair Relationships… can tidy up/);
+    expect(doctor.out).not.toMatch(/no problems/);
+
+    const check = await run(['check', '--project', root], tmp);
+    expect(check.code).toBe(0);
+    expect(check.out).toContain('"ERD Studio: Repair Relationships…" fixes the clear-cut ones');
+    const json = JSON.parse((await run(['check', '--json', '--project', root], tmp)).out) as CheckResult;
+    expect(json.findings).toMatchObject([{ code: 'REL006', fix: 'rehome' }]);
+  });
+
   it('no ERD Studio folder: not checked, no step', async () => {
     const root = path.join(tmp, 'bare');
     fs.mkdirSync(root);
     fs.writeFileSync(path.join(root, 'dbt_project.yml'), "name: 'p'\n");
     const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: { PATH: '' }, homeDir: tmp });
-    expect(r.relationships).toEqual({ checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, byCode: {}, unchecked: 0, uncheckedFiles: [] });
+    expect(r.relationships).toEqual({ checked: false, mode: null, stored: 0, errors: 0, warnings: 0, info: 0, repairable: 0, byCode: {}, unchecked: 0, uncheckedFiles: [] });
     expect(r.nextSteps.map((s) => s.id)).not.toContain('fix-relationships');
   });
 });

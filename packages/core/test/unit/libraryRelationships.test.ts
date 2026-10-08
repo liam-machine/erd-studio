@@ -52,14 +52,16 @@ describe('a relationship stored in a model file (#126)', () => {
     expect(plain(relationshipsOf(models))).toEqual(expected);
   });
 
-  it('is drawn once next to the same relationship in the domain file, with the library cardinality, and says so', () => {
+  it('is drawn once next to the same relationship in the domain file, with the library cardinality, and says the copy differs and is ignored', () => {
     const warn = vi.fn();
     const own = [{ ...TO_CUSTOMER, cardinality: 'one-to-one' as const }];
     const drawn = relationshipsOf(['fct_order', 'dim_customer'], own, warn);
     expect(plain(drawn)).toEqual([TO_CUSTOMER]);
     expect(drawn[0].source).toEqual({ kind: 'library', model: 'fct_order', index: 0 });
-    expect(drawn[0].issues).toEqual(['REL001']);
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/copies disagree \(.* many-to-one in entry 1 of fct_order's model file; .* one-to-one in entry 1 of silver\/d\.json\)/));
+    // The library's copy wins on every diagram: the domain copy is a note, never a duplicate (REL001).
+    expect(drawn[0].issues).toEqual(['REL009']);
+    // A note (info) is not a warning: nothing to warn about while loading.
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('keeps the domain file\'s own relationships first and in order', () => {

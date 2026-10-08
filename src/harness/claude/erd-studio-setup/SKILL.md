@@ -228,7 +228,7 @@ templates in `references/dbt-setup.md`. `dbt parse` needs a profile to exist but
 nothing, so placeholder values (the templates' `env_var('…', 'placeholder')` defaults) are enough.
 
 If `erd.domainFormatIssues` lists files, say some existing diagrams use an older file format and
-suggest **ERD Studio: Migrate to v5** (Command Palette) before checking them. Show the checklist.
+suggest **ERD Studio: Migrate Domains to Central Model Store** (Command Palette) before checking them. Show the checklist.
 
 ## Stage 2 — Refresh dbt's project files
 
@@ -244,9 +244,9 @@ Then work through doctor's `nextSteps`, which are already in the right order:
 - **`run-parse` / `refresh-parse`** — offer to run `dbt.commands.parse`.
 - **`run-catalog`** — full setup only: offer `dbt.commands.catalog`, warning that it connects to
   the warehouse; fine to skip. Otherwise do not run it now: say it adds exact types, offered later.
+- **`fix-relationships` / `check-relationships`** — about relationships already in the project, not ones you wrote: tell the user in one line and point them at **ERD Studio: Repair Relationships…** (or the file the step names). Never edit them yourself.
 
-Run exactly the command in doctor's `dbt.commands` (it has the right path, e.g. `.venv/bin/dbt
-parse`), never an activate-then-run pair: each command runs in a fresh shell, so it would not stick.
+Run exactly the command in doctor's `dbt.commands` (it has the right path, e.g. `.venv/bin/dbt parse`), never an activate-then-run pair: each command runs in a fresh shell, so it would not stick.
 
 Only ever run `dbt --version`, `debug`, `deps`, `parse`, `docs generate` and `compile
 --write-catalog` here — never `dbt run`, `build`, `seed` or `snapshot`, which change warehouse data.
@@ -413,7 +413,7 @@ Then loop, following `references/verify-and-fix.md`, which maps every fix to its
   lists it as intentional): usually a typo or a model not built yet. Offer to rename it to the
   real dbt name or remove it from this domain. Never delete a model file under `logical-models/`.
 - **`fix-model-yaml`** first, always — the file does not parse; fix that line, re-run the diff.
-- **`needsMigration`** — older file format; suggest **ERD Studio: Migrate to v5**, skip it now.
+- **`needsMigration`** — older file format; suggest **ERD Studio: Migrate Domains to Central Model Store**, skip it now.
 - Re-run the diff after each round of edits. **Stop after 3 rounds.** List what remains using
   each fix's `explain` text and suggest looking at it together with **⊕ Diff** on the canvas.
 

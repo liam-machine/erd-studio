@@ -139,6 +139,18 @@ describe('HarnessService', () => {
       }
     });
 
+    it('Gemini review rule 4 allows one copy per diagram file in a per-diagram project (#133)', () => {
+      const content = service.generateContent('gemini');
+      expect(content).not.toContain('is defined in exactly one place');
+      expect(content).toContain('once in each domain file whose diagram draws it');
+      expect(content).toContain('never in both a model YAML and a domain file');
+    });
+
+    it('the check guidance says it needs no dbt project, and never to create one (#133)', () => {
+      const content = service.generateContent('claude');
+      expect(content).toContain('it needs no dbt project — never create a `dbt_project.yml` to make it run');
+    });
+
     it('generates Gemini styleguide with review rules', () => {
       const content = service.generateContent('gemini');
       expect(content).toContain('# ERD Studio');
