@@ -400,7 +400,7 @@ describe('allowlists agree with the Worker', () => {
     // that breaks an invariant is.
     expect(ERROR_CODES.filter(e => e.startsWith('relState'))).toEqual([]);
     expect(FEATURES.filter(f => f.startsWith('relInv'))).toEqual([]);
-    expect(ERROR_CODES.filter(e => e.startsWith('relInv'))).toHaveLength(9);
+    expect(ERROR_CODES.filter(e => e.startsWith('relInv'))).toHaveLength(11);
     expect(FEATURES.filter(f => f.startsWith('relState'))).toHaveLength(8);
   });
 
