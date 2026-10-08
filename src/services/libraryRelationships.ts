@@ -11,7 +11,7 @@
  * Pure: no `vscode`, no file access.
  */
 
-import { canonicalRelationship, linkKey, relationshipKey, sameLink } from '@erd-studio/core';
+import { canonicalRelationship, linkKey, relationshipKey, reverseRelationship, sameLink } from '@erd-studio/core';
 import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 
 type RelationshipEnds = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
@@ -241,10 +241,10 @@ export interface MoveToLibraryPlan {
   /** From-model has no library file (or cannot be read): left in the domain file. */
   skippedNoModel: Relationship[];
   /**
-   * Library entries stored on their "one" side (`one-to-many`, written before
-   * #133 or by hand): each moves to the model on its many side as
-   * `many-to-one` — `stored` is taken out of `from`'s file and `to` added,
-   * unless that file already holds the link. The canvas draws the same line.
+   * Library entries stored on their "one" side (a `one-to-many`, or a
+   * backwards `many-to-one` — see `planRehome`): each moves to the model on
+   * its many side as `many-to-one` — `stored` is taken out of `from`'s file
+   * and `to` added, unless that file already holds the link.
    */
   rehome: RelationshipRehome[];
   /**
@@ -262,7 +262,7 @@ export interface MoveToLibraryPlan {
 
 /** Two copies of one link, one in each model file, that disagree. */
 export interface RelationshipDisagreement {
-  /** The copy stored on its one side, as `one-to-many`. */
+  /** The copy stored on its one side. */
   stored: Relationship;
   /** The copy the many side's file already holds. */
   held: Relationship;
@@ -274,16 +274,19 @@ export interface RelationshipRehome {
   from: string;
   /** The entry as stored there, with `fromModel` = `from`. */
   stored: Relationship;
-  /** The same relationship as it will be stored: `canonicalRelationship(stored)`. */
+  /** The same relationship as it will be stored, on its many side. */
   to: Relationship;
 }
 
 /**
- * Library entries stored the wrong way round (#133): a `one-to-many` sits in
- * the file of its "one" side, but belongs with the model holding the foreign
- * key. Entries whose many side has no library file stay where they are, and
- * so does an entry whose many side already holds a copy that disagrees, or
- * whose files are `locked` (see `MoveToLibraryPlan.lockedFiles`).
+ * Library entries stored the wrong way round (#133), which belong with the
+ * model holding the foreign key: a `one-to-many` in the file of its "one"
+ * side, and a `many-to-one` that 1.6.7 saved backwards from a dimension —
+ * one leaving its model's whole primary (or natural) key for a column that is
+ * not the target's whole key. Nothing else is guessed at. Entries whose many
+ * side has no library file stay where they are, and so does an entry whose
+ * many side already holds a copy that disagrees, or whose files are `locked`
+ * (see `MoveToLibraryPlan.lockedFiles`).
  */
 export function planRehome(
   libraryModels: readonly SemanticModel[],
@@ -294,7 +297,10 @@ export function planRehome(
   const disagreeing = new Set<string>();
   for (const model of libraryModels) {
     for (const stored of libraryRelationshipsOf(model)) {
-      const to = canonicalRelationship(stored);
+      const target = libraryModel(stored.toModel);
+      const backwards = stored.cardinality === 'many-to-one' && target !== null
+        && isWholeKey(model, stored.fromColumn) && !isWholeKey(target, stored.toColumn);
+      const to = backwards ? { ...reverseRelationship(stored), cardinality: 'many-to-one' as const } : canonicalRelationship(stored);
       if (to === stored) continue;
       const home = libraryModel(to.fromModel);
       if (!home) continue;
@@ -313,6 +319,14 @@ export function planRehome(
     }
   }
   return plan;
+}
+
+/** Whether `column` is `model`'s whole primary key or whole natural key. */
+function isWholeKey(model: SemanticModel, column: string): boolean {
+  return (['isPrimaryKey', 'isNaturalKey'] as const).some((flag) => {
+    const keys = (model.columns ?? []).filter((c) => c[flag]);
+    return keys.length === 1 && same(keys[0].name, column);
+  });
 }
 
 /** Whether two entries are the same stored entry (same ends, cardinality and role). */

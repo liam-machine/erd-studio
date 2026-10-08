@@ -559,6 +559,22 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     expect(messages(info)[0]).toMatch(/nothing to move/);
   });
 
+  it('turns round a many-to-one 1.6.7 saved backwards on the dimension, then has nothing left to do', async () => {
+    // The dim_product shape in core's library-relationships fixture: the stray FK flag stays.
+    const backwards = DIM.replace('    isPrimaryKey: true\n', '    isPrimaryKey: true\n    isForeignKey: true\n').replace('one-to-many', 'many-to-one');
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), backwards);
+    const info = acceptModal();
+    await run();
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('fct_order')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' },
+    ]);
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(backwards.slice(0, backwards.indexOf('relationships:')));
+    info.mockClear();
+    await run();
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
   it('drops the reversed copy when the fact already stores the link', async () => {
     fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT + [
       'relationships:',

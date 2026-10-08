@@ -237,6 +237,27 @@ describe('stored on the many side (#133)', () => {
     expect([fact.relationships, dimension.relationships]).toEqual([undefined, undefined]);
   });
 
+  describe('planRehome turns round a many-to-one 1.6.7 saved backwards on a dimension', () => {
+    const KEY = { name: 'customer_key', dataType: 'int', description: '', isPrimaryKey: true };
+    const backwards = { fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' as const, role: 'buyer' };
+    const plan = (dimColumns: SemanticModel['columns'], fctColumns: SemanticModel['columns'] = []) => {
+      const library = [{ ...dim([backwards]), columns: dimColumns }, { ...fct(), columns: fctColumns }];
+      return planRehome(library, (name) => library.find((m) => m.name === name) ?? null);
+    };
+
+    it('when it leaves the dimension\'s whole key for a column that is not the fact\'s key', () => {
+      expect(plan([{ ...KEY, isForeignKey: true }]).rehome).toEqual([
+        { from: 'dim_customer', stored: { fromModel: 'dim_customer', ...backwards }, to: { ...REL, role: 'buyer' } },
+      ]);
+    });
+
+    it('and leaves it alone without certain key evidence', () => {
+      expect(plan([{ ...KEY, isPrimaryKey: false }]).rehome).toEqual([]);
+      expect(plan([KEY, { ...KEY, name: 'valid_from' }]).rehome).toEqual([]);
+      expect(plan([KEY], [{ ...KEY }]).rehome).toEqual([]);
+    });
+  });
+
   it('planRehome leaves both copies of a link that disagree, and lists them', () => {
     const library = [
       dim([{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }]),
