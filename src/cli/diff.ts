@@ -21,6 +21,7 @@ import { DomainFileError } from '../services/domainService';
 import type { ModelFileError, ModelFileErrorKind } from '../services/logicalModelService';
 import { usesLibraryRelationships } from '../services/libraryRelationships';
 import { canonicalRelationship, linkKey, mergeLibraryRelationships, reverseRelationship } from '@erd-studio/core';
+import type { ColumnPair } from '@erd-studio/core';
 import { computeDomainDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
@@ -28,6 +29,7 @@ import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, t
 export type FixKind =
   | 'add-column' | 'remove-column' | 'set-type'
   | 'add-relationship' | 'remove-relationship' | 'set-cardinality'
+  | 'declare-composite-foreign-key'
   | 'resolve-phantom' | 'fix-model-yaml';
 
 export interface Fix {
@@ -44,7 +46,12 @@ export interface Fix {
    * Relationship fixes: the entry exactly as it belongs in `file` — on its
    * many side in a model yml (#133), never a `one-to-many` there.
    */
-  relationship?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality?: Cardinality };
+  relationship?: {
+    fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality?: Cardinality;
+    /** A composite foreign key's column pairs (#133 L2), in `fromModel` → `toModel` order; `fromColumn` / `toColumn` are the first. */
+    pairs?: ColumnPair[];
+    compositeKey?: string;
+  };
   /** set-cardinality: the file the link is stored in now, when the fix moves it to `file`. */
   movesFrom?: string;
   /** fix-model-yaml: where the parser stopped (1-based). */
@@ -181,6 +188,12 @@ const SEVERITY_ORDER: Record<Fix['severity'], number> = { blocking: 0, advisory:
 const pickRelationship = (r: NonNullable<Fix['relationship']>): NonNullable<Fix['relationship']> =>
   ({ fromModel: r.fromModel, fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn, ...(r.cardinality ? { cardinality: r.cardinality } : {}) });
 
+/** A composite's pairs read from the other end. */
+const reversePairs = (pairs: readonly ColumnPair[]): ColumnPair[] => pairs.map((p) => ({ fromColumn: p.toColumn, toColumn: p.fromColumn }));
+/** `pit_customer (customer_hk, as_of_date) → sat_customer (customer_hk, load_date)`. */
+const describeComposite = (from: string, to: string, pairs: readonly ColumnPair[]): string =>
+  `${from} (${pairs.map((p) => p.fromColumn).join(', ')}) → ${to} (${pairs.map((p) => p.toColumn).join(', ')})`;
+
 function sortFixes(fixes: Fix[]): Fix[] {
   return fixes.sort((a, b) =>
     SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
@@ -274,8 +287,44 @@ export function fixesFromPlan(
     if (phantomNames.has(r.fromModel) || phantomNames.has(r.toModel)) { continue; }
     const rel = { fromModel: r.fromModel, fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn };
     const link = `${r.fromModel}.${r.fromColumn} → ${r.toModel}.${r.toColumn}`;
+    // A composite foreign key (#133 L2) is one fix for all its pairs, stored
+    // from its canonical (many) side like any other relationship.
+    const pairs = r.pairs && r.pairs.length >= 2 ? r.pairs : undefined;
+    const canonicalPairs = (cardinality: Cardinality | undefined): { fromModel: string; toModel: string; pairs: ColumnPair[] } =>
+      cardinality === 'one-to-many'
+        ? { fromModel: r.toModel, toModel: r.fromModel, pairs: reversePairs(pairs!) }
+        : { fromModel: r.fromModel, toModel: r.toModel, pairs: [...pairs!] };
+    if (pairs && r.composite) {
+      const c = canonicalPairs(r.sourceCardinality);
+      const cardinality = r.sourceCardinality === 'one-to-many' ? 'many-to-one' : r.sourceCardinality;
+      fixes.push({
+        severity: 'advisory', kind: 'declare-composite-foreign-key', model: c.fromModel, column: c.pairs[0].fromColumn, file: ymlFile(c.fromModel),
+        relationship: {
+          fromModel: c.fromModel, fromColumn: c.pairs[0].fromColumn, toModel: c.toModel, toColumn: c.pairs[0].toColumn,
+          ...(cardinality ? { cardinality } : {}), pairs: c.pairs, ...(r.compositeKey ? { compositeKey: r.compositeKey } : {}),
+        },
+        explain: `The logical model draws the composite foreign key ${describeComposite(c.fromModel, c.toModel, c.pairs)}, and dbt declares none. `
+          + `Nothing to change in the logical model. To make dbt check it, add a model-level \`foreign_key\` constraint to ${c.fromModel} `
+          + `(\`columns: [${c.pairs.map((p) => p.fromColumn).join(', ')}]\`, \`to: ref('${c.toModel}')\`, \`to_columns: [${c.pairs.map((p) => p.toColumn).join(', ')}]\`, `
+          + 'dbt 1.9+ with an enforced contract) or a `dbt_constraints.foreign_key` test.',
+      });
+      continue;
+    }
     switch (r.action) {
       case 'add-relationship-to-logical': {
+        if (pairs) {
+          const c = canonicalPairs(r.targetCardinality);
+          const cardinality = r.targetCardinality === 'one-to-many' ? 'many-to-one' : (r.targetCardinality ?? 'many-to-one');
+          const stored = { fromModel: c.fromModel, fromColumn: c.pairs[0].fromColumn, toModel: c.toModel, toColumn: c.pairs[0].toColumn };
+          const name = r.compositeKey ?? `fk_${c.toModel}`.toLowerCase();
+          fixes.push({
+            severity: 'blocking', kind: 'add-relationship', model: c.fromModel, column: c.pairs[0].fromColumn, file: relationshipFile(stored, true),
+            relationship: { ...stored, cardinality, pairs: c.pairs, compositeKey: name },
+            explain: `dbt declares the composite foreign key ${describeComposite(c.fromModel, c.toModel, c.pairs)}, but the logical model `
+              + `does not draw it — add it to the logical model as ${c.pairs.length} entries sharing \`compositeKey: ${name}\`.`,
+          });
+          break;
+        }
         // Written on its many side (#133): a one-to-many is the same link
         // stored from the other end, in the other model's file.
         const stored = r.targetCardinality ? canonicalRelationship({ ...rel, cardinality: r.targetCardinality }) : rel;
@@ -312,15 +361,19 @@ export function fixesFromPlan(
           if (!same(stored.fromModel, entry.fromModel)) movesFrom = ymlFile(stored.fromModel);
         }
         const file = stored ? ymlFile(entry.fromModel) : domainFile;
+        // A composite's pairs, read from the end the entry is stored from.
+        const entryPairs = pairs && (same(entry.fromModel, r.fromModel) && same(entry.fromColumn, r.fromColumn) ? [...pairs] : pairs && reversePairs(pairs));
         fixes.push({
           severity: 'blocking', kind: 'set-cardinality', model: entry.fromModel, column: entry.fromColumn, file,
           from: r.sourceCardinality, to: r.targetCardinality,
-          relationship: pickRelationship(entry),
+          relationship: { ...pickRelationship(entry), ...(entryPairs ? { pairs: entryPairs, ...(r.compositeKey ? { compositeKey: r.compositeKey } : {}) } : {}) },
           ...(movesFrom ? { movesFrom } : {}),
-          explain: `${link} is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — ` +
+          explain: (entryPairs ? `The composite foreign key ${describeComposite(entry.fromModel, entry.toModel, entryPairs)}` : link) +
+            ` is ${r.sourceCardinality} in the logical model but ${r.targetCardinality} according to dbt's tests — ` +
             (movesFrom
-              ? `store it as ${entry.fromModel}.${entry.fromColumn} → ${entry.toModel}.${entry.toColumn} ${entry.cardinality} in ${file}, and take it out of ${movesFrom}.`
-              : `change it to ${entry.cardinality}${stored && entry.cardinality !== r.targetCardinality ? ` (stored from ${entry.fromModel})` : ''}.`),
+              ? `store it as ${entry.fromModel}.${entry.fromColumn} → ${entry.toModel}.${entry.toColumn} ${entry.cardinality} in ${file}, and take it out of ${movesFrom}`
+              : `change it to ${entry.cardinality}${stored && entry.cardinality !== r.targetCardinality ? ` (stored from ${entry.fromModel})` : ''}`) +
+            (entryPairs ? `; set \`cardinality\` on every entry of ${r.compositeKey ? `compositeKey ${r.compositeKey}` : 'the composite key'}.` : '.'),
         });
         break;
       }

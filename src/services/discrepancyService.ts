@@ -15,7 +15,7 @@ import type {
   ColumnDiscrepancy,
   RelationshipDiscrepancy,
 } from '../types/discrepancy';
-import { linkKey, reverseRelationship } from '@erd-studio/core';
+import { compositeGroupProblem, linkKey, pairsOf, reverseRelationship } from '@erd-studio/core';
 import { normaliseName } from './nameUtils';
 
 // ---------------------------------------------------------------------------
@@ -341,63 +341,93 @@ function compareRelationships(
   for (const r of targetRels) {
     if (!targetMap.has(linkKey(r))) targetMap.set(linkKey(r), r);
   }
+  // Read in `rel`'s direction: the target's copy of the same link.
+  const targetFor = (rel: DisplayRelationship): DisplayRelationship | undefined => {
+    const found = targetMap.get(linkKey(rel));
+    return found && relationshipKey(found) !== relationshipKey(rel) ? reverseRelationship(found) : found;
+  };
+  const ends = (rel: DisplayRelationship) =>
+    ({ fromModel: rel.fromModel, fromColumn: rel.fromColumn, toModel: rel.toModel, toColumn: rel.toColumn });
+  const composite = (members: DisplayRelationship[]) =>
+    ({ ...ends(members[0]), pairs: pairsOf(members), compositeKey: members[0].compositeKey! });
+  const sourceGroups = compositeGroups(sourceRels);
+  const targetGroups = compositeGroups(targetRels);
   const visited = new Set<string>();
   const result: RelationshipDiscrepancy[] = [];
 
+  // Composite foreign keys (#133 L2) match pair by pair, but each is
+  // reported once: matched, one cardinality difference, or — when the target
+  // does not declare every pair the same way — one informational extra.
+  // Target links a composite consumes are never reported as missing.
   for (const rel of sourceRels) {
     const key = linkKey(rel);
-    const found = targetMap.get(key);
+    if (visited.has(key)) continue;
+    const members = sourceGroups.get(rel);
+    if (members) {
+      for (const m of members) visited.add(linkKey(m));
+      const found = members.map(targetFor);
+      if (found.every((t) => t)) {
+        const differs = members.findIndex((m, i) => found[i]!.cardinality !== m.cardinality);
+        result.push(differs === -1
+          ? { ...composite(members), status: 'matched' }
+          : { ...composite(members), status: 'cardinality-mismatch', sourceCardinality: members[0].cardinality, targetCardinality: found[differs]!.cardinality });
+      } else {
+        result.push({
+          ...composite(members), status: 'extra', sourceCardinality: members[0].cardinality, composite: true,
+          undeclaredPairs: pairsOf(members.filter((_, i) => !found[i])),
+        });
+      }
+      continue;
+    }
+
     visited.add(key);
-    const targetRel = found && relationshipKey(found) !== relationshipKey(rel)
-      ? reverseRelationship(found)
-      : found;
+    const targetRel = targetFor(rel);
 
     if (!targetRel) {
-      result.push({
-        fromModel: rel.fromModel,
-        fromColumn: rel.fromColumn,
-        toModel: rel.toModel,
-        toColumn: rel.toColumn,
-        status: 'extra',
-        sourceCardinality: rel.cardinality,
-      });
+      result.push({ ...ends(rel), status: 'extra', sourceCardinality: rel.cardinality });
     } else if (rel.cardinality !== targetRel.cardinality) {
-      result.push({
-        fromModel: rel.fromModel,
-        fromColumn: rel.fromColumn,
-        toModel: rel.toModel,
-        toColumn: rel.toColumn,
-        status: 'cardinality-mismatch',
-        sourceCardinality: rel.cardinality,
-        targetCardinality: targetRel.cardinality,
-      });
+      result.push({ ...ends(rel), status: 'cardinality-mismatch', sourceCardinality: rel.cardinality, targetCardinality: targetRel.cardinality });
     } else {
-      result.push({
-        fromModel: rel.fromModel,
-        fromColumn: rel.fromColumn,
-        toModel: rel.toModel,
-        toColumn: rel.toColumn,
-        status: 'matched',
-      });
+      result.push({ ...ends(rel), status: 'matched' });
     }
   }
 
-  // Relationships in target but not source
+  // Relationships in target but not source: a composite the source lacks is
+  // one missing entry with all its pairs.
   for (const rel of targetRels) {
-    if (!visited.has(linkKey(rel))) {
-      visited.add(linkKey(rel));
-      result.push({
-        fromModel: rel.fromModel,
-        fromColumn: rel.fromColumn,
-        toModel: rel.toModel,
-        toColumn: rel.toColumn,
-        status: 'missing',
-        targetCardinality: rel.cardinality,
-      });
+    if (visited.has(linkKey(rel))) continue;
+    const members = targetGroups.get(rel);
+    if (members) {
+      for (const m of members) visited.add(linkKey(m));
+      result.push({ ...composite(members), status: 'missing', targetCardinality: members[0].cardinality });
+      continue;
     }
+    visited.add(linkKey(rel));
+    result.push({ ...ends(rel), status: 'missing', targetCardinality: rel.cardinality });
   }
 
   return result;
+}
+
+/**
+ * The valid composite foreign keys among `rels` (#133 L2): each member mapped
+ * to its group's members, in order. Entries sharing a `compositeKey` from one
+ * model that do not form one composite (`compositeGroupProblem`) count as
+ * singles.
+ */
+function compositeGroups(rels: readonly DisplayRelationship[]): Map<DisplayRelationship, DisplayRelationship[]> {
+  const byKey = new Map<string, DisplayRelationship[]>();
+  for (const rel of rels) {
+    if (!rel.compositeKey) continue;
+    const id = `${rel.fromModel.toLowerCase()}\u0000${rel.compositeKey.toLowerCase()}`;
+    byKey.set(id, [...(byKey.get(id) ?? []), rel]);
+  }
+  const groups = new Map<DisplayRelationship, DisplayRelationship[]>();
+  for (const members of byKey.values()) {
+    if (compositeGroupProblem(members)) continue;
+    for (const m of members) groups.set(m, members);
+  }
+  return groups;
 }
 
 // ---------------------------------------------------------------------------

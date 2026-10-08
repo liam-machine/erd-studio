@@ -522,3 +522,60 @@ describe('YmlParserService', () => {
     });
   });
 });
+
+describe('YmlParserService — composite foreign keys (#133 L2)', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yml-composite-')); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  const load = async (pit: string[]) => {
+    fs.mkdirSync(path.join(tmpDir, 'models', 'vault'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'models', 'vault', 'schema.yml'), [
+      'version: 2', 'models:',
+      '  - name: sat_customer', '    columns:', '      - name: customer_hk', '      - name: load_date',
+      '  - name: pit_customer', '    columns:', '      - name: customer_hk', '      - name: as_of_date',
+      ...pit, '',
+    ].join('\n'));
+    return new YmlParserService().loadYmlData(tmpDir);
+  };
+  const EXPECTED = { fromModel: 'pit_customer', fromColumns: ['customer_hk', 'as_of_date'], toModel: 'sat_customer', toColumns: ['customer_hk', 'load_date'] };
+
+  it('extracts a dbt ≥ 1.9 model-level foreign_key constraint', async () => {
+    const data = await load([
+      '    constraints:',
+      '      - type: foreign_key',
+      '        name: fk_sat',
+      '        columns: [customer_hk, as_of_date]',
+      "        to: ref('sat_customer', v=2)",
+      '        to_columns: [customer_hk, load_date]',
+    ]);
+    expect(data.compositeForeignKeys).toEqual([{ ...EXPECTED, name: 'fk_sat' }]);
+  });
+
+  it('extracts a dbt_constraints.foreign_key test, with or without arguments:', async () => {
+    const data = await load([
+      '    data_tests:',
+      '      - dbt_constraints.foreign_key:',
+      '          arguments:',
+      '            fk_column_names: [customer_hk, as_of_date]',
+      "            pk_table_name: ref('sat_customer')",
+      '            pk_column_names: [customer_hk, load_date]',
+    ]);
+    expect(data.compositeForeignKeys).toEqual([EXPECTED]);
+  });
+
+  it('skips single-column declarations and mismatched lengths', async () => {
+    const data = await load([
+      '    constraints:',
+      '      - type: foreign_key',
+      '        columns: [customer_hk]',
+      "        to: ref('sat_customer')",
+      '        to_columns: [customer_hk]',
+      '      - type: foreign_key',
+      '        columns: [customer_hk, as_of_date]',
+      "        to: ref('sat_customer')",
+      '        to_columns: [customer_hk]',
+    ]);
+    expect(data.compositeForeignKeys).toEqual([]);
+  });
+});

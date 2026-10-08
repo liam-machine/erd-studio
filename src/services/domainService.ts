@@ -16,6 +16,9 @@ import {
   DomainFileError,
   NON_DOMAIN_DIRS,
   buildUnifiedDomain,
+  compositeGroupProblem,
+  groupKey,
+  linkKey,
   parseDomainJson,
   toLogicalStage,
   validateDomainDocument,
@@ -23,7 +26,7 @@ import {
 import type { DbtKeyIndex } from '@erd-studio/core';
 import type { DomainSummary, SemanticDomain, UnifiedDomain } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
-import type { ManifestData } from '../types/manifest';
+import type { CompositeForeignKey, ManifestData } from '../types/manifest';
 import type { CatalogData, CatalogColumn } from '../types/catalog';
 import type { YmlData } from '../types/ymlData';
 import type { Cardinality } from '../types/semantic';
@@ -557,11 +560,16 @@ export class DomainService {
       manifest?.compositeUniqueGroups,
     );
 
+    // Composite foreign keys dbt declares (#133 L2): constraints and
+    // dbt_constraints tests, yml ∪ manifest.
+    const mergedForeignKeys = mergeCompositeForeignKeys(ymlData.compositeForeignKeys, manifest?.compositeForeignKeys);
+
     const relationships = derivePhysicalRelationships(
       renameTestModels(mergedRelationshipTests, resolvedViaRelation),
       physicalModelNames,
       renameMapKeys(mergedUniqueColumns, resolvedViaRelation),
       renameMapKeys(mergedCompositeGroups, resolvedViaRelation),
+      renameTestModels(mergedForeignKeys, resolvedViaRelation),
     );
 
     return {
@@ -605,12 +613,20 @@ export class DomainService {
  * outside the current domain. Model and column names are matched
  * case-insensitively; emitted edges use the spelling from `physicalModelNames`
  * so they line up with the physical DisplayModels.
+ *
+ * A composite foreign key dbt declares (#133 L2) adds one edge per column
+ * pair, sharing `compositeKey` (its name, else `fk_<toModel>`) when the pairs
+ * form a valid composite. Its "to" side is unique by definition: each member
+ * is many-to-one, or one-to-one when the from columns are a declared unique
+ * combination. A pair a relationships test also declares is drawn once, as
+ * the composite's member.
  */
 export function derivePhysicalRelationships(
   relationshipTests: RelationshipTest[],
   physicalModelNames: Set<string>,
   uniqueColumns: Map<string, Set<string>>,
   compositeUniqueGroups: Map<string, string[][]>,
+  compositeForeignKeys: readonly CompositeForeignKey[] = [],
 ): DisplayRelationship[] {
   // normalised name → display name (as used by the physical DisplayModels)
   const canonicalModelNames = new Map<string, string>();
@@ -664,18 +680,58 @@ export function derivePhysicalRelationships(
     group.push(test);
   }
 
-  return domainTests.map(rel => ({
-    fromModel: rel.fromModel,
-    fromColumn: rel.fromColumn,
-    toModel: rel.toModel,
-    toColumn: rel.toColumn,
-    cardinality: deriveCardinality(
-      rel,
-      testsByPair.get(pairKey(rel.fromModel, rel.toModel)) ?? [],
-      normalisedUnique,
-      normalisedComposite,
-    ),
-  }));
+  const composites: DisplayRelationship[] = [];
+  for (const fk of compositeForeignKeys) {
+    const fromModel = canonicalModelNames.get(normaliseName(fk.fromModel));
+    const toModel = canonicalModelNames.get(normaliseName(fk.toModel));
+    if (!fromModel || !toModel || fk.fromColumns.length !== fk.toColumns.length) continue;
+    const fromSet = fk.fromColumns.map(normaliseName);
+    const oneToOne = (normalisedComposite.get(normaliseName(fromModel)) ?? [])
+      .some((group) => group.length === fromSet.length && fromSet.every((c) => group.includes(c)));
+    const members: DisplayRelationship[] = fk.fromColumns.map((fromColumn, i) => ({
+      fromModel, fromColumn, toModel, toColumn: fk.toColumns[i], cardinality: oneToOne ? 'one-to-one' : 'many-to-one',
+    }));
+    const compositeKey = fk.name ?? `fk_${toModel}`;
+    composites.push(...(compositeGroupProblem(members) ? members : members.map((m) => ({ ...m, compositeKey }))));
+  }
+  const declared = new Set(composites.map(linkKey));
+
+  return [
+    ...domainTests.filter((rel) => !declared.has(linkKey(rel))).map(rel => ({
+      fromModel: rel.fromModel,
+      fromColumn: rel.fromColumn,
+      toModel: rel.toModel,
+      toColumn: rel.toColumn,
+      cardinality: deriveCardinality(
+        rel,
+        testsByPair.get(pairKey(rel.fromModel, rel.toModel)) ?? [],
+        normalisedUnique,
+        normalisedComposite,
+      ),
+    })),
+    ...composites,
+  ];
+}
+
+/**
+ * Composite foreign keys from the yml (primary) and the manifest, one per
+ * composite (`groupKey`: the same members, whatever the name).
+ */
+export function mergeCompositeForeignKeys(
+  primary: readonly CompositeForeignKey[] = [],
+  secondary: readonly CompositeForeignKey[] = [],
+): CompositeForeignKey[] {
+  const seen = new Set<string>();
+  const merged: CompositeForeignKey[] = [];
+  for (const fk of [...primary, ...secondary]) {
+    const key = groupKey(fk.fromColumns.map((fromColumn, i) => ({
+      fromModel: fk.fromModel, fromColumn, toModel: fk.toModel, toColumn: fk.toColumns[i] ?? '', cardinality: 'many-to-one' as const,
+    })));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(fk);
+  }
+  return merged;
 }
 
 /**
@@ -814,7 +870,7 @@ function physicalAlias(
 }
 
 /** Rewrite relationship test endpoints named in `renames` (normalised dbt name → logical name). */
-function renameTestModels(tests: RelationshipTest[], renames: Map<string, string>): RelationshipTest[] {
+function renameTestModels<T extends { fromModel: string; toModel: string }>(tests: T[], renames: Map<string, string>): T[] {
   if (renames.size === 0) { return tests; }
   return tests.map(t => ({
     ...t,

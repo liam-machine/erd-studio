@@ -7,6 +7,7 @@
  */
 
 import type { Cardinality, Stage } from './semantic.js';
+import type { ColumnPair } from '../relationships.js';
 
 export interface DiscrepancyReport {
   domain: string;
@@ -62,4 +63,19 @@ export interface RelationshipDiscrepancy {
   status: 'matched' | 'extra' | 'missing' | 'cardinality-mismatch';
   sourceCardinality?: Cardinality;
   targetCardinality?: Cardinality;
+  /**
+   * A composite foreign key's column pairs, two or more (#133 L2): one entry
+   * for the whole composite, whose `fromColumn` / `toColumn` are `pairs[0]`.
+   */
+  pairs?: ColumnPair[];
+  /** The composite's name, from the stage that declares it. */
+  compositeKey?: string;
+  /**
+   * Set only on an `extra` composite: the source draws a composite foreign
+   * key the target does not declare as one. Informational — dbt can only
+   * check it through a constraint or a dbt_constraints test.
+   */
+  composite?: true;
+  /** On an `extra` composite: the pairs the target has no link for at all. */
+  undeclaredPairs?: ColumnPair[];
 }

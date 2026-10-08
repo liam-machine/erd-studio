@@ -94,6 +94,7 @@ function deserializeWorkerResult(raw: ManifestWorkerResult): ManifestData {
     resourceDocs: new Map(
       Object.values(raw.resourceDocs ?? {}).map((info) => [normaliseName(info.name), info]),
     ),
+    ...(raw.compositeForeignKeys ? { compositeForeignKeys: raw.compositeForeignKeys } : {}),
   };
 }
 

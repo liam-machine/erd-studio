@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { DomainFileError, DomainService, derivePhysicalRelationships, isDomainFilePath, relationshipReferencesColumn, renameDomainInRaw } from '../../src/services/domainService';
+import { DomainFileError, DomainService, derivePhysicalRelationships, isDomainFilePath, mergeCompositeForeignKeys, relationshipReferencesColumn, renameDomainInRaw } from '../../src/services/domainService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import type { LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
@@ -1029,6 +1029,38 @@ describe('DomainService', () => {
       const result = derivePhysicalRelationships(tests, new Set(['employee']), unique, new Map());
       expect(result).toEqual([{ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id', cardinality: 'many-to-one' }]);
       expect(linkKey(result[0])).toBe(linkKey({ fromModel: 'employee', fromColumn: 'employee_id', toModel: 'employee', toColumn: 'manager_id' }));
+    });
+
+    describe('composite foreign keys (#133 L2)', () => {
+      const pit = new Set(['pit_customer', 'sat_customer']);
+      const FK = { fromModel: 'PIT_customer', fromColumns: ['customer_hk', 'as_of_date'], toModel: 'sat_customer', toColumns: ['customer_hk', 'load_date'] };
+
+      it('emits each declared pair as a member sharing compositeKey (its name, else fk_<toModel>)', () => {
+        expect(derivePhysicalRelationships([], pit, new Map(), new Map(), [FK])).toEqual([
+          { fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', cardinality: 'many-to-one', compositeKey: 'fk_sat_customer' },
+          { fromModel: 'pit_customer', fromColumn: 'as_of_date', toModel: 'sat_customer', toColumn: 'load_date', cardinality: 'many-to-one', compositeKey: 'fk_sat_customer' },
+        ]);
+        const named = derivePhysicalRelationships([], pit, new Map(), new Map([['pit_customer', [['as_of_date', 'customer_hk']]]]), [{ ...FK, name: 'fk_sat' }]);
+        expect(named.map((r) => [r.compositeKey, r.cardinality])).toEqual([['fk_sat', 'one-to-one'], ['fk_sat', 'one-to-one']]);
+      });
+
+      it('a pair a relationships test also declares is drawn once, as the composite\'s member', () => {
+        const tests: ManifestRelationshipTest[] = [
+          { fromModel: 'sat_customer', fromColumn: 'customer_hk', toModel: 'pit_customer', toColumn: 'customer_hk' },
+          { fromModel: 'pit_customer', fromColumn: 'id', toModel: 'sat_customer', toColumn: 'load_date' },
+        ];
+        const result = derivePhysicalRelationships(tests, pit, new Map(), new Map(), [FK]);
+        expect(result.map((r) => `${r.fromModel}.${r.fromColumn}>${r.toModel}.${r.toColumn}:${r.compositeKey ?? '-'}`)).toEqual([
+          'pit_customer.id>sat_customer.load_date:-',
+          'pit_customer.customer_hk>sat_customer.customer_hk:fk_sat_customer',
+          'pit_customer.as_of_date>sat_customer.load_date:fk_sat_customer',
+        ]);
+      });
+
+      it('ignores a declaration whose model is outside the domain, and merges yml and manifest by members', () => {
+        expect(derivePhysicalRelationships([], new Set(['pit_customer']), new Map(), new Map(), [FK])).toEqual([]);
+        expect(mergeCompositeForeignKeys([FK], [{ ...FK, fromModel: 'pit_customer', name: 'other' }, { ...FK, toColumns: ['customer_hk', 'x'] }])).toHaveLength(2);
+      });
     });
 
     it('derives many-to-many when neither column has unique test', () => {

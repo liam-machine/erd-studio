@@ -46,6 +46,11 @@ function fixLine(f: Fix, p: Paint): string {
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not tested in dbt`;
     case 'set-cardinality':
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  cardinality: ${f.from} (logical) vs ${f.to} (dbt)`;
+    case 'declare-composite-foreign-key': {
+      const pairs = f.relationship!.pairs ?? [];
+      return `  ${mark} ${f.relationship!.fromModel} (${pairs.map((x) => x.fromColumn).join(', ')}) → ${f.relationship!.toModel} `
+        + `(${pairs.map((x) => x.toColumn).join(', ')})  composite foreign key dbt does not declare`;
+    }
     case 'resolve-phantom':
       return `  ${mark} ${f.model}  not a dbt model`;
     default:

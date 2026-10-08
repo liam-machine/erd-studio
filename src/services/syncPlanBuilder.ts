@@ -32,6 +32,7 @@ import {
   deriveRelationshipAction,
   modelKey,
   relationshipKey,
+  relationshipSelectionKey,
   resolveGroundTruthDataType,
 } from '../types/syncPlan';
 import type { YmlData } from '../types/ymlData';
@@ -69,7 +70,8 @@ const PHYSICAL_ACTIONS: ReadonlySet<ModelAction | ColumnAction | RelationshipAct
  * Every resolvable item in `report` mapped to `truth` — the same key set the
  * sync modal's "resolve all" builds: `model:{m}` for each non-matched model,
  * `col:{m}:{c}` for each non-matched column (in any model), and
- * `rel:{from}:{fromCol}:{to}:{toCol}` for each non-matched relationship.
+ * `rel:{from}:{fromCol}:{to}:{toCol}` for each non-matched relationship
+ * (`rel:{from}:{a+b}:{to}:{c+d}` for a composite foreign key).
  */
 export function allSelections(report: DiscrepancyReport, truth: GroundTruth): Record<string, GroundTruth> {
   const selections: Record<string, GroundTruth> = {};
@@ -81,7 +83,7 @@ export function allSelections(report: DiscrepancyReport, truth: GroundTruth): Re
   }
   for (const r of report.relationships) {
     if (r.status !== 'matched') {
-      selections[relationshipKey(r.fromModel, r.fromColumn, r.toModel, r.toColumn)] = truth;
+      selections[relationshipSelectionKey(r)] = truth;
     }
   }
   return selections;
@@ -158,18 +160,18 @@ export function buildSyncPlan(
       });
       referencedModels.add(modelName);
     } else if (kind === 'rel') {
-      const [, fromModel, fromColumn, toModel, toColumn] = parts;
-      const relDisc = report.relationships.find(
-        (r) =>
-          r.fromModel === fromModel &&
-          r.fromColumn === fromColumn &&
-          r.toModel === toModel &&
-          r.toColumn === toColumn,
-      );
+      // A composite is selected by its joined key, or by its first pair's
+      // (a selector that knows only single links).
+      const relDisc = report.relationships.find((r) => relationshipSelectionKey(r) === key)
+        ?? report.relationships.find((r) => r.pairs && relationshipKey(r.fromModel, r.fromColumn, r.toModel, r.toColumn) === key);
       if (!relDisc || relDisc.status === 'matched') continue;
+      const { fromModel, fromColumn, toModel, toColumn } = relDisc;
 
-      const action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);
+      let action = deriveRelationshipAction(relDisc.status, groundTruth, report.sourceStage);
       if (!action) continue;
+      // A composite the logical model draws and dbt does not declare as one
+      // (#133 L2) is not wrong in the logical model: dbt is asked to declare it.
+      if (relDisc.composite && action === 'remove-relationship-from-logical') action = 'add-relationship-test-to-physical';
 
       relationships.push({
         fromModel,
@@ -181,6 +183,9 @@ export function buildSyncPlan(
         action,
         sourceCardinality: relDisc.sourceCardinality,
         targetCardinality: relDisc.targetCardinality,
+        ...(relDisc.pairs ? { pairs: relDisc.pairs.map((p) => ({ ...p })) } : {}),
+        ...(relDisc.compositeKey ? { compositeKey: relDisc.compositeKey } : {}),
+        ...(relDisc.composite ? { composite: true as const } : {}),
       });
       referencedModels.add(fromModel);
       referencedModels.add(toModel);

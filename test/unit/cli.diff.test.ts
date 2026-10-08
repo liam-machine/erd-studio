@@ -252,6 +252,77 @@ describe('fixesFromPlan — a self-reference (#133 L3)', () => {
   });
 });
 
+describe('fixesFromPlan — composite foreign keys (#133 L2)', () => {
+  const PAIRS = [{ fromColumn: 'customer_hk', toColumn: 'customer_hk' }, { fromColumn: 'as_of_date', toColumn: 'load_date' }];
+  const planOf = (relationships: SyncPlan['relationships']): SyncPlan => ({
+    generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+    modelContext: {}, models: [], columns: [], requiresCompile: false, relationships,
+  });
+
+  it('a composite dbt does not declare is one advisory declare-composite-foreign-key fix, on the many side\'s yml', () => {
+    const [fix] = fixesFromPlan(planOf([{
+      fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', pairs: PAIRS, compositeKey: 'fk_sat_customer',
+      composite: true, discrepancyStatus: 'extra', groundTruth: 'physical', action: 'add-relationship-test-to-physical', sourceCardinality: 'many-to-one',
+    }]), '.erd-studio/silver/d.json', '.erd-studio', []);
+    expect(fix).toMatchObject({
+      severity: 'advisory', kind: 'declare-composite-foreign-key', model: 'pit_customer', file: '.erd-studio/logical-models/pit_customer.yml',
+      relationship: { fromModel: 'pit_customer', toModel: 'sat_customer', cardinality: 'many-to-one', pairs: PAIRS, compositeKey: 'fk_sat_customer' },
+    });
+    expect(fix.explain).toMatch(/^The logical model draws the composite foreign key pit_customer \(customer_hk, as_of_date\) → sat_customer \(customer_hk, load_date\), and dbt declares none\. Nothing to change in the logical model\./);
+    expect(fix.explain).toContain('`foreign_key` constraint to pit_customer');
+  });
+
+  it('a dbt composite the logical model lacks is a blocking add-relationship with its pairs, in the canonical file', () => {
+    const reversed = PAIRS.map((p) => ({ fromColumn: p.toColumn, toColumn: p.fromColumn }));
+    const [fix] = fixesFromPlan(planOf([{
+      fromModel: 'sat_customer', fromColumn: 'customer_hk', toModel: 'pit_customer', toColumn: 'customer_hk', pairs: reversed, compositeKey: 'fk_dbt',
+      discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-many',
+    }]), '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Map(), addToLibrary: true });
+    expect(fix).toMatchObject({
+      severity: 'blocking', kind: 'add-relationship', model: 'pit_customer', file: '.erd-studio/logical-models/pit_customer.yml',
+      relationship: { fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', cardinality: 'many-to-one', pairs: PAIRS, compositeKey: 'fk_dbt' },
+    });
+    expect(fix.explain).toContain('add it to the logical model as 2 entries sharing `compositeKey: fk_dbt`');
+  });
+
+  it('a cardinality difference names every entry of the composite', () => {
+    const [fix] = fixesFromPlan(planOf([{
+      fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', pairs: PAIRS, compositeKey: 'fk_sat',
+      discrepancyStatus: 'cardinality-mismatch', groundTruth: 'physical', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-one',
+    }]), '.erd-studio/silver/d.json', '.erd-studio', []);
+    expect(fix).toMatchObject({ kind: 'set-cardinality', relationship: { pairs: PAIRS, compositeKey: 'fk_sat' } });
+    expect(fix.explain).toContain('set `cardinality` on every entry of compositeKey fk_sat');
+  });
+});
+
+describe('diff — an undeclared composite is advisory, blocking only under --strict (#133 L2)', () => {
+  it('dbt-project', async () => {
+    const root = copyProject('dbt-project');
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    const models = ['fct_order', 'dim_customer'];
+    const inventory = JSON.parse((await run(['inventory', '--models', models.join(','), '--json'], root)).out) as InventoryResult;
+    const file = writeModelFromInventory(root, inventory, 'silver', 'orders', 'library');
+    const ymlPath = path.join(root, '.erd-studio', 'logical-models', 'fct_order.yml');
+    const yml = parseYaml(fs.readFileSync(ymlPath, 'utf-8')) as { relationships: Array<Record<string, unknown>> };
+    yml.relationships = [
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', compositeKey: 'fk_dim_customer' },
+      { fromColumn: 'order_date', toModel: 'dim_customer', toColumn: 'email', cardinality: 'many-to-one', compositeKey: 'fk_dim_customer' },
+    ];
+    fs.writeFileSync(ymlPath, toYaml(yml));
+
+    const plain = await run(['diff', '--domain', path.relative(root, file), '--json'], root);
+    const d = (JSON.parse(plain.out) as DiffResult).domains[0];
+    expect(d.fixes.filter((f) => f.kind === 'declare-composite-foreign-key')).toEqual([
+      expect.objectContaining({ severity: 'advisory', model: 'fct_order', file: '.erd-studio/logical-models/fct_order.yml' }),
+    ]);
+    expect(d.fixes.filter((f) => f.severity === 'blocking')).toEqual([]);
+    expect(plain.code).toBe(0);
+
+    const strict = await run(['diff', '--domain', path.relative(root, file), '--json', '--strict'], root);
+    expect(strict.code).toBe(1);
+  });
+});
+
 describe('fixesFromPlan', () => {
   const plan: SyncPlan = {
     generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
