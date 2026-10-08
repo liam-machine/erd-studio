@@ -798,6 +798,33 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
     });
   });
 
+  describe('dbt key evidence on the canvas payload (#133 L1)', () => {
+    it('the editable logical payload carries dbtKey on the columns dbt tests; untested columns carry none', async () => {
+      fs.mkdirSync(path.join(h.root, 'models'), { recursive: true });
+      fs.writeFileSync(path.join(h.root, 'models', 'schema.yml'), [
+        'version: 2',
+        'models:',
+        '  - name: fct_order',
+        '    columns:',
+        '      - name: customer_key',
+        '        tests: [unique]',
+        '',
+      ].join('\n'));
+
+      await h.send({ type: 'ready' });
+
+      const loaded = h.panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as
+        { payload: { readOnly?: boolean; models: Array<{ name: string; columns: Array<{ name: string; dbtKey?: unknown }> }> } };
+      expect(loaded.payload.readOnly).toBeFalsy();
+      const fct = loaded.payload.models.find((m) => m.name === 'fct_order')!;
+      expect(Object.fromEntries(fct.columns.map((c) => [c.name, c.dbtKey ?? null]))).toEqual({
+        order_key: null,
+        customer_key: { key: 'unique', because: 'unique-test' },
+        amount: null,
+      });
+    });
+  });
+
   describe('undo / redo', () => {
     it('flushes reverted-but-dirty yml documents to disk so the library matches the domain', async () => {
       // Edit through the editor so the yml document is open in the mock workspace
