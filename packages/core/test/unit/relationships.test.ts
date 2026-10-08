@@ -2,14 +2,13 @@ import { describe, it, expect } from 'vitest';
 
 import { relationshipKey } from '../../src/domain';
 import { parseLogicalModelText } from '../../src/logicalModel';
-import { canonicalRelationship, normaliseRelationshipRole, RELATIONSHIP_ROLE_MAX_LENGTH } from '../../src/relationships';
+import {
+  canonicalRelationship, linkKey, normaliseRelationshipRole, RELATIONSHIP_ROLE_MAX_LENGTH, reverseRelationship, sameLink,
+} from '../../src/relationships';
 import type { Cardinality, Relationship } from '../../src/types/semantic';
 
 const rel = (cardinality: Cardinality): Relationship => ({
   fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality,
-});
-const reversed = (r: Relationship): Relationship => ({
-  ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn,
 });
 
 describe('canonicalRelationship — the many side owns a relationship (#133)', () => {
@@ -35,8 +34,28 @@ describe('canonicalRelationship — the many side owns a relationship (#133)', (
   );
 
   it('stores a link and the same link read from the other end identically', () => {
-    const fromFact = reversed(rel('many-to-one'));
+    const fromFact = reverseRelationship(rel('one-to-many'));
     expect(relationshipKey(canonicalRelationship(rel('one-to-many')))).toBe(relationshipKey(canonicalRelationship(fromFact)));
+  });
+});
+
+describe('linkKey / sameLink / reverseRelationship — one identity (#133)', () => {
+  it('the same two columns, either way round and in any case, are one link', () => {
+    expect(sameLink(rel('many-to-one'), reverseRelationship(rel('many-to-one')))).toBe(true);
+    expect(linkKey(rel('many-to-one'))).toBe(linkKey({ ...rel('one-to-one'), fromModel: ' DIM_Customer', toColumn: 'CUSTOMER_KEY' }));
+    expect(sameLink(rel('many-to-one'), { ...rel('many-to-one'), toColumn: 'other_key' })).toBe(false);
+  });
+
+  it('reverseRelationship swaps the ends and flips many-to-one and one-to-many only', () => {
+    expect(reverseRelationship(rel('one-to-many'))).toEqual({ ...rel('many-to-one'), fromModel: 'fct_order', toModel: 'dim_customer' });
+    expect(reverseRelationship(rel('one-to-one')).cardinality).toBe('one-to-one');
+    expect(reverseRelationship(reverseRelationship(rel('many-to-many')))).toEqual(rel('many-to-many'));
+  });
+
+  it('a self-reference is stored on its own model, whichever way it is drawn', () => {
+    const drawn: Relationship = { fromModel: 'employee', fromColumn: 'employee_id', toModel: 'employee', toColumn: 'manager_id', cardinality: 'one-to-many' };
+    expect(canonicalRelationship(drawn)).toEqual({ ...reverseRelationship(drawn), fromColumn: 'manager_id', cardinality: 'many-to-one' });
+    expect(canonicalRelationship(reverseRelationship(drawn)).fromModel).toBe('employee');
   });
 });
 

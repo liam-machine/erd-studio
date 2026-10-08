@@ -15,7 +15,6 @@ import {
   renameColumnInRelationships,
   renameModelInRelationships,
   routeToLibrary,
-  sameColumnPair,
   upsertLibraryRelationship,
   usesLibraryRelationships,
 } from '../../src/services/libraryRelationships';
@@ -189,12 +188,6 @@ describe('stored on the many side (#133)', () => {
   };
   const dim = (relationships?: SemanticModel['relationships']): SemanticModel =>
     ({ name: 'dim_customer', columns: [], ...(relationships ? { relationships: structuredClone(relationships) } : {}) });
-
-  it('sameColumnPair: the same two columns either way round are one link', () => {
-    expect(sameColumnPair(REL, REL)).toBe(true);
-    expect(sameColumnPair(REL, REVERSED)).toBe(true);
-    expect(sameColumnPair(REL, { ...REL, fromColumn: 'other_key' })).toBe(false);
-  });
 
   it('routeToLibrary stores a one-to-many on the fact, as many-to-one', () => {
     const fact = fct();

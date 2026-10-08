@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Panel } from '@xyflow/react';
+import { canonicalRelationship, sameLink } from '@erd-studio/core';
 
 import { useEditorStore } from '../../store/editorStore';
 import { useSend } from '../../hooks/useMessageBus';
@@ -89,16 +90,7 @@ function validateForm(
       }
 
       // The same two columns joined either way round is the same link.
-      return (
-        (rel.fromModel === fromModel &&
-          rel.fromColumn === fromColumn.trim() &&
-          rel.toModel === toModel &&
-          rel.toColumn === toColumn.trim()) ||
-        (rel.fromModel === toModel &&
-          rel.fromColumn === toColumn.trim() &&
-          rel.toModel === fromModel &&
-          rel.toColumn === fromColumn.trim())
-      );
+      return sameLink(rel, { fromModel, fromColumn, toModel, toColumn });
     });
     if (isDuplicate) {
       errors.duplicate = 'This relationship already exists';
@@ -318,13 +310,13 @@ export function NewFkDialog() {
       setTouched({});
       // A one-to-many (stored before #133) opens turned round, as the many-to-one
       // it will be saved as — the dialog offers no one-to-many.
-      const flip = fkDialogEditData.cardinality === 'one-to-many';
-      setFromModel(flip ? fkDialogEditData.toModel : fkDialogEditData.fromModel);
-      setFromColumn(flip ? fkDialogEditData.toColumn : fkDialogEditData.fromColumn);
-      setToModel(flip ? fkDialogEditData.fromModel : fkDialogEditData.toModel);
-      setToColumn(flip ? fkDialogEditData.fromColumn : fkDialogEditData.toColumn);
-      setCardinality(flip ? 'many-to-one' : fkDialogEditData.cardinality);
-      setRole(fkDialogEditData.role ?? '');
+      const shown = canonicalRelationship(fkDialogEditData);
+      setFromModel(shown.fromModel);
+      setFromColumn(shown.fromColumn);
+      setToModel(shown.toModel);
+      setToColumn(shown.toColumn);
+      setCardinality(shown.cardinality);
+      setRole(shown.role ?? '');
     }
   }, [isOpen, fkDialogEditData]);
 

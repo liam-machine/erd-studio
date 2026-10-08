@@ -20,7 +20,7 @@ import type { SyncPlan } from '../types/syncPlan';
 import { DomainFileError } from '../services/domainService';
 import type { ModelFileError, ModelFileErrorKind } from '../services/logicalModelService';
 import { libraryRelationshipsOf, usesLibraryRelationships } from '../services/libraryRelationships';
-import { canonicalRelationship, relationshipKey } from '@erd-studio/core';
+import { canonicalRelationship, linkKey } from '@erd-studio/core';
 import { computeDomainDiff } from '../services/stageDiff';
 import { allSelections, buildSyncPlan } from '../services/syncPlanBuilder';
 import { CliEnvError, inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
@@ -182,7 +182,7 @@ function sortFixes(fixes: Fix[]): Fix[] {
 
 /** Where a domain's relationships are defined, so a relationship fix names the right file. */
 export interface RelationshipHome {
-  /** `relationshipKey`s of the relationships this domain draws from model yml files. */
+  /** `linkKey`s of the relationships this domain draws from model yml files. */
   inLibrary: ReadonlySet<string>;
   /** Whether a new relationship goes to the from-model's yml (`usesLibraryRelationships`). */
   addToLibrary: boolean;
@@ -208,8 +208,8 @@ export function fixesFromPlan(
   // A relationship is fixed where it is defined (#126): the yml of the model
   // holding its foreign key when the library holds it, else the domain file.
   // A new one goes where the project keeps relationships.
-  const relationshipFile = (r: Parameters<typeof relationshipKey>[0], adding: boolean): string =>
-    (adding ? relationshipHome.addToLibrary : relationshipHome.inLibrary.has(relationshipKey(r)))
+  const relationshipFile = (r: Parameters<typeof linkKey>[0], adding: boolean): string =>
+    (adding ? relationshipHome.addToLibrary : relationshipHome.inLibrary.has(linkKey(r)))
       ? ymlFile(r.fromModel)
       : domainFile;
   const fixes: Fix[] = [];
@@ -389,7 +389,7 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
   });
   const unreadableModelFiles = unreadableModels(ctx, unified);
   const relationshipHome: RelationshipHome = {
-    inLibrary: new Set(unified.logical.models.flatMap(libraryRelationshipsOf).map(relationshipKey)),
+    inLibrary: new Set(unified.logical.models.flatMap(libraryRelationshipsOf).map(linkKey)),
     addToLibrary: usesLibraryRelationships(
       ctx.logicalModelService.listModels(),
       ctx.domainService.countDomainFileRelationships(ctx.root, ctx.semanticDir),

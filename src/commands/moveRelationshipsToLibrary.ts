@@ -25,7 +25,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { VALID_CARDINALITIES, normaliseRelationshipRole, parseLogicalModelText, relationshipKey } from '@erd-studio/core';
+import { VALID_CARDINALITIES, normaliseRelationshipRole, parseLogicalModelText, relationshipKey, sameLink } from '@erd-studio/core';
 import { dirtyFiles } from '../providers/dirtyDocuments';
 import {
   describeLeftAlone,
@@ -34,7 +34,6 @@ import {
   planMoveToLibrary,
   removeLibraryRelationships,
   resolveConflict,
-  sameColumnPair,
   upsertLibraryRelationship,
 } from '../services/libraryRelationships';
 import { relationshipsRewriteLoses, setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
@@ -294,7 +293,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     for (const rel of additions.get(name) ?? []) {
       // Already stored here (either way round): that entry stays as it is —
       // its cardinality and its role — and only gains a role it lacks.
-      const existing = libraryRelationshipsOf(copy).find((r) => sameColumnPair(r, rel));
+      const existing = libraryRelationshipsOf(copy).find((r) => sameLink(r, rel));
       if (existing) {
         if (!existing.role && rel.role && relationshipKey(existing) === relationshipKey(rel)) {
           changed = upsertLibraryRelationship(copy, { ...existing, role: rel.role }) || changed;

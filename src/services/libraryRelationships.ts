@@ -42,26 +42,10 @@ export function libraryRelationshipsOf(model: SemanticModel): Relationship[] {
   return (model.relationships ?? []).map((rel) => ({ fromModel: model.name, ...rel }));
 }
 
-/** Whether `model`'s library file defines a relationship with these ends. */
-export function hasLibraryRelationship(model: SemanticModel, ends: RelationshipEnds): boolean {
-  const key = relationshipKey(ends);
-  return libraryRelationshipsOf(model).some((rel) => relationshipKey(rel) === key);
-}
-
-/**
- * Whether two relationships join the same two columns, in either direction
- * (issue #133): `dim.id → fct.dim_id` and `fct.dim_id → dim.id` are one link,
- * so a second one would draw a duplicate line.
- */
-export function sameColumnPair(a: RelationshipEnds, b: RelationshipEnds): boolean {
-  const reversed = { fromModel: b.toModel, fromColumn: b.toColumn, toModel: b.fromModel, toColumn: b.fromColumn };
-  return relationshipKey(a) === relationshipKey(b) || relationshipKey(a) === relationshipKey(reversed);
-}
-
 /** The relationship any library model stores between these two columns, either way round. */
 export function findLibraryColumnPair(models: readonly SemanticModel[], ends: RelationshipEnds): Relationship | undefined {
   for (const model of models) {
-    const found = libraryRelationshipsOf(model).find((rel) => sameColumnPair(rel, ends));
+    const found = libraryRelationshipsOf(model).find((rel) => sameLink(rel, ends));
     if (found) return found;
   }
   return undefined;
@@ -229,7 +213,7 @@ export function routeToLibrary(
     // Already stored the other way round (by hand, or before #133): that
     // entry already draws this link, so a second would only duplicate it.
     const other = modelFor(rel.toModel);
-    if (other && libraryRelationshipsOf(other).some((r) => sameColumnPair(r, rel))) continue;
+    if (other && libraryRelationshipsOf(other).some((r) => sameLink(r, rel))) continue;
     if (upsertLibraryRelationship(model, rel)) changed.set(model.name, model);
   }
   return { kept, changed: [...changed.values()] };
@@ -388,8 +372,8 @@ export function planMoveToLibrary(
       continue;
     }
     const other = libraryModel(stored.toModel);
-    const alreadyShared = hasLibraryRelationship(model, stored)
-      || (other !== null && libraryRelationshipsOf(other).some((r) => sameColumnPair(r, stored)));
+    const shared = findLibraryColumnPair(other ? [model, other] : [model], stored);
+    const alreadyShared = shared !== undefined;
     const cardinalities = [...new Set(uses.map((u) => u.cardinality))];
     if (!alreadyShared && cardinalities.length > 1) {
       // Settled at either end, depending on the cardinality picked.
@@ -412,10 +396,9 @@ export function planMoveToLibrary(
     } else if (stored.role) {
       // The library already draws it but has no role: the domain's label is
       // the only copy of it, and the domain entry is about to go.
-      const entry = [model, other].flatMap((m) => (m ? libraryRelationshipsOf(m) : [])).find((r) => sameColumnPair(r, stored));
-      if (entry && !entry.role) {
-        if (isLocked(entry.fromModel)) continue;
-        plan.toLibrary.push({ ...entry, role: stored.role });
+      if (shared && !shared.role) {
+        if (isLocked(shared.fromModel)) continue;
+        plan.toLibrary.push({ ...shared, role: stored.role });
       }
     }
     for (const use of uses) {

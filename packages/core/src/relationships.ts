@@ -13,8 +13,9 @@ type Ends = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColum
  * end share it, so one line is drawn, not two.
  */
 export function linkKey(rel: Ends): string {
-  const from = `${rel.fromModel}.${rel.fromColumn}`.toLowerCase();
-  const to = `${rel.toModel}.${rel.toColumn}`.toLowerCase();
+  const end = (model: string, column: string): string => `${model}`.trim().toLowerCase() + '.' + `${column}`.trim().toLowerCase();
+  const from = end(rel.fromModel, rel.fromColumn);
+  const to = end(rel.toModel, rel.toColumn);
   return from <= to ? `${from}\u0000${to}` : `${to}\u0000${from}`;
 }
 
@@ -32,14 +33,19 @@ export function sameLink(a: Ends, b: Ends): boolean {
  * to prefer and keep the direction they were drawn in.
  */
 export function canonicalRelationship<T extends Relationship>(rel: T): T {
-  if (rel.cardinality !== 'one-to-many') return rel;
+  return rel.cardinality === 'one-to-many' ? reverseRelationship(rel) : rel;
+}
+
+/** The same relationship read from its other end: ends swapped, many-to-one ↔ one-to-many. */
+export function reverseRelationship<T extends Relationship>(rel: T): T {
+  const flipped = { 'many-to-one': 'one-to-many', 'one-to-many': 'many-to-one' } as const;
   return {
     ...rel,
     fromModel: rel.toModel,
     fromColumn: rel.toColumn,
     toModel: rel.fromModel,
     toColumn: rel.fromColumn,
-    cardinality: 'many-to-one',
+    cardinality: flipped[rel.cardinality as keyof typeof flipped] ?? rel.cardinality,
   };
 }
 

@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { relationshipKey } from '@erd-studio/core';
+import { linkKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
 import { fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
@@ -263,7 +263,7 @@ describe('fixesFromPlan', () => {
 
   it('names the from-model yml for a relationship stored in the model library (#126)', () => {
     const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
-      inLibrary: new Set([relationshipKey({ fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' })]),
+      inLibrary: new Set([linkKey({ fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' })]),
       addToLibrary: true,
     });
     expect(fixes.find((f) => f.kind === 'set-cardinality')).toMatchObject({ file: '.erd-studio/logical-models/f.yml' });
