@@ -16,6 +16,9 @@ on:
       - '.github/**'
       - 'social-video/**'
       - '.claude/**'
+      # npm package release tooling (publish-packages.yml); nothing in the VSIX.
+      - 'scripts/release-packages.mjs'
+      - 'test/unit/releasePackages.test.ts'
 
 concurrency:
   group: deploy-main
