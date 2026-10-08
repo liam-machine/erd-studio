@@ -1,0 +1,175 @@
+{
+  "output": "issue-133-before-after.mp4",
+  "music": "auto",
+  "segments": [
+    {
+      "type": "card",
+      "title": "ERD Studio · Issue #133",
+      "subtitle": "A relationship lives with the fact, however you draw it",
+      "note": "Reported by @gbrueckl",
+      "accent": "blue",
+      "duration": 4,
+      "say": "Issue one thirty-three. A relationship was saved in whichever model you drew it from, so a new fact meant editing its dimensions."
+    },
+    {
+      "type": "card",
+      "title": "BEFORE",
+      "subtitle": "develop · v1.6.7",
+      "accent": "red",
+      "duration": 2.2,
+      "say": "Before."
+    },
+    {
+      "type": "clip",
+      "src": "../rec/before",
+      "tag": "BEFORE · develop"
+    },
+    {
+      "type": "card",
+      "title": "AFTER",
+      "subtitle": "this pull request",
+      "accent": "green",
+      "duration": 2.2,
+      "say": "After, with this pull request."
+    },
+    {
+      "type": "clip",
+      "src": "../rec/after",
+      "tag": "AFTER · this PR",
+      "cues": [
+        {
+          "at": 2.26,
+          "caption": "Three models on the canvas, and no relationships yet."
+        },
+        {
+          "at": 5.46,
+          "caption": "Drag from the customer key to the order's customer column."
+        },
+        {
+          "at": 8.52,
+          "caption": "The dialog turns it round, and says it will be saved in the fact's file."
+        },
+        {
+          "at": 12.73,
+          "caption": "Create the relationship."
+        },
+        {
+          "at": 16.27,
+          "caption": "Now open the dimension's file."
+        },
+        {
+          "at": 21.75,
+          "caption": "The dimension file is untouched."
+        },
+        {
+          "at": 25.55,
+          "caption": "And the fact's file."
+        },
+        {
+          "at": 30.88,
+          "caption": "It lives with the fact, as many to one."
+        },
+        {
+          "at": 34.88,
+          "caption": "New: a relationship can carry a role, like ship date."
+        },
+        {
+          "at": 41.5,
+          "caption": "Drag the date key to the ship date column, and name it."
+        },
+        {
+          "at": 51.03,
+          "caption": "The role is drawn on the line."
+        }
+      ]
+    },
+    {
+      "type": "card",
+      "title": "Upgrading from 1.6.7",
+      "subtitle": "Projects saved the old way",
+      "accent": "green",
+      "duration": 2.6,
+      "say": "And for a project saved by the previous version."
+    },
+    {
+      "type": "term",
+      "title": "$ erd-studio check",
+      "file": "check-before.wrapped.txt",
+      "tag": "BEFORE REPAIR",
+      "duration": 6,
+      "say": "The new check command flags both relationships saved the old way."
+    },
+    {
+      "type": "clip",
+      "src": "../rec/notify",
+      "tag": "AFTER · this PR",
+      "cues": [
+        {
+          "at": 2.08,
+          "caption": "A project saved by version 1.6.7, before this change."
+        },
+        {
+          "at": 7.27,
+          "caption": "The dimension holds the relationship, and its key was flagged as a foreign key."
+        },
+        {
+          "at": 11.48,
+          "caption": "Open the diagram."
+        },
+        {
+          "at": 16.65,
+          "caption": "ERD Studio offers to tidy it up. Nothing changes until you confirm."
+        },
+        {
+          "at": 23.42,
+          "caption": "One preview lists every change, and anything that needs you."
+        },
+        {
+          "at": 32.34,
+          "caption": "Repaired in one step. The diagram draws the same lines."
+        },
+        {
+          "at": 41.1,
+          "caption": "Both relationships now live with the fact, as many to one."
+        },
+        {
+          "at": 46.0,
+          "caption": "And the dimension is back to just its own columns."
+        }
+      ]
+    },
+    {
+      "type": "term",
+      "title": "$ erd-studio check",
+      "file": "check-after.wrapped.txt",
+      "tag": "AFTER REPAIR",
+      "duration": 3.5,
+      "say": "After the repair, the check is clean."
+    },
+    {
+      "type": "card",
+      "title": "What else changed",
+      "accent": "blue",
+      "duration": 8,
+      "bullets": [
+        "One rule for when two relationships are the same: either way round, everywhere",
+        "Saving never drops an entry it could not read; old files still render",
+        "erd-studio check, doctor and diff report problems with stable codes",
+        "AI helper files, setup skill and docs; Data Vault and Kimball both covered"
+      ],
+      "say": "Behind the scenes: every part of ERD Studio now agrees on when two relationships are the same. Saving never drops what it could not read, and old files still render. A new check command reports problems with stable codes, and the AI helper files teach the same rules."
+    },
+    {
+      "type": "card",
+      "title": "Ready for review",
+      "accent": "green",
+      "duration": 5,
+      "bullets": [
+        "Saved with the model holding the foreign key",
+        "Older projects are offered a one-step, previewed repair",
+        "An optional role label on each link"
+      ],
+      "say": "Relationships now live with the fact, older projects get a one-step repair, and a link can carry a role."
+    }
+  ]
+}

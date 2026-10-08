@@ -1,0 +1,2 @@
+$ erd-studio check
+✓ No relationship problems (2 relationships kept in the model files, 3 model files, 1 diagram).

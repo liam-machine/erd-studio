@@ -1,0 +1,47 @@
+// Scene + check: a project saved by 1.6.7 is offered Repair, and Repair fixes it in one confirm.
+import { session, sleep } from '<issue-to-pr-skill>/scripts/cdp/act.mjs';
+const w = await session();
+await w.ev("(document.getElementById('__cur')||{style:{}}).style.opacity=0");
+const k = (key, code, kc, mod = 0) => w.key(key, code, kc, mod);
+const openFile = async (name) => {
+  await w.realClick(`document.querySelector('.part.sidebar .composite.title') || document.querySelector('.part.sidebar')`);
+  await w.ev("(document.getElementById('__cur')||{style:{}}).style.opacity=0");
+  await k('p', 'KeyP', 80, 4); await sleep(500); await w.type(name, 35); await sleep(700); await k('Enter', 'Enter', 13); await sleep(1500);
+};
+const button = (scope, re) => `[...document.querySelectorAll('${scope} .monaco-button, ${scope} a.monaco-button')].find(b => ${re}.test(b.textContent.trim()))`;
+const line = (re) => `[...document.querySelectorAll('.view-line')].find(l => ${re}.test(l.textContent))`;
+
+await sleep(600);
+await w.mark('A project saved by version 1.6.7, before this change.');
+await openFile('dim_customer.yml');
+await sleep(600);
+await w.highlight(line('/relationships:/'), 6);
+await w.mark('The dimension holds the relationship, and its key was flagged as a foreign key.');
+await sleep(4200); await w.unhighlight();
+await w.mark('Open the diagram.');
+await openFile('orders.json');
+await w.waitFor(`[...document.querySelectorAll('.notification-toast')].some(t => /tidied up automatically/.test(t.textContent))`, 25000);
+await sleep(700);
+await w.highlight(`[...document.querySelectorAll('.notification-toast')].find(t => /tidied up automatically/.test(t.textContent))`, 6);
+await w.mark('ERD Studio offers to tidy it up. Nothing changes until you confirm.');
+await sleep(4800); await w.unhighlight();
+await w.click(button('.notification-toast', '/^Repair Relationships…$/'));
+await w.waitFor(`document.querySelector('.monaco-dialog-box')`, 20000);
+await sleep(700);
+await w.highlight(`document.querySelector('.monaco-dialog-box')`, 4);
+await w.mark('One preview lists every change, and anything that needs you.');
+await sleep(5200); await w.unhighlight();
+await w.click(button('.monaco-dialog-box', '/^Repair Relationships$/'));
+await sleep(2500);
+await w.mark('Repaired in one step. The diagram draws the same lines.');
+await sleep(3500);
+await openFile('fct_order.yml');
+await sleep(700);
+await w.highlight(line('/relationships:/'), 6);
+await w.mark('Both relationships now live with the fact, as many to one.');
+await sleep(4200); await w.unhighlight();
+await openFile('dim_customer.yml');
+await sleep(700);
+await w.mark('And the dimension is back to just its own columns.');
+await sleep(3800);
+w.close();

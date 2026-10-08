@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 5,
+  "domain": "orders",
+  "layer": "gold",
+  "description": "Orders star",
+  "logical": {
+    "models": ["dim_customer", "fct_order", "dim_date"],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "dim_customer": { "x": 0, "y": 260 },
+      "fct_order": { "x": 420, "y": 260 },
+      "dim_date": { "x": 840, "y": 260 }
+    }
+  }
+}

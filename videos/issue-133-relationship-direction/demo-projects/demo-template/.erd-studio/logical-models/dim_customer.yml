@@ -1,0 +1,10 @@
+name: dim_customer
+description: One row per customer.
+columns:
+  - name: customer_key
+    dataType: integer
+    description: Surrogate key.
+    isPrimaryKey: true
+  - name: customer_name
+    dataType: string
+    description: Full name.

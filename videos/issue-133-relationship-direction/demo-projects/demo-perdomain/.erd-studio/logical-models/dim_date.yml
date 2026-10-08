@@ -1,0 +1,10 @@
+name: dim_date
+description: One row per calendar day.
+columns:
+  - name: date_key
+    dataType: integer
+    description: yyyymmdd.
+    isPrimaryKey: true
+  - name: calendar_date
+    dataType: date
+    description: The day.

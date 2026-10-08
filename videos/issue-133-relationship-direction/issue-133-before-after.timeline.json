@@ -1,0 +1,215 @@
+{
+ "duration": 199.15,
+ "lines": [
+  {
+   "at": 0.3,
+   "dur": 7.77,
+   "speed": 1.0,
+   "text": "Issue one thirty-three. A relationship was saved in whichever model you drew it from, so a new fact meant editing its dimensions."
+  },
+  {
+   "at": 9.27,
+   "dur": 0.81,
+   "speed": 1.0,
+   "text": "Before."
+  },
+  {
+   "at": 13.5,
+   "dur": 3.05,
+   "speed": 1.0778947368421055,
+   "text": "Three models on the canvas, and no relationships yet."
+  },
+  {
+   "at": 16.9,
+   "dur": 3.14,
+   "speed": 1.15,
+   "text": "Drag from the customer key to the order's customer column."
+  },
+  {
+   "at": 20.39,
+   "dur": 3.88,
+   "speed": 1.0084848484848488,
+   "text": "The dialog reads it from the dimension: customer is the many side."
+  },
+  {
+   "at": 24.62,
+   "dur": 1.47,
+   "speed": 1.0,
+   "text": "Create the relationship."
+  },
+  {
+   "at": 28.16,
+   "dur": 1.75,
+   "speed": 1.0,
+   "text": "Now open the dimension's file."
+  },
+  {
+   "at": 32.51,
+   "dur": 3.03,
+   "speed": 1.0,
+   "text": "The relationship was written into the dimension's file."
+  },
+  {
+   "at": 36.31,
+   "dur": 1.15,
+   "speed": 1.0,
+   "text": "And the fact's file."
+  },
+  {
+   "at": 40.45,
+   "dur": 1.56,
+   "speed": 1.0,
+   "text": "The fact file has nothing."
+  },
+  {
+   "at": 45.65,
+   "dur": 1.69,
+   "speed": 1.0,
+   "text": "After, with this pull request."
+  },
+  {
+   "at": 50.59,
+   "dur": 3.05,
+   "speed": 1.0778947368421052,
+   "text": "Three models on the canvas, and no relationships yet."
+  },
+  {
+   "at": 53.99,
+   "dur": 3.14,
+   "speed": 1.15,
+   "text": "Drag from the customer key to the order's customer column."
+  },
+  {
+   "at": 57.48,
+   "dur": 3.73,
+   "speed": 1.0,
+   "text": "The dialog turns it round, and says it will be saved in the fact's file."
+  },
+  {
+   "at": 61.69,
+   "dur": 1.47,
+   "speed": 1.0,
+   "text": "Create the relationship."
+  },
+  {
+   "at": 65.23,
+   "dur": 1.75,
+   "speed": 1.0,
+   "text": "Now open the dimension's file."
+  },
+  {
+   "at": 70.71,
+   "dur": 1.75,
+   "speed": 1.0,
+   "text": "The dimension file is untouched."
+  },
+  {
+   "at": 74.51,
+   "dur": 1.15,
+   "speed": 1.0,
+   "text": "And the fact's file."
+  },
+  {
+   "at": 79.84,
+   "dur": 2.24,
+   "speed": 1.0,
+   "text": "It lives with the fact, as many to one."
+  },
+  {
+   "at": 83.84,
+   "dur": 3.14,
+   "speed": 1.0,
+   "text": "New: a relationship can carry a role, like ship date."
+  },
+  {
+   "at": 90.46,
+   "dur": 2.97,
+   "speed": 1.0,
+   "text": "Drag the date key to the ship date column, and name it."
+  },
+  {
+   "at": 99.99,
+   "dur": 1.66,
+   "speed": 1.0,
+   "text": "The role is drawn on the line."
+  },
+  {
+   "at": 104.66,
+   "dur": 2.65,
+   "speed": 1.0,
+   "text": "And for a project saved by the previous version."
+  },
+  {
+   "at": 108.51,
+   "dur": 3.86,
+   "speed": 1.0,
+   "text": "The new check command flags both relationships saved the old way."
+  },
+  {
+   "at": 116.39,
+   "dur": 4.25,
+   "speed": 1.0,
+   "text": "A project saved by version 1.6.7, before this change."
+  },
+  {
+   "at": 121.58,
+   "dur": 4.16,
+   "speed": 1.1219343696027633,
+   "text": "The dimension holds the relationship, and its key was flagged as a foreign key."
+  },
+  {
+   "at": 126.09,
+   "dur": 1.26,
+   "speed": 1.0,
+   "text": "Open the diagram."
+  },
+  {
+   "at": 131.26,
+   "dur": 4.95,
+   "speed": 1.0,
+   "text": "ERD Studio offers to tidy it up. Nothing changes until you confirm."
+  },
+  {
+   "at": 138.03,
+   "dur": 3.24,
+   "speed": 1.0,
+   "text": "One preview lists every change, and anything that needs you."
+  },
+  {
+   "at": 146.95,
+   "dur": 3.52,
+   "speed": 1.0,
+   "text": "Repaired in one step. The diagram draws the same lines."
+  },
+  {
+   "at": 155.71,
+   "dur": 3.56,
+   "speed": 1.0,
+   "text": "Both relationships now live with the fact, as many to one."
+  },
+  {
+   "at": 160.61,
+   "dur": 2.58,
+   "speed": 1.0,
+   "text": "And the dimension is back to just its own columns."
+  },
+  {
+   "at": 169.51,
+   "dur": 1.98,
+   "speed": 1.0,
+   "text": "After the repair, the check is clean."
+  },
+  {
+   "at": 173.01,
+   "dur": 17.64,
+   "speed": 1.0,
+   "text": "Behind the scenes: every part of ERD Studio now agrees on when two relationships are the same. Saving never drops what it could not read, and old files still render. A new check command reports problems with stable codes, and the AI helper files teach the same rules."
+  },
+  {
+   "at": 191.85,
+   "dur": 6.4,
+   "speed": 1.0,
+   "text": "Relationships now live with the fact, older projects get a one-step repair, and a link can carry a role."
+  }
+ ]
+}

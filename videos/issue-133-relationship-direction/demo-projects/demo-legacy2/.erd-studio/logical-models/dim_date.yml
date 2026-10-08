@@ -1,0 +1,15 @@
+name: dim_date
+description: One row per calendar day.
+columns:
+  - name: date_key
+    dataType: integer
+    description: yyyymmdd.
+    isPrimaryKey: true
+  - name: calendar_date
+    dataType: date
+    description: The day.
+relationships:
+  - fromColumn: date_key
+    toModel: fct_order
+    toColumn: order_date_key
+    cardinality: one-to-many

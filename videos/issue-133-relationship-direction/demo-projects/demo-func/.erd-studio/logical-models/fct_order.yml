@@ -1,0 +1,20 @@
+name: fct_order
+description: One row per order.
+columns:
+  - name: order_key
+    dataType: integer
+    description: Surrogate key.
+    isPrimaryKey: true
+  - name: customer_key
+    dataType: integer
+    description: Who ordered.
+  - name: order_date_key
+    dataType: integer
+    description: When it was ordered.
+    isForeignKey: true
+  - name: ship_date_key
+    dataType: integer
+    description: When it shipped.
+  - name: amount
+    dataType: decimal(12,2)
+    description: Order total.

@@ -1,0 +1,16 @@
+name: dim_customer
+description: One row per customer.
+columns:
+  - name: customer_key
+    dataType: integer
+    description: Surrogate key.
+    isPrimaryKey: true
+    isForeignKey: true
+  - name: customer_name
+    dataType: string
+    description: Full name.
+relationships:
+  - fromColumn: customer_key
+    toModel: fct_order
+    toColumn: customer_key
+    cardinality: many-to-one

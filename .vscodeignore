@@ -36,6 +36,9 @@ features.json
 mcp-server/**
 proxy/**
 telemetry/**
+# Pull-request evidence (before/after videos, the documents and scripts they were made
+# with), one folder per issue or PR. Never part of the extension.
+videos/**
 # Getting-started video pipeline (see video/README.md). Its outputs that ship
 # are media/onboarding/getting-started.mp4 and getting-started-poster.jpg.
 video/**
