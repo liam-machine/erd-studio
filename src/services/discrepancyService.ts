@@ -9,6 +9,7 @@
  */
 
 import type { DisplayDomain, DisplayModel, DisplayRelationship } from '../types/display';
+import type { Cardinality } from '../types/semantic';
 import type {
   DiscrepancyReport,
   ModelDiscrepancy,
@@ -328,20 +329,48 @@ function compareColumns(
 }
 
 /**
- * Compare relationships between source and target domains.
+ * Identity of the link a relationship draws: its two column ends, in either
+ * order (#133). `fct.customer_key → dim.customer_key many-to-one` and
+ * `dim.customer_key → fct.customer_key one-to-many` are the same link — the
+ * logical model stores it on its many side, while dbt may test it from the
+ * other end.
+ */
+function linkKey(r: { fromModel: string; fromColumn: string; toModel: string; toColumn: string }): string {
+  const from = [r.fromModel, r.fromColumn].map(normaliseName).join('.');
+  const to = [r.toModel, r.toColumn].map(normaliseName).join('.');
+  return from <= to ? `${from}|${to}` : `${to}|${from}`;
+}
+
+/** `cardinality` as read from the other end (many-to-one ↔ one-to-many). */
+function readFromOtherEnd(cardinality: Cardinality): Cardinality {
+  if (cardinality === 'many-to-one') return 'one-to-many';
+  if (cardinality === 'one-to-many') return 'many-to-one';
+  return cardinality;
+}
+
+/**
+ * Compare relationships between source and target domains. A link is
+ * matched whichever end each side reads it from; a cardinality mismatch is
+ * reported in the source's direction.
  */
 function compareRelationships(
   sourceRels: DisplayRelationship[],
   targetRels: DisplayRelationship[],
 ): RelationshipDiscrepancy[] {
-  const targetMap = new Map(targetRels.map((r) => [relationshipKey(r), r]));
+  const targetMap = new Map<string, DisplayRelationship>();
+  for (const r of targetRels) {
+    if (!targetMap.has(linkKey(r))) targetMap.set(linkKey(r), r);
+  }
   const visited = new Set<string>();
   const result: RelationshipDiscrepancy[] = [];
 
   for (const rel of sourceRels) {
-    const key = relationshipKey(rel);
-    const targetRel = targetMap.get(key);
+    const key = linkKey(rel);
+    const found = targetMap.get(key);
     visited.add(key);
+    const targetRel = found && relationshipKey(found) !== relationshipKey(rel)
+      ? { ...found, cardinality: readFromOtherEnd(found.cardinality) }
+      : found;
 
     if (!targetRel) {
       result.push({
@@ -375,7 +404,8 @@ function compareRelationships(
 
   // Relationships in target but not source
   for (const rel of targetRels) {
-    if (!visited.has(relationshipKey(rel))) {
+    if (!visited.has(linkKey(rel))) {
+      visited.add(linkKey(rel));
       result.push({
         fromModel: rel.fromModel,
         fromColumn: rel.fromColumn,

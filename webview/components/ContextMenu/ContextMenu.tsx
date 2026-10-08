@@ -198,13 +198,14 @@ export function ContextMenu() {
   const handleEditClick = useCallback(() => {
     if (!contextMenu || contextMenu.type !== 'edge') return;
 
-    const { fromModel, fromColumn, toModel, toColumn, cardinality } = contextMenu.data;
+    const { fromModel, fromColumn, toModel, toColumn, cardinality, role } = contextMenu.data;
     const editData: FkDialogEditData = {
       fromModel,
       fromColumn,
       toModel,
       toColumn,
       cardinality,
+      ...(role ? { role } : {}),
     };
     openFkDialogForEdit(editData);
     closeContextMenu();

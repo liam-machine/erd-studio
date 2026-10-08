@@ -1064,6 +1064,18 @@ describe('LogicalModelService — a save keeps the relationships: list it did no
     expect(text).toContain('toModel: dim_calendar');
   });
 
+  it('saves a role-only change in place, and clearing the role removes the key (#133)', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships![1] = { ...model.relationships![1], role: 'order date' };
+    service.saveModel(model);
+    expect(listText(fs.readFileSync(file, 'utf-8'))).toBe(`${listText(YML)}    role: order date\n`);
+
+    const saved = service.getModel('fct_order')!;
+    const { role: _role, ...cleared } = saved.relationships![1];
+    service.saveModel({ ...saved, relationships: [saved.relationships![0], cleared] });
+    expect(listText(fs.readFileSync(file, 'utf-8'))).toBe(listText(YML));
+  });
+
   it('keeps a renamed entry\'s node, and a skipped entry when every readable one is removed', () => {
     const model = service.getModel('fct_order')!;
     model.relationships![0] = { ...model.relationships![0], fromColumn: 'cust_key' };

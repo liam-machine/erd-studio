@@ -13,7 +13,7 @@
 import type { Cardinality, ColumnDef, ModelRole, Stage } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, MODEL_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
-import { MODEL_ALIAS_MAX_LENGTH, MODEL_ALIAS_RULE, isValidModelAlias } from '@erd-studio/core';
+import { MODEL_ALIAS_MAX_LENGTH, MODEL_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isValidModelAlias } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -219,6 +219,15 @@ export const CARDINALITIES: readonly Cardinality[] = [
 
 export function isValidCardinality(value: unknown): value is Cardinality {
   return typeof value === 'string' && (CARDINALITIES as readonly string[]).includes(value);
+}
+
+/**
+ * A relationship's optional `role` label from the New / Edit Relationship
+ * dialog: absent, or text of at most `RELATIONSHIP_ROLE_MAX_LENGTH` characters
+ * ('' clears it). The host trims it with `normaliseRelationshipRole`.
+ */
+export function isValidRelationshipRole(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === 'string' && value.trim().length <= RELATIONSHIP_ROLE_MAX_LENGTH);
 }
 
 export const MODEL_ROLES: readonly ModelRole[] = [

@@ -597,6 +597,31 @@ describe('DiscrepancyService.compare', () => {
 // normaliseDataType unit tests
 // ---------------------------------------------------------------------------
 
+describe('DiscrepancyService.compare — a link matches whichever end each stage reads it from (#133)', () => {
+  const models = [makeModel('fct_order', [makeColumn('customer_key')]), makeModel('dim_customer', [makeColumn('customer_key')])];
+  const fromFact = (c: DisplayRelationship['cardinality']) => makeRel(['fct_order', 'customer_key'], ['dim_customer', 'customer_key'], c);
+  const fromDim = (c: DisplayRelationship['cardinality']) => makeRel(['dim_customer', 'customer_key'], ['fct_order', 'customer_key'], c);
+  const run = (logical: DisplayRelationship, physical: DisplayRelationship) => compare(
+    makeDomain({ models, relationships: [logical] }),
+    makeDomain({ stage: 'physical', models, relationships: [physical] }),
+  ).relationships;
+
+  it('matches the many-side logical entry with dbt\'s test from the other end', () => {
+    expect(run(fromFact('many-to-one'), fromDim('one-to-many'))).toEqual([
+      { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', status: 'matched' },
+    ]);
+  });
+
+  it('reports a real cardinality difference once, in the source\'s direction', () => {
+    expect(run(fromFact('one-to-one'), fromDim('one-to-many'))).toEqual([
+      {
+        fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key',
+        status: 'cardinality-mismatch', sourceCardinality: 'one-to-one', targetCardinality: 'many-to-one',
+      },
+    ]);
+  });
+});
+
 describe('normaliseDataType', () => {
   it('lowercases everything', () => {
     expect(normaliseDataType('STRING')).toBe('string');

@@ -100,7 +100,7 @@ export interface ModelFileEntry {
 /** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
 // `relationships` is synced on its own, entry by entry (syncRelationships).
 const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns'] as const;
-const RELATIONSHIP_KEYS = ['fromColumn', 'toModel', 'toColumn', 'cardinality'] as const;
+const RELATIONSHIP_KEYS = ['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role'] as const;
 /** A non-empty top-level `relationships:` list, as text (for a file that does not parse). */
 const RELATIONSHIPS_IN_TEXT = /^relationships[ \t]*:(?:\s*#.*)*\s*(?:-|\[\s*[^\s\]])/m;
 const COLUMN_KEYS = [
@@ -779,7 +779,7 @@ export class LogicalModelService {
   /**
    * Bring `relationships:` in line with `desired` entry by entry. An entry the
    * reader skipped stays where it is; a kept entry keeps its node (comments,
-   * unknown keys such as `role:`); an unchanged list is not touched at all.
+   * unknown keys); an unchanged list is not touched at all.
    * A change ERD Studio cannot make in place is refused, naming file and line.
    */
   private syncRelationships(doc: Document, root: YAMLMap, desired: Record<string, unknown>[], filePath: string): void {
@@ -1092,6 +1092,7 @@ export class LogicalModelService {
         toModel: rel.toModel,
         toColumn: rel.toColumn,
         cardinality: rel.cardinality,
+        ...(rel.role ? { role: rel.role } : {}),
       }));
     }
 

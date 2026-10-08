@@ -305,4 +305,68 @@ describe('relationships stored once in the model library (#126)', () => {
       }
     });
   });
+
+  describe('stored on the many side, however it was drawn (#133)', () => {
+    const REVERSED = {
+      fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key',
+    } as const;
+    const FCT_ENTRY = { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+
+    beforeEach(async () => { h = await createHarness(); });
+
+    it('a one-to-many drawn from the dimension goes to the fact\'s file as many-to-one; the dimension file is untouched', async () => {
+      const dimBefore = fs.readFileSync(h.logicalModelService.modelPath('dim_customer'), 'utf-8');
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...REVERSED, cardinality: 'one-to-many' } });
+
+      expect(orders.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([FCT_ENTRY]);
+      expect(fs.readFileSync(h.logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(dimBefore);
+      expect(h.shown('reporting')).toEqual([{ ...EDGE, cardinality: 'many-to-one' }]);
+    });
+
+    it('the ⇄ swap moves the relationship to the model that is now the many side', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-many' } });
+
+      expect(orders.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
+      expect(h.logicalModelService.getModel('dim_customer')?.relationships).toEqual([
+        { fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' },
+      ]);
+      expect(h.shown('orders')).toEqual([{ ...REVERSED, cardinality: 'many-to-one' }]);
+    });
+
+    it('refuses the same two columns joined the other way round — one link, one line', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+      await orders.send({ type: 'addRelationship', payload: { ...REVERSED, cardinality: 'many-to-one' } });
+
+      expect(orders.errors()).toEqual(['Failed to add relationship: This relationship already exists.']);
+      expect(h.shown('orders')).toEqual([{ ...EDGE, cardinality: 'many-to-one' }]);
+    });
+
+    it('keeps a role through a swap and an edit that leaves it, and clears it on an empty edit', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one', role: '  buyer ' } });
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([{ ...FCT_ENTRY, role: 'buyer' }]);
+      expect(h.shown('reporting')).toEqual([{ ...EDGE, cardinality: 'many-to-one', role: 'buyer' }]);
+
+      await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([{ ...FCT_ENTRY, cardinality: 'one-to-one', role: 'buyer' }]);
+
+      const original = { originalFromModel: EDGE.fromModel, originalFromColumn: EDGE.fromColumn, originalToModel: EDGE.toModel, originalToColumn: EDGE.toColumn };
+      await orders.send({ type: 'editRelationship', payload: { ...original, ...EDGE, cardinality: 'one-to-one', role: '' } });
+      expect(orders.errors()).toEqual([]);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([{ ...FCT_ENTRY, cardinality: 'one-to-one' }]);
+    });
+
+    it('refuses a role that is not text', async () => {
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one', role: 7 } });
+      expect(orders.errors()).toEqual(['Failed to add relationship: the role must be text of at most 60 characters.']);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
+    });
+  });
 });

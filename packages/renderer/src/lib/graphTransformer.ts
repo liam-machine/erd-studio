@@ -305,6 +305,7 @@ export function transformDomain(
           toModel: rel.toModel,
           toColumn: rel.toColumn,
           cardinality: rel.cardinality,
+          ...(rel.role ? { role: rel.role } : {}),
           stage,
           ...(readOnly ? { readOnly: true } : {}),
           ...(discStatus ? { discrepancyStatus: discStatus } : {}),

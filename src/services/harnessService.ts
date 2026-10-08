@@ -27,7 +27,7 @@ export type { FileState, HarnessStatus, RecommendedInstallResult } from '../type
 // ---------------------------------------------------------------------------
 
 /** Version of the harness content. Bump when SCHEMA_CONTENT or generators change. */
-export const HARNESS_VERSION = '25';
+export const HARNESS_VERSION = '26';
 
 const VERSION_MARKER_PREFIX = '<!-- erd-studio-harness:';
 const VERSION_MARKER_SUFFIX = ' -->';
@@ -135,7 +135,7 @@ export const HARNESS_TARGETS: HarnessTarget[] = [
 
 const SCHEMA_CONTENT = `# ERD Studio — AI Data Modeling Guide
 
-ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and hold the layout. Relationships are defined once, in the from-model's YAML, and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see \`Where relationships live\`).
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in \`.erd-studio/logical-models/\` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key (the "many" side), and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see \`Where relationships live\`).
 
 ## Architecture Overview
 
@@ -238,10 +238,10 @@ Annotations are temporary build notes — visible on the canvas while constructi
 | Change grain, modelRole, description, rationale, meta | the model's \`.yml\` |
 | Add a model to a domain diagram | Domain \`.json\` → add name to \`logical.models[]\` AND, if no file for that name exists in any folder, create it — \`logical-models/{layer}/{name}.yml\` (the domain's layer) when the project uses layer folders, else \`logical-models/{name}.yml\` |
 | Remove a model from a domain | Domain \`.json\` → remove name from \`logical.models[]\` AND remove its relationships from \`logical.relationships[]\` (relationships in model YAML stay — the domain just stops drawing them) |
-| Add/remove/edit a relationship | The from-model's \`.yml\` → \`relationships:\` when the project keeps relationships in the model library, else domain \`.json\` → \`logical.relationships[]\` — see "Where relationships live" |
+| Add/remove/edit a relationship | The many-side (FK) model's \`.yml\` → \`relationships:\` when the project keeps relationships in the model library, else domain \`.json\` → \`logical.relationships[]\` — see "Where relationships live" |
 | Change layout positions | Domain \`.json\` → \`viewConfig.positions\` |
 
-> **Common mistake:** Editing the \`.yml\` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the \`.yml\` AND adding the name string to the domain \`.json\`. A relationship is stored in exactly one place — the from-model's \`.yml\` or the domain \`.json\`, never both (see \`Where relationships live\`).
+> **Common mistake:** Editing the \`.yml\` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the \`.yml\` AND adding the name string to the domain \`.json\`. A relationship is stored in exactly one place — the FK (many-side) model's \`.yml\` or the domain \`.json\`, never both (see \`Where relationships live\`).
 
 ---
 
@@ -295,7 +295,7 @@ columns:
 | \`columns\` | No | Array of column definitions |
 | \`rationale\` | No | Design rationale object (omit if empty) |
 | \`meta\` | No | Free-form metadata map (see "Metadata" below) |
-| \`relationships\` | No | Relationships leaving this model, shared by every domain (see "Where relationships live") |
+| \`relationships\` | No | Relationships leaving this model (it holds the foreign key), shared by every domain (see "Where relationships live") |
 
 ### modelRole Values
 
@@ -447,13 +447,14 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 | \`fromColumn\` | Yes | FK column name |
 | \`toModel\` | Yes | PK side model name |
 | \`toColumn\` | Yes | PK column name |
-| \`cardinality\` | Yes | \`many-to-one\`, \`one-to-one\`, \`one-to-many\`, or \`many-to-many\` |
+| \`cardinality\` | Yes | \`many-to-one\`, \`one-to-one\`, or \`many-to-many\` (\`one-to-many\` is still read, but never write it — see Direction) |
+| \`role\` | No | A label for what the link means, e.g. \`order date\` and \`ship date\` for two columns pointing at the same date dimension. At most 60 characters. A label only — not part of the relationship's identity |
 
-**Direction:** \`fromModel\` is always the FK side, \`toModel\` is the PK side. FK column names should match the PK column name of the referenced table.
+**Direction:** \`fromModel\` is always the many (FK) side, \`toModel\` the side it points at (PK). Never write \`one-to-many\`: swap the ends and write \`many-to-one\`, in the other model's file — it is the same relationship. \`one-to-one\` and \`many-to-many\` keep the direction they were drawn in. FK column names should match the PK column name of the referenced table.
 
 ### Where relationships live
 
-A relationship is defined **once** for the whole project, in the YAML of its \`fromModel\` (the FK side), under \`relationships:\` — the same fields without \`fromModel\`, which is the file's own model. Every domain whose \`logical.models\` holds both ends draws it; a domain missing either end does not. Changing it changes every diagram that shows it.
+A relationship is defined **once** for the whole project, in the YAML of its \`fromModel\`, the model holding the foreign key (the many side), under \`relationships:\` — the same fields without \`fromModel\`, which is the file's own model. Every domain whose \`logical.models\` holds both ends draws it; a domain missing either end does not. Changing it changes every diagram that shows it.
 
 \`\`\`yaml
 # logical-models/gold/fct_orders.yml
@@ -464,9 +465,16 @@ relationships:
     toModel: dim_customer
     toColumn: customer_id
     cardinality: many-to-one
+  - fromColumn: ship_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
+    role: ship date
 \`\`\`
 
-**Which to use:** put new relationships in the model YAML when **any** model file already has a \`relationships:\` list, or **no** domain file has a \`logical.relationships\` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's \`logical.relationships[]\`, and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same relationship in both places; if they disagree, the model YAML wins.
+So adding a new fact only ever changes the fact's own file; its dimensions never list who points at them.
+
+**Which to use:** put new relationships in the model YAML when **any** model file already has a \`relationships:\` list, or **no** domain file has a \`logical.relationships\` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's \`logical.relationships[]\`, and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same two columns twice — not in both places, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
 
 ---
 
@@ -611,9 +619,9 @@ and no \`catalog.json\` to observe the real one. It resolves exactly like
 | \`add-column-to-logical\` | Add column to the model's yml (\`modelContext[name].logicalModelPath\`) columns array, with the dbt column \`meta\` keys the team's metadata list names |
 | \`remove-column-from-logical\` | Remove column from the model's yml (\`logicalModelPath\`) |
 | \`update-type-in-logical\` | Update column \`dataType\` in the model's yml (\`logicalModelPath\`) to the value in \`resolvedDataType\` |
-| \`add-relationship-to-logical\` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action) where the project keeps relationships — the from-model's YAML \`relationships:\` or domain JSON \`logical.relationships[]\` (see "Where relationships live") |
-| \`remove-relationship-from-logical\` | Remove the matching relationship from wherever it is defined — the from-model's YAML \`relationships:\` or domain JSON \`logical.relationships[]\` |
-| \`update-cardinality-in-logical\` | Update \`cardinality\` on the matching relationship, wherever it is defined, to \`targetCardinality\` |
+| \`add-relationship-to-logical\` | Add the relationship (fromModel/fromColumn/toModel/toColumn from the action) where the project keeps relationships — the many-side (FK) model's YAML \`relationships:\` or domain JSON \`logical.relationships[]\` (see "Where relationships live"). A \`one-to-many\` is written with its ends swapped as \`many-to-one\`, in the other model's file |
+| \`remove-relationship-from-logical\` | Remove the matching relationship from wherever it is defined — the many-side (FK) model's YAML \`relationships:\` (either end's file, for one written before this rule) or domain JSON \`logical.relationships[]\` |
+| \`update-cardinality-in-logical\` | Update \`cardinality\` on the matching relationship, wherever it is defined, to \`targetCardinality\`. In a model YAML, a change to \`one-to-many\` moves the entry: take it out, swap the ends and add it to the other model's file as \`many-to-one\` |
 
 ### Physical-side actions (edit dbt project files)
 
@@ -767,7 +775,7 @@ function generateGeminiStyleguide(): string {
 1. **Schema version** must be \`5\`
 2. **Required sections**: \`logical\` and \`viewConfig\` must both be present at root level
 3. **Model names** must follow naming conventions: \`dim_\`, \`fct_\`, \`ref_\`, or \`brg_\` prefixes
-4. **Relationships**: \`fromModel\` is always the FK side, \`toModel\` is the PK side; each relationship is defined in exactly one place — the from-model's YAML \`relationships:\` or a domain's \`logical.relationships\`
+4. **Relationships**: \`fromModel\` is always the many (FK) side, \`toModel\` is the PK side, and \`one-to-many\` is never written (swap the ends to \`many-to-one\`); each relationship is defined in exactly one place — the FK model's YAML \`relationships:\` or a domain's \`logical.relationships\`
 5. **Logical columns** must have \`dataType\` and \`description\`
 6. **viewConfig** must be at root level (not inside the logical section)
 7. **Boolean key flags** (\`isPrimaryKey\`, \`isForeignKey\`, \`isNaturalKey\`) should only be present when \`true\`

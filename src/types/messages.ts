@@ -291,6 +291,8 @@ export interface AddRelationshipMessage {
     toModel: string;
     toColumn: string;
     cardinality: Cardinality;
+    /** Optional label, e.g. `ship date`. Blank or absent means none. */
+    role?: string;
   };
 }
 
@@ -335,6 +337,8 @@ export interface EditRelationshipMessage {
     toModel: string;
     toColumn: string;
     cardinality: Cardinality;
+    /** The label after the edit; '' or absent clears it. */
+    role?: string;
   };
 }
 

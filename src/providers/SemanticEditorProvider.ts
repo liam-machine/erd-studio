@@ -77,7 +77,14 @@ import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
 import { SelectorsService } from '../services/selectorsService';
 import { computeNewModelPositions, findOpenPosition } from '../services/positionService';
-import { computeMissingPositions, DomainValidationError, setMetaEntry, toDisplayDomain } from '@erd-studio/core';
+import {
+  canonicalRelationship,
+  computeMissingPositions,
+  DomainValidationError,
+  normaliseRelationshipRole,
+  setMetaEntry,
+  toDisplayDomain,
+} from '@erd-studio/core';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import {
@@ -141,12 +148,13 @@ import {
 import { pickDraftScope } from './dbtDraftPicker';
 import { readDomainRelationships } from '../commands/moveRelationshipsToLibrary';
 import {
-  hasLibraryRelationship,
+  findLibraryColumnPair,
   removeColumnRelationships,
   removeLibraryRelationships,
   renameColumnInRelationships,
   renameModelInRelationships,
   routeToLibrary,
+  sameColumnPair,
   sharedRelationshipCount,
   upsertLibraryRelationship,
   usesLibraryRelationships,
@@ -318,6 +326,7 @@ class EditAborted extends Error {
 }
 import {
   isValidCardinality,
+  isValidRelationshipRole,
   isValidKeyType,
   isValidModelRole,
   isValidStage,
@@ -1010,10 +1019,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'addRelationship': {
-            const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
+            const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; role?: string } }).payload;
             if (payload) {
               if (!isValidCardinality(payload.cardinality)) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: unknown cardinality "${String(payload.cardinality)}".` } });
+                break;
+              }
+              if (!isValidRelationshipRole(payload.role)) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: 'Failed to add relationship: the role must be text of at most 60 characters.' } });
                 break;
               }
               telemetry.feature('addRelationship');
@@ -1075,10 +1088,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'editRelationship': {
-            const payload = (message as { payload?: { originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string; fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality } }).payload;
+            const payload = (message as { payload?: { originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string; fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; role?: string } }).payload;
             if (payload) {
               if (!isValidCardinality(payload.cardinality)) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: unknown cardinality "${String(payload.cardinality)}".` } });
+                break;
+              }
+              if (!isValidRelationshipRole(payload.role)) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: 'Failed to edit relationship: the role must be text of at most 60 characters.' } });
                 break;
               }
               await this.queueEdit(panelKey, () =>
@@ -2969,11 +2986,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleAddRelationship(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality },
+    payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; role?: string },
     stage: 'logical',
   ): Promise<void> {
     try {
       if (await this.writeLibraryRelationship(document, webview, null, payload, 'add')) return;
+      const role = normaliseRelationshipRole(payload.role);
       const success = await this.applyDomainEdit(
         document,
         (section) => {
@@ -2995,6 +3013,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             toModel: payload.toModel,
             toColumn: payload.toColumn,
             cardinality: payload.cardinality,
+            ...(role ? { role } : {}),
           });
           section.relationships = relationships;
         },
@@ -3027,7 +3046,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     original: RelationshipKey | null,
-    next: Relationship,
+    drawn: Relationship,
     action: 'add' | 'update' | 'edit',
   ): Promise<boolean> {
     const parsed = JSON.parse(document.getText()) as Record<string, unknown>;
@@ -3039,8 +3058,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       a.fromModel === b.fromModel && a.fromColumn === b.fromColumn &&
       a.toModel === b.toModel && a.toColumn === b.toColumn;
     const section = this.getStageSection(parsed, 'logical');
-    const domainRels = (section.relationships ?? []) as RelationshipKey[];
+    const domainRels = (section.relationships ?? []) as Relationship[];
     const changed = new Map<string, SemanticModel>();
+
+    // An update (⇄ swap, context-menu cardinality) carries no role: keep the
+    // one already stored. An add or edit carries the dialog's, '' clearing it.
+    const storedRole = original
+      ? (findLibraryColumnPair(models, original) ?? domainRels.find((rel) => sameEnds(rel, original)))?.role
+      : undefined;
+    const role = action === 'update' ? normaliseRelationshipRole(storedRole) : normaliseRelationshipRole(drawn.role);
+    // Stored on its many side, however it was drawn (#133).
+    const { role: _drawnRole, ...ends } = canonicalRelationship(drawn);
+    const next: Relationship = { ...ends, ...(role ? { role } : {}) };
 
     if (original) {
       const inDomain = domainRels.some((rel) => sameEnds(rel, original));
@@ -3050,8 +3079,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     const rekeyed = !original || !sameEnds(original, next);
     if (rekeyed) {
-      const taken = domainRels.some((rel) => sameEnds(rel, next))
-        || models.some((m) => sameName(m.name, next.fromModel) && hasLibraryRelationship(m, next));
+      // The same two columns joined either way round is the same link.
+      const taken = domainRels.some((rel) => !(original && sameEnds(rel, original)) && sameColumnPair(rel, next))
+        || findLibraryColumnPair(models, next) !== undefined;
       if (taken) {
         throw new Error(action === 'add' ? 'This relationship already exists.' : 'A relationship with this key already exists.');
       }
@@ -3487,11 +3517,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     payload: {
       originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string;
-      fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality;
+      fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; role?: string;
     },
     stage: 'logical',
   ): Promise<void> {
     try {
+      const role = normaliseRelationshipRole(payload.role);
       const original = {
         fromModel: payload.originalFromModel,
         fromColumn: payload.originalFromColumn,
@@ -3541,6 +3572,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             toModel: payload.toModel,
             toColumn: payload.toColumn,
             cardinality: payload.cardinality,
+            ...(role ? { role } : {}),
           };
         },
         { webview, stage },

@@ -11,8 +11,8 @@
  * Pure: no `vscode`, no file access.
  */
 
-import { relationshipKey } from '@erd-studio/core';
-import type { Relationship, SemanticModel } from '../types/semantic';
+import { canonicalRelationship, relationshipKey } from '@erd-studio/core';
+import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 
 type RelationshipEnds = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
 
@@ -49,21 +49,57 @@ export function hasLibraryRelationship(model: SemanticModel, ends: RelationshipE
 }
 
 /**
+ * Whether two relationships join the same two columns, in either direction
+ * (issue #133): `dim.id → fct.dim_id` and `fct.dim_id → dim.id` are one link,
+ * so a second one would draw a duplicate line.
+ */
+export function sameColumnPair(a: RelationshipEnds, b: RelationshipEnds): boolean {
+  const reversed = { fromModel: b.toModel, fromColumn: b.toColumn, toModel: b.fromModel, toColumn: b.fromColumn };
+  return relationshipKey(a) === relationshipKey(b) || relationshipKey(a) === relationshipKey(reversed);
+}
+
+/** The relationship any library model stores between these two columns, either way round. */
+export function findLibraryColumnPair(models: readonly SemanticModel[], ends: RelationshipEnds): Relationship | undefined {
+  for (const model of models) {
+    const found = libraryRelationshipsOf(model).find((rel) => sameColumnPair(rel, ends));
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
+ * The library entry for `rel`, without `fromModel`: the four stored fields,
+ * plus `role` when it has one.
+ */
+function libraryEntry(rel: Relationship): ModelRelationship {
+  return {
+    fromColumn: rel.fromColumn,
+    toModel: rel.toModel,
+    toColumn: rel.toColumn,
+    cardinality: rel.cardinality,
+    ...(rel.role ? { role: rel.role } : {}),
+  };
+}
+
+/**
  * Add or replace a relationship on its from-model (`model.name` must be
- * `rel.fromModel`). Returns false when an identical one is already there.
+ * `rel.fromModel`, already in its stored direction — see
+ * `canonicalRelationship`). Returns false when an identical one is already
+ * there.
  */
 export function upsertLibraryRelationship(model: SemanticModel, rel: Relationship): boolean {
   const key = relationshipKey(rel);
   const list = model.relationships ?? [];
   const index = list.findIndex((r) => relationshipKey({ fromModel: model.name, ...r }) === key);
-  const entry = { fromColumn: rel.fromColumn, toModel: rel.toModel, toColumn: rel.toColumn, cardinality: rel.cardinality };
+  const entry = libraryEntry(rel);
   if (index === -1) {
     model.relationships = [...list, entry];
     return true;
   }
   const current = list[index];
   if (current.cardinality === entry.cardinality && current.fromColumn === entry.fromColumn
-    && current.toModel === entry.toModel && current.toColumn === entry.toColumn) {
+    && current.toModel === entry.toModel && current.toColumn === entry.toColumn
+    && current.role === entry.role) {
     return false;
   }
   list[index] = entry;
@@ -179,12 +215,17 @@ export function routeToLibrary(
     if (!loaded.has(name)) loaded.set(name, libraryModel(name));
     return loaded.get(name) ?? null;
   };
-  for (const rel of relationships) {
+  for (const drawn of relationships) {
+    const rel = canonicalRelationship(drawn);
     const model = modelFor(rel.fromModel);
     if (!model) {
-      kept.push(rel);
+      kept.push(drawn);
       continue;
     }
+    // Already stored the other way round (by hand, or before #133): that
+    // entry already draws this link, so a second would only duplicate it.
+    const other = modelFor(rel.toModel);
+    if (other && libraryRelationshipsOf(other).some((r) => sameColumnPair(r, rel))) continue;
     if (upsertLibraryRelationship(model, rel)) changed.set(model.name, model);
   }
   return { kept, changed: [...changed.values()] };
@@ -192,7 +233,8 @@ export function routeToLibrary(
 
 /** One relationship that domain files define in more than one way. */
 export interface RelationshipConflict {
-  relationship: RelationshipEnds;
+  /** Its ends, with the `role` a domain file gave it, if any. */
+  relationship: RelationshipEnds & { role?: string };
   /** Each cardinality in use, with the domain files that use it. */
   definitions: Array<{ cardinality: Relationship['cardinality']; domains: string[] }>;
 }
@@ -210,6 +252,44 @@ export interface MoveToLibraryPlan {
   conflicts: RelationshipConflict[];
   /** From-model has no library file (or cannot be read): left in the domain file. */
   skippedNoModel: Relationship[];
+  /**
+   * Library entries stored on their "one" side (`one-to-many`, written before
+   * #133 or by hand): each moves to the model on its many side as
+   * `many-to-one` — `stored` is taken out of `from`'s file and `to` added,
+   * unless that file already holds the link. The canvas draws the same line.
+   */
+  rehome: RelationshipRehome[];
+}
+
+/** One library entry moving to its many side's file (see `MoveToLibraryPlan.rehome`). */
+export interface RelationshipRehome {
+  /** The model whose file holds it now. */
+  from: string;
+  /** The entry as stored there, with `fromModel` = `from`. */
+  stored: Relationship;
+  /** The same relationship as it will be stored: `canonicalRelationship(stored)`. */
+  to: Relationship;
+}
+
+/**
+ * Library entries stored the wrong way round (#133): a `one-to-many` sits in
+ * the file of its "one" side, but belongs with the model holding the foreign
+ * key. Entries whose many side has no library file stay where they are.
+ */
+export function planRehome(
+  libraryModels: readonly SemanticModel[],
+  libraryModel: (name: string) => SemanticModel | null,
+): RelationshipRehome[] {
+  const rehome: RelationshipRehome[] = [];
+  for (const model of libraryModels) {
+    for (const stored of libraryRelationshipsOf(model)) {
+      const to = canonicalRelationship(stored);
+      if (to === stored) continue;
+      if (!libraryModel(to.fromModel)) continue;
+      rehome.push({ from: model.name, stored, to });
+    }
+  }
+  return rehome;
 }
 
 /**
@@ -223,29 +303,42 @@ export interface MoveToLibraryPlan {
 export function planMoveToLibrary(
   domains: ReadonlyArray<{ label: string; relationships: readonly Relationship[] }>,
   libraryModel: (name: string) => SemanticModel | null,
+  libraryModels: readonly SemanticModel[] = [],
 ): MoveToLibraryPlan {
   const byKey = new Map<string, { rel: Relationship; uses: Array<{ label: string; cardinality: Relationship['cardinality'] }> }>();
   for (const domain of domains) {
     for (const rel of domain.relationships) {
       const key = relationshipKey(rel);
       const entry = byKey.get(key) ?? { rel, uses: [] };
+      // The first role any domain gives it is the one kept.
+      if (!entry.rel.role && rel.role) entry.rel = { ...entry.rel, role: rel.role };
       entry.uses.push({ label: domain.label, cardinality: rel.cardinality });
       byKey.set(key, entry);
     }
   }
 
-  const plan: MoveToLibraryPlan = { toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [] };
+  const plan: MoveToLibraryPlan = {
+    toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [],
+    rehome: planRehome(libraryModels, libraryModel),
+  };
   for (const [key, { rel, uses }] of byKey) {
-    const model = libraryModel(rel.fromModel);
+    // Stored on its many side (#133); a conflict is turned round once the user picks.
+    const stored = canonicalRelationship(rel);
+    const model = libraryModel(stored.fromModel);
     if (!model) {
       plan.skippedNoModel.push(rel);
       continue;
     }
-    const alreadyShared = hasLibraryRelationship(model, rel);
+    const other = libraryModel(stored.toModel);
+    const alreadyShared = hasLibraryRelationship(model, stored)
+      || (other !== null && libraryRelationshipsOf(other).some((r) => sameColumnPair(r, stored)));
     const cardinalities = [...new Set(uses.map((u) => u.cardinality))];
     if (!alreadyShared && cardinalities.length > 1) {
       plan.conflicts.push({
-        relationship: { fromModel: rel.fromModel, fromColumn: rel.fromColumn, toModel: rel.toModel, toColumn: rel.toColumn },
+        relationship: {
+          fromModel: rel.fromModel, fromColumn: rel.fromColumn, toModel: rel.toModel, toColumn: rel.toColumn,
+          ...(rel.role ? { role: rel.role } : {}),
+        },
         definitions: cardinalities.map((cardinality) => ({
           cardinality,
           domains: [...new Set(uses.filter((u) => u.cardinality === cardinality).map((u) => u.label))],
@@ -254,7 +347,12 @@ export function planMoveToLibrary(
       continue;
     }
     if (!alreadyShared) {
-      plan.toLibrary.push({ ...rel, fromModel: model.name });
+      plan.toLibrary.push({ ...stored, fromModel: model.name });
+    } else if (stored.role) {
+      // The library already draws it but has no role: the domain's label is
+      // the only copy of it, and the domain entry is about to go.
+      const entry = [model, other].flatMap((m) => (m ? libraryRelationshipsOf(m) : [])).find((r) => sameColumnPair(r, stored));
+      if (entry && !entry.role) plan.toLibrary.push({ ...entry, role: stored.role });
     }
     for (const use of uses) {
       const keys = plan.removeFromDomains.get(use.label) ?? new Set<string>();
@@ -286,7 +384,7 @@ export function resolveConflict(
   }
   return {
     ...plan,
-    toLibrary: [...plan.toLibrary, { ...conflict.relationship, cardinality }],
+    toLibrary: [...plan.toLibrary, canonicalRelationship({ ...conflict.relationship, cardinality })],
     removeFromDomains,
     conflicts: plan.conflicts.filter((c) => c !== conflict),
   };
@@ -324,11 +422,14 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n =
  * e.g. `logical-models/fct_order.yml`), and what happens to conflicts.
  */
 export function describeMovePlan(plan: MoveToLibraryPlan, fileOf: (model: string) => string = (m) => `logical-models/${m}.yml`): string {
-  const lines: string[] = [
-    'Why: today each diagram keeps its own copy of a relationship, so two diagrams can draw the same link ' +
-    'differently, and a new diagram has to draw it again. After the move each relationship is defined once, and ' +
-    'every diagram that holds both models draws it. A change made in one diagram shows in all of them.',
-  ];
+  const movesDomains = plan.removeFromDomains.size > 0 || plan.conflicts.length > 0;
+  const lines: string[] = movesDomains
+    ? [
+      'Why: today each diagram keeps its own copy of a relationship, so two diagrams can draw the same link ' +
+      'differently, and a new diagram has to draw it again. After the move each relationship is defined once, and ' +
+      'every diagram that holds both models draws it. A change made in one diagram shows in all of them.',
+    ]
+    : [];
 
   // Where each relationship will live — a conflict too, once its cardinality is picked.
   const byFile = new Map<string, RelationshipEnds[]>();
@@ -365,6 +466,20 @@ export function describeMovePlan(plan: MoveToLibraryPlan, fileOf: (model: string
       'file in logical-models/ and will stay in the diagram files.',
     );
   }
-  lines.push('', 'Teammates on an older ERD Studio version will not see relationships stored in the model library until they update.');
-  return lines.join('\n');
+  if (plan.rehome.length > 0) {
+    lines.push(
+      '',
+      `Turned round: ${plural(plan.rehome.length, 'relationship is', 'relationships are')} stored in the file of the ` +
+      'model it points at. Each moves to the file of the model holding the foreign key, as many-to-one, so adding a ' +
+      'new fact never means editing its dimensions. The diagrams draw the same lines:',
+    );
+    for (const { stored, to } of plan.rehome.slice(0, 5)) {
+      lines.push(`• ${describeEnds(stored)} → ${fileOf(to.fromModel)}`);
+    }
+    if (plan.rehome.length > 5) lines.push(`• …and ${plan.rehome.length - 5} more`);
+  }
+  if (movesDomains) {
+    lines.push('', 'Teammates on an older ERD Studio version will not see relationships stored in the model library until they update.');
+  }
+  return lines.join('\n').replace(/^\n/, '');
 }

@@ -7,6 +7,7 @@ import { relationshipKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
 import { fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
+import { canonicalRelationship } from '@erd-studio/core';
 import { main } from '../../src/cli/index';
 import type { InventoryResult } from '../../src/cli/inventory';
 import { computeDomainDiff } from '../../src/services/stageDiff';
@@ -216,6 +217,23 @@ describe('diff over a model file that does not parse', () => {
   });
 });
 
+describe('fixesFromPlan — a new relationship is written on its many side (#133)', () => {
+  it('turns a one-to-many round, naming the fact\'s file', () => {
+    const plan: SyncPlan = {
+      generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+      modelContext: {}, models: [], columns: [], requiresCompile: false,
+      relationships: [
+        { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-many' },
+      ],
+    };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Set(), addToLibrary: true });
+    expect(fix).toMatchObject({
+      kind: 'add-relationship', model: 'fct_order', column: 'customer_key', file: '.erd-studio/logical-models/fct_order.yml',
+      relationship: { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+    });
+  });
+});
+
 describe('fixesFromPlan', () => {
   const plan: SyncPlan = {
     generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
@@ -281,9 +299,11 @@ function writeModelFromInventory(
         ...(pk.has(c.name) ? { isPrimaryKey: true } : {}),
         ...(fk.has(c.name) ? { isForeignKey: true } : {}),
       })),
-      ...(home === 'library' && inventory.relationships.some((r) => r.fromModel === m.name)
+      // As the setup skill writes them: each on its many side (#133).
+      ...(home === 'library' && inventory.relationships.map(canonicalRelationship).some((r) => r.fromModel === m.name)
         ? {
             relationships: inventory.relationships
+              .map(canonicalRelationship)
               .filter((r) => r.fromModel === m.name)
               .map(({ fromModel: _from, ...rest }) => rest),
           }
@@ -343,10 +363,11 @@ describe('end to end: inventory → logical model → diff exits 0', () => {
     fs.writeFileSync(file, JSON.stringify(doc, null, 2));
     const drift = await run(['diff', '--domain', path.relative(root, file), '--json'], root);
     expect(drift.code).toBe(1);
+    // The fix names it on its many side (#133), whichever end dbt tests it from.
     expect(JSON.parse(drift.out).domains[0].fixes).toContainEqual(expect.objectContaining({
       kind: 'add-relationship',
       severity: 'blocking',
-      relationship: dropped,
+      relationship: canonicalRelationship(dropped),
     }));
   });
 });
@@ -368,7 +389,7 @@ describe('end to end, relationships in the model library (#126): inventory → l
     expect(d.counts.matchedRelationships).toBe(inventory.relationships.length);
 
     // Drift in the library is caught, and the fix names the model file, not the domain.
-    const dropped = inventory.relationships[0];
+    const dropped = canonicalRelationship(inventory.relationships[0]);
     const ymlPath = path.join(root, '.erd-studio', 'logical-models', `${dropped.fromModel}.yml`);
     const yml = parseYaml(fs.readFileSync(ymlPath, 'utf-8')) as { relationships: unknown[] };
     yml.relationships = yml.relationships.filter((r) => (r as { toModel: string }).toModel !== dropped.toModel

@@ -102,6 +102,7 @@ export interface EdgeHoverInput {
   toModel: string;
   toColumn: string;
   cardinality: string;
+  role?: string;
   discrepancyStatus?: 'extra' | 'missing' | 'cardinality-mismatch';
 }
 
@@ -115,6 +116,7 @@ export function edgeHoverText(edge: EdgeHoverInput): string {
   return [
     `${edge.fromModel}.${edge.fromColumn} \u2192 ${edge.toModel}.${edge.toColumn}`,
     edge.cardinality.replace(/-/g, ' '),
+    edge.role ? `role: ${edge.role}` : '',
     edge.discrepancyStatus ? DISCREPANCY_PHRASE[edge.discrepancyStatus] : '',
   ].filter(Boolean).join(' \u00b7 ');
 }
