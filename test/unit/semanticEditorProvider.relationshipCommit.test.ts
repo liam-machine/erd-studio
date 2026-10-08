@@ -24,7 +24,7 @@ import {
   type MockTextDocument,
   type WorkspaceEdit as MockWorkspaceEdit,
 } from '../__mocks__/vscode';
-import { PHYSICAL_READ_ONLY_MESSAGE, SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
+import { LIBRARY_MODE_ENDED_MESSAGE, PHYSICAL_READ_ONLY_MESSAGE, SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { ManifestService } from '../../src/services/manifestService';
@@ -168,6 +168,25 @@ describe('one write path, in the project\'s mode', () => {
     expect(h.shown('reporting')).toEqual([]);
   });
 
+  it('says so when removing the library\'s last relationship sends new ones to the diagram files (#133 review 8)', async () => {
+    const leftover: Relationship = { fromModel: 'fct_order', fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' };
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] }, reporting: [leftover] });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    info.mockClear();
+    await orders.send({ type: 'removeRelationship', payload: EDGE });
+    expect(orders.errors()).toEqual([]);
+    expect(info.mock.calls.map((c) => c[0])).toContain(LIBRARY_MODE_ENDED_MESSAGE);
+
+    // A remove that leaves the library holding relationships says nothing.
+    fs.rmSync(h.root, { recursive: true, force: true });
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }, { fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }] }, reporting: [leftover] });
+    const again = await h.open('orders');
+    info.mockClear();
+    await again.send({ type: 'removeRelationship', payload: EDGE });
+    expect(info.mock.calls.map((c) => c[0])).not.toContain(LIBRARY_MODE_ENDED_MESSAGE);
+  });
+
   it('removing by the stored ends (the dimension\'s one-to-many) works the same', async () => {
     h = await createHarness({
       library: { dim_customer: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }] },
@@ -264,6 +283,109 @@ describe('one write path, in the project\'s mode', () => {
     expect(_appliedEdits).toHaveLength(1);
     expect(h.model('dim_customer')?.columns?.[0].isPrimaryKey).toBe(true);
     expect(h.model('fct_order')?.relationships).toEqual([ENTRY]);
+  });
+
+  it('Delete Model File also takes out the relationships other model files keep to it, in the same edit (#133 review 8)', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }, { fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }] } });
+    const prompts: string[] = [];
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) => {
+      prompts.push(message);
+      return message.startsWith('Model "dim_customer" removed') ? 'Delete Model File' : undefined;
+    }) as never);
+    const orders = await h.open('orders');
+    await orders.send({ type: 'removeModels', payload: { modelNames: ['dim_customer'] } });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(prompts[0]).toBe(
+      'Model "dim_customer" removed from this domain. Delete the model file entirely? This also removes the relationship other model files keep to it: ' +
+      'fct_order.customer_key → dim_customer.customer_key.',
+    );
+    expect(fs.existsSync(path.join(h.root, '.erd-studio', 'logical-models', 'dim_customer.yml'))).toBe(false);
+    // The fact keeps its other relationship; the one to the deleted model is gone with it.
+    expect(h.model('fct_order')?.relationships).toEqual([{ fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one' }]);
+    // The diagram edit, then one edit (one undo step) deleting the file and cleaning the fact.
+    expect(_appliedEdits).toHaveLength(2);
+    const deleteEdit = _appliedEdits[1] as unknown as MockWorkspaceEdit;
+    expect(deleteEdit._ops.map((op) => op.kind).sort()).toEqual(['deleteFile', 'replace']);
+    expect(deleteEdit._opsFor(h.modelPath('fct_order'))).toHaveLength(1);
+  });
+
+  it('Delete Model File stops, naming the file, when a model file it would rewrite has unsaved edits (#133 review 8)', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] } });
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (message: string) =>
+      (message.startsWith('Model "dim_customer" removed') ? 'Delete Model File' : undefined)) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    const fctPath = h.modelPath('fct_order');
+    const fctText = fs.readFileSync(fctPath, 'utf-8');
+    const doc = createMockTextDocument(fctPath, fctText, { persist: true });
+    doc._setText(`${fctText}# unsaved\n`);
+    vscode.workspace.textDocuments.push(doc as never);
+    await orders.send({ type: 'removeModels', payload: { modelNames: ['dim_customer'] } });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(error.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringContaining('logical-models/fct_order.yml has unsaved changes')]);
+    expect(fs.existsSync(h.modelPath('dim_customer'))).toBe(true);
+    expect(fs.readFileSync(fctPath, 'utf-8')).toBe(fctText);
+  });
+
+  it('after an update, names other diagrams whose own copy now disagrees (#133 review 8)', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY }] }, reporting: [{ ...REVERSED, cardinality: 'one-to-many' }] });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+
+    expect(orders.errors()).toEqual([]);
+    expect(h.model('fct_order')?.relationships).toEqual([{ ...ENTRY, cardinality: 'one-to-one' }]);
+    expect(info).toHaveBeenCalledWith(
+      'silver/reporting.json keeps its own copy of this relationship, which now says something different — ' +
+      'Repair Relationships… lets you choose which one is right.',
+      'Repair Relationships…',
+    );
+  });
+
+  it('an update the other diagram\'s own copy still agrees with says nothing', async () => {
+    h = await createHarness({ library: { fct_order: [{ ...ENTRY, cardinality: 'one-to-one' }] }, reporting: [{ ...EDGE, cardinality: 'many-to-one' }] });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+    expect(orders.errors()).toEqual([]);
+    expect(info.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('own copy'))).toEqual([]);
+  });
+
+  it('per-domain project: a column rename or removal names other diagrams whose own relationship still uses the old column (#133 review 8)', async () => {
+    h = await createHarness({ orders: [{ ...EDGE, cardinality: 'many-to-one' }], reporting: [{ ...EDGE, cardinality: 'many-to-one' }] });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    await orders.send({
+      type: 'updateColumn',
+      payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'cust_key', dataType: 'string', description: '' } },
+    });
+    expect(orders.errors()).toEqual([]);
+    expect(h.readDomain('orders').logical.relationships[0].toColumn).toBe('cust_key');
+    expect(info).toHaveBeenCalledWith(
+      'silver/reporting.json keeps its own relationship to dim_customer.customer_key, which this rename did not change — ' +
+      'Repair Relationships… can point it at the new name or remove it.',
+      'Repair Relationships…',
+    );
+    info.mockClear();
+    await orders.send({ type: 'removeColumn', payload: { modelName: 'fct_order', columnName: 'customer_key' } });
+    expect(orders.errors()).toEqual([]);
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('silver/reporting.json keeps its own relationship to fct_order.customer_key, which this removal did not change'),
+      'Repair Relationships…',
+    );
+  });
+
+  it('a column rename no other diagram uses says nothing', async () => {
+    h = await createHarness({ orders: [{ ...EDGE, cardinality: 'many-to-one' }] });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const orders = await h.open('orders');
+    await orders.send({
+      type: 'updateColumn',
+      payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'cust_key', dataType: 'string', description: '' } },
+    });
+    expect(info.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('own relationship'))).toEqual([]);
   });
 
   it('after a remove, names other diagrams still drawing the link from their own copy', async () => {

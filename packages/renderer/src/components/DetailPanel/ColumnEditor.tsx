@@ -291,7 +291,10 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole }: Column
             showIndicators={true}
             showDelete={isEditable}
             onTogglePK={viewer ? undefined : () => handleToggleKey(col.name, 'PK', col.isPrimaryKey)}
-            onToggleFK={viewer ? undefined : () => handleToggleKey(col.name, 'FK', col.isForeignKey)}
+            onToggleFK={viewer ? undefined : () => handleToggleKey(col.name, 'FK', col.isForeignKeyDeclared ?? false)}
+            // The FK option ticks for the declared flag the toggle flips, not
+            // the badge a drawn relationship also lights (#133 review 8).
+            foreignKeyDeclared={readOnly ? undefined : col.isForeignKeyDeclared === true}
             onToggleNK={viewer ? undefined : () => handleToggleKey(col.name, 'NK', col.isNaturalKey)}
             showMultiplePKWarning={hasMultiplePKs && col.isPrimaryKey}
             modelRole={modelRole}

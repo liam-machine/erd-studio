@@ -41,13 +41,15 @@ export function BulkColumnActions({
   const selectedColumnData = columns.filter((c) => selectedColumns.includes(c.name));
 
   // Compute majority state for each key type
-  const keyMajority = (key: 'isPrimaryKey' | 'isForeignKey' | 'isNaturalKey') => {
+  // The FK toggle sets the declared flag, so its majority counts declared
+  // flags, not the badge every drawn relationship also switches on.
+  const keyMajority = (key: 'isPrimaryKey' | 'isForeignKeyDeclared' | 'isNaturalKey') => {
     const count = selectedColumnData.filter((c) => c[key]).length;
     return count > selectedColumnData.length / 2;
   };
 
   const majorityPK = keyMajority('isPrimaryKey');
-  const majorityFK = keyMajority('isForeignKey');
+  const majorityFK = keyMajority('isForeignKeyDeclared');
   const majorityNK = keyMajority('isNaturalKey');
 
   // Bulk delete

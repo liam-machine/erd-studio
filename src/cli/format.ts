@@ -107,8 +107,14 @@ export function describeUncheckedFiles(unchecked: ReadonlyArray<{ kind: 'domain'
 
 export function formatCheck(r: CheckResult, p: Paint): string {
   const { errors, warnings, info } = r.counts;
-  const where = r.mode === 'library' ? 'kept in the model files' : 'kept in each diagram';
-  const scope = `${plural(r.checked.relationships, 'relationship')} ${where}, ${plural(r.checked.modelFiles, 'model file')}, ${plural(r.checked.domains, 'diagram')}`;
+  // Where the entries actually are, not where the mode says new ones go: a
+  // library project can still hold copies in its diagram files.
+  const inModels = r.checked.modelFileRelationships;
+  const inDomains = r.checked.domainFileRelationships;
+  const stored = inModels > 0 && inDomains > 0
+    ? `${plural(inModels, 'relationship')} in the model files and ${inDomains} in diagram files`
+    : `${plural(r.checked.relationships, 'relationship')} ${inDomains > 0 || (inModels === 0 && r.mode === 'domain') ? 'kept in each diagram' : 'kept in the model files'}`;
+  const scope = `${stored}, ${plural(r.checked.modelFiles, 'model file')}, ${plural(r.checked.domains, 'diagram')}`;
   const lines: string[] = [];
   const notChecked = r.unchecked.map((u) => `  ${p.red('✗')} ${u.file} was not checked: ${u.reason}`);
   if (r.findings.length === 0 && r.unchecked.length === 0) {

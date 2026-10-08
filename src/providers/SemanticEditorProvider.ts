@@ -162,6 +162,8 @@ import {
   mergeDomainRelationships,
   planRelationshipCommit,
   removeColumnRelationships,
+  removeRelationshipsToModels,
+  describeRemovedRelationships,
   renameColumnInRelationships,
   renameModelInRelationships,
   resolveEndpointModels,
@@ -252,6 +254,16 @@ interface ModelFileSave {
 
 /** The command the canvas banner and the notification run (registered in `extension.ts`). */
 export const REPAIR_RELATIONSHIPS_COMMAND = 'erdStudio.repairRelationships';
+
+/** Shown when an edit took the model library's last relationship out while diagram files still hold their own (#133 review 8). */
+export const LIBRARY_MODE_ENDED_MESSAGE =
+  'The model library no longer holds any relationship, but some diagram files still hold their own, so new relationships ' +
+  'will now be saved in each diagram\'s file. To keep them in the model library, move the diagram files\' relationships there.';
+
+/** Shown when an undo would rewind a Repair / Move that saved files directly (#133 review 8). */
+export const UNDO_BARRIER_MESSAGE =
+  'Undo stops here: Repair Relationships… (or the move to the model library) saved its changes directly, ' +
+  'so undoing it in this diagram would put back only half of it. Use git (or your source control) to undo it.'
 
 /** Whether `model.column` is the `side` end of `rel`, names without case (core's identity rule). */
 function relEndIs(rel: Record<string, unknown>, side: 'from' | 'to', model: string, column?: string): boolean {
@@ -494,6 +506,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * never force-saved on their behalf.
    */
   private readonly editedModelPaths = new Map<string, Set<string>>();
+
+  /**
+   * Panels open when Repair Relationships… / Move Relationships to Model
+   * Library wrote files straight to disk (#133 review 8). VS Code records the
+   * reload of each open diagram as an undoable step, but the model files the
+   * same run rewrote are not part of it: an undo across that step would put
+   * back only the diagram's half. `edits` counts canvas edits made since (an
+   * undo may rewind those), `redoable` the ones undone since.
+   */
+  private readonly undoBarriers = new Map<string, { edits: number; redoable: number }>();
 
   /** `{layer}/{domain}\0{ignored file}` pairs already warned about this session. */
   private readonly duplicateWarningsShown = new Set<string>();
@@ -1627,6 +1649,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (this.pendingUpdates.get(panelKey)) {
         return;
       }
+      // The editor's own Undo / Redo (Cmd+Z) rewinds the document directly.
+      if (e.reason === vscode.TextDocumentChangeReason.Undo || e.reason === vscode.TextDocumentChangeReason.Redo) {
+        const verdict = this.passUndoBarrier(panelKey, e.reason === vscode.TextDocumentChangeReason.Undo ? 'undo' : 'redo');
+        if (verdict === 'blocked') {
+          await this.restoreAfterBlockedUndo(document, webviewPanel.webview, panelKey);
+          return;
+        }
+      }
       if (document.isDirty) {
         await document.save();
       }
@@ -1639,6 +1669,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.disposedWebviews.add(webviewPanel.webview);
       this.openPanels.delete(panelKey);
       this.editedModelPaths.delete(panelKey);
+      this.undoBarriers.delete(panelKey);
       this.lastLoadError.delete(panelKey);
     });
   }
@@ -2077,6 +2108,72 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return null;
   }
 
+  /**
+   * The library relationships other model files keep to `names`, taken out
+   * of fresh copies of those models. A name another file still defines (a
+   * duplicate in another folder) keeps its relationships: they still resolve.
+   */
+  private relationshipsToDeletedModels(names: readonly string[]): { changed: SemanticModel[]; removed: string[] } {
+    const files = names.map((name) => this.logicalModelService.findModelFile(name));
+    const gone = names.filter((name, i) => !this.logicalModelService.listModelFiles()
+      .some((e) => sameName(e.name, name) && !samePath(e.filePath, files[i] ?? '')));
+    if (gone.length === 0) return { changed: [], removed: [] };
+    return removeRelationshipsToModels(this.logicalModelService.listModels(), gone);
+  }
+
+  /**
+   * Delete model files the user chose to delete after removing them from a
+   * diagram — and, in the same WorkspaceEdit (one undo step), the
+   * relationships other model files keep to them. A file it would rewrite
+   * that is open with unsaved edits stops it, by name, before anything is
+   * changed.
+   */
+  private async deleteModelFiles(document: vscode.TextDocument, names: readonly string[]): Promise<void> {
+    const single = names.length === 1;
+    // Captured before the delete: afterwards the folder is unknowable.
+    const singlePath = single ? this.libraryRelativePath(names[0]) : '';
+    const { changed, removed } = this.relationshipsToDeletedModels(names);
+    // Delete through a WorkspaceEdit so VS Code snapshots the files and the
+    // deletion is undoable, rather than a bare unlink.
+    const edit = new vscode.WorkspaceEdit();
+    let docs: vscode.TextDocument[];
+    let deletedPaths: string[];
+    try {
+      ({ docs, deleted: deletedPaths } = await this.addModelFileEdits(edit, {
+        save: changed.map((model) => ({ model })),
+        delete: [...names],
+      }));
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Model file not deleted: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    if (!(await vscode.workspace.applyEdit(edit))) {
+      void vscode.window.showErrorMessage('Failed to delete model file(s).');
+      return;
+    }
+    const unsaved: string[] = [];
+    for (const doc of docs) {
+      if (await saveDocumentByUri(doc.uri)) {
+        this.ownWriteTracker.recordWrite(doc.uri.fsPath);
+      } else {
+        unsaved.push(doc.uri.fsPath);
+      }
+    }
+    for (const filePath of deletedPaths) this.ownWriteTracker.recordDelete(filePath);
+    if (unsaved.length > 0) {
+      telemetry.error('saveFailed');
+      void vscode.window.showErrorMessage(this.describeUnsaved(unsaved));
+    }
+    // Recorded as our own writes, so the watchers stay quiet: refresh here.
+    this.logicalModelService.invalidateCache();
+    await this.refreshDomainsReferencingModels([...names, ...changed.map((m) => m.name)]);
+    this._onDidWriteDomain.fire({ uri: document.uri, modelLibraryChanged: true });
+    const summary = single ? `Deleted ${singlePath}` : `Deleted ${names.length} model files`;
+    void vscode.window.showInformationMessage(
+      removed.length === 0 ? summary : `${summary} and ${removed.length === 1 ? 'the relationship' : `${removed.length} relationships`} other model files kept to ${single ? 'it' : 'them'}.`,
+    );
+  }
+
   /** Every library model except `exclude`, fresh copies an edit may change. */
   private otherLibraryModels(exclude: string): SemanticModel[] {
     return this.logicalModelService.listModels().filter((m) => !sameName(m.name, exclude));
@@ -2239,6 +2336,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     panelKey: string,
   ): Promise<void> {
+    const verdict = this.passUndoBarrier(panelKey, command);
+    if (verdict === 'blocked') {
+      this.post(webview, { type: 'error', payload: { message: UNDO_BARRIER_MESSAGE } });
+      return;
+    }
+    if (verdict === 'nothing') return;
     this.pendingUpdates.set(panelKey, true);
     try {
       await vscode.commands.executeCommand(command);
@@ -2321,6 +2424,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.pendingUpdates.set(panelKey, true);
     try {
       const success = await vscode.workspace.applyEdit(edit);
+      if (success) {
+        // One more step an undo may rewind before it reaches a repair's.
+        const barrier = this.undoBarriers.get(panelKey);
+        if (barrier) {
+          barrier.edits += 1;
+          barrier.redoable = 0;
+        }
+      }
       if (!success) {
         telemetry.error('editRejected');
         if (errorLabel && webview) {
@@ -2689,6 +2800,65 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       },
       { refreshWebview: false, stage: 'logical' },
     );
+  }
+
+  /**
+   * Repair Relationships… / Move Relationships to Model Library just wrote
+   * files to disk behind VS Code's undo history: from here on, an undo on any
+   * open diagram stops before it would rewind that change (the model files the
+   * run rewrote cannot be rewound with it).
+   */
+  markFilesRewrittenOnDisk(): void {
+    for (const panelKey of this.openPanels.keys()) {
+      this.undoBarriers.set(panelKey, { edits: 0, redoable: 0 });
+    }
+  }
+
+  /**
+   * Whether an undo / redo on this panel may go ahead, counting it: `blocked`
+   * when an undo would rewind a repair's disk write, `nothing` for a redo with
+   * nothing undone since one (VS Code would have nothing to redo), else `ok`.
+   */
+  private passUndoBarrier(panelKey: string, command: 'undo' | 'redo'): 'ok' | 'blocked' | 'nothing' {
+    const barrier = this.undoBarriers.get(panelKey);
+    if (!barrier) return 'ok';
+    if (command === 'undo') {
+      if (barrier.edits === 0) return 'blocked';
+      barrier.edits -= 1;
+      barrier.redoable += 1;
+      return 'ok';
+    }
+    if (barrier.redoable === 0) return 'nothing';
+    barrier.redoable -= 1;
+    barrier.edits += 1;
+    return 'ok';
+  }
+
+  /**
+   * The editor's own Undo rewound a diagram past a repair's disk write: put
+   * the file's text on disk (the repaired one — nothing was saved since) back
+   * into the document, and say why.
+   */
+  private async restoreAfterBlockedUndo(document: vscode.TextDocument, webview: vscode.Webview, panelKey: string): Promise<void> {
+    this.post(webview, { type: 'error', payload: { message: UNDO_BARRIER_MESSAGE } });
+    let onDisk: string;
+    try {
+      onDisk = fs.readFileSync(document.uri.fsPath, 'utf-8');
+    } catch {
+      return;
+    }
+    if (document.getText() === onDisk) return;
+    this.pendingUpdates.set(panelKey, true);
+    try {
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), onDisk);
+      if (await vscode.workspace.applyEdit(edit) && await saveDocument(document)) {
+        this.ownWriteTracker.recordWrite(document.uri.fsPath);
+      }
+      await this.sendDomainData(document, webview, panelKey);
+    } finally {
+      this.pendingUpdates.delete(panelKey);
+    }
   }
 
   /**
@@ -3087,7 +3257,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             dataType: payload.column.dataType,
             description: payload.column.description,
             ...(payload.column.isPrimaryKey ?? existing.isPrimaryKey ? { isPrimaryKey: true } : {}),
-            ...(payload.column.isForeignKey ?? existing.isForeignKey ? { isForeignKey: true } : {}),
+            // The canvas sends its FK *badge*, which every relationship drawn
+            // from the column also switches on. Writing that back would turn a
+            // drawn relationship into the declared flag direction checks trust
+            // (#133 D2). The flag is changed by `toggleColumnKey` only.
+            ...(existing.isForeignKey ? { isForeignKey: true } : {}),
             ...(payload.column.isNaturalKey ?? existing.isNaturalKey ? { isNaturalKey: true } : {}),
             ...(newScd != null ? { scdType: newScd } : {}),
             ...(newAdditive ? { additiveType: newAdditive } : {}),
@@ -3104,6 +3278,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           : []);
         if (!ok) {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to update column.' } });
+        } else if (columnRenamed) {
+          this.reportOtherDiagramReferences(document, payload.modelName, payload.oldColumnName, 'rename');
         }
         return;
       }
@@ -3137,7 +3313,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           const existingFK = columns[columnIndex].isForeignKey;
           const existingNK = columns[columnIndex].isNaturalKey;
           const newPK = payload.column.isPrimaryKey ?? existingPK;
-          const newFK = payload.column.isForeignKey ?? existingFK;
+          // The FK badge the canvas sends is not the declared flag (see the v5
+          // path above): only `toggleColumnKey` changes it.
+          const newFK = existingFK;
           const newNK = payload.column.isNaturalKey ?? existingNK;
           // Omitted (undefined) keeps the existing value; explicit null clears it.
           const existingScd = columns[columnIndex].scdType as ColumnDef['scdType'];
@@ -3218,6 +3396,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         );
         if (!ok) {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to remove column.' } });
+        } else if (hasColumn) {
+          this.reportOtherDiagramReferences(document, payload.modelName, payload.columnName, 'removal');
         }
         return;
       }
@@ -3478,7 +3658,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
       }
 
-      const otherDomains = op.kind === 'remove' && mode === 'library'
+      // Every commit in library mode: a remove names diagrams still drawing
+      // the link from their own copy, an add / update / edit those whose own
+      // copy now disagrees with what it wrote (#133 review 8).
+      const otherDomains = mode === 'library'
         ? readDomainRelationships(this.domainService, this.workspaceRoot, this.semanticDirName())
           .filter((d) => !samePath(d.filePath, document.uri.fsPath))
           .map((d) => ({ label: `${d.label}.json`, models: d.models, relationships: d.relationships }))
@@ -3530,6 +3713,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         { webview, stage: 'logical', modelFiles, errorLabel: `Failed to ${action} ${label}.` },
       );
       if (success && plan?.otherDomainCopies?.length) this.reportOtherDomainCopies(plan.otherDomainCopies);
+      if (success && plan?.disagreeingDomainCopies?.length) this.reportDisagreeingDomainCopies(plan.disagreeingDomainCopies);
+      // The mode is read from disk (R3): taking the model library's last
+      // relationship out while a diagram file still holds one of its own
+      // switches where new ones go. That is never left for the next add to
+      // discover (#133 review 8).
+      if (success && mode === 'library') {
+        const after = this.logicalModelService.relationshipModeInputs();
+        if (!this.relationshipsInLibrary(after.models, after.unreadableWithRelationships)) {
+          void vscode.window.showInformationMessage(LIBRARY_MODE_ENDED_MESSAGE, 'Move Relationships to Model Library').then((choice) => {
+            if (choice) void vscode.commands.executeCommand('erdStudio.moveRelationshipsToLibrary');
+          });
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (!(err instanceof RelationshipCommitError)) {
@@ -3606,6 +3802,67 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (choice !== 'Repair Relationships…') return;
       await this.runRepairCommand();
     }).catch((err) => console.warn('[SemanticEditorProvider] Other-copies notice failed:', err));
+  }
+
+  /**
+   * After an add / update / edit in a library project: other diagram files
+   * whose own copy of the link now says something else are stored twice and
+   * disagreeing there (REL001). Named, with the command that settles it.
+   */
+  private reportDisagreeingDomainCopies(labels: readonly string[]): void {
+    const where = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+    void Promise.resolve(vscode.window.showInformationMessage(
+      `${where} ${labels.length === 1 ? 'keeps its' : 'keep their'} own copy of this relationship, which now says something different — ` +
+      'Repair Relationships… lets you choose which one is right.',
+      'Repair Relationships…',
+    )).then(async (choice) => {
+      if (choice !== 'Repair Relationships…') return;
+      await this.runRepairCommand();
+    }).catch((err) => console.warn('[SemanticEditorProvider] Disagreeing-copies notice failed:', err));
+  }
+
+  /**
+   * After a column rename or removal, or a model rename: the edit follows the
+   * open diagram's own relationships and the model library's, but another
+   * diagram file keeping its own copy of a relationship to the old name
+   * (a project that keeps relationships per diagram, or a leftover copy) is
+   * not rewritten — it now points at something that is gone (REL003 /
+   * REL004 there). Named, with the command that repoints or removes it
+   * (#133 review 8). Writes nothing.
+   */
+  private reportOtherDiagramReferences(
+    document: vscode.TextDocument,
+    model: string,
+    column: string | undefined,
+    what: 'rename' | 'removal',
+  ): void {
+    let labels: string[];
+    try {
+      labels = readDomainRelationships(this.domainService, this.workspaceRoot, this.semanticDirName())
+        .filter((d) => !samePath(d.filePath, document.uri.fsPath))
+        .filter((d) => d.relationships.some((rel) => {
+          const r = rel as unknown as Record<string, unknown>;
+          return column === undefined
+            ? relEndIs(r, 'from', model) || relEndIs(r, 'to', model)
+            : relationshipReferencesColumnAnyCase(r, model, column);
+        }))
+        .map((d) => `${d.label}.json`)
+        .sort();
+    } catch (err) {
+      console.warn('[SemanticEditorProvider] Other-diagram check failed:', err);
+      return;
+    }
+    if (labels.length === 0) return;
+    const where = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+    const target = column === undefined ? model : `${model}.${column}`;
+    void Promise.resolve(vscode.window.showInformationMessage(
+      `${where} ${labels.length === 1 ? 'keeps its' : 'keep their'} own relationship to ${target}, which this ${what} did not change — ` +
+      'Repair Relationships… can point it at the new name or remove it.',
+      'Repair Relationships…',
+    )).then(async (choice) => {
+      if (choice !== 'Repair Relationships…') return;
+      await this.runRepairCommand();
+    }).catch((err) => console.warn('[SemanticEditorProvider] Other-diagram notice failed:', err));
   }
 
   /** Run "Repair Relationships…", reporting anything that escapes it. */
@@ -3734,6 +3991,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         if (success) {
           this.selectorsService.scheduleRegenerate();
+          this.reportOtherDiagramReferences(document, payload.oldName, undefined, 'rename');
         } else {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to rename model.' } });
         }
@@ -3856,35 +4114,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         );
         if (filesToOffer.length > 0) {
           const fileIsSingle = filesToOffer.length === 1;
-          const prompt = fileIsSingle
+          // Relationships other model files keep to these models would point
+          // at nothing once the files are gone (REL003 on every diagram
+          // showing the model holding them): named here, and taken out in
+          // the same edit (#133 review 8).
+          const pointing = this.relationshipsToDeletedModels(filesToOffer).removed;
+          const also = pointing.length === 0
+            ? ''
+            : ` This also removes ${pointing.length === 1 ? 'the relationship' : `${pointing.length} relationships`} other model files keep to ${fileIsSingle ? 'it' : 'them'}: ${describeRemovedRelationships(pointing)}.`;
+          const prompt = (fileIsSingle
             ? `Model "${filesToOffer[0]}" removed from this domain. Delete the model file entirely?`
-            : `${filesToOffer.length} models removed from this domain. Delete their model files entirely?`;
+            : `${filesToOffer.length} models removed from this domain. Delete their model files entirely?`) + also;
           const deleteLabel = fileIsSingle ? 'Delete Model File' : 'Delete Model Files';
           const keepLabel = fileIsSingle ? 'Keep File' : 'Keep Files';
           void vscode.window
             .showInformationMessage(prompt, deleteLabel, keepLabel)
             .then(async (choice) => {
               if (choice !== deleteLabel) return;
-              // Delete through a WorkspaceEdit so VS Code snapshots the files
-              // and the deletion is undoable, rather than a bare unlink.
-              const deleteEdit = new vscode.WorkspaceEdit();
-              // Captured before the delete: afterwards the folder is unknowable.
-              const singlePath = fileIsSingle ? this.libraryRelativePath(filesToOffer[0]) : '';
-              for (const name of filesToOffer) {
-                deleteEdit.deleteFile(
-                  vscode.Uri.file(this.logicalModelService.modelPath(name)),
-                  { ignoreIfNotExists: true },
-                );
-              }
-              const deleted = await vscode.workspace.applyEdit(deleteEdit);
-              if (!deleted) {
-                void vscode.window.showErrorMessage('Failed to delete model file(s).');
-                return;
-              }
-              const summary = fileIsSingle
-                ? `Deleted ${singlePath}`
-                : `Deleted ${filesToOffer.length} model files`;
-              vscode.window.showInformationMessage(summary);
+              await this.deleteModelFiles(document, filesToOffer);
             });
         }
         return;

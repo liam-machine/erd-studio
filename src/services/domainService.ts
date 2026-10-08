@@ -30,6 +30,7 @@ import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
 import type { LogicalModelService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
+import { domainTextRelationshipCount } from './libraryRelationships';
 import { sameName } from '../types/naming';
 
 // The pure domain parsing lives in @erd-studio/core; these are re-exported so
@@ -169,15 +170,16 @@ export class DomainService {
    * How many relationships the project's domain files hold between them
    * (`logical.relationships` entries, read raw). Zero means no domain keeps
    * its own, which is what makes the model library the default home for new
-   * ones (#126, `usesLibraryRelationships`). Unreadable files count as none.
+   * ones (#126, `usesLibraryRelationships`). A file that does not parse but
+   * whose text still shows a relationship list counts as holding one
+   * (`domainTextRelationshipCount`), so a merge conflict never switches the
+   * project's mode; a file that cannot be read at all counts as none.
    */
   countDomainFileRelationships(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): number {
     let count = 0;
     for (const summary of this.listDomains(projectPath, semanticDir)) {
       try {
-        const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as { logical?: { relationships?: unknown } } | null;
-        const relationships = raw?.logical?.relationships;
-        if (Array.isArray(relationships)) count += relationships.length;
+        count += domainTextRelationshipCount(fs.readFileSync(summary.filePath, 'utf-8'));
       } catch {
         // Nothing we could keep in step with.
       }
@@ -225,8 +227,13 @@ export class DomainService {
             : null;
         }
         : undefined,
+      // Asked once per library entry spelled in another case: the library is
+      // listed once per load, not once per question.
       libraryHasModel: this.logicalModelService
-        ? (name) => this.logicalModelService!.listModelNames().includes(name)
+        ? (() => {
+          let names: Set<string> | undefined;
+          return (name: string) => (names ??= new Set(this.logicalModelService!.listModelNames())).has(name);
+        })()
         : undefined,
       warn: (message) => console.warn(`[DomainService] ${message}`),
     });

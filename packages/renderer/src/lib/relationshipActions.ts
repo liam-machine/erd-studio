@@ -89,12 +89,21 @@ export interface RelationshipSwap {
  */
 export function relationshipSwap(rel: DrawnRelationship): RelationshipSwap {
   const { fromModel, toModel, cardinality } = rel;
+  // A relationship from a model to itself (a hierarchy) has the same model at
+  // both ends, so the words name the columns — "Make employee the many side"
+  // would read as already true and hide that the key columns trade places.
+  const selfReference = fromModel.toLowerCase() === toModel.toLowerCase();
+  const fromEnd = `${fromModel}.${rel.fromColumn}`;
+  const toEnd = `${toModel}.${rel.toColumn}`;
   if (cardinality === 'many-to-one' || cardinality === 'one-to-many') {
     // After the swap the "many" end is the other one.
     const nextMany = cardinality === 'many-to-one' ? toModel : fromModel;
+    const [pointing, pointedAt] = cardinality === 'many-to-one' ? [toEnd, fromEnd] : [fromEnd, toEnd];
     return {
       request: updateCardinalityRequest(rel, swapCardinality(cardinality)),
-      title: `Make ${nextMany} the many side`,
+      title: selfReference
+        ? `Make ${pointing} point at ${pointedAt} (the many side)`
+        : `Make ${nextMany} the many side`,
     };
   }
   return {
@@ -115,8 +124,8 @@ export function relationshipSwap(rel: DrawnRelationship): RelationshipSwap {
       },
     },
     title: cardinality === 'one-to-one'
-      ? `Make ${toModel} the side that holds the foreign key`
-      : `Swap the ends (list ${toModel} first)`,
+      ? (selfReference ? `Make ${toEnd} hold the key to ${fromEnd}` : `Make ${toModel} the side that holds the foreign key`)
+      : `Swap the ends (list ${selfReference ? toEnd : toModel} first)`,
   };
 }
 

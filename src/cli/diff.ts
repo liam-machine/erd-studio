@@ -442,12 +442,16 @@ export function fixesFromPlan(
       case 'update-cardinality-in-logical': {
         // The entry as it should be stored (D10): a one-to-many is the same
         // link turned round, many-to-one, on the other model — so in a
-        // library project it also moves to that model's file.
+        // library project it also moves to that model's file. In a library
+        // project an entry the diagram file holds goes to the model library
+        // too, exactly as the canvas's commit writes an edited relationship
+        // (`planRelationshipCommit`): the two never disagree on where the
+        // same relationship ends up (#133 review 8).
         const target: Cardinality = r.targetCardinality ?? 'many-to-one';
         const stored = canonicalRelationship({ ...rel, cardinality: target });
         const turned = stored.fromModel !== rel.fromModel || stored.fromColumn !== rel.fromColumn;
         const current = currentFile(rel);
-        const file = homeFile(stored, heldBy(rel) !== undefined);
+        const file = homeFile(stored, relationshipHome.addToLibrary || heldBy(rel) !== undefined);
         const movesFrom = file !== current ? current : undefined;
         const copies = furtherCopies(rel);
         const alsoIn = copies.map((c) => c.file);

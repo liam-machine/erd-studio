@@ -57,7 +57,7 @@ import {
 } from '@erd-studio/core';
 import { domainRelationshipElementTexts, editDomainRelationshipEntries, setDomainRelationships, setYamlRelationships } from './minimalEdits';
 import { COMMENTS, describeExtras, domainEntryExtras, yamlEntryExtras } from './relationshipEntryExtras';
-import { usesLibraryRelationships } from './libraryRelationships';
+import { domainTextRelationshipCount, usesLibraryRelationships } from './libraryRelationships';
 import { CURRENT_SCHEMA_VERSION, detectDomainFormat } from '../types/semantic';
 import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 import type { DomainService } from './domainService';
@@ -160,6 +160,8 @@ export function scanDomainFiles(domainService: DomainScanSource, workspaceRoot: 
     // open is never counted here as checked and clean, nor its entries
     // towards the project's mode.
     if (text.startsWith('\uFEFF')) {
+      // Unopenable, but its relationships still say how the project keeps them.
+      scan.domainFileRelationshipCount += domainTextRelationshipCount(text);
       scan.unchecked.push({
         label, filePath: summary.filePath,
         reason: 'it starts with a byte-order mark (BOM), so ERD Studio cannot open it — save it as UTF-8 without BOM',
@@ -169,6 +171,9 @@ export function scanDomainFiles(domainService: DomainScanSource, workspaceRoot: 
     try {
       raw = JSON.parse(text) as Record<string, unknown>;
     } catch (err) {
+      // A merge conflict must not switch the project's mode: a file whose
+      // text still shows a relationship list counts as holding one.
+      scan.domainFileRelationshipCount += domainTextRelationshipCount(text);
       scan.unchecked.push({
         label, filePath: summary.filePath,
         reason: `it could not be read (${err instanceof Error ? err.message : String(err)})`,
@@ -1280,8 +1285,19 @@ export async function planRelationshipRepair(
     if (directionFinding && !userPicked && r.cardinality !== 'many-to-many') {
       const answer = await ask(directionQuestion(r, directionFinding), position());
       if (answer === undefined) return null;
-      if (answer === 'swap') {
-        r = { ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn };
+      const swapped: Relationship = { ...r, fromModel: r.toModel, fromColumn: r.toColumn, toModel: r.fromModel, toColumn: r.fromColumn };
+      // Turning it round moves it to the other model's file: when that would
+      // take out an entry carrying its own keys or comments, the direction is
+      // left as it is (and said), and the rest of the task — a respelling —
+      // still goes ahead, so a second run has nothing left to do.
+      const swapKeeps = keptRecord(task, swapped, find);
+      const swapLoses = task.records.filter((rec) => rec !== swapKeeps && rec.extras.length > 0);
+      if (answer === 'swap' && swapLoses.length > 0) {
+        const what = swapLoses.map((rec) => `${rec.file} entry ${rec.rawIndex + 1} has ${describeExtras(rec.extras)}`);
+        left.push(`${describeEnds(r)}: the keys suggest the other direction, but ${what.join('; ')}, which turning it round would remove — its direction stays as it is; change it by hand.`);
+        counts.left++;
+      } else if (answer === 'swap') {
+        r = swapped;
         markUserChanged(task.key);
         expectGone('REL006');
         counts.swapped++;
@@ -1453,12 +1469,7 @@ export async function planRelationshipRepair(
 
 /** How many entries a domain file's `logical.relationships` holds, read raw (0 when it cannot be read). */
 function rawDomainRelationshipCount(text: string): number {
-  try {
-    const raw = JSON.parse(text.replace(/^\uFEFF/, '')) as { logical?: { relationships?: unknown } };
-    return Array.isArray(raw.logical?.relationships) ? raw.logical!.relationships.length : 0;
-  } catch {
-    return 0;
-  }
+  return domainTextRelationshipCount(text);
 }
 
 /** The mode (`usesLibraryRelationships`) the project is in once `changes` are written. */
@@ -1677,7 +1688,11 @@ function directionQuestion(r: Relationship, finding: RelationshipFinding): Repai
     code: 'REL006',
     kind: 'direction',
     subject: describeEnds(r),
-    prompt: 'The keys suggest this relationship runs the other way. Swap its ends? (Esc cancels everything)',
+    // Neutral: when only one end's key is known, the keys show the stored
+    // direction is wrong but not that swapping is right — the link may be
+    // a one-to-one (a subtype sharing its parent's key) (#133 review 8).
+    prompt: 'The keys do not fit this relationship\'s direction. Swap its ends if it runs the other way; '
+      + 'if both sides are unique, leave it and make it one-to-one on the canvas. (Esc cancels everything)',
     options: [
       {
         id: 'swap',

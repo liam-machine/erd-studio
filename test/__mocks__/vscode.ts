@@ -197,6 +197,11 @@ export interface MockStatusBarItem {
   dispose: () => void;
 }
 
+export enum TextDocumentChangeReason {
+  Undo = 1,
+  Redo = 2,
+}
+
 export enum QuickPickItemKind {
   Separator = -1,
   Default = 0,

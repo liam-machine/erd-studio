@@ -14,6 +14,14 @@ import './KeyBadgeGroup.css';
 export interface KeyBadgeGroupProps {
   isPrimaryKey: boolean;
   isForeignKey: boolean;
+  /**
+   * The declared foreign-key flag, when it can differ from the `isForeignKey`
+   * badge (a drawn relationship lights the badge without declaring anything).
+   * Given, the menu's FK option ticks only for a declared key — the value its
+   * toggle flips — and a badge that comes only from a relationship says so,
+   * unticked. Omitted, the option follows `isForeignKey`.
+   */
+  isForeignKeyDeclared?: boolean;
   isNaturalKey: boolean;
   mode: 'readonly' | 'editable';
   status?: 'built' | 'approved' | 'planned' | 'missing';
@@ -42,6 +50,7 @@ const KEY_CONFIG: Array<{
 export function KeyBadgeGroup({
   isPrimaryKey,
   isForeignKey,
+  isForeignKeyDeclared,
   isNaturalKey,
   mode,
   status,
@@ -113,11 +122,16 @@ export function KeyBadgeGroup({
   };
 
   // Get active state by type
+  // The menu ticks what the toggle flips: for FK that is the declared flag
+  // when the caller supplies it, never only the badge a relationship lights.
+  const fkDeclared = isForeignKeyDeclared ?? isForeignKey;
   const activeStates: Record<KeyType, boolean> = {
     PK: isPrimaryKey,
-    FK: isForeignKey,
+    FK: fkDeclared,
     NK: isNaturalKey,
   };
+  // A badge that comes only from a drawn relationship: shown, not ticked.
+  const fkFromRelationshipOnly = isForeignKey && !fkDeclared;
 
   const handleToggle = useCallback(() => {
     if (isEditable) {
@@ -223,7 +237,11 @@ export function KeyBadgeGroup({
                   />
                   <span className="key-badge-group__label">
                     <span className="key-badge-group__label-text">{label}</span>
-                    <span className="key-badge-group__label-desc">{description}</span>
+                    <span className="key-badge-group__label-desc">
+                      {type === 'FK' && fkFromRelationshipOnly
+                        ? 'Shown because a relationship starts here — tick to declare it'
+                        : description}
+                    </span>
                   </span>
                 </div>
               );

@@ -185,6 +185,35 @@ describe('checkRelationships — stable codes (#133)', () => {
     expect(findings).toMatchObject([{ code: 'REL006', severity: 'info', fix: 'swap' }]);
   });
 
+  it('REL006: a many-to-one from a whole primary key is flagged even when the other end has no key flags (1.6.7 dim → fact drag)', () => {
+    const plainFact: SemanticModel = { name: 'fct_order', columns: [col('order_line_key', { isPrimaryKey: true }), col('customer_key')] };
+    const findings = checkRelationships({
+      libraryModels: [entry(plainFact), entry(dimCustomer([rel('customer_key', 'fct_order', 'customer_key')]))],
+      domains: [],
+    });
+    expect(findings).toMatchObject([{ code: 'REL006', severity: 'info', fix: 'swap', files: ['logical-models/dim_customer.yml'] }]);
+    expect(findings[0].message).toMatch(/dim_customer\.customer_key is dim_customer's primary key, so its values are unique and it cannot be the many side/);
+    // Only one end's key is known: it never claims which fix is right (#133 review 8).
+    expect(findings[0].message).toMatch(/either the relationship runs the other way, or both sides are unique and it is one-to-one$/);
+    // The same link stored the right way round is clean, and a one-to-one from a key is not a contradiction.
+    expect(checkRelationships({
+      libraryModels: [entry({ ...plainFact, relationships: [TO_CUSTOMER] }), entry(dimCustomer())], domains: [],
+    })).toEqual([]);
+    expect(checkRelationships({
+      libraryModels: [entry(plainFact), entry(dimCustomer([rel('customer_key', 'fct_order', 'customer_key', { cardinality: 'one-to-one' })]))], domains: [],
+    })).toEqual([]);
+  });
+
+  it('REL006: the 1.6.7 Draw from dbt shape (dimension key also marked FK, saved on the dimension) is flagged too', () => {
+    const plainFact: SemanticModel = { name: 'fct_order', columns: [col('order_line_key', { isPrimaryKey: true }), col('customer_key')] };
+    const dim: SemanticModel = {
+      name: 'dim_customer',
+      columns: [col('customer_key', { isPrimaryKey: true, isForeignKey: true })],
+      relationships: [rel('customer_key', 'fct_order', 'customer_key')],
+    };
+    expect(summary(checkRelationships({ libraryModels: [entry(plainFact), entry(dim)], domains: [] }))).toEqual(['REL006:info']);
+  });
+
   it('REL008: entries skipped or defaulted on read, with their line', () => {
     const model = parseLogicalModelText([
       'name: fct_order',

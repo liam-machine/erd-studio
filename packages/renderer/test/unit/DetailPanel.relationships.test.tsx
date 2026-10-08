@@ -123,3 +123,58 @@ describe('DetailPanel — a relationship whose other end is not in the diagram (
   });
 });
 
+
+describe('the FK key toggle acts on the declared flag, not the badge (#133 review 8, D2)', () => {
+  it('a column whose FK badge comes only from a drawn relationship is declared on the first click', () => {
+    const { container, host } = renderPanel([LIBRARY_REL]);
+    // orders' second column, customer_id: the badge is on (it starts a relationship), nothing is declared.
+    const triggers = container.querySelectorAll('.key-badge-group__trigger');
+    expect(triggers).toHaveLength(2);
+    fireEvent.click(triggers[1]);
+    const fk = [...document.querySelectorAll('.key-badge-group__option')].find((o) => o.textContent?.includes('FK'))!;
+    fireEvent.click(fk);
+    expect(host.postMessage).toHaveBeenCalledWith({
+      type: 'toggleColumnKey', payload: { modelName: 'orders', columnName: 'customer_id', keyType: 'FK', value: true },
+    });
+  });
+});
+
+describe('the FK option ticks what its toggle flips (#133 review 8)', () => {
+  const fkOption = (): Element =>
+    [...document.querySelectorAll('.key-badge-group__option')].find((o) => o.textContent?.includes('FK'))!;
+
+  it('a badge lit only by a drawn relationship is shown unticked, saying where it comes from', () => {
+    const { container } = renderPanel([LIBRARY_REL]);
+    // The row still shows the FK badge…
+    const triggers = container.querySelectorAll('.key-badge-group__trigger');
+    expect(triggers[1].textContent).toContain('FK');
+    fireEvent.click(triggers[1]);
+    // …but the option the toggle flips (the declared flag) is not ticked, so
+    // the first click — which declares it — visibly ticks it.
+    expect(fkOption().getAttribute('aria-checked')).toBe('false');
+    expect(fkOption().textContent).toContain('Shown because a relationship starts here');
+  });
+
+  it('a declared foreign key is ticked, and its click removes it', () => {
+    const declared = domain([LIBRARY_REL]);
+    declared.models[0].columns[1] = { ...declared.models[0].columns[1], isForeignKeyDeclared: true };
+    const host: CanvasHost = { postMessage: vi.fn() };
+    const store = createCanvasStore({ domain: declared, selectedNode: 'orders', detailPanelOpen: true });
+    const { container } = render(
+      <CanvasEnvironmentProvider host={host} viewer={false}>
+        <CanvasStoreProvider store={store}>
+          <ReactFlowProvider>
+            <DetailPanel />
+          </ReactFlowProvider>
+        </CanvasStoreProvider>
+      </CanvasEnvironmentProvider>,
+    );
+    fireEvent.click(container.querySelectorAll('.key-badge-group__trigger')[1]);
+    expect(fkOption().getAttribute('aria-checked')).toBe('true');
+    expect(fkOption().textContent).not.toContain('Shown because a relationship starts here');
+    fireEvent.click(fkOption());
+    expect(host.postMessage).toHaveBeenCalledWith({
+      type: 'toggleColumnKey', payload: { modelName: 'orders', columnName: 'customer_id', keyType: 'FK', value: false },
+    });
+  });
+});

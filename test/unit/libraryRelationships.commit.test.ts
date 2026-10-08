@@ -607,6 +607,14 @@ describe('planRelationshipCommit — never drops what the user wrote on a copy (
     ]);
   });
 
+  it('domain mode: an update keeps the user\'s own source / stored / issues keys (they are never runtime fields on disk)', () => {
+    const entry = { ...EDGE, cardinality: 'many-to-one', source: 'relationships test in schema.yml', stored: 'by hand', issues: ['none'], note: 'keep' } as unknown as Relationship;
+    const result = plan('domain', { kind: 'update', stored: EDGE, cardinality: 'one-to-one' }, [FCT(), DIM()], [entry]);
+    expect(result.domainRelationships).toEqual([
+      { ...EDGE, cardinality: 'one-to-one', source: 'relationships test in schema.yml', stored: 'by hand', issues: ['none'], note: 'keep' },
+    ]);
+  });
+
   it('domain mode: an edit that clears the role keeps the entry\'s own keys, without the role', () => {
     const entry = { ...EDGE, cardinality: 'many-to-one', role: 'x', description: 'keep me' } as unknown as Relationship;
     const result = plan('domain', { kind: 'edit', stored: EDGE, next: { ...EDGE, cardinality: 'many-to-one' } }, [FCT(), DIM()], [entry]);
@@ -715,5 +723,22 @@ describe('planRelationshipCommit — copies that disagree in an older-format dia
       '"ERD Studio: Migrate Domains to Central Model Store", then "Repair Relationships…" to choose which one is right — ' +
       'or remove the extra entry from legacy.json by hand.',
     );
+  });
+});
+
+describe('countAffectedRelationships — one unreadable entry is one relationship (#133 review 8)', () => {
+  it('counts two read problems of the same entry once, and two entries twice', async () => {
+    const { countAffectedRelationships } = await import('../../src/types/relationshipIssues');
+    const model = parseLogicalModelText([
+      'name: fct_order',
+      'relationships:',
+      '  - { fromModel: fct_order, fromColumn: customer_key, toModel: dim_customer, toColumn: customer_key }',
+      '  - { fromColumn: ship_date_key, toModel: dim_customer, toColumn: customer_key, cardinality: sideways }',
+      '',
+    ].join('\n'), 'fct_order')!;
+    const findings = checkRelationships({ libraryModels: [{ model, file: 'lm/fct_order.yml' }, { model: DIM(), file: 'lm/dim_customer.yml' }], domains: [] })
+      .filter((f) => f.code === 'REL008');
+    expect(findings).toHaveLength(3);
+    expect(countAffectedRelationships(findings)).toBe(2);
   });
 });

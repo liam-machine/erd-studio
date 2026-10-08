@@ -87,6 +87,26 @@ export function usesLibraryRelationships(
     || models.some((m) => (m.relationships?.length ?? 0) > 0 || (m.relationshipIssues?.length ?? 0) > 0);
 }
 
+/**
+ * How many relationships a domain file's text holds, towards the project's
+ * mode (`usesLibraryRelationships`). A file that does not parse — merge
+ * conflict markers, a stray comma — but whose text still shows a non-empty
+ * `"relationships": [` list counts as one: like a model file with a YAML
+ * error that has a `relationships:` key, it is evidence that the project
+ * keeps relationships per diagram, and a broken file must never switch where
+ * every new relationship is written (#133 review 8).
+ */
+export function domainTextRelationshipCount(text: string): number {
+  const body = text.replace(/^\uFEFF/, '');
+  try {
+    const raw = JSON.parse(body) as { logical?: { relationships?: unknown } } | null;
+    const relationships = raw?.logical?.relationships;
+    return Array.isArray(relationships) ? relationships.length : 0;
+  } catch {
+    return /"relationships"\s*:\s*\[\s*[^\s\]]/.test(body) ? 1 : 0;
+  }
+}
+
 /** The full relationships stored in `model`'s library file. */
 export function libraryRelationshipsOf(model: SemanticModel): Relationship[] {
   return (model.relationships ?? []).map((rel) => ({ fromModel: model.name, ...rel }));
@@ -146,12 +166,13 @@ function domainEntry(rel: Relationship): Relationship {
  * entry's own keys (a `description`, `tests`, anything a relationship does
  * not have) and their order are kept, the relationship's fields are set to
  * `rel`'s, and a role `rel` does not have is removed. Without an entry to
- * replace, the plain {@link domainEntry}.
+ * replace, the plain {@link domainEntry}. `existing` is the raw entry as
+ * written in the file (the reader's runtime `source` / `stored` / `issues`
+ * are never written), so a key of that name is the user's and is kept too.
  */
 function domainEntryOver(existing: Relationship | undefined, rel: Relationship): Relationship {
   if (!existing || typeof existing !== 'object') return domainEntry(rel);
   const out: Record<string, unknown> = { ...(existing as unknown as Record<string, unknown>) };
-  for (const key of ['source', 'stored', 'issues']) delete out[key];
   Object.assign(out, domainEntry(rel));
   if (!rel.role) delete out.role;
   return out as unknown as Relationship;
@@ -218,6 +239,32 @@ export function removeColumnRelationships(
   column: string,
 ): SemanticModel[] {
   return dropWhere(models, (rel) => endIs(rel, 'from', modelName, column) || endIs(rel, 'to', modelName, column));
+}
+
+/**
+ * Take out every library relationship other models keep to any of `names` —
+ * what deleting those models' files would leave pointing at nothing (REL003
+ * on every diagram showing the model that holds it). Mutates `models` (pass
+ * fresh copies) and returns the ones changed, plus one line per relationship
+ * taken out, for the confirmation that names them (#133 review 8).
+ */
+export function removeRelationshipsToModels(
+  models: readonly SemanticModel[],
+  names: readonly string[],
+): { changed: SemanticModel[]; removed: string[] } {
+  const removed: string[] = [];
+  const holders = models.filter((m) => !names.some((n) => same(n, m.name)));
+  const changed = dropWhere(holders, (rel) => {
+    if (!names.some((n) => same(n, rel.toModel))) return false;
+    removed.push(`${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn}`);
+    return true;
+  });
+  return { changed, removed };
+}
+
+/** "fct_order.customer_id → dim_customer.customer_id, … and 3 more", for a confirmation. */
+export function describeRemovedRelationships(removed: readonly string[], max = 3): string {
+  return removed.slice(0, max).join(', ') + (removed.length > max ? ` and ${removed.length - max} more` : '');
 }
 
 /**
@@ -357,9 +404,10 @@ export interface RelationshipCommitInput {
   /** The current domain file's `logical.relationships`. Not edited; the result carries the new list. */
   domainRelationships: readonly Relationship[];
   /**
-   * The project's other domain files (library mode, remove only): those that
-   * still hold their own copy of a removed link are named in
-   * `otherDomainCopies`.
+   * The project's other domain files (library mode): those that still hold
+   * their own copy of a removed link are named in `otherDomainCopies`, and
+   * those whose own copy disagrees with the record an add / update / edit
+   * wrote in `disagreeingDomainCopies`.
    */
   otherDomains?: ReadonlyArray<{ label: string; models: readonly string[]; relationships: readonly Relationship[] }>;
   /** The message for a home model that is not among `endpointModels` (library mode). */
@@ -405,6 +453,12 @@ export interface RelationshipCommitPlan {
   written?: { where: 'library'; model: string; index: number } | { where: 'domain'; index: number };
   /** Other domain files (by label) still holding their own copy of a removed link. */
   otherDomainCopies?: string[];
+  /**
+   * Other domain files (by label) whose own copy of the link just written to
+   * the model library now says something else — stored twice and disagreeing
+   * (REL001) there until Repair Relationships… settles it.
+   */
+  disagreeingDomainCopies?: string[];
 }
 
 /** A commit the canvas must refuse; the message is for the user. */
@@ -698,16 +752,31 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
   if (markColumn) markColumn.isPrimaryKey = true;
 
   // --- Other domains still drawing a removed link from their own copy --------
+  // A remove, or an edit that moved the link to other ends: a copy of the old
+  // link in another diagram file keeps drawing it there.
   let otherDomainCopies: string[] | undefined;
-  if (op.kind === 'remove' && library && input.otherDomains) {
+  let disagreeingDomainCopies: string[] | undefined;
+  if (library && input.otherDomains) {
+    const recordKey = record ? linkKey(record) : undefined;
+    const shows = (d: { models: readonly string[] }, rel: Relationship): boolean => {
+      const names = new Set(d.models.map((m) => m.toLowerCase()));
+      return names.has(rel.fromModel.toLowerCase()) && names.has(rel.toModel.toLowerCase());
+    };
     const labels = input.otherDomains
-      .filter((d) => {
-        const names = new Set(d.models.map((m) => m.toLowerCase()));
-        return d.relationships.some((rel) => cleared.has(linkKey(rel))
-          && names.has(rel.fromModel.toLowerCase()) && names.has(rel.toModel.toLowerCase()));
-      })
+      .filter((d) => d.relationships.some((rel) => cleared.has(linkKey(rel)) && linkKey(rel) !== recordKey && shows(d, rel)))
       .map((d) => d.label);
     if (labels.length > 0) otherDomainCopies = [...new Set(labels)].sort();
+    // An add / update / edit written to the model library: another diagram
+    // file's own copy that now says something else (a cardinality, a role)
+    // is a REL001 there — named now, not found later (#133 review 8).
+    if (record && recordKey !== undefined && written?.where === 'library') {
+      const kept = record;
+      const differing = input.otherDomains
+        .filter((d) => d.relationships.some((rel) => linkKey(rel) === recordKey && shows(d, rel)
+          && !sameRelationshipMeaning(asRead(rel), asRead(kept))))
+        .map((d) => d.label);
+      if (differing.length > 0) disagreeingDomainCopies = [...new Set(differing)].sort();
+    }
   }
 
   const domainChanged = JSON.stringify(domain) !== JSON.stringify(input.domainRelationships);
@@ -722,6 +791,7 @@ export function planRelationshipCommit(input: RelationshipCommitInput): Relation
     domainChanged,
     ...(written ? { written } : {}),
     ...(otherDomainCopies ? { otherDomainCopies } : {}),
+    ...(disagreeingDomainCopies ? { disagreeingDomainCopies } : {}),
   };
 }
 

@@ -127,4 +127,4 @@ models:
 - **Cascade deletions**: When removing a model from a domain, also remove the domain JSON's relationships referencing it. When renaming or deleting a model or column, update every model YAML `relationships:` entry that points at it
 - **Column ordering**: When adding columns to logical-models YAML, append to the end of the columns array
 
-<!-- erd-studio-harness: 27 -->
+<!-- erd-studio-harness: 28 -->

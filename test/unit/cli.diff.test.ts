@@ -420,6 +420,18 @@ describe('fixesFromPlan — set-cardinality is written as it should be stored (D
     expect(fix.explain).toMatch(/replacing the old entry/);
   });
 
+  it('in a library project, a diagram-file entry moves to the model library — as the canvas writes an edited relationship (#133 review 8)', () => {
+    const plan: SyncPlan = { ...toOneToMany, relationships: [{ ...toOneToMany.relationships[0], targetCardinality: 'one-to-one' }] };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
+      inLibrary: new Map(), addToLibrary: true,
+    });
+    expect(fix).toMatchObject({
+      kind: 'set-cardinality', to: 'one-to-one',
+      file: '.erd-studio/logical-models/fct_order.yml', movesFrom: '.erd-studio/silver/d.json',
+    });
+    expect(fix.explain).toMatch(/take it out of \.erd-studio\/silver\/d\.json and add it to \.erd-studio\/logical-models\/fct_order\.yml/);
+  });
+
   it('never tells anyone to write one-to-many', () => {
     for (const home of [{ inLibrary: new Map([[key, 'fct_order']]), addToLibrary: true }, { inLibrary: new Map<string, string>(), addToLibrary: false }]) {
       const fixes = fixesFromPlan(toOneToMany, '.erd-studio/silver/d.json', '.erd-studio', [], [], home);

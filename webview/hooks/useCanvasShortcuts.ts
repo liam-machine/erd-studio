@@ -237,6 +237,10 @@ export function useCanvasShortcuts(): void {
       // DELETE KEY: Delete selected design models, annotations, or edges
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!domain || domain.readOnly) return;
+        // A dialog is open: focus may sit on one of its buttons (Swap sides,
+        // a direction choice), which the text-entry guard above lets through.
+        // The key belongs to the dialog, never to the selection behind it.
+        if (s.newFkDialogOpen || s.newModelDialogOpen || s.addExistingModelDialogOpen || s.feedbackDialogOpen) return;
 
         const { selectedEdges, selectedNode, selectedColumns, detailPanelOpen } = s;
 

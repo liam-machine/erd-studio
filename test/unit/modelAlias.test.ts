@@ -16,6 +16,7 @@ import { validateModelAliasPayload } from '../../src/providers/payloadValidation
 import {
   describeDuplicateFix,
   planDuplicateFix,
+  planLibraryRepoint,
   repointDomainModel,
   suggestDuplicateName,
   type DomainReference,
@@ -296,6 +297,26 @@ describe('duplicate model files', () => {
     expect(text).toContain('alias: date');
     expect(text).toContain('gold/finance');
     expect(text).toContain('Still using "date"');
+  });
+
+  it('library relationships: repoints entries held in the copy\'s folder, lists the others a repointed domain stops drawing (#133 review 8)', () => {
+    const plan = planDuplicateFix('date', 'gold', 'gold_date', undefined, refs);
+    const holders = [
+      { name: 'fct_sale', folder: 'gold', relationships: [{ fromColumn: 'x', toModel: 'dim', toColumn: 'id' }, { fromColumn: 'date_key', toModel: 'Date', toColumn: 'date_key' }] },
+      { name: 'stg_sale', folder: '', relationships: [{ fromColumn: 'date_key', toModel: 'date', toColumn: 'date_key' }] },
+      { name: 'fct_core', folder: 'gold', relationships: [{ fromColumn: 'date_key', toModel: 'date', toColumn: 'date_key' }] },
+      { name: 'date', folder: '', relationships: [{ fromColumn: 'parent', toModel: 'date', toColumn: 'date_key' }] },
+    ];
+    const library = planLibraryRepoint(plan, holders, [
+      { label: 'gold/finance', models: ['fct_sale', 'stg_sale', 'date'] },
+      { label: 'gold/sales', models: ['stg_sale', 'date'] },
+    ]);
+    // fct_core is in no repointed domain: those that show it keep the winning date.
+    expect(library.repoint).toEqual([{ model: 'fct_sale', indexes: [1] }]);
+    expect(library.undrawn).toEqual([{ model: 'stg_sale', fromColumn: 'date_key', toColumn: 'date_key', domains: ['gold/finance', 'gold/sales'] }]);
+    const text = describeDuplicateFix(plan, 'a', 'b', library, holders);
+    expect(text).toContain('  • fct_sale.date_key → gold_date.date_key');
+    expect(text).toContain('  • stg_sale.date_key → date.date_key (gold/finance, gold/sales)');
   });
 
   it("keeps an alias the copy already has, and repoints nothing for a top-level copy", () => {

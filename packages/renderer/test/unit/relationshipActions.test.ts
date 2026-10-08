@@ -69,6 +69,24 @@ describe('relationshipSwap', () => {
   });
 });
 
+describe('relationshipSwap on a relationship from a model to itself (#133 review 8)', () => {
+  const SELF = {
+    fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id',
+  } as const;
+  it('names the columns, since "Make employee the many side" is already true', () => {
+    const swap = relationshipSwap({ ...SELF, cardinality: 'many-to-one' });
+    expect(swap.title).toBe('Make employee.employee_id point at employee.manager_id (the many side)');
+    expect(relationshipSwap({ ...SELF, cardinality: 'one-to-many' }).title)
+      .toBe('Make employee.manager_id point at employee.employee_id (the many side)');
+  });
+  it('one-to-one and many-to-many name the columns too', () => {
+    expect(relationshipSwap({ ...SELF, cardinality: 'one-to-one' }).title)
+      .toBe('Make employee.employee_id hold the key to employee.manager_id');
+    expect(relationshipSwap({ ...SELF, cardinality: 'many-to-many' }).title)
+      .toBe('Swap the ends (list employee.employee_id first)');
+  });
+});
+
 describe('edge issues', () => {
   it('keeps only the badge codes, in code order', () => {
     expect(edgeIssues(['REL006', 'REL009', 'REL001', 'REL003'])).toEqual(['REL001', 'REL006']);

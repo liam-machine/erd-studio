@@ -145,7 +145,7 @@ function isFileThroughLink(filePath: string): boolean {
  */
 const RELATIONSHIPS_KEY = /^relationships[ \t]*:(?![ \t]*(?:\[[ \t]*\]|null|Null|NULL|~)[ \t]*(?:#.*)?$)/m;
 
-function textHoldsRelationships(filePath: string): boolean {
+export function textHoldsRelationships(filePath: string): boolean {
   try {
     return RELATIONSHIPS_KEY.test(fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, ''));
   } catch {
@@ -884,8 +884,15 @@ export class LogicalModelService {
     options: SerializeModelOptions,
     filePath: string,
   ): void {
+    // The name the reader judged this file's entries against (before a
+    // rename rewrites it): an entry whose `fromModel:` names another model
+    // was skipped by the reader, so it must be kept exactly as written.
+    const nameNode = root.get('name', true);
+    const readAs = isScalar(nameNode) ? this.scalarValue(nameNode) : undefined;
+    const ownNames = new Set([model.name.toLowerCase()]);
+    if (typeof readAs === 'string' && readAs !== '') ownNames.add(readAs.toLowerCase());
     this.syncMap(doc, root, this.modelToPlain(model), MODEL_KEYS);
-    this.syncRelationships(doc, root, model, new Set(options.relationshipTargets ?? []), filePath);
+    this.syncRelationships(doc, root, model, new Set(options.relationshipTargets ?? []), filePath, ownNames);
   }
 
   /**
@@ -1068,6 +1075,7 @@ export class LogicalModelService {
     model: SemanticModel,
     targets: ReadonlySet<number>,
     filePath: string,
+    ownNames: ReadonlySet<string> = new Set([model.name.toLowerCase()]),
   ): void {
     const desired = (model.relationships ?? []).map((rel) => this.relationshipToPlain(rel));
     const file = path.basename(filePath);
@@ -1083,7 +1091,7 @@ export class LogicalModelService {
       // because writing it here would cut the link to the anchored list.
       const target = existing.resolve(doc);
       const read = isSeq(target)
-        ? target.items.map((item) => this.readRelationshipEntry(this.nodeToPlain(doc, item)))
+        ? target.items.map((item) => this.readRelationshipEntry(this.nodeToPlain(doc, item), ownNames))
           .filter((r): r is ModelRelationship => r !== null).map((r) => this.relationshipToPlain(r))
         : [];
       if (JSON.stringify(read) === JSON.stringify(desired)) return;
@@ -1102,7 +1110,7 @@ export class LogicalModelService {
     const occurrences = new Map<string, number>();
     const readable = new Map<number, { read: ModelRelationship; key: string; occ: number }>();
     existing.items.forEach((item, pos) => {
-      const read = this.readRelationshipEntry(this.nodeToPlain(doc, item));
+      const read = this.readRelationshipEntry(this.nodeToPlain(doc, item), ownNames);
       if (!read) return;
       const key = linkKey({ fromModel: model.name, ...read });
       const occ = occurrences.get(key) ?? 0;
@@ -1152,7 +1160,7 @@ export class LogicalModelService {
       }
       const i = desiredAt.get(pos);
       if (i === undefined) return; // readable and no longer wanted
-      items.push(this.updateRelationshipNode(doc, item, r.read, desired[i], targets.has(i), `${file}, relationship entry ${pos + 1}`));
+      items.push(this.updateRelationshipNode(doc, item, r.read, desired[i], targets.has(i), `${file}, relationship entry ${pos + 1}`, model.name));
     });
     desired.forEach((entry, i) => {
       if (!posFor.has(i)) items.push(doc.createNode(entry));
@@ -1233,13 +1241,17 @@ export class LogicalModelService {
 
   /**
    * What the reader (core's `readRelationships`) makes of one entry, or null
-   * for an entry it skips: not a mapping, or an endpoint missing or blank.
+   * for an entry it skips: not a mapping, an endpoint missing or blank, or a
+   * `fromModel:` that is not one of `ownNames` (the file's model, any case).
    */
-  private readRelationshipEntry(value: unknown): ModelRelationship | null {
+  private readRelationshipEntry(value: unknown, ownNames: ReadonlySet<string>): ModelRelationship | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const r = value as Record<string, unknown>;
     for (const key of ['fromColumn', 'toModel', 'toColumn'] as const) {
       if (typeof r[key] !== 'string' || r[key] === '') return null;
+    }
+    if (r.fromModel !== undefined && !(typeof r.fromModel === 'string' && ownNames.has(r.fromModel.toLowerCase()))) {
+      return null;
     }
     const cardinality = typeof r.cardinality === 'string' && CARDINALITIES.has(r.cardinality)
       ? (r.cardinality as Cardinality)
@@ -1285,11 +1297,22 @@ export class LogicalModelService {
     want: ModelRelationship,
     target: boolean,
     where: string,
+    modelName: string,
   ): unknown {
     const unchanged = (['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role'] as const).every((k) => read[k] === want[k]);
     if (!isMap(node)) {
       if (target) throw new Error(`${where} cannot be edited in place (it is not a plain mapping). Edit it by hand.`);
       return unchanged ? node : doc.createNode(this.relationshipToPlain(want));
+    }
+    // A readable entry's `fromModel:` names the file's model — under its old
+    // name when the file is being written under a new one (a rename, Give
+    // Duplicate Model Its Own Name). Kept, it would name a model the file no
+    // longer is, and the reader would skip the entry: it is dropped, as an
+    // edit target's is.
+    const fromModel = node.get('fromModel', true);
+    const fromModelText = isScalar(fromModel) ? this.scalarValue(fromModel) : undefined;
+    if (node.has('fromModel') && !(typeof fromModelText === 'string' && fromModelText.toLowerCase() === modelName.toLowerCase())) {
+      node.delete('fromModel');
     }
     // A name the parser coerced (`toColumn: 007` is the number 7) is read as
     // its source text; pin it to that text so writing the file back cannot

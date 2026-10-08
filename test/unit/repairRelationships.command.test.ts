@@ -15,7 +15,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { createMockTextDocument, _resetMockWorkspace } from '../__mocks__/vscode';
-import { repairRelationships, runMoveRelationships, writeFileAtomic } from '../../src/commands/repairRelationships';
+import { repairRelationships, runMoveRelationships, unwritableFiles, writeFileAtomic } from '../../src/commands/repairRelationships';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
@@ -171,6 +171,89 @@ describe('Repair Relationships… — automatic fixes', () => {
     expect(f.read('logical-models/fct_order.yml')).toBe(`${FCT}# edited meanwhile\n`);
   });
 
+  it('refuses, naming what happened, when a relationship in a file it does not change was edited while the preview was open (#133 review 8)', async () => {
+    fs.writeFileSync(f.at('logical-models/dim_date.yml'), 'name: dim_date\ncolumns:\n  - name: date_key\n    dataType: date\n    isPrimaryKey: true\n');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) => {
+      const options = args[1] as { modal?: boolean } | undefined;
+      if (!options?.modal) return undefined;
+      // Another diagram adds a relationship to a model the repair does not touch.
+      fs.appendFileSync(f.at('logical-models/dim_date.yml'),
+        'relationships:\n  - fromColumn: date_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: many-to-one\n');
+      return args[args.length - 1];
+    }) as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+
+    await f.run();
+
+    expect(texts(error)).toEqual([
+      'Repair Relationships: relationships in the project changed while the dialog was open. Run the repair again. Nothing was changed.',
+    ]);
+    expect(f.read('logical-models/dim_customer.yml')).toBe(DIM_ONE_SIDED);
+    expect(f.read('logical-models/fct_order.yml')).toBe(FCT);
+  });
+
+  it('a second run while the first is still asking is refused, not started (#133 review 8)', async () => {
+    let release: (value: unknown) => void = () => undefined;
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) => {
+      const options = args[1] as { modal?: boolean } | undefined;
+      if (!options?.modal) return undefined;
+      return new Promise((resolve) => { release = () => resolve(args[args.length - 1]); });
+    }) as never);
+    const first = f.run();
+    await new Promise((r) => setTimeout(r, 0));
+    await f.run();
+    expect(texts(info)).toContain('Repair Relationships is already running — answer or cancel its dialog first.');
+    release(undefined);
+    await first;
+    expect(f.read('logical-models/dim_customer.yml')).toBe(DIM);
+    // Once it has finished, the command runs again as usual.
+    info.mockClear();
+    await f.run();
+    expect(texts(info).some((t) => t.startsWith('Repair Relationships: nothing to repair'))).toBe(true);
+  });
+
+  it('Show Full Diff… opens the diff and asks without a modal, so the diff can be read; the preview tab is closed after (#133 review 8)', async () => {
+    const registration = { dispose: vi.fn() };
+    (vscode.workspace as unknown as { registerTextDocumentContentProvider: unknown }).registerTextDocumentContentProvider = vi.fn(() => registration);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined as never);
+    const picks: Array<{ labels: string[]; ignoreFocusOut?: boolean }> = [];
+    vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string; index?: number }>, options?: { ignoreFocusOut?: boolean }) => {
+      picks.push({ labels: items.map((i) => i.label), ignoreFocusOut: options?.ignoreFocusOut });
+      // The file picker (items carry an index), then the question asked while the diff is open.
+      return items[0].index !== undefined ? items[0] : items.find((i) => i.label === 'Repair Relationships');
+    }) as never);
+    const close = vi.fn(async () => true);
+    const previewTab = { input: { modified: { scheme: 'erd-studio-repair-preview', path: '/0/fct_order.yml' } } };
+    (vscode.window as unknown as { tabGroups: unknown }).tabGroups = { all: [{ tabs: [previewTab, { input: {} }] }], close, activeTabGroup: { activeTab: undefined } };
+    const calls: Array<{ modal: boolean; buttons: unknown[] }> = [];
+    vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) => {
+      const options = args[1] as { modal?: boolean } | undefined;
+      const modal = !!(options && typeof options === 'object' && options.modal);
+      const buttons = args.slice(modal ? 2 : 1);
+      calls.push({ modal, buttons });
+      if (modal) return 'Show Full Diff…';
+      return buttons.includes('Repair Relationships') ? 'Repair Relationships' : undefined;
+    }) as never);
+
+    try {
+      await f.run();
+    } finally {
+      delete (vscode.workspace as unknown as { registerTextDocumentContentProvider?: unknown }).registerTextDocumentContentProvider;
+      (vscode.window as unknown as { tabGroups: unknown }).tabGroups = { all: [], activeTabGroup: { activeTab: undefined } };
+    }
+
+    expect(exec).toHaveBeenCalledWith('vscode.diff', expect.anything(), expect.anything(), expect.stringContaining('now ↔ after the change'), { preview: true });
+    // One modal (the preview), then the question while the diff is open is
+    // not modal — and not a notification either, which hides itself after a
+    // few seconds while the diff is read: a QuickPick that stays on screen.
+    expect(calls[0]).toEqual({ modal: true, buttons: ['Show Full Diff…', 'Repair Relationships'] });
+    expect(calls.slice(1).filter((c) => c.buttons.includes('Repair Relationships'))).toEqual([]);
+    expect(picks.at(-1)).toEqual({ labels: ['Repair Relationships', 'Show Another File…', 'Cancel'], ignoreFocusOut: true });
+    expect(f.read('logical-models/dim_customer.yml')).toBe(DIM);
+    expect(close).toHaveBeenCalledWith([previewTab]);
+    expect(registration.dispose).toHaveBeenCalled();
+  });
+
   it('refuses before asking anything when a file it would change has unsaved edits', async () => {
     const info = acceptModal();
     const error = vi.spyOn(vscode.window, 'showErrorMessage');
@@ -285,6 +368,48 @@ describe('Repair Relationships… — entries that could not be read', () => {
     const selection = (show.mock.calls[0][1] as { selection: { start: { line: number } } }).selection;
     expect(selection.start.line).toBe(5);
     expect(f.read('logical-models/fct_order.yml')).toBe(fct);
+  });
+});
+
+describe('Repair Relationships… — the closing message (#133 review 8)', () => {
+  it('a closing message left unanswered does not hold the run lock', async () => {
+    const fct = `${FCT}relationships:\n  - fromColumn: customer_key\n    toModel: dim_customer\n    toColumn: customer_key\n    cardinality: one_to_many\n`;
+    f = fixture({ 'logical-models/dim_customer.yml': DIM, 'logical-models/fct_order.yml': fct });
+    // The Open File notification is never answered (it sits in the notification centre).
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation(((...args: unknown[]) =>
+      (args.includes('Open File') ? new Promise(() => undefined) : Promise.resolve(undefined))) as never);
+    void f.run();
+    await new Promise((r) => setTimeout(r, 0));
+    info.mockClear();
+    void f.run();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(texts(info).some((t) => t.includes('already running'))).toBe(false);
+    expect(texts(info).some((t) => t.includes('nothing to repair'))).toBe(true);
+  });
+
+  it('names an unreadable entry at its line after the repair moved the entries above it', async () => {
+    const dim = `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: one-to-many\n` +
+      '  - fromColumn: customer_key\n    toModel: fct_order\n    cardinality: many-to-one\n';
+    f = fixture({ 'logical-models/dim_customer.yml': dim, 'logical-models/fct_order.yml': FCT });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockImplementation((async (...args: unknown[]) => {
+      const options = args[1] as { modal?: boolean } | undefined;
+      if (options && typeof options === 'object' && options.modal) return args[args.length - 1];
+      return args.includes('Open File') ? 'Open File' : undefined;
+    }) as never);
+    const open = vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({} as never);
+    const show = vi.spyOn(vscode.window, 'showTextDocument').mockResolvedValue(undefined as never);
+
+    await f.run();
+
+    const after = f.read('logical-models/dim_customer.yml');
+    const lines = after.split('\n');
+    const entryLine = lines.findIndex((l) => l.startsWith('  - fromColumn: customer_key')) + 1;
+    expect(entryLine).toBeGreaterThan(0);
+    const closing = texts(info).find((t) => t.startsWith('Repair Relationships: changed'))!;
+    expect(closing).toContain(`logical-models/dim_customer.yml:${entryLine}`);
+    expect(open).toHaveBeenCalled();
+    const selection = (show.mock.calls[0][1] as { selection: { start: { line: number } } }).selection;
+    expect(selection.start.line).toBe(entryLine - 1);
   });
 });
 
@@ -408,6 +533,23 @@ describe('Repair Relationships… — symlinked and read-only files (#133 review
     expect(f.read('shared/fct_order.yml')).toBe(FCT);
     expect(fs.statSync(f.at('shared/fct_order.yml')).mode & 0o777).toBe(0o444);
     fs.chmodSync(f.at('shared/fct_order.yml'), 0o644);
+  });
+});
+
+describe('unwritableFiles (#133 review 8)', () => {
+  it('refuses a writable file in a folder that is not writable (the atomic write needs a temp file there)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-repair-ro-dir-'));
+    f = { root: dir } as Fixture;
+    const file = path.join(dir, 'shared', 'a.yml');
+    fs.mkdirSync(path.dirname(file));
+    fs.writeFileSync(file, 'old');
+    fs.chmodSync(path.dirname(file), 0o555);
+    try {
+      expect(unwritableFiles([file])).toEqual([file]);
+    } finally {
+      fs.chmodSync(path.dirname(file), 0o755);
+    }
+    expect(unwritableFiles([file])).toEqual([]);
   });
 });
 

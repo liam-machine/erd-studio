@@ -25,7 +25,7 @@ import {
   _clearMockFileWatchers,
   _mockFileWatchers,
 } from '../__mocks__/vscode';
-import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE } from '../../src/providers/SemanticEditorProvider';
+import { SemanticEditorProvider, PHYSICAL_READ_ONLY_MESSAGE, UNDO_BARRIER_MESSAGE } from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { ManifestService } from '../../src/services/manifestService';
@@ -44,6 +44,7 @@ interface Harness {
   root: string;
   domainPath: string;
   logicalModelService: LogicalModelService;
+  provider: SemanticEditorProvider;
   /** Tracker the provider records its own writes into (shared with watchers). */
   ownWrites: OwnWriteTracker;
   /** Open a second domain in another panel, sharing the same provider. */
@@ -149,6 +150,7 @@ async function createHarness(): Promise<Harness> {
     root,
     domainPath,
     logicalModelService,
+    provider,
     ownWrites,
     openSecondDomain: async (models) => {
       const otherPath = path.join(domainDir, 'other.json');
@@ -844,6 +846,61 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(ourDoc.isDirty).toBe(false);
       expect(userDoc.isDirty).toBe(true);
       expect(fs.readFileSync(customerPath, 'utf-8')).toBe(onDisk);
+    });
+  });
+
+  describe('undo never crosses a Repair / Move that wrote files to disk (#133 review 8)', () => {
+    it('the toolbar Undo stops at the repair, after rewinding canvas edits made since', async () => {
+      const exec = vi.spyOn(vscode.commands, 'executeCommand');
+      h.provider.markFilesRewrittenOnDisk();
+
+      await h.send({ type: 'undo' });
+      expect(exec).not.toHaveBeenCalledWith('undo');
+      expect(h.errors()).toEqual([UNDO_BARRIER_MESSAGE]);
+
+      // A redo with nothing undone since does nothing at all.
+      await h.send({ type: 'redo' });
+      expect(exec).not.toHaveBeenCalledWith('redo');
+
+      // An edit made after the repair can be undone and redone; the step before it cannot.
+      await h.send({
+        type: 'addColumn',
+        payload: { modelName: 'fct_order', column: { name: 'order_date', dataType: 'date', description: '' } },
+      });
+      await h.send({ type: 'undo' });
+      expect(exec).toHaveBeenCalledWith('undo');
+      expect(h.errors()).toEqual([]);
+      await h.send({ type: 'redo' });
+      expect(exec).toHaveBeenCalledWith('redo');
+      exec.mockClear();
+      await h.send({ type: 'undo' });
+      expect(exec).toHaveBeenCalledWith('undo');
+      exec.mockClear();
+      await h.send({ type: 'undo' });
+      expect(exec).not.toHaveBeenCalledWith('undo');
+      expect(h.errors()).toEqual([UNDO_BARRIER_MESSAGE]);
+    });
+
+    it('the editor\'s own Undo (Cmd+Z) past the repair is put back to the text on disk', async () => {
+      let listener: ((e: unknown) => Promise<void>) | undefined;
+      vi.spyOn(vscode.workspace, 'onDidChangeTextDocument').mockImplementation(((fn: (e: unknown) => Promise<void>) => {
+        listener = fn;
+        return { dispose: () => undefined };
+      }) as never);
+      fs.rmSync(h.root, { recursive: true, force: true });
+      _resetMockWorkspace();
+      h = await createHarness();
+      h.provider.markFilesRewrittenOnDisk();
+      const doc = _mockDocuments.get(vscode.Uri.file(h.domainPath).toString())!;
+      const repaired = fs.readFileSync(h.domainPath, 'utf-8');
+      // VS Code rewinds the reload the repair caused: the document holds the old text.
+      doc._setText(repaired.replace('"Orders domain"', '"before the repair"'));
+      h.panel._postedMessages.length = 0;
+      await listener!({ document: doc, contentChanges: [], reason: vscode.TextDocumentChangeReason.Undo });
+
+      expect(doc.getText()).toBe(repaired);
+      expect(fs.readFileSync(h.domainPath, 'utf-8')).toBe(repaired);
+      expect(h.errors()).toEqual([UNDO_BARRIER_MESSAGE]);
     });
   });
 

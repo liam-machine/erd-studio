@@ -12,7 +12,8 @@
  * 3. One QuickPick per relationship only the user can settle, each with
  *    "Leave as is"; Esc cancels everything.
  * 4. A modal preview naming every file and change (plus "Show Full Diff…",
- *    a read-only diff of one file); nothing is written until it is confirmed.
+ *    a read-only diff of one file, asked about without a modal so the diff
+ *    can be read); nothing is written until it is confirmed.
  * 5. Disk only, like the move since 1.6.7: each new text is computed from the
  *    file's bytes as read, a file changed on disk since is refused, and the
  *    writes are all-or-nothing.
@@ -93,16 +94,18 @@ export function writeFileAtomic(filePath: string, text: string): void {
 }
 
 /**
- * The files among `filePaths` that exist and cannot be written (read-only, or
- * a link to a file that is) — checked before the preview, so nobody confirms a
+ * The files among `filePaths` that cannot be written (read-only, a link to a
+ * file that is, or in a folder that is — the atomic write creates its temp
+ * file next to the target) — checked before the preview, so nobody confirms a
  * plan the writes would then refuse half-way.
  */
 export function unwritableFiles(filePaths: Iterable<string>): string[] {
   const refused: string[] = [];
   for (const filePath of filePaths) {
-    if (!fs.existsSync(filePath)) continue;
     try {
-      fs.accessSync(fs.realpathSync(filePath), fs.constants.W_OK);
+      const target = fs.existsSync(filePath) ? fs.realpathSync(filePath) : filePath;
+      if (fs.existsSync(target)) fs.accessSync(target, fs.constants.W_OK);
+      if (fs.existsSync(path.dirname(target))) fs.accessSync(path.dirname(target), fs.constants.W_OK);
     } catch {
       refused.push(filePath);
     }
@@ -138,14 +141,64 @@ export async function runMoveRelationships(deps: RepairRelationshipsDeps): Promi
   await runGuarded(deps, MOVE);
 }
 
+/** The run in progress, if any: a second click (the banner and the notification, a double-click) never starts another. */
+let running: string | null = null;
+
 async function runGuarded(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<void> {
+  if (running) {
+    void vscode.window.showInformationMessage(`${running} is already running — answer or cancel its dialog first.`);
+    return;
+  }
+  running = mode.title;
+  let closing: ClosingReport | void = undefined;
   try {
-    await run(deps, mode);
+    closing = await run(deps, mode);
   } catch (err) {
     telemetry.error('relMoveFailed');
     console.error(`[${mode.title}] failed:`, err);
     void vscode.window.showErrorMessage(`${mode.title} failed: ${errorText(err)}`);
+  } finally {
+    running = null;
   }
+  // The closing message is shown after the lock is released: a notification
+  // with an Open File button stays pending (in the notification centre) until
+  // it is answered, and a run that has finished must not turn the next one
+  // away as "already running" with no dialog on screen (#133 review 8).
+  if (closing) {
+    try {
+      await closing();
+    } catch (err) {
+      console.error(`[${mode.title}] closing message failed:`, err);
+    }
+  }
+}
+
+/** The run's closing message, shown once the run lock is released. */
+type ClosingReport = () => Promise<void>;
+
+/**
+ * What the read-back check compares, for every file the run did not plan to
+ * change: each model's relationships, read issues and key columns, each
+ * diagram's models and relationships. Positions and descriptions are left out,
+ * so moving a box while a question is open does not stop the run.
+ */
+function relationshipSignature(s: RepairSnapshot): string {
+  const models = s.modelFiles.map((m) => JSON.stringify([
+    m.filePath,
+    m.name,
+    m.model.relationships ?? [],
+    (m.model.relationshipIssues ?? []).length,
+    (m.model.columns ?? []).map((c) => [c.name, !!c.isPrimaryKey, !!c.isNaturalKey, !!c.isForeignKey]),
+  ])).sort();
+  const domains = s.domains.map((d) => JSON.stringify([d.filePath, d.models, d.relationships, d.readIssues.length])).sort();
+  return JSON.stringify({
+    mode: s.mode,
+    models,
+    domains,
+    older: s.olderFormat.map((o) => o.file).sort(),
+    unreadable: s.unreadable.map((u) => u.file).sort(),
+    unchecked: s.unchecked.map((u) => u.file).sort(),
+  });
 }
 
 /**
@@ -168,7 +221,7 @@ function refuseIfDirty(filePaths: Iterable<string>, label: (filePath: string) =>
   return true;
 }
 
-async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<void> {
+async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<ClosingReport | void> {
   const writeFile = deps.writeFile ?? writeFileAtomic;
   telemetry.feature('relMoveStarted');
   const modelsDir = deps.logicalModelService.getModelsDir();
@@ -178,8 +231,7 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<voi
   const analysis = analyseRepair(before, { moveDomainsToLibrary: mode.move });
   if (analysis.tasks.length === 0) {
     telemetry.feature('relMoveNothingToMove');
-    await reportNothingToDo(before, analysis.unreadableEntries, [...analysis.blocked, ...analysis.noHome], analysis.outOfReach, mode);
-    return;
+    return () => reportNothingToDo(before, analysis.unreadableEntries, [...analysis.blocked, ...analysis.noHome], analysis.outOfReach, mode);
   }
   // Checked before asking anything, so nobody settles conflicts only to be
   // turned away; checked again before writing.
@@ -263,6 +315,16 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<voi
     );
     return;
   }
+  // A relationship edited elsewhere meanwhile (another diagram, an
+  // assistant) would make the read-back check fail and blame the repair:
+  // say what happened instead, before writing anything.
+  if (relationshipSignature(readRepairSnapshot(deps)) !== relationshipSignature(before)) {
+    telemetry.error('relMoveFailed');
+    void vscode.window.showErrorMessage(
+      `${mode.title}: relationships in the project changed while the dialog was open. Run ${mode.noun} again. Nothing was changed.`,
+    );
+    return;
+  }
 
   // All or nothing: if one write fails, every file already written is put back.
   const written: RepairPlan['changes'] = [];
@@ -302,8 +364,10 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<voi
 
   // Read it all back: the result must be exactly what was planned.
   let problems: string[];
+  let after: RepairSnapshot | undefined;
   try {
-    problems = verifyRepair(before, readRepairSnapshot(deps), plan);
+    after = readRepairSnapshot(deps);
+    problems = verifyRepair(before, after, plan);
   } catch (err) {
     problems = [`the result could not be checked (${errorText(err)})`];
   }
@@ -331,7 +395,13 @@ async function run(deps: RepairRelationshipsDeps, mode: RunnerMode): Promise<voi
 
   telemetry.feature('relMoveCompleted');
   if (plan.counts.left > 0) telemetry.feature('relMoveLeftover');
-  await reportDone(before, plan, mode);
+  // Entries that could not be read are named at their place in the files as
+  // written: moving an entry out of a file shifts the ones below it.
+  const finalSnapshot = after ?? before;
+  const finalPlan: RepairPlan = after
+    ? { ...plan, unreadableEntries: after.findings.filter((finding) => finding.code === 'REL008') }
+    : plan;
+  return () => reportDone(finalSnapshot, finalPlan, mode);
 }
 
 /** The modal preview, with "Show Full Diff…" where the editor supports it. True when confirmed. */
@@ -367,13 +437,33 @@ async function confirmPlan(plan: RepairPlan, mode: RunnerMode): Promise<boolean>
   const diff = 'Show Full Diff…';
   const canDiff = typeof (vscode.workspace as { registerTextDocumentContentProvider?: unknown }).registerTextDocumentContentProvider === 'function';
   const preview = canDiff ? previewProvider(plan) : undefined;
+  const another = 'Show Another File…';
   try {
     for (;;) {
       const buttons = preview ? [diff, confirm] : [confirm];
       const choice = await vscode.window.showInformationMessage(message, { modal: true, detail }, ...buttons);
       if (choice === confirm) return true;
       if (choice !== diff || !preview) return false;
-      await preview.show();
+      // While a diff is open the question is asked without a modal: a modal
+      // blocks the whole window, so the diff behind it could not be scrolled.
+      // A QuickPick that ignores focus loss stays on screen while the diff is
+      // read — a notification would hide itself after a few seconds and leave
+      // the run waiting on a question nobody can see (#133 review 8).
+      for (;;) {
+        if (!(await preview.show())) break; // no file picked: back to the preview
+        const options = [confirm, ...(plan.changes.length > 1 ? [another] : []), 'Cancel'];
+        const picked = await vscode.window.showQuickPick(
+          options.map((label) => ({ label })),
+          {
+            title: `${message} The diff is open — review it, then choose here.`,
+            placeHolder: 'Esc cancels — nothing is changed',
+            ignoreFocusOut: true,
+          },
+        );
+        const next = picked?.label;
+        if (next === confirm) return true;
+        if (next !== another) return false;
+      }
     }
   } finally {
     preview?.dispose();
@@ -381,7 +471,7 @@ async function confirmPlan(plan: RepairPlan, mode: RunnerMode): Promise<boolean>
 }
 
 /** A read-only document per planned text, and a picker that diffs one against the file on disk. */
-function previewProvider(plan: RepairPlan): { show: () => Promise<void>; dispose: () => void } {
+function previewProvider(plan: RepairPlan): { show: () => Promise<boolean>; dispose: () => void } {
   const scheme = 'erd-studio-repair-preview';
   const texts = new Map(plan.changes.map((c, i) => [`/${i}/${path.basename(c.filePath)}`, c.text]));
   const registration = vscode.workspace.registerTextDocumentContentProvider(scheme, {
@@ -395,7 +485,7 @@ function previewProvider(plan: RepairPlan): { show: () => Promise<void>; dispose
           plan.changes.map((c, index) => ({ label: c.file, description: plural(c.notes.length, 'change'), index })),
           { title: 'Show the full diff of one file', placeHolder: 'Which file?' },
         );
-      if (!picked) return;
+      if (!picked) return false;
       const change = plan.changes[picked.index];
       await vscode.commands.executeCommand(
         'vscode.diff',
@@ -404,8 +494,19 @@ function previewProvider(plan: RepairPlan): { show: () => Promise<void>; dispose
         `${change.file} (now ↔ after the change)`,
         { preview: true },
       );
+      return true;
     },
-    dispose: () => registration.dispose(),
+    dispose: () => {
+      // The preview tabs would show nothing once the files are written (or
+      // nothing at all once the provider is gone): close them.
+      const groups = (vscode.window as { tabGroups?: { all: ReadonlyArray<{ tabs: readonly vscode.Tab[] }>; close?: (tabs: vscode.Tab[]) => Thenable<boolean> } }).tabGroups;
+      const tabs = (groups?.all ?? []).flatMap((g) => g.tabs).filter((tab) => {
+        const modified = (tab.input as { modified?: vscode.Uri } | undefined)?.modified;
+        return modified?.scheme === scheme;
+      });
+      if (tabs.length > 0 && groups?.close) void Promise.resolve(groups.close(tabs)).catch(() => undefined);
+      registration.dispose();
+    },
   };
 }
 

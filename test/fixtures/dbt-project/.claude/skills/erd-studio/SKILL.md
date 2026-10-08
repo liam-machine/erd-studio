@@ -118,7 +118,8 @@ Annotations are temporary build notes — visible on the canvas while constructi
 | Change grain, modelRole, description, rationale, meta | the model's `.yml` |
 | Add a model to a domain diagram | Domain `.json` → add name to `logical.models[]` AND, if no file for that name exists in any folder, create it — `logical-models/{layer}/{name}.yml` (the domain's layer) when the project uses layer folders, else `logical-models/{name}.yml` |
 | Remove a model from a domain | Domain `.json` → remove name from `logical.models[]` AND remove its relationships from `logical.relationships[]` (relationships in model YAML stay — the domain just stops drawing them) |
-| Add/remove/edit a relationship | The many-side (FK) model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships[]` — see "Where relationships live" |
+| Add a relationship | The many-side (FK) model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships[]` — see "Where relationships live" |
+| Remove/edit a relationship | Look for the same two columns, **either way round**, in **both** models' `.yml` `relationships:` and in the domain `.json` → `logical.relationships[]` — one written before this rule may sit in the "one" side's file, often as `one-to-many`. Remove or change every copy you find; when you change one that sits on the "one" side, take it out there and store it once on the many side as `many-to-one` |
 | Change layout positions | Domain `.json` → `viewConfig.positions` |
 
 > **Common mistake:** Editing the `.yml` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the `.yml` AND adding the name string to the domain `.json`. A relationship is stored in exactly one place — the FK (many-side) model's `.yml` or the domain `.json`, never both (see `Where relationships live`).
@@ -328,7 +329,7 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 | `toModel` | Yes | PK side model name |
 | `toColumn` | Yes | PK column name |
 | `cardinality` | Yes | `many-to-one`, `one-to-one`, or `many-to-many` (`one-to-many` is still read, but never write it — see Direction) |
-| `role` | No | A label for what the link means, e.g. `order date` and `ship date` for two columns pointing at the same date dimension. At most 60 characters. A label only — not part of the relationship's identity |
+| `role` | No | A label for what the link means, e.g. `order date` and `ship date` for two columns pointing at the same date dimension. At most 60 characters. A label only — not part of the relationship's identity. ERD Studio 1.6.7 and earlier remove `role` when they save that model or diagram, so only add one when everyone on the project has updated |
 
 **Direction:** `fromModel` is always the many (FK) side, `toModel` the side it points at (PK). Never write `one-to-many`: swap the ends and write `many-to-one`, in the other model's file — it is the same relationship. A `one-to-one` is written from the model holding the foreign key (`fromModel` holds it, `toModel` is pointed at); a `many-to-many` keeps the direction it was drawn in (a bridge model with two `many-to-one` links is usually better). Take the direction from the keys, never from the order you thought of the two models: the end whose column is its model's **whole** primary key (or whole natural key) is the "one" side; the end that is a foreign key, or only part of a composite key, is the "many" side. When the keys do not settle it, ask the user. FK column names should match the PK column name of the referenced table.
 
@@ -428,4 +429,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 27 -->
+<!-- erd-studio-harness: 28 -->

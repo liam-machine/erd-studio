@@ -287,3 +287,56 @@ describe('handleUpdateColumn (V4) scdType / additiveType', () => {
     expect(col.additiveType).toBe('additive');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The FK badge is not the declared flag (#133 review 8, D2)
+// ---------------------------------------------------------------------------
+
+describe('handleUpdateColumn never writes the canvas FK badge back as a declared foreign key', () => {
+  it('V5: a description edit on a relationship\'s from-column (badge on) leaves isForeignKey off', async () => {
+    const { provider, saved } = makeProvider([{ name: 'dim_customer', columns: [makeColumn()] }]);
+    const doc = makeDocument(JSON.stringify({ schemaVersion: 5, domain: 'test', layer: 'silver', logical: { models: ['dim_customer'], relationships: [] } }));
+    await runUpdate(provider, doc, makeWebview().webview, {
+      modelName: 'dim_customer',
+      oldColumnName: 'customer_name',
+      column: canvasPayload({ description: 'edited', isForeignKey: true }),
+    });
+    const col = saved[0].columns![0];
+    expect(col.description).toBe('edited');
+    expect(col).not.toHaveProperty('isForeignKey');
+  });
+
+  it('V5: a declared flag survives an edit whose payload says false', async () => {
+    const { provider, saved } = makeProvider([{ name: 'dim_customer', columns: [makeColumn({ isForeignKey: true })] }]);
+    const doc = makeDocument(JSON.stringify({ schemaVersion: 5, domain: 'test', layer: 'silver', logical: { models: ['dim_customer'], relationships: [] } }));
+    await runUpdate(provider, doc, makeWebview().webview, {
+      modelName: 'dim_customer',
+      oldColumnName: 'customer_name',
+      column: canvasPayload({ dataType: 'varchar', isForeignKey: false }),
+    });
+    expect(saved[0].columns![0].isForeignKey).toBe(true);
+  });
+
+  it('V4: a rename with the badge on leaves isForeignKey off', async () => {
+    vi.restoreAllMocks();
+    const { provider } = makeProvider([]);
+    let written: { logical: { models: Array<{ columns: ColumnDef[] }> } } | null = null;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit: unknown) => {
+      const ops = (edit as vscode.WorkspaceEdit & { _ops: Array<{ kind: string; newText?: string }> })._ops;
+      written = JSON.parse(ops.find((op) => op.kind === 'replace')!.newText!);
+      return true;
+    });
+    const doc = makeDocument(JSON.stringify({
+      schemaVersion: 4, domain: 'test', layer: 'silver',
+      logical: { models: [{ name: 'dim_customer', columns: [makeColumn()] }], relationships: [] },
+    }, null, 2));
+    await runUpdate(provider, doc, makeWebview().webview, {
+      modelName: 'dim_customer',
+      oldColumnName: 'customer_name',
+      column: canvasPayload({ name: 'customer_label', isForeignKey: true }),
+    });
+    const col = written!.logical.models[0].columns[0];
+    expect(col.name).toBe('customer_label');
+    expect(col).not.toHaveProperty('isForeignKey');
+  });
+});

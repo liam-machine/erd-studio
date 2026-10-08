@@ -551,6 +551,46 @@ describe('erdStudio.organizeModelLibrary (issue #76)', () => {
   });
 });
 
+describe('erdStudio.deleteLogicalModel (#133 review 8)', () => {
+  const lib = () => path.join(root, '.erd-studio', 'logical-models');
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    fs.writeFileSync(path.join(lib(), 'zz_dim.yml'), 'name: zz_dim\ncolumns:\n  - name: id\n    dataType: string\n    isPrimaryKey: true\n');
+    fs.writeFileSync(path.join(lib(), 'zz_fct.yml'),
+      '# the fact\nname: zz_fct\ncolumns:\n  - name: dim_id\n    dataType: string\nrelationships:\n  - fromColumn: dim_id\n    toModel: zz_dim\n    toColumn: id\n    cardinality: many-to-one\n');
+  });
+
+  it('names the relationships other model files keep to it, and takes them out with the file', async () => {
+    await activate(context);
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Delete' as never);
+
+    await vscode.commands.executeCommand('erdStudio.deleteLogicalModel', { type: 'model', name: 'zz_dim', filePath: path.join(lib(), 'zz_dim.yml') });
+
+    expect(String(warn.mock.calls[0][0])).toContain('It also removes the relationship other model files keep to it: zz_fct.dim_id → zz_dim.id.');
+    expect(fs.existsSync(path.join(lib(), 'zz_dim.yml'))).toBe(false);
+    expect(fs.readFileSync(path.join(lib(), 'zz_fct.yml'), 'utf-8')).toBe('# the fact\nname: zz_fct\ncolumns:\n  - name: dim_id\n    dataType: string\n');
+  });
+
+  it('changes nothing while a model file it would rewrite has unsaved edits', async () => {
+    await activate(context);
+    vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue('Delete' as never);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const fctPath = path.join(lib(), 'zz_fct.yml');
+    const fctText = fs.readFileSync(fctPath, 'utf-8');
+    const doc = vscode.createMockTextDocument(fctPath, fctText, { persist: true });
+    doc._setText(`${fctText}# unsaved\n`);
+    vscode.workspace.textDocuments.push(doc as never);
+
+    await vscode.commands.executeCommand('erdStudio.deleteLogicalModel', { type: 'model', name: 'zz_dim', filePath: path.join(lib(), 'zz_dim.yml') });
+
+    expect(error.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringContaining('zz_fct.yml has unsaved edits')]);
+    expect(fs.existsSync(path.join(lib(), 'zz_dim.yml'))).toBe(true);
+    expect(fs.readFileSync(fctPath, 'utf-8')).toBe(fctText);
+  });
+});
+
 describe('erdStudio.repairRelationships (issue #133)', () => {
   const lib = () => path.join(root, '.erd-studio', 'logical-models');
 
@@ -676,6 +716,72 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     expect(fs.readFileSync(path.join(erd(), 'gold', 'reporting.json'), 'utf-8')).toBe(goldDomainBefore);
     expect(fs.existsSync(path.join(lib(), 'gold', 'date.yml'))).toBe(true);
     expect(info).toHaveBeenCalledWith(expect.stringMatching(/"silver_date" \(table: date\)\. Repointed 1 domain\.$/));
+  });
+
+  it('repoints library relationships held by models in the copy\'s folder, and names the ones the repointed domains stop drawing (#133 review 8)', async () => {
+    const stgOrders = '# staged orders\nname: stg_orders\ncolumns:\n  - name: date_key\n    dataType: int\nrelationships:\n  - fromColumn: date_key # order date\n    toModel: date\n    toColumn: date_key\n    cardinality: many-to-one\n';
+    fs.writeFileSync(path.join(lib(), 'silver', 'stg_orders.yml'), stgOrders);
+    fs.writeFileSync(path.join(lib(), 'fct_visit.yml'),
+      'name: fct_visit\ncolumns:\n  - name: visit_date_key\n    dataType: int\nrelationships:\n  - fromColumn: visit_date_key\n    toModel: date\n    toColumn: date_key\n    cardinality: many-to-one\n');
+    const calendar = readJson(path.join(erd(), 'silver', 'calendar.json'));
+    calendar.logical.models.push('stg_orders', 'fct_visit');
+    writeJson(path.join(erd(), 'silver', 'calendar.json'), calendar);
+    await activate(context);
+    const info = answer('Rename');
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    const detail = (info.mock.calls.find((c) => String(c[0]).startsWith('Rename the duplicate'))![1] as { detail: string }).detail;
+    expect(detail).toContain('Relationships in the model library repointed to silver_date:\n  • stg_orders.date_key → silver_date.date_key');
+    expect(detail).toContain('No longer drawn in the repointed domains (they point at "date", left as they are):\n  • fct_visit.visit_date_key → date.date_key (silver/calendar)');
+    expect(fs.readFileSync(path.join(lib(), 'silver', 'stg_orders.yml'), 'utf-8')).toBe(stgOrders.replace('toModel: date', 'toModel: silver_date'));
+    expect(fs.readFileSync(path.join(lib(), 'fct_visit.yml'), 'utf-8')).toContain('toModel: date\n');
+  });
+
+  it('refuses, naming the file, when a model file it would rewrite is open with unsaved edits (#133 review 8)', async () => {
+    const stgOrders = 'name: stg_orders\ncolumns:\n  - name: date_key\n    dataType: int\nrelationships:\n  - fromColumn: date_key\n    toModel: date\n    toColumn: date_key\n    cardinality: many-to-one\n';
+    const stgPath = path.join(lib(), 'silver', 'stg_orders.yml');
+    fs.writeFileSync(stgPath, stgOrders);
+    const calendar = readJson(path.join(erd(), 'silver', 'calendar.json'));
+    calendar.logical.models.push('stg_orders');
+    writeJson(path.join(erd(), 'silver', 'calendar.json'), calendar);
+    await activate(context);
+    const info = answer('Rename');
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    const doc = vscode.createMockTextDocument(stgPath, stgOrders, { persist: true });
+    doc._setText(`${stgOrders}# my unsaved note\n`);
+    vscode.workspace.textDocuments.push(doc as never);
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    expect(error.mock.calls.map((c) => String(c[0]))).toEqual([
+      expect.stringContaining('logical-models/silver/stg_orders.yml has unsaved edits'),
+    ]);
+    expect(info.mock.calls.some((c) => String(c[0]).startsWith('Rename the duplicate'))).toBe(false);
+    expect(fs.existsSync(ignored())).toBe(true);
+    expect(fs.readFileSync(stgPath, 'utf-8')).toBe(stgOrders);
+    expect(doc.getText()).toContain('# my unsaved note');
+  });
+
+  it('leaves a library relationship a kept domain still draws, and says so (#133 review 8)', async () => {
+    const stgOrders = 'name: stg_orders\ncolumns:\n  - name: date_key\n    dataType: int\nrelationships:\n  - fromColumn: date_key\n    toModel: date\n    toColumn: date_key\n    cardinality: many-to-one\n';
+    fs.writeFileSync(path.join(lib(), 'silver', 'stg_orders.yml'), stgOrders);
+    const calendar = readJson(path.join(erd(), 'silver', 'calendar.json'));
+    calendar.logical.models.push('stg_orders');
+    writeJson(path.join(erd(), 'silver', 'calendar.json'), calendar);
+    // The gold diagram keeps the gold date and shows stg_orders too: it draws stg_orders → date today.
+    const reporting = readJson(path.join(erd(), 'gold', 'reporting.json'));
+    reporting.logical.models.push('stg_orders');
+    writeJson(path.join(erd(), 'gold', 'reporting.json'), reporting);
+    await activate(context);
+    const info = answer('Rename');
+
+    await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
+
+    const detail = (info.mock.calls.find((c) => String(c[0]).startsWith('Rename the duplicate'))![1] as { detail: string }).detail;
+    expect(detail).not.toContain('Relationships in the model library repointed');
+    expect(detail).toContain('  • stg_orders.date_key → date.date_key (silver/calendar) — kept because gold/reporting still draws it');
+    expect(fs.readFileSync(path.join(lib(), 'silver', 'stg_orders.yml'), 'utf-8')).toBe(stgOrders);
   });
 
   it('changes nothing when the confirmation is dismissed', async () => {

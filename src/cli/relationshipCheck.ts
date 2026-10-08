@@ -26,7 +26,7 @@ import {
 import { redactPaths } from '../types/feedback';
 import type { DomainService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
-import type { LogicalModelService } from '../services/logicalModelService';
+import { textHoldsRelationships, type LogicalModelService } from '../services/logicalModelService';
 import { usesLibraryRelationships, type RelationshipMode } from '../services/libraryRelationships';
 import { scanDomainFiles, toCheckDomains } from '../services/relationshipRepair';
 import { relPath } from './context';
@@ -61,14 +61,18 @@ export interface ProjectRelationshipCheck {
     domains: number;
     /** Relationship entries read: model-file entries plus domain-file entries (skipped entries are REL008 findings). */
     relationships: number;
+    /** Of `relationships`, the entries read from model files. */
+    modelFileRelationships: number;
+    /** Of `relationships`, the entries read from domain (diagram) files. */
+    domainFileRelationships: number;
   };
   /**
    * Files whose relationships could not be checked at all, project-relative,
    * each with why: a domain file that is not JSON, unreadable or in a layout
    * ERD Studio cannot load; a model file that does not parse (its
-   * relationships were never read); a shadowed duplicate model file (a name
-   * the library already has elsewhere: ignored, its relationships never
-   * read or drawn); a layers.json that could not be used (a domain file in a
+   * relationships were never read); a shadowed duplicate model file that has
+   * a `relationships:` key (a name the library already has elsewhere:
+   * ignored, its relationships never read or drawn); a layers.json that could not be used (a domain file in a
    * layer folder it names may have been skipped). A check that skipped one
    * is never clean.
    */
@@ -137,12 +141,13 @@ export function checkProjectRelationships(src: RelationshipCheckSources): Projec
         }),
       } : {}),
     }));
-  const relationships = libraryModels.reduce((n, m) => n + (m.model.relationships?.length ?? 0), 0)
-    + domains.reduce((n, d) => n + d.relationships.length, 0);
+  const modelFileRelationships = libraryModels.reduce((n, m) => n + (m.model.relationships?.length ?? 0), 0);
+  const domainFileRelationships = domains.reduce((n, d) => n + d.relationships.length, 0);
+  const relationships = modelFileRelationships + domainFileRelationships;
   return {
     mode,
     findings,
-    checked: { modelFiles: libraryModels.length, domains: domains.length, relationships },
+    checked: { modelFiles: libraryModels.length, domains: domains.length, relationships, modelFileRelationships, domainFileRelationships },
     unchecked: [
       ...layersUnchecked(src),
       ...unreadableModels.map((u): UncheckedFile => ({
@@ -155,8 +160,11 @@ export function checkProjectRelationships(src: RelationshipCheckSources): Projec
       // A second file with a name the library already has is ignored
       // everywhere (shadowed): its relationships are never read or drawn, so
       // a check that passed over it in silence would be a false all-clear.
+      // One with no `relationships:` hides nothing from this check (the
+      // duplicate itself is the Model Library's warning, not a relationship
+      // problem), so it does not make the run unclean.
       ...src.logicalModelService.listModelFiles()
-        .filter((e) => e.shadowedBy)
+        .filter((e) => e.shadowedBy && textHoldsRelationships(e.filePath))
         .map((e): UncheckedFile => ({
           file: fileName(e.filePath),
           reason: `a model named ${e.name} is already in ${fileName(e.shadowedBy!)}, so ERD Studio ignores this file and ` +

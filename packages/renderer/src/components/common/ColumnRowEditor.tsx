@@ -49,6 +49,14 @@ export interface ColumnRowEditorProps {
   onUpdate?: (updated: UpdateColumnPayloadColumn) => void;
   /** Callback when delete button is clicked. */
   onDelete?: () => void;
+  /**
+   * Whether the column's file declares it a foreign key, when that can differ
+   * from `column.isForeignKey` (the badge, which a drawn relationship also
+   * switches on). Given, the key menu's FK option ticks only for a declared
+   * key — the value `onToggleFK` flips — so the toggle visibly does what it
+   * sends. Omitted, the option follows the badge.
+   */
+  foreignKeyDeclared?: boolean;
   /** Callback when new row is cancelled (Escape key). */
   onCancel?: () => void;
   /** Show PK/FK/NK indicator badges. Default true. */
@@ -124,6 +132,7 @@ export function ColumnRowEditor({
   existingColumnNames = [],
   onUpdate,
   onDelete,
+  foreignKeyDeclared,
   onCancel,
   showIndicators = true,
   showDelete = true,
@@ -542,6 +551,7 @@ export function ColumnRowEditor({
           <KeyBadgeGroup
             isPrimaryKey={column.isPrimaryKey ?? false}
             isForeignKey={column.isForeignKey ?? false}
+            isForeignKeyDeclared={foreignKeyDeclared}
             isNaturalKey={column.isNaturalKey ?? false}
             mode={onTogglePK || onToggleFK || onToggleNK ? 'editable' : 'readonly'}
             status={statusClass}

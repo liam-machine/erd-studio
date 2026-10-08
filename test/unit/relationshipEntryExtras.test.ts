@@ -45,3 +45,23 @@ describe('yamlEntryExtras — comments on the entry itself', () => {
     ))]).toEqual([]);
   });
 });
+
+describe('yamlEntryExtras — a fromModel naming the file\'s own model (#133 review 8)', () => {
+  it('is not a key of the user\'s; one naming another model is', () => {
+    const text = [
+      'name: fct_order',
+      'relationships:',
+      '  - fromModel: FCT_ORDER',
+      '    fromColumn: a',
+      '    toModel: dim',
+      '    toColumn: a',
+      '    cardinality: many-to-one',
+      '  - fromModel: other',
+      '    fromColumn: a',
+      '    toModel: dim',
+      '    toColumn: a',
+      '',
+    ].join('\n');
+    expect([...yamlEntryExtras(text)]).toEqual([[1, ['fromModel']]]);
+  });
+});

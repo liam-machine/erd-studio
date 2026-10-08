@@ -194,6 +194,35 @@ describe('useCanvasShortcuts', () => {
     expect(useEditorStore.getState().detailPanelOpen).toBe(true);
   });
 
+  it('Delete / Backspace while a dialog is open (focus on one of its buttons) never removes the selection behind it (#133 review 8)', () => {
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.getState().setSelectedEdges([edgeId(REL_AB)]);
+      useEditorStore.getState().setNewFkDialogOpen(true);
+    });
+    const button = document.createElement('button');
+    button.textContent = 'Swap sides';
+    document.body.appendChild(button);
+    button.focus();
+    press('Backspace');
+    press('Delete');
+    expect(sent()).toEqual([]);
+    for (const open of ['setNewModelDialogOpen', 'setAddExistingModelDialogOpen'] as const) {
+      act(() => {
+        useEditorStore.getState().setNewFkDialogOpen(false);
+        useEditorStore.getState()[open](true);
+      });
+      press('Delete');
+      expect(sent()).toEqual([]);
+      act(() => { useEditorStore.getState()[open](false); });
+    }
+    // Closed again: the same key deletes the selected line.
+    press('Delete');
+    expect(sent()).toEqual([
+      { type: 'removeRelationship', payload: { fromModel: 'a', fromColumn: 'b_id', toModel: 'b', toColumn: 'id' } },
+    ]);
+  });
+
   it('does nothing on Delete when the domain is read-only or the user is typing', () => {
     renderHook(() => useCanvasShortcuts());
     act(() => {

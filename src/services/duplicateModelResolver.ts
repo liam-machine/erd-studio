@@ -71,8 +71,94 @@ export function planDuplicateFix(
   return { name, folder, newName, alias: existingAlias || name, repoint, keep };
 }
 
+/** A readable model file in the library, as the duplicate fix sees its relationships. */
+export interface LibraryHolder {
+  name: string;
+  /** Sub-folder under logical-models/ (`''` at the top level). */
+  folder: string;
+  relationships: ReadonlyArray<{ fromColumn: string; toModel: string; toColumn: string }>;
+}
+
+/** What the fix does to relationships kept in the model library (#133 review 8). */
+export interface LibraryRepointPlan {
+  /**
+   * Models in the copy's folder whose entries point at the duplicated name,
+   * shown by a repointed domain: those entries are repointed to the new name,
+   * as that domain's own relationships are. By position in `relationships`.
+   */
+  repoint: Array<{ model: string; indexes: number[] }>;
+  /**
+   * Entries a repointed domain draws today and will no longer draw: their
+   * model is in another folder, so which copy they mean is not known, and
+   * they are left as they are — named so the dialog can say so.
+   */
+  undrawn: Array<{
+    model: string;
+    fromColumn: string;
+    toColumn: string;
+    domains: string[];
+    /**
+     * Domains that keep using the winning file and also show the entry's
+     * model: they draw it today, so it is left pointing at the old name rather
+     * than repointed out from under them (#133 review 8).
+     */
+    stillDrawnIn?: string[];
+  }>;
+}
+
+/**
+ * Library relationships the fix affects. A domain draws a library entry only
+ * when it shows both models, so once a repointed domain shows `newName`
+ * instead of `name`, an entry pointing at `name` would silently stop being
+ * drawn there. An entry held by a model in the copy's own folder means the
+ * copy (the same layer) and is repointed with it; any other is listed.
+ * `repointed` is each repointed domain's label and model list (before the fix).
+ */
+export function planLibraryRepoint(
+  plan: DuplicateFixPlan,
+  holders: readonly LibraryHolder[],
+  repointed: ReadonlyArray<{ label: string; models: readonly string[] }>,
+  /**
+   * Each kept domain's label and model list (`plan.keep`). One that shows a
+   * holder draws its entries to the old name today; repointing them would
+   * silently take the line off that diagram, so they are left and named.
+   */
+  kept: ReadonlyArray<{ label: string; models: readonly string[] }> = [],
+): LibraryRepointPlan {
+  const result: LibraryRepointPlan = { repoint: [], undrawn: [] };
+  for (const holder of holders) {
+    if (sameName(holder.name, plan.name)) continue;
+    const indexes = holder.relationships
+      .map((rel, i) => (sameName(rel.toModel, plan.name) ? i : -1))
+      .filter((i) => i !== -1);
+    if (indexes.length === 0) continue;
+    const shows = (d: { models: readonly string[] }): boolean => d.models.some((m) => sameName(m, holder.name));
+    const shownIn = repointed.filter(shows).map((d) => d.label);
+    if (shownIn.length === 0) continue;
+    const stillDrawnIn = kept.filter((d) => shows(d) && d.models.some((m) => sameName(m, plan.name))).map((d) => d.label);
+    if (plan.folder !== '' && holder.folder === plan.folder && stillDrawnIn.length === 0) {
+      result.repoint.push({ model: holder.name, indexes });
+      continue;
+    }
+    for (const i of indexes) {
+      const rel = holder.relationships[i];
+      result.undrawn.push({
+        model: holder.name, fromColumn: rel.fromColumn, toColumn: rel.toColumn, domains: shownIn,
+        ...(stillDrawnIn.length > 0 ? { stillDrawnIn } : {}),
+      });
+    }
+  }
+  return result;
+}
+
 /** Modal text for a plan. */
-export function describeDuplicateFix(plan: DuplicateFixPlan, fromLabel: string, toLabel: string): string {
+export function describeDuplicateFix(
+  plan: DuplicateFixPlan,
+  fromLabel: string,
+  toLabel: string,
+  library?: LibraryRepointPlan,
+  holders: readonly LibraryHolder[] = [],
+): string {
   const lines = [
     `${fromLabel} → ${toLabel}`,
     `The model becomes "${plan.newName}" with alias: ${plan.alias}, so dbt still builds a table called ${plan.alias}.`,
@@ -86,6 +172,21 @@ export function describeDuplicateFix(plan: DuplicateFixPlan, fromLabel: string, 
   if (plan.keep.length > 0) {
     lines.push('', `Still using "${plan.name}":`);
     lines.push(...plan.keep.map((r) => `  • ${r.layer}/${r.domain}`));
+  }
+  if (library && library.repoint.length > 0) {
+    lines.push('', `Relationships in the model library repointed to ${plan.newName}:`);
+    for (const { model, indexes } of library.repoint) {
+      const holder = holders.find((h) => h.name === model);
+      for (const i of indexes) {
+        const rel = holder?.relationships[i];
+        if (rel) lines.push(`  • ${model}.${rel.fromColumn} → ${plan.newName}.${rel.toColumn}`);
+      }
+    }
+  }
+  if (library && library.undrawn.length > 0) {
+    lines.push('', `No longer drawn in the repointed domains (they point at "${plan.name}", left as they are):`);
+    lines.push(...library.undrawn.map((u) => `  • ${u.model}.${u.fromColumn} → ${plan.name}.${u.toColumn} (${u.domains.join(', ')})` +
+      (u.stillDrawnIn ? ` — kept because ${u.stillDrawnIn.join(', ')} still ${u.stillDrawnIn.length === 1 ? 'draws' : 'draw'} it` : '')));
   }
   return lines.join('\n');
 }

@@ -106,6 +106,78 @@ describe('relationships are synced entry by entry (R6)', () => {
     expect(reread.relationshipIssues?.map((i) => i.reason)).toEqual(['not-a-mapping', 'missing-endpoint']);
   });
 
+  describe('an entry whose fromModel names another model (skipped by the reader) is kept as written', () => {
+    const STRAY = `name: dim_customer
+columns:
+  - name: customer_id
+    dataType: string
+relationships:
+  # an assistant saved it on the one side
+  - fromModel: fct_orders
+    fromColumn: customer_id
+    toModel: dim_customer
+    toColumn: customer_id
+    cardinality: many-to-one
+`;
+
+    it('an unrelated save leaves it byte for byte', () => {
+      write('dim_customer', STRAY);
+      const model = read('dim_customer');
+      expect(model.relationships).toBeUndefined();
+      expect(model.relationshipIssues?.map((i) => [i.reason, i.skipped])).toEqual([['stray-from-model', true]]);
+      const text = service.serializeModel({ ...model, description: 'Customers' });
+      expect(text).toContain('  # an assistant saved it on the one side\n  - fromModel: fct_orders\n    fromColumn: customer_id');
+    });
+
+    it('a new relationship is appended, never written over it', () => {
+      write('dim_customer', STRAY);
+      const model = read('dim_customer');
+      const text = service.serializeModel({
+        ...model,
+        relationships: [{ fromColumn: 'customer_id', toModel: 'dim_region', toColumn: 'id', cardinality: 'many-to-one' }],
+      }, undefined, { relationshipTargets: [0] });
+      const reread = parseLogicalModelText(text, 'dim_customer')!;
+      expect(reread.relationships).toEqual([{ fromColumn: 'customer_id', toModel: 'dim_region', toColumn: 'id', cardinality: 'many-to-one' }]);
+      expect(reread.relationshipIssues?.map((i) => i.reason)).toEqual(['stray-from-model']);
+      expect(text).toContain('  - fromModel: fct_orders\n    fromColumn: customer_id\n    toModel: dim_customer');
+    });
+  });
+
+  describe('an entry whose fromModel names the file\'s own model survives a rename (#133 review 8)', () => {
+    const OWN = `name: fct_orders
+columns:
+  - name: customer_id
+    dataType: string
+relationships:
+  # keep this comment
+  - fromModel: fct_orders
+    fromColumn: customer_id
+    toModel: dim_customer
+    toColumn: customer_id
+    cardinality: many-to-one
+`;
+
+    it('renaming the model drops the old-name fromModel, so the entry is still read and drawn', () => {
+      write('fct_orders', OWN);
+      const model = read('fct_orders');
+      expect(model.relationships).toHaveLength(1);
+      const text = service.serializeModel({ ...model, name: 'fct_order' }, 'fct_orders');
+      expect(text).not.toContain('fromModel');
+      expect(text).toContain('  # keep this comment\n');
+      const reread = parseLogicalModelText(text, 'fct_order')!;
+      expect(reread.relationships).toEqual([
+        { fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id', cardinality: 'many-to-one' },
+      ]);
+      expect(reread.relationshipIssues ?? []).toEqual([]);
+    });
+
+    it('a save under the same name leaves it as written', () => {
+      write('fct_orders', OWN);
+      const model = read('fct_orders');
+      expect(service.serializeModel({ ...model, description: 'Orders' })).toContain('  - fromModel: fct_orders\n');
+    });
+  });
+
   it('a target whose role is longer than the canvas shows keeps the role exactly as written', () => {
     const long = 'the date the order was shipped from the warehouse to the customer address on file';
     write('fct_order', FILE.replace('    role: ship date', `    role: ${long}`));

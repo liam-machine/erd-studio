@@ -820,8 +820,15 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 27 (relationships stored on their many side, with an optional role, and sync plans\' resolvedRelationship, #133)', () => {
-      expect(HARNESS_VERSION).toBe('27');
+    it('is 28 (relationships stored on their many side, with an optional role, and sync plans\' resolvedRelationship, #133)', () => {
+      expect(HARNESS_VERSION).toBe('28');
+    });
+
+    it('tells assistants to look for a relationship in both models\' files before removing or editing it, and that 1.6.7 drops role (#133 review 8)', () => {
+      service.install(tmpDir, CLAUDE, true);
+      const skill = read(tmpDir, '.claude/skills/erd-studio/SKILL.md');
+      expect(skill).toContain('| Remove/edit a relationship | Look for the same two columns, **either way round**, in **both** models');
+      expect(skill).toContain('ERD Studio 1.6.7 and earlier remove `role` when they save that model or diagram');
     });
 
     it('tells assistants to write a sync plan\'s resolvedRelationship, never targetCardinality (#133 review 6)', () => {

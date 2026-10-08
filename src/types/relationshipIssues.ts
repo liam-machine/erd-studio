@@ -20,11 +20,24 @@ export interface CountableRelationshipIssue {
   link?: string;
 }
 
+/**
+ * The entry a link-less finding is about: core words every per-entry read
+ * problem as "<file>: Relationship entry N of <model | diagram label> …", and
+ * one entry can have several (no cardinality and a role that is not text) —
+ * still one relationship (#133 review 8).
+ */
+const ENTRY = /^(.*?Relationship entry \d+ of (?:diagram )?\S+)\s/;
+
 /** The number of distinct relationships `issues` concern. */
 export function countAffectedRelationships(issues: readonly CountableRelationshipIssue[]): number {
   const ids = new Set<string>();
   for (const issue of issues) {
-    ids.add(issue.link ? `link\u0000${issue.link}` : `finding\u0000${issue.code}\u0000${issue.message}`);
+    if (issue.link) {
+      ids.add(`link\u0000${issue.link}`);
+      continue;
+    }
+    const entry = ENTRY.exec(issue.message);
+    ids.add(entry ? `entry\u0000${entry[1]}` : `finding\u0000${issue.code}\u0000${issue.message}`);
   }
   return ids.size;
 }

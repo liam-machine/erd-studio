@@ -235,6 +235,23 @@ describe('erd-studio check', () => {
     expect(f.link).toBe(linkKey({ fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key' }));
   });
 
+  it('the summary says where the entries are: model files and diagram files counted apart (#133 review 8)', async () => {
+    const root = makeProject({
+      'dim_customer.yml': DIM_CUSTOMER,
+      'dim_date.yml': DIM_DATE,
+      'fct_order.yml': SOUND_FACT,
+    }, {
+      'silver/orders.json': domain(['fct_order', 'dim_customer', 'dim_date'], [
+        { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+      ]),
+    });
+    const { result } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(result.checked).toMatchObject({ relationships: 3, modelFileRelationships: 2, domainFileRelationships: 1 });
+    const { out } = await run(['check', '--project', root], tmp);
+    expect(out).toContain('2 relationships in the model files and 1 in diagram files');
+    expect(out).not.toContain('kept in the model files');
+  });
+
   it('warnings pass unless --strict; info never fails, not even with --strict', async () => {
     const warnOnly = makeProject({
       'dim_customer.yml': DIM_CUSTOMER,
@@ -592,6 +609,22 @@ relationships:
     const doctor = await run(['doctor', '--project', root, '--no-dbt', '--json'], tmp);
     const steps = (JSON.parse(doctor.out) as { nextSteps: Array<{ id: string; why: string }> }).nextSteps;
     expect(steps.find((s) => s.id === 'check-relationships')?.why).toContain('.erd-studio/logical-models/gold/fct_order.yml: a model named fct_order is already in');
+  });
+
+  it('a shadowed duplicate with no relationships is not a relationship problem: check stays clean (#133 review 8)', async () => {
+    const root = makeProject({
+      'fct_order.yml': SOUND_FACT,
+      'dim_customer.yml': DIM_CUSTOMER,
+      'gold/dim_date.yml': DIM_DATE,
+      'silver/dim_date.yml': DIM_DATE,
+    });
+    const { result, exitCode } = runCheck({ project: root, semanticDir: '.erd-studio' });
+    expect(result.unchecked).toEqual([]);
+    expect(result.clean).toBe(true);
+    expect(exitCode).toBe(0);
+    const doctor = await run(['doctor', '--project', root, '--no-dbt', '--json'], tmp);
+    const steps = (JSON.parse(doctor.out) as { nextSteps: Array<{ id: string }> }).nextSteps;
+    expect(steps.find((s) => s.id === 'check-relationships')).toBeUndefined();
   });
 
   it('a layers.json that cannot be used makes the run not clean, so a skipped layer folder is never a pass', async () => {

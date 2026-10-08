@@ -4,7 +4,7 @@
  * the canvas (DomainService) resolves the end against the whole library
  * first, the way `checkRelationships` does, so the two always agree.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -84,5 +84,14 @@ describe('DomainService — case-variant model names in the library', () => {
     const unified = domains.getDomain(path.join(semantic, 'gold', 'x.json'));
     expect(unified.logical.relationships.map((r) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`)).toEqual(['g.d->DD.id']);
     expect(viewer.relationships.map((r) => `${r.fromModel}.${r.fromColumn}->${r.toModel}.${r.toColumn}`)).toEqual(['g.d->DD.id']);
+  });
+  it('lists the library once per load, however many entries are spelled in another case (#133 review 8)', () => {
+    const models = lms.getModelsDir();
+    const rels = Array.from({ length: 5 }, (_, i) => `  - { fromColumn: d, toModel: dd, toColumn: id, cardinality: many-to-one, role: r${i} }`);
+    fs.writeFileSync(path.join(models, 'gold', 'g.yml'), ['name: g', 'columns:', '  - { name: d, dataType: INT }', 'relationships:', ...rels, ''].join('\n'));
+    lms.invalidateCache();
+    const list = vi.spyOn(lms, 'listModelNames');
+    domains.getDomain(path.join(root, '.erd-studio', 'gold', 'x.json'));
+    expect(list.mock.calls.length).toBeLessThanOrEqual(1);
   });
 });

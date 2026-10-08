@@ -71,6 +71,10 @@ export function yamlEntryExtras(text: string): Map<number, string[]> {
   if (!isMap(root)) return out;
   const pair = (root.items as unknown[]).find((p): p is Pair => isPair(p) && isScalar(p.key) && p.key.value === 'relationships');
   if (!pair || !isSeq(pair.value)) return out;
+  // A `fromModel:` naming the file's own model (any case) says nothing the
+  // entry's place does not: the entry carries no key of the user's for it.
+  const nameNode = (root.items as unknown[]).find((p): p is Pair => isPair(p) && isScalar(p.key) && p.key.value === 'name')?.value;
+  const ownName = isScalar(nameNode) && typeof nameNode.value === 'string' ? nameNode.value.toLowerCase() : undefined;
   const comments = commentOffsets(body);
   const seqStart = pair.value.range?.[0] ?? 0;
   let previousEnd = seqStart;
@@ -86,7 +90,10 @@ export function yamlEntryExtras(text: string): Map<number, string[]> {
     const lost: string[] = [];
     if (isMap(item)) {
       for (const p of item.items) {
-        if (isPair(p) && isScalar(p.key) && !MODEL_ENTRY_KEYS.has(String(p.key.value))) lost.push(String(p.key.value));
+        if (!isPair(p) || !isScalar(p.key) || MODEL_ENTRY_KEYS.has(String(p.key.value))) continue;
+        if (p.key.value === 'fromModel' && ownName !== undefined && isScalar(p.value)
+          && typeof p.value.value === 'string' && p.value.value.toLowerCase() === ownName) continue;
+        lost.push(String(p.key.value));
       }
     }
     let commented = ownComment || !!(item as { comment?: string }).comment;

@@ -25,7 +25,7 @@ import {
   type RelationshipIssueCode,
   type RelationshipSource,
 } from './relationships.js';
-import { endEvidenceFromModel, resolveDirection } from './relationshipDirection.js';
+import { endEvidenceFromModel, resolveDirection, type EndEvidence } from './relationshipDirection.js';
 
 export interface NormaliseRelationshipsInput {
   /**
@@ -328,6 +328,14 @@ export function normaliseRelationships(input: NormaliseRelationshipsInput): Norm
  * models' keys say for certain (REL006), else null. Only many-to-one and
  * one-to-one have a direction; a model without that column (a placeholder,
  * an unreadable file) gives no evidence.
+ *
+ * One contradiction needs only one end's flags: a many-to-one whose from
+ * column is its model's whole primary or natural key. A unique column can
+ * never be the many side, whatever is known about the other end — the shape
+ * 1.6.7 saved for a line dragged from a dimension to a fact (#133 review 8).
+ * It is reported when the key flags say nothing about the other end; when
+ * they say that end is unique too, the cardinality is what is wrong, not the
+ * direction.
  */
 export function keyEvidenceContradiction(
   rel: Relationship,
@@ -341,6 +349,22 @@ export function keyEvidenceContradiction(
   const a = endEvidenceFromModel(fromModel, canonical.fromColumn);
   const b = endEvidenceFromModel(toModel, canonical.toColumn);
   if (!a || !b) return null;
+  const wholeKey = (e: EndEvidence): string | null =>
+    e.isPrimaryKey && e.pkColumnCount === 1 ? 'primary key'
+      : e.isNaturalKey && e.nkColumnCount === 1 ? 'natural key'
+        : null;
+  const flagsSilent = (e: EndEvidence): boolean => !e.isPrimaryKey && !e.isNaturalKey && !e.isForeignKeyDeclared;
+  const fromKey = wholeKey(a);
+  if (canonical.cardinality === 'many-to-one' && fromKey && flagsSilent(b)) {
+    return (
+      `Relationship ${canonical.fromModel}.${canonical.fromColumn} → ${canonical.toModel}.${canonical.toColumn} ` +
+      `makes ${canonical.fromModel} the many side, but ${a.model}.${a.column} is ${a.model}'s ${fromKey}, ` +
+      // Only this end is known: the record is turned round, or it is a
+      // one-to-one (a subtype sharing its parent's key) — never claim which.
+      'so its values are unique and it cannot be the many side: either the relationship runs the other way, ' +
+      'or both sides are unique and it is one-to-one'
+    );
+  }
   const verdict = resolveDirection(a, b);
   if (verdict.confidence !== 'certain') return null;
   // Compared exactly, with the real names the evidence carries: two models

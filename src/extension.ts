@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 
 import { DomainService, renameDomainInRaw } from './services/domainService';
 import { LayerService } from './services/layerService';
-import { CURRENT_SCHEMA_VERSION, getRawDomainModelNames, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
+import { CURRENT_SCHEMA_VERSION, getRawDomainModelNames, type SemanticModel, type DomainSummary, type Layer, type Stage, type UnifiedDomain, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
 import { TemplateService } from './services/templateService';
 import { DomainTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
@@ -33,8 +33,10 @@ import {
 } from './services/manifestMissingReasons';
 import { ModelLibraryTreeProvider, type ModelLibraryNode } from './providers/ModelLibraryTreeProvider';
 import { describeOrganizePlan, planOrganizeByLayer, type DomainModelUsage } from './services/modelLibraryOrganizer';
-import { describeDuplicateFix, planDuplicateFix, repointDomainModel, suggestDuplicateName, type DomainReference } from './services/duplicateModelResolver';
+import { describeDuplicateFix, planDuplicateFix, planLibraryRepoint, repointDomainModel, suggestDuplicateName, type DomainReference, type LibraryHolder } from './services/duplicateModelResolver';
 import { validateModelName } from './providers/payloadValidation';
+import { sameName } from './types/naming';
+import { describeRemovedRelationships, removeRelationshipsToModels } from './services/libraryRelationships';
 import { parseLogicalModelText } from '@erd-studio/core';
 import { DOMAIN_EDITOR_VIEW_TYPE, hasOpenDomainCanvas, saveAllAndReload } from './services/recoveryService';
 import { submitFeedback } from './services/feedbackService';
@@ -954,6 +956,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     logicalModelService,
     layerService,
     onWritten: async (domainPaths: string[]) => {
+      // Written behind VS Code's undo history: a canvas undo must not cross it.
+      editorProvider.markFilesRewrittenOnDisk();
       for (const domainPath of domainPaths) treeProvider.invalidateDomain(domainPath);
       modelLibraryProvider.refresh();
       treeProvider.refresh();
@@ -1343,14 +1347,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         void vscode.window.showErrorMessage('Delete Model: No model selected. Right-click a model in the Model Library.');
         return;
       }
+      // Relationships other model files keep to this model would point at
+      // nothing once its file is gone (REL003 on every diagram showing the
+      // model holding them): named in the confirmation and taken out with it
+      // (#133 review 8). A name another file still defines keeps them.
+      const pointingAtIt = () => {
+        const deleting = logicalModelService.findModelFile(node.name);
+        const stillDefined = logicalModelService.listModelFiles()
+          .some((e) => sameName(e.name, node.name) && path.resolve(e.filePath) !== path.resolve(deleting ?? ''));
+        return stillDefined
+          ? { changed: [] as SemanticModel[], removed: [] as string[] }
+          : removeRelationshipsToModels(logicalModelService.listModels(), [node.name]);
+      };
+      const { removed } = pointingAtIt();
+      const also = removed.length === 0
+        ? ''
+        : ` It also removes ${removed.length === 1 ? 'the relationship' : `${removed.length} relationships`} other model files keep to it: ${describeRemovedRelationships(removed)}.`;
       const confirm = await vscode.window.showWarningMessage(
-        `Delete model "${node.name}"? This removes the YAML file — domain references are not cleaned up.`,
+        `Delete model "${node.name}"? This removes the YAML file — domain references are not cleaned up.${also}`,
         { modal: true },
         'Delete',
       );
       if (confirm === 'Delete') {
-        logicalModelService.deleteModel(node.name);
+        const { changed } = pointingAtIt();
+        const changedFiles = changed.map((m) => logicalModelService.findModelFile(m.name)).filter((p): p is string => p !== null);
+        const dirty = vscode.workspace.textDocuments
+          .filter((doc) => doc.isDirty && changedFiles.some((p) => path.resolve(p) === path.resolve(doc.uri.fsPath)))
+          .map((doc) => path.relative(workspaceRoot, doc.uri.fsPath).split(path.sep).join('/'));
+        if (dirty.length > 0) {
+          void vscode.window.showErrorMessage(
+            `Delete Model: ${dirty.join(', ')} ${dirty.length === 1 ? 'has' : 'have'} unsaved edits and ${dirty.length === 1 ? 'keeps a relationship' : 'keep relationships'} to "${node.name}". ` +
+            'Save or revert first, then delete again. Nothing was changed.',
+          );
+          return;
+        }
+        try {
+          for (const model of changed) logicalModelService.saveModel(model);
+          logicalModelService.deleteModel(node.name);
+        } catch (err) {
+          void vscode.window.showErrorMessage(`Delete Model: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        logicalModelService.invalidateCache();
         modelLibraryProvider.refresh();
+        // Recorded as own writes, so the model watcher stays quiet: refresh the open diagrams here.
+        void editorProvider.refreshDomainsReferencingModels([node.name, ...changed.map((m) => m.name)]);
       }
     }),
     vscode.commands.registerCommand('erdStudio.selectDbtProject', (target?: unknown) =>
@@ -1476,29 +1516,92 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!newName) return;
 
       const references: DomainReference[] = [];
+      const domainModelNames = new Map<string, string[]>();
       for (const summary of domainService.listDomains(workspaceRoot, semanticDir)) {
         try {
           const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as unknown;
-          if (getRawDomainModelNames(raw).includes(dup.name)) {
+          const names = getRawDomainModelNames(raw);
+          if (names.includes(dup.name)) {
             references.push({ filePath: summary.filePath, domain: summary.domain, layer: summary.layer });
+            domainModelNames.set(summary.filePath, names);
           }
         } catch {
           // An unreadable domain is not repointed; it keeps the name it has.
         }
       }
       const plan = planDuplicateFix(dup.name, dup.folder, newName, model.alias, references);
+      // Relationships kept in the model library (#133): a repointed domain
+      // draws one only while it shows both models, so an entry pointing at
+      // the old name would silently stop being drawn there.
+      const holderFiles = new Map<string, { filePath: string; model: SemanticModel }>();
+      const holders: LibraryHolder[] = [];
+      for (const e of logicalModelService.listModelFiles()) {
+        if (e.shadowedBy || e.filePath === dup.filePath) continue;
+        try {
+          const m = parseLogicalModelText(fs.readFileSync(e.filePath, 'utf-8'), e.name);
+          if (!m?.relationships?.length) continue;
+          holderFiles.set(m.name, { filePath: e.filePath, model: m });
+          holders.push({ name: m.name, folder: e.folder, relationships: m.relationships });
+        } catch {
+          // An unreadable model file is left as it is.
+        }
+      }
+      const library = planLibraryRepoint(
+        plan,
+        holders,
+        plan.repoint.map((r) => ({ label: `${r.layer}/${r.domain}`, models: domainModelNames.get(r.filePath) ?? [] })),
+        plan.keep.map((r) => ({ label: `${r.layer}/${r.domain}`, models: domainModelNames.get(r.filePath) ?? [] })),
+      );
+      // Every file the rename rewrites is rebuilt from disk: one open with
+      // unsaved edits would have them replaced, so it is refused by name.
+      const filesToChange = [
+        dup.filePath,
+        ...plan.repoint.map((r) => r.filePath),
+        ...library.repoint.map((r) => holderFiles.get(r.model)?.filePath).filter((p): p is string => p !== undefined),
+      ];
+      const refuseUnsaved = (): boolean => {
+        const targets = new Set(filesToChange.map((p) => path.resolve(p)));
+        const dirty = vscode.workspace.textDocuments
+          .filter((doc) => doc.isDirty && targets.has(path.resolve(doc.uri.fsPath)))
+          .map((doc) => path.relative(workspaceRoot, doc.uri.fsPath).split(path.sep).join('/'));
+        if (dirty.length === 0) return false;
+        void vscode.window.showErrorMessage(
+          `Give Duplicate Model Its Own Name: ${dirty.join(', ')} ${dirty.length === 1 ? 'has' : 'have'} unsaved edits. ` +
+          'Save or revert them first, then run it again. Nothing was changed.',
+        );
+        return true;
+      };
+      if (refuseUnsaved()) return;
       const newPath = path.join(path.dirname(dup.filePath), `${newName}.yml`);
       const choice = await vscode.window.showInformationMessage(
         `Rename the duplicate "${dup.name}" to "${newName}"?`,
-        { modal: true, detail: describeDuplicateFix(plan, libPath(dup.filePath), libPath(newPath)) },
+        { modal: true, detail: describeDuplicateFix(plan, libPath(dup.filePath), libPath(newPath), library, holders) },
         'Rename',
       );
       if (choice !== 'Rename') return;
+      // The dialog may have been open a while.
+      if (refuseUnsaved()) return;
 
       const edit = new vscode.WorkspaceEdit();
-      const yamlText = logicalModelService.serializeModelAt({ ...model, name: newName, alias: plan.alias }, dup.filePath);
+      // The copy's own relationships to itself follow it to its new name.
+      const ownRelationships = model.relationships?.map((rel) => (sameName(rel.toModel, dup.name) ? { ...rel, toModel: newName } : rel));
+      const yamlText = logicalModelService.serializeModelAt(
+        { ...model, name: newName, alias: plan.alias, ...(ownRelationships ? { relationships: ownRelationships } : {}) },
+        dup.filePath,
+      );
       edit.createFile(vscode.Uri.file(newPath), { overwrite: false, contents: Buffer.from(yamlText, 'utf-8') });
       edit.deleteFile(vscode.Uri.file(dup.filePath), { ignoreIfNotExists: true });
+      const modelDocs: vscode.TextDocument[] = [];
+      for (const { model: holderName, indexes } of library.repoint) {
+        const holder = holderFiles.get(holderName);
+        if (!holder) continue;
+        const relationships = (holder.model.relationships ?? []).map((rel, i) => (indexes.includes(i) ? { ...rel, toModel: newName } : rel));
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(holder.filePath));
+        const text = doc.getText();
+        const next = logicalModelService.serializeModelAt({ ...holder.model, relationships }, holder.filePath);
+        edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(text.length)), next);
+        modelDocs.push(doc);
+      }
       const domainDocs: vscode.TextDocument[] = [];
       for (const ref of plan.repoint) {
         const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(ref.filePath));
@@ -1518,13 +1621,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // Re-fetched by URI and checked (#126): a handle opened before the edit
       // may have been disposed, and a save can fail without throwing.
       const unsaved: string[] = [];
-      for (const doc of domainDocs) {
+      for (const doc of [...domainDocs, ...modelDocs]) {
         if (await saveDocumentByUri(doc.uri)) {
           ownWrites.recordWrite(doc.uri.fsPath);
         } else {
           unsaved.push(path.relative(workspaceRoot, doc.uri.fsPath).split(path.sep).join('/'));
         }
-        treeProvider.invalidateDomain(doc.uri.fsPath);
+        if (domainDocs.includes(doc)) treeProvider.invalidateDomain(doc.uri.fsPath);
       }
       if (unsaved.length > 0) {
         telemetry.error('saveFailed');

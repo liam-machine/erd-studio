@@ -17,6 +17,7 @@ import * as path from 'path';
 import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
+import { usesLibraryRelationships } from '../../src/services/libraryRelationships';
 import {
   LEAVE_AS_IS,
   RepairEditError,
@@ -353,6 +354,35 @@ describe('questions only the user can answer', () => {
     expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
     expect(p.read('logical-models/fct_order.yml')).toContain('  - fromColumn: customer_key\n    toModel: dim_customer\n');
     expect(codes(run.after!)).not.toContain('REL006');
+  });
+
+  it('REL006: a 1.6.7 dim → fact line on an unflagged fact column is offered the swap and lands in the fact\'s file', async () => {
+    const p = project({
+      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key\n    toModel: fct_order\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'logical-models/fct_order.yml': FCT,
+    });
+    expect(codes(readRepairSnapshot(p.deps))).toEqual(['REL006']);
+    const run = await repair(p, ['swap']);
+    expect(run.questions.map((q) => q.code)).toEqual(['REL006']);
+    expect(run.problems).toEqual([]);
+    expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
+    expect(p.read('logical-models/fct_order.yml')).toContain('  - fromColumn: customer_key\n    toModel: dim_customer\n');
+    expect(codes(run.after!)).toEqual([]);
+  });
+
+  it('REL006: a swap that would take out a commented entry is left, and the respelling still goes ahead (a second run does nothing)', async () => {
+    const p = project({
+      'logical-models/dim_customer.yml': `${DIM}relationships:\n  - fromColumn: customer_key   # hand note\n    toModel: FCT_ORDER\n    toColumn: customer_key\n    cardinality: many-to-one\n`,
+      'logical-models/dim_date.yml': DIM_DATE,
+      'logical-models/fct_order.yml': FCT,
+    });
+    const run = await repair(p, ['swap']);
+    expect(run.problems).toEqual([]);
+    expect(run.plan!.left.join(' ')).toMatch(/the keys suggest the other direction, but .*which turning it round would remove/);
+    expect(p.read('logical-models/dim_customer.yml')).toContain('  - fromColumn: customer_key   # hand note\n    toModel: fct_order\n');
+    const second = await repair(p, []);
+    expect(second.plan?.changes ?? []).toEqual([]);
   });
 
   it('REL006: the file a swap writes is among the files checked for unsaved edits before any question', async () => {
@@ -815,7 +845,27 @@ describe('scanDomainFiles', () => {
       reason: 'it starts with a byte-order mark (BOM), so ERD Studio cannot open it — save it as UTF-8 without BOM',
     })]);
     expect(scan.domainFileRelationshipCount).toBe(p.deps.domainService.countDomainFileRelationships(p.root, SEMANTIC_DIR));
+    // Unopenable, but its relationship still says the project keeps them per
+    // diagram (#133 review 8): it counts towards the mode.
+    expect(scan.domainFileRelationshipCount).toBe(2);
+  });
+
+  it('a domain file that does not parse (a merge conflict) still counts its relationships towards the mode (#133 review 8)', () => {
+    const rel = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const conflicted = domainJson('sales', ['fct_order', 'dim_customer'], [rel])
+      .replace('"viewConfig"', '<<<<<<< HEAD\n"viewConfig"');
+    expect(() => JSON.parse(conflicted)).toThrow();
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'gold/sales.json': conflicted,
+      'gold/other.json': domainJson('other', ['fct_order', 'dim_customer'], []),
+      'gold/empty.json': '{ "nope',
+    });
+    const scan = scanDomainFiles(p.deps.domainService, p.root, SEMANTIC_DIR);
     expect(scan.domainFileRelationshipCount).toBe(1);
+    expect(p.deps.domainService.countDomainFileRelationships(p.root, SEMANTIC_DIR)).toBe(1);
+    // So the project stays per-diagram: a new relationship is not written to a model file.
+    expect(usesLibraryRelationships([], scan.domainFileRelationshipCount)).toBe(false);
   });
 });
 
@@ -1115,14 +1165,32 @@ describe('#133 review 6', () => {
       'gold/b.json': domainJson('b', ['dim_customer', 'fct_order']),
     });
     const run = await repair(p, [], { moveDomainsToLibrary: true });
-    expect(codes(run.before)).toEqual(['REL008']);
+    // Read as many-to-one from the dimension's primary key: also REL006 (a
+    // unique column cannot be the many side), left as it is by the answer.
+    expect(codes(run.before)).toEqual(['REL006', 'REL008']);
     expect(p.read('gold/a.json')).toBe(a);
     expect(p.read('logical-models/dim_customer.yml')).toBe(DIM);
     if (run.plan) {
       expect(run.plan.changes.map((c) => c.file)).not.toContain('gold/a.json');
       expect(run.problems).toEqual([]);
-      expect(codes(run.after!)).toEqual(['REL008']);
+      expect(codes(run.after!)).toEqual(['REL006', 'REL008']);
     }
+  });
+
+  it('a direction question never claims swapping is right: the link may be a one-to-one (#133 review 8)', async () => {
+    const typo = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' };
+    const p = project({
+      'logical-models/dim_customer.yml': DIM,
+      'logical-models/fct_order.yml': FCT_HEAD + '\n',
+      'logical-models/dim_date.yml': DIM_DATE,
+      'gold/a.json': domainJson('a', ['dim_customer', 'fct_order'], [typo]),
+    });
+    const run = await repair(p);
+    const question = run.questions.find((q) => q.code === 'REL006');
+    expect(question?.prompt).toBe(
+      'The keys do not fit this relationship\'s direction. Swap its ends if it runs the other way; '
+      + 'if both sides are unique, leave it and make it one-to-one on the canvas. (Esc cancels everything)',
+    );
   });
 
   it('repair never removes a defaulted diagram entry as a duplicate of a good copy', async () => {
