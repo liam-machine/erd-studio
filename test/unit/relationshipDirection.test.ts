@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { isReferencedKey, orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
+import { isReferencedKey, keysContradictionWarning, orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
 
 const col = (name: string, keys: { pk?: boolean; nk?: boolean; fk?: boolean } = {}) => ({
   name, dataType: 'string', description: '',
@@ -80,5 +80,17 @@ describe('orientDraggedRelationship (#133)', () => {
     expect(orientDraggedRelationship(noTarget, MODELS)).toBe(noTarget);
     const unknown = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'nope' };
     expect(orientDraggedRelationship(unknown, MODELS)).toBe(unknown);
+  });
+});
+
+describe('keysContradictionWarning — the dialog\'s keys-win warning (#133)', () => {
+  const rel = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' as const };
+  it('warns when the many side is its model\'s whole key and the other end is certainly not a key', () => {
+    expect(keysContradictionWarning(rel, MODELS)).toMatch(/^dim_customer\.customer_key is dim_customer's key, so each value appears only once/);
+  });
+  it('says nothing the other way round, for a one-to-one, or without a key on the other end', () => {
+    expect(keysContradictionWarning({ ...rel, fromModel: 'fct_order', toModel: 'dim_customer' }, MODELS)).toBeNull();
+    expect(keysContradictionWarning({ ...rel, cardinality: 'one-to-one' }, MODELS)).toBeNull();
+    expect(keysContradictionWarning(rel, [MODELS[0], { name: 'fct_order', columns: [col('customer_key')] }])).toBeNull();
   });
 });

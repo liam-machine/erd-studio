@@ -563,6 +563,8 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     // The dim_product shape in core's library-relationships fixture: the stray FK flag stays.
     const backwards = DIM.replace('    isPrimaryKey: true\n', '    isPrimaryKey: true\n    isForeignKey: true\n').replace('one-to-many', 'many-to-one');
     fs.writeFileSync(logicalModelService.modelPath('dim_customer'), backwards);
+    // The fact declares its own key, so customer_key there is certainly not it.
+    fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT + '  - name: order_key\n    dataType: string\n    isPrimaryKey: true\n');
     const info = acceptModal();
     await run();
     logicalModelService.invalidateCache();
@@ -572,6 +574,16 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(backwards.slice(0, backwards.indexOf('relationships:')));
     info.mockClear();
     await run();
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
+  it('leaves a many-to-one from the dimension\'s key alone when the other model flags no key (M)', async () => {
+    // A 1:1 extension table: customer_detail.customer_key is its whole key and points at a model with none flagged.
+    const backwards = DIM.replace('one-to-many', 'many-to-one');
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), backwards);
+    const info = acceptModal();
+    await run();
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(backwards);
     expect(messages(info)[0]).toMatch(/nothing to move/);
   });
 

@@ -10,7 +10,10 @@
  * swapped before the dialog opens.
  */
 
+import { contradictsKeys } from '@erd-studio/core';
+
 import type { DisplayColumn, DisplayModel } from '../../src/types/display';
+import type { Cardinality } from '../../src/types/semantic';
 import type { FkDialogPrefill } from '../store/editorStore';
 
 type KeyFlags = Pick<DisplayColumn, 'isPrimaryKey' | 'isNaturalKey' | 'isForeignKey'>;
@@ -48,4 +51,22 @@ export function orientDraggedRelationship(
     toModel: prefill.fromModel,
     toColumn: prefill.fromColumn,
   };
+}
+
+/**
+ * The New / Edit Relationship dialog's warning (#133, keys win): a
+ * many-to-one whose "many" end is its model's whole key while the other end
+ * is certainly not the other model's key — the same contradiction that
+ * refuses ⇄ and that Move turns round. The dialog still lets the user save it
+ * ("Create anyway"). Null when there is nothing to say.
+ */
+export function keysContradictionWarning(
+  rel: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality },
+  models: ReadonlyArray<Pick<DisplayModel, 'name' | 'columns'>>,
+): string | null {
+  if (!rel.fromModel || !rel.fromColumn || !rel.toModel || !rel.toColumn) return null;
+  if (!contradictsKeys(rel, (name) => models.find((m) => m.name === name))) return null;
+  return `${rel.fromModel}.${rel.fromColumn} is ${rel.fromModel}'s key, so each value appears only once — it can't be the ` +
+    `"many" side. ${rel.toModel}.${rel.toColumn} is probably the source column instead; if you save it this way, Move ` +
+    'Relationships to Model Library will turn it round.';
 }

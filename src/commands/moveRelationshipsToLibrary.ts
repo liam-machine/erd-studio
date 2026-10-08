@@ -5,9 +5,10 @@
  * hold is stored once, in the `logical-models/*.yml` of the model holding the
  * foreign key, and taken out of the domain files. A library entry already
  * stored on its "one" side (a `one-to-many`) is moved to that model too
- * (#133), so a new fact never means editing its dimensions. A relationship the domains disagree about is
+ * (#133), so a new fact never means editing its dimensions. A relationship the domains define in different
+ * ways (cardinality, role, or which end of a one-to-one holds the key) is
  * settled by the user — one QuickPick per conflict, naming the diagrams behind
- * each cardinality — or left as it is in each diagram. Prompted.
+ * each version — or left as it is in each diagram. Prompted.
  *
  * Disk is the one source of truth, and the files are written directly — not
  * through a WorkspaceEdit. 1.6.6 edited them through VS Code's documents and
@@ -25,22 +26,23 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { VALID_CARDINALITIES, linkKey, normaliseRelationshipRole, parseLogicalModelText, relationshipKey, sameLink } from '@erd-studio/core';
+import { VALID_CARDINALITIES, linkKey, normaliseRelationshipRole, parseLogicalModelText } from '@erd-studio/core';
 import { dirtyFiles } from '../providers/dirtyDocuments';
 import {
+  applyMoveToModel,
+  describeDefinition,
   describeLeftAlone,
   describeMovePlan,
-  libraryRelationshipsOf,
+  moveTargets,
   planMoveToLibrary,
-  removeLibraryRelationships,
   resolveConflict,
-  upsertLibraryRelationship,
 } from '../services/libraryRelationships';
+import type { ConflictDefinition } from '../services/libraryRelationships';
 import { relationshipsRewriteLoses, setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
 import { detectDomainFormat } from '../types/semantic';
-import type { Cardinality, Relationship, SemanticModel } from '../types/semantic';
+import type { Relationship, SemanticModel } from '../types/semantic';
 import type { DomainService } from '../services/domainService';
 import type { LogicalModelService } from '../services/logicalModelService';
 
@@ -228,28 +230,28 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     return;
   }
 
-  // Each conflict is the user's to settle: which cardinality every diagram draws.
+  // Each conflict is the user's to settle: which version every diagram draws.
   const conflicts = plan.conflicts;
   for (const [index, conflict] of conflicts.entries()) {
     const { fromModel, fromColumn, toModel, toColumn } = conflict.relationship;
     const picked = await vscode.window.showQuickPick(
       [
         ...conflict.definitions.map((d) => ({
-          label: d.cardinality,
+          label: describeDefinition(d.relationship),
           description: `as in ${d.domains.join(', ')}`,
-          detail: `Saved once in ${fileOf(fromModel)}; every diagram with ${fromModel} and ${toModel} draws it ${d.cardinality}.`,
-          cardinality: d.cardinality as Cardinality | undefined,
+          detail: `Saved once in ${fileOf(d.relationship.fromModel)}; every diagram with ${fromModel} and ${toModel} draws it this way.`,
+          definition: d as ConflictDefinition | undefined,
         })),
         {
           label: 'Leave it as it is in each diagram',
           description: 'decide later',
           detail: 'It stays in the diagram files. Run this command again to settle it.',
-          cardinality: undefined,
+          definition: undefined,
         },
       ],
       {
-        title: `Conflict ${index + 1} of ${conflicts.length}: ${fromModel}.${fromColumn} → ${toModel}.${toColumn}`,
-        placeHolder: 'The diagrams disagree. Which cardinality should every diagram use? (Esc cancels the move)',
+        title: `Conflict ${index + 1} of ${conflicts.length}: ${fromModel}.${fromColumn} ↔ ${toModel}.${toColumn}`,
+        placeHolder: 'The diagrams draw this link differently. Which version should every diagram use? (Esc cancels the move)',
         ignoreFocusOut: true,
       },
     );
@@ -258,7 +260,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
       void vscode.window.showInformationMessage(`${TITLE}: cancelled — nothing was changed.`);
       return;
     }
-    if (picked.cardinality) plan = resolveConflict(plan, conflict, picked.cardinality);
+    if (picked.definition) plan = resolveConflict(plan, conflict, picked.definition);
   }
   if (plan.removeFromDomains.size === 0 && plan.rehome.length === 0) {
     telemetry.feature('relMoveCancelled');
@@ -270,17 +272,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   // disk now — after the modal and the QuickPicks, which may have taken a
   // while — changing only its relationships.
   const writes: Array<{ filePath: string; original: string; text: string }> = [];
-  const additions = new Map<string, Relationship[]>();
-  const removals = new Map<string, Relationship[]>();
-  const push = (map: Map<string, Relationship[]>, name: string, rel: Relationship): void => {
-    map.set(name, [...(map.get(name) ?? []), rel]);
-  };
-  for (const rel of plan.toLibrary) push(additions, rel.fromModel, rel);
-  for (const { from, stored, to } of plan.rehome) {
-    push(removals, from, stored);
-    push(additions, to.fromModel, to);
-  }
-  for (const name of new Set([...additions.keys(), ...removals.keys()])) {
+  for (const name of moveTargets(plan)) {
     const filePath = logicalModelService.modelPath(name);
     const original = fs.readFileSync(filePath, 'utf-8');
     if (relationshipsRewriteLoses(original)) {
@@ -289,20 +281,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     const model = parseLogicalModelText(original, name);
     if (!model) throw new Error(`${relPath(filePath)} could not be read as a model file.`);
     const copy: SemanticModel = { ...model, relationships: model.relationships ? [...model.relationships] : undefined };
-    let changed = removeLibraryRelationships([copy], removals.get(name) ?? []).length > 0;
-    for (const rel of additions.get(name) ?? []) {
-      // Already stored here (either way round): that entry stays as it is —
-      // its cardinality and its role — and only gains a role it lacks.
-      const existing = libraryRelationshipsOf(copy).find((r) => sameLink(r, rel));
-      if (existing) {
-        if (!existing.role && rel.role && relationshipKey(existing) === relationshipKey(rel)) {
-          changed = upsertLibraryRelationship(copy, { ...existing, role: rel.role }) || changed;
-        }
-        continue;
-      }
-      changed = upsertLibraryRelationship(copy, rel) || changed;
-    }
-    if (!changed) continue;
+    if (!applyMoveToModel(plan, copy)) continue;
     const text = setYamlRelationships(original, copy.relationships ?? []);
     if (text !== original) writes.push({ filePath, original, text });
   }

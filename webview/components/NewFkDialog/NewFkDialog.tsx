@@ -22,6 +22,7 @@ import { canonicalRelationship, sameLink } from '@erd-studio/core';
 import { useEditorStore } from '../../store/editorStore';
 import { useSend } from '../../hooks/useMessageBus';
 import { detectCircularFk, formatCyclePath } from '../../lib/validation';
+import { keysContradictionWarning } from '../../lib/relationshipDirection';
 import type { Cardinality } from '../../../src/types/semantic';
 import './NewFkDialog.css';
 
@@ -186,6 +187,15 @@ export function NewFkDialog() {
     }
     return null;
   }, [fromModel, toModel, relationshipsForCycleCheck]);
+
+  // Keys win (#133): warn, but allow, a many side that is its model's whole key.
+  const keysWarning = useMemo(
+    () => keysContradictionWarning(
+      { fromModel, fromColumn: fromColumn.trim(), toModel, toColumn: toColumn.trim(), cardinality },
+      domain?.models ?? [],
+    ),
+    [fromModel, fromColumn, toModel, toColumn, cardinality, domain],
+  );
 
   // Validation — pass original key when editing to skip self-duplicate check
   const errors = useMemo(
@@ -520,6 +530,13 @@ export function NewFkDialog() {
           </div>
         )}
 
+        {keysWarning && (
+          <div className="new-fk-dialog__warning new-fk-dialog__warning--global" role="alert">
+            <span className="new-fk-dialog__warning-icon">⚠</span>
+            {keysWarning}
+          </div>
+        )}
+
         {/* Preview */}
         {fromModel && toModel && (
           <div className="new-fk-dialog__preview">
@@ -547,7 +564,7 @@ export function NewFkDialog() {
           onClick={handleSubmit}
           disabled={!isValid}
         >
-          {isEditMode ? 'Save Changes' : 'Create Relationship'}
+          {keysWarning ? (isEditMode ? 'Save anyway' : 'Create anyway') : (isEditMode ? 'Save Changes' : 'Create Relationship')}
         </button>
       </div>
     </Panel>

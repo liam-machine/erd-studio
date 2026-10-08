@@ -325,17 +325,17 @@ describe('relationships stored once in the model library (#126)', () => {
       expect(h.shown('reporting')).toEqual([{ ...EDGE, cardinality: 'many-to-one' }]);
     });
 
-    it('the ⇄ swap moves the relationship to the model that is now the many side', async () => {
+    it('refuses a ⇄ swap that would make a model\'s key the many side, and changes nothing (keys win)', async () => {
       const orders = await h.open('orders');
       await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
       await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-many' } });
 
-      expect(orders.errors()).toEqual([]);
-      expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
-      expect(h.logicalModelService.getModel('dim_customer')?.relationships).toEqual([
-        { fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' },
+      expect(orders.errors()).toEqual([
+        'Failed to update relationship: dim_customer.customer_key is dim_customer\'s key, so each value appears only once — ' +
+        'it can\'t be the "many" side. Unmark it as a key first, then try again.',
       ]);
-      expect(h.shown('orders')).toEqual([{ ...REVERSED, cardinality: 'many-to-one' }]);
+      expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([FCT_ENTRY]);
+      expect(h.logicalModelService.getModel('dim_customer')?.relationships).toBeUndefined();
     });
 
     it('refuses the same two columns joined the other way round — one link, one line', async () => {
@@ -375,12 +375,14 @@ describe('relationships stored once in the model library (#126)', () => {
       expect(files()).toEqual({ fct: [{ ...FCT_ENTRY, role: 'buyer' }], dim: undefined });
       expect(h.shown('reporting')).toEqual([{ ...EDGE, cardinality: 'many-to-one', role: 'buyer' }]);
 
-      // 2. ⇄ swap in the other diagram: the dimension is now the many side, so it moves there, role and all.
+      // 2. ⇄ swap in the other diagram would make the dimension's key the many side: refused, nothing changes.
       await reporting.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-many' } });
-      expect(files()).toEqual({ fct: undefined, dim: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' }] });
+      expect(reporting.errors()).toHaveLength(1);
+      expect(files()).toEqual({ fct: [{ ...FCT_ENTRY, role: 'buyer' }], dim: undefined });
 
-      // 3. ⇄ swap back: home again.
-      await orders.send({ type: 'updateRelationship', payload: { ...REVERSED, cardinality: 'one-to-many' } });
+      // 3. A one-to-one from the fact's end keeps its home and its role.
+      await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'one-to-one' } });
+      await orders.send({ type: 'updateRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
       expect(files()).toEqual({ fct: [{ ...FCT_ENTRY, role: 'buyer' }], dim: undefined });
 
       // 4. Edit: new cardinality and role, same ends.
