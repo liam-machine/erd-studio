@@ -23,8 +23,9 @@ import { TemplateService } from '../../src/services/templateService';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import type { ConflictDefinition } from '../../src/services/libraryRelationships';
 import type { Relationship } from '../../src/types/semantic';
-import { columnsOf } from './relationshipStateSpace.model';
-import type { DomainName, ModelName, MovePick, World } from './relationshipStateSpace.model';
+import { DBT, columnsOf } from './relationshipStateSpace.model';
+import type { DbtSpec, DomainName, ModelName, MovePick, World } from './relationshipStateSpace.model';
+import { dbtKeyIndexOf } from '../../src/services/stageDisplay';
 
 export const SEMANTIC_DIR = '.erd-studio';
 
@@ -41,6 +42,7 @@ export function materialise(w: World): Project {
       name, columns: columnsOf(w.profile, name), ...(w.lib[name].length > 0 ? { relationships: w.lib[name] } : {}),
     });
   }
+  writeDbtTests(root, DBT[w.profile]);
   const domainDir = path.join(root, SEMANTIC_DIR, 'silver');
   fs.mkdirSync(domainDir, { recursive: true });
   const domainPath = (d: DomainName) => path.join(domainDir, `${d}.json`);
@@ -52,6 +54,33 @@ export function materialise(w: World): Project {
     }, null, 2) + '\n');
   }
   return { root, logicalModelService, domainService, domainPath };
+}
+
+/** A profile's dbt tests as a schema yml the real YmlParserService reads (#133 L1). */
+function writeDbtTests(root: string, spec: DbtSpec | undefined): void {
+  if (!spec) return;
+  const lines = ['version: 2', 'models:'];
+  for (const model of ['dim', 'fct']) {
+    const other = model === 'dim' ? 'fct' : 'dim';
+    lines.push(`  - name: ${model}`);
+    const combos = (spec.combos ?? []).filter((c) => c[0].startsWith(`${model}.`));
+    if (combos.length > 0) {
+      lines.push('    tests:');
+      for (const combo of combos) {
+        lines.push('      - dbt_utils.unique_combination_of_columns:', `          combination_of_columns: [${combo.map((mc) => mc.split('.')[1]).join(', ')}]`);
+      }
+    }
+    lines.push('    columns:');
+    for (const column of ['k', 'k_x', 'id', 'k2']) {
+      const tests = [
+        ...((spec.unique ?? []).includes(`${model}.${column}`) ? ['          - unique'] : []),
+        ...((spec.pointsOut ?? []).includes(`${model}.${column}`) ? ['          - relationships:', `              to: ref('${other}')`, `              field: ${column}`] : []),
+      ];
+      if (tests.length > 0) lines.push(`      - name: ${column}`, '        tests:', ...tests);
+    }
+  }
+  fs.mkdirSync(path.join(root, 'models'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'models', 'schema.yml'), lines.join('\n') + '\n');
 }
 
 export function readBack(p: Project, profile: World['profile']): World {
@@ -125,5 +154,7 @@ export async function runRealMove(p: Project, picks: MovePick[]): Promise<void> 
   await moveRelationshipsToLibrary({
     workspaceRoot: p.root, semanticDir: SEMANTIC_DIR, domainService: p.domainService,
     logicalModelService: p.logicalModelService, onWritten: async () => undefined,
+    // As extension.ts wires it.
+    loadDbtKeyIndex: async () => dbtKeyIndexOf(await new YmlParserService().loadYmlData(p.root, undefined), undefined),
   });
 }

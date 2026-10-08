@@ -8,9 +8,14 @@
  * optional bystander link L2 (fct.k2 → dim.k, role "ship") in fct.yml. Two
  * diagrams, D1 and D2, both holding dim and fct. A state is a multiset of
  * stored copies of L — in dim.yml, fct.yml, D1 or D2 — each with a direction,
- * a cardinality, a role and a column spelling, under one of six key profiles.
- * Every state is run through every operation a user can perform from D1, and
- * the invariants below are checked after each.
+ * a cardinality, a role and a spelling of the column and of the other end's
+ * model (#133 L4), under one of ten key profiles: six by key flags, four
+ * where dbt's tests are the evidence (`DBT`, #133 L1). Every state is run
+ * through every operation a user can perform from D1, and the invariants
+ * below are checked after each. Besides the storage invariants (I*, M*):
+ * C1/C2 (ends resolve without case and are drawn and written in the real
+ * spelling), E1 (flags dominate dbt), E2 (orientation is symmetric) and E3
+ * (no silent default from drag order).
  *
  * The provider's handlers decide every write with `planRelationshipWrite`
  * and the Move applies its plan with `applyMoveToModel`; the `host*` and
@@ -19,7 +24,8 @@
  * command over a sample to check the plumbing around them.
  */
 
-import { mergeLibraryRelationships } from '@erd-studio/core';
+import { buildDbtKeyIndex, linkEnd, mergeLibraryRelationships, orientLink } from '@erd-studio/core';
+import type { DbtKeyIndex } from '@erd-studio/core';
 import {
   applyMoveToModel,
   diagramsStillDrawing,
@@ -35,6 +41,8 @@ import {
 } from '../../src/services/libraryRelationships';
 import type { ConflictDefinition, MoveToLibraryPlan, RelationshipWriteOp } from '../../src/services/libraryRelationships';
 import type { Cardinality, ColumnDef, ModelRelationship, Relationship, SemanticModel } from '../../src/types/semantic';
+import type { LinkEnd } from '@erd-studio/core';
+import { orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
 
 // ---------------------------------------------------------------------------
 // Identity, as #133 defines it. Local copies, so the checks never trust the
@@ -76,8 +84,41 @@ export const PROFILES: Record<string, Record<ModelName, Array<[string, Key]>>> =
   natural: { dim: [['k', 'nk']], fct: [['id', 'pk'], ['k', ''], ['k2', '']] },
   sharedKey: { dim: [['k', 'pk']], fct: [['k', 'pk'], ['k2', '']] },
   reversed: { dim: [['k', '']], fct: [['k', 'pk'], ['k2', '']] },
+  // No key flagged; dbt's tests are the evidence (#133 L1, see DBT).
+  dbtStar: { dim: [['k', '']], fct: [['id', ''], ['k', ''], ['k2', '']] },
+  dbtOnlyUnique: { dim: [['k', '']], fct: [['id', ''], ['k', ''], ['k2', '']] },
+  flagsBeatDbt: { dim: [['k', ''], ['k_x', 'pk']], fct: [['id', 'pk'], ['k', ''], ['k2', '']] },
+  dbtCombo: { dim: [['k', ''], ['k_x', '']], fct: [['id', ''], ['k', ''], ['k2', '']] },
 };
 export type Profile = keyof typeof PROFILES;
+
+/** What dbt's tests say in a profile, as `model.column`s (#133 L1). */
+export interface DbtSpec { unique?: string[]; pointsOut?: string[]; combos?: string[][] }
+export const DBT: Partial<Record<Profile, DbtSpec>> = {
+  dbtStar: { unique: ['dim.k'], pointsOut: ['fct.k'] },
+  dbtOnlyUnique: { unique: ['dim.k'] },
+  // dim flags k_x as its key, so dbt's unique test on dim.k is never read.
+  flagsBeatDbt: { unique: ['dim.k'] },
+  dbtCombo: { combos: [['dim.k', 'dim.k_x']] },
+};
+
+/** A profile's dbt evidence as the host builds it, or undefined without any. */
+export function dbtIndexOf(spec: DbtSpec | undefined): DbtKeyIndex | undefined {
+  if (!spec) return undefined;
+  const split = (mc: string): [string, string] => mc.split('.') as [string, string];
+  const unique = new Map<string, Set<string>>();
+  for (const [m, c] of (spec.unique ?? []).map(split)) unique.set(m, new Set([...(unique.get(m) ?? []), c]));
+  const combos = new Map<string, string[][]>();
+  for (const combo of spec.combos ?? []) {
+    const m = split(combo[0])[0];
+    combos.set(m, [...(combos.get(m) ?? []), combo.map((mc) => split(mc)[1])]);
+  }
+  return buildDbtKeyIndex([{
+    uniqueColumns: unique, compositeUniqueGroups: combos,
+    relationshipTests: (spec.pointsOut ?? []).map(split).map(([fromModel, fromColumn]) => ({ fromModel, fromColumn })),
+  }]);
+}
+export const dbtIndex = (w: World): DbtKeyIndex | undefined => dbtIndexOf(DBT[w.profile]);
 
 export const L_KEY = linkKey({ fromModel: 'fct', fromColumn: 'k', toModel: 'dim', toColumn: 'k' });
 export const BYSTANDER: ModelRelationship = { fromColumn: 'k2', toModel: 'dim', toColumn: 'k', cardinality: 'many-to-one', role: 'ship' };
@@ -90,12 +131,13 @@ export interface World {
   domModels: Record<DomainName, ModelName[]>;
 }
 
-/** One stored copy of L, as enumerated. */
-export interface Copy { where: ModelName | 'D1' | 'D2'; dir: 'fd' | 'df'; card: Cardinality; role?: string; upper: boolean }
+/** One stored copy of L, as enumerated. `upperModel` spells the other end's model in another case (#133 L4). */
+export interface Copy { where: ModelName | 'D1' | 'D2'; dir: 'fd' | 'df'; card: Cardinality; role?: string; upper: boolean; upperModel?: boolean }
 
 export function relOf(c: Copy): Relationship {
   const col = c.upper ? 'K' : 'k';
-  const [fromModel, toModel] = c.dir === 'fd' ? ['fct', 'dim'] : ['dim', 'fct'];
+  const [fromModel, other] = c.dir === 'fd' ? ['fct', 'dim'] : ['dim', 'fct'];
+  const toModel = c.upperModel ? other[0].toUpperCase() + other.slice(1) : other;
   return { fromModel, fromColumn: col, toModel, toColumn: col, cardinality: c.card, ...(c.role ? { role: c.role } : {}) };
 }
 
@@ -148,12 +190,12 @@ export const domainRelCount = (w: World): number => w.dom.D1.length + w.dom.D2.l
 export const libraryMode = (w: World): boolean => usesLibraryRelationships(libModels(w), domainRelCount(w));
 
 /** What diagram `d` draws: core's read path, as `DomainService.getDomain` calls it. */
-export function draw(w: World, d: DomainName, modelOrder?: ModelName[], reverseEntries = false): Relationship[] {
+export function draw(w: World, d: DomainName, modelOrder?: ModelName[], reverseEntries = false, dbt?: DbtKeyIndex): Relationship[] {
   const order = modelOrder ?? w.domModels[d];
   const models = libModels(w, order);
   if (reverseEntries) for (const m of models) if (m.relationships) m.relationships.reverse();
   const own = reverseEntries ? [...w.dom[d]].reverse() : w.dom[d];
-  return mergeLibraryRelationships(models, clone(own));
+  return mergeLibraryRelationships(models, clone(own), '', undefined, dbt ?? dbtIndex(w));
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +242,9 @@ export type Ends = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | '
 
 /** One canvas edit from diagram `d`, decided by the provider's own planner. */
 export function hostWrite(w: World, op: RelationshipWriteOp, d: DomainName = 'D1'): Outcome {
-  const plan = planRelationshipWrite(op, { home: libraryMode(w) ? 'library' : 'domain', models: libModels(w), domainRelationships: clone(w.dom[d]) });
+  const plan = planRelationshipWrite(op, {
+    home: libraryMode(w) ? 'library' : 'domain', models: libModels(w), domainRelationships: clone(w.dom[d]), dbt: dbtIndex(w),
+  });
   if (!plan.ok) return { world: w, error: plan.error };
   const out = withLib(w, plan.changed);
   if (plan.domainRelationships) out.dom[d] = clone(plan.domainRelationships);
@@ -251,16 +295,20 @@ export function hostRenameColumn(w: World, model: ModelName, oldName: string, ne
 }
 
 /** The Move command's plan, as `runMove` builds it. */
-export function movePlan(w: World, domainOrder: DomainName[] = ['D1', 'D2', 'D3'], modelOrder: ModelName[] = ['dim', 'fct']): MoveToLibraryPlan {
+export function movePlan(
+  w: World, domainOrder: DomainName[] = ['D1', 'D2', 'D3'], modelOrder: ModelName[] = ['dim', 'fct'], dbt: DbtKeyIndex | undefined = dbtIndex(w),
+): MoveToLibraryPlan {
   const domains = domainOrder
     .map((d) => ({ label: d, relationships: clone(w.dom[d]) }))
     .filter((d) => d.relationships.length > 0);
+  // As the command looks a model up: by its real name, one object per model whatever the spelling (L4).
   const cache = new Map<string, SemanticModel | null>();
   const libraryModel = (name: string): SemanticModel | null => {
-    if (!cache.has(name)) cache.set(name, libModels(w).find((m) => m.name === name) ?? null);
-    return cache.get(name) ?? null;
+    const key = name.toLowerCase();
+    if (!cache.has(key)) cache.set(key, libModels(w).find((m) => m.name === key) ?? null);
+    return cache.get(key) ?? null;
   };
-  return planMoveToLibrary(domains, libraryModel, libModels(w, modelOrder), () => false);
+  return planMoveToLibrary(domains, libraryModel, libModels(w, modelOrder), () => false, { dbt });
 }
 
 /** A conflict pick: a definition, or undefined to leave it. */
@@ -286,7 +334,7 @@ export function moveApply(w: World, plan0: MoveToLibraryPlan, picks: MovePick[])
   if (plan.removeFromDomains.size === 0 && plan.rehome.length === 0) return { world: w, report: ['nothing changed'] };
   let out = clone(w);
   for (const name of moveTargets(plan)) {
-    const copy = libModels(out).find((m) => m.name === name)!;
+    const copy = libModels(out).find((m) => m.name === name.toLowerCase())!;
     if (applyMoveToModel(plan, copy)) out = withLib(out, [copy]);
   }
   for (const d of ['D1', 'D2', 'D3'] as const) {
@@ -310,7 +358,7 @@ export function copyAlphabet(roles: Array<string | undefined>, uppers: boolean[]
   return out;
 }
 
-export const copyCode = (c: Copy): string => `${c.where}:${c.dir}:${SHORT[c.card]}:${c.role ?? '-'}:${c.upper ? 'K' : 'k'}`;
+export const copyCode = (c: Copy): string => `${c.where}:${c.dir}:${SHORT[c.card]}:${c.role ?? '-'}:${c.upper ? 'K' : 'k'}${c.upperModel ? ':M' : ''}`;
 
 /** Canonical under the symmetries D1↔D2 and r1↔r2; null when `copies` is not its class's representative. */
 export function representative(copies: Copy[]): boolean {
@@ -336,7 +384,15 @@ export interface State { profile: Profile; copies: Copy[]; bystander: boolean }
 export function* states(scope: 'full' | 'small' = (process.env.STATESPACE_SCOPE as 'small' | undefined) ?? 'full'): Generator<State> {
   const small = copyAlphabet([undefined, 'r1'], [false]);
   const full = scope === 'small' ? small : copyAlphabet([undefined, 'r1', 'r2'], [false, true]);
+  // dbt's evidence decides direction, not roles: one role, no bystander (#133 L1).
+  const plain = copyAlphabet([undefined], [false]);
   for (const profile of Object.keys(PROFILES) as Profile[]) {
+    if (DBT[profile]) {
+      for (let size = 0; size <= 2; size++) {
+        for (const copies of multisets(plain, size)) if (representative(copies)) yield { profile, copies, bystander: false };
+      }
+      continue;
+    }
     for (const bystander of [false, true]) {
       const alphabet = profile === 'star' || profile === 'sharedKey' ? full : small;
       for (let size = 0; size <= 2; size++) {
@@ -347,12 +403,22 @@ export function* states(scope: 'full' | 'small' = (process.env.STATESPACE_SCOPE 
       }
     }
   }
+  // Ends spelled in another case (#133 L4), star only: one such copy alone,
+  // or a library copy beside a plain one. The full scope's alphabet already
+  // varies the column, so it adds only the model spelling.
+  const variants = plain.flatMap((c) => (scope === 'small'
+    ? [{ ...c, upper: true }, { ...c, upperModel: true }, { ...c, upper: true, upperModel: true }]
+    : [{ ...c, upperModel: true }, { ...c, upper: true, upperModel: true }]));
+  for (const v of variants) yield { profile: 'star', copies: [v], bystander: false };
+  for (const v of variants.filter((c) => c.where === 'dim' || c.where === 'fct')) {
+    for (const c of plain) yield { profile: 'star', copies: [v, c], bystander: false };
+  }
 }
 
 /** Smaller is simpler: fewer copies, then no bystander, the star profile, no roles, no upper case. */
 export function weight(s: State): number {
   return s.copies.length * 100 + (s.bystander ? 10 : 0) + (s.profile === 'star' ? 0 : 5)
-    + s.copies.filter((c) => c.role).length * 2 + s.copies.filter((c) => c.upper).length * 3;
+    + s.copies.filter((c) => c.role).length * 2 + s.copies.filter((c) => c.upper).length * 3 + s.copies.filter((c) => c.upperModel).length * 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -557,10 +623,95 @@ export function readInvariants(w: World): Violation[] {
     const reordered = draw(w, d, undefined, true);
     if (sortRels(reordered) !== sortRels(lines)) v.push(['I3b deterministic (entry order within a file)', `${d}: ${sortRels(lines)}  vs  ${sortRels(reordered)}`]);
     const stored = [...storedCopies(w).filter((c) => c.file.endsWith('.yml')).map((c) => c.rel), ...w.dom[d]];
+    // C1: a stored copy of L whose ends resolve, without case, to this diagram's models is drawn, in the real spelling (L4).
+    if (stored.some((r) => linkKey(r) === L_KEY)) {
+      const line = drawnAs(lines, L_KEY);
+      if (!line) v.push(['C1 resolved-is-drawn', `${d} stores L but draws nothing`]);
+      else if (!realSpelling(line)) v.push(['C1 resolved-is-drawn', `${d} draws ${sortRels([line])}`]);
+    }
     for (const line of lines) {
       const backing = stored.filter((s) => sameLink(s, line) && cardFrom(s, line.fromModel) === line.cardinality);
       if (backing.length === 0) v.push(['I8 drawn-is-stored', `${d} draws ${sortRels([line])}, no copy says that`]);
       else if (line.role && !stored.some((s) => sameLink(s, line) && s.role === line.role)) v.push(['I8 drawn-is-stored', `${d} role ${line.role} not stored`]);
+    }
+  }
+  return v;
+}
+
+/** L's ends in the models' and columns' real spelling. */
+export const realSpelling = (r: Relationship): boolean =>
+  [r.fromModel, r.toModel].every((m) => m === 'dim' || m === 'fct') && r.fromColumn === 'k' && r.toColumn === 'k';
+
+/**
+ * C2: in every file `op` wrote, entries of untargeted links are unchanged
+ * (each, in order), and L's entries are spelled with the real names (L4: a
+ * write respells only what it touches).
+ */
+export function respellTouchedOnly(before: World, after: World, targets: string[]): Violation[] {
+  const v: Violation[] = [];
+  const files = (w: World): Array<[string, Relationship[]]> => [
+    ...(['dim', 'fct'] as const).map((m): [string, Relationship[]] => [`${m}.yml`, w.lib[m].map((e) => ({ fromModel: m, ...e }))]),
+    ...(['D1', 'D2', 'D3'] as const).map((d): [string, Relationship[]] => [d, w.dom[d]]),
+  ];
+  const a = new Map(files(after));
+  for (const [file, b] of files(before)) {
+    const now = a.get(file)!;
+    if (JSON.stringify(now) === JSON.stringify(b)) continue;
+    const others = (rels: Relationship[]) => JSON.stringify(rels.filter((r) => !targets.includes(linkKey(r))));
+    if (others(now) !== others(b)) v.push(['C2 respell-touched-only', `${file}: an untargeted entry changed`]);
+    if (now.some((r) => linkKey(r) === L_KEY && !realSpelling(r))) v.push(['C2 respell-touched-only', `${file}: L written as ${sortRels(now.filter((r) => linkKey(r) === L_KEY))}`]);
+  }
+  return v;
+}
+
+/** Whether a profile's own flags decide L's direction: both models flag a key. */
+export const flagsDecide = (profile: Profile): boolean =>
+  (['dim', 'fct'] as const).every((m) => PROFILES[profile][m].some(([, key]) => key !== ''));
+
+/** dbt evidence pointing L the other way round (and more), for E1. */
+export const ADVERSARIAL_DBT = dbtIndexOf({ unique: ['fct.k'], pointsOut: ['dim.k'], combos: [['fct.k', 'fct.k2']] });
+
+/**
+ * E1: in a profile whose flags decide L's direction, dbt evidence changes
+ * nothing about L — what each diagram draws, or what the Move plans.
+ */
+export function flagsDominate(w: World): Violation[] {
+  if (!flagsDecide(w.profile)) return [];
+  const v: Violation[] = [];
+  for (const d of ['D1', 'D2'] as const) {
+    const plainLine = drawnAs(draw(w, d, undefined, false, dbtIndex(w)), L_KEY);
+    const withDbt = drawnAs(draw(w, d, undefined, false, ADVERSARIAL_DBT), L_KEY);
+    if (JSON.stringify(plainLine) !== JSON.stringify(withDbt)) v.push(['E1 flags-dominate', `${d}: ${sortRels(plainLine ? [plainLine] : [])} became ${sortRels(withDbt ? [withDbt] : [])} with dbt evidence`]);
+  }
+  const ofL = (plan: MoveToLibraryPlan): string => JSON.stringify([
+    plan.toLibrary.filter((r) => linkKey(r) === L_KEY), plan.rehome.filter((r) => linkKey(r.to) === L_KEY),
+    plan.turned.filter((t) => linkKey(t.relationship) === L_KEY), plan.conflicts.filter((c) => linkKey(c.relationship) === L_KEY),
+  ]);
+  if (ofL(movePlan(w)) !== ofL(movePlan(w, undefined, undefined, ADVERSARIAL_DBT))) v.push(['E1 flags-dominate', 'the Move plans L differently with dbt evidence']);
+  return v;
+}
+
+/**
+ * E2 and E3 for a profile: orientLink is symmetric for every column pair,
+ * and when nothing is known about either end of L, a drag either way round
+ * is undecided — never a silent default from drag order.
+ */
+export function orientationInvariants(profile: Profile): Violation[] {
+  const v: Violation[] = [];
+  const w = worldOf(profile, [], false);
+  const dbt = dbtIndex(w);
+  const models = libModels(w);
+  const ends = models.flatMap((m) => (m.columns ?? []).map((c) => linkEnd(m.name, m, [c.name], { dbt })));
+  for (const a of ends) for (const b of ends) {
+    if (a === b) continue;
+    if (JSON.stringify(orientLink(a, b)) !== JSON.stringify(orientLink(b, a))) v.push(['E2 orientation-symmetric', `${profile}: ${a.model}.${a.columns} ↔ ${b.model}.${b.columns}`]);
+  }
+  const at = (model: string): LinkEnd => linkEnd(model, models.find((m) => m.name === model), ['k'], { dbt });
+  if (at('dim').evidence === 'unknown' && at('fct').evidence === 'unknown') {
+    const display = models.map((m) => ({ name: m.name, columns: (m.columns ?? []).map((c) => ({ ...c, isPrimaryKey: !!c.isPrimaryKey, isNaturalKey: !!c.isNaturalKey, isForeignKey: false, description: '', dataType: 'string' })) }));
+    for (const drag of [fd('many-to-one'), reverseEnds(fd('many-to-one'))]) {
+      const oriented = orientDraggedRelationship({ fromModel: drag.fromModel, fromColumn: drag.fromColumn, toModel: drag.toModel, toColumn: drag.toColumn }, display);
+      if ((oriented as { direction?: string }).direction !== 'undecided') v.push(['E3 no-silent-default', `${profile}: a drag ${drag.fromModel}→${drag.toModel} was decided`]);
     }
   }
   return v;
@@ -665,6 +816,7 @@ export function checkOp(w: World, op: Op, a: World, outcome: Outcome = { world: 
       }
     } else {
       vs.push(...noSilentLoss(w, a, op.targets));
+      if (op.targets.includes(L_KEY)) vs.push(...respellTouchedOnly(w, a, op.targets));
       if (!op.name.startsWith('add') || op.targets.length === 0) vs.push(...sameDrawing(w, a, op.targets));
       vs.push(...(op.post?.(w, a, outcome) ?? []));
       const opDomain: DomainName = op.call?.d ?? 'D1';

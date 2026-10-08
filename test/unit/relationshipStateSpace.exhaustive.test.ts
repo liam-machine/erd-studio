@@ -1,22 +1,27 @@
 /**
  * Bounded exhaustive check of relationship storage (#133): every small state,
- * every operation, every invariant. See relationshipStateSpace.model.ts.
+ * every operation, every invariant. See relationshipStateSpace.model.ts and,
+ * for the self-reference and composite-key universes,
+ * relationshipStateSpace.universes.ts.
  *
- * CI runs the small scope (≤2 copies, roles none/r1, lower case; ~15 s) and
- * fails on any violation not in ALLOWED. `STATESPACE_SCOPE=full` widens it
- * (3 copies, a second role, upper-case spellings); `STATESPACE_BFS=1` adds the
- * search over operation sequences from clean projects (depth STATESPACE_DEPTH,
- * default 3). `EXHAUSTIVE_REPORT=<file>` writes the report.
+ * CI runs the small scope (≤2 copies, roles none/r1, lower case, plus the
+ * dbt-evidence profiles and the case-variant star; ~15 s, the two further
+ * universes ~1 s) and fails on any violation not in ALLOWED, which is empty.
+ * `STATESPACE_SCOPE=full` widens it (3 copies, a second role, upper-case
+ * spellings); `STATESPACE_BFS=1` adds the search over operation sequences
+ * from clean projects (depth STATESPACE_DEPTH, default 3).
+ * `EXHAUSTIVE_REPORT=<file>` writes the report.
  */
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 
 import {
-  L_KEY, SWAP, checkMove, checkOp, describeState, draw, drawnAs, factOf, factText, hostUpdate, libraryMode, linkKey,
-  moveApply, movePlan, opsFor, pickLabel, pickSets, readInvariants, states, storedCopies, weight, worldOf,
+  L_KEY, PROFILES, SWAP, checkMove, checkOp, describeState, draw, drawnAs, factOf, factText, flagsDominate, hostUpdate, libraryMode,
+  linkKey, moveApply, movePlan, opsFor, orientationInvariants, pickLabel, pickSets, readInvariants, states, storedCopies, weight, worldOf,
 } from './relationshipStateSpace.model';
-import type { Ends, Found, State, Violation, World } from './relationshipStateSpace.model';
+import type { Ends, Found, Profile, State, Violation, World } from './relationshipStateSpace.model';
+import { checkGroupState, checkSelfState, describeGroup, describeSelf, groupStates, selfStates } from './relationshipStateSpace.universes';
 
 /**
  * Violations still accepted, by signature, each with its reason. Empty: every
@@ -52,10 +57,13 @@ describe('relationship storage — bounded exhaustive check (#133)', () => {
       }
     };
 
+    // E2, E3: orientation, once per key profile.
+    for (const profile of Object.keys(PROFILES) as Profile[]) record({ profile, copies: [], bystander: false }, 'orient', orientationInvariants(profile));
+
     for (const s of states(scope)) {
       stateCount += 1;
       const w = worldOf(s.profile, s.copies, s.bystander);
-      record(s, 'read', readInvariants(w));
+      record(s, 'read', [...readInvariants(w), ...flagsDominate(w)]);
 
       for (const op of opsFor(w)) {
         opCount += 1;
@@ -119,6 +127,39 @@ describe('relationship storage — bounded exhaustive check (#133)', () => {
     }
     expect(stateCount).toBeGreaterThan(1000);
     expect(unexpected.map(([sig, f]) => `${sig} — ${f.state} / ${f.op}: ${f.detail}`)).toEqual([]);
+  }, 600_000);
+
+  it('checks every small self-reference and composite-key state (#133 L2, L3)', () => {
+    const t0 = Date.now();
+    const found = new Map<string, { count: number; state: string; detail: string }>();
+    let states = 0;
+    const note = (universe: string, state: string, op: string, vs: Violation[]): void => {
+      for (const [inv, detail] of vs) {
+        const sig = `${universe} ${inv} :: ${op}`;
+        const f = found.get(sig);
+        if (!f) found.set(sig, { count: 1, state, detail });
+        else f.count += 1;
+      }
+    };
+    for (const { profile, copies } of selfStates()) {
+      states += 1;
+      for (const { op, violations } of checkSelfState(profile, copies)) note('SELF', describeSelf(profile, copies), op, violations);
+    }
+    for (const copies of groupStates()) {
+      states += 1;
+      for (const { op, violations } of checkGroupState(copies)) note('GROUP', describeGroup(copies), op, violations);
+    }
+    const rows = [...found.entries()].sort((x, y) => x[0].localeCompare(y[0]));
+    const lines = [
+      `self-reference and composite universes: states ${states}, ${Date.now() - t0} ms`,
+      ...rows.map(([sig, f]) => `\n${ALLOWED[sig] ? '○' : '●'} ${sig}  (×${f.count})\n    state: ${f.state}\n    got:   ${f.detail}`),
+    ];
+    if (process.env.EXHAUSTIVE_REPORT) fs.writeFileSync(process.env.EXHAUSTIVE_REPORT.replace(/\.txt$/, '-universes.txt'), lines.join('\n') + '\n');
+    const unexpected = rows.filter(([sig]) => !ALLOWED[sig]);
+    // eslint-disable-next-line no-console
+    if (unexpected.length > 0) console.log(lines.join('\n'));
+    expect(states).toBeGreaterThan(500);
+    expect(unexpected.map(([sig, f]) => `${sig} — ${f.state}: ${f.detail}`)).toEqual([]);
   }, 600_000);
 
   it.runIf(!!process.env.STATESPACE_BFS)('explores every state reachable from clean projects (BFS over operation sequences)', () => {
