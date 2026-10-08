@@ -655,6 +655,27 @@ describe('a rename reaches the copies other diagrams keep of their own (#133 L5)
     expect(h.readDomain('finance').logical.relationships).toEqual([]);
   });
 
+  it('one undo puts the other diagram back on disk too, not just in memory', async () => {
+    const orders = await perDiagram();
+    const reportingBefore = fs.readFileSync(h.domainPath('reporting'), 'utf-8');
+    const ymlPath = h.logicalModelService.modelPath('dim_customer');
+    const ymlBefore = fs.readFileSync(ymlPath, 'utf-8');
+    await orders.send({ type: 'updateColumn', payload: { modelName: 'dim_customer', oldColumnName: 'customer_key', column: { name: 'customer_sk', dataType: 'string', description: '' } } });
+    expect(orders.errors()).toEqual([]);
+    expect(fs.readFileSync(h.domainPath('reporting'), 'utf-8')).not.toBe(reportingBefore);
+
+    // VS Code's undo rewinds every document of the step in memory, leaving them dirty.
+    const reporting = _mockDocuments.get(vscode.Uri.file(h.domainPath('reporting')).toString())!;
+    const yml = _mockDocuments.get(vscode.Uri.file(ymlPath).toString())!;
+    reporting._setText(reportingBefore);
+    yml._setText(ymlBefore);
+    await orders.send({ type: 'undo' });
+
+    expect(reporting.isDirty).toBe(false);
+    expect(fs.readFileSync(h.domainPath('reporting'), 'utf-8')).toBe(reportingBefore);
+    expect(fs.readFileSync(ymlPath, 'utf-8')).toBe(ymlBefore);
+  });
+
   it('a model rename rewrites the other diagram\'s model list, position and copy', async () => {
     const orders = await perDiagram();
     await orders.send({ type: 'renameModel', payload: { oldName: 'dim_customer', newName: 'dim_client' } });
