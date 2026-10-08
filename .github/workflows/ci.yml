@@ -35,6 +35,9 @@ jobs:
       # The extension builds the workspace packages from source; this checks
       # their own publishable builds (esbuild + declarations) still succeed.
       - run: npm run build:packages
+      # What publish-packages.yml would upload: fails here, not after a merge,
+      # when a package's `files` or `prepack` stops producing a tarball.
+      - run: npm pack --dry-run -w @erd-studio/core -w @erd-studio/renderer
       - run: npm run test
       - run: npm run package
 
@@ -61,6 +64,33 @@ jobs:
   # the type-check step fails on unresolved modules. An accidental `import 'vscode'` in a
   # shared service still fails the esbuild step here, because `vscode` is not in the bundle's
   # `external` list.
+  # Preview of what publish-packages.yml will release to npm once this reaches
+  # main, in the run summary. Informational only: it needs the npm registry,
+  # and a registry hiccup must not block a PR.
+  packages-plan:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: npm release preview
+        run: |
+          PLAN="${RUNNER_TEMP}/package-plan.json"
+          node scripts/release-packages.mjs plan --out "$PLAN"
+          {
+            echo '### npm packages this PR releases on merge to main'
+            echo
+            echo '| Package | npm | Release | Why |'
+            echo '|---|---|---|---|'
+            jq -r '.[] | "| `\(.name)` | \(.published // "—") | \(.next // "skipped") | \(.reason) |"' "$PLAN"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   mcp-server:
     runs-on: ubuntu-latest
     steps:
