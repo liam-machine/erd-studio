@@ -4,6 +4,8 @@
  */
 
 import type { Relationship } from './types/semantic.js';
+import { keyEvidence } from './keyEvidence.js';
+import type { DbtKeyIndex, KeyedModel } from './keyEvidence.js';
 
 type Ends = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
 
@@ -80,51 +82,38 @@ export function reverseRelationship<T extends Relationship>(rel: T): T {
 }
 
 /**
- * What a model's key flags say about one of its columns (#133): its whole
- * primary or natural key (`whole-key`), a column of a model that declares a
- * single-column key elsewhere (`not-key`), or nothing either way (`unknown` —
- * no key flagged, or only a composite one). The one place relationship
- * direction reads key evidence: Move's turn-round, the read winner, the ⇄
- * refusal and the New Relationship dialog's warning all ask it.
- */
-export type KeyEvidence = 'whole-key' | 'not-key' | 'unknown';
-
-/** The parts of a model `keyEvidence` reads. */
-export interface KeyedModel {
-  columns?: ReadonlyArray<{ name: string; isPrimaryKey?: boolean; isNaturalKey?: boolean }>;
-}
-
-export function keyEvidence(model: KeyedModel | null | undefined, column: string): KeyEvidence {
-  const columns = model?.columns ?? [];
-  const wholeKeys = (['isPrimaryKey', 'isNaturalKey'] as const)
-    .map((flag) => columns.filter((c) => c[flag]))
-    .filter((keys) => keys.length === 1)
-    .map((keys) => keys[0].name.trim().toLowerCase());
-  if (wholeKeys.length === 0) return 'unknown';
-  return wholeKeys.includes(`${column}`.trim().toLowerCase()) ? 'whole-key' : 'not-key';
-}
-
-/**
  * Whether the keys contradict a stored many-to-one: its many side is its
  * model's whole key (each value appears once) and the one side is certainly
- * not the target's key. "Keys win": such an entry is read the other way
- * round. Without that certainty — no key flagged on the target, or a
- * composite one — nothing is turned round.
+ * not the target's key (`keyEvidence`: the model's flags, else dbt's tests).
+ * "Keys win": such an entry is read the other way round. Without that
+ * certainty — nothing flagged or tested on the target — nothing is turned
+ * round.
  */
-export function contradictsKeys(rel: Relationship, modelOf: (name: string) => KeyedModel | null | undefined): boolean {
+export function contradictsKeys(
+  rel: Relationship,
+  modelOf: (name: string) => KeyedModel | null | undefined,
+  dbt?: DbtKeyIndex,
+): boolean {
   return rel.cardinality === 'many-to-one'
-    && keyEvidence(modelOf(rel.fromModel), rel.fromColumn) === 'whole-key'
-    && keyEvidence(modelOf(rel.toModel), rel.toColumn) === 'not-key';
+    && keyEvidence(named(modelOf(rel.fromModel), rel.fromModel), rel.fromColumn, dbt) === 'whole-key'
+    && keyEvidence(named(modelOf(rel.toModel), rel.toModel), rel.toColumn, dbt) === 'not-key';
 }
+
+/** A model as key evidence reads it, named so dbt evidence can be looked up for it. */
+const named = (model: KeyedModel | null | undefined, name: string): KeyedModel => (model ? { ...model, name: model.name ?? name } : { name });
 
 /**
  * Where a relationship belongs, by its cardinality and its keys: the
  * `canonicalRelationship`, turned round as a many-to-one when the keys
  * contradict it (`contradictsKeys`). Returns `rel` itself when nothing changes.
  */
-export function keyedRelationship<T extends Relationship>(rel: T, modelOf: (name: string) => KeyedModel | null | undefined): T {
+export function keyedRelationship<T extends Relationship>(
+  rel: T,
+  modelOf: (name: string) => KeyedModel | null | undefined,
+  dbt?: DbtKeyIndex,
+): T {
   const canonical = canonicalRelationship(rel);
-  return contradictsKeys(canonical, modelOf) ? { ...reverseRelationship(canonical), cardinality: 'many-to-one' } : canonical;
+  return contradictsKeys(canonical, modelOf, dbt) ? { ...reverseRelationship(canonical), cardinality: 'many-to-one' } : canonical;
 }
 
 /** Longest `role` label kept on a relationship. */

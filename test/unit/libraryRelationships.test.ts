@@ -24,6 +24,7 @@ import {
   usesLibraryRelationships,
 } from '../../src/services/libraryRelationships';
 import { LogicalModelService } from '../../src/services/logicalModelService';
+import { buildDbtKeyIndex } from '@erd-studio/core';
 import type { Relationship, SemanticModel } from '../../src/types/semantic';
 
 const REL: Relationship = {
@@ -306,7 +307,21 @@ describe('stored on the many side (#133)', () => {
 
     it('and leaves it alone when the fact flags no key: no certainty the column is not its key (M)', () => {
       expect(plan([KEY], [{ ...KEY, isPrimaryKey: false }]).rehome).toEqual([]);
-      expect(plan([KEY], [{ ...ORDER_KEY }, { ...ORDER_KEY, name: 'line_no' }]).rehome).toEqual([]);
+    });
+
+    it('a fact keyed by a composite is certain evidence: customer_key is not that key, so it turns round (#133 L1)', () => {
+      expect(plan([KEY], [{ ...ORDER_KEY }, { ...ORDER_KEY, name: 'line_no' }]).rehome).toHaveLength(1);
+    });
+
+    it('with no key flagged anywhere, dbt\'s tests decide: a unique dim key and a relationships test leaving the fact', () => {
+      const bare = (name: string) => ({ ...KEY, name, isPrimaryKey: false });
+      const library = [{ ...dim([backwards]), columns: [bare('customer_key')] }, { ...fct(), columns: [bare('customer_key')] }];
+      const lookup = (name: string) => library.find((m) => m.name === name) ?? null;
+      expect(planRehome(library, lookup).rehome).toEqual([]);
+      const dbt = buildDbtKeyIndex([{ uniqueColumns: new Map([['dim_customer', new Set(['customer_key'])]]), relationshipTests: [{ fromModel: 'fct_order', fromColumn: 'customer_key' }] }]);
+      expect(planRehome(library, lookup, () => false, dbt).rehome).toEqual([
+        { from: 'dim_customer', stored: { fromModel: 'dim_customer', ...backwards }, to: { ...REL, role: 'buyer' } },
+      ]);
     });
   });
 

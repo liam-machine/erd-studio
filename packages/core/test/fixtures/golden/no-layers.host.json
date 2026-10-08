@@ -27,7 +27,8 @@
             "description": "Account",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "amount",
@@ -118,7 +119,8 @@
             "description": "Account",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "amount",

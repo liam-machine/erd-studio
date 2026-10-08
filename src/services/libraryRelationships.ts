@@ -15,7 +15,7 @@ import {
   canonicalRelationship, contradictsKeys, keyedRelationship, linkKey, mergeLibraryRelationships, normaliseRelationshipRole,
   relationshipKey, respellRelationship, reverseRelationship, sameLink,
 } from '@erd-studio/core';
-import type { KeyedModel } from '@erd-studio/core';
+import type { DbtKeyIndex, KeyedModel } from '@erd-studio/core';
 import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 
 type RelationshipEnds = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
@@ -224,12 +224,18 @@ export function renameModelInDomainRelationships(
   return touched;
 }
 
+/** Columns of one end's model to mark as its primary key with the relationship (#133 L1). */
+export interface MarkKey {
+  model: string;
+  columns: readonly string[];
+}
+
 /** One canvas edit of a relationship, as the webview sends it. */
 export type RelationshipWriteOp =
-  | { kind: 'add'; drawn: Relationship }
+  | { kind: 'add'; drawn: Relationship; markKey?: MarkKey }
   /** ⇄ or a context-menu cardinality: the drawn line's ends, with the new cardinality. */
   | { kind: 'update'; ends: RelationshipEnds; cardinality: Relationship['cardinality'] }
-  | { kind: 'edit'; original: RelationshipEnds; drawn: Relationship }
+  | { kind: 'edit'; original: RelationshipEnds; drawn: Relationship; markKey?: MarkKey }
   | { kind: 'remove'; keys: readonly RelationshipEnds[] };
 
 export interface RelationshipWriteInput {
@@ -239,15 +245,19 @@ export interface RelationshipWriteInput {
   models: readonly SemanticModel[];
   /** The open domain file's `logical.relationships`, as parsed; never changed in place. */
   domainRelationships: readonly Relationship[];
+  /** dbt's key evidence (#133 L1): the line drawn, and ⇄'s keys-win refusal, read it as the canvas does. */
+  dbt?: DbtKeyIndex;
 }
 
 export type RelationshipWritePlan =
   | {
     ok: true;
-    /** Copies of the library models whose `relationships` changed, to save. */
+    /** Copies of the library models whose `relationships` (or, for `markKey`, key flags) changed, to save. */
     changed: SemanticModel[];
     /** The domain file's new `logical.relationships`, or null when it is unchanged. */
     domainRelationships: Relationship[] | null;
+    /** A v4 domain's `markKey`: no library model holds it, so the caller marks the inline model. */
+    inlineMarkKey?: MarkKey;
   }
   | { ok: false; error: string; /** Set when the home model has no readable file. */ missingModel?: string };
 
@@ -270,9 +280,39 @@ const refuse = (error: string, missingModel?: string): RelationshipWritePlan =>
  * against the other end's key (`contradictsKeys`). Removing drops every copy.
  */
 export function planRelationshipWrite(op: RelationshipWriteOp, input: RelationshipWriteInput): RelationshipWritePlan {
-  const { home, models, domainRelationships } = input;
+  const plan = planLinkWrite(op, input);
+  if (!plan.ok || op.kind === 'remove' || op.kind === 'update' || !op.markKey) return plan;
+  // "Mark … as primary key" (#133 L1): the key flags travel in the same edit.
+  if (input.models.length === 0) return { ...plan, inlineMarkKey: op.markKey };
+  const target = input.models.find((m) => same(m.name, op.markKey!.model));
+  if (!target) return refuse(`Model "${op.markKey.model}" not found in logical-models/.`, op.markKey.model);
+  const marked = markPrimaryKey(plan.changed.find((m) => same(m.name, target.name)) ?? copyModel(target), op.markKey.columns);
+  if (typeof marked === 'string') return refuse(marked.replace('{was}', op.kind === 'add' ? 'added' : 'changed'));
+  return { ...plan, changed: [...plan.changed.filter((m) => !same(m.name, target.name)), marked] };
+}
+
+/**
+ * `model` with `columns` (matched without case) flagged `isPrimaryKey`, or
+ * the refusal when the model already flags a key (`{was}` names what did not
+ * happen) or lacks one of the columns. Never changes `model` itself.
+ */
+export function markPrimaryKey<T extends Pick<SemanticModel, 'name' | 'columns'>>(model: T, columns: readonly string[]): T | string {
+  const cols = model.columns ?? [];
+  if (cols.some((c) => c.isPrimaryKey || c.isNaturalKey)) {
+    return `${model.name} already has a key marked — the relationship was not {was}. Set its keys in the model first.`;
+  }
+  const missing = columns.find((name) => !cols.some((c) => typeof c.name === 'string' && same(c.name, name)));
+  if (missing !== undefined) return `Column "${missing}" not found in ${model.name}.`;
+  return {
+    ...model,
+    columns: cols.map((c) => (columns.some((name) => typeof c.name === 'string' && same(c.name, name)) ? { ...c, isPrimaryKey: true } : c)),
+  };
+}
+
+function planLinkWrite(op: RelationshipWriteOp, input: RelationshipWriteInput): RelationshipWritePlan {
+  const { home, models, domainRelationships, dbt } = input;
   const modelOf = (name: string): SemanticModel | undefined => models.find((m) => same(m.name, name));
-  const drawnLines = (): Relationship[] => mergeLibraryRelationships(home === 'library' ? models : [], domainRelationships);
+  const drawnLines = (): Relationship[] => mergeLibraryRelationships(home === 'library' ? models : [], domainRelationships, '', undefined, dbt);
   const libraryCopies = (key: string): Relationship[] => models.flatMap(libraryRelationshipsOf).filter((r) => linkKey(r) === key);
   const domainCopies = (key: string): Relationship[] => domainRelationships.filter((r) => isEnds(r) && linkKey(r) === key);
   const stored = (key: string): boolean => libraryCopies(key).length > 0 || domainCopies(key).length > 0;
@@ -315,7 +355,7 @@ export function planRelationshipWrite(op: RelationshipWriteOp, input: Relationsh
   const next: Relationship = { ...(home === 'library' ? canonicalRelationship(drawn) : drawn), ...(role ? { role } : {}) };
   const asMany = canonicalRelationship(drawn);
   const lineAsMany = line && canonicalRelationship(line);
-  if (op.kind === 'update' && contradictsKeys(asMany, modelOf)
+  if (op.kind === 'update' && contradictsKeys(asMany, modelOf, dbt)
     && !(lineAsMany?.cardinality === 'many-to-one' && relationshipKey(lineAsMany) === relationshipKey(asMany))) {
     const model = modelOf(asMany.fromModel)?.name ?? asMany.fromModel;
     return refuse(`${model}.${asMany.fromColumn} is ${model}'s key, so each value appears only once — it can't be ` +
@@ -537,12 +577,14 @@ export function planRehome(
   libraryModels: readonly SemanticModel[],
   libraryModel: (name: string) => SemanticModel | null,
   locked: (model: string) => boolean = () => false,
+  /** dbt's key evidence for models that flag no key (#133 L1). */
+  dbt?: DbtKeyIndex,
 ): Pick<MoveToLibraryPlan, 'rehome' | 'disagreements' | 'lockedFiles'> {
   const plan: Pick<MoveToLibraryPlan, 'rehome' | 'disagreements' | 'lockedFiles'> = { rehome: [], disagreements: [], lockedFiles: [] };
   const disagreeing = new Set<string>();
   for (const model of libraryModels) {
     libraryRelationshipsOf(model).forEach((stored, index) => {
-      const to = keyedRelationship(stored, libraryModel);
+      const to = keyedRelationship(stored, libraryModel, dbt);
       if (to === stored) return;
       const home = libraryModel(to.fromModel);
       if (!home) return;
@@ -550,7 +592,7 @@ export function planRehome(
       const files = [model, ...(same(home.name, model.name) ? [] : [home])];
       const others = files.flatMap((m) => libraryRelationshipsOf(m)
         .filter((r, i) => sameLink(r, to) && !(same(m.name, model.name) && i === index)));
-      const held = others.find((r) => !agrees(r, to, libraryModel));
+      const held = others.find((r) => !agrees(r, to, libraryModel, dbt));
       if (held) {
         if (!disagreeing.has(linkKey(to))) plan.disagreements.push({ stored, held });
         disagreeing.add(linkKey(to));
@@ -581,8 +623,8 @@ function sameMeaning(a: Relationship, b: Relationship): boolean {
 }
 
 /** Whether a stored copy says the same as `home` (already keyed): its meaning, and any role. */
-function agrees(copy: Relationship, home: Relationship, modelOf: (name: string) => KeyedModel | null): boolean {
-  return sameMeaning(keyedRelationship(copy, modelOf), home) && (!copy.role || !home.role || copy.role === home.role);
+function agrees(copy: Relationship, home: Relationship, modelOf: (name: string) => KeyedModel | null, dbt?: DbtKeyIndex): boolean {
+  return sameMeaning(keyedRelationship(copy, modelOf, dbt), home) && (!copy.role || !home.role || copy.role === home.role);
 }
 
 /**
@@ -591,8 +633,8 @@ function agrees(copy: Relationship, home: Relationship, modelOf: (name: string) 
  * has no many side — from its lower end, so the order the diagrams are read
  * in never decides its file.
  */
-function moveForm(rel: Relationship, modelOf: (name: string) => KeyedModel | null): Relationship {
-  const keyed = keyedRelationship(rel, modelOf);
+function moveForm(rel: Relationship, modelOf: (name: string) => KeyedModel | null, dbt?: DbtKeyIndex): Relationship {
+  const keyed = keyedRelationship(rel, modelOf, dbt);
   if (keyed.cardinality !== 'many-to-many') return keyed;
   const from = `${keyed.fromModel}.${keyed.fromColumn}`.toLowerCase();
   const to = `${keyed.toModel}.${keyed.toColumn}`.toLowerCase();
@@ -650,10 +692,13 @@ export function planMoveToLibrary(
   libraryModel: (name: string) => SemanticModel | null,
   libraryModels: readonly SemanticModel[] = [],
   locked: (model: string) => boolean = () => false,
+  /** `dbt`: dbt's key evidence, for models that flag no key (#133 L1). */
+  options: { dbt?: DbtKeyIndex } = {},
 ): MoveToLibraryPlan {
+  const { dbt } = options;
   const plan: MoveToLibraryPlan = {
     toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [], turned: [], keptLibrary: [],
-    ...planRehome(libraryModels, libraryModel, locked),
+    ...planRehome(libraryModels, libraryModel, locked, dbt),
   };
   // A relationship bound for a locked file stays in its domain files.
   const isLocked = (...names: string[]): boolean => {
@@ -674,7 +719,7 @@ export function planMoveToLibrary(
     for (const drawn of domain.relationships) {
       const key = linkKey(drawn);
       const ends = [libraryModel(drawn.fromModel), libraryModel(drawn.toModel)].filter((m): m is SemanticModel => !!m);
-      const stored = moveForm(respellRelationship(drawn, ends), libraryModel);
+      const stored = moveForm(respellRelationship(drawn, ends), libraryModel, dbt);
       byKey.set(key, [...(byKey.get(key) ?? []), { label: domain.label, drawn, stored }]);
     }
   }
@@ -685,7 +730,7 @@ export function planMoveToLibrary(
     // The library's word on this link: as it will be stored once turned round, else the copy drawn.
     const rehomes = plan.rehome.filter((r) => linkKey(r.to) === key);
     const library = rehomes[0]?.to ?? mergeLibraryRelationships(
-      ends.map((m, i) => m ?? { name: i === 0 ? sample.fromModel : sample.toModel, columns: [] }), [],
+      ends.map((m, i) => m ?? { name: i === 0 ? sample.fromModel : sample.toModel, columns: [] }), [], '', undefined, dbt,
     ).find((r) => linkKey(r) === key);
 
     if (library) {
@@ -704,7 +749,7 @@ export function planMoveToLibrary(
       for (const use of uses) {
         if (!agreeing.includes(use)) {
           plan.keptLibrary.push({ domain: use.label, relationship: use.drawn, library: { ...library, ...(role ? { role } : {}) } });
-        } else if (contradictsKeys(canonicalRelationship(use.drawn), libraryModel)) {
+        } else if (contradictsKeys(canonicalRelationship(use.drawn), libraryModel, dbt)) {
           plan.turned.push({ domain: use.label, relationship: use.drawn, to: library });
         }
         takeOut(use.label, key);
@@ -738,7 +783,7 @@ export function planMoveToLibrary(
     if (isLocked(relationship.fromModel)) continue;
     plan.toLibrary.push(relationship);
     for (const use of uses) {
-      if (contradictsKeys(canonicalRelationship(use.drawn), libraryModel)) {
+      if (contradictsKeys(canonicalRelationship(use.drawn), libraryModel, dbt)) {
         plan.turned.push({ domain: use.label, relationship: use.drawn, to: relationship });
       }
       takeOut(use.label, key);

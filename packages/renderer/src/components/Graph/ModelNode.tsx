@@ -24,6 +24,7 @@ import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
 import { useIsViewer, useSend } from '../../host/canvasEnvironment';
+import { dbtKeyTitle } from '../../lib/dbtKeyTitle';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
 import { KeyBadge } from '../common/KeyBadge';
 import { DataTypeSelect } from '../common/DataTypeSelect';
@@ -442,7 +443,7 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
       ) : (
         <span
           className={`model-node__col-name${!readOnly ? ' model-node__col-name--editable' : ''}`}
-          title={column.name}
+          title={!viewer && column.dbtKey ? `${column.name}\n${dbtKeyTitle(column.dbtKey)}` : column.name}
           onDoubleClick={!readOnly ? handleDoubleClickName : undefined}
         >
           {column.name}

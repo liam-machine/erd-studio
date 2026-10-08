@@ -20,6 +20,7 @@ import {
   toLogicalStage,
   validateDomainDocument,
 } from '@erd-studio/core';
+import type { DbtKeyIndex } from '@erd-studio/core';
 import type { DomainSummary, SemanticDomain, UnifiedDomain } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
 import type { ManifestData } from '../types/manifest';
@@ -198,8 +199,12 @@ export class DomainService {
    * callers can tell a file that is momentarily unreadable (empty or truncated
    * because something is writing it right now) from one that is genuinely
    * wrong. See `DomainFileError` for why that distinction is load-bearing.
+   *
+   * `dbtKeyIndex` is dbt's key evidence (#133 L1): with it, a link stored
+   * twice with no key flagged is drawn from the copy dbt's tests orient. The
+   * canvas and the diff pass it; callers that only list or count need not.
    */
-  getDomain(filePath: string): UnifiedDomain {
+  getDomain(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex } = {}): UnifiedDomain {
     if (!fs.existsSync(filePath)) {
       throw new DomainFileError('missing', filePath, `Domain file not found: ${filePath}`);
     }
@@ -232,6 +237,7 @@ export class DomainService {
         }
         : undefined,
       warn: (message) => console.warn(`[DomainService] ${message}`),
+      ...(options.dbtKeyIndex ? { dbtKeyIndex: options.dbtKeyIndex } : {}),
     });
   }
 
@@ -240,8 +246,8 @@ export class DomainService {
    *
    * Physical stage is not supported here — use buildPhysicalDomain() instead.
    */
-  getDomainStage(filePath: string): SemanticDomain {
-    return DomainService.toLogicalStage(this.getDomain(filePath));
+  getDomainStage(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex } = {}): SemanticDomain {
+    return DomainService.toLogicalStage(this.getDomain(filePath, options));
   }
 
   /**

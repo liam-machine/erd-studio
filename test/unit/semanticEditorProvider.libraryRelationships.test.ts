@@ -456,3 +456,50 @@ describe('relationship ends spelled in another case (#133 L4)', () => {
     expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
   });
 });
+
+describe('"Mark … as primary key" travels with the relationship (#133 L1)', () => {
+  let h: Harness;
+  beforeEach(() => { _resetMockWorkspace(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(h.root, { recursive: true, force: true });
+  });
+  const unkeyed = () => h.logicalModelService.saveModel({ ...DIM_CUSTOMER, columns: [{ ...DIM_CUSTOMER.columns[0], isPrimaryKey: undefined }] });
+  const files = (edit: { _ops: Array<{ uri?: { fsPath: string } }> }) => edit._ops.map((op) => path.basename(op.uri?.fsPath ?? '')).sort();
+
+  it('sets isPrimaryKey in the same WorkspaceEdit as the relationship — one undo step', async () => {
+    h = await createHarness();
+    unkeyed();
+    const orders = await h.open('orders');
+    await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one', markKey: { model: 'dim_customer', columns: ['CUSTOMER_KEY'] } } });
+    expect(orders.errors()).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(files(_appliedEdits[0] as never)).toEqual(['dim_customer.yml', 'fct_order.yml', 'orders.json']);
+    h.logicalModelService.invalidateCache();
+    expect(h.logicalModelService.getModel('dim_customer')?.columns[0].isPrimaryKey).toBe(true);
+    expect(h.logicalModelService.getModel('fct_order')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+    ]);
+  });
+
+  it('is refused, writing nothing, when the model has a key marked by then', async () => {
+    h = await createHarness();
+    const orders = await h.open('orders');
+    await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one', markKey: { model: 'dim_customer', columns: ['customer_key'] } } });
+    expect(orders.errors()).toEqual([
+      'Failed to add relationship: dim_customer already has a key marked — the relationship was not added. Set its keys in the model first.',
+    ]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(h.logicalModelService.getModel('fct_order')?.relationships).toBeUndefined();
+  });
+
+  it('is refused at the boundary when it is not one end of the link', async () => {
+    h = await createHarness();
+    const orders = await h.open('orders');
+    await orders.send({ type: 'editRelationship', payload: {
+      originalFromModel: 'fct_order', originalFromColumn: 'customer_key', originalToModel: 'dim_customer', originalToColumn: 'customer_key',
+      ...EDGE, cardinality: 'many-to-one', markKey: { model: 'dim_date', columns: ['date_key'] },
+    } });
+    expect(orders.errors()).toEqual(['Failed to edit relationship: the key to mark must be one end of the relationship.']);
+  });
+});

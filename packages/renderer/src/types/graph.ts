@@ -7,7 +7,7 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { AnnotationColor, Cardinality, Layer, Meta, ModelLoadError, ModelRole, Stage } from '@erd-studio/core';
+import type { AnnotationColor, Cardinality, DbtKeyHint, Layer, Meta, ModelLoadError, ModelRole, Stage } from '@erd-studio/core';
 import type { LayerConfig } from '@erd-studio/core';
 import type { ModelDiscrepancy } from '@erd-studio/core';
 import type { PhysicalProvenance } from '@erd-studio/core';
@@ -33,6 +33,8 @@ export interface ColumnDisplay {
   additiveType?: 'additive' | 'semi-additive' | 'non-additive';
   /** Structured metadata (`meta:`) — shown in the tooltip. Absent when empty. */
   meta?: Meta;
+  /** What dbt's tests say about the column (editable logical canvas only) — one line of its hover text. */
+  dbtKey?: DbtKeyHint;
 }
 
 // ---------------------------------------------------------------------------

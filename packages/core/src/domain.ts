@@ -26,7 +26,9 @@ import type {
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
-import { keyEvidence, linkKey, normaliseRelationshipRole, respellRelationship } from './relationships.js';
+import { linkKey, normaliseRelationshipRole, respellRelationship } from './relationships.js';
+import { keyEvidence } from './keyEvidence.js';
+import type { DbtKeyIndex } from './keyEvidence.js';
 
 /**
  * Sub-directories of the semantic dir that never contain domain files.
@@ -208,6 +210,11 @@ export interface BuildUnifiedDomainContext {
   getModelError?: (name: string) => ModelLoadError | null;
   /** Receives repair warnings (dropped entries, defaulted values). Defaults to console.warn. */
   warn?: (message: string) => void;
+  /**
+   * What dbt's tests say about keys (#133 L1): how the read winner tells a
+   * link's copies apart when no key is flagged. Without it, flags only.
+   */
+  dbtKeyIndex?: DbtKeyIndex;
 }
 
 /**
@@ -246,7 +253,7 @@ export function buildUnifiedDomain(
     layer,
     description: typeof obj.description === 'string' ? obj.description : '',
     ...(typeof obj.modelFolder === 'string' ? { modelFolder: obj.modelFolder } : {}),
-    logical: parseStageData(obj.logical, format, filePath, ctx.getModel, ctx.getModelError, warn) ?? { ...emptyStage },
+    logical: parseStageData(obj.logical, format, filePath, ctx.getModel, ctx.getModelError, warn, ctx.dbtKeyIndex) ?? { ...emptyStage },
     ...(stubColumns && stubColumns.length > 0 ? { stubColumns } : {}),
     viewConfig: globalViewConfig,
   };
@@ -288,6 +295,7 @@ function parseStageData(
   getModel: ((name: string) => SemanticModel | null) | undefined,
   getModelError: ((name: string) => ModelLoadError | null) | undefined,
   warn: (message: string) => void,
+  dbt?: DbtKeyIndex,
 ): StageData | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -325,7 +333,7 @@ function parseStageData(
       // Create placeholder models from names
       models = names.map(name => ({ name, columns: [] }));
     }
-    return { models, relationships: mergeLibraryRelationships(models, relationships, filePath, warn) };
+    return { models, relationships: mergeLibraryRelationships(models, relationships, filePath, warn, dbt) };
   } else {
     // v4 format: inline model objects — each must carry a string name
     models = [];
@@ -413,16 +421,18 @@ export function mergeLibraryRelationships(
   own: readonly Relationship[],
   filePath = '',
   warn: (message: string) => void = () => { /* silent */ },
+  /** dbt's tests, the key evidence for a model that flags no key (#133 L1). */
+  dbt?: DbtKeyIndex,
 ): Relationship[] {
   const byName = new Map(models.map((m) => [m.name.toLowerCase(), m]));
   const modelOf = (name: string): SemanticModel | undefined => byName.get(name.toLowerCase());
   // A link stored twice is drawn from the same copy whatever the file or
   // entry order (#133): one in its home (not one-to-many), then one not
-  // leaving its model's whole key (`keyEvidence` — choosing between copies
-  // changes no data, so this needs no evidence about the other end), then the
-  // lowest model name, then the lowest content.
+  // leaving its model's whole key (`keyEvidence`: flags, else dbt's tests —
+  // choosing between copies changes no data, so this needs no evidence about
+  // the other end), then the lowest model name, then the lowest content.
   const rankOf = (rel: Relationship, index: number): string => [
-    `${rel.cardinality === 'one-to-many' ? 1 : 0}${keyEvidence(modelOf(rel.fromModel), rel.fromColumn) === 'whole-key' ? 1 : 0}`,
+    `${rel.cardinality === 'one-to-many' ? 1 : 0}${keyEvidence(modelOf(rel.fromModel) ?? { name: rel.fromModel }, rel.fromColumn, dbt) === 'whole-key' ? 1 : 0}`,
     ...[rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()),
     // A copy with a role before its unlabelled twin: the label is information.
     rel.cardinality, rel.role ? `0${rel.role}` : '1',

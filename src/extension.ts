@@ -21,6 +21,7 @@ import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { hasErdStudioData, resolveDbtProject, samePath, type DbtProjectResolution } from './services/projectDiscovery';
 import { YmlParserService } from './services/ymlParserService';
+import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
 import { manifestDisplayPath, readDbtProjectConfig, type DbtProjectConfig } from './services/dbtProjectConfig';
@@ -1533,6 +1534,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         semanticDir,
         domainService,
         logicalModelService,
+        loadDbtKeyIndex: async () => dbtKeyIndexOf(
+          await ymlParserService.loadYmlData(workspaceRoot, undefined),
+          await manifestService.loadManifest(workspaceRoot).catch(() => undefined),
+        ),
         onWritten: async (domainPaths) => {
           for (const domainPath of domainPaths) treeProvider.invalidateDomain(domainPath);
           modelLibraryProvider.refresh();

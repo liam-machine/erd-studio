@@ -293,7 +293,21 @@ export interface AddRelationshipMessage {
     cardinality: Cardinality;
     /** Optional label, e.g. `ship date`. Blank or absent means none. */
     role?: string;
+    /**
+     * Mark these columns of one end's model as its primary key in the same
+     * edit (#133 L1) — the New Relationship dialog's "Mark … as primary key".
+     * Refused when that model has a key flagged by then.
+     */
+    markKey?: MarkKeyPayload;
   };
+}
+
+/** A key the New / Edit Relationship dialog asks to mark with the relationship (#133 L1). */
+export interface MarkKeyPayload {
+  /** One end's model. */
+  model: string;
+  /** That end's columns. */
+  columns: string[];
 }
 
 /**
@@ -339,6 +353,8 @@ export interface EditRelationshipMessage {
     cardinality: Cardinality;
     /** The label after the edit; '' or absent clears it. */
     role?: string;
+    /** As on `addRelationship`. */
+    markKey?: MarkKeyPayload;
   };
 }
 

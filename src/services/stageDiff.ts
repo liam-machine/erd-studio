@@ -17,7 +17,7 @@ import type { Stage, UnifiedDomain } from '../types/semantic';
 import type { YmlData } from '../types/ymlData';
 import { compare } from './discrepancyService';
 import { DomainService } from './domainService';
-import { buildLogicalDisplayDomain } from './stageDisplay';
+import { buildLogicalDisplayDomain, dbtKeyIndexOf } from './stageDisplay';
 
 /** Everything the comparison reads besides the domain file itself. */
 export interface DomainDiffInputs {
@@ -77,7 +77,8 @@ export function computeDomainDiff(
   sourceStage: Stage,
   targetStage: Stage = otherStage(sourceStage),
 ): DomainDiffResult {
-  const unified = inputs.domainService.getDomain(domainPath);
+  // The read winner sees dbt's key evidence, as the canvas does (#133 L1).
+  const unified = inputs.domainService.getDomain(domainPath, { dbtKeyIndex: dbtKeyIndexOf(inputs.ymlData, inputs.manifest) });
   const source = buildStageForDiff(inputs, unified, sourceStage);
   const target = buildStageForDiff(inputs, unified, targetStage);
   const report = compare(source, target, new Set(unified.stubColumns ?? []));

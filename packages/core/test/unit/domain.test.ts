@@ -398,3 +398,16 @@ describe('relationship ends spelled in another case are drawn (#133 L4)', () => 
     expect(u.logical.relationships).toEqual([{ ...REAL, cardinality: 'many-to-one' }]);
   });
 });
+
+describe('the read winner reads dbt evidence when no key is flagged (#133 L1)', () => {
+  it('dbt-unique on dim.k makes fct\'s copy win, with no flags anywhere', async () => {
+    const { buildDbtKeyIndex } = await import('../../src/keyEvidence');
+    const dim: SemanticModel = { name: 'dim', columns: [{ name: 'k', dataType: 'int', description: '' }], relationships: [{ fromColumn: 'k', toModel: 'fct', toColumn: 'k', cardinality: 'many-to-one' }] };
+    const fct: SemanticModel = { name: 'fct', columns: [{ name: 'k', dataType: 'int', description: '' }], relationships: [{ fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'many-to-one', role: 'r' }] };
+    const getModel = (name: string): SemanticModel | null => ({ dim, fct } as Record<string, SemanticModel>)[name] ?? null;
+    const doc = { schemaVersion: 5, logical: { models: ['dim', 'fct'] } };
+    expect(build(doc, { getModel }).logical.relationships).toEqual([{ fromModel: 'dim', fromColumn: 'k', toModel: 'fct', toColumn: 'k', cardinality: 'many-to-one' }]);
+    const dbtKeyIndex = buildDbtKeyIndex([{ uniqueColumns: new Map([['dim', new Set(['k'])]]) }]);
+    expect(build(doc, { getModel, dbtKeyIndex }).logical.relationships).toEqual([{ fromModel: 'fct', fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'many-to-one', role: 'r' }]);
+  });
+});

@@ -80,6 +80,7 @@ function mapColumns(model: DisplayModel): ColumnDisplay[] {
     ...(col.scdType != null ? { scdType: col.scdType } : {}),
     ...(col.additiveType ? { additiveType: col.additiveType } : {}),
     ...(hasMeta(col.meta) ? { meta: col.meta } : {}),
+    ...(col.dbtKey ? { dbtKey: col.dbtKey } : {}),
   }));
   return mapped;
 }

@@ -47,6 +47,12 @@ export interface FkDialogPrefill {
   toModel: string;
   /** Optional target column — set when user drags to a specific column handle. */
   toColumn?: string;
+  /** The cardinality key evidence suggests (#133 L1). */
+  cardinality?: 'many-to-one' | 'one-to-one' | 'many-to-many';
+  /** Whether key evidence decided which end holds the foreign key; undecided, the dialog asks. */
+  direction?: 'decided' | 'undecided';
+  /** What decided it: the models' key flags, dbt's tests, or nothing. */
+  basis?: 'keys' | 'dbt' | 'none';
 }
 
 /** Edit data for FK dialog when editing an existing relationship. */

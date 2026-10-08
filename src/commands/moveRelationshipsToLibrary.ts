@@ -38,6 +38,7 @@ import {
   resolveConflict,
 } from '../services/libraryRelationships';
 import type { ConflictDefinition } from '../services/libraryRelationships';
+import type { DbtKeyIndex } from '@erd-studio/core';
 import { relationshipsRewriteLoses, setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
@@ -58,6 +59,8 @@ export interface MoveRelationshipsDeps {
   onWritten: (domainPaths: string[]) => Promise<void>;
   /** Test seam: how one file is written. Defaults to {@link writeFileAtomic}. */
   writeFile?: (filePath: string, text: string) => void;
+  /** dbt's key evidence (#133 L1), loaded once before planning. Without it, only key flags count. */
+  loadDbtKeyIndex?: () => Promise<DbtKeyIndex>;
 }
 
 /** A v5 domain file's models and own relationships, as read from disk. */
@@ -189,7 +192,9 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     }
     return lockedFiles.get(name)!;
   };
-  let plan = planMoveToLibrary(domains, libraryModel, logicalModelService.listModels(), locked);
+  // dbt's tests orient links between models that flag no key (#133 L1).
+  const dbt = deps.loadDbtKeyIndex ? await deps.loadDbtKeyIndex().catch(() => undefined) : undefined;
+  let plan = planMoveToLibrary(domains, libraryModel, logicalModelService.listModels(), locked, { dbt });
   if (plan.removeFromDomains.size === 0 && plan.conflicts.length === 0 && plan.rehome.length === 0) {
     telemetry.feature('relMoveNothingToMove');
     const leftAlone = describeLeftAlone(plan, fileOf);

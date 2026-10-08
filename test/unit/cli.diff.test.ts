@@ -434,3 +434,36 @@ describe('end to end, relationships in the model library (#126): inventory → l
     }));
   });
 });
+
+describe('the read winner sees dbt\'s key evidence in the CLI as on the canvas (#133 L1)', () => {
+  it('CLI diff and canvas diff agree when dbt decides which of two copies is drawn', async () => {
+    const root = copyProject('dbt-project');
+    const semantic = path.join(root, '.erd-studio');
+    for (const entry of fs.readdirSync(semantic)) if (entry !== 'layers.json') fs.rmSync(path.join(semantic, entry), { recursive: true, force: true });
+    fs.mkdirSync(path.join(semantic, 'logical-models'));
+    fs.mkdirSync(path.join(semantic, 'silver'));
+    // No key flagged; the link stored at both ends, both many-to-one (a 1.6.7 leftover).
+    const col = (name: string) => ({ name, dataType: 'INT', description: 'x' });
+    fs.writeFileSync(path.join(semantic, 'logical-models', 'dim_customer.yml'), toYaml({
+      name: 'dim_customer', description: 'x', columns: [col('customer_key')],
+      relationships: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' }],
+    }));
+    fs.writeFileSync(path.join(semantic, 'logical-models', 'fct_order.yml'), toYaml({
+      name: 'fct_order', description: 'x', columns: [col('order_id'), col('customer_key')],
+      relationships: [{ fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' }],
+    }));
+    const file = path.join(semantic, 'silver', 'orders.json');
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 5, domain: 'orders', layer: 'silver', description: '', logical: { models: ['dim_customer', 'fct_order'], relationships: [] }, viewConfig: {} }));
+
+    const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
+    // Flags alone draw the dimension's backwards copy; dbt's unique test on dim_customer.customer_key draws the fact's.
+    expect(ctx.domainService.getDomain(file).logical.relationships[0].fromModel).toBe('dim_customer');
+    const canvas = computeDomainDiff({ domainService: ctx.domainService, ymlData: ctx.ymlData, manifest: ctx.manifest, catalog: ctx.catalog }, file, 'logical');
+    expect(canvas.source.relationships).toEqual([expect.objectContaining({ fromModel: 'fct_order', toModel: 'dim_customer', cardinality: 'many-to-one' })]);
+    expect(canvas.report.relationships.map((r) => r.status)).toEqual(['matched']);
+
+    const { result } = runDiff(ctx, { domains: ['.erd-studio/silver/orders.json'] });
+    expect(result.domains[0].report).toEqual(canvas.report);
+    expect(result.domains[0].fixes.filter((f) => f.relationship)).toEqual([]);
+  });
+});

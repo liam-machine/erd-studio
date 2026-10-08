@@ -230,6 +230,38 @@ export function isValidRelationshipRole(value: unknown): value is string | undef
   return value === undefined || (typeof value === 'string' && value.trim().length <= RELATIONSHIP_ROLE_MAX_LENGTH);
 }
 
+/** The columns of each end of a relationship payload. */
+interface LinkPayloadEnds {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+  toColumn: string;
+}
+
+const sameText = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+const sameColumnSet = (a: readonly string[], b: readonly string[]): boolean => {
+  const x = [...new Set(a.map((c) => c.toLowerCase()))];
+  const y = [...new Set(b.map((c) => c.toLowerCase()))];
+  return x.length === a.length && x.length === y.length && x.every((c) => y.includes(c));
+};
+
+/**
+ * The New / Edit Relationship dialog's `markKey` (#133 L1): absent, or one
+ * end of the link — its model and, as a set without case, exactly that end's
+ * columns (1–8, each a valid column name). For a self-reference either end
+ * may be named; the columns decide which. Returns an error, or null.
+ */
+export function validateMarkKey(markKey: unknown, link: LinkPayloadEnds): string | null {
+  if (markKey === undefined) return null;
+  const invalid = 'the key to mark must be one end of the relationship.';
+  if (!markKey || typeof markKey !== 'object' || Array.isArray(markKey)) return invalid;
+  const { model, columns } = markKey as { model?: unknown; columns?: unknown };
+  if (typeof model !== 'string' || !Array.isArray(columns) || columns.length < 1 || columns.length > 8) return invalid;
+  if (!columns.every((c): c is string => typeof c === 'string' && COLUMN_NAME_PATTERN.test(c))) return invalid;
+  const ends: Array<[string, string[]]> = [[link.fromModel, [link.fromColumn]], [link.toModel, [link.toColumn]]];
+  return ends.some(([m, cols]) => sameText(m, model) && sameColumnSet(columns, cols)) ? null : invalid;
+}
+
 export const MODEL_ROLES: readonly ModelRole[] = [
   'conformed-dim',
   'domain-dim',

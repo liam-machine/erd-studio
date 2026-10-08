@@ -80,10 +80,13 @@ import { computeNewModelPositions, findOpenPosition } from '../services/position
 import {
   computeMissingPositions,
   DomainValidationError,
+  EMPTY_DBT_KEY_INDEX,
   sameLink,
   setMetaEntry,
   toDisplayDomain,
 } from '@erd-studio/core';
+import type { DbtKeyIndex } from '@erd-studio/core';
+import { dbtKeyIndexOf, withDbtKeyHints } from '../services/stageDisplay';
 import { checkManifestStaleness } from '../services/stalenessService';
 import { saveAllAndReload } from '../services/recoveryService';
 import {
@@ -109,8 +112,10 @@ import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
 import { findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
 import type {
+  AddRelationshipMessage,
   AnalyzeFeedbackMessage,
   CopyFeedbackReportMessage,
+  EditRelationshipMessage,
   ErrorMessage,
   OpenFeedbackLinkMessage,
   OpenModelFileMessage,
@@ -149,6 +154,7 @@ import { readDomainRelationships } from '../commands/moveRelationshipsToLibrary'
 import {
   diagramsStillDrawing,
   drawnDiagramCopies,
+  markPrimaryKey,
   planRelationshipWrite,
   removeColumnRelationships,
   renameColumnInDomainRelationships,
@@ -340,6 +346,7 @@ import {
   validateAddModelsFromDbtPayload,
   validateOpenModelFilePayload,
   validateLayoutFinishedPayload,
+  validateMarkKey,
   validateDismissManifestHintPayload,
   validateAnnotationUpdate,
   validateModelNameSafety,
@@ -1020,7 +1027,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'addRelationship': {
-            const payload = (message as { payload?: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; role?: string } }).payload;
+            const payload = (message as { payload?: AddRelationshipMessage['payload'] }).payload;
             if (payload) {
               if (!isValidCardinality(payload.cardinality)) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: unknown cardinality "${String(payload.cardinality)}".` } });
@@ -1028,6 +1035,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               }
               if (!isValidRelationshipRole(payload.role)) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: 'Failed to add relationship: the role must be text of at most 60 characters.' } });
+                break;
+              }
+              const markKeyError = validateMarkKey(payload.markKey, payload);
+              if (markKeyError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: ${markKeyError}` } });
                 break;
               }
               telemetry.feature('addRelationship');
@@ -1089,7 +1101,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'editRelationship': {
-            const payload = (message as { payload?: { originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string; fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; role?: string } }).payload;
+            const payload = (message as { payload?: EditRelationshipMessage['payload'] }).payload;
             if (payload) {
               if (!isValidCardinality(payload.cardinality)) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: unknown cardinality "${String(payload.cardinality)}".` } });
@@ -1097,6 +1109,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               }
               if (!isValidRelationshipRole(payload.role)) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: 'Failed to edit relationship: the role must be text of at most 60 characters.' } });
+                break;
+              }
+              const markKeyError = validateMarkKey(payload.markKey, payload);
+              if (markKeyError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: ${markKeyError}` } });
                 break;
               }
               await this.queueEdit(panelKey, () =>
@@ -1717,6 +1734,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /**
+   * What dbt's tests say about keys (#133 L1), from the cached yml and
+   * manifest. Never throws: without dbt it is empty, and only flags count.
+   */
+  private async loadDbtKeyIndex(): Promise<DbtKeyIndex> {
+    try {
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      const manifest = await this.manifestService.loadManifest(this.workspaceRoot).catch(() => undefined);
+      return dbtKeyIndexOf(ymlData, manifest);
+    } catch {
+      return EMPTY_DBT_KEY_INDEX;
+    }
+  }
+
   /** Every library model except `exclude`, fresh copies an edit may change. */
   private otherLibraryModels(exclude: string): SemanticModel[] {
     return this.logicalModelService.listModels().filter((m) => !sameName(m.name, exclude));
@@ -2076,14 +2107,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stubColumns?: string[],
   ): DisplayDomain {
     const editorPayload = this.buildWebviewPayload(domain, manifest, ymlData, domain.modelFolder);
+    const readOnly = domain.stage === 'physical';
 
-    return toDisplayDomain(domain, {
+    const display = toDisplayDomain(domain, {
       viewConfig,
       stubColumns,
       layerConfig: this.layerService.getLayer(domain.layer),
-      readOnly: domain.stage === 'physical',
+      readOnly,
       editorPayload,
     });
+    // dbt's key evidence orients new relationships on an editable canvas (#133 L1).
+    return readOnly ? display : withDbtKeyHints(display, dbtKeyIndexOf(ymlData, manifest));
   }
 
   /**
@@ -2129,8 +2163,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const catalog = await this.loadCatalog();
       const welcomeDismissed = !!this.context.globalState.get('welcomeDismissed');
+      const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
-      let unifiedDomain = await this.readDomainTolerantly(document.uri.fsPath);
+      let unifiedDomain = await this.readDomainTolerantly(document.uri.fsPath, { dbtKeyIndex });
       this.warnAboutDuplicateModels(unifiedDomain);
 
       // A fresh domain — models but not one stored position, typically written
@@ -2148,7 +2183,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           const positionsWritten = await this.autoPositionNewModels(document, computed);
           if (positionsWritten) {
             // Re-read since we wrote new positions to the file
-            unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+            unifiedDomain = this.domainService.getDomain(document.uri.fsPath, { dbtKeyIndex });
           }
         }
         // Whether or not they were persisted, the payload carries the positions
@@ -2234,10 +2269,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * or structurally wrong will read the same way in a second, and making the
    * user wait to be told so helps nobody.
    */
-  private async readDomainTolerantly(filePath: string): Promise<UnifiedDomain> {
+  private async readDomainTolerantly(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex } = {}): Promise<UnifiedDomain> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return this.domainService.getDomain(filePath);
+        return this.domainService.getDomain(filePath, options);
       } catch (err) {
         const last = attempt >= DOMAIN_READ_RETRY_DELAYS_MS.length;
         if (last || !isRetryableDomainRead(err)) {
@@ -2984,11 +3019,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleAddRelationship(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    payload: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; role?: string },
+    payload: AddRelationshipMessage['payload'],
     stage: 'logical',
   ): Promise<void> {
     try {
-      await this.commitRelationshipWrite(document, webview, { kind: 'add', drawn: payload }, stage, 'Failed to add relationship.');
+      const { markKey, ...rest } = payload;
+      const drawn: Relationship = {
+        fromModel: rest.fromModel, fromColumn: rest.fromColumn, toModel: rest.toModel, toColumn: rest.toColumn,
+        cardinality: rest.cardinality, ...(rest.role !== undefined ? { role: rest.role } : {}),
+      };
+      await this.commitRelationshipWrite(document, webview, { kind: 'add', drawn, ...(markKey ? { markKey } : {}) }, stage, 'Failed to add relationship.');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
@@ -3017,15 +3057,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const v5 = this.isDomainV5(parsed);
     const models = v5 ? this.logicalModelService.listModels() : [];
     const home = v5 && this.relationshipsInLibrary(models) ? 'library' : 'domain';
+    const dbt = await this.loadDbtKeyIndex();
     // Filled by the mutator, which applyDomainEdit runs before it reads modelFiles.
     const save: Array<{ model: SemanticModel }> = [];
     const success = await this.applyDomainEdit(
       document,
       (section) => {
         const plan = planRelationshipWrite(op, {
-          home, models, domainRelationships: (section.relationships ?? []) as Relationship[],
+          home, models, domainRelationships: (section.relationships ?? []) as Relationship[], dbt,
         });
         if (!plan.ok) throw new Error(plan.missingModel ? this.modelUnavailableMessage(plan.missingModel) : plan.error);
+        if (plan.inlineMarkKey) {
+          // A v4 domain keeps its models inline: the key is marked there.
+          const inline = ((section.models ?? []) as SemanticModel[]).findIndex((m) => sameName(m.name, plan.inlineMarkKey!.model));
+          if (inline === -1) throw new Error(`Model "${plan.inlineMarkKey.model}" not found.`);
+          const marked = markPrimaryKey((section.models as SemanticModel[])[inline], plan.inlineMarkKey.columns);
+          if (typeof marked === 'string') throw new Error(marked.replace('{was}', op.kind === 'add' ? 'added' : 'changed'));
+          (section.models as SemanticModel[])[inline] = marked;
+        }
         if (plan.domainRelationships) section.relationships = plan.domainRelationships;
         save.push(...plan.changed.map((model) => ({ model })));
       },
@@ -3413,10 +3462,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private async handleEditRelationship(
     document: vscode.TextDocument,
     webview: vscode.Webview,
-    payload: {
-      originalFromModel: string; originalFromColumn: string; originalToModel: string; originalToColumn: string;
-      fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality; role?: string;
-    },
+    payload: EditRelationshipMessage['payload'],
     stage: 'logical',
   ): Promise<void> {
     try {
@@ -3434,7 +3480,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         cardinality: payload.cardinality,
         ...(payload.role !== undefined ? { role: payload.role } : {}),
       };
-      await this.commitRelationshipWrite(document, webview, { kind: 'edit', original, drawn }, stage, 'Failed to edit relationship.');
+      await this.commitRelationshipWrite(
+        document, webview, { kind: 'edit', original, drawn, ...(payload.markKey ? { markKey: payload.markKey } : {}) }, stage, 'Failed to edit relationship.',
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Edit relationship failed: ${message}`);
@@ -4241,8 +4289,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const catalog = await this.loadCatalog();
+      const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
-      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath);
+      const unifiedDomain = this.domainService.getDomain(document.uri.fsPath, { dbtKeyIndex });
 
       // Same in-memory auto-positioning as sendDomainData — never a write here.
       const computed = this.computeMissingPositions(unifiedDomain);
@@ -4264,7 +4313,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         if (this.manifestService.isMissing) telemetry.featureOnce('manifestMissingPhysical');
       } else {
         // Logical — extract from unified file
-        const domain = this.domainService.getDomainStage(document.uri.fsPath);
+        const domain = this.domainService.getDomainStage(document.uri.fsPath, { dbtKeyIndex });
         const displayDomain = this.buildDisplayDomain(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns);
         this.post(webview, { type: 'stageData', payload: displayDomain, ...reply, ...this.manifestHintFlag() });
       }

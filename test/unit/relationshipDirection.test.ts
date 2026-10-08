@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { isReferencedKey, keysContradictionWarning, orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
+import { keysContradictionWarning, orientDraggedRelationship } from '../../webview/lib/relationshipDirection';
 
 const col = (name: string, keys: { pk?: boolean; nk?: boolean; fk?: boolean } = {}) => ({
   name, dataType: 'string', description: '',
@@ -47,7 +47,10 @@ describe('orientDraggedRelationship (#133)', () => {
     expect(orientDraggedRelationship(
       { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key' },
       MODELS,
-    )).toEqual({ fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' });
+    )).toEqual({
+      fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key',
+      cardinality: 'many-to-one', direction: 'decided', basis: 'keys',
+    });
   });
 
   it('turns a drag from a natural key round too', () => {
@@ -57,22 +60,21 @@ describe('orientDraggedRelationship (#133)', () => {
     ).fromModel).toBe('fct_order');
   });
 
-  it('leaves a drag that already starts on the referring column alone', () => {
+  it('keeps a drag that already starts on the referring column, decided', () => {
     const prefill = { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key' };
-    expect(orientDraggedRelationship(prefill, MODELS)).toBe(prefill);
+    expect(orientDraggedRelationship(prefill, MODELS)).toEqual({ ...prefill, cardinality: 'many-to-one', direction: 'decided', basis: 'keys' });
   });
 
-  it('leaves key-to-key drags as drawn (one-to-one: the user decides)', () => {
+  it('key-to-key drags are a one-to-one the user decides: ends as dragged, undecided', () => {
     const prefill = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'order_key' };
-    expect(orientDraggedRelationship(prefill, MODELS)).toBe(prefill);
+    expect(orientDraggedRelationship(prefill, MODELS)).toEqual({ ...prefill, cardinality: 'one-to-one', direction: 'undecided', basis: 'none' });
   });
 
-  it('treats a bridge key that is also a foreign key as the referring end', () => {
+  it('a key that is also flagged as a foreign key holds the other key: one-to-one from the bridge', () => {
     expect(orientDraggedRelationship(
       { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'brg_account_customer', toColumn: 'customer_key' },
-      MODELS,
-    ).fromModel).toBe('brg_account_customer');
-    expect(isReferencedKey(col('k', { pk: true, fk: true }))).toBe(false);
+      MODELS.map((m) => ({ ...m, columns: m.columns.map((c) => ({ ...c, isForeignKeyDeclared: c.isForeignKey })) })),
+    )).toMatchObject({ fromModel: 'brg_account_customer', cardinality: 'one-to-one', direction: 'decided' });
   });
 
   it('leaves a drag with no target column, or unknown columns, alone', () => {
@@ -83,10 +85,51 @@ describe('orientDraggedRelationship (#133)', () => {
   });
 });
 
+describe('orientDraggedRelationship — no key flagged (#133 L1)', () => {
+  const unflagged = [
+    { name: 'dim_customer', columns: [col('customer_id')] },
+    { name: 'fct_order', columns: [col('customer_id')] },
+  ];
+  const drag = { fromModel: 'dim_customer', fromColumn: 'customer_id', toModel: 'fct_order', toColumn: 'customer_id' };
+
+  it('a drag from a column dbt tests as unique turns round', () => {
+    const tested = unflagged.map((m) => (m.name === 'dim_customer'
+      ? { ...m, columns: [{ ...col('customer_id'), dbtKey: { key: 'unique' as const, because: 'unique-test' as const } }] } : m));
+    expect(orientDraggedRelationship(drag, tested)).toEqual({
+      fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id',
+      cardinality: 'many-to-one', direction: 'decided', basis: 'dbt',
+    });
+  });
+
+  it('with no evidence, the ends stay as dragged and nothing is decided — whichever way it was dragged', () => {
+    expect(orientDraggedRelationship(drag, unflagged)).toEqual({ ...drag, cardinality: 'many-to-one', direction: 'undecided', basis: 'none' });
+    const back = { fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' };
+    expect(orientDraggedRelationship(back, unflagged)).toMatchObject({ ...back, direction: 'undecided' });
+  });
+
+  it('a Data Vault satellite with no flags is oriented by its unique combination', () => {
+    const part = { key: 'not-unique' as const, because: 'part-of-unique-combination' as const, combinations: [['customer_hk', 'load_date']] };
+    const models = [
+      { name: 'hub_customer', columns: [{ ...col('customer_hk'), dbtKey: { key: 'unique' as const, because: 'unique-test' as const } }] },
+      { name: 'sat_customer', columns: [{ ...col('customer_hk'), dbtKey: part }, { ...col('load_date'), dbtKey: part }] },
+    ];
+    expect(orientDraggedRelationship(
+      { fromModel: 'hub_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk' }, models,
+    )).toMatchObject({ fromModel: 'sat_customer', toModel: 'hub_customer', direction: 'decided', basis: 'dbt' });
+  });
+});
+
 describe('keysContradictionWarning — the dialog\'s keys-win warning (#133)', () => {
   const rel = { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' as const };
   it('warns when the many side is its model\'s whole key and the other end is certainly not a key', () => {
     expect(keysContradictionWarning(rel, MODELS)).toMatch(/^dim_customer\.customer_key is dim_customer's key, so each value appears only once/);
+  });
+  it('names dbt\'s test when the many end\'s evidence came from dbt', () => {
+    const tested = [
+      { name: 'dim_customer', columns: [{ ...col('customer_key'), dbtKey: { key: 'unique' as const, because: 'unique-test' as const } }] },
+      { name: 'fct_order', columns: [{ ...col('customer_key'), dbtKey: { key: 'not-unique' as const, because: 'relationships-test' as const } }] },
+    ];
+    expect(keysContradictionWarning(rel, tested)).toMatch(/^dbt tests dim_customer\.customer_key as unique, so each value appears only once/);
   });
   it('says nothing the other way round, for a one-to-one, or without a key on the other end', () => {
     expect(keysContradictionWarning({ ...rel, fromModel: 'fct_order', toModel: 'dim_customer' }, MODELS)).toBeNull();

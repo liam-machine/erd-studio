@@ -77,6 +77,7 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
       isPrimaryKey: col.isPrimaryKey === true,
       isForeignKey: col.isForeignKey === true || fkCols.has(col.name),
       isNaturalKey: col.isNaturalKey === true,
+      ...(col.isForeignKey === true ? { isForeignKeyDeclared: true } : {}),
       ...(col.scdType != null ? { scdType: col.scdType } : {}),
       ...(col.additiveType ? { additiveType: col.additiveType } : {}),
       ...(col.meta ? { meta: col.meta } : {}),

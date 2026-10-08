@@ -164,6 +164,65 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Which side holds the foreign key (#133 L1)
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__direction {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim-fg);
+}
+
+.new-fk-dialog__direction--reversed {
+  padding: 8px;
+  border-radius: 3px;
+  color: var(--warning-fg);
+  background: var(--warning-bg);
+}
+
+.new-fk-dialog__direction-lead {
+  font-weight: 600;
+}
+
+.new-fk-dialog__link-button {
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground, var(--focus-border));
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.new-fk-dialog__direction-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+}
+
+.new-fk-dialog__radio,
+.new-fk-dialog__checkbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  font-size: 12px;
+  color: var(--editor-fg);
+  cursor: pointer;
+}
+
+.new-fk-dialog__radio .new-fk-dialog__hint {
+  flex-basis: 100%;
+  padding-left: 20px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* ---------------------------------------------------------------------------
    Preview
    --------------------------------------------------------------------------- */
 

@@ -36,6 +36,7 @@ import { TemplateService } from '../../src/services/templateService';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import { telemetry } from '../../src/services/telemetryService';
 import type { Relationship } from '../../src/types/semantic';
+import { buildDbtKeyIndex } from '@erd-studio/core';
 
 const SEMANTIC_DIR = '.erd-studio';
 const MODEL_COUNT = 70;
@@ -608,6 +609,30 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     expect(writes.sort()).toEqual(['dim_customer.yml', 'fct_order.yml']);
     logicalModelService.invalidateCache();
     expect(logicalModelService.getModel('fct_order')?.relationships?.map((r) => r.fromColumn)).toEqual(['customer_key', 'alt_customer_key']);
+  });
+
+  it('with no key flagged, dbt\'s tests turn a backwards copy round; without them it is left (#133 L1)', async () => {
+    const backwards = DIM.replace('    isPrimaryKey: true\n', '').replace('one-to-many', 'many-to-one');
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), backwards);
+    const info = acceptModal();
+    await run();
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(backwards);
+
+    const loadDbtKeyIndex = vi.fn(async () => buildDbtKeyIndex([{
+      uniqueColumns: new Map([['dim_customer', new Set(['customer_key'])]]),
+      relationshipTests: [{ fromModel: 'fct_order', fromColumn: 'customer_key' }],
+    }]));
+    await moveRelationshipsToLibrary({
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService: new DomainService(new LayerService(root, SEMANTIC_DIR)),
+      logicalModelService, onWritten: vi.fn(async () => undefined), loadDbtKeyIndex,
+    });
+    expect(loadDbtKeyIndex).toHaveBeenCalledTimes(1);
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('fct_order')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' },
+    ]);
+    expect(logicalModelService.getModel('dim_customer')?.relationships).toBeUndefined();
   });
 
   it('drops the reversed copy when the fact already stores the link', async () => {

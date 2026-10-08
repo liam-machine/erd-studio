@@ -35,7 +35,8 @@
             "description": "",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "product_key",
@@ -117,7 +118,8 @@
             "description": "",
             "isPrimaryKey": true,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "product_name",
