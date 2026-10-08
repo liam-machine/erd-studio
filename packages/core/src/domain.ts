@@ -28,6 +28,7 @@ import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFo
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
 import {
   canonicalRelationship, compositeGroupProblem, linkKey, normaliseCompositeKey, normaliseRelationshipRole, respellRelationship,
+  reverseRelationship,
 } from './relationships.js';
 import { keyEvidence } from './keyEvidence.js';
 import type { DbtKeyIndex } from './keyEvidence.js';
@@ -552,8 +553,9 @@ function assembleGroups(
       continue;
     }
     const head = ordered[0].rel;
+    // Every member read the way the first is (one line, one direction), its meaning unchanged.
     const unified = ordered.map(({ rel }) => {
-      const { role: _role, ...rest } = rel;
+      const { role: _role, ...rest } = rel.fromModel.toLowerCase() === head.fromModel.toLowerCase() ? rel : reverseRelationship(rel);
       return { ...rest, compositeKey: head.compositeKey!, ...(head.role ? { role: head.role } : {}) };
     });
     // The whole group is placed where its first drawn member falls.

@@ -622,3 +622,37 @@ describe('composite foreign keys (#133 L2)', () => {
     expect(removeColumnFromDomainRelationships(own.slice(0, 1), PIT, 'customer_hk')).toEqual([]);
   });
 });
+
+describe('composite keys: what the exhaustive check found (#133 L2)', () => {
+  const col = (name: string, isPrimaryKey = false) => ({ name, dataType: 'string', description: '', ...(isPrimaryKey ? { isPrimaryKey } : {}) });
+  const m = (fromColumn: string, toModel: string, toColumn: string, cardinality: Relationship['cardinality'], compositeKey?: string) =>
+    ({ fromColumn, toModel, toColumn, cardinality, ...(compositeKey ? { compositeKey } : {}) });
+  const models = (fct: SemanticModel['relationships'], dim: SemanticModel['relationships']): SemanticModel[] => [
+    { name: 'dim', columns: [col('k', true), col('k_x', true)], ...(dim ? { relationships: structuredClone(dim) } : {}) },
+    { name: 'fct', columns: [col('id', true), col('k'), col('k_x')], ...(fct ? { relationships: structuredClone(fct) } : {}) },
+  ];
+  const L = { fromModel: 'fct', fromColumn: 'k', toModel: 'dim', toColumn: 'k' };
+
+  it('a write acts on the group the canvas draws, not on the first stored copy (a stray partial elsewhere)', () => {
+    // fct.yml holds the one-to-one group; dim.yml a stray copy of k with the same name, saved the other way round.
+    const ms = models([m('k', 'dim', 'k', 'one-to-one', 'fk_dim'), m('k_x', 'dim', 'k_x', 'one-to-one', 'fk_dim')], [m('k', 'fct', 'k', 'one-to-many', 'fk_dim')]);
+    const plan = planRelationshipWrite({ kind: 'remove', keys: [L] }, { home: 'library', models: ms, domainRelationships: [] });
+    expect(plan.ok && plan.changed.map((x) => [x.name, x.relationships ?? null])).toEqual([['dim', null], ['fct', null]]);
+  });
+
+  it('a file holding a group twice is one group for a write, as for the read', () => {
+    const group = [m('k', 'dim', 'k', 'many-to-one', 'fk_dim'), m('k_x', 'dim', 'k_x', 'many-to-one', 'fk_dim')];
+    const plan = planRelationshipWrite({ kind: 'update', ends: L, cardinality: 'one-to-one' }, { home: 'library', models: models([...group, ...group], undefined), domainRelationships: [] });
+    expect(plan.ok && plan.changed.find((x) => x.name === 'fct')?.relationships).toEqual(group.map((r) => ({ ...r, cardinality: 'one-to-one' })));
+  });
+
+  it('Move turns a group round all or nothing, reading each member as part of its group', () => {
+    // dim.yml: the group stored on its one side, plus a stray one-to-many copy of k that agrees with it.
+    const ms = models(undefined, [m('k', 'fct', 'k', 'many-to-one', 'fk_dim'), m('k_x', 'fct', 'k_x', 'many-to-one', 'fk_dim'), m('k', 'fct', 'k', 'one-to-many', 'fk_dim')]);
+    const plan = planRehome(ms, (n) => ms.find((x) => x.name === n) ?? null);
+    expect(plan.disagreements).toEqual([]);
+    expect(plan.rehome.map((r) => [r.to.fromModel, r.to.fromColumn, r.to.compositeKey ?? null])).toEqual([
+      ['fct', 'k', 'fk_dim'], ['fct', 'k_x', 'fk_dim'], ['fct', 'k', null],
+    ]);
+  });
+});

@@ -2911,6 +2911,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // V5: write to central model file, cascade orphaned relationships in the domain.
       // No-op silently if the column or model is already gone (e.g. spam-clicked delete).
       if (this.isDomainV5(parsed)) {
+        // The whole library, as read before the edit: where a composite the column is part of is found.
+        const library = this.logicalModelService.listModels();
         const ok = await this.applyModelEdit(
           document,
           webview,
@@ -2920,15 +2922,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             const idx = columns.findIndex((c) => c.name === payload.columnName);
             if (idx === -1) return;
             columns.splice(idx, 1);
-            removeColumnRelationships([model], payload.modelName, payload.columnName);
+            removeColumnRelationships([model], payload.modelName, payload.columnName, library);
           },
           (sec) => {
-            // A composite key loses all its members with one column (#133 L2).
+            // A composite key loses all its members with one column (#133 L2), the library's included.
             sec.relationships = removeColumnFromDomainRelationships(
-              (sec.relationships ?? []) as Array<Record<string, unknown>>, payload.modelName, payload.columnName);
+              (sec.relationships ?? []) as Array<Record<string, unknown>>, payload.modelName, payload.columnName, library);
           },
           // Library relationships in other models that point at the removed column (#126).
-          removeColumnRelationships(this.otherLibraryModels(payload.modelName), payload.modelName, payload.columnName),
+          removeColumnRelationships(this.otherLibraryModels(payload.modelName), payload.modelName, payload.columnName, library),
         );
         if (!ok) {
           webview.postMessage({ type: 'error', payload: { message: 'Failed to remove column.' } });

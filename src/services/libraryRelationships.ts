@@ -12,7 +12,7 @@
  */
 
 import {
-  canonicalRelationship, compositeGroupProblem, contradictsKeys, contradictsKeysOf, groupKey, keyedRelationship, linkKey,
+  canonicalRelationship, compositeGroupProblem, contradictsKeys, contradictsKeysOf, keyedRelationship, linkKey,
   mergeLibraryRelationships, normaliseRelationshipRole, relationshipKey, respellRelationship, reverseRelationship, sameLink,
 } from '@erd-studio/core';
 import type { ColumnPair, DbtKeyIndex, KeyedModel } from '@erd-studio/core';
@@ -131,28 +131,38 @@ export function removeColumnRelationships(
   models: readonly SemanticModel[],
   modelName: string,
   column: string,
+  /** The whole library, which a composite is read from when `models` is part of it. */
+  library: readonly SemanticModel[] = models,
 ): SemanticModel[] {
-  const keys = new Set<string>();
-  for (const model of models) {
-    const list = libraryRelationshipsOf(model);
-    for (const rel of list.filter((r) => touchesColumn(r, modelName, column))) {
-      for (const member of groupOf(list, rel) ?? [rel]) keys.add(linkKey(member));
-    }
-  }
+  const keys = columnRemovalKeys(library, [], modelName, column);
   return dropWhere(models, (rel) => keys.has(linkKey(rel)));
+}
+
+/** The links to drop when `model.column` goes: those touching it, and every member of a composite (as drawn) one of them is in. */
+function columnRemovalKeys(models: readonly SemanticModel[], domainRels: readonly Relationship[], modelName: string, column: string): Set<string> {
+  const own = domainRels.filter(isEnds);
+  const keys = new Set([...models.flatMap(libraryRelationshipsOf), ...own].filter((r) => touchesColumn(r, modelName, column)).map(linkKey));
+  const lines = mergeLibraryRelationships(models, own);
+  for (const line of lines.filter((r) => touchesColumn(r, modelName, column))) {
+    for (const member of drawnGroupOf(lines, line) ?? []) keys.add(linkKey(member));
+  }
+  return keys;
 }
 
 /**
  * A domain file's own `logical.relationships` without those that start or
  * end at `model.column`, a composite taking all its members with it (#133
- * L2). Entries that are not relationships are kept.
+ * L2) — whether the composite is the file's own or the model library's
+ * (`library`: its models), as drawn, so no copy of a member outlives the
+ * key. Entries that are not relationships are kept.
  */
-export function removeColumnFromDomainRelationships<T>(relationships: readonly T[], modelName: string, column: string): T[] {
-  const list = relationships.filter(isEnds) as unknown as Relationship[];
-  const keys = new Set<string>();
-  for (const rel of list.filter((r) => touchesColumn(r, modelName, column))) {
-    for (const member of groupOf(list, rel) ?? [rel]) keys.add(linkKey(member));
-  }
+export function removeColumnFromDomainRelationships<T>(
+  relationships: readonly T[],
+  modelName: string,
+  column: string,
+  library: readonly SemanticModel[] = [],
+): T[] {
+  const keys = columnRemovalKeys(library, relationships as unknown as Relationship[], modelName, column);
   return relationships.filter((r) => !isEnds(r) || !keys.has(linkKey(r)));
 }
 
@@ -164,17 +174,33 @@ export function removeColumnFromDomainRelationships<T>(relationships: readonly T
  */
 export function groupOf(list: readonly Relationship[], ends: RelationshipEnds): Relationship[] | undefined {
   const entries = list.filter(isEnds);
-  const found = entries.find((r) => r.compositeKey && sameLink(r, ends));
+  // The entry itself when it is one of them (a file may hold two groups of one name), else its link's first keyed copy.
+  const found = entries.find((r) => r === ends && r.compositeKey) ?? entries.find((r) => r.compositeKey && sameLink(r, ends));
   if (!found) return undefined;
   const owner = canonicalRelationship(found).fromModel;
+  // One member per link, as the read path draws it: a link saved twice is one pair.
   const members = entries.filter((r) => !!r.compositeKey && same(r.compositeKey, found.compositeKey!)
-    && same(canonicalRelationship(r).fromModel, owner));
+    && same(canonicalRelationship(r).fromModel, owner))
+    .filter((r, i, all) => all.findIndex((x) => sameLink(x, r)) === i);
   return compositeGroupProblem(members) ? undefined : members;
 }
 
 /**
+ * The composite `ends` is drawn in among `lines` (what the read path draws:
+ * only a valid group keeps its compositeKey there), or undefined (#133 L2).
+ * How a write finds the group the user sees, whichever stored copies won.
+ */
+export function drawnGroupOf(lines: readonly Relationship[], ends: RelationshipEnds): Relationship[] | undefined {
+  const line = lines.find((r) => sameLink(r, ends));
+  if (!line?.compositeKey) return undefined;
+  const members = lines.filter((r) => !!r.compositeKey && same(r.compositeKey, line.compositeKey!)
+    && same(r.fromModel, line.fromModel) && same(r.toModel, line.toModel));
+  return members.length >= 2 ? members : undefined;
+}
+
+/**
  * `ends`, plus every other member of a valid composite any of them belongs
- * to — in the model library or the domain section — deduped by link
+ * to — in the model library or the domain section, as drawn — deduped by link
  * (#133 L2). How one edge of a composite stands for the whole group.
  */
 export function expandToGroups(
@@ -182,7 +208,7 @@ export function expandToGroups(
   domainRels: readonly Relationship[],
   ends: readonly RelationshipEnds[],
 ): RelationshipEnds[] {
-  const library = models.flatMap(libraryRelationshipsOf);
+  const lines = mergeLibraryRelationships(models, domainRels.filter(isEnds));
   const out: RelationshipEnds[] = [];
   const seen = new Set<string>();
   const add = (e: RelationshipEnds): void => {
@@ -192,7 +218,7 @@ export function expandToGroups(
   };
   for (const e of ends) {
     add(e);
-    for (const member of [...(groupOf(library, e) ?? []), ...(groupOf(domainRels, e) ?? [])]) add(member);
+    for (const member of drawnGroupOf(lines, e) ?? []) add(member);
   }
   return out;
 }
@@ -406,8 +432,9 @@ function planLinkWrite(op: RelationshipWriteOp, input: RelationshipWriteInput): 
   const libraryCopies = (key: string): Relationship[] => library.filter((r) => linkKey(r) === key);
   const domainCopies = (key: string): Relationship[] => domainRelationships.filter((r) => isEnds(r) && linkKey(r) === key);
   const stored = (key: string): boolean => libraryCopies(key).length > 0 || domainCopies(key).length > 0;
-  /** The valid composite stored with `ends` as a member: in the library, else the domain section. */
-  const storedGroup = (ends: RelationshipEnds): Relationship[] | undefined => groupOf(library, ends) ?? groupOf(domainRelationships, ends);
+  /** The composite `ends` is drawn in, as the canvas shows it. */
+  let lines: Relationship[] | undefined;
+  const storedGroup = (ends: RelationshipEnds): Relationship[] | undefined => drawnGroupOf(lines ??= drawnLines(), ends);
 
   if (op.kind === 'remove') {
     // One edge of a composite deletes the whole group.
@@ -741,92 +768,103 @@ export function planRehome(
 ): Pick<MoveToLibraryPlan, 'rehome' | 'disagreements' | 'lockedFiles'> {
   const plan: Pick<MoveToLibraryPlan, 'rehome' | 'disagreements' | 'lockedFiles'> = { rehome: [], disagreements: [], lockedFiles: [] };
   const disagreeing = new Set<string>();
+  // Each file's entries, and how the move reads each one: a composite's
+  // member as part of its group (keys on the column sets, #133 L2), any other
+  // entry on its own — so a member is never judged by its single column.
+  const files = new Map<string, { list: Relationship[]; forms: Relationship[]; groupOf: Array<Relationship[] | undefined> }>();
+  const fileOf = (model: SemanticModel) => {
+    const key = model.name.toLowerCase();
+    if (!files.has(key)) {
+      const list = libraryRelationshipsOf(model);
+      const groupOfEntry = list.map((r) => { const g = groupOf(list, r); return g?.includes(r) ? g : undefined; });
+      const forms = list.map((r, i) => {
+        const g = groupOfEntry[i];
+        return g ? keyedGroup(g, libraryModel, dbt)[g.indexOf(r)] : keyedRelationship(r, libraryModel, dbt);
+      });
+      files.set(key, { list, forms, groupOf: groupOfEntry });
+    }
+    return files.get(key)!;
+  };
+  /** The first other copy of `to`'s link in `inFiles` that says something else, skipping `skip`. */
+  const disagreement = (inFiles: SemanticModel[], to: Relationship, skip: (file: string, i: number) => boolean): Relationship | undefined => {
+    for (const m of inFiles) {
+      const { list, forms } = fileOf(m);
+      const i = list.findIndex((r, j) => !skip(m.name, j) && sameLink(r, to) && !agreesAs(forms[j], r.role, to));
+      if (i !== -1) return list[i];
+    }
+    return undefined;
+  };
+  // Rehomes that move together: a composite's members, all or none.
+  const batches: RelationshipRehome[][] = [];
   for (const model of libraryModels) {
-    const list = libraryRelationshipsOf(model);
+    const { list, forms, groupOf: groups } = fileOf(model);
     const grouped = new Set<number>();
     list.forEach((stored, index) => {
       if (grouped.has(index)) return;
-      // A composite key moves as one (#133 L2): every member, or none.
-      const group = groupOf(list, stored);
+      const group = groups[index];
       if (group) {
-        group.forEach((m) => grouped.add(list.indexOf(m)));
-        planGroupRehome(plan, disagreeing, model, list, group, libraryModel, locked, dbt);
+        const indices = group.map((m) => list.indexOf(m));
+        indices.forEach((i) => grouped.add(i));
+        const to = indices.map((i) => forms[i]);
+        if (to.every((t, k) => relationshipKey(t) === relationshipKey(group[k]) && t.cardinality === group[k].cardinality)) return;
+        const home = libraryModel(to[0].fromModel);
+        if (!home) return;
+        const inFiles = [model, ...(same(home.name, model.name) ? [] : [home])];
+        const disagree = to.flatMap((t, k) => {
+          const held = disagreement(inFiles, t, (file, i) => same(file, model.name) && indices.includes(i));
+          return held ? [{ stored: group[k], held }] : [];
+        });
+        if (disagree.length > 0) {
+          for (const d of disagree) if (!disagreeing.has(linkKey(d.stored))) plan.disagreements.push(d);
+          for (const m of group) disagreeing.add(linkKey(m));
+          return;
+        }
+        if (lockedOut(model, home)) return;
+        // In its new file it keeps its name unless that file already uses it.
+        const keys = new Set(group.map(linkKey));
+        const elsewhere = libraryRelationshipsOf(home).filter((r) => !keys.has(linkKey(r)));
+        const name = elsewhere.some((r) => r.compositeKey && same(r.compositeKey, group[0].compositeKey!))
+          ? nextCompositeKey(elsewhere, to[0].toModel) : group[0].compositeKey!;
+        batches.push(group.map((s, k) => ({ from: model.name, stored: s, to: { ...to[k], compositeKey: name } })));
         return;
       }
-      const to = keyedRelationship(stored, libraryModel, dbt);
-      if (to === stored) return;
+      if (forms[index] === stored) return;
+      // A single link moving file carries no compositeKey: one that groups nothing is stale (#133 L2).
+      const { compositeKey: _stale, ...to } = forms[index];
       const home = libraryModel(to.fromModel);
       if (!home) return;
       // Every other copy of the link, in either file, must say the same.
-      const files = [model, ...(same(home.name, model.name) ? [] : [home])];
-      const others = files.flatMap((m) => libraryRelationshipsOf(m)
-        .filter((r, i) => sameLink(r, to) && !(same(m.name, model.name) && i === index)));
-      const held = others.find((r) => !agrees(r, to, libraryModel, dbt));
+      const held = disagreement([model, ...(same(home.name, model.name) ? [] : [home])], to, (file, i) => same(file, model.name) && i === index);
       if (held) {
         if (!disagreeing.has(linkKey(to))) plan.disagreements.push({ stored, held });
         disagreeing.add(linkKey(to));
         return;
       }
-      const lockedHere = [model.name, home.name].filter(locked);
-      if (lockedHere.length > 0) {
-        plan.lockedFiles.push(...lockedHere.filter((m) => !plan.lockedFiles.includes(m)));
-        return;
-      }
-      plan.rehome.push({ from: model.name, stored, to });
+      if (lockedOut(model, home)) return;
+      batches.push([{ from: model.name, stored, to }]);
     });
   }
-  // A link listed as disagreeing moves nowhere, whichever copy came first.
-  plan.rehome = plan.rehome.filter((r) => !disagreeing.has(linkKey(r.to)));
+  function lockedOut(model: SemanticModel, home: SemanticModel): boolean {
+    const lockedHere = [model.name, home.name].filter(locked);
+    plan.lockedFiles.push(...lockedHere.filter((m) => !plan.lockedFiles.includes(m)));
+    return lockedHere.length > 0;
+  }
+  // A link listed as disagreeing moves nowhere, whichever copy came first — nor does the rest of its composite.
+  plan.rehome = batches.filter((b) => !b.some((r) => disagreeing.has(linkKey(r.to)))).flat();
   return plan;
 }
 
-/**
- * `planRehome` for one composite stored in `model`'s file: turned round
- * together when stored on its one side — a one-to-many, or its from columns
- * together a whole key against a to-column set that is certainly not one —
- * and left whole when any member's other copy disagrees or a file is locked.
- * In its new file it keeps its name unless that file already uses it.
- */
-function planGroupRehome(
-  plan: Pick<MoveToLibraryPlan, 'rehome' | 'disagreements' | 'lockedFiles'>,
-  disagreeing: Set<string>,
-  model: SemanticModel,
-  list: readonly Relationship[],
-  group: readonly Relationship[],
-  libraryModel: (name: string) => SemanticModel | null,
-  locked: (model: string) => boolean,
-  dbt?: DbtKeyIndex,
-): void {
+/** A composite's members as the move stores them: on its many side, turned round together where the column sets' keys say so. */
+function keyedGroup(group: readonly Relationship[], modelOf: (name: string) => KeyedModel | null, dbt?: DbtKeyIndex): Relationship[] {
   const canon = group.map(canonicalRelationship);
-  const to = contradictsKeysOf(canon, libraryModel, dbt)
+  return contradictsKeysOf(canon, modelOf, dbt)
     ? canon.map((c) => ({ ...reverseRelationship(c), cardinality: 'many-to-one' as const }))
     : canon;
-  if (to.every((t, i) => relationshipKey(t) === relationshipKey(group[i]) && t.cardinality === group[i].cardinality)) return;
-  const home = libraryModel(to[0].fromModel);
-  if (!home) return;
-  const files = [model, ...(same(home.name, model.name) ? [] : [home])];
-  const members = new Set(group);
-  const disagree = to.flatMap((t, i) => {
-    const held = files.flatMap((m) => (m === model ? list : libraryRelationshipsOf(m)))
-      .filter((r) => !members.has(r) && sameLink(r, t))
-      .find((r) => !agrees(r, t, libraryModel, dbt));
-    return held ? [{ stored: group[i], held }] : [];
-  });
-  if (disagree.length > 0) {
-    for (const d of disagree) if (!disagreeing.has(linkKey(d.stored))) plan.disagreements.push(d);
-    for (const m of group) disagreeing.add(linkKey(m));
-    return;
-  }
-  const lockedHere = [model.name, home.name].filter(locked);
-  if (lockedHere.length > 0) {
-    plan.lockedFiles.push(...lockedHere.filter((m) => !plan.lockedFiles.includes(m)));
-    return;
-  }
-  const keys = new Set(group.map(linkKey));
-  const elsewhere = libraryRelationshipsOf(home).filter((r) => !keys.has(linkKey(r)));
-  const name = elsewhere.some((r) => r.compositeKey && same(r.compositeKey, group[0].compositeKey!))
-    ? nextCompositeKey(elsewhere, to[0].toModel) : group[0].compositeKey!;
-  plan.rehome.push(...group.map((stored, i) => ({ from: model.name, stored, to: { ...to[i], compositeKey: name } })));
+}
+
+/** Whether a copy, read as the move stores it (`form`), says what `home` says: its meaning, and any role. */
+function agreesAs(form: Relationship, role: string | undefined, home: Relationship): boolean {
+  return sameMeaning(form, home) && (!role || !home.role || role === home.role);
 }
 
 /** Whether two entries are the same stored entry (same ends, cardinality and role). */
@@ -838,11 +876,6 @@ function sameEntry(a: Relationship, b: Relationship): boolean {
 function sameMeaning(a: Relationship, b: Relationship): boolean {
   if (a.cardinality !== b.cardinality || !sameLink(a, b)) return false;
   return a.cardinality === 'many-to-many' || relationshipKey(a) === relationshipKey(b);
-}
-
-/** Whether a stored copy says the same as `home` (already keyed): its meaning, and any role. */
-function agrees(copy: Relationship, home: Relationship, modelOf: (name: string) => KeyedModel | null, dbt?: DbtKeyIndex): boolean {
-  return sameMeaning(keyedRelationship(copy, modelOf, dbt), home) && (!copy.role || !home.role || copy.role === home.role);
 }
 
 /**
@@ -1045,7 +1078,8 @@ function planGroupMoves(
       const group = groupOf(rels, rel);
       if (!group) continue;
       group.forEach((m) => seen.add(m));
-      const id = groupKey(group);
+      // The same pairs, whichever side a diagram draws them from (definitions settle direction).
+      const id = group.map(linkKey).sort().join('\u0001');
       uses.set(id, [...(uses.get(id) ?? []), { label: domain.label, members: group }]);
     }
   }
@@ -1066,6 +1100,14 @@ function planGroupMoves(
     const forms = groupUses.map((u) => ({ label: u.label, members: formOf(u.members) }));
     const head = forms[0].members;
     const leave = (reason: string): void => { plan.leftGroups.push({ members: head, domains: holders, reason }); };
+    // A diagram that also keeps a member's link as another entry saying something else.
+    const disagreeing = groupUses.some((u) => domains.find((d) => d.label === u.label)!.relationships
+      .filter((r) => isEnds(r) && keys.includes(linkKey(r)) && !u.members.includes(r))
+      .some((r) => !sameMeaning(moveForm(r, libraryModel, dbt), formOf(u.members).find((m) => sameLink(m, r))!)));
+    if (disagreeing) {
+      leave('a diagram also keeps one of its column pairs as another relationship that says something else');
+      continue;
+    }
     const owner = libraryModel(head[0].fromModel);
     if (!owner) {
       leave(`${head[0].fromModel} has no readable file in logical-models/`);
@@ -1076,7 +1118,9 @@ function planGroupMoves(
     const library = endFiles.flatMap(libraryRelationshipsOf);
     const held = library.filter((r) => keys.includes(linkKey(r)));
     const libGroup = held.length > 0 ? groupOf(library, held[0]) : undefined;
-    if (libGroup && groupKey(libGroup) === groupKey(head)) {
+    // The same pairs (in whichever direction the library holds them — planRehome turns them round).
+    const pairsOfGroup = (members: readonly Relationship[]): string => members.map(linkKey).sort().join('\u0001');
+    if (libGroup && pairsOfGroup(libGroup) === pairsOfGroup(head)) {
       // Already defined there, as every diagram draws it: the diagram copies go.
       for (const label of holders) for (const k of keys) takeOut(label, k);
       continue;
