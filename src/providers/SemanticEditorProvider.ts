@@ -3599,16 +3599,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private noteDiagramsStillDrawing(document: vscode.TextDocument, keys: readonly RelationshipKey[]): void {
     try {
       const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.logicalModelService.getModelsDir()));
-      const here = path.resolve(document.uri.fsPath);
+      // Compared the way the file system does: VS Code may spell the open file's path in another case.
       const others = readDomainRelationships(this.domainService, this.workspaceRoot, semanticDir)
-        .filter((d) => path.resolve(d.filePath) !== here);
+        .filter((d) => !samePath(d.filePath, document.uri.fsPath));
       const labels = diagramsStillDrawing(keys, others);
       if (labels.length === 0) return;
       const what = keys.length === 1 ? 'this relationship' : 'one of these relationships';
-      void vscode.window.showInformationMessage(
-        `Deleted. ${labels.length === 1 ? `The diagram ${labels[0]} still draws` : `These diagrams still draw`} ` +
-        `${what} from a copy of its own${labels.length === 1 ? '' : `: ${labels.join(', ')}`}. Delete it there too if it should go everywhere.`,
-      );
+      void vscode.window.showInformationMessage(labels.length === 1
+        ? `Deleted. The diagram ${labels[0]} still draws ${what} from a copy of its own. Delete it there too if it should go everywhere.`
+        : `Deleted. These diagrams still draw ${what} from copies of their own: ${labels.join(', ')}. ` +
+          'Delete those copies too if it should go everywhere.');
     } catch (err) {
       console.error('[SemanticEditorProvider] Could not check other diagrams after a delete:', err);
     }

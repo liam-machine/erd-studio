@@ -55,6 +55,7 @@ const EDGE = {
 
 interface Harness {
   root: string;
+  provider: SemanticEditorProvider;
   domainService: DomainService;
   logicalModelService: LogicalModelService;
   domainPath: (name: string) => string;
@@ -106,6 +107,7 @@ async function createHarness(ownRelationships: Relationship[] = []): Promise<Har
 
   return {
     root,
+    provider,
     domainService,
     logicalModelService,
     domainPath,
@@ -781,5 +783,55 @@ describe("VS Code's own undo — Cmd+Z on the canvas — after an edit to two mo
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(docs.map((doc) => doc.isDirty)).toEqual([true, true]);
     expect(files.map((file) => fs.readFileSync(file, 'utf-8'))).toEqual(after);
+  });
+});
+
+describe('the notice after deleting a link another diagram still draws (#133 D3)', () => {
+  let h: Harness;
+  beforeEach(() => { _resetMockWorkspace(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(h.root, { recursive: true, force: true });
+  });
+  const OWN: Relationship = { ...EDGE, cardinality: 'many-to-one' };
+
+  /** orders (the open diagram), reporting and `extra` each keep a copy of their own. */
+  async function copiesIn(extra: string[]) {
+    h = await createHarness([OWN]);
+    for (const name of ['reporting', ...extra]) {
+      const file = h.domainPath(name);
+      const doc = fs.existsSync(file)
+        ? JSON.parse(fs.readFileSync(file, 'utf-8'))
+        : { schemaVersion: 5, domain: name, layer: 'silver', description: '', logical: { models: ['fct_order', 'dim_customer'] }, viewConfig: { positions: {} } };
+      doc.logical.relationships = [OWN];
+      fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+    }
+    return vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+  }
+  const note = (fsPath: string) => (h.provider as unknown as {
+    noteDiagramsStillDrawing: (d: unknown, k: unknown[]) => void;
+  }).noteDiagramsStillDrawing({ uri: vscode.Uri.file(fsPath) }, [EDGE]);
+
+  it('never names the open diagram, even when VS Code spells its path in another case', async () => {
+    const info = await copiesIn([]);
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    try {
+      note(h.domainPath('orders').toUpperCase());
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+    expect(info.mock.calls.map((c) => c[0])).toEqual([
+      'Deleted. The diagram silver/reporting still draws this relationship from a copy of its own. Delete it there too if it should go everywhere.',
+    ]);
+  });
+
+  it('names several diagrams in the plural', async () => {
+    const info = await copiesIn(['sales']);
+    note(h.domainPath('orders'));
+    expect(info.mock.calls.map((c) => c[0])).toEqual([
+      'Deleted. These diagrams still draw this relationship from copies of their own: silver/reporting, silver/sales. ' +
+      'Delete those copies too if it should go everywhere.',
+    ]);
   });
 });
