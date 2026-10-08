@@ -1,0 +1,16 @@
+# ERD Studio 1.6.7 saved a dimension-to-fact line as a many-to-one from the
+# dimension's primary key — backwards — next to the fact's own copy.
+name: dim_date
+schema: gold
+modelRole: dimension
+columns:
+  - name: date_key
+    dataType: INT
+    isPrimaryKey: true
+  - name: calendar_date
+    dataType: DATE
+relationships:
+  - fromColumn: date_key
+    toModel: fct_order
+    toColumn: order_date_key
+    cardinality: many-to-one

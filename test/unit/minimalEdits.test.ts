@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseLogicalModelText } from '@erd-studio/core';
 
-import { setDomainRelationships, setYamlRelationships } from '../../src/services/minimalEdits';
+import { relationshipsRewriteLoses, rewriteJsonScalars, setDomainRelationships, setYamlRelationships } from '../../src/services/minimalEdits';
 import type { ModelRelationship, Relationship } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
@@ -224,6 +224,31 @@ function splitAroundRelationships(text: string): [string, string] {
   return [text.slice(0, start), text.slice(parsedEnd)];
 }
 
+describe('setYamlRelationships — role (#133)', () => {
+  it('writes a role after the cardinality, and the parser reads it back', () => {
+    const rel: ModelRelationship = { fromColumn: 'ship_date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'many-to-one', role: 'ship: date' };
+    const text = setYamlRelationships('name: fct_order\n', [rel]);
+    expect(text).toContain('    cardinality: many-to-one\n    role: "ship: date"\n');
+    expect(parseLogicalModelText(text, 'fct_order')?.relationships).toEqual([rel]);
+  });
+});
+
+describe('relationshipsRewriteLoses — files the move leaves alone (#133)', () => {
+  it('is false for a plain list, none at all, and comments outside it', () => {
+    expect(relationshipsRewriteLoses(MESSY_BODY + BLOCK_2 + '# after the list\n')).toBe(false);
+    expect(relationshipsRewriteLoses(MESSY_BODY)).toBe(false);
+    expect(relationshipsRewriteLoses(`${MESSY_BODY}${BLOCK_2}    role: order date\n`)).toBe(false);
+  });
+  it.each([
+    ['a comment', BLOCK_2.replace('many-to-one', 'many-to-one  # checked with finance')],
+    ['an unknown key', `${BLOCK_2}    description: why\n`],
+    ['an unrecognised cardinality', BLOCK_2.replace('many-to-one', 'many_to_one')],
+    ['an entry the reader skips', `${BLOCK_2}  - toModel: dim_date\n`],
+  ])('is true for %s in the list', (_, block) => {
+    expect(relationshipsRewriteLoses(MESSY_BODY + block)).toBe(true);
+  });
+});
+
 describe('setDomainRelationships', () => {
   it.each([
     ['2-space', '  '],
@@ -317,5 +342,43 @@ describe('setDomainRelationships', () => {
     expect(() => setDomainRelationships('{"logical": []}', [])).toThrow(/no "logical" object/);
     expect(() => setDomainRelationships('{}', [])).toThrow(/no "logical" object/);
     expect(() => setDomainRelationships('{', [])).toThrow();
+  });
+});
+
+describe('rewriteJsonScalars — a rename reaching another diagram file (#133 L5)', () => {
+  const CRLF_FILE = [
+    '{',
+    '    "schemaVersion": 5,',
+    '    "logical": { "models": ["fct_order", "Dim_Customer"],',
+    '        "relationships": [ {"fromModel": "fct_order", "fromColumn": "customer_key", "toModel": "Dim_Customer", "toColumn": "CUSTOMER_KEY"} ] },',
+    '    "viewConfig": {"positions": {"Dim_Customer": {"x": 1, "y": 2}, "fct_order": {"x": 0, "y": 0}}}',
+    '}',
+    '',
+  ].join('\r\n');
+
+  it('changes only the renamed strings, keeping layout, key order and CRLF', () => {
+    const parsed = JSON.parse(CRLF_FILE);
+    parsed.logical.models[1] = 'dim_client';
+    parsed.logical.relationships[0].toModel = 'dim_client';
+    parsed.logical.relationships[0].toColumn = 'customer_sk';
+    parsed.viewConfig.positions.dim_client = parsed.viewConfig.positions.Dim_Customer;
+    delete parsed.viewConfig.positions.Dim_Customer;
+    expect(rewriteJsonScalars(CRLF_FILE, parsed)).toBe(CRLF_FILE
+      .replace('["fct_order", "Dim_Customer"]', '["fct_order", "dim_client"]')
+      .replace('"toModel": "Dim_Customer", "toColumn": "CUSTOMER_KEY"', '"toModel": "dim_client", "toColumn": "customer_sk"')
+      .replace('{"Dim_Customer": {"x": 1', '{"dim_client": {"x": 1'));
+  });
+
+  it('returns the text unchanged when nothing changed, and keeps a BOM', () => {
+    expect(rewriteJsonScalars('﻿' + CRLF_FILE, JSON.parse(CRLF_FILE))).toBe('﻿' + CRLF_FILE);
+  });
+
+  it('is null when the shape changed — a member or element added or removed', () => {
+    const added = JSON.parse(CRLF_FILE);
+    added.logical.models.push('dim_date');
+    expect(rewriteJsonScalars(CRLF_FILE, added)).toBeNull();
+    const removed = JSON.parse(CRLF_FILE);
+    delete removed.schemaVersion;
+    expect(rewriteJsonScalars(CRLF_FILE, removed)).toBeNull();
   });
 });

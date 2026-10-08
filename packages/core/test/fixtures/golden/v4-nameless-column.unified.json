@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 4,
+  "domain": "orders",
+  "layer": "silver",
+  "description": "A hand-edited v4 file: columns without a text name, and relationship ends spelled in another case",
+  "logical": {
+    "models": [
+      {
+        "name": "stg_orders",
+        "columns": [
+          {
+            "dataType": "INT",
+            "description": "A column whose name was deleted by hand"
+          },
+          {
+            "name": 123,
+            "dataType": "INT",
+            "description": "A column named by a number"
+          },
+          {
+            "name": "order_id",
+            "dataType": "BIGINT",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "customer_key",
+            "dataType": "INT"
+          }
+        ]
+      },
+      {
+        "name": "stg_customers",
+        "columns": [
+          {
+            "dataType": "VARCHAR"
+          },
+          {
+            "name": "Customer_Key",
+            "dataType": "INT",
+            "isPrimaryKey": true
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "stg_orders",
+        "fromColumn": "customer_key",
+        "toModel": "stg_customers",
+        "toColumn": "Customer_Key",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "stg_orders",
+        "fromColumn": "dropped_column",
+        "toModel": "stg_customers",
+        "toColumn": "Customer_Key",
+        "cardinality": "many-to-one"
+      }
+    ]
+  },
+  "viewConfig": {
+    "positions": {
+      "stg_orders": {
+        "x": 400,
+        "y": 40
+      },
+      "stg_customers": {
+        "x": 40,
+        "y": 40
+      }
+    }
+  }
+}

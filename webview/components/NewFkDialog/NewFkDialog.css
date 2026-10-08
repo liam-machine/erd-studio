@@ -128,6 +128,11 @@
   cursor: pointer;
 }
 
+.new-fk-dialog__hint {
+  font-size: 11px;
+  color: var(--dim-fg);
+}
+
 .new-fk-dialog__error {
   font-size: 11px;
   color: var(--error-fg, #f48771);
@@ -156,6 +161,103 @@
 .new-fk-dialog__warning-icon {
   flex-shrink: 0;
   font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Which side holds the foreign key (#133 L1)
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__direction {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim-fg);
+}
+
+.new-fk-dialog__direction--reversed {
+  padding: 8px;
+  border-radius: 3px;
+  color: var(--warning-fg);
+  background: var(--warning-bg);
+}
+
+.new-fk-dialog__direction-lead {
+  font-weight: 600;
+}
+
+.new-fk-dialog__link-button {
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground, var(--focus-border));
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.new-fk-dialog__direction-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+}
+
+.new-fk-dialog__radio,
+.new-fk-dialog__checkbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  font-size: 12px;
+  color: var(--editor-fg);
+  cursor: pointer;
+}
+
+.new-fk-dialog__radio .new-fk-dialog__hint {
+  flex-basis: 100%;
+  padding-left: 20px;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* ---------------------------------------------------------------------------
+   Composite foreign keys: the other column pairs (#133 L2)
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__pair-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.new-fk-dialog__pair-column {
+  flex: 1;
+  min-width: 0;
+}
+
+.new-fk-dialog__pair-arrow {
+  color: var(--dim-fg);
+}
+
+.new-fk-dialog__pair-remove {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--dim-fg);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.new-fk-dialog__pair-remove:hover {
+  color: var(--error-fg);
+}
+
+.new-fk-dialog__add-pair {
+  align-self: flex-start;
+  margin-left: 0;
+  font-size: 11px;
 }
 
 /* ---------------------------------------------------------------------------

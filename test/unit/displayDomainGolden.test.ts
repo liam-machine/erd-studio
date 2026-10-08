@@ -71,6 +71,13 @@ const DOMAIN_CASES: Record<string, string> = {
   'missing-model': 'silver/partial.json',
   'no-layers': 'gold/accounts.json',
   'missing-positions': 'silver/showcase.json',
+  // Old shapes a released extension wrote and core must keep reading:
+  // model-library relationships stored one-to-many and backwards (1.6.6 /
+  // 1.6.7), and a hand-edited v4 file whose columns have no text name.
+  'library-relationships': 'gold/sales.json',
+  'v4-nameless-column': 'silver/orders.json',
+  // #133 L2–L4: a composite foreign key, a lone compositeKey, self-references, a mis-cased end.
+  'composite-and-self': 'gold/vault.json',
 };
 
 /** Domain files under packages/core/test/fixtures/errors that must fail to load. */

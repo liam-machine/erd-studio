@@ -170,6 +170,18 @@
             "one-to-many",
             "many-to-many"
           ]
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Optional label for what this link means, e.g. \"order date\" and \"ship date\" for two columns pointing at the same date dimension. A label only; it is not part of the relationship's identity."
+        },
+        "compositeKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Entries of this file with the same fromModel that share this value form one composite foreign key: one relationship over several column pairs, drawn as one line. Each entry is one column pair; all must point at the same toModel with the same cardinality (many-to-one or one-to-one). ERD Studio 1.6.7 and earlier read the entries as separate relationships and drop this key when they save the file."
         }
       }
     },

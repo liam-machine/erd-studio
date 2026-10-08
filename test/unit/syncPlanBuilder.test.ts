@@ -102,6 +102,27 @@ describe('buildSyncPlan', () => {
     expect(Object.keys(plan.modelContext).sort()).toEqual(['dim_customer', 'dim_extra', 'dim_missing', 'dim_store', 'fct_order']);
   });
 
+  it('a composite resolution carries its pairs and is selected by a joined key (#133 L2)', () => {
+    const pairs = [{ fromColumn: 'hk', toColumn: 'hk' }, { fromColumn: 'as_of', toColumn: 'load_date' }];
+    const composite: DiscrepancyReport = {
+      ...report(), models: [],
+      relationships: [
+        { fromModel: 'pit', fromColumn: 'hk', toModel: 'sat', toColumn: 'hk', pairs, compositeKey: 'fk_sat', status: 'missing', targetCardinality: 'many-to-one' },
+        { fromModel: 'pit2', fromColumn: 'hk', toModel: 'sat', toColumn: 'hk', pairs, compositeKey: 'fk_sat', status: 'extra', sourceCardinality: 'many-to-one', composite: true, undeclaredPairs: pairs },
+      ],
+    };
+    const selections = allSelections(composite, 'physical');
+    expect(Object.keys(selections)).toEqual(['rel:pit:hk+as_of:sat:hk+load_date', 'rel:pit2:hk+as_of:sat:hk+load_date']);
+    const plan = buildSyncPlan(composite, selections, ctx);
+    expect(plan.relationships).toEqual([
+      expect.objectContaining({ fromModel: 'pit', action: 'add-relationship-to-logical', pairs, compositeKey: 'fk_sat' }),
+      // An undeclared composite is not wrong in the logical model: dbt is asked to declare it.
+      expect.objectContaining({ fromModel: 'pit2', action: 'add-relationship-test-to-physical', pairs, composite: true }),
+    ]);
+    // A selector that only knows single links selects a composite by its first pair.
+    expect(buildSyncPlan(composite, { 'rel:pit:hk:sat:hk': 'physical' }, ctx).relationships).toHaveLength(1);
+  });
+
   it('marks requiresCompile when logical is truth', () => {
     const plan = buildSyncPlan(report(), allSelections(report(), 'logical'), ctx);
     expect(plan.requiresCompile).toBe(true);

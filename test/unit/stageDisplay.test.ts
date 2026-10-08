@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { buildLogicalDisplayDomain } from '../../src/services/stageDisplay';
+import { buildLogicalDisplayDomain, dbtKeyIndexOf, withDbtKeyHints } from '../../src/services/stageDisplay';
 import type { SemanticDomain, SemanticModel } from '../../src/types/semantic';
 
 function model(name: string, columns: Array<Record<string, unknown>>, extra: Partial<SemanticModel> = {}): SemanticModel {
@@ -85,5 +85,30 @@ describe('buildLogicalDisplayDomain', () => {
     const d = domain({ models: [{ name: 'bare' } as SemanticModel], relationships: [] });
     const out = buildLogicalDisplayDomain(d, {});
     expect(out.models[0]).toEqual({ name: 'bare', schema: '', description: '', columns: [] });
+  });
+});
+
+describe('withDbtKeyHints — dbt evidence on the editable payload (#133 L1)', () => {
+  it('adds dbtKey only to the columns dbt\'s tests name, from the yml and the manifest', () => {
+    const display = buildLogicalDisplayDomain(domain(), {});
+    const index = dbtKeyIndexOf(
+      { uniqueColumns: new Map([['FCT_ORDER', new Set(['order_id'])]]), compositeUniqueGroups: new Map(), relationshipTests: [] } as never,
+      { uniqueColumns: new Map(), compositeUniqueGroups: new Map(), relationshipTests: [{ fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' }] } as never,
+    );
+    const hinted = withDbtKeyHints(display, index);
+    const fct = hinted.models.find((m) => m.name === 'fct_order')!;
+    expect(fct.columns.map((c) => c.dbtKey ?? null)).toEqual([
+      { key: 'unique', because: 'unique-test' },
+      { key: 'not-unique', because: 'relationships-test' },
+      ...fct.columns.slice(2).map(() => null),
+    ]);
+    expect(hinted.models.filter((m) => m.name !== 'fct_order')).toEqual(display.models.filter((m) => m.name !== 'fct_order'));
+    // The diff's and the viewer's payload never carry it.
+    expect(JSON.stringify(display)).not.toContain('dbtKey');
+  });
+
+  it('returns the payload itself when dbt says nothing', () => {
+    const display = buildLogicalDisplayDomain(domain(), {});
+    expect(withDbtKeyHints(display, dbtKeyIndexOf(undefined, undefined))).toBe(display);
   });
 });

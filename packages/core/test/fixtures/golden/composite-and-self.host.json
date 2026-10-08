@@ -1,0 +1,185 @@
+{
+  "type": "domainLoaded",
+  "payload": {
+    "schemaVersion": 5,
+    "domain": "vault",
+    "layer": "gold",
+    "stage": "logical",
+    "description": "A composite foreign key, an entry with a lone compositeKey, and two self-references (one spelled in another case)",
+    "models": [
+      {
+        "name": "pit_customer",
+        "schema": "",
+        "description": "",
+        "columns": [
+          {
+            "name": "pit_customer_hk",
+            "dataType": "binary",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_hk",
+            "dataType": "binary",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "as_of_date",
+            "dataType": "date",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "snapshot_hk",
+            "dataType": "binary",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "sat_customer",
+        "schema": "",
+        "description": "",
+        "columns": [
+          {
+            "name": "customer_hk",
+            "dataType": "binary",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "load_date",
+            "dataType": "timestamp",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "name",
+            "dataType": "string",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "employee",
+        "schema": "",
+        "description": "",
+        "columns": [
+          {
+            "name": "employee_id",
+            "dataType": "int",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "manager_id",
+            "dataType": "int",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "mentor_id",
+            "dataType": "int",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "pit_customer",
+        "fromColumn": "customer_hk",
+        "toModel": "sat_customer",
+        "toColumn": "customer_hk",
+        "cardinality": "many-to-one",
+        "role": "as of",
+        "compositeKey": "fk_sat_customer"
+      },
+      {
+        "fromModel": "pit_customer",
+        "fromColumn": "as_of_date",
+        "toModel": "sat_customer",
+        "toColumn": "load_date",
+        "cardinality": "many-to-one",
+        "role": "as of",
+        "compositeKey": "fk_sat_customer"
+      },
+      {
+        "fromModel": "pit_customer",
+        "fromColumn": "snapshot_hk",
+        "toModel": "sat_customer",
+        "toColumn": "customer_hk",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "employee",
+        "fromColumn": "manager_id",
+        "toModel": "employee",
+        "toColumn": "employee_id",
+        "cardinality": "many-to-one",
+        "role": "manager"
+      },
+      {
+        "fromModel": "employee",
+        "fromColumn": "mentor_id",
+        "toModel": "employee",
+        "toColumn": "employee_id",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "pit_customer": {
+          "x": 40,
+          "y": 40
+        },
+        "sat_customer": {
+          "x": 400,
+          "y": 40
+        },
+        "employee": {
+          "x": 40,
+          "y": 360
+        }
+      }
+    },
+    "templates": [],
+    "manifestModels": [],
+    "existingModels": [],
+    "layerConfig": {
+      "id": "gold",
+      "label": "Gold",
+      "abbreviation": "GLD",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 2
+    },
+    "readOnly": false,
+    "positionDraggable": true
+  },
+  "welcomeDismissed": false
+}

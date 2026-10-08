@@ -26,6 +26,7 @@ import type {
   ColumnDisplay,
 } from '../types/graph';
 import { resolveNodeDimensions } from './nodeSizing';
+import { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './relationshipDisplayKey';
 import { computeModelLabels } from './modelLabels';
 // ---------------------------------------------------------------------------
 // Types
@@ -80,6 +81,7 @@ function mapColumns(model: DisplayModel): ColumnDisplay[] {
     ...(col.scdType != null ? { scdType: col.scdType } : {}),
     ...(col.additiveType ? { additiveType: col.additiveType } : {}),
     ...(hasMeta(col.meta) ? { meta: col.meta } : {}),
+    ...(col.dbtKey ? { dbtKey: col.dbtKey } : {}),
   }));
   return mapped;
 }
@@ -269,17 +271,15 @@ export function transformDomain(
   const relDiscrepancyMap = new Map<string, 'extra' | 'missing' | 'cardinality-mismatch'>();
   if (options?.discrepancyReport) {
     for (const rd of options.discrepancyReport.relationships) {
-      if (rd.status !== 'matched') {
-        const key = `${rd.fromModel}|${rd.fromColumn}|${rd.toModel}|${rd.toColumn}`;
-        relDiscrepancyMap.set(key, rd.status);
-      }
+      if (rd.status !== 'matched') relDiscrepancyMap.set(relationshipDisplayKey(rd), rd.status);
     }
   }
 
   // Only include edges where both endpoints exist in the models/ghost nodes.
   const allNodeNames = new Set(positionMap.keys());
 
-  const edges: (FkFlowEdge | AnnotationFlowEdge)[] = relationships
+  // A composite foreign key is one line carrying its column pairs (#133 L2).
+  const edges: (FkFlowEdge | AnnotationFlowEdge)[] = foldComposites(relationships)
     .filter((rel) => allNodeNames.has(rel.fromModel) && allNodeNames.has(rel.toModel))
     .map((rel) => {
       const isSelfLoop = rel.fromModel === rel.toModel;
@@ -289,11 +289,10 @@ export function transformDomain(
         ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
         : pickHandleSides(rectOf(rel.fromModel), rectOf(rel.toModel));
 
-      const relKey = `${rel.fromModel}|${rel.fromColumn}|${rel.toModel}|${rel.toColumn}`;
-      const discStatus = relDiscrepancyMap.get(relKey);
+      const discStatus = relDiscrepancyMap.get(relationshipDisplayKey(rel));
 
       return {
-        id: `fk-${rel.fromModel}-${rel.fromColumn}-${rel.toModel}-${rel.toColumn}`,
+        id: relationshipEdgeId(rel),
         type: 'fk' as const,
         source: rel.fromModel,
         target: rel.toModel,
@@ -305,6 +304,8 @@ export function transformDomain(
           toModel: rel.toModel,
           toColumn: rel.toColumn,
           cardinality: rel.cardinality,
+          ...(rel.role ? { role: rel.role } : {}),
+          ...(rel.pairs ? { pairs: rel.pairs, compositeKey: rel.compositeKey } : {}),
           stage,
           ...(readOnly ? { readOnly: true } : {}),
           ...(discStatus ? { discrepancyStatus: discStatus } : {}),
@@ -323,8 +324,11 @@ export function transformDomain(
         const { sourceSide, targetSide } = isSelfLoop
           ? { sourceSide: 'top' as Side, targetSide: 'right' as Side }
           : pickHandleSides(rectOf(rd.fromModel), rectOf(rd.toModel));
+        // A missing composite is one ghost line too.
+        const pairs = columnPairs(rd);
+        const composite = pairs.length > 1 ? { pairs, ...(rd.compositeKey ? { compositeKey: rd.compositeKey } : {}) } : {};
         edges.push({
-          id: `ghost-fk-${rd.fromModel}-${rd.fromColumn}-${rd.toModel}-${rd.toColumn}`,
+          id: `ghost-${relationshipEdgeId({ ...rd, pairs })}`,
           type: 'fk' as const,
           source: rd.fromModel,
           target: rd.toModel,
@@ -336,6 +340,7 @@ export function transformDomain(
             toModel: rd.toModel,
             toColumn: rd.toColumn,
             cardinality: rd.sourceCardinality ?? rd.targetCardinality ?? 'many-to-one',
+            ...composite,
             stage,
             discrepancyStatus: 'missing',
             ...(isSelfLoop ? { isSelfLoop: true } : {}),
@@ -343,6 +348,18 @@ export function transformDomain(
         });
       }
     }
+  }
+
+  // Several self-loops on one node nest rather than cross (#133 L3): each
+  // gets its place among that node's loops, by edge id, so it is stable.
+  const loopsByNode = new Map<string, FkFlowEdge[]>();
+  for (const edge of edges) {
+    if (edge.type !== 'fk' || !(edge as FkFlowEdge).data?.isSelfLoop) continue;
+    loopsByNode.set(edge.source, [...(loopsByNode.get(edge.source) ?? []), edge as FkFlowEdge]);
+  }
+  for (const loops of loopsByNode.values()) {
+    [...loops].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .forEach((edge, loopIndex) => { edge.data = { ...edge.data!, loopIndex }; });
   }
 
   // --- Annotations ----------------------------------------------------------

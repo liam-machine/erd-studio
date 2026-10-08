@@ -21,6 +21,7 @@ import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { hasErdStudioData, resolveDbtProject, samePath, type DbtProjectResolution } from './services/projectDiscovery';
 import { YmlParserService } from './services/ymlParserService';
+import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
 import { manifestDisplayPath, readDbtProjectConfig, type DbtProjectConfig } from './services/dbtProjectConfig';
@@ -68,6 +69,7 @@ import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 import { saveDocumentByUri } from './providers/documentSave';
+import { dirtyFiles } from './providers/dirtyDocuments';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -845,10 +847,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     semanticDir,
     {
-      isFileDirtyInEditor: (filePath) =>
-        vscode.workspace.textDocuments.some(
-          doc => doc.uri.fsPath === filePath && doc.isDirty,
-        ),
+      // Paths compared as the file system does (a `c:` drive letter, a folder in another case).
+      isFileDirtyInEditor: (filePath) => dirtyFiles([filePath]).length > 0,
       onSkipped: (info) => {
         const message = info.reason === 'unsaved-edits'
           ? 'selectors.yml has unsaved edits in your editor — ERD Studio won\'t overwrite to avoid losing your work. ' +
@@ -1533,6 +1533,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         semanticDir,
         domainService,
         logicalModelService,
+        loadDbtKeyIndex: async () => dbtKeyIndexOf(
+          await ymlParserService.loadYmlData(workspaceRoot, undefined),
+          await manifestService.loadManifest(workspaceRoot).catch(() => undefined),
+        ),
         onWritten: async (domainPaths) => {
           for (const domainPath of domainPaths) treeProvider.invalidateDomain(domainPath);
           modelLibraryProvider.refresh();

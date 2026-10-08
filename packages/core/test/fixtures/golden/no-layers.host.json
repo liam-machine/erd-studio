@@ -27,7 +27,8 @@
             "description": "Account",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "amount",
@@ -60,7 +61,7 @@
             "dataType": "INT",
             "description": "Surrogate key",
             "isPrimaryKey": true,
-            "isForeignKey": true,
+            "isForeignKey": false,
             "isNaturalKey": false,
             "scdType": 0
           },
@@ -118,7 +119,8 @@
             "description": "Account",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "amount",
@@ -149,13 +151,6 @@
         "toModel": "dim_account",
         "toColumn": "account_key",
         "cardinality": "many-to-one"
-      },
-      {
-        "fromModel": "dim_account",
-        "fromColumn": "account_key",
-        "toModel": "fct_txn",
-        "toColumn": "account_key",
-        "cardinality": "one-to-many"
       }
     ],
     "viewConfig": {

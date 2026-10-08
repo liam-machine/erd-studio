@@ -29,7 +29,8 @@ import {
 } from '../services/dbtDraft';
 import { pickDraftScope } from '../providers/dbtDraftPicker';
 import { dirtyFiles } from '../providers/dirtyDocuments';
-import { routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
+import { drawnDiagramCopies, routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
+import { readDomainRelationships } from './moveRelationshipsToLibrary';
 import { ownWrites } from '../services/ownWriteTracker';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { telemetry } from '../services/telemetryService';
@@ -181,7 +182,8 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
       domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
       logicalModelService.hasUnreadableRelationships(),
     )
-      ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
+      ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n),
+        drawnDiagramCopies(readDomainRelationships(domainService, workspaceRoot, semanticDir)))
       : { kept: draft.relationships, changed: [] };
     dirty = dirtyFiles([
       ...draft.newModels.map((m) => logicalModelService.modelPath(m.name, folder)),

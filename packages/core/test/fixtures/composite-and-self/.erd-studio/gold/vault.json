@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 5,
+  "domain": "vault",
+  "layer": "gold",
+  "description": "A composite foreign key, an entry with a lone compositeKey, and two self-references (one spelled in another case)",
+  "logical": {
+    "models": ["pit_customer", "sat_customer", "employee"],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+      "pit_customer": { "x": 40, "y": 40 },
+      "sat_customer": { "x": 400, "y": 40 },
+      "employee": { "x": 40, "y": 360 }
+    }
+  }
+}

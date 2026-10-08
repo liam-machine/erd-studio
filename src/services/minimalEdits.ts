@@ -7,8 +7,10 @@
  * moved entries of `logical.relationships`. Pure: no `vscode`, no `fs`.
  */
 
-import { isMap, isPair, isScalar, isSeq, parseDocument, stringify } from 'yaml';
+import { isMap, isPair, isScalar, isSeq, parseDocument, stringify, visit } from 'yaml';
 import type { Node, Pair } from 'yaml';
+
+import { VALID_CARDINALITIES, normaliseCompositeKey, normaliseRelationshipRole } from '@erd-studio/core';
 
 import type { ModelRelationship, Relationship } from '../types/semantic';
 import { detectEol, keepLineEndings } from './lineEndings';
@@ -72,8 +74,33 @@ function renderYamlBlock(relationships: readonly ModelRelationship[], indent: nu
     lines.push(`${body}toModel: ${yamlScalar(r.toModel)}`);
     lines.push(`${body}toColumn: ${yamlScalar(r.toColumn)}`);
     lines.push(`${body}cardinality: ${yamlScalar(r.cardinality)}`);
+    if (r.role) lines.push(`${body}role: ${yamlScalar(r.role)}`);
+    if (r.compositeKey) lines.push(`${body}compositeKey: ${yamlScalar(r.compositeKey)}`);
   }
   return lines.join(eol);
+}
+
+const ENTRY_KEYS = new Set(['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role', 'compositeKey']);
+
+/**
+ * Whether re-rendering `text`'s `relationships:` block would lose something:
+ * a comment in it, or an entry the reader skips, defaults or changes (an
+ * unknown key, a typo'd cardinality). Such a file is left for the user.
+ */
+export function relationshipsRewriteLoses(text: string): boolean {
+  const doc = parseDocument(splitBom(text).body);
+  if (doc.errors.length > 0 || !isMap(doc.contents)) return true;
+  const pair = (doc.contents.items as Pair[]).find((p) => isScalar(p.key) && p.key.value === 'relationships');
+  if (!pair?.value) return false;
+  let commented = Boolean((pair.key as Node).comment);
+  visit(pair.value as Node, { Node: (_, n) => { if (n.comment || n.commentBefore) commented = true; } });
+  const list: unknown = (pair.value as Node).toJSON() ?? [];
+  return commented || !Array.isArray(list) || list.some((entry: Record<string, unknown> | null) =>
+    !entry || typeof entry !== 'object' || Object.keys(entry).some((k) => !ENTRY_KEYS.has(k))
+    || ['fromColumn', 'toModel', 'toColumn'].some((k) => typeof entry[k] !== 'string' || entry[k] === '')
+    || !VALID_CARDINALITIES.has(entry.cardinality as never)
+    || (entry.role !== undefined && normaliseRelationshipRole(entry.role) !== entry.role)
+    || (entry.compositeKey !== undefined && normaliseCompositeKey(entry.compositeKey) !== entry.compositeKey));
 }
 
 /**
@@ -97,6 +124,8 @@ export function setYamlRelationships(text: string, relationships: readonly Model
     if (relationships.length === 0) doc.delete('relationships');
     else doc.set('relationships', relationships.map((r) => ({
       fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn, cardinality: r.cardinality,
+      ...(r.role ? { role: r.role } : {}),
+      ...(r.compositeKey ? { compositeKey: r.compositeKey } : {}),
     })));
     return bom + keepLineEndings(doc.toString(), body);
   }
@@ -291,4 +320,76 @@ export function setDomainRelationships(text: string, relationships: readonly Rel
   return bom + body.slice(0, anchor.valueEnd)
     + lead + '"relationships"' + separator + rendered
     + body.slice(anchor.valueEnd);
+}
+
+/** The element spans of the array whose `[` is at `open`. */
+function scanArrayElements(text: string, open: number): Array<{ start: number; end: number }> {
+  const elements: Array<{ start: number; end: number }> = [];
+  let i = skipWs(text, open + 1);
+  if (text[i] === ']') return elements;
+  for (;;) {
+    const end = scanValue(text, i);
+    elements.push({ start: i, end });
+    i = skipWs(text, end);
+    if (text[i] === ']') return elements;
+    i = skipWs(text, i + 1); // past ','
+  }
+}
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * Return `text` (a JSON document) turned into `updated` by rewriting only the
+ * scalars that differ and the object keys renamed in place — every other
+ * byte, the layout and the line endings stay as they were (#133 L5: a rename
+ * reaching another diagram's file). Null when `updated` differs in shape (a
+ * member or element added or removed, an object where there was a scalar):
+ * the caller renders the file instead.
+ */
+export function rewriteJsonScalars(text: string, updated: unknown): string | null {
+  const { bom, body } = splitBom(text);
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+
+  const walk = (i: number, next: unknown): boolean => {
+    const ch = body[i];
+    if (ch === '{') {
+      if (!isPlainObject(next)) return false;
+      const { members } = scanObject(body, i);
+      const keys = members.map((m) => m.key);
+      const nextKeys = Object.keys(next);
+      if (new Set(keys).size !== keys.length || keys.length !== nextKeys.length) return false;
+      // A key gone and a key new, in the same order, are renames in place.
+      const removed = keys.filter((k) => !Object.prototype.hasOwnProperty.call(next, k));
+      const added = nextKeys.filter((k) => !keys.includes(k));
+      if (removed.length !== added.length) return false;
+      for (const m of members) {
+        const at = removed.indexOf(m.key);
+        const key = at === -1 ? m.key : added[at];
+        if (at !== -1) edits.push({ start: m.keyStart, end: m.keyEnd, text: JSON.stringify(key) });
+        if (!walk(m.valueStart, next[key])) return false;
+      }
+      return true;
+    }
+    if (ch === '[') {
+      if (!Array.isArray(next)) return false;
+      const elements = scanArrayElements(body, i);
+      if (elements.length !== next.length) return false;
+      return elements.every((el, k) => walk(el.start, next[k]));
+    }
+    if (next !== null && typeof next === 'object') return false;
+    const end = scanValue(body, i);
+    if (!Object.is(JSON.parse(body.slice(i, end)), next)) {
+      if (next === undefined) return false;
+      edits.push({ start: i, end, text: JSON.stringify(next) });
+    }
+    return true;
+  };
+
+  if (!walk(skipWs(body, 0), updated)) return null;
+  let out = body;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  }
+  return bom + out;
 }

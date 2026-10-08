@@ -29,3 +29,6 @@ video/node_modules/
 
 # Local-only Claude skill that reports on .traffic/ (not for the public repo)
 .claude/skills/erd-traffic/
+
+# Issue before/after videos and their demo projects (local only)
+/videos/

@@ -47,6 +47,12 @@ export interface FkDialogPrefill {
   toModel: string;
   /** Optional target column — set when user drags to a specific column handle. */
   toColumn?: string;
+  /** The cardinality key evidence suggests (#133 L1). */
+  cardinality?: 'many-to-one' | 'one-to-one' | 'many-to-many';
+  /** Whether key evidence decided which end holds the foreign key; undecided, the dialog asks. */
+  direction?: 'decided' | 'undecided';
+  /** What decided it: the models' key flags, dbt's tests, or nothing. */
+  basis?: 'keys' | 'dbt' | 'none';
 }
 
 /** Edit data for FK dialog when editing an existing relationship. */
@@ -56,6 +62,10 @@ export interface FkDialogEditData {
   toModel: string;
   toColumn: string;
   cardinality: import('../../src/types/semantic').Cardinality;
+  /** Optional label, e.g. `ship date`. */
+  role?: string;
+  /** A composite foreign key's column pairs, the first being fromColumn → toColumn (#133 L2). */
+  pairs?: import('@erd-studio/core').ColumnPair[];
 }
 
 export interface EditorState extends CanvasState {

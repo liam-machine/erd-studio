@@ -2,10 +2,13 @@
  * ERD Studio: Move Relationships to Model Library (issue #126).
  *
  * The opt-in for an existing project: every relationship its v5 domain files
- * hold is stored once, in its from-model's `logical-models/*.yml`, and taken
- * out of the domain files. A relationship the domains disagree about is
+ * hold is stored once, in the `logical-models/*.yml` of the model holding the
+ * foreign key, and taken out of the domain files. A library entry already
+ * stored on its "one" side (a `one-to-many`) is moved to that model too
+ * (#133), so a new fact never means editing its dimensions. A relationship the domains define in different
+ * ways (cardinality, role, or which end of a one-to-one holds the key) is
  * settled by the user — one QuickPick per conflict, naming the diagrams behind
- * each cardinality — or left as it is in each diagram. Prompted.
+ * each version — or left as it is in each diagram. Prompted.
  *
  * Disk is the one source of truth, and the files are written directly — not
  * through a WorkspaceEdit. 1.6.6 edited them through VS Code's documents and
@@ -23,14 +26,24 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { VALID_CARDINALITIES, parseLogicalModelText, relationshipKey } from '@erd-studio/core';
+import { VALID_CARDINALITIES, linkKey, normaliseCompositeKey, normaliseRelationshipRole, parseLogicalModelText } from '@erd-studio/core';
 import { dirtyFiles } from '../providers/dirtyDocuments';
-import { describeMovePlan, planMoveToLibrary, resolveConflict, upsertLibraryRelationship } from '../services/libraryRelationships';
-import { setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
+import {
+  applyMoveToModel,
+  describeConflictDefinition,
+  describeLeftAlone,
+  describeMovePlan,
+  moveTargets,
+  planMoveToLibrary,
+  resolveConflict,
+} from '../services/libraryRelationships';
+import type { ConflictDefinition } from '../services/libraryRelationships';
+import type { DbtKeyIndex } from '@erd-studio/core';
+import { relationshipsRewriteLoses, setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
 import { detectDomainFormat } from '../types/semantic';
-import type { Cardinality, Relationship, SemanticModel } from '../types/semantic';
+import type { Relationship, SemanticModel } from '../types/semantic';
 import type { DomainService } from '../services/domainService';
 import type { LogicalModelService } from '../services/logicalModelService';
 
@@ -40,11 +53,14 @@ export interface MoveRelationshipsDeps {
   workspaceRoot: string;
   semanticDir: string;
   domainService: Pick<DomainService, 'listDomains'>;
-  logicalModelService: Pick<LogicalModelService, 'getModel' | 'modelPath' | 'invalidateCache' | 'getModelsDir'>;
+  logicalModelService: Pick<LogicalModelService, 'getModel' | 'listModels' | 'modelPath' | 'invalidateCache' | 'getModelsDir'>
+    & Partial<Pick<LogicalModelService, 'findModelNameIgnoringCase'>>;
   /** Refresh the trees, open canvases and selectors once the files are written. */
   onWritten: (domainPaths: string[]) => Promise<void>;
   /** Test seam: how one file is written. Defaults to {@link writeFileAtomic}. */
   writeFile?: (filePath: string, text: string) => void;
+  /** dbt's key evidence (#133 L1), loaded once before planning. Without it, only key flags count. */
+  loadDbtKeyIndex?: () => Promise<DbtKeyIndex>;
 }
 
 /** A v5 domain file's models and own relationships, as read from disk. */
@@ -74,7 +90,12 @@ export function readDomainRelationships(
           && ['fromModel', 'fromColumn', 'toModel', 'toColumn'].every((k) => typeof (r as Record<string, unknown>)[k] === 'string'))
         // An unrecognised cardinality is drawn as many-to-one (core's parseRelationships);
         // the move stores what the diagram shows, never the typo.
-        .map((r) => (VALID_CARDINALITIES.has(r.cardinality) ? r : { ...r, cardinality: 'many-to-one' as const }));
+        .map((r) => (VALID_CARDINALITIES.has(r.cardinality) ? r : { ...r, cardinality: 'many-to-one' as const }))
+        .map(({ role, compositeKey, ...r }) => {
+          const label = normaliseRelationshipRole(role);
+          const key = normaliseCompositeKey(compositeKey);
+          return { ...r, ...(label ? { role: label } : {}), ...(key ? { compositeKey: key } : {}) };
+        });
       domains.push({ label: `${summary.layer}/${summary.domain}`, filePath: summary.filePath, models, relationships });
     } catch {
       // An unreadable domain keeps its relationships.
@@ -143,20 +164,51 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   const domains = readDomainRelationships(domainService, workspaceRoot, semanticDir)
     .filter((d) => d.relationships.length > 0);
 
+  // One object per model, whatever the spelling an entry uses (#133 L4):
+  // `Dim_Customer` reaches dim_customer.yml on a case-sensitive file system,
+  // and both spellings in one plan edit the same copy.
   const models = new Map<string, SemanticModel | null>();
   const libraryModel = (name: string): SemanticModel | null => {
-    if (!models.has(name)) models.set(name, logicalModelService.getModel(name));
-    return models.get(name) ?? null;
+    const key = name.toLowerCase();
+    if (!models.has(key)) models.set(key, logicalModelService.getModel(logicalModelService.findModelNameIgnoringCase?.(name) ?? name));
+    return models.get(key) ?? null;
   };
+  /** The model's file, by its real name. */
+  const pathOf = (name: string): string => logicalModelService.modelPath(libraryModel(name)?.name ?? name);
   const libraryRoot = path.dirname(logicalModelService.getModelsDir());
   const relPath = (filePath: string): string => path.relative(libraryRoot, filePath).split(path.sep).join('/');
-  const fileOf = (model: string): string => relPath(logicalModelService.modelPath(model));
-  let plan = planMoveToLibrary(domains, libraryModel);
-  if (plan.removeFromDomains.size === 0 && plan.conflicts.length === 0) {
+  const fileOf = (model: string): string => relPath(pathOf(model));
+  // A file whose relationships list holds comments or unreadable entries is
+  // never rewritten: re-rendering the list would lose them.
+  const lockedFiles = new Map<string, boolean>();
+  const locked = (name: string): boolean => {
+    if (!lockedFiles.has(name)) {
+      let loses = false;
+      try {
+        loses = relationshipsRewriteLoses(fs.readFileSync(pathOf(name), 'utf-8'));
+      } catch {
+        // Unreadable: the plan already leaves a model with no readable file alone.
+      }
+      lockedFiles.set(name, loses);
+    }
+    return lockedFiles.get(name)!;
+  };
+  // dbt's tests orient links between models that flag no key (#133 L1).
+  const dbt = deps.loadDbtKeyIndex ? await deps.loadDbtKeyIndex().catch(() => undefined) : undefined;
+  let plan = planMoveToLibrary(domains, libraryModel, logicalModelService.listModels(), locked, { dbt });
+  if (plan.removeFromDomains.size === 0 && plan.conflicts.length === 0 && plan.rehome.length === 0) {
     telemetry.feature('relMoveNothingToMove');
+    const leftAlone = describeLeftAlone(plan, fileOf);
+    if (leftAlone.length > 0) {
+      void vscode.window.showInformationMessage(
+        `${TITLE}: nothing was moved.`,
+        { modal: true, detail: leftAlone.join('\n').replace(/^\n/, '') },
+      );
+      return;
+    }
     void vscode.window.showInformationMessage(
       `${TITLE}: nothing to move — ${domains.length === 0
-        ? 'no diagram file holds a relationship of its own.'
+        ? 'no diagram file holds a relationship of its own, and every relationship in the model library is stored with the model holding the foreign key.'
         : 'every relationship in the diagram files starts at a model with no readable file in logical-models/.'}`,
     );
     return;
@@ -165,15 +217,21 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   // turned away; checked again before writing, in case a file was edited
   // while the dialog was open.
   const candidates = [
-    ...[...plan.toLibrary, ...plan.conflicts.map((c) => c.relationship)].map((r) => logicalModelService.modelPath(r.fromModel)),
+    ...plan.toLibrary.map((r) => pathOf(r.fromModel)),
+    // A conflict lands at either end, depending on the cardinality picked.
+    ...plan.conflicts.flatMap((c) => [c.relationship.fromModel, c.relationship.toModel]).map(pathOf),
+    ...plan.rehome.flatMap((r) => [r.from, r.to.fromModel]).map(pathOf),
     ...domains
       .filter((d) => plan.removeFromDomains.has(d.label) || plan.conflicts.some((c) => c.definitions.some((def) => def.domains.includes(d.label))))
       .map((d) => d.filePath),
   ];
   if (refuseIfDirty(candidates, relPath)) return;
 
+  const onlyRehome = plan.removeFromDomains.size === 0 && plan.conflicts.length === 0;
   const choice = await vscode.window.showInformationMessage(
-    'Define each relationship once, in the model library?',
+    onlyRehome
+      ? 'Store each relationship with the model that holds the foreign key?'
+      : 'Define each relationship once, in the model library?',
     {
       modal: true,
       detail: `${describeMovePlan(plan, fileOf)}\n\nThe move saves the files directly — use git (or your source control) to undo it.`,
@@ -185,28 +243,28 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     return;
   }
 
-  // Each conflict is the user's to settle: which cardinality every diagram draws.
+  // Each conflict is the user's to settle: which version every diagram draws.
   const conflicts = plan.conflicts;
   for (const [index, conflict] of conflicts.entries()) {
     const { fromModel, fromColumn, toModel, toColumn } = conflict.relationship;
     const picked = await vscode.window.showQuickPick(
       [
         ...conflict.definitions.map((d) => ({
-          label: d.cardinality,
+          label: describeConflictDefinition(d),
           description: `as in ${d.domains.join(', ')}`,
-          detail: `Saved once in ${fileOf(fromModel)}; every diagram with ${fromModel} and ${toModel} draws it ${d.cardinality}.`,
-          cardinality: d.cardinality as Cardinality | undefined,
+          detail: `Saved once in ${fileOf(d.relationship.fromModel)}; every diagram with ${fromModel} and ${toModel} draws it this way.`,
+          definition: d as ConflictDefinition | undefined,
         })),
         {
           label: 'Leave it as it is in each diagram',
           description: 'decide later',
           detail: 'It stays in the diagram files. Run this command again to settle it.',
-          cardinality: undefined,
+          definition: undefined,
         },
       ],
       {
-        title: `Conflict ${index + 1} of ${conflicts.length}: ${fromModel}.${fromColumn} → ${toModel}.${toColumn}`,
-        placeHolder: 'The diagrams disagree. Which cardinality should every diagram use? (Esc cancels the move)',
+        title: `Conflict ${index + 1} of ${conflicts.length}: ${fromModel}.${fromColumn} ↔ ${toModel}.${toColumn}`,
+        placeHolder: 'The diagrams draw this link differently. Which version should every diagram use? (Esc cancels the move)',
         ignoreFocusOut: true,
       },
     );
@@ -215,9 +273,9 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
       void vscode.window.showInformationMessage(`${TITLE}: cancelled — nothing was changed.`);
       return;
     }
-    if (picked.cardinality) plan = resolveConflict(plan, conflict, picked.cardinality);
+    if (picked.definition) plan = resolveConflict(plan, conflict, picked.definition);
   }
-  if (plan.removeFromDomains.size === 0) {
+  if (plan.removeFromDomains.size === 0 && plan.rehome.length === 0) {
     telemetry.feature('relMoveCancelled');
     void vscode.window.showInformationMessage(`${TITLE}: nothing was changed.`);
     return;
@@ -227,19 +285,17 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   // disk now — after the modal and the QuickPicks, which may have taken a
   // while — changing only its relationships.
   const writes: Array<{ filePath: string; original: string; text: string }> = [];
-  const byModel = new Map<string, Relationship[]>();
-  for (const rel of plan.toLibrary) {
-    byModel.set(rel.fromModel, [...(byModel.get(rel.fromModel) ?? []), rel]);
-  }
-  for (const [name, rels] of byModel) {
+  for (const target of moveTargets(plan)) {
+    const name = libraryModel(target)?.name ?? target;
     const filePath = logicalModelService.modelPath(name);
     const original = fs.readFileSync(filePath, 'utf-8');
+    if (relationshipsRewriteLoses(original)) {
+      throw new Error(`${relPath(filePath)} changed while the dialog was open (its relationships list now has comments or entries it cannot read). Nothing was changed.`);
+    }
     const model = parseLogicalModelText(original, name);
     if (!model) throw new Error(`${relPath(filePath)} could not be read as a model file.`);
     const copy: SemanticModel = { ...model, relationships: model.relationships ? [...model.relationships] : undefined };
-    let changed = false;
-    for (const rel of rels) changed = upsertLibraryRelationship(copy, rel) || changed;
-    if (!changed) continue;
+    if (!applyMoveToModel(plan, copy)) continue;
     const text = setYamlRelationships(original, copy.relationships ?? []);
     if (text !== original) writes.push({ filePath, original, text });
   }
@@ -252,7 +308,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     const current = Array.isArray(raw.logical?.relationships) ? raw.logical!.relationships as Relationship[] : [];
     const isRelationship = (r: unknown): r is Relationship => !!r && typeof r === 'object'
       && ['fromModel', 'fromColumn', 'toModel', 'toColumn'].every((k) => typeof (r as Record<string, unknown>)[k] === 'string');
-    const kept = current.filter((r) => !isRelationship(r) || !keys.has(relationshipKey(r)));
+    const kept = current.filter((r) => !isRelationship(r) || !keys.has(linkKey(r)));
     if (kept.length === current.length) continue;
     const text = setDomainRelationships(original, kept);
     if (text === original) continue;
@@ -302,11 +358,18 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   }
 
   const moved = plan.toLibrary.length;
+  const turned = plan.rehome.length;
   const left = plan.conflicts.length + plan.skippedNoModel.length;
+  const unsettled = plan.disagreements.length + plan.lockedFiles.length;
   telemetry.feature('relMoveCompleted');
-  if (left > 0) telemetry.feature('relMoveLeftover');
+  if (left + unsettled > 0) telemetry.feature('relMoveLeftover');
+  const parts = [
+    ...(moved > 0 || !turned ? [`Moved ${moved} relationship${moved === 1 ? '' : 's'} into the model library — each is now defined once.`] : []),
+    ...(turned > 0 ? [`${turned} relationship${turned === 1 ? ' is' : 's are'} now stored with the model holding the foreign key.`] : []),
+  ];
   void vscode.window.showInformationMessage(
-    `Moved ${moved} relationship${moved === 1 ? '' : 's'} into the model library — each is now defined once.` +
-    (left > 0 ? ` ${left} stayed in the diagram files; run this command again to settle ${left === 1 ? 'it' : 'them'}.` : ''),
+    parts.join(' ') +
+    (left > 0 ? ` ${left} stayed in the diagram files; run this command again to settle ${left === 1 ? 'it' : 'them'}.` : '') +
+    (unsettled > 0 ? ' Some were left as they are for you to fix by hand, as the preview listed.' : ''),
   );
 }

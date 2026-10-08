@@ -362,9 +362,12 @@ describe('setup skill: where relationships go (#126)', () => {
 
   it('fixes a relationship wherever it is defined', () => {
     const fix = ref('verify-and-fix.md');
-    for (const kind of ['remove-column', 'set-cardinality', 'resolve-phantom']) {
+    for (const kind of ['remove-column', 'remove-relationship', 'resolve-phantom']) {
       const row = fix.split('\n').find((l) => l.startsWith(`| \`${kind}\``)) ?? '';
       expect(row, kind).toMatch(/relationships:/);
     }
+    // D5: the fix names the canonical entry and both files; the assistant swaps nothing itself.
+    const setCardinality = fix.split('\n').find((l) => l.startsWith('| `set-cardinality`')) ?? '';
+    expect(setCardinality).toMatch(/Write `relationship`.*in `file`.*`movesFrom`/);
   });
 });

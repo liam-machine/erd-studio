@@ -36,6 +36,7 @@ import { TemplateService } from '../../src/services/templateService';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import { telemetry } from '../../src/services/telemetryService';
 import type { Relationship } from '../../src/types/semantic';
+import { buildDbtKeyIndex } from '@erd-studio/core';
 
 const SEMANTIC_DIR = '.erd-studio';
 const MODEL_COUNT = 70;
@@ -486,5 +487,298 @@ describe('readDomainRelationships', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('moveRelationshipsToLibrary — turns reversed library entries round (#133)', () => {
+  const DIM = [
+    '# hand-written dimension',
+    'name: dim_customer',
+    'columns:',
+    '  - name: customer_key',
+    '    dataType: string',
+    '    isPrimaryKey: true',
+    'relationships:',
+    '  - fromColumn: customer_key',
+    '    toModel: fct_order',
+    '    toColumn: customer_key',
+    '    cardinality: one-to-many',
+    '    role: buyer',
+    '',
+  ].join('\n');
+  const FCT = [
+    'name: fct_order   # the fact',
+    'columns:',
+    '  - name: customer_key',
+    '    dataType: string',
+    '',
+  ].join('\n');
+
+  let root: string;
+  let logicalModelService: LogicalModelService;
+  let run: () => Promise<void>;
+
+  beforeEach(() => {
+    _resetMockWorkspace();
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-rehome-'));
+    const layerService = new LayerService(root, SEMANTIC_DIR);
+    const domainService = new DomainService(layerService);
+    logicalModelService = new LogicalModelService(root, SEMANTIC_DIR);
+    domainService.setLogicalModelService(logicalModelService);
+    fs.mkdirSync(logicalModelService.getModelsDir(), { recursive: true });
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), DIM);
+    fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT);
+    run = () => moveRelationshipsToLibrary({
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService, logicalModelService, onWritten: vi.fn(async () => undefined),
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('moves a one-to-many out of the dimension into the fact as many-to-one, keeping its role and both files\' other bytes', async () => {
+    const info = acceptModal();
+    await run();
+
+    expect(messages(info).find((m) => m.startsWith('Store each relationship with the model that holds the foreign key?'))).toBeDefined();
+    expect(messages(info)).toContain('1 relationship is now stored with the model holding the foreign key.');
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(DIM.slice(0, DIM.indexOf('relationships:')));
+    const fct = fs.readFileSync(logicalModelService.modelPath('fct_order'), 'utf-8');
+    expect(withoutRelationshipsBlock(fct)).toBe(FCT);
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('fct_order')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' },
+    ]);
+  });
+
+  it('has nothing left to do on a second run', async () => {
+    const info = acceptModal();
+    await run();
+    info.mockClear();
+    await run();
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
+  it('turns round a many-to-one 1.6.7 saved backwards on the dimension, then has nothing left to do', async () => {
+    // The dim_product shape in core's library-relationships fixture: the stray FK flag stays.
+    const backwards = DIM.replace('    isPrimaryKey: true\n', '    isPrimaryKey: true\n    isForeignKey: true\n').replace('one-to-many', 'many-to-one');
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), backwards);
+    // The fact declares its own key, so customer_key there is certainly not it.
+    fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT + '  - name: order_key\n    dataType: string\n    isPrimaryKey: true\n');
+    const info = acceptModal();
+    await run();
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('fct_order')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' },
+    ]);
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(backwards.slice(0, backwards.indexOf('relationships:')));
+    info.mockClear();
+    await run();
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
+  it('leaves a many-to-one from the dimension\'s key alone when the other model flags no key (M)', async () => {
+    // A 1:1 extension table: customer_detail.customer_key is its whole key and points at a model with none flagged.
+    const backwards = DIM.replace('one-to-many', 'many-to-one');
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), backwards);
+    const info = acceptModal();
+    await run();
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(backwards);
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
+  it('Dim_Customer and dim_customer resolve to one model object: one read of the real file, one write (#133 L4)', async () => {
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), DIM.replace('toModel: fct_order', 'toModel: FCT_Order') + [
+      '  - fromColumn: customer_key',
+      '    toModel: fct_order',
+      '    toColumn: alt_customer_key',
+      '    cardinality: one-to-many',
+      '',
+    ].join('\n'));
+    const reads = vi.spyOn(logicalModelService, 'getModel');
+    const writes: string[] = [];
+    acceptModal();
+    await moveRelationshipsToLibrary({
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService: new DomainService(new LayerService(root, SEMANTIC_DIR)),
+      logicalModelService, onWritten: vi.fn(async () => undefined),
+      writeFile: (filePath, text) => { writes.push(path.basename(filePath)); writeFileAtomic(filePath, text); },
+    });
+    // Each file read by its real name, once, whichever spelling asked for it.
+    expect(reads.mock.calls.map(([name]) => name).sort()).toEqual(['dim_customer', 'fct_order']);
+    expect(writes.sort()).toEqual(['dim_customer.yml', 'fct_order.yml']);
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('fct_order')?.relationships?.map((r) => r.fromColumn)).toEqual(['customer_key', 'alt_customer_key']);
+  });
+
+  it('with no key flagged, dbt\'s tests turn a backwards copy round; without them it is left (#133 L1)', async () => {
+    const backwards = DIM.replace('    isPrimaryKey: true\n', '').replace('one-to-many', 'many-to-one');
+    fs.writeFileSync(logicalModelService.modelPath('dim_customer'), backwards);
+    const info = acceptModal();
+    await run();
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+    expect(fs.readFileSync(logicalModelService.modelPath('dim_customer'), 'utf-8')).toBe(backwards);
+
+    const loadDbtKeyIndex = vi.fn(async () => buildDbtKeyIndex([{
+      uniqueColumns: new Map([['dim_customer', new Set(['customer_key'])]]),
+      relationshipTests: [{ fromModel: 'fct_order', fromColumn: 'customer_key' }],
+    }]));
+    await moveRelationshipsToLibrary({
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService: new DomainService(new LayerService(root, SEMANTIC_DIR)),
+      logicalModelService, onWritten: vi.fn(async () => undefined), loadDbtKeyIndex,
+    });
+    expect(loadDbtKeyIndex).toHaveBeenCalledTimes(1);
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('fct_order')?.relationships).toEqual([
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', role: 'buyer' },
+    ]);
+    expect(logicalModelService.getModel('dim_customer')?.relationships).toBeUndefined();
+  });
+
+  it('turns a backwards self-reference round inside its one file, written once (#133 L3)', async () => {
+    const EMPLOYEE = [
+      '# staff, with managers',
+      'name: employee',
+      'columns:',
+      '  - name: employee_id',
+      '    dataType: int',
+      '    isPrimaryKey: true',
+      '  - name: manager_id',
+      '    dataType: int',
+      'relationships:',
+      '  - fromColumn: employee_id',
+      '    toModel: employee',
+      '    toColumn: manager_id',
+      '    cardinality: one-to-many',
+      '    role: manager',
+      '',
+    ].join('\n');
+    fs.rmSync(logicalModelService.modelPath('dim_customer'));
+    fs.writeFileSync(logicalModelService.modelPath('employee'), EMPLOYEE);
+    const writes: string[] = [];
+    const info = acceptModal();
+    const deps = {
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService: new DomainService(new LayerService(root, SEMANTIC_DIR)),
+      logicalModelService, onWritten: vi.fn(async () => undefined),
+      writeFile: (filePath: string, text: string) => { writes.push(path.basename(filePath)); writeFileAtomic(filePath, text); },
+    };
+    await moveRelationshipsToLibrary(deps);
+    expect(writes).toEqual(['employee.yml']);
+    expect(fs.readFileSync(logicalModelService.modelPath('employee'), 'utf-8')).toBe(EMPLOYEE.replace(
+      '  - fromColumn: employee_id\n    toModel: employee\n    toColumn: manager_id\n    cardinality: one-to-many\n    role: manager\n',
+      '  - fromColumn: manager_id\n    toModel: employee\n    toColumn: employee_id\n    cardinality: many-to-one\n    role: manager\n',
+    ));
+    info.mockClear();
+    await moveRelationshipsToLibrary(deps);
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
+  it('drops the reversed copy when the fact already stores the link', async () => {
+    fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT + [
+      'relationships:',
+      '  - fromColumn: customer_key',
+      '    toModel: dim_customer',
+      '    toColumn: customer_key',
+      '    cardinality: many-to-one',
+      '',
+    ].join('\n'));
+    acceptModal();
+    await run();
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('dim_customer')?.relationships).toBeUndefined();
+    expect(logicalModelService.getModel('fct_order')?.relationships).toHaveLength(1);
+  });
+});
+
+describe('moveRelationshipsToLibrary — composite keys move as one (#133 L2)', () => {
+  const PIT = { name: 'pit_customer', columns: [
+    { name: 'pit_id', dataType: 'int', description: '', isPrimaryKey: true },
+    { name: 'customer_hk', dataType: 'int', description: '' },
+    { name: 'as_of_date', dataType: 'date', description: '' },
+  ] };
+  const SAT = { name: 'sat_customer', columns: [
+    { name: 'customer_hk', dataType: 'int', description: '', isPrimaryKey: true },
+    { name: 'load_date', dataType: 'date', description: '', isPrimaryKey: true },
+  ] };
+  const pair = (fromColumn: string, toColumn: string, extra: Partial<Relationship> = {}): Relationship =>
+    ({ fromModel: 'pit_customer', fromColumn, toModel: 'sat_customer', toColumn, cardinality: 'many-to-one', ...extra });
+  const GROUP = [pair('customer_hk', 'customer_hk', { compositeKey: 'fk_sat' }), pair('as_of_date', 'load_date', { compositeKey: 'fk_sat' })];
+
+  let root: string;
+  let logicalModelService: LogicalModelService;
+  let deps: Parameters<typeof moveRelationshipsToLibrary>[0];
+  const writeDomain = (name: string, relationships: unknown[]) => {
+    const dir = path.join(root, SEMANTIC_DIR, 'silver');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify({
+      schemaVersion: 5, domain: name, layer: 'silver', description: '', logical: { models: ['pit_customer', 'sat_customer'], relationships }, viewConfig: {},
+    }, null, 2) + '\n');
+  };
+  const domainRels = (name: string) => JSON.parse(fs.readFileSync(path.join(root, SEMANTIC_DIR, 'silver', `${name}.json`), 'utf-8')).logical.relationships;
+  const pitRels = () => { logicalModelService.invalidateCache(); return logicalModelService.getModel('pit_customer')?.relationships; };
+
+  beforeEach(() => {
+    _resetMockWorkspace();
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-move-group-'));
+    logicalModelService = new LogicalModelService(root, SEMANTIC_DIR);
+    logicalModelService.saveModel(PIT);
+    logicalModelService.saveModel(SAT);
+    deps = {
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService: new DomainService(new LayerService(root, SEMANTIC_DIR)),
+      logicalModelService, onWritten: vi.fn(async () => undefined),
+    };
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const stored = (r: Relationship) => { const { fromModel: _f, ...e } = r; return e; };
+
+  it('a group moves as one unit; grouped in one diagram and singles in another become the group; a second run is empty', async () => {
+    writeDomain('d1', GROUP.map((r) => ({ ...r, role: 'as of' })));
+    writeDomain('d2', GROUP.map(({ compositeKey: _k, ...r }) => r));
+    const info = acceptModal();
+    await moveRelationshipsToLibrary(deps);
+    expect(pitRels()).toEqual(GROUP.map((r) => ({ ...stored(r), role: 'as of' })));
+    expect([domainRels('d1'), domainRels('d2')]).toEqual([[], []]);
+    const preview = messages(info).find((m) => m.startsWith('Define each relationship once')) ?? '';
+    expect(info.mock.calls.map((c) => String((c[1] as { detail?: string } | undefined)?.detail ?? '')).join('\n')).toContain('silver/d2: pit_customer.customer_hk → sat_customer.customer_hk — part of fk_sat');
+    expect(preview).not.toBe('');
+    info.mockClear();
+    await moveRelationshipsToLibrary(deps);
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
+  it('two diagrams defining the group differently are one conflict; the pick moves every member', async () => {
+    writeDomain('d1', GROUP);
+    writeDomain('d2', GROUP.map((r) => ({ ...r, cardinality: 'one-to-one' })));
+    acceptModal();
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string; definition?: { relationship: Relationship } }>) =>
+      items.find((it) => it.definition?.relationship.cardinality === 'one-to-one')) as never);
+    await moveRelationshipsToLibrary(deps);
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(pick.mock.calls[0][0]).toEqual(expect.arrayContaining([expect.objectContaining({ label: expect.stringContaining('composite key pit_customer.(customer_hk, as_of_date) → sat_customer.(customer_hk, load_date)') })]));
+    expect(pitRels()).toEqual(GROUP.map((r) => ({ ...stored(r), cardinality: 'one-to-one' })));
+    expect([domainRels('d1'), domainRels('d2')]).toEqual([[], []]);
+  });
+
+  it('a group whose pair the library holds in another composite stays whole in the diagrams, and says why', async () => {
+    logicalModelService.saveModel({ ...PIT, relationships: [stored({ ...GROUP[1], compositeKey: 'other' }), stored({ ...pair('pit_id', 'customer_hk'), compositeKey: 'other' })] });
+    writeDomain('d1', GROUP);
+    const info = acceptModal();
+    await moveRelationshipsToLibrary(deps);
+    expect(domainRels('d1')).toEqual(GROUP);
+    expect(info.mock.calls.map((c) => String((c[1] as { detail?: string } | undefined)?.detail ?? '')).join('\n'))
+      .toContain('Composite key pit_customer.(customer_hk, as_of_date) → sat_customer.(customer_hk, load_date) left in the diagrams (silver/d1): the model library holds one of its column pairs in another composite key.');
+  });
+
+  it('planRehome turns a backwards group round together, in one write per file', async () => {
+    // Stored on the satellite's side, the one side by its whole composite key.
+    logicalModelService.saveModel({ ...SAT, relationships: GROUP.map((r) => ({ fromColumn: r.toColumn, toModel: 'pit_customer', toColumn: r.fromColumn, cardinality: 'one-to-many' as const, compositeKey: 'fk_sat' })) });
+    acceptModal();
+    await moveRelationshipsToLibrary(deps);
+    expect(pitRels()).toEqual(GROUP.map(stored));
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('sat_customer')?.relationships).toBeUndefined();
   });
 });

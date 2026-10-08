@@ -16,6 +16,9 @@ export * from './types/canvasMessages.js';
 
 export * from './positions.js';
 export * from './domain.js';
+export * from './relationships.js';
+export * from './keyEvidence.js';
+export * from './orientLink.js';
 export {
   LOGICAL_MODELS_DIR,
   RATIONALE_KEYS,

@@ -18,6 +18,9 @@ import {
   validatePositions,
   findDuplicateNames,
   validateAddModelsFromDbtPayload,
+  validateExtraPairs,
+  validateMarkKey,
+  validateRelationshipEnds,
   validateOpenModelFilePayload,
   validateDismissManifestHintPayload,
 } from '../../src/providers/payloadValidation';
@@ -291,5 +294,61 @@ describe('validateOpenModelFilePayload', () => {
     [{ modelName: 'C:evil' }, /file system path/],
   ])('rejects %j', (value, message) => {
     expect(validateOpenModelFilePayload(value)).toMatch(message);
+  });
+});
+
+describe('validateMarkKey — the key to mark is one end of the link (#133 L1)', () => {
+  const link = { fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' };
+  const ERR = 'the key to mark must be one end of the relationship.';
+  it('accepts no key, or either end by its model and columns, without case', () => {
+    expect(validateMarkKey(undefined, link)).toBeNull();
+    expect(validateMarkKey({ model: 'dim_customer', columns: ['customer_id'] }, link)).toBeNull();
+    expect(validateMarkKey({ model: 'FCT_ORDER', columns: ['Customer_ID'] }, link)).toBeNull();
+  });
+  it('refuses anything else', () => {
+    for (const bad of [
+      null, 'dim_customer', [], { model: 'dim_customer' }, { model: 'dim_customer', columns: [] },
+      { model: 'dim_customer', columns: ['other'] }, { model: 'dim_date', columns: ['customer_id'] },
+      { model: 'dim_customer', columns: ['customer_id', 'customer_id'] }, { model: 'dim_customer', columns: ['bad name'] },
+      { model: 7, columns: ['customer_id'] }, { model: 'dim_customer', columns: Array(9).fill('customer_id') },
+    ]) expect(validateMarkKey(bad, link)).toBe(ERR);
+  });
+  it('a self-reference: either end, decided by the columns', () => {
+    const self = { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' };
+    expect(validateMarkKey({ model: 'employee', columns: ['employee_id'] }, self)).toBeNull();
+    expect(validateMarkKey({ model: 'employee', columns: ['manager_id'] }, self)).toBeNull();
+    expect(validateMarkKey({ model: 'employee', columns: ['name'] }, self)).toBe(ERR);
+  });
+});
+
+describe('validateRelationshipEnds — a column can\'t point at itself (#133 L3)', () => {
+  it('allows a self-reference between two columns, refuses one column at both ends (without case)', () => {
+    expect(validateRelationshipEnds({ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' })).toBeNull();
+    expect(validateRelationshipEnds({ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'Employee', toColumn: 'MANAGER_ID' }))
+      .toBe("a column can't point at itself.");
+    expect(validateRelationshipEnds({ fromModel: 'a', fromColumn: 'k', toModel: 'b', toColumn: 'k' })).toBeNull();
+  });
+});
+
+describe('validateExtraPairs — a composite key\'s other column pairs (#133 L2)', () => {
+  const link = { fromModel: 'pit', fromColumn: 'hk', toModel: 'sat', toColumn: 'hk', cardinality: 'many-to-one' };
+  it('accepts none, or valid distinct pairs', () => {
+    expect(validateExtraPairs(undefined, link)).toBeNull();
+    expect(validateExtraPairs([], link)).toBeNull();
+    expect(validateExtraPairs([{ fromColumn: 'as_of', toColumn: 'load_date' }], link)).toBeNull();
+  });
+  it('refuses too many pairs, bad names, a column used twice (without case), and many-to-many', () => {
+    expect(validateExtraPairs(Array.from({ length: 8 }, (_, i) => ({ fromColumn: `a${i}`, toColumn: `b${i}` })), link)).toMatch(/at most 8/);
+    expect(validateExtraPairs([{ fromColumn: 'bad name', toColumn: 'x' }], link)).toMatch(/valid column names/);
+    expect(validateExtraPairs('x', link)).toMatch(/at most 8/);
+    expect(validateExtraPairs([{ fromColumn: 'HK', toColumn: 'load_date' }], link)).toMatch(/used twice/);
+    expect(validateExtraPairs([{ fromColumn: 'as_of', toColumn: 'Hk' }], link)).toMatch(/used twice/);
+    expect(validateExtraPairs([{ fromColumn: 'as_of', toColumn: 'load_date' }], { ...link, cardinality: 'many-to-many' })).toMatch(/many-to-many/);
+  });
+  it('markKey and the self-reference check read every pair', () => {
+    const composite = { ...link, extraPairs: [{ fromColumn: 'as_of', toColumn: 'load_date' }] };
+    expect(validateMarkKey({ model: 'sat', columns: ['load_date', 'HK'] }, composite)).toBeNull();
+    expect(validateMarkKey({ model: 'sat', columns: ['hk'] }, composite)).not.toBeNull();
+    expect(validateRelationshipEnds({ ...composite, toModel: 'pit', extraPairs: [{ fromColumn: 'as_of', toColumn: 'AS_OF' }] })).toBe("a column can't point at itself.");
   });
 });

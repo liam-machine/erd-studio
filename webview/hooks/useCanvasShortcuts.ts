@@ -24,6 +24,7 @@ import {
   altStageShortcut,
   resolveSingleDeleteTarget,
 } from '../lib/keyboardShortcuts';
+import { foldComposites, relationshipEdgeId } from '@erd-studio/renderer/editor';
 import type { ModelFlowNode, AnnotationFlowNode } from '@erd-studio/renderer/editor';
 import type { WebviewMessage, RelationshipKey } from '../../src/types/messages';
 import type { AnnotationColor } from '../../src/types/semantic';
@@ -32,23 +33,21 @@ import type { AnnotationColor } from '../../src/types/semantic';
 type CopiedAnnotation = { text: string; color: AnnotationColor; width?: number; height?: number; linkedModel?: string };
 let _copiedAnnotation: CopiedAnnotation | null = null;
 
-/** Edge id as produced by graphTransformer for an FK relationship. */
-function fkEdgeId(r: RelationshipKey): string {
-  return `fk-${r.fromModel}-${r.fromColumn}-${r.toModel}-${r.toColumn}`;
-}
-
 /**
  * Resolve selected edge ids to relationship keys, dropping edges the model
- * batch will cascade (an edge touching a model that is being deleted).
+ * batch will cascade (an edge touching a model that is being deleted). A
+ * composite foreign key is one edge; its first pair is sent, and the host
+ * removes the whole group (#133 L2).
  */
 function selectedEdgesToRelationships(
   edgeIds: string[],
-  relationships: RelationshipKey[],
+  relationships: Array<RelationshipKey & { compositeKey?: string }>,
   deletedModels: string[],
 ): RelationshipKey[] {
   const result: RelationshipKey[] = [];
+  const edges = foldComposites(relationships);
   for (const edgeId of edgeIds) {
-    const rel = relationships.find((r) => fkEdgeId(r) === edgeId);
+    const rel = edges.find((r) => relationshipEdgeId(r) === edgeId);
     if (!rel) continue;
     if (deletedModels.includes(rel.fromModel) || deletedModels.includes(rel.toModel)) continue;
     result.push({

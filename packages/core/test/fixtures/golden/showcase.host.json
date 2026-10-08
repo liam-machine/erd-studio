@@ -27,7 +27,8 @@
             "description": "FK to dim_task",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "project_key",
@@ -35,7 +36,8 @@
             "description": "FK to dim_project",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "customer_key",
@@ -43,7 +45,8 @@
             "description": "FK to dim_customer",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "event_date",
@@ -117,7 +120,8 @@
             "description": "FK to dim_project",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "name",
@@ -184,7 +188,8 @@
             "description": "Parent project for hierarchical rollups (self-reference to project_key)",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           }
         ],
         "rationale": {
@@ -309,7 +314,8 @@
             "description": "FK to dim_customer",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "order_date",
@@ -325,7 +331,8 @@
             "description": "FK to dim_project",
             "isPrimaryKey": false,
             "isForeignKey": true,
-            "isNaturalKey": false
+            "isNaturalKey": false,
+            "isForeignKeyDeclared": true
           },
           {
             "name": "amount",

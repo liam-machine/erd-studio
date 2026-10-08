@@ -1,0 +1,110 @@
+{
+  "type": "domainLoaded",
+  "payload": {
+    "schemaVersion": 4,
+    "domain": "orders",
+    "layer": "silver",
+    "stage": "logical",
+    "description": "A hand-edited v4 file: columns without a text name, and relationship ends spelled in another case",
+    "models": [
+      {
+        "name": "stg_orders",
+        "schema": "",
+        "description": "",
+        "columns": [
+          {
+            "dataType": "INT",
+            "description": "A column whose name was deleted by hand",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": 123,
+            "dataType": "INT",
+            "description": "A column named by a number",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "order_id",
+            "dataType": "BIGINT",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_key",
+            "dataType": "INT",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          }
+        ]
+      },
+      {
+        "name": "stg_customers",
+        "schema": "",
+        "description": "",
+        "columns": [
+          {
+            "dataType": "VARCHAR",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "Customer_Key",
+            "dataType": "INT",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "stg_orders",
+        "fromColumn": "customer_key",
+        "toModel": "stg_customers",
+        "toColumn": "Customer_Key",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "stg_orders",
+        "fromColumn": "dropped_column",
+        "toModel": "stg_customers",
+        "toColumn": "Customer_Key",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "stg_orders": {
+          "x": 400,
+          "y": 40
+        },
+        "stg_customers": {
+          "x": 40,
+          "y": 40
+        }
+      }
+    },
+    "templates": [],
+    "manifestModels": [],
+    "existingModels": [],
+    "layerConfig": {
+      "id": "silver",
+      "label": "Silver",
+      "abbreviation": "SLV",
+      "color": "#a0a0a0",
+      "creatable": true,
+      "order": 1
+    },
+    "readOnly": false,
+    "positionDraggable": true
+  },
+  "welcomeDismissed": false
+}

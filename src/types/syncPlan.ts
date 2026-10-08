@@ -7,6 +7,7 @@
  */
 
 import type { Cardinality, Stage } from './semantic';
+import type { ColumnPair } from '@erd-studio/core';
 
 // ---------------------------------------------------------------------------
 // Ground truth selection
@@ -38,6 +39,18 @@ export function relationshipKey(
   toColumn: string,
 ): string {
   return `rel:${fromModel}:${fromColumn}:${toModel}:${toColumn}`;
+}
+
+/**
+ * The selection key of a relationship discrepancy: {@link relationshipKey},
+ * or for a composite foreign key (#133 L2) its joined columns,
+ * `rel:{from}:{a+b}:{to}:{c+d}`.
+ */
+export function relationshipSelectionKey(r: {
+  fromModel: string; fromColumn: string; toModel: string; toColumn: string; pairs?: ReadonlyArray<ColumnPair>;
+}): string {
+  if (!r.pairs || r.pairs.length < 2) return relationshipKey(r.fromModel, r.fromColumn, r.toModel, r.toColumn);
+  return `rel:${r.fromModel}:${r.pairs.map((p) => p.fromColumn).join('+')}:${r.toModel}:${r.pairs.map((p) => p.toColumn).join('+')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +122,11 @@ export interface RelationshipResolution {
   action: RelationshipAction;
   sourceCardinality?: Cardinality;
   targetCardinality?: Cardinality;
+  /** A composite foreign key's column pairs (#133 L2); `fromColumn` / `toColumn` are the first. */
+  pairs?: ColumnPair[];
+  compositeKey?: string;
+  /** An `extra` composite the target does not declare as one (see `RelationshipDiscrepancy.composite`). */
+  composite?: true;
 }
 
 // ---------------------------------------------------------------------------

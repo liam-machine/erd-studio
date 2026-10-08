@@ -60,9 +60,10 @@ describe('a relationship stored in a model file (#126)', () => {
     expect(relationshipsOf(['fct_order', 'dim_customer', 'dim_product'], [own])).toEqual([own, TO_CUSTOMER, TO_PRODUCT]);
   });
 
-  it('leaves a domain with no library relationships exactly as its file says', () => {
-    const own = [TO_CUSTOMER, TO_CUSTOMER];
-    expect(mergeLibraryRelationships([{ name: 'fct_order' }], own)).toEqual(own);
+  it('leaves a domain with no library relationships as its file says, drawing a link it holds twice once', () => {
+    const own = [TO_CUSTOMER, TO_PRODUCT, { ...TO_CUSTOMER, cardinality: 'one-to-one' as const }];
+    expect(mergeLibraryRelationships([{ name: 'fct_order', columns: [] }], own)).toEqual([TO_CUSTOMER, TO_PRODUCT]);
+    expect(mergeLibraryRelationships([{ name: 'fct_order', columns: [] }], [...own].reverse())).toEqual([TO_CUSTOMER, TO_PRODUCT]);
   });
 
   it('matches endpoints without case', () => {

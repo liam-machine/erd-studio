@@ -172,6 +172,20 @@ describe('useCanvasShortcuts', () => {
     ]);
   });
 
+  it('deleting a composite foreign key\'s one edge sends its first pair (#133 L2)', () => {
+    const member = (fromColumn: string, toColumn: string) =>
+      ({ fromModel: 'b', fromColumn, toModel: 'c', toColumn, cardinality: 'many-to-one' as const, compositeKey: 'fk_c' });
+    useEditorStore.setState({ domain: { ...domain, relationships: [member('c_id', 'id'), member('c_date', 'valid_from')] } as unknown as DisplayDomain });
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.getState().setSelectedEdges(['fk-b-c_id+c_date-c-id+valid_from']);
+    });
+    press('Delete');
+    expect(sent()).toEqual([
+      { type: 'removeRelationship', payload: { fromModel: 'b', fromColumn: 'c_id', toModel: 'c', toColumn: 'id' } },
+    ]);
+  });
+
   it('single annotation delete beats everything else and sends removeAnnotation', () => {
     renderHook(() => useCanvasShortcuts());
     act(() => {

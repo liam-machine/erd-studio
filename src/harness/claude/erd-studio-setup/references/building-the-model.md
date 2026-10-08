@@ -176,13 +176,17 @@ nothing else — a drafted extra column would show up as drift.
     domain file has a `logical.relationships` entry (always true for a first diagram). Write each
     one into its `fromModel`'s yml under `relationships:` — the same fields without `fromModel`,
     as in the worked example below — and leave `"relationships": []` in the domain JSON, as
-    above. Every diagram holding both models then draws it, and it is defined once.
+    above. The exception is a `one-to-many`: swap the ends and write it as `many-to-one` in the
+    other model's yml, so every relationship sits with the model holding the foreign key. Every diagram holding both models then draws it, and it is defined once.
   - **Per domain** — otherwise: the project's diagrams already keep their own. Put each one in
     the domain JSON's `logical.relationships` with all five fields (`fromModel`, `fromColumn`,
     `toModel`, `toColumn`, `cardinality`).
   - Never write one in both places, and never move existing relationships from one place to the
     other yourself — that is the user's choice, made with **ERD Studio: Move Relationships to
     Model Library**, which explains the move and lets them settle conflicts.
+  - A foreign key over several columns (a Data Vault PIT or bridge, a multi-column natural key)
+    is one entry per column pair, all sharing one `compositeKey` (e.g. `fk_sat_customer`), as the
+    `/erd-studio` skill's "Composite foreign keys" shows.
 - `viewConfig: {}` (no positions) makes ERD Studio auto-arrange the diagram with its auto layout
   the first time the domain is opened, and save the result. Do not write positions yourself;
   the user can re-run the layout any time with **Layout** in the canvas toolbar or Shift+L.
