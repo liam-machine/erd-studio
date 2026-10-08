@@ -61,8 +61,10 @@ together.
   (another path) or `405` (another method on this path). No CORS headers: the
   caller is the VS Code extension host, not a browser.
 - `KILL_SWITCH` truthy → every request `503` before any D1 access.
-- Body over **2,048 bytes** → `413`, counted while streaming, so a missing or
-  lying `Content-Length` does not help.
+- Body over **8,192 bytes** → `413`, counted while streaming, so a missing or
+  lying `Content-Length` does not help. (A heartbeat with every feature and
+  error key at its cap is about 4.5 KB; the extension's `telemetryPayload`
+  test reads this limit and fails if that ever stops fitting.)
 - A known field with a wrong type or out-of-range value → `400`, nothing
   written. `day` must be a real calendar date, not in the future and at most 7
   days before today (UTC). Unknown top-level keys and unknown `features` /
@@ -108,8 +110,10 @@ an older Worker drops every key it does not list.
 
 Deploy the Worker **before** the extension release that sends the new fields.
 An older Worker would still accept the new heartbeats (it drops unknown
-top-level and feature keys) but the new data would be lost, and the body cap
-was raised from 2 KB to 4 KB for the longer feature list.
+top-level and feature keys) but the new data would be lost. The body cap was
+raised from 2 KB to 4 KB for the longer feature list, and from 4 KB to 8 KB
+with the relationship keys (#133) — an older Worker would 413 a very busy
+day's heartbeat outright.
 
 The custom domain `erd-studio-telemetry.w2solutions.ai` needs the
 `w2solutions.ai` zone on the same Cloudflare account; `wrangler deploy` creates
@@ -169,6 +173,170 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 
 Prefer aggregates. There is rarely a reason to look at individual rows, and
 none to copy `install_id` anywhere.
+
+### Relationship health (#133)
+
+The relationship code reports three kinds of key, all under a `rel` prefix:
+
+- **`errors.relInv*`** — a relationship write broke one of the invariants the
+  exhaustive checker holds the code to (`src/services/relationshipHealth.ts`).
+  Recorded after the write, never blocking it. **Each one is a bug in ERD
+  Studio**; the expected count on every version is zero.
+- **`errors.relWriteFailed` / `relHandlerFailed` / `relSyncRefused` /
+  `relMoveRestoreFailed`**, plus the older `relMove*` errors — a relationship
+  edit or a Move that did not complete.
+- **`features.relState*`** (and `relCaseRespelled`) — at most once per install
+  per day, what the user's files held when a diagram opened: a link stored
+  twice, a one-to-many in a model file, a many-to-one stored backwards, a
+  dangling model or column, an unreadable entry, a partial composite, a
+  diagram copy of a library link. These are the user's files, not failures,
+  which is why they are features; what matters is their **trend by version**.
+
+No D1 migration is needed for any of them: `features` and `errors` are JSON
+text columns. Every query below leaves out development hosts (`dev`) and
+counts rows, and a row is one install on one day — so "installs" below means
+install-days, and no query needs `install_id`.
+
+```bash
+# 0. Which versions are reporting, newest first (pick the two to compare).
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT ext_version, MIN(day) AS first_day, COUNT(*) AS install_days, SUM(canvas_opens > 0) AS canvas_days
+   FROM heartbeats WHERE COALESCE(dev, 0) = 0 GROUP BY ext_version ORDER BY first_day DESC LIMIT 6"
+
+# 1. Relationship error codes per extension version per day.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.day, h.ext_version, j.key AS code, COUNT(*) AS installs, SUM(j.value) AS total
+   FROM heartbeats h, json_each(h.errors) j
+   WHERE j.key LIKE 'rel%' AND h.day >= date('now', '-14 days') AND COALESCE(h.dev, 0) = 0
+   GROUP BY h.day, h.ext_version, j.key ORDER BY h.day DESC, h.ext_version DESC, installs DESC"
+
+# 2. Each relationship error as a share of the installs active on that version
+#    (per day, then averaged over the last 7 days), beside the canvas installs.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH active AS (
+     SELECT day, ext_version, COUNT(*) AS installs, SUM(canvas_opens > 0) AS canvas
+     FROM heartbeats WHERE day >= date('now', '-7 days') AND COALESCE(dev, 0) = 0 GROUP BY day, ext_version),
+   hit AS (
+     SELECT h.day, h.ext_version, j.key AS code, COUNT(*) AS installs
+     FROM heartbeats h, json_each(h.errors) j
+     WHERE j.key LIKE 'rel%' AND h.day >= date('now', '-7 days') AND COALESCE(h.dev, 0) = 0
+     GROUP BY h.day, h.ext_version, j.key)
+   SELECT hit.ext_version, hit.code, SUM(hit.installs) AS installs_hit, SUM(a.installs) AS installs_active,
+     ROUND(100.0 * SUM(hit.installs) / SUM(a.installs), 2) AS pct_of_active,
+     ROUND(100.0 * SUM(hit.installs) / MAX(SUM(a.canvas), 1), 2) AS pct_of_canvas
+   FROM hit JOIN active a ON a.day = hit.day AND a.ext_version = hit.ext_version
+   GROUP BY hit.ext_version, hit.code ORDER BY hit.ext_version DESC, pct_of_active DESC"
+
+# 3. Invariant violations per 1,000 relationship edits, by version.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH edits AS (
+     SELECT h.ext_version, SUM(j.value) AS n FROM heartbeats h, json_each(h.features) j
+     WHERE j.key IN ('addRelationship', 'editRelationship') AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
+     GROUP BY h.ext_version),
+   broken AS (
+     SELECT h.ext_version, SUM(j.value) AS n FROM heartbeats h, json_each(h.errors) j
+     WHERE j.key LIKE 'relInv%' AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
+     GROUP BY h.ext_version)
+   SELECT e.ext_version, e.n AS relationship_edits, COALESCE(b.n, 0) AS violations,
+     ROUND(1000.0 * COALESCE(b.n, 0) / MAX(e.n, 1), 2) AS per_1000_edits
+   FROM edits e LEFT JOIN broken b USING (ext_version) ORDER BY e.ext_version DESC"
+
+# 4. Data-state signals: share of canvas installs whose files show each state,
+#    per version and week. A state that grows on a new version is being written.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH canvas AS (
+     SELECT strftime('%Y-W%W', day) AS week, ext_version, COUNT(*) AS n
+     FROM heartbeats WHERE canvas_opens > 0 AND day >= date('now', '-56 days') AND COALESCE(dev, 0) = 0
+     GROUP BY week, ext_version),
+   seen AS (
+     SELECT strftime('%Y-W%W', h.day) AS week, h.ext_version, j.key AS state, COUNT(*) AS n
+     FROM heartbeats h, json_each(h.features) j
+     WHERE (j.key LIKE 'relState%' OR j.key = 'relCaseRespelled') AND h.day >= date('now', '-56 days') AND COALESCE(h.dev, 0) = 0
+     GROUP BY week, h.ext_version, j.key)
+   SELECT s.week, s.ext_version, s.state, s.n AS installs, c.n AS canvas_installs, ROUND(100.0 * s.n / c.n, 1) AS pct
+   FROM seen s JOIN canvas c ON c.week = s.week AND c.ext_version = s.ext_version
+   ORDER BY s.state, s.week DESC, s.ext_version DESC"
+
+# 5. Move Relationships funnel (28 days), every step in order, errors included.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH steps(ord, step) AS (VALUES
+     (1, 'relMoveOffered'), (2, 'relMoveReview'), (3, 'relMoveNotNow'), (4, 'relMoveDeclined'),
+     (5, 'relMoveStarted'), (6, 'relMoveDirtyFiles'), (7, 'relMoveCancelled'), (8, 'relMoveNothingToMove'),
+     (9, 'relMoveConflictShown'), (10, 'relMoveRehomed'), (11, 'relMoveTurned'), (12, 'relMoveKeptLibrary'),
+     (13, 'relMoveDisagreementLeft'), (14, 'relMoveFileLocked'), (15, 'relMoveWriteFailed'),
+     (16, 'relMoveRestoreFailed'), (17, 'relMoveFailed'), (18, 'relMoveCompleted'), (19, 'relMoveLeftover')),
+   used AS (
+     SELECT j.key AS step, COUNT(*) AS installs, SUM(j.value) AS times FROM heartbeats h, json_each(h.features) j
+     WHERE j.key LIKE 'relMove%' AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0 GROUP BY j.key
+     UNION ALL
+     SELECT j.key, COUNT(*), SUM(j.value) FROM heartbeats h, json_each(h.errors) j
+     WHERE j.key LIKE 'relMove%' AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0 GROUP BY j.key)
+   SELECT s.ord, s.step, COALESCE(u.installs, 0) AS install_days, COALESCE(u.times, 0) AS times
+   FROM steps s LEFT JOIN used u ON u.step = s.step ORDER BY s.ord"
+
+# 6. New since the last release: relationship errors and states seen on the new
+#    version that the previous one never reported. Edit the two versions first.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH v(new_version, old_version) AS (VALUES ('1.6.9', '1.6.8')),
+   codes AS (
+     SELECT h.ext_version, 'error' AS kind, j.key AS code FROM heartbeats h, json_each(h.errors) j
+     WHERE j.key LIKE 'rel%' AND COALESCE(h.dev, 0) = 0
+     UNION ALL
+     SELECT h.ext_version, 'state', j.key FROM heartbeats h, json_each(h.features) j
+     WHERE (j.key LIKE 'relState%' OR j.key = 'relCaseRespelled') AND COALESCE(h.dev, 0) = 0)
+   SELECT c.kind, c.code, COUNT(*) AS install_days
+   FROM codes c, v
+   WHERE c.ext_version = v.new_version
+     AND NOT EXISTS (SELECT 1 FROM codes o WHERE o.ext_version = v.old_version AND o.code = c.code)
+   GROUP BY c.kind, c.code ORDER BY c.kind, install_days DESC"
+```
+
+`LIKE 'rel%'` also matches the older `relMove*` keys (#126); that is intended.
+
+### Watching a release
+
+A heartbeat describes the *previous* UTC day and is sent on the next
+activation, so a release shipped on day D has its first rows on D+1 and most of
+them by D+2. Numbers are small: read `installs`, not `total`, because one
+install can fire the same code a hundred times.
+
+The day after shipping (and again a week later):
+
+1. Run query 0 and check the new version is reporting at all. No rows after
+   two days with the old version still reporting means the heartbeat broke.
+2. Run query 1 for the new version, then query 3.
+3. Run query 6 against the previous version.
+4. Glance at query 5 if the release touched the Move command, and at query 4
+   weekly.
+
+Investigate when:
+
+- **Any `relInv*` on a non-dev install.** Each is a write that did something
+  the invariants forbid. `relInvOtherLost`, `relInvCopyLeft`,
+  `relInvNotCanonical` and `relInvRoleLost` mean a user's data was lost or
+  stored wrongly: top priority. `relInvCheckFailed` means the check itself
+  met input it could not read. Reproduce with the exhaustive checker over the
+  operation the release changed.
+- **Any `relMoveRestoreFailed`.** A user has files half moved.
+- `relWriteFailed` or `relHandlerFailed` on more than 1% of canvas installs on
+  the new version (query 2), or more than on the previous version.
+- `relSyncRefused` rising: users have hand-written `relationships:` lists the
+  editor cannot rewrite, so their edits are refused.
+- A `relState*` share (query 4) **rising** on the new version compared with
+  the previous one: stored-twice, one-to-many or backwards entries should only
+  fall as people run Move; growth means a writer is producing them.
+  `relStateDanglingModel` / `relStateDanglingColumn` growing points at the
+  rename and remove cascades.
+- In the Move funnel, `relMoveCompleted` well below `relMoveStarted` minus
+  `relMoveCancelled`, or any `relMoveWriteFailed`.
+
+The local archive (below) already picks the new keys up: its per-day
+feature and error CSVs come from `json_each`, so `rel*` keys land there with no
+change. What it lacks is the **version**: to keep relationship health per
+version past the 90 days, add query 1's aggregate (day, version, code,
+installs, total; no install ids) to `.traffic/telemetry.mjs` as
+`telemetry-relationships.csv`, and have the `erd-traffic` report flag any
+`relInv*` row and the week-on-week change of each `relState*` share.
 
 ## The local archive
 
