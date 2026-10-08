@@ -556,3 +556,62 @@ describe('a self-reference (#133 L3)', () => {
     expect(h.logicalModelService.getModel('employee')?.relationships).toBeUndefined();
   });
 });
+
+describe('composite foreign keys on the canvas (#133 L2)', () => {
+  let h: Harness;
+  beforeEach(() => { _resetMockWorkspace(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(h.root, { recursive: true, force: true });
+  });
+  async function openVault() {
+    h = await createHarness();
+    h.logicalModelService.saveModel({ name: 'pit_customer', columns: ['pit_id', 'customer_hk', 'as_of_date'].map((name, i) => ({ name, dataType: 'string', description: '', ...(i === 0 ? { isPrimaryKey: true } : {}) })) });
+    h.logicalModelService.saveModel({ name: 'sat_customer', columns: ['customer_hk', 'load_date'].map((name) => ({ name, dataType: 'string', description: '', isPrimaryKey: true })) });
+    fs.writeFileSync(h.domainPath('vault'), JSON.stringify({
+      schemaVersion: 5, domain: 'vault', layer: 'silver', description: '', logical: { models: ['pit_customer', 'sat_customer'], relationships: [] },
+      viewConfig: { positions: { pit_customer: { x: 0, y: 0 }, sat_customer: { x: 300, y: 0 } } },
+    }, null, 2) + '\n');
+    return h.open('vault');
+  }
+  const FIRST = { fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk' };
+  const GROUP = [
+    { fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', cardinality: 'many-to-one', compositeKey: 'fk_sat_customer' },
+    { fromColumn: 'as_of_date', toModel: 'sat_customer', toColumn: 'load_date', cardinality: 'many-to-one', compositeKey: 'fk_sat_customer' },
+  ];
+
+  it('add with extraPairs writes the group in one edit; deleting one member edge deletes it in one edit', async () => {
+    const vault = await openVault();
+    await vault.send({ type: 'addRelationship', payload: { ...FIRST, cardinality: 'many-to-one', extraPairs: [{ fromColumn: 'as_of_date', toColumn: 'load_date' }] } });
+    expect(vault.errors()).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    h.logicalModelService.invalidateCache();
+    expect(h.logicalModelService.getModel('pit_customer')?.relationships).toEqual(GROUP);
+    expect(h.shown('vault').map((r) => r.compositeKey)).toEqual(['fk_sat_customer', 'fk_sat_customer']);
+
+    await vault.send({ type: 'removeRelationship', payload: { ...FIRST, fromColumn: 'as_of_date', toColumn: 'load_date' } });
+    expect(_appliedEdits).toHaveLength(1);
+    expect(h.logicalModelService.getModel('pit_customer')?.relationships).toBeUndefined();
+  });
+
+  it('regroups singles a 1.6.7 save left, and says so', async () => {
+    const vault = await openVault();
+    h.logicalModelService.saveModel({ ...h.logicalModelService.getModel('pit_customer')!, relationships: GROUP.map(({ compositeKey: _k, ...r }) => r) as never });
+    const infos = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    const original = { originalFromModel: FIRST.fromModel, originalFromColumn: FIRST.fromColumn, originalToModel: FIRST.toModel, originalToColumn: FIRST.toColumn };
+    await vault.send({ type: 'editRelationship', payload: { ...original, ...FIRST, cardinality: 'many-to-one', extraPairs: [{ fromColumn: 'as_of_date', toColumn: 'load_date' }] } });
+    expect(vault.errors()).toEqual([]);
+    h.logicalModelService.invalidateCache();
+    expect(h.logicalModelService.getModel('pit_customer')?.relationships).toEqual(GROUP);
+    expect(infos).toHaveBeenCalledWith('Grouped 1 existing relationship into fk_sat_customer.');
+  });
+
+  it('refuses many-to-many and a repeated column at the boundary', async () => {
+    const vault = await openVault();
+    await vault.send({ type: 'addRelationship', payload: { ...FIRST, cardinality: 'many-to-many', extraPairs: [{ fromColumn: 'as_of_date', toColumn: 'load_date' }] } });
+    expect(vault.errors()).toEqual(["Failed to add relationship: a composite key can't be many-to-many."]);
+    await vault.send({ type: 'addRelationship', payload: { ...FIRST, cardinality: 'many-to-one', extraPairs: [{ fromColumn: 'Customer_HK', toColumn: 'load_date' }] } });
+    expect(vault.errors()).toEqual(['Failed to add relationship: a column is used twice in the composite key.']);
+    expect(h.logicalModelService.getModel('pit_customer')?.relationships).toBeUndefined();
+  });
+});

@@ -1,0 +1,10 @@
+name: sat_customer
+columns:
+  - name: customer_hk
+    dataType: binary
+    isPrimaryKey: true
+  - name: load_date
+    dataType: timestamp
+    isPrimaryKey: true
+  - name: name
+    dataType: string

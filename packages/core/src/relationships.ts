@@ -4,7 +4,7 @@
  */
 
 import type { Relationship } from './types/semantic.js';
-import { keyEvidence } from './keyEvidence.js';
+import { keyEvidenceOf } from './keyEvidence.js';
 import type { DbtKeyIndex, KeyedModel } from './keyEvidence.js';
 
 type Ends = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
@@ -94,9 +94,24 @@ export function contradictsKeys(
   modelOf: (name: string) => KeyedModel | null | undefined,
   dbt?: DbtKeyIndex,
 ): boolean {
-  return rel.cardinality === 'many-to-one'
-    && keyEvidence(named(modelOf(rel.fromModel), rel.fromModel), rel.fromColumn, dbt) === 'whole-key'
-    && keyEvidence(named(modelOf(rel.toModel), rel.toModel), rel.toColumn, dbt) === 'not-key';
+  return contradictsKeysOf([rel], modelOf, dbt);
+}
+
+/**
+ * {@link contradictsKeys} for the members of one composite foreign key (#133
+ * L2), read on their column sets: all many-to-one, every from column together
+ * its model's whole key, and the to columns together certainly not the other
+ * model's key.
+ */
+export function contradictsKeysOf(
+  members: readonly Relationship[],
+  modelOf: (name: string) => KeyedModel | null | undefined,
+  dbt?: DbtKeyIndex,
+): boolean {
+  if (members.length === 0 || members.some((m) => m.cardinality !== 'many-to-one')) return false;
+  const { fromModel, toModel } = members[0];
+  return keyEvidenceOf(named(modelOf(fromModel), fromModel), members.map((m) => m.fromColumn), dbt) === 'whole-key'
+    && keyEvidenceOf(named(modelOf(toModel), toModel), members.map((m) => m.toColumn), dbt) === 'not-key';
 }
 
 /** A model as key evidence reads it, named so dbt evidence can be looked up for it. */
@@ -128,4 +143,63 @@ export function normaliseRelationshipRole(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const role = value.replace(/\s+/g, ' ').trim().slice(0, RELATIONSHIP_ROLE_MAX_LENGTH).trim();
   return role === '' ? undefined : role;
+}
+
+/** Longest `compositeKey` name kept (#133 L2). */
+export const COMPOSITE_KEY_MAX_LENGTH = 64;
+/** Most column pairs in one composite foreign key. */
+export const MAX_COMPOSITE_PAIRS = 8;
+
+/**
+ * A relationship's `compositeKey` as read: trimmed text of 1–64 characters,
+ * or undefined — a non-string, blank or longer value is ignored (the entry
+ * reads as a single link, and its bytes stay on disk).
+ */
+export function normaliseCompositeKey(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const key = value.trim();
+  return key === '' || key.length > COMPOSITE_KEY_MAX_LENGTH ? undefined : key;
+}
+
+/** One column pair of a link: the from end's column and the to end's. */
+export interface ColumnPair {
+  fromColumn: string;
+  toColumn: string;
+}
+
+/**
+ * Identity of a composite foreign key: its canonical from-model plus its
+ * members' sorted `linkKey`s. The same members drawn in two diagrams, or
+ * under two `compositeKey` names, are the same composite. Never written.
+ */
+export function groupKey(members: readonly Relationship[]): string {
+  const from = members.length > 0 ? canonicalRelationship(members[0]).fromModel.toLowerCase() : '';
+  return `${from}\u0000${members.map(linkKey).sort().join('\u0001')}`;
+}
+
+/**
+ * Why these entries — sharing one `compositeKey` — do not form one composite
+ * foreign key, or null when they do (#133 L2): at least two pairs and at most
+ * {@link MAX_COMPOSITE_PAIRS}; all from one model to one model (stored on the
+ * many side); one cardinality, many-to-one or one-to-one; and no column used
+ * twice at either end.
+ */
+export function compositeGroupProblem(members: readonly Relationship[]): string | null {
+  if (members.length < 2) return 'it has only one column pair';
+  if (members.length > MAX_COMPOSITE_PAIRS) return `it has more than ${MAX_COMPOSITE_PAIRS} column pairs`;
+  const canon = members.map(canonicalRelationship);
+  const lower = (s: string): string => s.toLowerCase();
+  if (canon.some((m) => lower(m.fromModel) !== lower(canon[0].fromModel) || lower(m.toModel) !== lower(canon[0].toModel))) {
+    return 'its entries join different models';
+  }
+  if (canon.some((m) => m.cardinality !== canon[0].cardinality)) return 'its entries have different cardinalities';
+  if (canon[0].cardinality !== 'many-to-one' && canon[0].cardinality !== 'one-to-one') return 'a composite key can\'t be many-to-many';
+  const distinct = (cols: string[]): boolean => new Set(cols.map(lower)).size === cols.length;
+  if (!distinct(canon.map((m) => m.fromColumn)) || !distinct(canon.map((m) => m.toColumn))) return 'a column is used twice';
+  return null;
+}
+
+/** A composite's column pairs, in the members' order and direction. */
+export function pairsOf(members: readonly Relationship[]): ColumnPair[] {
+  return members.map((m) => ({ fromColumn: m.fromColumn, toColumn: m.toColumn }));
 }

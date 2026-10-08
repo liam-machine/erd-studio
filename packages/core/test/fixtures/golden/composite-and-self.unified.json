@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 5,
+  "domain": "vault",
+  "layer": "gold",
+  "description": "A composite foreign key, an entry with a lone compositeKey, and two self-references (one spelled in another case)",
+  "logical": {
+    "models": [
+      {
+        "name": "pit_customer",
+        "columns": [
+          {
+            "name": "pit_customer_hk",
+            "dataType": "binary",
+            "description": "",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "customer_hk",
+            "dataType": "binary",
+            "description": ""
+          },
+          {
+            "name": "as_of_date",
+            "dataType": "date",
+            "description": ""
+          },
+          {
+            "name": "snapshot_hk",
+            "dataType": "binary",
+            "description": ""
+          }
+        ],
+        "relationships": [
+          {
+            "fromColumn": "customer_hk",
+            "toModel": "sat_customer",
+            "toColumn": "customer_hk",
+            "cardinality": "many-to-one",
+            "role": "as of",
+            "compositeKey": "fk_sat_customer"
+          },
+          {
+            "fromColumn": "as_of_date",
+            "toModel": "sat_customer",
+            "toColumn": "load_date",
+            "cardinality": "many-to-one",
+            "role": "as of",
+            "compositeKey": "fk_sat_customer"
+          },
+          {
+            "fromColumn": "snapshot_hk",
+            "toModel": "sat_customer",
+            "toColumn": "customer_hk",
+            "cardinality": "many-to-one",
+            "compositeKey": "fk_lonely"
+          }
+        ]
+      },
+      {
+        "name": "sat_customer",
+        "columns": [
+          {
+            "name": "customer_hk",
+            "dataType": "binary",
+            "description": "",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "load_date",
+            "dataType": "timestamp",
+            "description": "",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "name",
+            "dataType": "string",
+            "description": ""
+          }
+        ]
+      },
+      {
+        "name": "employee",
+        "columns": [
+          {
+            "name": "employee_id",
+            "dataType": "int",
+            "description": "",
+            "isPrimaryKey": true
+          },
+          {
+            "name": "manager_id",
+            "dataType": "int",
+            "description": ""
+          },
+          {
+            "name": "mentor_id",
+            "dataType": "int",
+            "description": ""
+          }
+        ],
+        "relationships": [
+          {
+            "fromColumn": "manager_id",
+            "toModel": "employee",
+            "toColumn": "employee_id",
+            "cardinality": "many-to-one",
+            "role": "manager"
+          },
+          {
+            "fromColumn": "Mentor_ID",
+            "toModel": "Employee",
+            "toColumn": "EMPLOYEE_ID",
+            "cardinality": "many-to-one"
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "pit_customer",
+        "fromColumn": "customer_hk",
+        "toModel": "sat_customer",
+        "toColumn": "customer_hk",
+        "cardinality": "many-to-one",
+        "compositeKey": "fk_sat_customer",
+        "role": "as of"
+      },
+      {
+        "fromModel": "pit_customer",
+        "fromColumn": "as_of_date",
+        "toModel": "sat_customer",
+        "toColumn": "load_date",
+        "cardinality": "many-to-one",
+        "compositeKey": "fk_sat_customer",
+        "role": "as of"
+      },
+      {
+        "fromModel": "pit_customer",
+        "fromColumn": "snapshot_hk",
+        "toModel": "sat_customer",
+        "toColumn": "customer_hk",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "employee",
+        "fromColumn": "manager_id",
+        "toModel": "employee",
+        "toColumn": "employee_id",
+        "cardinality": "many-to-one",
+        "role": "manager"
+      },
+      {
+        "fromModel": "employee",
+        "fromColumn": "mentor_id",
+        "toModel": "employee",
+        "toColumn": "employee_id",
+        "cardinality": "many-to-one"
+      }
+    ]
+  },
+  "viewConfig": {
+    "positions": {
+      "pit_customer": {
+        "x": 40,
+        "y": 40
+      },
+      "sat_customer": {
+        "x": 400,
+        "y": 40
+      },
+      "employee": {
+        "x": 40,
+        "y": 360
+      }
+    }
+  }
+}

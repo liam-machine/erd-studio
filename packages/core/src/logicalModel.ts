@@ -13,7 +13,7 @@ import type { Alias, Document, Node, Pair } from 'yaml';
 import type { Cardinality, ColumnDef, ModelRelationship, SemanticModel } from './types/semantic.js';
 import { readMeta } from './meta.js';
 import { checkLimit } from './limits.js';
-import { normaliseRelationshipRole } from './relationships.js';
+import { normaliseCompositeKey, normaliseRelationshipRole } from './relationships.js';
 
 /** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
 export const LOGICAL_MODELS_DIR = 'logical-models';
@@ -399,6 +399,7 @@ function readRelationships(value: unknown): ModelRelationship[] {
     if (typeof fromColumn !== 'string' || typeof toModel !== 'string' || typeof toColumn !== 'string') continue;
     if (!fromColumn || !toModel || !toColumn) continue;
     const role = normaliseRelationshipRole(r.role);
+    const compositeKey = normaliseCompositeKey(r.compositeKey);
     relationships.push({
       fromColumn,
       toModel,
@@ -407,6 +408,7 @@ function readRelationships(value: unknown): ModelRelationship[] {
         ? cardinality as Cardinality
         : 'many-to-one',
       ...(role ? { role } : {}),
+      ...(compositeKey ? { compositeKey } : {}),
     });
   }
   return relationships;

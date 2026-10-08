@@ -225,6 +225,12 @@ export interface Relationship {
    * not part of the relationship's identity, which the columns already give.
    */
   role?: string;
+  /**
+   * Entries sharing this value, in one file and from one model, form one
+   * composite foreign key: one relationship over several column pairs (#133
+   * L2). Grouping only, like `role`: each entry is still its own link.
+   */
+  compositeKey?: string;
 }
 
 /**

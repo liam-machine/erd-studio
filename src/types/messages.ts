@@ -30,6 +30,7 @@
 import type { DisplayDomain } from './display';
 import type { DiscrepancyReport } from './discrepancy';
 import type { AnnotationColor, Cardinality, DesignModel, Stage } from './semantic';
+import type { ColumnPair } from '@erd-studio/core';
 import type { GroundTruth } from './syncPlan';
 import type {
   FeedbackAiProviderChoice,
@@ -299,6 +300,12 @@ export interface AddRelationshipMessage {
      * Refused when that model has a key flagged by then.
      */
     markKey?: MarkKeyPayload;
+    /**
+     * The other column pairs of a composite foreign key (#133 L2), in the
+     * dialog's order; `fromColumn` / `toColumn` are its first pair. Absent or
+     * [] is a single-column relationship.
+     */
+    extraPairs?: ColumnPair[];
   };
 }
 
@@ -355,6 +362,11 @@ export interface EditRelationshipMessage {
     role?: string;
     /** As on `addRelationship`. */
     markKey?: MarkKeyPayload;
+    /**
+     * As on `addRelationship`: the pairs after the edit. The original ends
+     * may name any member of a composite; the host edits the whole group.
+     */
+    extraPairs?: ColumnPair[];
   };
 }
 

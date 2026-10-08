@@ -1065,6 +1065,27 @@ describe('LogicalModelService — a save keeps the relationships: list it did no
       + '  - fromColumn: customer_key\n    toModel: dim_region\n    toColumn: region_key\n    cardinality: many-to-one\n');
   });
 
+  it('compositeKey is written, kept on its node, and removed when cleared (#133 L2)', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships = model.relationships!.map((r) => (r.toModel === 'dim_date' ? { ...r, compositeKey: 'fk_dim_date' } : r));
+    service.saveModel(model);
+    let text = fs.readFileSync(file, 'utf-8');
+    expect(listText(text)).toBe(listText(YML).replace('    toModel: dim_date\n    toColumn: date_key\n    cardinality: many-to-one\n', '    toModel: dim_date\n    toColumn: date_key\n    cardinality: many-to-one\n    compositeKey: fk_dim_date\n'));
+    // A description change leaves it alone.
+    service.invalidateCache();
+    const again = service.getModel('fct_order')!;
+    expect(again.relationships!.find((r) => r.toModel === 'dim_date')!.compositeKey).toBe('fk_dim_date');
+    service.saveModel({ ...again, description: 'Orders' });
+    expect(listText(fs.readFileSync(file, 'utf-8'))).toBe(listText(text));
+    // Cleared: only that key goes.
+    service.invalidateCache();
+    const cleared = service.getModel('fct_order')!;
+    cleared.relationships = cleared.relationships!.map(({ compositeKey: _k, ...r }) => r);
+    service.saveModel(cleared);
+    text = fs.readFileSync(file, 'utf-8');
+    expect(listText(text)).toBe(listText(YML));
+  });
+
   it('edits only the entry that changed, keeping comments, unknown keys and skipped entries', () => {
     const model = service.getModel('fct_order')!;
     model.relationships = model.relationships!.filter((r) => r.toModel !== 'dim_date');

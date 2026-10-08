@@ -100,7 +100,7 @@ export interface ModelFileEntry {
 /** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
 // `relationships` is synced on its own, entry by entry (syncRelationships).
 const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns'] as const;
-const RELATIONSHIP_KEYS = ['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role'] as const;
+const RELATIONSHIP_KEYS = ['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role', 'compositeKey'] as const;
 /** A non-empty top-level `relationships:` list, as text (for a file that does not parse). */
 const RELATIONSHIPS_IN_TEXT = /^relationships[ \t]*:(?:\s*#.*)*\s*(?:-|\[\s*[^\s\]])/m;
 const COLUMN_KEYS = [
@@ -1095,6 +1095,7 @@ export class LogicalModelService {
         toColumn: rel.toColumn,
         cardinality: rel.cardinality,
         ...(rel.role ? { role: rel.role } : {}),
+        ...(rel.compositeKey ? { compositeKey: rel.compositeKey } : {}),
       }));
     }
 

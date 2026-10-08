@@ -1,0 +1,31 @@
+# A Data Vault point-in-time table: one composite foreign key to the
+# satellite, and an entry whose compositeKey has no partner (drawn single).
+name: pit_customer
+columns:
+  - name: pit_customer_hk
+    dataType: binary
+    isPrimaryKey: true
+  - name: customer_hk
+    dataType: binary
+  - name: as_of_date
+    dataType: date
+  - name: snapshot_hk
+    dataType: binary
+relationships:
+  - fromColumn: customer_hk
+    toModel: sat_customer
+    toColumn: customer_hk
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+    role: as of
+  - fromColumn: as_of_date
+    toModel: sat_customer
+    toColumn: load_date
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+    role: as of
+  - fromColumn: snapshot_hk
+    toModel: sat_customer
+    toColumn: customer_hk
+    cardinality: many-to-one
+    compositeKey: fk_lonely

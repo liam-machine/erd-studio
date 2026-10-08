@@ -104,6 +104,7 @@ export function toDisplayDomain(domain: SemanticDomain, options: ToDisplayDomain
     toColumn: rel.toColumn,
     cardinality: rel.cardinality,
     ...(rel.role ? { role: rel.role } : {}),
+    ...(rel.compositeKey ? { compositeKey: rel.compositeKey } : {}),
   }));
 
   return {

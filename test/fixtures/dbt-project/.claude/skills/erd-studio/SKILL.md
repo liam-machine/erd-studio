@@ -329,6 +329,9 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 | `toColumn` | Yes | PK column name |
 | `cardinality` | Yes | `many-to-one`, `one-to-one`, or `many-to-many` (`one-to-many` is still read, but never write it — see Direction) |
 | `role` | No | A label for what the link means, e.g. `order date` and `ship date` for two columns pointing at the same date dimension. At most 60 characters. A label only — not part of the relationship's identity |
+| `compositeKey` | No | Groups entries into one composite foreign key (see below). At most 64 characters |
+
+**Spelling:** always spell `fromModel`, `toModel` and the columns exactly as the model and column are named. ERD Studio matches them ignoring case, but writes the real spelling the next time it changes that entry.
 
 **Direction:** `fromModel` is always the many (FK) side, `toModel` the side it points at (PK). Never write `one-to-many`: swap the ends and write `many-to-one`, in the other model's file — it is the same relationship. `one-to-one` and `many-to-many` keep the direction they were drawn in. Keys win: the many side is never its model's whole primary or natural key while the other end is a column of a model with a different key — ERD Studio reads such a `many-to-one` the other way round (**Move Relationships to Model Library** stores it so), and the canvas refuses a ⇄ that would write it. FK column names should match the PK column name of the referenced table.
 
@@ -353,6 +356,37 @@ relationships:
 ```
 
 So adding a new fact only ever changes the fact's own file; its dimensions never list who points at them.
+
+**Mark the keys.** Direction comes from keys: when you add a relationship, mark the referenced column with `isPrimaryKey: true` (or `isNaturalKey`) on the model it points at, unless that model already marks a key. Without a key marked, ERD Studio falls back to dbt's `unique` tests, and with neither the user has to say which side holds the foreign key.
+
+**Self-references** (`employee.manager_id → employee.employee_id`) are stored in the model's own file with `toModel` set to the model itself. A column never points at itself.
+
+```yaml
+# logical-models/employee.yml
+relationships:
+  - fromColumn: manager_id
+    toModel: employee
+    toColumn: employee_id
+    cardinality: many-to-one
+    role: manager
+```
+
+**Composite foreign keys** (several columns together, e.g. a Data Vault PIT or bridge, a multi-column natural key) are one entry per column pair, all sharing the same `compositeKey` value, stored together on the FK side. Every entry points at the same `toModel` with the same cardinality (`many-to-one` or `one-to-one`, never `many-to-many`), and no column appears twice. ERD Studio draws them as one line. Name the key `fk_<toModel>` (`fk_<toModel>_2` for a second one in the same file). Never use array forms such as `fromColumns: [...]` — older ERD Studio versions would delete them.
+
+```yaml
+# logical-models/gold/pit_customer.yml
+relationships:
+  - fromColumn: customer_hk
+    toModel: sat_customer
+    toColumn: customer_hk
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+  - fromColumn: as_of_date
+    toModel: sat_customer
+    toColumn: load_date
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+```
 
 **Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` list, or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]`, and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same two columns twice — not in both places, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
 
@@ -424,4 +458,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 27 -->
+<!-- erd-studio-harness: 28 -->

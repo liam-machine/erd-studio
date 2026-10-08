@@ -26,11 +26,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { VALID_CARDINALITIES, linkKey, normaliseRelationshipRole, parseLogicalModelText } from '@erd-studio/core';
+import { VALID_CARDINALITIES, linkKey, normaliseCompositeKey, normaliseRelationshipRole, parseLogicalModelText } from '@erd-studio/core';
 import { dirtyFiles } from '../providers/dirtyDocuments';
 import {
   applyMoveToModel,
-  describeDefinition,
+  describeConflictDefinition,
   describeLeftAlone,
   describeMovePlan,
   moveTargets,
@@ -91,9 +91,10 @@ export function readDomainRelationships(
         // An unrecognised cardinality is drawn as many-to-one (core's parseRelationships);
         // the move stores what the diagram shows, never the typo.
         .map((r) => (VALID_CARDINALITIES.has(r.cardinality) ? r : { ...r, cardinality: 'many-to-one' as const }))
-        .map(({ role, ...r }) => {
+        .map(({ role, compositeKey, ...r }) => {
           const label = normaliseRelationshipRole(role);
-          return label ? { ...r, role: label } : r;
+          const key = normaliseCompositeKey(compositeKey);
+          return { ...r, ...(label ? { role: label } : {}), ...(key ? { compositeKey: key } : {}) };
         });
       domains.push({ label: `${summary.layer}/${summary.domain}`, filePath: summary.filePath, models, relationships });
     } catch {
@@ -249,7 +250,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     const picked = await vscode.window.showQuickPick(
       [
         ...conflict.definitions.map((d) => ({
-          label: describeDefinition(d.relationship),
+          label: describeConflictDefinition(d),
           description: `as in ${d.domains.join(', ')}`,
           detail: `Saved once in ${fileOf(d.relationship.fromModel)}; every diagram with ${fromModel} and ${toModel} draws it this way.`,
           definition: d as ConflictDefinition | undefined,

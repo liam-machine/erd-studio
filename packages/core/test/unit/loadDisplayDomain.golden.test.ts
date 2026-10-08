@@ -31,6 +31,7 @@ const DOMAIN_CASES: Record<string, string> = {
   'missing-positions': '.erd-studio/silver/showcase.json',
   'library-relationships': '.erd-studio/gold/sales.json',
   'v4-nameless-column': '.erd-studio/silver/orders.json',
+  'composite-and-self': '.erd-studio/gold/vault.json',
 };
 
 const ERROR_CASES: Record<string, string> = {

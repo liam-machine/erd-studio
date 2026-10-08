@@ -64,7 +64,6 @@ import {
   DomainFileError,
   DomainService,
   isDomainFilePath,
-  relationshipReferencesColumn,
 } from '../services/domainService';
 import { computeDomainDiff } from '../services/stageDiff';
 import { buildSyncPlan, countSyncPlanActions } from '../services/syncPlanBuilder';
@@ -156,6 +155,7 @@ import {
   drawnDiagramCopies,
   markPrimaryKey,
   planRelationshipWrite,
+  removeColumnFromDomainRelationships,
   removeColumnRelationships,
   renameColumnInDomainRelationships,
   renameColumnInRelationships,
@@ -346,6 +346,7 @@ import {
   validateAddModelsFromDbtPayload,
   validateOpenModelFilePayload,
   validateLayoutFinishedPayload,
+  validateExtraPairs,
   validateMarkKey,
   validateRelationshipEnds,
   validateDismissManifestHintPayload,
@@ -1038,7 +1039,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: 'Failed to add relationship: the role must be text of at most 60 characters.' } });
                 break;
               }
-              const linkError = validateRelationshipEnds(payload) ?? validateMarkKey(payload.markKey, payload);
+              // extraPairs first: the other two read every pair once it is valid.
+              const linkError = validateExtraPairs(payload.extraPairs, payload) ?? validateRelationshipEnds(payload)
+                ?? validateMarkKey(payload.markKey, payload);
               if (linkError) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: ${linkError}` } });
                 break;
@@ -1112,7 +1115,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: 'Failed to edit relationship: the role must be text of at most 60 characters.' } });
                 break;
               }
-              const linkError = validateRelationshipEnds(payload) ?? validateMarkKey(payload.markKey, payload);
+              // extraPairs first: the other two read every pair once it is valid.
+              const linkError = validateExtraPairs(payload.extraPairs, payload) ?? validateRelationshipEnds(payload)
+                ?? validateMarkKey(payload.markKey, payload);
               if (linkError) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: ${linkError}` } });
                 break;
@@ -2829,10 +2834,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             removeColumnRelationships([model], payload.modelName, payload.columnName);
           },
           (sec) => {
-            const rels = (sec.relationships ?? []) as Array<Record<string, unknown>>;
-            sec.relationships = rels.filter(
-              (rel) => !relationshipReferencesColumn(rel, payload.modelName, payload.columnName),
-            );
+            // A composite key loses all its members with one column (#133 L2).
+            sec.relationships = removeColumnFromDomainRelationships(
+              (sec.relationships ?? []) as Array<Record<string, unknown>>, payload.modelName, payload.columnName);
           },
           // Library relationships in other models that point at the removed column (#126).
           removeColumnRelationships(this.otherLibraryModels(payload.modelName), payload.modelName, payload.columnName),
@@ -2858,10 +2862,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           columns.splice(columnIndex, 1);
           model.columns = columns;
 
-          const relationships = (section.relationships ?? []) as Array<Record<string, unknown>>;
-          section.relationships = relationships.filter(
-            (rel) => !relationshipReferencesColumn(rel, payload.modelName, payload.columnName),
-          );
+          section.relationships = removeColumnFromDomainRelationships(
+            (section.relationships ?? []) as Array<Record<string, unknown>>, payload.modelName, payload.columnName);
         },
         { webview, stage, errorLabel: 'Failed to remove column.' },
       );
@@ -3024,12 +3026,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     stage: 'logical',
   ): Promise<void> {
     try {
-      const { markKey, ...rest } = payload;
+      const { markKey, extraPairs, ...rest } = payload;
       const drawn: Relationship = {
         fromModel: rest.fromModel, fromColumn: rest.fromColumn, toModel: rest.toModel, toColumn: rest.toColumn,
         cardinality: rest.cardinality, ...(rest.role !== undefined ? { role: rest.role } : {}),
       };
-      await this.commitRelationshipWrite(document, webview, { kind: 'add', drawn, ...(markKey ? { markKey } : {}) }, stage, 'Failed to add relationship.');
+      await this.commitRelationshipWrite(
+        document, webview,
+        { kind: 'add', drawn, ...(markKey ? { markKey } : {}), ...(extraPairs?.length ? { extraPairs } : {}) },
+        stage, 'Failed to add relationship.',
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[SemanticEditorProvider] Add relationship failed: ${message}`);
@@ -3061,6 +3067,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const dbt = await this.loadDbtKeyIndex();
     // Filled by the mutator, which applyDomainEdit runs before it reads modelFiles.
     const save: Array<{ model: SemanticModel }> = [];
+    let grouped: { count: number; compositeKey: string } | undefined;
     const success = await this.applyDomainEdit(
       document,
       (section) => {
@@ -3078,9 +3085,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         }
         if (plan.domainRelationships) section.relationships = plan.domainRelationships;
         save.push(...plan.changed.map((model) => ({ model })));
+        grouped = plan.grouped;
       },
       { webview, stage, errorLabel, modelFiles: { save } },
     );
+    if (success && grouped) {
+      // Single links taken into a composite key (#133 L2), e.g. after a 1.6.7 save split it.
+      void vscode.window.showInformationMessage(
+        `Grouped ${grouped.count} existing relationship${grouped.count === 1 ? '' : 's'} into ${grouped.compositeKey}.`,
+      );
+    }
     return success ? { home, changed: save.map((entry) => entry.model) } : null;
   }
 
@@ -3482,7 +3496,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         ...(payload.role !== undefined ? { role: payload.role } : {}),
       };
       await this.commitRelationshipWrite(
-        document, webview, { kind: 'edit', original, drawn, ...(payload.markKey ? { markKey: payload.markKey } : {}) }, stage, 'Failed to edit relationship.',
+        document, webview,
+        {
+          kind: 'edit', original, drawn,
+          ...(payload.markKey ? { markKey: payload.markKey } : {}),
+          ...(payload.extraPairs?.length ? { extraPairs: payload.extraPairs } : {}),
+        },
+        stage, 'Failed to edit relationship.',
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

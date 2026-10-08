@@ -689,3 +689,96 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     expect(logicalModelService.getModel('fct_order')?.relationships).toHaveLength(1);
   });
 });
+
+describe('moveRelationshipsToLibrary — composite keys move as one (#133 L2)', () => {
+  const PIT = { name: 'pit_customer', columns: [
+    { name: 'pit_id', dataType: 'int', description: '', isPrimaryKey: true },
+    { name: 'customer_hk', dataType: 'int', description: '' },
+    { name: 'as_of_date', dataType: 'date', description: '' },
+  ] };
+  const SAT = { name: 'sat_customer', columns: [
+    { name: 'customer_hk', dataType: 'int', description: '', isPrimaryKey: true },
+    { name: 'load_date', dataType: 'date', description: '', isPrimaryKey: true },
+  ] };
+  const pair = (fromColumn: string, toColumn: string, extra: Partial<Relationship> = {}): Relationship =>
+    ({ fromModel: 'pit_customer', fromColumn, toModel: 'sat_customer', toColumn, cardinality: 'many-to-one', ...extra });
+  const GROUP = [pair('customer_hk', 'customer_hk', { compositeKey: 'fk_sat' }), pair('as_of_date', 'load_date', { compositeKey: 'fk_sat' })];
+
+  let root: string;
+  let logicalModelService: LogicalModelService;
+  let deps: Parameters<typeof moveRelationshipsToLibrary>[0];
+  const writeDomain = (name: string, relationships: unknown[]) => {
+    const dir = path.join(root, SEMANTIC_DIR, 'silver');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify({
+      schemaVersion: 5, domain: name, layer: 'silver', description: '', logical: { models: ['pit_customer', 'sat_customer'], relationships }, viewConfig: {},
+    }, null, 2) + '\n');
+  };
+  const domainRels = (name: string) => JSON.parse(fs.readFileSync(path.join(root, SEMANTIC_DIR, 'silver', `${name}.json`), 'utf-8')).logical.relationships;
+  const pitRels = () => { logicalModelService.invalidateCache(); return logicalModelService.getModel('pit_customer')?.relationships; };
+
+  beforeEach(() => {
+    _resetMockWorkspace();
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-move-group-'));
+    logicalModelService = new LogicalModelService(root, SEMANTIC_DIR);
+    logicalModelService.saveModel(PIT);
+    logicalModelService.saveModel(SAT);
+    deps = {
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService: new DomainService(new LayerService(root, SEMANTIC_DIR)),
+      logicalModelService, onWritten: vi.fn(async () => undefined),
+    };
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const stored = (r: Relationship) => { const { fromModel: _f, ...e } = r; return e; };
+
+  it('a group moves as one unit; grouped in one diagram and singles in another become the group; a second run is empty', async () => {
+    writeDomain('d1', GROUP.map((r) => ({ ...r, role: 'as of' })));
+    writeDomain('d2', GROUP.map(({ compositeKey: _k, ...r }) => r));
+    const info = acceptModal();
+    await moveRelationshipsToLibrary(deps);
+    expect(pitRels()).toEqual(GROUP.map((r) => ({ ...stored(r), role: 'as of' })));
+    expect([domainRels('d1'), domainRels('d2')]).toEqual([[], []]);
+    const preview = messages(info).find((m) => m.startsWith('Define each relationship once')) ?? '';
+    expect(info.mock.calls.map((c) => String((c[1] as { detail?: string } | undefined)?.detail ?? '')).join('\n')).toContain('silver/d2: pit_customer.customer_hk → sat_customer.customer_hk — part of fk_sat');
+    expect(preview).not.toBe('');
+    info.mockClear();
+    await moveRelationshipsToLibrary(deps);
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
+  it('two diagrams defining the group differently are one conflict; the pick moves every member', async () => {
+    writeDomain('d1', GROUP);
+    writeDomain('d2', GROUP.map((r) => ({ ...r, cardinality: 'one-to-one' })));
+    acceptModal();
+    const pick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Array<{ label: string; definition?: { relationship: Relationship } }>) =>
+      items.find((it) => it.definition?.relationship.cardinality === 'one-to-one')) as never);
+    await moveRelationshipsToLibrary(deps);
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(pick.mock.calls[0][0]).toEqual(expect.arrayContaining([expect.objectContaining({ label: expect.stringContaining('composite key pit_customer.(customer_hk, as_of_date) → sat_customer.(customer_hk, load_date)') })]));
+    expect(pitRels()).toEqual(GROUP.map((r) => ({ ...stored(r), cardinality: 'one-to-one' })));
+    expect([domainRels('d1'), domainRels('d2')]).toEqual([[], []]);
+  });
+
+  it('a group whose pair the library holds in another composite stays whole in the diagrams, and says why', async () => {
+    logicalModelService.saveModel({ ...PIT, relationships: [stored({ ...GROUP[1], compositeKey: 'other' }), stored({ ...pair('pit_id', 'customer_hk'), compositeKey: 'other' })] });
+    writeDomain('d1', GROUP);
+    const info = acceptModal();
+    await moveRelationshipsToLibrary(deps);
+    expect(domainRels('d1')).toEqual(GROUP);
+    expect(info.mock.calls.map((c) => String((c[1] as { detail?: string } | undefined)?.detail ?? '')).join('\n'))
+      .toContain('Composite key pit_customer.(customer_hk, as_of_date) → sat_customer.(customer_hk, load_date) left in the diagrams (silver/d1): the model library holds one of its column pairs in another composite key.');
+  });
+
+  it('planRehome turns a backwards group round together, in one write per file', async () => {
+    // Stored on the satellite's side, the one side by its whole composite key.
+    logicalModelService.saveModel({ ...SAT, relationships: GROUP.map((r) => ({ fromColumn: r.toColumn, toModel: 'pit_customer', toColumn: r.fromColumn, cardinality: 'one-to-many' as const, compositeKey: 'fk_sat' })) });
+    acceptModal();
+    await moveRelationshipsToLibrary(deps);
+    expect(pitRels()).toEqual(GROUP.map(stored));
+    logicalModelService.invalidateCache();
+    expect(logicalModelService.getModel('sat_customer')?.relationships).toBeUndefined();
+  });
+});

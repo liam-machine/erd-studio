@@ -778,8 +778,20 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 27 (keys win over a relationship direction, and diff fixes name the entry to write, #133)', () => {
-      expect(HARNESS_VERSION).toBe('27');
+    it('is 28 (composite foreign keys, self-references, spelling and marking keys, #133 L1–L4)', () => {
+      expect(HARNESS_VERSION).toBe('28');
+    });
+
+    it('documents compositeKey, self-references, real spelling and marking the referenced key (#133 L1–L4)', () => {
+      const SCHEMA_CONTENT = service.generateContent('claude');
+      expect(SCHEMA_CONTENT).toContain('| `compositeKey` | No |');
+      expect(SCHEMA_CONTENT).toContain('all sharing the same `compositeKey` value, stored together on the FK side');
+      expect(SCHEMA_CONTENT).toContain('never `many-to-many`');
+      expect(SCHEMA_CONTENT).toContain('Never use array forms such as `fromColumns: [...]`');
+      expect(SCHEMA_CONTENT).toContain('**Self-references**');
+      expect(SCHEMA_CONTENT).toContain('A column never points at itself.');
+      expect(SCHEMA_CONTENT).toContain('always spell `fromModel`, `toModel` and the columns exactly as the model and column are named');
+      expect(SCHEMA_CONTENT).toContain('mark the referenced column with `isPrimaryKey: true`');
     });
 
     it('tells assistants to store a relationship on its many side and never write one-to-many (#133)', () => {

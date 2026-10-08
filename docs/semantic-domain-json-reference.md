@@ -218,12 +218,59 @@ A relationship is stored in exactly one place: the YAML of the model holding its
 | `toColumn` | string | Yes | Referenced PK column on the to model. |
 | `cardinality` | string | Yes | One of `"many-to-one"`, `"one-to-one"`, `"one-to-many"`, `"many-to-many"`. `"one-to-many"` is deprecated in a model YAML: still read, but ERD Studio never writes it there (see the direction convention), and the JSON schema marks it. |
 | `role` | string | No | A label for what the link means, e.g. `"order date"` and `"ship date"` for two columns pointing at the same date dimension. Trimmed, at most 60 characters, drawn on the line. A label only: not part of the identity. |
+| `compositeKey` | string | No | Groups entries into one composite foreign key (see [Composite foreign keys](#composite-foreign-keys)). Trimmed, 1–64 characters, compared without case. A blank or non-string value is ignored (the entry reads as a single link and the bytes stay). Grouping only: not part of the identity. |
+
+**Spelling:** model and column names in a relationship match the models' and columns' real names ignoring case, and are drawn with the real spelling; ERD Studio writes the real spelling the next time it changes that entry.
 
 **Identity key:** the composite `(fromModel, fromColumn, toModel, toColumn)` must be unique within the domain — and the same two columns may not be joined twice in opposite directions either: that is one link, drawn once.
 
 **Direction convention:** `fromModel` holds the FK (the "many" side), `toModel` holds the PK. A `one-to-many` is the same relationship read from the other end, so it is stored with its ends swapped as `many-to-one` (`canonicalRelationship` in `@erd-studio/core`, issue #133). `one-to-one` and `many-to-many` keep the direction they were drawn in. **Keys win:** a `many-to-one` whose `fromColumn` is its model's whole primary or natural key, pointing at a column of a model whose own whole key is a different column, contradicts the keys (that column holds each value once, so it cannot be the many side). The canvas refuses a ⇄ that would write one and the New Relationship dialog warns before creating one (**Create anyway**); the move command turns one round. Without a key flagged on the target there is no certainty, and nothing is turned round.
 
+**Which side holds the key** comes from evidence, never from the order a line was drawn in: first the models' own key flags (a column set equal to a model's full `isPrimaryKey` set, or its full `isNaturalKey` set, is its whole key; in a model that flags any key, any other set is not), then — only for a model that flags no key — dbt's tests (a `unique` test, a `unique_combination_of_columns` equal to the set, a column a `relationships` test leaves). Flags always win over dbt. With neither, the New Relationship dialog asks which side holds the foreign key.[^winner]
+
 Entries missing any of the four string endpoints are dropped on read with a console warning; an unrecognised `cardinality` falls back to `many-to-one`.
+
+[^winner]: When the same link is stored twice, the copy drawn is chosen with the same evidence (the canvas and `erd-studio diff` pass dbt's tests; the read-only viewer cannot). The only state where they can differ is a link stored twice in the model library, with neither end flagged, in disagreeing directions — an ERD Studio 1.6.7 leftover that **Move Relationships to Model Library** settles.
+
+### Self-references
+
+A model may point at itself, e.g. an employee's manager. It is stored in the model's own file, and a column never points at itself:
+
+```yaml
+# logical-models/employee.yml
+relationships:
+  - fromColumn: manager_id
+    toModel: employee
+    toColumn: employee_id
+    cardinality: many-to-one
+    role: manager
+```
+
+### Composite foreign keys
+
+A foreign key over several columns (a Data Vault PIT or bridge, a multi-column natural key) is one entry per column pair, all sharing one `compositeKey`, stored together on the FK side like any relationship:
+
+```yaml
+# logical-models/gold/pit_customer.yml
+relationships:
+  - fromColumn: customer_hk
+    toModel: sat_customer
+    toColumn: customer_hk
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+  - fromColumn: as_of_date
+    toModel: sat_customer
+    toColumn: load_date
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+    role: as of          # the group's role is the first entry's, and is written on every entry
+```
+
+Entries sharing a `compositeKey` (without case) form one composite — in one model file from one model, or in one domain file from one `fromModel` — when there are 2–8 of them, all point at the same `toModel`, all have the same cardinality (`many-to-one` or `one-to-one`, never `many-to-many`), and no column is used twice at either end. A valid composite is drawn as one line listing its pairs; otherwise each entry is drawn as a single link and a warning is logged. ERD Studio names a new one `fk_<toModel>` (then `_2`, `_3`, … in that file). An edit, ⇄ or delete of the line acts on every entry; removing one of its columns removes the whole composite.
+
+**Older versions.** ERD Studio 1.6.7 and earlier read each entry as a separate relationship, and drop `compositeKey` and `role` when they save that model — every column pair is kept. Editing one of those links and adding the other pairs back groups them again.
+
+**dbt.** The physical stage reads a composite foreign key from a dbt ≥ 1.9 model-level `foreign_key` constraint (`columns`, `to: ref(...)`, `to_columns`) or a `dbt_constraints.foreign_key` test (`fk_column_names`, `pk_table_name`, `pk_column_names`), from schema yml and the manifest. Compare to Physical matches each pair as its own link; a composite dbt does not declare is one informational difference, and `erd-studio diff` reports it as an advisory `declare-composite-foreign-key` fix (blocking only with `--strict`).
 
 ### Where relationships live
 

@@ -420,3 +420,16 @@ describe('alias (the warehouse table name)', () => {
     expect(display.models[1]).not.toHaveProperty('alias');
   });
 });
+
+describe('compositeKey on a relationship entry (#133 L2)', () => {
+  it('is read trimmed; blank, non-string or over-long values are ignored', () => {
+    const text = [
+      'name: pit', 'relationships:',
+      '  - { fromColumn: a, toModel: sat, toColumn: a, compositeKey: "  fk_sat  " }',
+      '  - { fromColumn: b, toModel: sat, toColumn: b, compositeKey: "" }',
+      '  - { fromColumn: c, toModel: sat, toColumn: c, compositeKey: [fk_sat] }',
+      `  - { fromColumn: d, toModel: sat, toColumn: d, compositeKey: ${'x'.repeat(65)} }`,
+    ].join('\n');
+    expect(parseLogicalModelText(text, 'pit')!.relationships!.map((r) => r.compositeKey ?? null)).toEqual(['fk_sat', null, null, null]);
+  });
+});

@@ -8,9 +8,14 @@ import {
   describeLeftAlone,
   describeMovePlan,
   diagramsStillDrawing,
+  expandToGroups,
+  groupOf,
+  libraryRelationshipsOf,
+  nextCompositeKey,
   planRelationshipWrite,
   planMoveToLibrary,
   planRehome,
+  removeColumnFromDomainRelationships,
   removeColumnRelationships,
   removeLibraryRelationships,
   resolveConflict,
@@ -25,6 +30,7 @@ import {
 } from '../../src/services/libraryRelationships';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import { buildDbtKeyIndex } from '@erd-studio/core';
+import type { ColumnPair } from '@erd-studio/core';
 import type { Relationship, SemanticModel } from '../../src/types/semantic';
 
 const REL: Relationship = {
@@ -517,5 +523,102 @@ describe('the move preview and its leftovers', () => {
       { label: 'gold/b', models: ['fct_order'], relationships: [REL] },
       { label: 'gold/c', models: ['fct_order', 'dim_customer'], relationships: [] },
     ])).toEqual(['gold/a']);
+  });
+});
+
+describe('composite foreign keys (#133 L2)', () => {
+  const PIT = 'pit_customer';
+  const SAT = 'sat_customer';
+  const col = (name: string, isPrimaryKey = false) => ({ name, dataType: 'string', description: '', ...(isPrimaryKey ? { isPrimaryKey } : {}) });
+  const member = (from: string, to: string, extra: Partial<Relationship> = {}) =>
+    ({ fromColumn: from, toModel: SAT, toColumn: to, cardinality: 'many-to-one' as const, compositeKey: 'fk_sat_customer', ...extra });
+  const models = (pitRels: SemanticModel['relationships'] = undefined, satKeys = true): SemanticModel[] => [
+    { name: PIT, columns: [col('pit_id', true), col('customer_hk'), col('as_of_date')], ...(pitRels ? { relationships: structuredClone(pitRels) } : {}) },
+    { name: SAT, columns: [col('customer_hk', satKeys), col('load_date', satKeys), col('name')] },
+  ];
+  const GROUP = [member('customer_hk', 'customer_hk'), member('as_of_date', 'load_date')];
+  const FIRST = { fromModel: PIT, fromColumn: 'customer_hk', toModel: SAT, toColumn: 'customer_hk' };
+  const write = (op: Parameters<typeof planRelationshipWrite>[0], ms = models(GROUP)) =>
+    planRelationshipWrite(op, { home: 'library', models: ms, domainRelationships: [] });
+  const pitOf = (plan: ReturnType<typeof planRelationshipWrite>) => (plan.ok ? plan.changed.find((m) => m.name === PIT)?.relationships : 'refused');
+
+  it('groupOf finds a valid group, expandToGroups adds its members, nextCompositeKey suffixes deterministically', () => {
+    const lib = libraryRelationshipsOf(models(GROUP)[0]);
+    expect(groupOf(lib, FIRST)?.map((m) => m.fromColumn)).toEqual(['customer_hk', 'as_of_date']);
+    expect(groupOf(lib.slice(0, 1), FIRST)).toBeUndefined();
+    expect(expandToGroups(models(GROUP), [], [FIRST]).map((e) => e.fromColumn)).toEqual(['customer_hk', 'as_of_date']);
+    expect(nextCompositeKey([], 'Sat_Customer')).toBe('fk_sat_customer');
+    expect(nextCompositeKey([{ compositeKey: 'FK_SAT_CUSTOMER' }, { compositeKey: 'fk_sat_customer_2' }], SAT)).toBe('fk_sat_customer_3');
+  });
+
+  it('add with extra pairs writes one group in the many side\'s file, named fk_<toModel>, role on every member', () => {
+    const plan = write({ kind: 'add', drawn: { ...FIRST, cardinality: 'many-to-one', role: 'as of' }, extraPairs: [{ fromColumn: 'as_of_date', toColumn: 'load_date' }] }, models());
+    expect(pitOf(plan)).toEqual(GROUP.map((m) => ({ ...m, role: 'as of' })));
+  });
+
+  it('add from the "one" side is stored swapped, every member together', () => {
+    const plan = write({
+      kind: 'add', drawn: { fromModel: SAT, fromColumn: 'customer_hk', toModel: PIT, toColumn: 'customer_hk', cardinality: 'one-to-many' },
+      extraPairs: [{ fromColumn: 'load_date', toColumn: 'as_of_date' }],
+    }, models());
+    expect(pitOf(plan)).toEqual(GROUP);
+  });
+
+  it('absorbs single links already stored, keeping their role, and says how many', () => {
+    const singles = GROUP.map(({ compositeKey: _k, ...m }, i) => (i === 1 ? { ...m, role: 'as of' } : m));
+    const plan = write({ kind: 'edit', original: FIRST, drawn: { ...FIRST, cardinality: 'many-to-one' }, extraPairs: [{ fromColumn: 'as_of_date', toColumn: 'load_date' }] }, models(singles));
+    expect(pitOf(plan)).toEqual(GROUP);
+    const added = write({ kind: 'add', drawn: { ...FIRST, fromColumn: 'pit_id', cardinality: 'many-to-one' }, extraPairs: [{ fromColumn: 'as_of_date', toColumn: 'load_date' }] }, models(singles));
+    expect(added).toMatchObject({ ok: true, grouped: { count: 1, compositeKey: 'fk_sat_customer' } });
+    expect(pitOf(added)).toEqual([singles[0], member('pit_id', 'customer_hk', { role: 'as of' }), member('as_of_date', 'load_date', { role: 'as of' })]);
+  });
+
+  it('refuses a pair another composite owns', () => {
+    const plan = write({ kind: 'add', drawn: { ...FIRST, fromColumn: 'pit_id', cardinality: 'many-to-one' }, extraPairs: [{ fromColumn: 'as_of_date', toColumn: 'load_date' }] });
+    expect(plan).toEqual({ ok: false, error: 'pit_customer.as_of_date ↔ sat_customer.load_date is already part of composite key fk_sat_customer.' });
+  });
+
+  it('update (⇄, cardinality) changes every member, keeps the name and role, and refuses many-to-many', () => {
+    const withRole = GROUP.map((m) => ({ ...m, role: 'as of' }));
+    expect(pitOf(write({ kind: 'update', ends: FIRST, cardinality: 'one-to-one' }, models(withRole, false))))
+      .toEqual(withRole.map((m) => ({ ...m, cardinality: 'one-to-one' })));
+    expect(write({ kind: 'update', ends: FIRST, cardinality: 'many-to-many' })).toEqual({ ok: false, error: "A composite key can't be many-to-many." });
+  });
+
+  it('⇄ is refused when the group\'s column set is the target\'s whole key (keys win on sets)', () => {
+    const plan = write({ kind: 'update', ends: FIRST, cardinality: 'one-to-many' });
+    expect(plan).toMatchObject({ ok: false });
+    expect((plan as { error: string }).error).toMatch(/^\(customer_hk, load_date\) is sat_customer's key/);
+  });
+
+  it('edit sets the role on every member, clears it on every member, and edit to one pair writes a single link', () => {
+    const withRole = GROUP.map((m) => ({ ...m, role: 'as of' }));
+    const edit = (role: string, extraPairs?: ColumnPair[], ms = models(GROUP)) => write({ kind: 'edit', original: { ...FIRST, fromColumn: 'as_of_date', toColumn: 'load_date' }, drawn: { ...FIRST, cardinality: 'many-to-one', role }, ...(extraPairs ? { extraPairs } : {}) }, ms);
+    expect(pitOf(edit('as of', [{ fromColumn: 'as_of_date', toColumn: 'load_date' }]))).toEqual(withRole);
+    expect(pitOf(edit('', [{ fromColumn: 'as_of_date', toColumn: 'load_date' }], models(withRole)))).toEqual(GROUP);
+    const { compositeKey: _k, ...single } = GROUP[0];
+    expect(pitOf(edit(''))).toEqual([single]);
+  });
+
+  it('delete of any member edge deletes the whole group', () => {
+    expect(pitOf(write({ kind: 'remove', keys: [{ ...FIRST, fromColumn: 'as_of_date', toColumn: 'load_date' }] }))).toBeUndefined();
+  });
+
+  it('per-diagram: the same operations act on the domain section', () => {
+    const own = GROUP.map(({ fromColumn, toModel, toColumn, cardinality, compositeKey }) => ({ fromModel: PIT, fromColumn, toModel, toColumn, cardinality, compositeKey, note: 'kept' }));
+    const plan = planRelationshipWrite({ kind: 'update', ends: FIRST, cardinality: 'one-to-one' }, { home: 'domain', models: models(undefined, false), domainRelationships: own });
+    expect(plan.ok && plan.domainRelationships).toEqual(own.map((r) => ({ ...r, cardinality: 'one-to-one' })));
+    const removed = planRelationshipWrite({ kind: 'remove', keys: [FIRST] }, { home: 'domain', models: [], domainRelationships: own });
+    expect(removed.ok && removed.domainRelationships).toEqual([]);
+  });
+
+  it('removing a member column removes the whole group, in model files and in a domain section', () => {
+    const ms = models(GROUP);
+    removeColumnRelationships(ms, SAT, 'LOAD_DATE');
+    expect(ms[0].relationships).toBeUndefined();
+    const own = GROUP.map((m) => ({ fromModel: PIT, ...m }));
+    expect(removeColumnFromDomainRelationships([...own, { note: 'x' }], PIT, 'customer_hk')).toEqual([{ note: 'x' }]);
+    // A stale key on one entry is a single link: only it goes.
+    expect(removeColumnFromDomainRelationships(own.slice(0, 1), PIT, 'customer_hk')).toEqual([]);
   });
 });

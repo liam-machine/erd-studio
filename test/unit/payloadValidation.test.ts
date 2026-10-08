@@ -18,6 +18,7 @@ import {
   validatePositions,
   findDuplicateNames,
   validateAddModelsFromDbtPayload,
+  validateExtraPairs,
   validateMarkKey,
   validateRelationshipEnds,
   validateOpenModelFilePayload,
@@ -326,5 +327,28 @@ describe('validateRelationshipEnds — a column can\'t point at itself (#133 L3)
     expect(validateRelationshipEnds({ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'Employee', toColumn: 'MANAGER_ID' }))
       .toBe("a column can't point at itself.");
     expect(validateRelationshipEnds({ fromModel: 'a', fromColumn: 'k', toModel: 'b', toColumn: 'k' })).toBeNull();
+  });
+});
+
+describe('validateExtraPairs — a composite key\'s other column pairs (#133 L2)', () => {
+  const link = { fromModel: 'pit', fromColumn: 'hk', toModel: 'sat', toColumn: 'hk', cardinality: 'many-to-one' };
+  it('accepts none, or valid distinct pairs', () => {
+    expect(validateExtraPairs(undefined, link)).toBeNull();
+    expect(validateExtraPairs([], link)).toBeNull();
+    expect(validateExtraPairs([{ fromColumn: 'as_of', toColumn: 'load_date' }], link)).toBeNull();
+  });
+  it('refuses too many pairs, bad names, a column used twice (without case), and many-to-many', () => {
+    expect(validateExtraPairs(Array.from({ length: 8 }, (_, i) => ({ fromColumn: `a${i}`, toColumn: `b${i}` })), link)).toMatch(/at most 8/);
+    expect(validateExtraPairs([{ fromColumn: 'bad name', toColumn: 'x' }], link)).toMatch(/valid column names/);
+    expect(validateExtraPairs('x', link)).toMatch(/at most 8/);
+    expect(validateExtraPairs([{ fromColumn: 'HK', toColumn: 'load_date' }], link)).toMatch(/used twice/);
+    expect(validateExtraPairs([{ fromColumn: 'as_of', toColumn: 'Hk' }], link)).toMatch(/used twice/);
+    expect(validateExtraPairs([{ fromColumn: 'as_of', toColumn: 'load_date' }], { ...link, cardinality: 'many-to-many' })).toMatch(/many-to-many/);
+  });
+  it('markKey and the self-reference check read every pair', () => {
+    const composite = { ...link, extraPairs: [{ fromColumn: 'as_of', toColumn: 'load_date' }] };
+    expect(validateMarkKey({ model: 'sat', columns: ['load_date', 'HK'] }, composite)).toBeNull();
+    expect(validateMarkKey({ model: 'sat', columns: ['hk'] }, composite)).not.toBeNull();
+    expect(validateRelationshipEnds({ ...composite, toModel: 'pit', extraPairs: [{ fromColumn: 'as_of', toColumn: 'AS_OF' }] })).toBe("a column can't point at itself.");
   });
 });

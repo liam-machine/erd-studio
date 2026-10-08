@@ -10,7 +10,7 @@
 import { isMap, isPair, isScalar, isSeq, parseDocument, stringify, visit } from 'yaml';
 import type { Node, Pair } from 'yaml';
 
-import { VALID_CARDINALITIES, normaliseRelationshipRole } from '@erd-studio/core';
+import { VALID_CARDINALITIES, normaliseCompositeKey, normaliseRelationshipRole } from '@erd-studio/core';
 
 import type { ModelRelationship, Relationship } from '../types/semantic';
 import { detectEol, keepLineEndings } from './lineEndings';
@@ -75,11 +75,12 @@ function renderYamlBlock(relationships: readonly ModelRelationship[], indent: nu
     lines.push(`${body}toColumn: ${yamlScalar(r.toColumn)}`);
     lines.push(`${body}cardinality: ${yamlScalar(r.cardinality)}`);
     if (r.role) lines.push(`${body}role: ${yamlScalar(r.role)}`);
+    if (r.compositeKey) lines.push(`${body}compositeKey: ${yamlScalar(r.compositeKey)}`);
   }
   return lines.join(eol);
 }
 
-const ENTRY_KEYS = new Set(['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role']);
+const ENTRY_KEYS = new Set(['fromColumn', 'toModel', 'toColumn', 'cardinality', 'role', 'compositeKey']);
 
 /**
  * Whether re-rendering `text`'s `relationships:` block would lose something:
@@ -98,7 +99,8 @@ export function relationshipsRewriteLoses(text: string): boolean {
     !entry || typeof entry !== 'object' || Object.keys(entry).some((k) => !ENTRY_KEYS.has(k))
     || ['fromColumn', 'toModel', 'toColumn'].some((k) => typeof entry[k] !== 'string' || entry[k] === '')
     || !VALID_CARDINALITIES.has(entry.cardinality as never)
-    || (entry.role !== undefined && normaliseRelationshipRole(entry.role) !== entry.role));
+    || (entry.role !== undefined && normaliseRelationshipRole(entry.role) !== entry.role)
+    || (entry.compositeKey !== undefined && normaliseCompositeKey(entry.compositeKey) !== entry.compositeKey));
 }
 
 /**
@@ -123,6 +125,7 @@ export function setYamlRelationships(text: string, relationships: readonly Model
     else doc.set('relationships', relationships.map((r) => ({
       fromColumn: r.fromColumn, toModel: r.toModel, toColumn: r.toColumn, cardinality: r.cardinality,
       ...(r.role ? { role: r.role } : {}),
+      ...(r.compositeKey ? { compositeKey: r.compositeKey } : {}),
     })));
     return bom + keepLineEndings(doc.toString(), body);
   }

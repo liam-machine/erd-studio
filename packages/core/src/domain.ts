@@ -26,7 +26,9 @@ import type {
 } from './types/semantic.js';
 import { CURRENT_SCHEMA_VERSION, describeUnsupportedDomainFormat, detectDomainFormat } from './types/semantic.js';
 import { LOGICAL_MODELS_DIR } from './logicalModel.js';
-import { linkKey, normaliseRelationshipRole, respellRelationship } from './relationships.js';
+import {
+  canonicalRelationship, compositeGroupProblem, linkKey, normaliseCompositeKey, normaliseRelationshipRole, respellRelationship,
+} from './relationships.js';
 import { keyEvidence } from './keyEvidence.js';
 import type { DbtKeyIndex } from './keyEvidence.js';
 
@@ -347,7 +349,8 @@ function parseStageData(
     }
   }
 
-  return { models, relationships: relationships.map((rel) => respellRelationship(rel, models)) };
+  const grouped = assembleGroups(relationships.map((rel, index) => ({ rel, at: { source: 'dom' as const, file: '', index } })), filePath, warn);
+  return { models, relationships: grouped.map((rel) => respellRelationship(rel, models)) };
 }
 
 /** The YAML parser's error codes, grouped into the kinds the UI and telemetry use. */
@@ -415,6 +418,8 @@ export function relationshipKey(rel: Pick<Relationship, 'fromModel' | 'fromColum
  * changes nothing on the canvas) and the library entries follow. When both
  * define the same endpoints, the library's cardinality wins — it is the one
  * every other domain shows too — and the disagreement is warned about.
+ * Entries sharing a `compositeKey` are drawn as one composite foreign key
+ * when they form a valid one (`assembleGroups`, #133 L2).
  */
 export function mergeLibraryRelationships(
   models: readonly SemanticModel[],
@@ -434,66 +439,131 @@ export function mergeLibraryRelationships(
   const rankOf = (rel: Relationship, index: number): string => [
     `${rel.cardinality === 'one-to-many' ? 1 : 0}${keyEvidence(modelOf(rel.fromModel) ?? { name: rel.fromModel }, rel.fromColumn, dbt) === 'whole-key' ? 1 : 0}`,
     ...[rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn].map((part) => part.toLowerCase()),
-    // A copy with a role before its unlabelled twin: the label is information.
-    rel.cardinality, rel.role ? `0${rel.role}` : '1',
+    // A copy with a role (or a composite key) before its unlabelled twin: the label is information.
+    rel.cardinality, rel.role ? `0${rel.role}` : '1', rel.compositeKey ? `0${rel.compositeKey}` : '1',
     // Spelling only splits copies that differ in case; then the index splits identical ones.
     rel.fromModel, rel.fromColumn, rel.toModel, rel.toColumn, String(index).padStart(6, '0'),
   ].join('\u0000');
-  const ranked = new Map<string, { rel: Relationship; rank: string }>();
-  const keep = (map: Map<string, { rel: Relationship; rank: string }>, rel: Relationship, rank: string): void => {
+  type Held = { rel: Relationship; rank: string; at: GroupSource };
+  const keep = (map: Map<string, Held>, rel: Relationship, rank: string, at: GroupSource): void => {
     const key = linkKey(rel);
     const held = map.get(key);
-    if (!held || rank < held.rank) map.set(key, { rel, rank });
+    if (!held || rank < held.rank) map.set(key, { rel, rank, at });
   };
+  const ranked = new Map<string, Held>();
   for (const model of models) {
     (model.relationships ?? []).forEach((entry, index) => {
       if (!byName.has(entry.toModel.toLowerCase())) return;
       const rel = { fromModel: model.name, ...entry };
-      keep(ranked, rel, rankOf(rel, index));
+      keep(ranked, rel, rankOf(rel, index), { source: 'lib', file: model.name.toLowerCase(), index });
     });
   }
-  const library = new Map([...ranked].map(([key, { rel }]) => [key, rel]));
   // The domain file's own copies of one link are drawn once too, from the
   // same ranking, at the place of the first.
-  const ownRanked = new Map<string, { rel: Relationship; rank: string }>();
-  own.forEach((rel, index) => keep(ownRanked, rel, rankOf(rel, index)));
-  // Every end is drawn with the real model and column spelling (L4).
-  const spelled = (rels: Relationship[]): Relationship[] => rels.map((rel) => respellRelationship(rel, models));
-  if (library.size === 0) {
-    const drawn: Relationship[] = [];
-    for (const rel of own) {
-      const winner = ownRanked.get(linkKey(rel));
-      if (winner && !drawn.includes(winner.rel)) drawn.push(winner.rel);
-    }
-    return spelled(drawn);
-  }
-
-  const merged: Relationship[] = [];
+  const ownRanked = new Map<string, Held>();
+  own.forEach((rel, index) => keep(ownRanked, rel, rankOf(rel, index), { source: 'dom', file: '', index }));
+  const drawn: Array<{ rel: Relationship; at: GroupSource }> = [];
   const seen = new Set<string>();
   for (const first of own) {
     const key = linkKey(first);
     if (seen.has(key)) continue;
     seen.add(key);
-    const rel = ownRanked.get(key)!.rel;
-    const shared = library.get(key);
-    // Stored the other way round in the library (#133): the same link, read
-    // from the other end. The library's entry is the one drawn.
-    if (shared && relationshipKey(shared) !== relationshipKey(rel)) {
-      merged.push(shared);
+    const { rel, at } = ownRanked.get(key)!;
+    const shared = ranked.get(key);
+    if (!shared) {
+      drawn.push({ rel, at });
       continue;
     }
-    if (shared && shared.cardinality !== rel.cardinality) {
+    // Stored the other way round in the library (#133): the same link, read
+    // from the other end. The library's entry is the one drawn.
+    if (relationshipKey(shared.rel) !== relationshipKey(rel)) {
+      drawn.push({ rel: shared.rel, at: shared.at });
+      continue;
+    }
+    if (shared.rel.cardinality !== rel.cardinality) {
       warn(
         `Relationship ${rel.fromModel}.${rel.fromColumn} → ${rel.toModel}.${rel.toColumn} in ${filePath} ` +
-        `is ${rel.cardinality}, but logical-models/ defines it as ${shared.cardinality}; using ${shared.cardinality}`,
+        `is ${rel.cardinality}, but logical-models/ defines it as ${shared.rel.cardinality}; using ${shared.rel.cardinality}`,
       );
     }
-    merged.push(shared ? { ...rel, cardinality: shared.cardinality, ...(shared.role ? { role: shared.role } : {}) } : rel);
+    // The library's definition, at the domain entry's place.
+    const { compositeKey: _own, ...rest } = rel;
+    drawn.push({
+      rel: {
+        ...rest, cardinality: shared.rel.cardinality,
+        ...(shared.rel.role ? { role: shared.rel.role } : {}),
+        ...(shared.rel.compositeKey ? { compositeKey: shared.rel.compositeKey } : {}),
+      },
+      at: shared.at,
+    });
   }
-  for (const [key, rel] of library) {
-    if (!seen.has(key)) merged.push(rel);
+  for (const [key, held] of ranked) {
+    if (!seen.has(key)) drawn.push({ rel: held.rel, at: held.at });
   }
-  return spelled(merged);
+  // Every end is drawn with the real model and column spelling (L4).
+  return assembleGroups(drawn, filePath, warn).map((rel) => respellRelationship(rel, models));
+}
+
+/** Where a drawn relationship is stored: the library (a model's file) or the domain file, and its entry index there. */
+interface GroupSource {
+  source: 'lib' | 'dom';
+  /** The library model whose file holds it, lowercased ('' for the domain file). */
+  file: string;
+  index: number;
+}
+
+/**
+ * Composite foreign keys among the drawn relationships (#133 L2). Entries
+ * sharing a `compositeKey` in one source — the library, from one canonical
+ * model, or the domain file, from one model — are one composite when
+ * `compositeGroupProblem` finds nothing wrong: they keep the key, spelled as
+ * on the member stored first, all carry that member's role, and sit together
+ * at the first one's place. Otherwise the key is dropped from what is drawn,
+ * once with a warning, and each draws as a single link; nothing on disk
+ * changes.
+ */
+function assembleGroups(
+  drawn: ReadonlyArray<{ rel: Relationship; at: GroupSource }>,
+  filePath: string,
+  warn: (message: string) => void,
+): Relationship[] {
+  const groups = new Map<string, Array<{ rel: Relationship; at: GroupSource }>>();
+  for (const item of drawn) {
+    if (!item.rel.compositeKey) continue;
+    const owner = item.at.source === 'lib' ? canonicalRelationship(item.rel).fromModel : item.rel.fromModel;
+    const id = `${item.at.source}:${owner.toLowerCase()}:${item.rel.compositeKey.toLowerCase()}`;
+    groups.set(id, [...(groups.get(id) ?? []), item]);
+  }
+  if (groups.size === 0) return drawn.map((d) => d.rel);
+  const byFile = (a: { at: GroupSource }, b: { at: GroupSource }): number =>
+    (a.at.file < b.at.file ? -1 : a.at.file > b.at.file ? 1 : a.at.index - b.at.index);
+  const replaced = new Map<Relationship, Relationship[] | null>();
+  for (const members of groups.values()) {
+    const ordered = [...members].sort(byFile);
+    const problem = compositeGroupProblem(ordered.map((m) => m.rel));
+    if (problem) {
+      const key = ordered[0].rel.compositeKey;
+      warn(`Relationships in ${ordered[0].at.source === 'lib' ? `${ordered[0].rel.fromModel}'s model file` : filePath} ` +
+        `marked compositeKey "${key}" do not form one composite key (${problem}); drawn separately`);
+      for (const m of members) {
+        const { compositeKey: _dropped, ...single } = m.rel;
+        replaced.set(m.rel, [single]);
+      }
+      continue;
+    }
+    const head = ordered[0].rel;
+    const unified = ordered.map(({ rel }) => {
+      const { role: _role, ...rest } = rel;
+      return { ...rest, compositeKey: head.compositeKey!, ...(head.role ? { role: head.role } : {}) };
+    });
+    // The whole group is placed where its first drawn member falls.
+    const first = drawn.find((d) => members.some((m) => m.rel === d.rel))!.rel;
+    for (const m of members) replaced.set(m.rel, m.rel === first ? unified : null);
+  }
+  return drawn.flatMap(({ rel }) => {
+    const r = replaced.get(rel);
+    return r === undefined ? [rel] : r ?? [];
+  });
 }
 
 /**
@@ -528,12 +598,14 @@ function parseRelationships(value: unknown, filePath: string, warn: (message: st
       );
     }
 
-    const { role: _role, ...rest } = r as unknown as Relationship;
+    const { role: _role, compositeKey: _compositeKey, ...rest } = r as unknown as Relationship;
     const role = normaliseRelationshipRole(r.role);
+    const compositeKey = normaliseCompositeKey(r.compositeKey);
     relationships.push({
       ...rest,
       cardinality,
       ...(role ? { role } : {}),
+      ...(compositeKey ? { compositeKey } : {}),
     });
   }
   return relationships;

@@ -151,6 +151,8 @@ export interface DisplayRelationship {
   cardinality: Cardinality;
   /** Optional label for the link, e.g. `ship date` (see `Relationship.role`). */
   role?: string;
+  /** Set only on the members of a valid composite foreign key (see `Relationship.compositeKey`). */
+  compositeKey?: string;
 }
 
 // ---------------------------------------------------------------------------

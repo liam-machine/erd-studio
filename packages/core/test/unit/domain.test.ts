@@ -411,3 +411,59 @@ describe('the read winner reads dbt evidence when no key is flagged (#133 L1)', 
     expect(build(doc, { getModel, dbtKeyIndex }).logical.relationships).toEqual([{ fromModel: 'fct', fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'many-to-one', role: 'r' }]);
   });
 });
+
+describe('composite foreign keys are drawn when they form one (#133 L2)', () => {
+  const col = (name: string) => ({ name, dataType: 'int', description: '' });
+  const sat: SemanticModel = { name: 'sat', columns: [col('hk'), col('load_date')] };
+  const other: SemanticModel = { name: 'hub', columns: [col('hk')] };
+  const m = (fromColumn: string, toColumn: string, extra: Record<string, unknown> = {}) =>
+    ({ fromColumn, toModel: 'sat', toColumn, cardinality: 'many-to-one' as const, compositeKey: 'FK_Sat', ...extra });
+  const pit = (relationships: SemanticModel['relationships']): SemanticModel => ({ name: 'pit', columns: [col('hk'), col('as_of'), col('x')], relationships });
+  const draw = (models: SemanticModel[], own: unknown[] = [], warn = vi.fn()) => {
+    const lookup = Object.fromEntries(models.map((x) => [x.name, x]));
+    const u = build({ schemaVersion: 5, logical: { models: models.map((x) => x.name), relationships: own } }, { getModel: (n) => lookup[n] ?? null, warn });
+    return u.logical.relationships;
+  };
+
+  it('a valid group keeps compositeKey, spelled as its first member, with the first member\'s role on every member', () => {
+    const rels = draw([pit([m('hk', 'hk', { role: 'as of' }), m('as_of', 'load_date', { compositeKey: 'fk_sat', role: 'other' })]), sat]);
+    expect(rels.map((r) => [r.fromColumn, r.compositeKey, r.role])).toEqual([['hk', 'FK_Sat', 'as of'], ['as_of', 'FK_Sat', 'as of']]);
+  });
+
+  it.each([
+    ['one member', [m('hk', 'hk')]],
+    ['mixed toModel', [m('hk', 'hk'), m('as_of', 'hk', { toModel: 'hub' })]],
+    ['mixed cardinality', [m('hk', 'hk'), m('as_of', 'load_date', { cardinality: 'one-to-one' })]],
+    ['many-to-many', [m('hk', 'hk', { cardinality: 'many-to-many' }), m('as_of', 'load_date', { cardinality: 'many-to-many' })]],
+    ['a repeated column', [m('hk', 'hk'), m('hk', 'load_date')]],
+  ])('an invalid group (%s) draws as singles, with one warning', (_name, entries) => {
+    const warn = vi.fn();
+    const rels = draw([pit(entries as SemanticModel['relationships']), sat, other], [], warn);
+    expect(rels.length).toBe(entries.length);
+    expect(rels.every((r) => r.compositeKey === undefined)).toBe(true);
+    expect(warn.mock.calls.filter(([msg]) => /do not form one composite key/.test(msg))).toHaveLength(1);
+  });
+
+  it('a 1.6.7 single copy elsewhere does not break the group in its home file', () => {
+    const stray: SemanticModel = { ...sat, relationships: [{ fromColumn: 'hk', toModel: 'pit', toColumn: 'hk', cardinality: 'one-to-many' }] };
+    const rels = draw([pit([m('hk', 'hk'), m('as_of', 'load_date')]), stray]);
+    expect(rels.map((r) => [r.fromModel, r.fromColumn, r.compositeKey])).toEqual([['pit', 'hk', 'FK_Sat'], ['pit', 'as_of', 'FK_Sat']]);
+  });
+
+  it('a domain file\'s own group is drawn too, by (fromModel, compositeKey)', () => {
+    const own = [
+      { fromModel: 'pit', fromColumn: 'hk', toModel: 'sat', toColumn: 'hk', cardinality: 'many-to-one', compositeKey: 'k' },
+      { fromModel: 'pit', fromColumn: 'as_of', toModel: 'sat', toColumn: 'load_date', cardinality: 'many-to-one', compositeKey: 'K' },
+    ];
+    expect(draw([{ ...pit(undefined) }, sat], own).map((r) => r.compositeKey)).toEqual(['k', 'k']);
+  });
+
+  it('file and model order do not change the result', () => {
+    const entries = [m('hk', 'hk', { role: 'r' }), m('as_of', 'load_date')];
+    const a = draw([pit(entries), sat]);
+    const b = draw([sat, pit(entries)]);
+    const sorted = (rels: typeof a) => rels.map((r) => JSON.stringify(r)).sort();
+    expect(sorted(b)).toEqual(sorted(a));
+    expect(a.map((r) => [r.compositeKey, r.role])).toEqual([['FK_Sat', 'r'], ['FK_Sat', 'r']]);
+  });
+});
