@@ -19,6 +19,7 @@ import type { Cardinality, Meta, UnifiedDomain } from '../types/semantic';
 import { getRawDomainModelNames } from '../types/semantic';
 import { mergeCompositeGroups, mergeUniqueMaps } from '../services/domainService';
 import { normaliseName } from '../services/nameUtils';
+import { catalogNodeFor } from '../services/columnTypes';
 import { inputsOf, relPath, type ArtifactStatus, type CliContext, type Envelope } from './context';
 import {
   detectConventions,
@@ -265,7 +266,7 @@ function describeModels(ctx: CliContext, names: readonly string[], summary: bool
     const key = normaliseName(m.name);
     const yml = ymlIndex.get(key);
     const man = manifestIndex.get(key);
-    const catalogNode = (man ? ctx.catalog?.byUniqueId.get(man.uniqueId) : undefined) ?? ctx.catalog?.byName.get(key);
+    const catalogNode = catalogNodeFor(ctx.catalog, man, key);
 
     const file = ctx.ymlData.sourceFiles?.get(key) ?? man?.originalFilePath?.replace(/\\/g, '/') ?? null;
     // A seed / snapshot is documented in a `seeds:` / `snapshots:` block, not `models:`.
