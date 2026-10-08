@@ -21,9 +21,11 @@ import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
 import type { ColumnDef, Relationship, SemanticModel } from '../types/semantic';
 import type { YmlData } from '../types/ymlData';
 import type { ManifestData } from '../types/manifest';
+import type { CatalogColumn, CatalogData } from '../types/catalog';
 import { validateModelNameSafety } from '../providers/payloadValidation';
 import { derivePhysicalRelationships, mergeCompositeGroups, mergeUniqueMaps } from './domainService';
 import { normaliseName } from './nameUtils';
+import { catalogNodeFor, resolveColumnType } from './columnTypes';
 
 /** Most models one draft (or one batch add) will create — a readable first diagram. */
 export const DRAFT_MODEL_LIMIT = 15;
@@ -107,6 +109,8 @@ export interface BuildDbtDraftInput {
   modelNames: readonly string[];
   ymlData?: YmlData;
   manifest?: ManifestData;
+  /** `target/catalog.json`, when `dbt docs generate` has run: the warehouse's column types. */
+  catalog?: CatalogData;
   /** True when `logical-models/` already has this model — it is referenced, not re-created. */
   libraryHas: (name: string) => boolean;
   /** Seeds a new library model; defaults to {@link seedModelFromDbt}. */
@@ -428,10 +432,20 @@ export function customDraftScope(modelNames: readonly string[], models: readonly
 /**
  * A logical model copied from dbt: the schema yml first (as
  * `LogicalModelService.ymlToSemanticModel` does), with the manifest filling a
- * missing column type, description and the schema; the manifest alone when
- * no yml declares the model. Undefined when neither has it.
+ * missing description and the schema; the manifest alone when no yml declares
+ * the model. Undefined when neither has it.
+ *
+ * Column names and order are the declared ones (yml, else manifest); the
+ * catalog never adds or respells a column. Each TYPE resolves exactly as the
+ * physical stage resolves it (`resolveColumnType`: catalog, then the declared
+ * `data_type:`, then the manifest), and is empty when no source has one.
  */
-export function seedModelFromDbt(name: string, ymlData?: YmlData, manifest?: ManifestData): SemanticModel | undefined {
+export function seedModelFromDbt(
+  name: string,
+  ymlData?: YmlData,
+  manifest?: ManifestData,
+  catalog?: CatalogData,
+): SemanticModel | undefined {
   const key = normaliseName(name);
   const yml = ymlData?.models.get(name)
     ?? [...(ymlData?.models.values() ?? [])].find((m) => normaliseName(m.name) === key);
@@ -440,18 +454,29 @@ export function seedModelFromDbt(name: string, ymlData?: YmlData, manifest?: Man
   if (!yml && !man) { return undefined; }
 
   const manifestColumns = new Map((man?.columns ?? []).map((c) => [normaliseName(c.name), c]));
+  const observedColumns = new Map<string, CatalogColumn>();
+  for (const cc of catalogNodeFor(catalog, man, key)?.columns ?? []) {
+    // First wins, as on the physical stage.
+    if (!observedColumns.has(normaliseName(cc.name))) { observedColumns.set(normaliseName(cc.name), cc); }
+  }
+  const typeOf = (columnName: string, declared: string | null | undefined): string =>
+    resolveColumnType(
+      observedColumns.get(normaliseName(columnName))?.dataType,
+      declared,
+      manifestColumns.get(normaliseName(columnName))?.data_type,
+    ).dataType;
   const columns: ColumnDef[] = yml
     ? yml.columns.map((col) => {
       const mc = manifestColumns.get(normaliseName(col.name));
       return {
         name: col.name,
-        dataType: col.dataType ?? mc?.data_type ?? 'unknown',
+        dataType: typeOf(col.name, col.dataType),
         description: col.description || mc?.description || '',
       };
     })
     : man!.columns.map((col) => ({
       name: col.name,
-      dataType: col.data_type ?? 'unknown',
+      dataType: typeOf(col.name, col.data_type),
       description: col.description ?? '',
     }));
 
@@ -562,7 +587,7 @@ export function relationshipsForAddedModels(
  */
 export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
   const limit = input.limit ?? DRAFT_MODEL_LIMIT;
-  const seed = input.seed ?? ((name: string) => seedModelFromDbt(name, input.ymlData, input.manifest));
+  const seed = input.seed ?? ((name: string) => seedModelFromDbt(name, input.ymlData, input.manifest, input.catalog));
   const disabled = input.manifest?.disabledModels ?? new Set<string>();
   const inDomain = new Set((input.existingModelNames ?? []).map(normaliseName));
 

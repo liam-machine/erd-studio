@@ -37,6 +37,7 @@ import { telemetry } from '../services/telemetryService';
 import type { DomainService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { LogicalModelService } from '../services/logicalModelService';
+import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 
@@ -47,7 +48,8 @@ const TITLE = 'Draw from dbt';
 /**
  * Shown when no model has columns to draw. `listDraftModels` takes a model's
  * columns from its schema yml, else the manifest — which is a compiled copy
- * of the same yml, so running dbt adds none. catalog.json is not read here.
+ * of the same yml, so running dbt adds none. catalog.json only fills in the
+ * types of those columns, never adds one.
  */
 export const NO_DBT_MODELS_MESSAGE =
   'No dbt models with columns found. Draw from dbt reads the columns listed in your schema .yml files — ' +
@@ -64,8 +66,8 @@ export interface DrawFromDbtDeps {
     LogicalModelService,
     'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel' | 'hasUnreadableRelationships' | 'modelPath' | 'getModelsDir'
   >;
-  /** Schema yml and manifest; either may be undefined (no yml, never compiled). */
-  loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData }>;
+  /** Schema yml, manifest and catalog; each may be undefined (no yml, never compiled, no `dbt docs generate`). */
+  loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData; catalog?: CatalogData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
   /** Every file is written; refresh the tree, model library, context keys and selectors. */
@@ -95,7 +97,7 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
 async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, domainService, logicalModelService } = deps;
 
-  const { ymlData, manifest } = await vscode.window.withProgress(
+  const { ymlData, manifest, catalog } = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Reading your dbt project…' },
     () => deps.loadDbt(),
   );
@@ -150,6 +152,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     modelNames: pick.modelNames,
     ymlData,
     manifest,
+    catalog,
     libraryHas: (n) => logicalModelService.modelExists(n),
   });
   if (draft.modelNames.length === 0) {

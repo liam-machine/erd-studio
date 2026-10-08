@@ -33,6 +33,7 @@ import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
 import type { LogicalModelService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
+import { catalogNodeFor, resolveColumnType } from './columnTypes';
 
 // The pure domain parsing lives in @erd-studio/core; these are re-exported so
 // existing imports of this module keep working.
@@ -376,13 +377,10 @@ export class DomainService {
         // only: a disabled model still declared in a yml keeps what the yml says,
         // because that is a different question.
         const disabled = manifest?.disabledModels.has(key) ?? false;
-        // unique_id FIRST: catalog keys ARE manifest unique_ids, so when a
-        // manifest resolved the model that join is exact and already knows which
-        // version dbt marks latest. byName is a best-effort index for the
-        // manifest-absent case (highest version wins, first entry on a tie).
-        const catalogNode =
-          (manifestModel ? catalog?.byUniqueId.get(manifestModel.uniqueId) : undefined)
-          ?? catalog?.byName.get(key)
+        // unique_id first, then the short-name index (catalogNodeFor — the
+        // same lookup Draw from dbt seeds types through); the relation index
+        // only when no manifest resolved the model.
+        const catalogNode = catalogNodeFor(catalog, manifestModel, key)
           ?? (manifestModel ? undefined : catalogByRelation?.get(relationKey(model.schema, model.alias ?? model.name)));
         // Seed / snapshot documentation: DESCRIPTIONS ONLY. It never decides
         // existence, adds a column or pulls in an edge — those stay the job of
@@ -465,16 +463,13 @@ export class DomainService {
 
           // Ordered fallthrough — what the warehouse reports, then the declared
           // assertion, then the manifest's compiled copy of it, then ''.
-          let dataType = '';
-          if (entry.observed?.dataType) {
-            dataType = entry.observed.dataType;
-            typeSources.add('catalog');
-          } else if (entry.declared?.dataType) {
-            dataType = entry.declared.dataType;
+          const { dataType, source: typeSource } = resolveColumnType(
+            entry.observed?.dataType, entry.declared?.dataType, manifestCol?.data_type,
+          );
+          if (typeSource === 'declared') {
             if (declaredSource) { typeSources.add(declaredSource); }
-          } else if (manifestCol?.data_type) {
-            dataType = manifestCol.data_type;
-            typeSources.add('manifest');
+          } else if (typeSource) {
+            typeSources.add(typeSource);
           }
 
           return {
