@@ -188,6 +188,17 @@ describe('transformDomain edges', () => {
     });
   });
 
+  it('carries a relationship role onto the edge it labels (#133)', () => {
+    const result = transformDomain(domain({
+      models: [model('fct_order'), model('dim_date')],
+      relationships: [
+        rel('fct_order', 'dim_date', { fromColumn: 'order_date_key', toColumn: 'date_key', role: 'order date' }),
+        rel('fct_order', 'dim_date', { fromColumn: 'ship_date_key', toColumn: 'date_key' }),
+      ],
+    }));
+    expect(fkEdges(result).map((e) => e.data?.role)).toEqual(['order date', undefined]);
+  });
+
   it('picks handle sides from the relative node positions', () => {
     const horizontal = transformDomain(domain({
       models: [model('a'), model('b')],
