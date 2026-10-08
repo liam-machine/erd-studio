@@ -1114,6 +1114,29 @@ describe('LogicalModelService — a save keeps the relationships: list it did no
     expect(saved).toEqual(expect.arrayContaining(model.relationships));
   });
 
+  it('writes no cardinality into a renamed entry that had none', () => {
+    fs.writeFileSync(file, [
+      'name: fct_order',
+      'relationships:',
+      '  - fromColumn: customer_key # no cardinality: read as many-to-one',
+      '    toModel: dim_customer',
+      '    toColumn: customer_key',
+      '',
+    ].join('\n'));
+    const model = service.getModel('fct_order')!;
+    expect(model.relationships![0].cardinality).toBe('many-to-one');
+    model.relationships![0] = { ...model.relationships![0], fromColumn: 'cust_key' };
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe([
+      'name: fct_order',
+      'relationships:',
+      '  - fromColumn: cust_key # no cardinality: read as many-to-one',
+      '    toModel: dim_customer',
+      '    toColumn: customer_key',
+      '',
+    ].join('\n'));
+  });
+
   it('refuses an edit to a relationships: value it cannot read, naming the file and line', () => {
     fs.writeFileSync(file, 'name: fct_order\nrelationships: see the wiki\n');
     const model = service.getModel('fct_order')!;
@@ -1199,6 +1222,20 @@ describe('LogicalModelService — a direct write keeps the file\'s line endings'
 
   it('renameModel carries CRLF to the new file', () => {
     service.renameModel('dim_customer', 'dim_client');
+    const text = fs.readFileSync(service.modelPath('dim_client'), 'utf-8');
+    expect(text).toContain('name: dim_client\r\n');
+    expect(isCrlfOnly(text)).toBe(true);
+  });
+
+  it('renameModel keeps CRLF when it has to regenerate the file', () => {
+    const spy = service as unknown as { loadEditableDocument: (p: string) => unknown };
+    const original = spy.loadEditableDocument.bind(service);
+    spy.loadEditableDocument = () => null;
+    try {
+      service.renameModel('dim_customer', 'dim_client');
+    } finally {
+      spy.loadEditableDocument = original;
+    }
     const text = fs.readFileSync(service.modelPath('dim_client'), 'utf-8');
     expect(text).toContain('name: dim_client\r\n');
     expect(isCrlfOnly(text)).toBe(true);

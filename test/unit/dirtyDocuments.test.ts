@@ -8,7 +8,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { createMockTextDocument, _resetMockWorkspace } from '../__mocks__/vscode';
-import { dirtyFiles, pathKey } from '../../src/providers/dirtyDocuments';
+import { dirtyFiles } from '../../src/providers/dirtyDocuments';
+import { pathKey } from '../../src/services/pathKey';
 
 describe('pathKey', () => {
   it('ignores case on Windows and macOS, whose file systems do', () => {

@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { findOwningDbtProject, resolveDbtProject } from '../../src/services/projectDiscovery';
+import { findOwningDbtProject, resolveDbtProject, samePath } from '../../src/services/projectDiscovery';
 
 let root: string;
 
@@ -110,7 +110,29 @@ describe('findOwningDbtProject', () => {
     expect(findOwningDbtProject(path.join(nested, '.erd-studio', 'gold', 'y.json'), standalone)).toBe(nested);
   });
 
+  it('with stopAt spelt in another case, still finds the open root where the file system ignores case', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      const standalone = path.join(root, 'docs', 'erd');
+      const file = path.join(standalone, '.erd-studio', 'silver', 'x.json');
+      // VS Code writes a Windows drive letter in lower case; path.resolve does not.
+      expect(findOwningDbtProject(file, standalone.toUpperCase())).toBe(standalone);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('returns undefined outside every dbt project', () => {
     expect(findOwningDbtProject(path.join(root, 'loose', 'z.json'))).toBeUndefined();
+  });
+});
+
+describe('samePath', () => {
+  it('ignores case on Windows and macOS, and keeps it on Linux', () => {
+    expect(samePath('/Proj/A', '/proj/a', 'win32')).toBe(true);
+    expect(samePath('/Proj/A', '/proj/a', 'darwin')).toBe(true);
+    expect(samePath('/Proj/A', '/proj/a', 'linux')).toBe(false);
+    expect(samePath('/proj/x/../a', '/proj/a', 'linux')).toBe(true);
   });
 });

@@ -1,21 +1,12 @@
 /**
  * Which files are open in VS Code with unsaved edits — the check every writer
- * runs before it replaces a file under the user's work in progress.
- *
- * Paths are compared the way the file system compares them. Windows and macOS
- * ignore case, and VS Code spells a Windows drive letter `c:` where
- * `path.resolve` gives `C:`, so an exact string comparison there would miss
- * the open tab and the write would go ahead.
+ * runs before it replaces a file under the user's work in progress. Paths are
+ * compared the way the file system compares them (`pathKey`).
  */
 
-import * as path from 'path';
 import * as vscode from 'vscode';
 
-/** `filePath` as the file system compares it: resolved, and lower-cased where case is ignored. */
-export function pathKey(filePath: string, platform: NodeJS.Platform = process.platform): string {
-  const resolved = path.resolve(filePath);
-  return platform === 'win32' || platform === 'darwin' ? resolved.toLowerCase() : resolved;
-}
+import { pathKey } from '../services/pathKey';
 
 /** Those of `filePaths` open with unsaved edits, each once, in the order given. */
 export function dirtyFiles(filePaths: Iterable<string>): string[] {

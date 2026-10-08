@@ -19,6 +19,9 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - **Saving a model no longer adds `dataType: unknown` to columns that have no type.** A column written without a `dataType` stays that way unless you give it one.
 - **Files keep their Windows (CRLF) line endings.** Saving a model from Draw from dbt, renaming one, the v4 → v5 migration and Move Relationships to Model Library could turn a file's CRLF line endings into LF, changing every line in the diff. Each file now keeps the line endings it had.
 - **A new relationship no longer inherits another's comment or `role:`.** When one save removed a relationship and added an unrelated one to the same model file, the new entry took over the removed entry's comments and extra keys. It now does so only when the two share an end, as in a column or model rename.
+- **Renaming a column no longer writes `cardinality: many-to-one` into its relationship entries.** An entry with no `cardinality:` keeps it unwritten when a rename changes one of its ends.
+- **Stripping legacy domain tags keeps your dbt schema files' line endings.** A schema `.yml` with Windows (CRLF) line endings stays CRLF.
+- **A diagram is no longer mistaken for another project's on Windows and macOS.** The check that a diagram belongs to the open dbt project compared folder paths letter for letter, so the same folder spelled in another case could be refused. It now compares them the way the operating system does.
 
 ## 1.6.7 — 2026-10-04
 

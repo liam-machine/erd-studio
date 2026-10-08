@@ -167,22 +167,33 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
   // Decided once, before the first file lands: an empty library would
   // otherwise read as "flat" after one top-level write. A flat library stays
   // flat; one already grouped by layer gets this layer's folder.
-  const folder = logicalModelService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
   // Relationships go to their from-models' library files when the project
   // keeps them there (#126) — decided, like the folder, before any write.
-  const routed = usesLibraryRelationships(
-    logicalModelService.listModels(),
-    domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
-    logicalModelService.hasUnreadableRelationships(),
-  )
-    ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
-    : { kept: draft.relationships, changed: [] };
   // A model file it would write that is open with unsaved edits stops the
   // draw before anything is written, as a canvas edit does.
-  const dirty = dirtyFiles([
-    ...draft.newModels.map((m) => logicalModelService.modelPath(m.name, folder)),
-    ...routed.changed.map((m) => logicalModelService.modelPath(m.name)),
-  ]);
+  let folder: string | undefined;
+  let routed: { kept: DbtDraft['relationships']; changed: DbtDraft['newModels'] };
+  let dirty: string[];
+  try {
+    folder = logicalModelService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
+    routed = usesLibraryRelationships(
+      logicalModelService.listModels(),
+      domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
+      logicalModelService.hasUnreadableRelationships(),
+    )
+      ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
+      : { kept: draft.relationships, changed: [] };
+    dirty = dirtyFiles([
+      ...draft.newModels.map((m) => logicalModelService.modelPath(m.name, folder)),
+      ...routed.changed.map((m) => logicalModelService.modelPath(m.name)),
+    ]);
+  } catch (err) {
+    telemetry.error('drawFromDbtFailed');
+    void vscode.window.showErrorMessage(
+      `${TITLE} could not read the model library to plan the diagram: ${err instanceof Error ? err.message : String(err)}. Nothing was changed.`,
+    );
+    return undefined;
+  }
   if (dirty.length > 0) {
     const libraryRoot = path.dirname(logicalModelService.getModelsDir());
     const file = path.relative(libraryRoot, dirty[0]).split(path.sep).join('/');

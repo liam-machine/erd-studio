@@ -575,15 +575,17 @@ export class LogicalModelService {
     // The renamed file stays in the folder the old one was in.
     const folder = this.modelFolder(oldName) ?? '';
     const oldPath = this.modelPath(oldName);
+    const oldText = this.readExisting(oldPath);
     const doc = this.loadEditableDocument(oldPath);
+    const target = this.modelPath(newName, folder);
+    this.ensureDir(target);
     if (doc) {
-      const target = this.modelPath(newName, folder);
-      this.ensureDir(target);
       doc.set('name', newName);
-      this.writeAtomic(target, keepLineEndings(doc.toString(STRINGIFY_OPTIONS), this.readExisting(oldPath)));
+      this.writeAtomic(target, keepLineEndings(doc.toString(STRINGIFY_OPTIONS), oldText));
     } else {
+      // Regenerated, but with the old file's line endings.
       model.name = newName;
-      this.saveModel(model, folder);
+      this.writeAtomic(target, keepLineEndings(this.renderModel(model, target), oldText));
     }
     this.deleteModel(oldName);
   }
@@ -821,7 +823,10 @@ export class LogicalModelService {
     const takeOver = (d: number, at: number): void => {
       const node = list.items[at];
       if (!isMap(node)) throw refuse(node, 'this relationship entry is not written out in full');
-      this.syncMap(doc, node, desired[d], RELATIONSHIP_KEYS);
+      // A field that reads the same is left as written: a missing (or unknown)
+      // cardinality reads as many-to-one, and is not written out by a rename.
+      const unchanged = new Set(RELATIONSHIP_KEYS.filter((k) => read[at]?.[k] === desired[d][k]));
+      this.syncMap(doc, node, desired[d], RELATIONSHIP_KEYS, unchanged);
       matchOf[d] = claim(at);
     };
     matchOf.forEach((i, d) => {

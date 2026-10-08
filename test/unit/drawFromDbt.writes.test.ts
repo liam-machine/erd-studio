@@ -107,4 +107,18 @@ describe('Draw from dbt — model files it rewrites', () => {
     expect(text.startsWith(FCT_ORDER)).toBe(true);
     expect(text.replace(/\r\n/g, '')).not.toMatch(/\n/);
   });
+
+  it('names what failed when it cannot read the library to plan the diagram, and writes nothing', async () => {
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    const d = deps();
+    d.domainService.countDomainFileRelationships = () => { throw new Error('EACCES: permission denied, scandir'); };
+
+    await expect(drawFromDbt(d)).resolves.toBeUndefined();
+
+    expect(error.mock.calls.map((c) => String(c[0]))).toEqual([
+      'Draw from dbt could not read the model library to plan the diagram: EACCES: permission denied, scandir. Nothing was changed.',
+    ]);
+    expect(fs.readFileSync(fctPath, 'utf-8')).toBe(FCT_ORDER);
+    expect(lms.modelExists('dim_customer')).toBe(false);
+  });
 });
