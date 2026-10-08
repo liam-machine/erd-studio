@@ -18,6 +18,9 @@ import {
   createMockTextDocument,
   _resetMockWorkspace,
   _appliedEdits,
+  _mockDocuments,
+  _fireDidChangeTextDocument,
+  TextDocumentChangeReason,
 } from '../__mocks__/vscode';
 import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { DomainService } from '../../src/services/domainService';
@@ -56,7 +59,11 @@ interface Harness {
   logicalModelService: LogicalModelService;
   domainPath: (name: string) => string;
   /** Open a domain in a canvas panel; its messages go through `send`. */
-  open: (name: string) => Promise<{ send: (message: unknown) => Promise<void>; errors: () => string[] }>;
+  open: (name: string) => Promise<{
+    send: (message: unknown) => Promise<void>;
+    errors: () => string[];
+    panel: ReturnType<typeof createMockWebviewPanel>;
+  }>;
   readDomain: (name: string) => { logical: { models: string[]; relationships: Relationship[] } };
   shown: (name: string) => Relationship[];
 }
@@ -119,6 +126,7 @@ async function createHarness(ownRelationships: Relationship[] = []): Promise<Har
         errors: () => panel._postedMessages
           .filter((m): m is { type: 'error'; payload: { message: string } } => (m as { type: string }).type === 'error')
           .map((m) => m.payload.message),
+        panel,
       };
     },
     readDomain: (name) => JSON.parse(fs.readFileSync(domainPath(name), 'utf-8')),
@@ -669,5 +677,62 @@ describe('a rename reaches the copies other diagrams keep of their own (#133 L5)
     expect(orders.errors()).toEqual([expect.stringContaining('.erd-studio/silver/reporting.json has unsaved changes. Save or revert it, then try again.')]);
     expect(_appliedEdits).toHaveLength(0);
     expect(fs.readFileSync(h.domainPath('reporting'), 'utf-8')).toBe(onDisk);
+  });
+});
+
+describe("VS Code's own undo — Cmd+Z on the canvas — after an edit to two model files", () => {
+  let h: Harness;
+  beforeEach(() => { _resetMockWorkspace(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(h.root, { recursive: true, force: true });
+  });
+
+  /** A link stored at both ends, as a 1.6.7 drag from each side can leave it. */
+  async function storedAtBothEnds() {
+    h = await createHarness();
+    h.logicalModelService.saveModel({ ...FCT_ORDER, relationships: [{ fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' }] });
+    h.logicalModelService.saveModel({ ...DIM_CUSTOMER, relationships: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }] });
+    const files = ['fct_order', 'dim_customer'].map((name) => h.logicalModelService.modelPath(name));
+    const before = files.map((file) => fs.readFileSync(file, 'utf-8'));
+    const orders = await h.open('orders');
+    await orders.send({ type: 'removeRelationship', payload: EDGE });
+    expect(orders.errors()).toEqual([]);
+    const after = files.map((file) => fs.readFileSync(file, 'utf-8'));
+    expect(after).not.toEqual(before);
+    const docs = files.map((file) => _mockDocuments.get(vscode.Uri.file(file).toString())!);
+    /** What VS Code's undo does to the model files: rewinds them in memory, each firing a change. */
+    const rewind = async (texts: string[], reason: TextDocumentChangeReason) => {
+      orders.panel._postedMessages.length = 0;
+      docs.forEach((doc, i) => doc._setText(texts[i]));
+      for (const doc of docs) await _fireDidChangeTextDocument(doc, reason);
+    };
+    const drawn = () => (orders.panel._postedMessages as Array<{ type: string; payload: { relationships: unknown[] } }>)
+      .filter((m) => m.type === 'domainLoaded').map((m) => m.payload.relationships.length);
+    return { orders, files, before, after, docs, rewind, drawn };
+  }
+
+  it('saves both model files and redraws, as the toolbar Undo does; Cmd+Shift+Z likewise', async () => {
+    const { files, before, after, docs, rewind, drawn } = await storedAtBothEnds();
+
+    await rewind(before, TextDocumentChangeReason.Undo);
+    await vi.waitFor(() => expect(files.map((file) => fs.readFileSync(file, 'utf-8'))).toEqual(before));
+    expect(docs.map((doc) => doc.isDirty)).toEqual([false, false]);
+    await vi.waitFor(() => expect(drawn()).toEqual([1]));
+
+    await rewind(after, TextDocumentChangeReason.Redo);
+    await vi.waitFor(() => expect(files.map((file) => fs.readFileSync(file, 'utf-8'))).toEqual(after));
+    expect(docs.map((doc) => doc.isDirty)).toEqual([false, false]);
+    await vi.waitFor(() => expect(drawn()).toEqual([0]));
+  });
+
+  it("leaves an undo typed in a model file's own tab unsaved — the canvas is not the one focused", async () => {
+    const { orders, files, before, after, docs, rewind } = await storedAtBothEnds();
+    orders.panel.active = false;
+
+    await rewind(before, TextDocumentChangeReason.Undo);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(docs.map((doc) => doc.isDirty)).toEqual([true, true]);
+    expect(files.map((file) => fs.readFileSync(file, 'utf-8'))).toEqual(after);
   });
 });

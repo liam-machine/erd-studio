@@ -51,7 +51,8 @@
  * Update loop prevention:
  *   `pendingUpdates` is held for the whole applyDomainEdit / undo / redo so the
  *   onDidChangeTextDocument listener does not save and re-send on its own.
- *   External edits (guard not held) are saved if dirty and re-sent.
+ *   External edits (guard not held) are saved if dirty and re-sent. VS Code's
+ *   own undo/redo (Cmd+Z on the canvas) is flushed exactly as the toolbar's is.
  */
 
 import * as crypto from 'crypto';
@@ -454,6 +455,9 @@ const EDIT_FEATURES: Partial<Record<string, TelemetryFeature>> = {
   redo: 'editUndo',
 };
 
+/** How long VS Code's own undo/redo has to finish rewinding every document of the step. */
+const NATIVE_UNDO_SETTLE_MS = 50;
+
 export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Guard flags to prevent re-sending domain data to the webview when
@@ -478,6 +482,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * never force-saved on their behalf.
    */
   private readonly editedModelPaths = new Map<string, Set<string>>();
+
+  /** Per panel: the pending flush after VS Code's own undo/redo (see scheduleNativeUndoFlush). */
+  private readonly nativeUndoTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** `{layer}/{domain}\0{ignored file}` pairs already warned about this session. */
   private readonly duplicateWarningsShown = new Set<string>();
@@ -1574,10 +1581,24 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     );
 
     const changeSubscription = vscode.workspace.onDidChangeTextDocument(async (e) => {
-      if (e.document.uri.toString() !== document.uri.toString()) {
+      if (this.pendingUpdates.get(panelKey)) {
         return;
       }
-      if (this.pendingUpdates.get(panelKey)) {
+      // Cmd+Z / Cmd+Shift+Z on the canvas is VS Code's own undo, not the
+      // toolbar's message: it rewinds the domain file and the model files the
+      // edit wrote in memory only. Flush them as the toolbar's Undo does.
+      const undoRedo = e.reason === vscode.TextDocumentChangeReason.Undo
+        || e.reason === vscode.TextDocumentChangeReason.Redo;
+      if (e.document.uri.toString() !== document.uri.toString()) {
+        // A model file this canvas wrote — while the canvas has focus, so an
+        // undo typed in that file's own tab stays the user's to save.
+        if (undoRedo && webviewPanel.active && this.editedModelPaths.get(panelKey)?.has(e.document.uri.fsPath)) {
+          this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
+        }
+        return;
+      }
+      if (undoRedo) {
+        this.scheduleNativeUndoFlush(document, webviewPanel.webview, panelKey);
         return;
       }
       if (document.isDirty) {
@@ -1592,6 +1613,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.disposedWebviews.add(webviewPanel.webview);
       this.openPanels.delete(panelKey);
       this.editedModelPaths.delete(panelKey);
+      clearTimeout(this.nativeUndoTimers.get(panelKey));
+      this.nativeUndoTimers.delete(panelKey);
       this.lastLoadError.delete(panelKey);
     });
   }
@@ -1950,15 +1973,47 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.pendingUpdates.set(panelKey, true);
     try {
       await vscode.commands.executeCommand(command);
-      await document.save();
-      this.ownWriteTracker.recordWrite(document.uri.fsPath);
-      await this.saveDirtyModelDocuments(panelKey);
-      this.logicalModelService.invalidateCache();
-      await this.sendDomainData(document, webview, panelKey);
-      this._onDidWriteDomain.fire({ uri: document.uri, modelLibraryChanged: true });
+      await this.flushUndoRedo(document, webview, panelKey);
     } finally {
       this.pendingUpdates.delete(panelKey);
     }
+  }
+
+  /**
+   * After an undo/redo has rewound the documents: save the domain file and
+   * the model files this canvas wrote, then redraw — one refresh for the step.
+   */
+  private async flushUndoRedo(document: vscode.TextDocument, webview: vscode.Webview, panelKey: string): Promise<void> {
+    await document.save();
+    this.ownWriteTracker.recordWrite(document.uri.fsPath);
+    await this.saveDirtyModelDocuments(panelKey);
+    this.logicalModelService.invalidateCache();
+    await this.sendDomainData(document, webview, panelKey);
+    this._onDidWriteDomain.fire({ uri: document.uri, modelLibraryChanged: true });
+  }
+
+  /**
+   * VS Code's own undo/redo (Cmd+Z on the canvas) changes each document of
+   * the step in turn: wait until the burst settles, then flush once, exactly
+   * as the toolbar's Undo / Redo does. A domain file whose text the step did
+   * not change fires no event, so a model file's event schedules it too.
+   */
+  private scheduleNativeUndoFlush(document: vscode.TextDocument, webview: vscode.Webview, panelKey: string): void {
+    clearTimeout(this.nativeUndoTimers.get(panelKey));
+    this.nativeUndoTimers.set(panelKey, setTimeout(() => {
+      this.nativeUndoTimers.delete(panelKey);
+      void this.queueEdit(panelKey, async () => {
+        if (this.disposedWebviews.has(webview)) return;
+        this.pendingUpdates.set(panelKey, true);
+        try {
+          await this.flushUndoRedo(document, webview, panelKey);
+        } catch (err) {
+          console.error('[SemanticEditorProvider] Failed to save after undo/redo:', err);
+        } finally {
+          this.pendingUpdates.delete(panelKey);
+        }
+      });
+    }, NATIVE_UNDO_SETTLE_MS));
   }
 
   /**
