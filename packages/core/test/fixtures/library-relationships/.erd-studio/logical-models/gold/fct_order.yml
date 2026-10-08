@@ -1,0 +1,27 @@
+# The fact. It carries its own copy of the order-date link (ERD Studio 1.6.7
+# also left a backwards copy in dim_date.yml), and nothing for the customer or
+# product links: those were written on the dimensions' side.
+name: fct_order
+alias: orders
+schema: gold
+description: One row per order line
+modelRole: fact
+columns:
+  - name: order_line_id
+    dataType: BIGINT
+    isPrimaryKey: true
+  - name: customer_key
+    dataType: INT
+  - name: order_date_key
+    dataType: INT
+    isForeignKey: true
+  - name: product_key
+    dataType: INT
+  - name: amount
+    dataType: DECIMAL(18,2)
+    additiveType: additive
+relationships:
+  - fromColumn: order_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one

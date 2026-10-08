@@ -1,0 +1,192 @@
+{
+  "type": "domainLoaded",
+  "payload": {
+    "schemaVersion": 5,
+    "domain": "sales",
+    "layer": "gold",
+    "stage": "logical",
+    "description": "Relationships in the model library in the shapes released extensions wrote, plus a domain-file copy that disagrees",
+    "models": [
+      {
+        "name": "fct_order",
+        "schema": "gold",
+        "alias": "orders",
+        "description": "One row per order line",
+        "columns": [
+          {
+            "name": "order_line_id",
+            "dataType": "BIGINT",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "order_date_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "product_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "amount",
+            "dataType": "DECIMAL(18,2)",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false,
+            "additiveType": "additive"
+          }
+        ],
+        "modelRole": "fact"
+      },
+      {
+        "name": "dim_customer",
+        "schema": "gold",
+        "alias": "customer",
+        "description": "",
+        "columns": [
+          {
+            "name": "customer_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "customer_name",
+            "dataType": "VARCHAR",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ],
+        "modelRole": "dimension"
+      },
+      {
+        "name": "dim_date",
+        "schema": "gold",
+        "description": "",
+        "columns": [
+          {
+            "name": "date_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          },
+          {
+            "name": "calendar_date",
+            "dataType": "DATE",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ],
+        "modelRole": "dimension"
+      },
+      {
+        "name": "dim_product",
+        "schema": "gold",
+        "description": "",
+        "columns": [
+          {
+            "name": "product_key",
+            "dataType": "INT",
+            "description": "",
+            "isPrimaryKey": true,
+            "isForeignKey": true,
+            "isNaturalKey": false
+          },
+          {
+            "name": "product_name",
+            "dataType": "VARCHAR",
+            "description": "",
+            "isPrimaryKey": false,
+            "isForeignKey": false,
+            "isNaturalKey": false
+          }
+        ],
+        "modelRole": "dimension"
+      }
+    ],
+    "relationships": [
+      {
+        "fromModel": "dim_customer",
+        "fromColumn": "customer_key",
+        "toModel": "fct_order",
+        "toColumn": "customer_key",
+        "cardinality": "one-to-many"
+      },
+      {
+        "fromModel": "fct_order",
+        "fromColumn": "order_date_key",
+        "toModel": "dim_date",
+        "toColumn": "date_key",
+        "cardinality": "many-to-one"
+      },
+      {
+        "fromModel": "dim_product",
+        "fromColumn": "product_key",
+        "toModel": "fct_order",
+        "toColumn": "product_key",
+        "cardinality": "many-to-one"
+      }
+    ],
+    "viewConfig": {
+      "positions": {
+        "fct_order": {
+          "x": 400,
+          "y": 200
+        },
+        "dim_customer": {
+          "x": 40,
+          "y": 40
+        },
+        "dim_date": {
+          "x": 40,
+          "y": 360
+        },
+        "dim_product": {
+          "x": 760,
+          "y": 200
+        }
+      }
+    },
+    "templates": [],
+    "manifestModels": [],
+    "existingModels": [],
+    "layerConfig": {
+      "id": "gold",
+      "label": "Gold",
+      "abbreviation": "GLD",
+      "color": "#d4a800",
+      "creatable": true,
+      "order": 2
+    },
+    "readOnly": false,
+    "positionDraggable": true
+  },
+  "welcomeDismissed": false
+}

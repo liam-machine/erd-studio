@@ -31,6 +31,8 @@
   "errors.noversion.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field"
   ],
+  "library-relationships.host": [],
+  "library-relationships.unified": [],
   "missing-model.host": [
     "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
     "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
@@ -68,5 +70,7 @@
     "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: {\"fromModel\":\"raw_refunds\",\"fromColumn\":\"order_line_id\",\"toModel\":\"raw_orders\"}",
     "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: \"not-a-relationship\"",
     "warn: [DomainService] Skipping inline model without a string \"name\" in <root>/.erd-studio/bronze/orders.json"
-  ]
+  ],
+  "v4-nameless-column.host": [],
+  "v4-nameless-column.unified": []
 }
