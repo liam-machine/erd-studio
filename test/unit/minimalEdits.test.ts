@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseLogicalModelText } from '@erd-studio/core';
 
-import { setDomainRelationships, setYamlRelationships } from '../../src/services/minimalEdits';
+import { relationshipsRewriteLoses, setDomainRelationships, setYamlRelationships } from '../../src/services/minimalEdits';
 import type { ModelRelationship, Relationship } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
@@ -230,6 +230,22 @@ describe('setYamlRelationships — role (#133)', () => {
     const text = setYamlRelationships('name: fct_order\n', [rel]);
     expect(text).toContain('    cardinality: many-to-one\n    role: "ship: date"\n');
     expect(parseLogicalModelText(text, 'fct_order')?.relationships).toEqual([rel]);
+  });
+});
+
+describe('relationshipsRewriteLoses — files the move leaves alone (#133)', () => {
+  it('is false for a plain list, none at all, and comments outside it', () => {
+    expect(relationshipsRewriteLoses(MESSY_BODY + BLOCK_2 + '# after the list\n')).toBe(false);
+    expect(relationshipsRewriteLoses(MESSY_BODY)).toBe(false);
+    expect(relationshipsRewriteLoses(`${MESSY_BODY}${BLOCK_2}    role: order date\n`)).toBe(false);
+  });
+  it.each([
+    ['a comment', BLOCK_2.replace('many-to-one', 'many-to-one  # checked with finance')],
+    ['an unknown key', `${BLOCK_2}    description: why\n`],
+    ['an unrecognised cardinality', BLOCK_2.replace('many-to-one', 'many_to_one')],
+    ['an entry the reader skips', `${BLOCK_2}  - toModel: dim_date\n`],
+  ])('is true for %s in the list', (_, block) => {
+    expect(relationshipsRewriteLoses(MESSY_BODY + block)).toBe(true);
   });
 });
 

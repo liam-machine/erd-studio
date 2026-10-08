@@ -28,6 +28,7 @@ import * as vscode from 'vscode';
 import { VALID_CARDINALITIES, normaliseRelationshipRole, parseLogicalModelText, relationshipKey } from '@erd-studio/core';
 import { dirtyFiles } from '../providers/dirtyDocuments';
 import {
+  describeLeftAlone,
   describeMovePlan,
   libraryRelationshipsOf,
   planMoveToLibrary,
@@ -36,7 +37,7 @@ import {
   sameColumnPair,
   upsertLibraryRelationship,
 } from '../services/libraryRelationships';
-import { setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
+import { relationshipsRewriteLoses, setDomainRelationships, setYamlRelationships } from '../services/minimalEdits';
 import { ownWrites } from '../services/ownWriteTracker';
 import { telemetry } from '../services/telemetryService';
 import { detectDomainFormat } from '../types/semantic';
@@ -165,9 +166,32 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   const libraryRoot = path.dirname(logicalModelService.getModelsDir());
   const relPath = (filePath: string): string => path.relative(libraryRoot, filePath).split(path.sep).join('/');
   const fileOf = (model: string): string => relPath(logicalModelService.modelPath(model));
-  let plan = planMoveToLibrary(domains, libraryModel, logicalModelService.listModels());
+  // A file whose relationships list holds comments or unreadable entries is
+  // never rewritten: re-rendering the list would lose them.
+  const lockedFiles = new Map<string, boolean>();
+  const locked = (name: string): boolean => {
+    if (!lockedFiles.has(name)) {
+      let loses = false;
+      try {
+        loses = relationshipsRewriteLoses(fs.readFileSync(logicalModelService.modelPath(name), 'utf-8'));
+      } catch {
+        // Unreadable: the plan already leaves a model with no readable file alone.
+      }
+      lockedFiles.set(name, loses);
+    }
+    return lockedFiles.get(name)!;
+  };
+  let plan = planMoveToLibrary(domains, libraryModel, logicalModelService.listModels(), locked);
   if (plan.removeFromDomains.size === 0 && plan.conflicts.length === 0 && plan.rehome.length === 0) {
     telemetry.feature('relMoveNothingToMove');
+    const leftAlone = describeLeftAlone(plan, fileOf);
+    if (leftAlone.length > 0) {
+      void vscode.window.showInformationMessage(
+        `${TITLE}: nothing was moved.`,
+        { modal: true, detail: leftAlone.join('\n').replace(/^\n/, '') },
+      );
+      return;
+    }
     void vscode.window.showInformationMessage(
       `${TITLE}: nothing to move — ${domains.length === 0
         ? 'no diagram file holds a relationship of its own, and every relationship in the model library is stored with the model holding the foreign key.'
@@ -260,6 +284,9 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   for (const name of new Set([...additions.keys(), ...removals.keys()])) {
     const filePath = logicalModelService.modelPath(name);
     const original = fs.readFileSync(filePath, 'utf-8');
+    if (relationshipsRewriteLoses(original)) {
+      throw new Error(`${relPath(filePath)} changed while the dialog was open (its relationships list now has comments or entries it cannot read). Nothing was changed.`);
+    }
     const model = parseLogicalModelText(original, name);
     if (!model) throw new Error(`${relPath(filePath)} could not be read as a model file.`);
     const copy: SemanticModel = { ...model, relationships: model.relationships ? [...model.relationships] : undefined };
@@ -341,14 +368,16 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   const moved = plan.toLibrary.length;
   const turned = plan.rehome.length;
   const left = plan.conflicts.length + plan.skippedNoModel.length;
+  const unsettled = plan.disagreements.length + plan.lockedFiles.length;
   telemetry.feature('relMoveCompleted');
-  if (left > 0) telemetry.feature('relMoveLeftover');
+  if (left + unsettled > 0) telemetry.feature('relMoveLeftover');
   const parts = [
     ...(moved > 0 || !turned ? [`Moved ${moved} relationship${moved === 1 ? '' : 's'} into the model library — each is now defined once.`] : []),
     ...(turned > 0 ? [`${turned} relationship${turned === 1 ? ' is' : 's are'} now stored with the model holding the foreign key.`] : []),
   ];
   void vscode.window.showInformationMessage(
     parts.join(' ') +
-    (left > 0 ? ` ${left} stayed in the diagram files; run this command again to settle ${left === 1 ? 'it' : 'them'}.` : ''),
+    (left > 0 ? ` ${left} stayed in the diagram files; run this command again to settle ${left === 1 ? 'it' : 'them'}.` : '') +
+    (unsettled > 0 ? ' Some were left as they are for you to fix by hand, as the preview listed.' : ''),
   );
 }

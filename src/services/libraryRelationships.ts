@@ -11,7 +11,7 @@
  * Pure: no `vscode`, no file access.
  */
 
-import { canonicalRelationship, linkKey, relationshipKey } from '@erd-studio/core';
+import { canonicalRelationship, linkKey, relationshipKey, sameLink } from '@erd-studio/core';
 import type { ModelRelationship, Relationship, SemanticModel } from '../types/semantic';
 
 type RelationshipEnds = Pick<Relationship, 'fromModel' | 'fromColumn' | 'toModel' | 'toColumn'>;
@@ -263,6 +263,25 @@ export interface MoveToLibraryPlan {
    * unless that file already holds the link. The canvas draws the same line.
    */
   rehome: RelationshipRehome[];
+  /**
+   * Links stored in both model files whose copies disagree (cardinality,
+   * direction or role): both are left in place for the user to settle.
+   */
+  disagreements: RelationshipDisagreement[];
+  /**
+   * Model files left untouched because rewriting their `relationships:`
+   * list would lose a comment or an entry the reader cannot understand
+   * (`relationshipsRewriteLoses`); what would have gone there stays put.
+   */
+  lockedFiles: string[];
+}
+
+/** Two copies of one link, one in each model file, that disagree. */
+export interface RelationshipDisagreement {
+  /** The copy stored on its one side, as `one-to-many`. */
+  stored: Relationship;
+  /** The copy the many side's file already holds. */
+  held: Relationship;
 }
 
 /** One library entry moving to its many side's file (see `MoveToLibraryPlan.rehome`). */
@@ -278,22 +297,50 @@ export interface RelationshipRehome {
 /**
  * Library entries stored the wrong way round (#133): a `one-to-many` sits in
  * the file of its "one" side, but belongs with the model holding the foreign
- * key. Entries whose many side has no library file stay where they are.
+ * key. Entries whose many side has no library file stay where they are, and
+ * so does an entry whose many side already holds a copy that disagrees, or
+ * whose files are `locked` (see `MoveToLibraryPlan.lockedFiles`).
  */
 export function planRehome(
   libraryModels: readonly SemanticModel[],
   libraryModel: (name: string) => SemanticModel | null,
-): RelationshipRehome[] {
-  const rehome: RelationshipRehome[] = [];
+  locked: (model: string) => boolean = () => false,
+): Pick<MoveToLibraryPlan, 'rehome' | 'disagreements' | 'lockedFiles'> {
+  const plan: Pick<MoveToLibraryPlan, 'rehome' | 'disagreements' | 'lockedFiles'> = { rehome: [], disagreements: [], lockedFiles: [] };
+  const disagreeing = new Set<string>();
   for (const model of libraryModels) {
     for (const stored of libraryRelationshipsOf(model)) {
       const to = canonicalRelationship(stored);
       if (to === stored) continue;
-      if (!libraryModel(to.fromModel)) continue;
-      rehome.push({ from: model.name, stored, to });
+      const home = libraryModel(to.fromModel);
+      if (!home) continue;
+      const held = libraryRelationshipsOf(home).find((r) => sameLink(r, to) && !sameEntry(r, stored));
+      if (held && !agrees(held, to)) {
+        if (!disagreeing.has(linkKey(to))) plan.disagreements.push({ stored, held });
+        disagreeing.add(linkKey(to));
+        continue;
+      }
+      const lockedHere = [model.name, home.name].filter(locked);
+      if (lockedHere.length > 0) {
+        plan.lockedFiles.push(...lockedHere.filter((m) => !plan.lockedFiles.includes(m)));
+        continue;
+      }
+      plan.rehome.push({ from: model.name, stored, to });
     }
   }
-  return rehome;
+  return plan;
+}
+
+/** Whether two entries are the same stored entry (same ends, cardinality and role). */
+function sameEntry(a: Relationship, b: Relationship): boolean {
+  return relationshipKey(a) === relationshipKey(b) && a.cardinality === b.cardinality && a.role === b.role;
+}
+
+/** Whether a copy already stored says the same as `canonical`: ends, cardinality, and any role. */
+function agrees(copy: Relationship, canonical: Relationship): boolean {
+  const c = canonicalRelationship(copy);
+  return relationshipKey(c) === relationshipKey(canonical) && c.cardinality === canonical.cardinality
+    && (!c.role || !canonical.role || c.role === canonical.role);
 }
 
 /**
@@ -308,6 +355,7 @@ export function planMoveToLibrary(
   domains: ReadonlyArray<{ label: string; relationships: readonly Relationship[] }>,
   libraryModel: (name: string) => SemanticModel | null,
   libraryModels: readonly SemanticModel[] = [],
+  locked: (model: string) => boolean = () => false,
 ): MoveToLibraryPlan {
   const byKey = new Map<string, { rel: Relationship; uses: Array<{ label: string; cardinality: Relationship['cardinality'] }> }>();
   for (const domain of domains) {
@@ -323,7 +371,13 @@ export function planMoveToLibrary(
 
   const plan: MoveToLibraryPlan = {
     toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [],
-    rehome: planRehome(libraryModels, libraryModel),
+    ...planRehome(libraryModels, libraryModel, locked),
+  };
+  // A relationship bound for a locked file stays in its domain files.
+  const isLocked = (...names: string[]): boolean => {
+    const hit = names.filter(locked);
+    for (const name of hit) if (!plan.lockedFiles.includes(name)) plan.lockedFiles.push(name);
+    return hit.length > 0;
   };
   for (const [key, { rel, uses }] of byKey) {
     // Stored on its many side (#133); a conflict is turned round once the user picks.
@@ -338,6 +392,8 @@ export function planMoveToLibrary(
       || (other !== null && libraryRelationshipsOf(other).some((r) => sameColumnPair(r, stored)));
     const cardinalities = [...new Set(uses.map((u) => u.cardinality))];
     if (!alreadyShared && cardinalities.length > 1) {
+      // Settled at either end, depending on the cardinality picked.
+      if (isLocked(stored.fromModel, stored.toModel)) continue;
       plan.conflicts.push({
         relationship: {
           fromModel: rel.fromModel, fromColumn: rel.fromColumn, toModel: rel.toModel, toColumn: rel.toColumn,
@@ -351,12 +407,16 @@ export function planMoveToLibrary(
       continue;
     }
     if (!alreadyShared) {
+      if (isLocked(model.name)) continue;
       plan.toLibrary.push({ ...stored, fromModel: model.name });
     } else if (stored.role) {
       // The library already draws it but has no role: the domain's label is
       // the only copy of it, and the domain entry is about to go.
       const entry = [model, other].flatMap((m) => (m ? libraryRelationshipsOf(m) : [])).find((r) => sameColumnPair(r, stored));
-      if (entry && !entry.role) plan.toLibrary.push({ ...entry, role: stored.role });
+      if (entry && !entry.role) {
+        if (isLocked(entry.fromModel)) continue;
+        plan.toLibrary.push({ ...entry, role: stored.role });
+      }
     }
     for (const use of uses) {
       const keys = plan.removeFromDomains.get(use.label) ?? new Set<string>();
@@ -482,8 +542,36 @@ export function describeMovePlan(plan: MoveToLibraryPlan, fileOf: (model: string
     }
     if (plan.rehome.length > 5) lines.push(`• …and ${plan.rehome.length - 5} more`);
   }
+  lines.push(...describeLeftAlone(plan, fileOf));
   if (movesDomains) {
     lines.push('', 'Teammates on an older ERD Studio version will not see relationships stored in the model library until they update.');
   }
   return lines.join('\n').replace(/^\n/, '');
+}
+
+/** What the move leaves for the user: copies that disagree, and files it will not rewrite. */
+export function describeLeftAlone(
+  plan: Pick<MoveToLibraryPlan, 'disagreements' | 'lockedFiles'>,
+  fileOf: (model: string) => string = (m) => `logical-models/${m}.yml`,
+): string[] {
+  const lines: string[] = [];
+  if (plan.disagreements.length > 0) {
+    lines.push(
+      '',
+      `Needs your attention: ${plural(plan.disagreements.length, 'link is', 'links are')} saved in both model files, ` +
+      'and the two copies disagree. Both are left as they are; delete the wrong one:',
+    );
+    const copy = (rel: Relationship): string =>
+      `${describeEnds(rel)} ${rel.cardinality}${rel.role ? ` "${rel.role}"` : ''} in ${fileOf(rel.fromModel)}`;
+    for (const { stored, held } of plan.disagreements.slice(0, 5)) lines.push(`• ${copy(stored)}, but ${copy(held)}`);
+    if (plan.disagreements.length > 5) lines.push(`• …and ${plan.disagreements.length - 5} more`);
+  }
+  if (plan.lockedFiles.length > 0) {
+    lines.push(
+      '',
+      `Left alone: the relationships list in ${plan.lockedFiles.map(fileOf).join(', ')} has comments or entries ` +
+      'ERD Studio cannot read, which rewriting it would lose. Its relationships stay where they are; move them by hand.',
+    );
+  }
+  return lines;
 }

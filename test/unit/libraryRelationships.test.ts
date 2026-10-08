@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import {
+  describeLeftAlone,
   describeMovePlan,
   planMoveToLibrary,
   planRehome,
@@ -230,9 +231,9 @@ describe('stored on the many side (#133)', () => {
   it('planRehome finds library entries stored on their one side, and only those', () => {
     const stored = { fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' as const };
     const library = [dim([stored, { ...stored, toModel: 'stg_gone' }]), fct([STORED])];
-    const rehome = planRehome(library, (name) => library.find((m) => m.name === name) ?? null);
+    const { rehome } = planRehome(library, (name) => library.find((m) => m.name === name) ?? null);
     expect(rehome).toEqual([{ from: 'dim_customer', stored: REVERSED, to: REL }]);
-    expect(describeMovePlan({ toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [], rehome }))
+    expect(describeMovePlan({ toLibrary: [], removeFromDomains: new Map(), conflicts: [], skippedNoModel: [], rehome, disagreements: [], lockedFiles: [] }))
       .toMatch(/^Turned round: 1 relationship is stored in the file of the model it points at/);
   });
 
@@ -241,6 +242,29 @@ describe('stored on the many side (#133)', () => {
     const dimension = dim([{ fromColumn: 'CUSTOMER_KEY', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' }]);
     expect(removeLibraryRelationships([fact, dimension], [REVERSED])).toEqual([fact, dimension]);
     expect([fact.relationships, dimension.relationships]).toEqual([undefined, undefined]);
+  });
+
+  it('planRehome leaves both copies of a link that disagree, and lists them', () => {
+    const library = [
+      dim([{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }]),
+      fct([{ ...STORED, cardinality: 'one-to-one' }]),
+    ];
+    const plan = planRehome(library, (name) => library.find((m) => m.name === name) ?? null);
+    expect(plan).toEqual({
+      rehome: [], lockedFiles: [],
+      disagreements: [{ stored: REVERSED, held: { ...REL, cardinality: 'one-to-one' } }],
+    });
+    expect(describeLeftAlone(plan).join('\n')).toContain(
+      '• dim_customer.customer_key → fct_order.customer_key one-to-many in logical-models/dim_customer.yml, '
+      + 'but fct_order.customer_key → dim_customer.customer_key one-to-one in logical-models/fct_order.yml',
+    );
+  });
+
+  it('the move leaves a locked file alone, and what was bound for it where it is', () => {
+    const library = [dim([{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'one-to-many' }]), fct()];
+    const lookup = (name: string) => library.find((m) => m.name === name) ?? null;
+    const plan = planMoveToLibrary([{ label: 'a', relationships: [{ ...REL, toColumn: 'other_key' }] }], lookup, library, (m) => m === 'fct_order');
+    expect([plan.rehome, plan.toLibrary, plan.removeFromDomains.size, plan.lockedFiles]).toEqual([[], [], 0, ['fct_order']]);
   });
 
   it('upsertLibraryRelationship writes and compares the role', () => {
