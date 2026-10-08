@@ -263,8 +263,8 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
      (1, 'relMoveOffered'), (2, 'relMoveReview'), (3, 'relMoveNotNow'), (4, 'relMoveDeclined'),
      (5, 'relMoveStarted'), (6, 'relMoveDirtyFiles'), (7, 'relMoveCancelled'), (8, 'relMoveNothingToMove'),
      (9, 'relMoveConflictShown'), (10, 'relMoveRehomed'), (11, 'relMoveTurned'), (12, 'relMoveKeptLibrary'),
-     (13, 'relMoveDisagreementLeft'), (14, 'relMoveFileLocked'), (15, 'relMoveWriteFailed'),
-     (16, 'relMoveRestoreFailed'), (17, 'relMoveFailed'), (18, 'relMoveCompleted'), (19, 'relMoveLeftover')),
+     (13, 'relMoveDisagreementLeft'), (14, 'relMoveFileLocked'), (15, 'relMoveGroupLeft'), (16, 'relMoveWriteFailed'),
+     (17, 'relMoveRestoreFailed'), (18, 'relMoveFailed'), (19, 'relMoveCompleted'), (20, 'relMoveLeftover')),
    used AS (
      SELECT j.key AS step, COUNT(*) AS installs, SUM(j.value) AS times FROM heartbeats h, json_each(h.features) j
      WHERE j.key LIKE 'relMove%' AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0 GROUP BY j.key
@@ -313,8 +313,8 @@ Investigate when:
 
 - **Any `relInv*` on a non-dev install.** Each is a write that did something
   the invariants forbid. `relInvOtherLost`, `relInvCopyLeft`,
-  `relInvNotCanonical` and `relInvRoleLost` mean a user's data was lost or
-  stored wrongly: top priority. `relInvCheckFailed` means the check itself
+  `relInvNotCanonical`, `relInvRoleLost` and `relInvGroupBroken` mean a user's
+  data was lost or stored wrongly: top priority. `relInvCheckFailed` means the check itself
   met input it could not read. Reproduce with the exhaustive checker over the
   operation the release changed.
 - **Any `relMoveRestoreFailed`.** A user has files half moved.
