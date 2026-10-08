@@ -267,6 +267,27 @@ describe('activate() with a dbt project', () => {
     openWorkspace(root);
   });
 
+  it('selectors.yml regeneration finds its unsaved tab when VS Code spells the path in another case', async () => {
+    const { SelectorsService } = await import('../../src/services/selectorsService');
+    let service: { hooks?: { isFileDirtyInEditor?: (filePath: string) => boolean } } | undefined;
+    vi.spyOn(SelectorsService.prototype, 'scheduleRegenerate').mockImplementation(function (this: never) { service = this; });
+    await activate(context);
+
+    const selectorsPath = path.join(root, 'selectors.yml');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    try {
+      // e.g. a Windows drive letter `c:` against `C:`, or a folder typed in another case on macOS
+      const tab = vscode.createMockTextDocument(selectorsPath.toUpperCase(), 'selectors: []\n');
+      (vscode.workspace.textDocuments as unknown[]).push(tab);
+      expect(service!.hooks!.isFileDirtyInEditor!(selectorsPath)).toBe(false);
+      tab._setText('selectors: [] # unsaved\n');
+      expect(service!.hooks!.isFileDirtyInEditor!(selectorsPath)).toBe(true);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('registers every contributed command once, plus a code-only dbtSemantic.* alias for each', async () => {
     await activate(context);
 
