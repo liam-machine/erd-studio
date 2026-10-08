@@ -233,7 +233,7 @@ export interface MoveToLibraryPlan {
   toLibrary: Relationship[];
   /**
    * Per domain file, the entries to take out of `logical.relationships`
-   * (by ends) — every entry whose relationship moves.
+   * (by `linkKey`) — every copy of a relationship that moves.
    */
   removeFromDomains: Map<string, Set<string>>;
   /** Defined with different cardinalities: the user picks one (`resolveConflict`) or leaves them in place. */
@@ -355,14 +355,17 @@ export function planMoveToLibrary(
   libraryModels: readonly SemanticModel[] = [],
   locked: (model: string) => boolean = () => false,
 ): MoveToLibraryPlan {
+  // One entry per link, however each diagram drew it (#133); every use's
+  // cardinality is read in the direction of the first copy seen.
   const byKey = new Map<string, { rel: Relationship; uses: Array<{ label: string; cardinality: Relationship['cardinality'] }> }>();
   for (const domain of domains) {
     for (const rel of domain.relationships) {
-      const key = relationshipKey(rel);
+      const key = linkKey(rel);
       const entry = byKey.get(key) ?? { rel, uses: [] };
       // The first role any domain gives it is the one kept.
       if (!entry.rel.role && rel.role) entry.rel = { ...entry.rel, role: rel.role };
-      entry.uses.push({ label: domain.label, cardinality: rel.cardinality });
+      const read = relationshipKey(rel) === relationshipKey(entry.rel) ? rel : reverseRelationship(rel);
+      entry.uses.push({ label: domain.label, cardinality: read.cardinality });
       byKey.set(key, entry);
     }
   }
@@ -436,7 +439,7 @@ export function resolveConflict(
   cardinality: Relationship['cardinality'],
 ): MoveToLibraryPlan {
   if (!plan.conflicts.includes(conflict)) return plan;
-  const key = relationshipKey(conflict.relationship);
+  const key = linkKey(conflict.relationship);
   const removeFromDomains = new Map([...plan.removeFromDomains].map(([label, keys]) => [label, new Set(keys)]));
   for (const domain of conflict.definitions.flatMap((d) => d.domains)) {
     const keys = removeFromDomains.get(domain) ?? new Set<string>();

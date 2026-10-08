@@ -281,6 +281,29 @@ describe('stored on the many side (#133)', () => {
     expect([plan.rehome, plan.toLibrary, plan.removeFromDomains.size, plan.lockedFiles]).toEqual([[], [], 0, ['fct_order']]);
   });
 
+  it('the same link drawn both ways round in two diagrams, disagreeing, is one conflict and nothing is dropped', () => {
+    const plan = planMoveToLibrary(
+      [{ label: 'gold/orders', relationships: [REVERSED] }, { label: 'gold/reporting', relationships: [{ ...REL, cardinality: 'one-to-one' }] }],
+      (name) => (name === 'fct_order' ? fct() : dim()),
+    );
+    expect([plan.toLibrary, plan.removeFromDomains.size]).toEqual([[], 0]);
+    expect(plan.conflicts).toEqual([{
+      relationship: { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key' },
+      definitions: [{ cardinality: 'one-to-many', domains: ['gold/orders'] }, { cardinality: 'one-to-one', domains: ['gold/reporting'] }],
+    }]);
+    const settled = resolveConflict(plan, plan.conflicts[0], 'one-to-one');
+    expect(settled.toLibrary).toEqual([{ ...REVERSED, cardinality: 'one-to-one' }]);
+    expect([...settled.removeFromDomains.keys()]).toEqual(['gold/orders', 'gold/reporting']);
+  });
+
+  it('the same link drawn both ways round in two diagrams, agreeing, merges into one many-to-one on the fact', () => {
+    const plan = planMoveToLibrary(
+      [{ label: 'gold/orders', relationships: [REVERSED] }, { label: 'gold/reporting', relationships: [REL] }],
+      (name) => (name === 'fct_order' ? fct() : dim()),
+    );
+    expect([plan.toLibrary, plan.conflicts, [...plan.removeFromDomains.keys()]]).toEqual([[REL], [], ['gold/orders', 'gold/reporting']]);
+  });
+
   it('upsertLibraryRelationship writes and compares the role', () => {
     const fact = fct([STORED]);
     expect(upsertLibraryRelationship(fact, { ...REL, role: 'buyer' })).toBe(true);

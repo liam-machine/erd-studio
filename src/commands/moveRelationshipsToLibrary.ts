@@ -25,7 +25,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { VALID_CARDINALITIES, normaliseRelationshipRole, parseLogicalModelText, relationshipKey, sameLink } from '@erd-studio/core';
+import { VALID_CARDINALITIES, linkKey, normaliseRelationshipRole, parseLogicalModelText, relationshipKey, sameLink } from '@erd-studio/core';
 import { dirtyFiles } from '../providers/dirtyDocuments';
 import {
   describeLeftAlone,
@@ -315,7 +315,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     const current = Array.isArray(raw.logical?.relationships) ? raw.logical!.relationships as Relationship[] : [];
     const isRelationship = (r: unknown): r is Relationship => !!r && typeof r === 'object'
       && ['fromModel', 'fromColumn', 'toModel', 'toColumn'].every((k) => typeof (r as Record<string, unknown>)[k] === 'string');
-    const kept = current.filter((r) => !isRelationship(r) || !keys.has(relationshipKey(r)));
+    const kept = current.filter((r) => !isRelationship(r) || !keys.has(linkKey(r)));
     if (kept.length === current.length) continue;
     const text = setDomainRelationships(original, kept);
     if (text === original) continue;
