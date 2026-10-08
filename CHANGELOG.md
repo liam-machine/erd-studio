@@ -8,6 +8,13 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+- **Editing a model on the canvas no longer rewrites its `relationships:` list.** Renaming a column or changing a description used to rewrite the whole list in the model's file, deleting entries ERD Studio could not read (a typo such as `one_to_many`, an entry missing an end), comments inside the list and any extra keys on an entry. A save now leaves the list exactly as written unless the relationships themselves change, and then edits only the entries that changed. Entries it cannot read are always kept, and an edit it cannot make safely (for example when `relationships:` is not a list) is refused with the file and line named.
+- **Unsaved edits in a model file are no longer overwritten.** If a model file is open in a tab with unsaved changes, a canvas edit that would rewrite or delete it now stops and names the file, instead of replacing your unsaved text.
+- **A broken file no longer changes where new relationships are saved.** A diagram or model file that could not be read (for example during a merge conflict) used to count as holding no relationships, which could switch a project between keeping relationships in each diagram and keeping them in the model library. Such a file is now counted by what its text shows.
+
 ## 1.6.7 — 2026-10-04
 
 ### Fixed

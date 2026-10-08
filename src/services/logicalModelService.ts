@@ -13,12 +13,12 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Document, parseDocument, isAlias, isMap, isPair, isScalar, isSeq } from 'yaml';
+import { Document, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq } from 'yaml';
 import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
 
 import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
 import type { ModelLoadErrorKind } from '@erd-studio/core';
-import type { ColumnDef, SemanticModel } from '../types/semantic';
+import type { ColumnDef, ModelRelationship, SemanticModel } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
 import type { ManifestData, ManifestModelInfo } from '../types/manifest';
 import { OwnWriteTracker, ownWrites } from './ownWriteTracker';
@@ -97,7 +97,11 @@ export interface ModelFileEntry {
 }
 
 /** Keys ERD Studio owns on a model file. Unknown keys are left untouched. */
-const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns', 'relationships'] as const;
+// `relationships` is synced on its own, entry by entry (syncRelationships).
+const MODEL_KEYS = ['name', 'schema', 'alias', 'description', 'grain', 'modelRole', 'rationale', 'meta', 'columns'] as const;
+const RELATIONSHIP_KEYS = ['fromColumn', 'toModel', 'toColumn', 'cardinality'] as const;
+/** A non-empty top-level `relationships:` list, as text (for a file that does not parse). */
+const RELATIONSHIPS_IN_TEXT = /^relationships[ \t]*:(?:\s*#.*)*\s*(?:-|\[\s*[^\s\]])/m;
 const COLUMN_KEYS = [
   'name', 'dataType', 'description',
   'isPrimaryKey', 'isForeignKey', 'isNaturalKey',
@@ -391,6 +395,23 @@ export class LogicalModelService {
   }
 
   /**
+   * Whether a model file that fails to parse still shows a non-empty
+   * `relationships:` list, so a broken file cannot switch the project's
+   * relationship mode (`usesLibraryRelationships`).
+   */
+  hasUnreadableRelationships(): boolean {
+    return this.listModelFiles().some((entry) => {
+      if (entry.shadowedBy) return false;
+      try {
+        this.readModelFile(entry.filePath, entry.name);
+        return false;
+      } catch {
+        try { return RELATIONSHIPS_IN_TEXT.test(fs.readFileSync(entry.filePath, 'utf-8')); } catch { return false; }
+      }
+    });
+  }
+
+  /**
    * Whether new models should be created in layer folders. Folders are
    * opt-in per project: true once any model file lives in a LAYER folder
    * (someone ran "Organise Model Library by Layer", or organised by hand),
@@ -482,7 +503,7 @@ export class LogicalModelService {
   private renderModel(model: SemanticModel, filePath: string): string {
     const doc = this.loadEditableDocument(filePath) ?? new Document(this.modelToPlain(model));
     if (isMap(doc.contents)) {
-      this.applyModel(doc, doc.contents, model);
+      this.applyModel(doc, doc.contents, model, filePath);
     }
     return doc.toString(STRINGIFY_OPTIONS);
   }
@@ -734,8 +755,90 @@ export class LogicalModelService {
    * Apply a model onto an existing document, touching only managed keys
    * whose value differs. Keys ERD Studio does not know about are preserved.
    */
-  private applyModel(doc: Document, root: YAMLMap, model: SemanticModel): void {
-    this.syncMap(doc, root, this.modelToPlain(model), MODEL_KEYS);
+  private applyModel(doc: Document, root: YAMLMap, model: SemanticModel, filePath: string): void {
+    const plain = this.modelToPlain(model);
+    this.syncMap(doc, root, plain, MODEL_KEYS);
+    this.syncRelationships(doc, root, (plain.relationships ?? []) as Record<string, unknown>[], filePath);
+  }
+
+  /**
+   * Bring `relationships:` in line with `desired` entry by entry. An entry the
+   * reader skipped stays where it is; a kept entry keeps its node (comments,
+   * unknown keys such as `role:`); an unchanged list is not touched at all.
+   * A change ERD Studio cannot make in place is refused, naming file and line.
+   */
+  private syncRelationships(doc: Document, root: YAMLMap, desired: Record<string, unknown>[], filePath: string): void {
+    const existing = root.get('relationships', true);
+    if (existing === undefined || (isScalar(existing) && existing.value === null)) {
+      if (desired.length > 0) root.set('relationships', doc.createNode(desired));
+      return;
+    }
+    const list = isAlias(existing) ? existing.resolve(doc) : existing;
+    const refuse = (node: unknown, why: string): Error => {
+      const offset = isNode(node) ? node.range?.[0] ?? 0 : 0;
+      const line = fs.readFileSync(filePath, 'utf-8').slice(0, offset).split('\n').length;
+      const file = `${LOGICAL_MODELS_DIR}/${path.relative(this.modelsDir, filePath).split(path.sep).join('/')}`;
+      return new Error(`${file}, line ${line}: ${why}, so ERD Studio cannot change it. Fix it by hand first.`);
+    };
+    if (!isSeq(list)) {
+      if (desired.length === 0) return; // nothing was read from it, so nothing changed
+      throw refuse(existing, '"relationships:" is not a list');
+    }
+    const read = list.items.map((item) => this.readRelationshipEntry(doc, item));
+    const same = (r: ModelRelationship | null | undefined, want: Record<string, unknown>): boolean =>
+      !!r && RELATIONSHIP_KEYS.every((k) => r[k] === want[k]);
+    const claimed = new Set<number>();
+    const claim = (i: number): number => (i === -1 ? i : (claimed.add(i), i));
+    const matchOf = desired.map((want) => claim(read.findIndex((r, i) => !claimed.has(i) && same(r, want))));
+    if (matchOf.every((i) => i !== -1) && read.every((r, i) => r === null || claimed.has(i))) return;
+    const unknown = read.findIndex((r) => r === undefined);
+    if (unknown !== -1) throw refuse(list.items[unknown], 'this relationship entry cannot be read');
+    if (isAlias(existing)) throw refuse(existing, '"relationships:" is an alias of a list written elsewhere');
+
+    // A changed entry keeps its node (comments, unknown keys): first one with
+    // the same ends (a cardinality change), then — only when as many entries
+    // changed as went, as in a column or model rename — the rest in order.
+    const sameEnds = (r: ModelRelationship | null | undefined, want: Record<string, unknown>): boolean =>
+      !!r && r.fromColumn === want.fromColumn && r.toModel === want.toModel && r.toColumn === want.toColumn;
+    const takeOver = (d: number, at: number): void => {
+      const node = list.items[at];
+      if (!isMap(node)) throw refuse(node, 'this relationship entry is not written out in full');
+      this.syncMap(doc, node, desired[d], RELATIONSHIP_KEYS);
+      matchOf[d] = claim(at);
+    };
+    matchOf.forEach((i, d) => {
+      if (i !== -1) return;
+      const at = read.findIndex((r, j) => !claimed.has(j) && sameEnds(r, desired[d]));
+      if (at !== -1) takeOver(d, at);
+    });
+    const gone = read.flatMap((r, j) => (r && !claimed.has(j) ? [j] : []));
+    const changed = matchOf.flatMap((i, d) => (i === -1 ? [d] : []));
+    if (gone.length === changed.length) changed.forEach((d, k) => takeOver(d, gone[k]));
+
+    const items = list.items.filter((_, i) => read[i] === null || claimed.has(i));
+    desired.forEach((want, d) => { if (matchOf[d] === -1) items.push(doc.createNode(want)); });
+    if (items.length === 0) {
+      root.delete('relationships');
+      return;
+    }
+    if (list.items.length === 0) list.flow = false; // `relationships: []` gains its first entry
+    list.items = items;
+  }
+
+  /**
+   * What the reader makes of one `relationships:` entry — null when it skips
+   * it, undefined when that cannot be told. Read through core's own parser so
+   * the answer is exactly what the canvas draws.
+   */
+  private readRelationshipEntry(doc: Document, item: unknown): ModelRelationship | null | undefined {
+    try {
+      const node = isAlias(item) ? item.resolve(doc) : item;
+      const probe = new Document({ name: 'probe', relationships: [] });
+      (probe.get('relationships', true) as YAMLSeq).items.push(isNode(node) ? node.clone() : node);
+      return parseLogicalModelText(probe.toString(), 'probe')?.relationships?.[0] ?? null;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -764,10 +867,6 @@ export class LogicalModelService {
       }
       if (key === 'columns' && isSeq(existing) && Array.isArray(value)) {
         this.syncColumns(doc, existing, value as Record<string, unknown>[]);
-        continue;
-      }
-      if (key === 'relationships' && isSeq(existing) && this.sameMetaValue(doc, existing, value)) {
-        // Unchanged: leave the list (and its comments and flow style) alone.
         continue;
       }
       if (key === 'meta' && isMap(existing) && value && typeof value === 'object' && !Array.isArray(value)) {

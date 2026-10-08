@@ -264,4 +264,23 @@ describe('relationships stored once in the model library (#126)', () => {
       expect(h.shown('reporting')).toContainEqual({ ...DATE_EDGE, cardinality: 'one-to-one' });
     });
   });
+
+  describe('a model file open with unsaved edits', () => {
+    beforeEach(async () => { h = await createHarness(); });
+
+    it('refuses the edit, naming the file, instead of replacing the unsaved text', async () => {
+      const ymlPath = h.logicalModelService.modelPath('fct_order');
+      const onDisk = fs.readFileSync(ymlPath, 'utf-8');
+      const tab = await vscode.workspace.openTextDocument(vscode.Uri.file(ymlPath)) as unknown as { _setText: (t: string) => void; getText: () => string };
+      tab._setText(`${onDisk}# my unsaved note\n`);
+
+      const orders = await h.open('orders');
+      await orders.send({ type: 'addRelationship', payload: { ...EDGE, cardinality: 'many-to-one' } });
+
+      expect(orders.errors()).toEqual([expect.stringContaining('logical-models/fct_order.yml has unsaved changes')]);
+      expect(_appliedEdits).toHaveLength(0);
+      expect(tab.getText()).toBe(`${onDisk}# my unsaved note\n`);
+      expect(fs.readFileSync(ymlPath, 'utf-8')).toBe(onDisk);
+    });
+  });
 });

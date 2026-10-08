@@ -389,6 +389,7 @@ export function diffDomain(ctx: CliContext, file: string, strict: boolean): Doma
     addToLibrary: usesLibraryRelationships(
       ctx.logicalModelService.listModels(),
       ctx.domainService.countDomainFileRelationships(ctx.root, ctx.semanticDir),
+      ctx.logicalModelService.hasUnreadableRelationships(),
     ),
   };
   const fixes = fixesFromPlan(plan, rel, ctx.semanticDir, phantoms, unreadableModelFiles, relationshipHome);

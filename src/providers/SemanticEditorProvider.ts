@@ -1620,7 +1620,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    */
   private relationshipsInLibrary(models: readonly SemanticModel[]): boolean {
     const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.logicalModelService.getModelsDir()));
-    return usesLibraryRelationships(models, this.domainService.countDomainFileRelationships(this.workspaceRoot, semanticDir));
+    return usesLibraryRelationships(
+      models,
+      this.domainService.countDomainFileRelationships(this.workspaceRoot, semanticDir),
+      this.logicalModelService.hasUnreadableRelationships(),
+    );
   }
 
   /**
@@ -1788,6 +1792,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     return { docs, created, deleted };
   }
 
+  /** The library path of a model file `ops` would rewrite or delete that is open with unsaved edits. */
+  private dirtyModelFile(ops: ModelFileOps | undefined): string | null {
+    const names = [
+      ...(ops?.delete ?? []),
+      ...(ops?.save ?? []).flatMap(({ model, fromName }) => (fromName ? [model.name, fromName] : [model.name])),
+    ];
+    for (const name of names) {
+      // The file addModelFileEdits would replace, read from or delete.
+      if (!this.logicalModelService.modelExists(name)) continue;
+      const filePath = this.logicalModelService.modelPath(name);
+      if (vscode.workspace.textDocuments.some((d) => d.isDirty && path.resolve(d.uri.fsPath) === path.resolve(filePath))) {
+        return `logical-models/${path.relative(this.logicalModelService.getModelsDir(), filePath).split(path.sep).join('/')}`;
+      }
+    }
+    return null;
+  }
+
   /**
    * After an undo/redo the in-memory yml documents we edited via WorkspaceEdit
    * are reverted but dirty; DomainService reads the library from disk, so
@@ -1884,6 +1905,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (err instanceof EditAborted) return false;
       throw err;
     }
+    // A model file open with unsaved edits would be replaced by text rendered
+    // from disk: refuse by name (the handler reports it), before anything is written.
+    const dirty = this.dirtyModelFile(modelFiles);
+    if (dirty) throw new Error(`${dirty} has unsaved changes. Save or revert it, then try again.`);
 
     const updatedText = JSON.stringify(parsed, null, 2) + '\n';
     const edit = new vscode.WorkspaceEdit();

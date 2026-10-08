@@ -58,7 +58,7 @@ export interface DrawFromDbtDeps {
   modelPaths: readonly string[];
   layerService: Pick<LayerService, 'getValidLayerIds' | 'getCreatableLayers' | 'getAllLayers' | 'saveConfig'>;
   domainService: Pick<DomainService, 'listDomains' | 'countDomainFileRelationships'>;
-  logicalModelService: Pick<LogicalModelService, 'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel'>;
+  logicalModelService: Pick<LogicalModelService, 'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel' | 'hasUnreadableRelationships'>;
   /** Schema yml and manifest; either may be undefined (no yml, never compiled). */
   loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
@@ -178,6 +178,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     const routed = usesLibraryRelationships(
       logicalModelService.listModels(),
       domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
+      logicalModelService.hasUnreadableRelationships(),
     )
       ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
       : { kept: draft.relationships, changed: [] };
