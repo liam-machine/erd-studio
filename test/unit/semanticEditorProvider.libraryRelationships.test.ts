@@ -503,3 +503,56 @@ describe('"Mark … as primary key" travels with the relationship (#133 L1)', ()
     expect(orders.errors()).toEqual(['Failed to edit relationship: the key to mark must be one end of the relationship.']);
   });
 });
+
+describe('a self-reference (#133 L3)', () => {
+  let h: Harness;
+  beforeEach(() => { _resetMockWorkspace(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(h.root, { recursive: true, force: true });
+  });
+  const SELF = { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' };
+
+  async function openHr() {
+    h = await createHarness();
+    h.logicalModelService.saveModel({ name: 'employee', columns: [
+      { name: 'employee_id', dataType: 'int', description: '', isPrimaryKey: true },
+      { name: 'manager_id', dataType: 'int', description: '' },
+    ] });
+    fs.writeFileSync(h.domainPath('hr'), JSON.stringify({
+      schemaVersion: 5, domain: 'hr', layer: 'silver', description: '', logical: { models: ['employee'], relationships: [] },
+      viewConfig: { positions: { employee: { x: 0, y: 0 } } },
+    }, null, 2) + '\n');
+    return h.open('hr');
+  }
+
+  it('is stored in its own model\'s file; a one-to-many drawn is stored swapped', async () => {
+    const hr = await openHr();
+    await hr.send({ type: 'addRelationship', payload: { ...SELF, fromColumn: 'employee_id', toColumn: 'manager_id', cardinality: 'one-to-many', role: 'manager' } });
+    expect(hr.errors()).toEqual([]);
+    h.logicalModelService.invalidateCache();
+    expect(h.logicalModelService.getModel('employee')?.relationships).toEqual([
+      { fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id', cardinality: 'many-to-one', role: 'manager' },
+    ]);
+    expect(h.shown('hr')).toEqual([{ ...SELF, cardinality: 'many-to-one', role: 'manager' }]);
+
+    // Renaming the model renames its own entry's toModel.
+    await hr.send({ type: 'renameModel', payload: { oldName: 'employee', newName: 'staff' } });
+    expect(h.logicalModelService.getModel('staff')?.relationships).toEqual([
+      { fromColumn: 'manager_id', toModel: 'staff', toColumn: 'employee_id', cardinality: 'many-to-one', role: 'manager' },
+    ]);
+  });
+
+  it('a column pointing at itself is refused at the boundary', async () => {
+    const hr = await openHr();
+    await hr.send({ type: 'addRelationship', payload: { ...SELF, toColumn: 'MANAGER_ID', cardinality: 'many-to-one' } });
+    expect(hr.errors()).toEqual(["Failed to add relationship: a column can't point at itself."]);
+  });
+
+  it('removing either column removes it', async () => {
+    const hr = await openHr();
+    await hr.send({ type: 'addRelationship', payload: { ...SELF, cardinality: 'many-to-one' } });
+    await hr.send({ type: 'removeColumn', payload: { modelName: 'employee', columnName: 'manager_id' } });
+    expect(h.logicalModelService.getModel('employee')?.relationships).toBeUndefined();
+  });
+});

@@ -19,6 +19,7 @@ import {
   findDuplicateNames,
   validateAddModelsFromDbtPayload,
   validateMarkKey,
+  validateRelationshipEnds,
   validateOpenModelFilePayload,
   validateDismissManifestHintPayload,
 } from '../../src/providers/payloadValidation';
@@ -316,5 +317,14 @@ describe('validateMarkKey — the key to mark is one end of the link (#133 L1)',
     expect(validateMarkKey({ model: 'employee', columns: ['employee_id'] }, self)).toBeNull();
     expect(validateMarkKey({ model: 'employee', columns: ['manager_id'] }, self)).toBeNull();
     expect(validateMarkKey({ model: 'employee', columns: ['name'] }, self)).toBe(ERR);
+  });
+});
+
+describe('validateRelationshipEnds — a column can\'t point at itself (#133 L3)', () => {
+  it('allows a self-reference between two columns, refuses one column at both ends (without case)', () => {
+    expect(validateRelationshipEnds({ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' })).toBeNull();
+    expect(validateRelationshipEnds({ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'Employee', toColumn: 'MANAGER_ID' }))
+      .toBe("a column can't point at itself.");
+    expect(validateRelationshipEnds({ fromModel: 'a', fromColumn: 'k', toModel: 'b', toColumn: 'k' })).toBeNull();
   });
 });

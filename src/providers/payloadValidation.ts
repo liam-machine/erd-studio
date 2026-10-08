@@ -246,6 +246,18 @@ const sameColumnSet = (a: readonly string[], b: readonly string[]): boolean => {
 };
 
 /**
+ * A relationship's ends (#133 L3): a self-reference joins two columns of one
+ * model, but a column can't point at itself. Returns an error, or null.
+ */
+export function validateRelationshipEnds(link: LinkPayloadEnds): string | null {
+  return typeof link.fromModel === 'string' && typeof link.toModel === 'string'
+    && typeof link.fromColumn === 'string' && typeof link.toColumn === 'string'
+    && sameText(link.fromModel, link.toModel) && sameText(link.fromColumn, link.toColumn)
+    ? "a column can't point at itself."
+    : null;
+}
+
+/**
  * The New / Edit Relationship dialog's `markKey` (#133 L1): absent, or one
  * end of the link — its model and, as a set without case, exactly that end's
  * columns (1–8, each a valid column name). For a self-reference either end

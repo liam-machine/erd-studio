@@ -73,9 +73,10 @@ function validateForm(
     errors.toColumn = 'Target column is required';
   }
 
-  // Check for self-referential relationship
-  if (fromModel && toModel && fromModel === toModel) {
-    errors.selfReference = 'A model cannot have a relationship with itself';
+  // A self-reference joins two columns of one model (#133 L3); a column can't point at itself.
+  const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+  if (fromModel && toModel && fromColumn.trim() && same(fromModel, toModel) && same(fromColumn, toColumn)) {
+    errors.sameColumn = "A column can't point at itself";
   }
 
   // Check for duplicate relationship (same composite key)
@@ -201,7 +202,9 @@ export function NewFkDialog() {
   const models = useMemo(() => domain?.models ?? [], [domain]);
   const fromCols = useMemo(() => (fromColumn.trim() ? [fromColumn.trim()] : []), [fromColumn]);
   const toCols = useMemo(() => (toColumn.trim() ? [toColumn.trim()] : []), [toColumn]);
-  const complete = !!fromModel && !!toModel && fromCols.length > 0 && toCols.length > 0;
+  // Both ends named, and not one column at both ends (refused below).
+  const complete = !!fromModel && !!toModel && fromCols.length > 0 && toCols.length > 0
+    && !(fromModel.toLowerCase() === toModel.toLowerCase() && fromCols.join('+').toLowerCase() === toCols.join('+').toLowerCase());
   const orientation = useMemo(
     () => (complete ? orientCanvasLink(models, { model: fromModel, columns: fromCols }, { model: toModel, columns: toCols }) : null),
     [complete, models, fromModel, fromCols, toModel, toCols],
@@ -631,9 +634,9 @@ export function NewFkDialog() {
         </div>
 
         {/* Global errors */}
-        {errors.selfReference && (
+        {errors.sameColumn && (
           <div className="new-fk-dialog__error new-fk-dialog__error--global">
-            {errors.selfReference}
+            {errors.sameColumn}
           </div>
         )}
         {errors.duplicate && (

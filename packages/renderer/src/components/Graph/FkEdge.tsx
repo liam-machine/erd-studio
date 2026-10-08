@@ -54,6 +54,8 @@ const LABEL_OFFSET = 8;
  * right side. A larger radius means the loop extends further from the node.
  */
 const SELF_LOOP_RADIUS = 55;
+/** How much wider each further self-loop on one node is drawn, so they nest (#133 L3). */
+const SELF_LOOP_STEP = 18;
 
 /** Stable empty sibling group for edges whose handle side is unknown. */
 const NO_SIBLINGS: readonly import('@xyflow/react').Edge[] = Object.freeze([]);
@@ -170,6 +172,7 @@ function FkEdgeComponent({
 
   if (!data) return null;
   const { cardinality, role, stage, discrepancyStatus, dimmed, readOnly, isSelfLoop, fromColumn, toColumn } = data;
+  const loopRadius = SELF_LOOP_RADIUS + SELF_LOOP_STEP * (data.loopIndex ?? 0);
 
   // For cardinality mismatch edges, pull the mismatch details from the report
   // The edge data only has status — we need to find the original relationship discrepancy
@@ -219,7 +222,7 @@ function FkEdgeComponent({
   // *around* the corner instead of sagging through it — perpendicular-only
   // control points let the midsection collapse onto the node corner.
   const edgePath = isSelfLoop
-    ? `M ${src.x},${src.y} C ${src.x + SELF_LOOP_RADIUS},${src.y - SELF_LOOP_RADIUS} ${tgt.x + SELF_LOOP_RADIUS},${tgt.y - SELF_LOOP_RADIUS} ${tgt.x},${tgt.y}`
+    ? `M ${src.x},${src.y} C ${src.x + loopRadius},${src.y - loopRadius} ${tgt.x + loopRadius},${tgt.y - loopRadius} ${tgt.x},${tgt.y}`
     : getSmoothStepPath({
         sourceX: src.x,
         sourceY: src.y,
@@ -284,10 +287,10 @@ function FkEdgeComponent({
   // the top-right corner. (Derived from B(0.5) with diagonal control points:
   // the R terms aggregate to 0.75·R along each axis.)
   const midX = isSelfLoop
-    ? (src.x + tgt.x) / 2 + SELF_LOOP_RADIUS * 0.75
+    ? (src.x + tgt.x) / 2 + loopRadius * 0.75
     : (adjustedSourceX + adjustedTargetX) / 2;
   const midY = isSelfLoop
-    ? (src.y + tgt.y) / 2 - SELF_LOOP_RADIUS * 0.75
+    ? (src.y + tgt.y) / 2 - loopRadius * 0.75
     : (adjustedSourceY + adjustedTargetY) / 2;
 
   return (

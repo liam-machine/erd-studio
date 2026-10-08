@@ -329,7 +329,7 @@ function EditorCanvas() {
     };
 
     const handleColumnRelationshipSelfDrop = () => {
-      setToastMessage('Cannot create relationship from a model to itself');
+      setToastMessage("A column can't point at itself — drop it on another column of the same model to draw a self-reference.");
     };
 
     window.addEventListener('column-relationship-drop', handleColumnRelationshipDrop);

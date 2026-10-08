@@ -316,21 +316,24 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
         const targetColumnName = columnRow.dataset.columnName;
         const targetModelName = modelNode.dataset.modelName;
 
-        if (targetColumnName && targetModelName && targetModelName !== modelName) {
-          window.dispatchEvent(
-            new CustomEvent('column-relationship-drop', {
-              detail: {
-                fromModel: modelName,
-                fromColumn: column.name,
-                toModel: targetModelName,
-                toColumn: targetColumnName,
-              },
-            }),
-          );
-        } else if (targetModelName === modelName) {
-          window.dispatchEvent(
-            new CustomEvent('column-relationship-self-drop'),
-          );
+        if (targetColumnName && targetModelName) {
+          // Another column of the same model draws a self-reference (#133
+          // L3), e.g. employee.manager_id → employee.employee_id. Only the
+          // column itself is refused.
+          if (targetModelName === modelName && targetColumnName.toLowerCase() === column.name.toLowerCase()) {
+            window.dispatchEvent(new CustomEvent('column-relationship-self-drop'));
+          } else {
+            window.dispatchEvent(
+              new CustomEvent('column-relationship-drop', {
+                detail: {
+                  fromModel: modelName,
+                  fromColumn: column.name,
+                  toModel: targetModelName,
+                  toColumn: targetColumnName,
+                },
+              }),
+            );
+          }
         }
       }
 

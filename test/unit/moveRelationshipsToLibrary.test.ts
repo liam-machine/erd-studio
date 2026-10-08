@@ -635,6 +635,44 @@ describe('moveRelationshipsToLibrary — turns reversed library entries round (#
     expect(logicalModelService.getModel('dim_customer')?.relationships).toBeUndefined();
   });
 
+  it('turns a backwards self-reference round inside its one file, written once (#133 L3)', async () => {
+    const EMPLOYEE = [
+      '# staff, with managers',
+      'name: employee',
+      'columns:',
+      '  - name: employee_id',
+      '    dataType: int',
+      '    isPrimaryKey: true',
+      '  - name: manager_id',
+      '    dataType: int',
+      'relationships:',
+      '  - fromColumn: employee_id',
+      '    toModel: employee',
+      '    toColumn: manager_id',
+      '    cardinality: one-to-many',
+      '    role: manager',
+      '',
+    ].join('\n');
+    fs.rmSync(logicalModelService.modelPath('dim_customer'));
+    fs.writeFileSync(logicalModelService.modelPath('employee'), EMPLOYEE);
+    const writes: string[] = [];
+    const info = acceptModal();
+    const deps = {
+      workspaceRoot: root, semanticDir: SEMANTIC_DIR, domainService: new DomainService(new LayerService(root, SEMANTIC_DIR)),
+      logicalModelService, onWritten: vi.fn(async () => undefined),
+      writeFile: (filePath: string, text: string) => { writes.push(path.basename(filePath)); writeFileAtomic(filePath, text); },
+    };
+    await moveRelationshipsToLibrary(deps);
+    expect(writes).toEqual(['employee.yml']);
+    expect(fs.readFileSync(logicalModelService.modelPath('employee'), 'utf-8')).toBe(EMPLOYEE.replace(
+      '  - fromColumn: employee_id\n    toModel: employee\n    toColumn: manager_id\n    cardinality: one-to-many\n    role: manager\n',
+      '  - fromColumn: manager_id\n    toModel: employee\n    toColumn: employee_id\n    cardinality: many-to-one\n    role: manager\n',
+    ));
+    info.mockClear();
+    await moveRelationshipsToLibrary(deps);
+    expect(messages(info)[0]).toMatch(/nothing to move/);
+  });
+
   it('drops the reversed copy when the fact already stores the link', async () => {
     fs.writeFileSync(logicalModelService.modelPath('fct_order'), FCT + [
       'relationships:',

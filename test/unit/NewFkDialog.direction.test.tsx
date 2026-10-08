@@ -96,3 +96,26 @@ describe('NewFkDialog — which side holds the foreign key (#133 L1)', () => {
     expect(sent()[0].markKey).toEqual({ model: 'dim_customer', columns: ['customer_id'] });
   });
 });
+
+describe('NewFkDialog — self-reference (#133 L3)', () => {
+  it('is allowed, oriented by the key: manager_id points at employee_id whichever column the drag started on', () => {
+    const employee = [{ name: 'employee', columns: [col('employee_id', { isPrimaryKey: true }), col('manager_id')] }];
+    open(employee, { fromModel: 'employee', fromColumn: 'employee_id', toModel: 'employee', toColumn: 'manager_id' });
+    expect(screen.queryByText(/can't point at itself/)).toBeNull();
+    expect(screen.getByText("employee.manager_id points at employee.employee_id — employee_id is employee's primary key.")).toBeTruthy();
+    fireEvent.click(create());
+    expect(sent()).toEqual([expect.objectContaining({ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' })]);
+  });
+
+  it('with no key, asks in the self-reference wording', () => {
+    open([{ name: 'employee', columns: [col('employee_id'), col('manager_id')] }], { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' });
+    expect(screen.getByText("Each employee row's manager_id points at one employee_id")).toBeTruthy();
+    expect(screen.getByText("Each employee row's employee_id points at one manager_id")).toBeTruthy();
+  });
+
+  it('refuses a column pointing at itself', () => {
+    open([{ name: 'employee', columns: [col('employee_id', { isPrimaryKey: true }), col('manager_id')] }], { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'manager_id' });
+    expect(screen.getByText("A column can't point at itself")).toBeTruthy();
+    expect(create().disabled).toBe(true);
+  });
+});

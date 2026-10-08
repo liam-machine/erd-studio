@@ -235,6 +235,23 @@ describe('fixesFromPlan — a new relationship is written on its many side (#133
   });
 });
 
+describe('fixesFromPlan — a self-reference (#133 L3)', () => {
+  it('add-relationship names the model\'s own file, on its many column', () => {
+    const plan: SyncPlan = {
+      generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+      modelContext: {}, models: [], columns: [], requiresCompile: false,
+      relationships: [
+        { fromModel: 'employee', fromColumn: 'employee_id', toModel: 'employee', toColumn: 'manager_id', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-many' },
+      ],
+    };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Map(), addToLibrary: true });
+    expect(fix).toMatchObject({
+      kind: 'add-relationship', model: 'employee', file: '.erd-studio/logical-models/employee.yml',
+      relationship: { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id', cardinality: 'many-to-one' },
+    });
+  });
+});
+
 describe('fixesFromPlan', () => {
   const plan: SyncPlan = {
     generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',

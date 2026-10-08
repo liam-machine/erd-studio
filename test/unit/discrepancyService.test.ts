@@ -310,6 +310,12 @@ describe('DiscrepancyService.compare', () => {
       expect(report.relationships[0].targetCardinality).toBe('one-to-one');
     });
 
+    it('a self-reference matches dbt\'s, read from either column (#133 L3)', () => {
+      const source = makeDomain({ relationships: [makeRel(['employee', 'manager_id'], ['employee', 'employee_id'])] });
+      const target = makeDomain({ relationships: [makeRel(['employee', 'employee_id'], ['employee', 'manager_id'], 'one-to-many')] });
+      expect(compare(source, target).relationships.map((r) => r.status)).toEqual(['matched']);
+    });
+
     it('matches a link whose model and column differ only in case (#133 L4)', () => {
       const source = makeDomain({ relationships: [makeRel(['Fct_Orders', 'Customer_ID'], ['DIM_CUSTOMER', 'id'])] });
       const target = makeDomain({ relationships: [makeRel(['fct_orders', 'customer_id'], ['dim_customer', 'ID'])] });

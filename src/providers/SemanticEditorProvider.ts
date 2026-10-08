@@ -347,6 +347,7 @@ import {
   validateOpenModelFilePayload,
   validateLayoutFinishedPayload,
   validateMarkKey,
+  validateRelationshipEnds,
   validateDismissManifestHintPayload,
   validateAnnotationUpdate,
   validateModelNameSafety,
@@ -1037,9 +1038,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: 'Failed to add relationship: the role must be text of at most 60 characters.' } });
                 break;
               }
-              const markKeyError = validateMarkKey(payload.markKey, payload);
-              if (markKeyError) {
-                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: ${markKeyError}` } });
+              const linkError = validateRelationshipEnds(payload) ?? validateMarkKey(payload.markKey, payload);
+              if (linkError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add relationship: ${linkError}` } });
                 break;
               }
               telemetry.feature('addRelationship');
@@ -1111,9 +1112,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: 'Failed to edit relationship: the role must be text of at most 60 characters.' } });
                 break;
               }
-              const markKeyError = validateMarkKey(payload.markKey, payload);
-              if (markKeyError) {
-                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: ${markKeyError}` } });
+              const linkError = validateRelationshipEnds(payload) ?? validateMarkKey(payload.markKey, payload);
+              if (linkError) {
+                this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to edit relationship: ${linkError}` } });
                 break;
               }
               await this.queueEdit(panelKey, () =>

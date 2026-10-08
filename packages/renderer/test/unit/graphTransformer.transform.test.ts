@@ -376,3 +376,19 @@ describe('transformDomain — ends spelled in another case (#133 L4)', () => {
     expect(edges.map((e) => [e.source, e.target])).toEqual([['fact_order', 'dim_customer']]);
   });
 });
+
+describe('transformDomain — self-references (#133 L3)', () => {
+  it('two self-loops on one node get loopIndex 0 and 1, by edge id, and nest', () => {
+    const employee = model('employee', { columns: [column('employee_id', { isPrimaryKey: true }), column('manager_id'), column('mentor_id')] });
+    const loops = [
+      { fromModel: 'employee', fromColumn: 'mentor_id', toModel: 'employee', toColumn: 'employee_id', cardinality: 'many-to-one' as const },
+      { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id', cardinality: 'many-to-one' as const },
+    ];
+    const edges = fkEdges(transformDomain(domain({ models: [employee], relationships: loops })));
+    expect(edges.map((e) => [e.data!.fromColumn, e.data!.isSelfLoop, e.data!.loopIndex])).toEqual([
+      ['mentor_id', true, 1],
+      ['manager_id', true, 0],
+    ]);
+    expect(fkEdges(transformDomain(domain({ models: [employee], relationships: [...loops].reverse() }))).find((e) => e.data!.fromColumn === 'mentor_id')!.data!.loopIndex).toBe(1);
+  });
+});

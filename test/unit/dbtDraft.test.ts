@@ -302,6 +302,19 @@ describe('buildDbtDraft', () => {
     expect([key('dim_customers').isPrimaryKey, key('dim_customers').isForeignKey, key('fct_orders').isForeignKey]).toEqual([true, undefined, true]);
   });
 
+  it('draws a self-referencing relationships test, keys flagged (#133 L3)', () => {
+    const y = emptyYml();
+    y.models.set('employee', ymlModel('employee', 'marts', [['employee_id', 'int'], ['manager_id', 'int']]));
+    y.relationshipTests = [{ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' }];
+    y.uniqueColumns = new Map([['employee', new Set(['employee_id'])]]);
+    const draft = buildDbtDraft({ modelNames: ['employee'], ymlData: y, libraryHas: () => false });
+    expect(draft.relationships).toEqual([
+      { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id', cardinality: 'many-to-one' },
+    ]);
+    const cols = draft.newModels[0].columns!;
+    expect(cols.map((c) => [c.name, !!c.isPrimaryKey, !!c.isForeignKey])).toEqual([['employee_id', true, false], ['manager_id', false, true]]);
+  });
+
   it('creates new models, reuses library ones and joins them', () => {
     const draft = buildDbtDraft({
       modelNames: ['fct_orders', 'dim_customers', 'dim_products'],

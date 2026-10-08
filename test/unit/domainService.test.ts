@@ -1,3 +1,4 @@
+import { linkKey } from '@erd-studio/core';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -1018,6 +1019,16 @@ describe('DomainService', () => {
       const result = derivePhysicalRelationships(tests, models, unique, new Map());
 
       expect(result[0].cardinality).toBe('one-to-many');
+    });
+
+    it('a self-reference: manager_id → employee_id is many-to-one, and its link matches the logical one (#133 L3)', () => {
+      const tests: ManifestRelationshipTest[] = [
+        { fromModel: 'Employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id' },
+      ];
+      const unique = new Map([['employee', new Set(['employee_id'])]]);
+      const result = derivePhysicalRelationships(tests, new Set(['employee']), unique, new Map());
+      expect(result).toEqual([{ fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id', cardinality: 'many-to-one' }]);
+      expect(linkKey(result[0])).toBe(linkKey({ fromModel: 'employee', fromColumn: 'employee_id', toModel: 'employee', toColumn: 'manager_id' }));
     });
 
     it('derives many-to-many when neither column has unique test', () => {

@@ -347,6 +347,18 @@ export function transformDomain(
     }
   }
 
+  // Several self-loops on one node nest rather than cross (#133 L3): each
+  // gets its place among that node's loops, by edge id, so it is stable.
+  const loopsByNode = new Map<string, FkFlowEdge[]>();
+  for (const edge of edges) {
+    if (edge.type !== 'fk' || !(edge as FkFlowEdge).data?.isSelfLoop) continue;
+    loopsByNode.set(edge.source, [...(loopsByNode.get(edge.source) ?? []), edge as FkFlowEdge]);
+  }
+  for (const loops of loopsByNode.values()) {
+    [...loops].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .forEach((edge, loopIndex) => { edge.data = { ...edge.data!, loopIndex }; });
+  }
+
   // --- Annotations ----------------------------------------------------------
 
   const annotations = domain.viewConfig.annotations ?? [];

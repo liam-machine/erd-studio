@@ -150,6 +150,11 @@ export type FkEdgeData = {
   readOnly?: boolean;
   /** True when source === target — renders a loop arc over the top-right corner. */
   isSelfLoop?: boolean;
+  /**
+   * For a self-loop: its place among the node's self-loops, by edge id (#133
+   * L3). Each one is drawn wider than the last, so loops nest, never cross.
+   */
+  loopIndex?: number;
   /** Index signature required by React Flow's Edge generic. */
   [key: string]: unknown;
 };

@@ -231,7 +231,8 @@ export function DetailPanel() {
       return { outgoing: [] as DisplayRelationship[], incoming: [] as DisplayRelationship[] };
     }
     const outgoing = domain.relationships.filter((r) => r.fromModel === selectedNode);
-    const incoming = domain.relationships.filter((r) => r.toModel === selectedNode);
+    // A self-reference is listed once, under outgoing (#133 L3).
+    const incoming = domain.relationships.filter((r) => r.toModel === selectedNode && r.fromModel !== selectedNode);
     return { outgoing, incoming };
   }, [domain, selectedNode]);
 
@@ -451,8 +452,8 @@ export function DetailPanel() {
                 }}
                 title={viewer ? undefined : 'Click to edit cardinality'}
               >
-                <span className="detail-panel__rel-direction" title="Outgoing FK">
-                  →
+                <span className="detail-panel__rel-direction" title={rel.toModel === rel.fromModel ? 'Self-reference' : 'Outgoing FK'}>
+                  {rel.toModel === rel.fromModel ? '↻' : '→'}
                 </span>
                 <span className="detail-panel__rel-columns">
                   <span className="detail-panel__rel-local" title={rel.fromColumn}>
