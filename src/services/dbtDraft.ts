@@ -16,8 +16,9 @@
 
 import * as path from 'path';
 
+import { canonicalRelationship, linkKey } from '@erd-studio/core';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
-import type { Cardinality, ColumnDef, Relationship, SemanticModel } from '../types/semantic';
+import type { ColumnDef, Relationship, SemanticModel } from '../types/semantic';
 import type { YmlData } from '../types/ymlData';
 import type { ManifestData } from '../types/manifest';
 import { validateModelNameSafety } from '../providers/payloadValidation';
@@ -483,6 +484,7 @@ export function markDraftKeys(
   }
   const pk = !hasComposite && uniqueCols.size === 1 ? [...uniqueCols][0] : undefined;
   const fks = new Set(relationships
+    .map((r) => canonicalRelationship(r))
     .filter((r) => normaliseName(r.fromModel) === key)
     .map((r) => normaliseName(r.fromColumn)));
 
@@ -492,7 +494,8 @@ export function markDraftKeys(
       const col = { ...c };
       const name = normaliseName(c.name);
       if (pk === name && col.isPrimaryKey === undefined) { col.isPrimaryKey = true; }
-      if (fks.has(name) && col.isForeignKey === undefined) { col.isForeignKey = true; }
+      // A key is never flagged a foreign key here: it would turn later drags round.
+      if (fks.has(name) && col.isForeignKey === undefined && !col.isPrimaryKey) { col.isForeignKey = true; }
       return col;
     }),
   };
@@ -508,8 +511,9 @@ export function markDraftKeys(
  * domain (existing or added), deduped against the domain's relationships.
  *
  * Cardinality comes from `derivePhysicalRelationships()` (the physical stage's
- * inference from `unique` / `unique_combination_of_columns` tests), narrowed
- * to what a relationship test can mean for a draft: both ends unique is
+ * inference from `unique` / `unique_combination_of_columns` tests), so a test
+ * declared on the dimension reads as `one-to-many` and is stored on the fact
+ * (`canonicalRelationship`, #133). It is then narrowed: both ends unique is
  * `one-to-one`, anything else `many-to-one` (the test names the "one" side).
  * Endpoints use the spelling of the names passed in.
  */
@@ -522,7 +526,7 @@ export function relationshipsForAddedModels(
 ): Relationship[] {
   const added = new Set(addedNames.map(normaliseName));
   const domainNames = new Set<string>([...existingNamesInDomain, ...addedNames]);
-  const seen = new Set(existingRelationships.map(testKey));
+  const seen = new Set(existingRelationships.map(linkKey));
 
   const derived = derivePhysicalRelationships(
     [...tests],
@@ -534,16 +538,13 @@ export function relationshipsForAddedModels(
   const out: Relationship[] = [];
   for (const rel of derived) {
     if (!added.has(normaliseName(rel.fromModel)) && !added.has(normaliseName(rel.toModel))) { continue; }
-    const key = testKey(rel);
+    const key = linkKey(rel);
     if (seen.has(key)) { continue; }
     seen.add(key);
-    const cardinality: Cardinality = rel.cardinality === 'one-to-one' ? 'one-to-one' : 'many-to-one';
+    const { fromModel, fromColumn, toModel, toColumn, cardinality } = canonicalRelationship(rel);
     out.push({
-      fromModel: rel.fromModel,
-      fromColumn: rel.fromColumn,
-      toModel: rel.toModel,
-      toColumn: rel.toColumn,
-      cardinality,
+      fromModel, fromColumn, toModel, toColumn,
+      cardinality: cardinality === 'one-to-one' ? 'one-to-one' : 'many-to-one',
     });
   }
   return out;

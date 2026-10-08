@@ -291,6 +291,17 @@ describe('markDraftKeys', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildDbtDraft', () => {
+  it('stores a test declared on the dimension on the fact, with no FK flag on the key (#133)', () => {
+    const y = shopYml();
+    y.relationshipTests = [{ fromModel: 'dim_customers', fromColumn: 'customer_id', toModel: 'fct_orders', toColumn: 'customer_id' }];
+    const draft = buildDbtDraft({ modelNames: ['fct_orders', 'dim_customers'], ymlData: y, libraryHas: () => false });
+    expect(draft.relationships).toEqual([
+      { fromModel: 'fct_orders', fromColumn: 'customer_id', toModel: 'dim_customers', toColumn: 'customer_id', cardinality: 'many-to-one' },
+    ]);
+    const key = (m: string) => draft.newModels.find((x) => x.name === m)!.columns!.find((c) => c.name === 'customer_id')!;
+    expect([key('dim_customers').isPrimaryKey, key('dim_customers').isForeignKey, key('fct_orders').isForeignKey]).toEqual([true, undefined, true]);
+  });
+
   it('creates new models, reuses library ones and joins them', () => {
     const draft = buildDbtDraft({
       modelNames: ['fct_orders', 'dim_customers', 'dim_products'],
