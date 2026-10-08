@@ -45,3 +45,12 @@ describe('edgeHoverText', () => {
     })).toBe('dim_project.parent_project_id → dim_project.project_id · many to one');
   });
 });
+
+describe('edgeHoverText — composite foreign key (#133 L2)', () => {
+  it('lists the pairs as one end each', () => {
+    expect(edgeHoverText({
+      fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', cardinality: 'many-to-one', role: 'as of',
+      pairs: [{ fromColumn: 'customer_hk', toColumn: 'customer_hk' }, { fromColumn: 'as_of_date', toColumn: 'load_date' }],
+    })).toBe('pit_customer (customer_hk, as_of_date) → sat_customer (customer_hk, load_date) · many to one · role: as of');
+  });
+});

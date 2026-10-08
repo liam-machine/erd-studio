@@ -223,6 +223,44 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Composite foreign keys: the other column pairs (#133 L2)
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__pair-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.new-fk-dialog__pair-column {
+  flex: 1;
+  min-width: 0;
+}
+
+.new-fk-dialog__pair-arrow {
+  color: var(--dim-fg);
+}
+
+.new-fk-dialog__pair-remove {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--dim-fg);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.new-fk-dialog__pair-remove:hover {
+  color: var(--error-fg);
+}
+
+.new-fk-dialog__add-pair {
+  align-self: flex-start;
+  margin-left: 0;
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
    Preview
    --------------------------------------------------------------------------- */
 

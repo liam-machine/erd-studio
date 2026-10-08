@@ -104,6 +104,8 @@ export interface EdgeHoverInput {
   cardinality: string;
   role?: string;
   discrepancyStatus?: 'extra' | 'missing' | 'cardinality-mismatch';
+  /** A composite foreign key's column pairs (#133 L2). */
+  pairs?: ReadonlyArray<{ fromColumn: string; toColumn: string }>;
 }
 
 /**
@@ -113,8 +115,13 @@ export interface EdgeHoverInput {
  * that can carry this.
  */
 export function edgeHoverText(edge: EdgeHoverInput): string {
+  // A composite lists its pairs: `pit (hk, as_of_date) → sat (hk, load_date)`.
+  const composite = edge.pairs && edge.pairs.length > 1;
+  const ends = composite
+    ? `${edge.fromModel} (${edge.pairs!.map((p) => p.fromColumn).join(', ')}) \u2192 ${edge.toModel} (${edge.pairs!.map((p) => p.toColumn).join(', ')})`
+    : `${edge.fromModel}.${edge.fromColumn} \u2192 ${edge.toModel}.${edge.toColumn}`;
   return [
-    `${edge.fromModel}.${edge.fromColumn} \u2192 ${edge.toModel}.${edge.toColumn}`,
+    ends,
     edge.cardinality.replace(/-/g, ' '),
     edge.role ? `role: ${edge.role}` : '',
     edge.discrepancyStatus ? DISCREPANCY_PHRASE[edge.discrepancyStatus] : '',

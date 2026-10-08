@@ -117,6 +117,20 @@
   white-space: nowrap;
 }
 
+/* Composite foreign key chip, under the midpoint: "⧉ 2" column pairs (#133 L2) */
+.fk-edge__composite {
+  position: absolute;
+  pointer-events: none;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: var(--panel-bg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 /* Cardinality mismatch midpoint badge */
 .fk-edge__mismatch-badge {
   position: absolute;

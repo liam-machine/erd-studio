@@ -137,3 +137,14 @@ describe('keysContradictionWarning — the dialog\'s keys-win warning (#133)', (
     expect(keysContradictionWarning(rel, [MODELS[0], { name: 'fct_order', columns: [col('customer_key')] }])).toBeNull();
   });
 });
+
+describe('keysContradictionWarning — a composite, read on its column sets (#133 L2)', () => {
+  it('warns when the many end\'s columns together are its whole key and the other end\'s are not', () => {
+    const models = [SAT, { name: 'pit_customer', columns: [col('pit_id', { pk: true }), col('customer_hk'), col('as_of_date')] }];
+    const rel = { fromModel: 'sat_customer', fromColumn: 'customer_hk', toModel: 'pit_customer', toColumn: 'customer_hk', cardinality: 'many-to-one' as const };
+    const pairs = [{ fromColumn: 'customer_hk', toColumn: 'customer_hk' }, { fromColumn: 'load_date', toColumn: 'as_of_date' }];
+    expect(keysContradictionWarning(rel, models, pairs)).toMatch(/^sat_customer\.\(customer_hk, load_date\) is sat_customer's key/);
+    // The first pair alone is only part of sat_customer's key: nothing to say.
+    expect(keysContradictionWarning(rel, models)).toBeNull();
+  });
+});

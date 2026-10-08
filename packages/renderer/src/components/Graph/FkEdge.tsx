@@ -238,8 +238,9 @@ function FkEdgeComponent({
     : `fk-edge--${stage ?? 'logical'}`;
 
   const edgeTitle = edgeHoverText({
-    fromModel, fromColumn, toModel, toColumn, cardinality, role, discrepancyStatus,
+    fromModel, fromColumn, toModel, toColumn, cardinality, role, discrepancyStatus, pairs: data.pairs,
   });
+  const compositeSize = data.pairs && data.pairs.length > 1 ? data.pairs.length : 0;
   // Cardinality labels at each end:
   // - many-to-one: * at source, 1 at target
   // - one-to-one: 1 at both ends
@@ -337,6 +338,17 @@ function FkEdgeComponent({
             }}
           >
             {role}
+          </span>
+        )}
+        {compositeSize > 0 && (
+          <span
+            className={`fk-edge__composite ${labelColorClass}${dimmed ? ' fk-edge__label--dimmed' : ''}`}
+            style={{
+              transform: `translate(-50%, calc(100% + 6px)) translate(${midX}px, ${midY}px)`,
+            }}
+            title={`Composite foreign key: ${compositeSize} column pairs`}
+          >
+            ⧉ {compositeSize}
           </span>
         )}
         {discrepancyStatus === 'cardinality-mismatch' && (

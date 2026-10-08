@@ -7,7 +7,7 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { AnnotationColor, Cardinality, DbtKeyHint, Layer, Meta, ModelLoadError, ModelRole, Stage } from '@erd-studio/core';
+import type { AnnotationColor, Cardinality, ColumnPair, DbtKeyHint, Layer, Meta, ModelLoadError, ModelRole, Stage } from '@erd-studio/core';
 import type { LayerConfig } from '@erd-studio/core';
 import type { ModelDiscrepancy } from '@erd-studio/core';
 import type { PhysicalProvenance } from '@erd-studio/core';
@@ -140,6 +140,13 @@ export type FkEdgeData = {
   cardinality: Cardinality;
   /** Optional label for the link, e.g. `ship date`, drawn at the edge's midpoint. */
   role?: string;
+  /**
+   * A composite foreign key's column pairs (two or more; #133 L2). Absent for
+   * a single-column link; `fromColumn` / `toColumn` are always the first pair.
+   */
+  pairs?: ColumnPair[];
+  /** The composite's `compositeKey` name, alongside `pairs`. */
+  compositeKey?: string;
   /** Stage of the owning domain canvas — drives CSS colour class. */
   stage?: Stage;
   /** Discrepancy status for ghost/extra/mismatch edges. */

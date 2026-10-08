@@ -20,6 +20,7 @@ import { useEditorStore, useEditorStoreApi } from '../store/editorStore';
 import { useColumnExpansion } from '../hooks/useColumnExpansion';
 import { transformDomain } from '../lib/graphTransformer';
 import { applyNodeOverlays } from '../lib/nodeOverlays';
+import { columnPairs } from '../lib/relationshipDisplayKey';
 import type { ModelFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 
 export interface UseCanvasGraphOptions {
@@ -199,9 +200,12 @@ export function useCanvasGraph({
     (_event: React.MouseEvent, edge: FkFlowEdge | AnnotationFlowEdge) => {
       if (edge.type !== 'fk') return; // Annotation link edges are not interactive
       if (edge.data) {
+        // Every column of a composite foreign key, on both nodes (#133 L2).
         const cols = new Set<string>();
-        cols.add(`${edge.data.fromModel}:${edge.data.fromColumn}`);
-        cols.add(`${edge.data.toModel}:${edge.data.toColumn}`);
+        for (const pair of columnPairs(edge.data)) {
+          cols.add(`${edge.data.fromModel}:${pair.fromColumn}`);
+          cols.add(`${edge.data.toModel}:${pair.toColumn}`);
+        }
         setHighlightedColumns(cols);
         // Clear node selection and activate edge dimming
         selectNode(null);

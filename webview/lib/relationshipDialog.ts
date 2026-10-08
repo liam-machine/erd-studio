@@ -82,3 +82,21 @@ export function markKeyLabel(model: string, columns: readonly string[]): string 
     ? `Mark ${model}.${columns[0]} as ${model}'s primary key`
     : `Mark (${columns.join(', ')}) as ${model}'s primary key`;
 }
+
+// Composite foreign keys (#133 L2)
+
+export const ADD_PAIR_LABEL = '+ Add another column pair';
+export const PAIR_INCOMPLETE = 'Pick both columns';
+export const COMPOSITE_MANY_TO_MANY_TITLE = "A composite key can't be many-to-many";
+export const COMPOSITE_MANY_TO_MANY_ERROR = "A composite key can't be many-to-many — pick many-to-one or one-to-one";
+export const ABSORB_HINT = 'Already a relationship — it will become part of this key.';
+
+/** A pair's column already used by an earlier pair at the same end. */
+export function pairColumnUsed(column: string): string {
+  return `${column} is already used in this key`;
+}
+
+/** The dialog's title: "New Relationship", or "New Composite Relationship" with two or more pairs. */
+export function dialogTitle(editing: boolean, pairCount: number): string {
+  return `${editing ? 'Edit' : 'New'} ${pairCount > 1 ? 'Composite ' : ''}Relationship`;
+}

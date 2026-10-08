@@ -64,6 +64,8 @@ export interface FkDialogEditData {
   cardinality: import('../../src/types/semantic').Cardinality;
   /** Optional label, e.g. `ship date`. */
   role?: string;
+  /** A composite foreign key's column pairs, the first being fromColumn → toColumn (#133 L2). */
+  pairs?: import('@erd-studio/core').ColumnPair[];
 }
 
 export interface EditorState extends CanvasState {

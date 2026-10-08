@@ -9,7 +9,7 @@
  * take the drag's order as the answer.
  */
 
-import { contradictsKeys, keyEvidenceDetail, linkEnd, orientLink } from '@erd-studio/core';
+import { contradictsKeysOf, keyEvidenceDetail, linkEnd, orientLink } from '@erd-studio/core';
 import type { KeyColumn, LinkEnd, Orientation } from '@erd-studio/core';
 
 import type { DisplayModel } from '../../src/types/display';
@@ -78,14 +78,20 @@ export function orientDraggedRelationship(prefill: FkDialogPrefill, models: Mode
 export function keysContradictionWarning(
   rel: { fromModel: string; fromColumn: string; toModel: string; toColumn: string; cardinality: Cardinality },
   models: Models,
+  /** A composite's column pairs, the first being rel's (#133 L2): read on the column sets. */
+  pairs?: ReadonlyArray<{ fromColumn: string; toColumn: string }>,
 ): string | null {
   if (!rel.fromModel || !rel.fromColumn || !rel.toModel || !rel.toColumn) return null;
-  if (!contradictsKeys(rel, (name) => modelNamed(models, name))) return null;
-  const evidence = keyEvidenceDetail(modelNamed(models, rel.fromModel), [rel.fromColumn]);
+  const members = (pairs && pairs.length > 1 ? pairs : [rel]).map((p) => ({ ...rel, fromColumn: p.fromColumn, toColumn: p.toColumn }));
+  if (!contradictsKeysOf(members, (name) => modelNamed(models, name))) return null;
+  const end = (model: string, cols: string[]): string => (cols.length === 1 ? `${model}.${cols[0]}` : `${model}.(${cols.join(', ')})`);
+  const from = end(rel.fromModel, members.map((m) => m.fromColumn));
+  const to = end(rel.toModel, members.map((m) => m.toColumn));
+  const evidence = keyEvidenceDetail(modelNamed(models, rel.fromModel), members.map((m) => m.fromColumn));
   const why = evidence.source === 'dbt'
-    ? `dbt tests ${rel.fromModel}.${rel.fromColumn} as unique`
-    : `${rel.fromModel}.${rel.fromColumn} is ${rel.fromModel}'s key`;
+    ? `dbt tests ${from} as unique`
+    : `${from} is ${rel.fromModel}'s key`;
   return `${why}, so each value appears only once — it can't be the ` +
-    `"many" side. ${rel.toModel}.${rel.toColumn} is probably the source column instead; if you save it this way, Move ` +
+    `"many" side. ${to} is probably the source ${members.length > 1 ? 'columns' : 'column'} instead; if you save it this way, Move ` +
     'Relationships to Model Library will turn it round.';
 }

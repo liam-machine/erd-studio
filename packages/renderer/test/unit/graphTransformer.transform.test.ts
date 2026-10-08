@@ -392,3 +392,44 @@ describe('transformDomain — self-references (#133 L3)', () => {
     expect(fkEdges(transformDomain(domain({ models: [employee], relationships: [...loops].reverse() }))).find((e) => e.data!.fromColumn === 'mentor_id')!.data!.loopIndex).toBe(1);
   });
 });
+
+describe('transformDomain — composite foreign keys (#133 L2)', () => {
+  const pit = model('pit_customer', { columns: [column('customer_hk'), column('as_of_date'), column('other')] });
+  const sat = model('sat_customer', { columns: [column('customer_hk'), column('load_date')] });
+  const member = (fromColumn: string, toColumn: string): DisplayRelationship =>
+    ({ fromModel: 'pit_customer', fromColumn, toModel: 'sat_customer', toColumn, cardinality: 'many-to-one', compositeKey: 'fk_sat_customer', role: 'as of' });
+
+  it('a group becomes one edge with its pairs and a joined id, in first-member order', () => {
+    const single = { fromModel: 'pit_customer', fromColumn: 'other', toModel: 'sat_customer', toColumn: 'customer_hk', cardinality: 'many-to-one' as const };
+    const edges = fkEdges(transformDomain(domain({
+      models: [pit, sat], relationships: [member('customer_hk', 'customer_hk'), single, member('as_of_date', 'load_date')],
+    })));
+    expect(edges.map((e) => e.id)).toEqual([
+      'fk-pit_customer-customer_hk+as_of_date-sat_customer-customer_hk+load_date',
+      'fk-pit_customer-other-sat_customer-customer_hk',
+    ]);
+    expect(edges[0].data).toMatchObject({
+      fromColumn: 'customer_hk', toColumn: 'customer_hk', compositeKey: 'fk_sat_customer', role: 'as of',
+      pairs: [{ fromColumn: 'customer_hk', toColumn: 'customer_hk' }, { fromColumn: 'as_of_date', toColumn: 'load_date' }],
+    });
+    expect(edges[1].data).not.toHaveProperty('pairs');
+  });
+
+  it('a composite discrepancy colours the one edge; a missing composite is one ghost edge', () => {
+    const report = {
+      sourceStage: 'logical', targetStage: 'physical', models: [], summary: {},
+      relationships: [
+        { fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', status: 'extra',
+          pairs: [{ fromColumn: 'customer_hk', toColumn: 'customer_hk' }, { fromColumn: 'as_of_date', toColumn: 'load_date' }] },
+      ],
+    } as unknown as DiscrepancyReport;
+    const drawn = fkEdges(transformDomain(domain({ models: [pit, sat], relationships: [member('customer_hk', 'customer_hk'), member('as_of_date', 'load_date')] }), { discrepancyReport: report }));
+    expect(drawn.map((e) => e.data!.discrepancyStatus)).toEqual(['extra']);
+
+    const missing = { ...report, relationships: [{ ...report.relationships[0], status: 'missing', targetCardinality: 'many-to-one', compositeKey: 'fk_sat_customer' }] } as unknown as DiscrepancyReport;
+    const ghosts = fkEdges(transformDomain(domain({ models: [pit, sat] }), { discrepancyReport: missing }));
+    expect(ghosts.map((e) => [e.id, e.data!.pairs?.length, e.data!.discrepancyStatus])).toEqual([
+      ['ghost-fk-pit_customer-customer_hk+as_of_date-sat_customer-customer_hk+load_date', 2, 'missing'],
+    ]);
+  });
+});

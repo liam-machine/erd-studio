@@ -198,7 +198,7 @@ export function ContextMenu() {
   const handleEditClick = useCallback(() => {
     if (!contextMenu || contextMenu.type !== 'edge') return;
 
-    const { fromModel, fromColumn, toModel, toColumn, cardinality, role } = contextMenu.data;
+    const { fromModel, fromColumn, toModel, toColumn, cardinality, role, pairs } = contextMenu.data;
     const editData: FkDialogEditData = {
       fromModel,
       fromColumn,
@@ -206,6 +206,8 @@ export function ContextMenu() {
       toColumn,
       cardinality,
       ...(role ? { role } : {}),
+      // A composite foreign key opens with all its pairs (#133 L2).
+      ...(pairs && pairs.length > 1 ? { pairs: pairs.map((p) => ({ ...p })) } : {}),
     };
     openFkDialogForEdit(editData);
     closeContextMenu();
@@ -406,13 +408,13 @@ export function ContextMenu() {
         <div className="context-menu__row">
           <span className="context-menu__label">From</span>
           <span className="context-menu__value">
-            {edge.fromModel}.<strong>{edge.fromColumn}</strong>
+            {edge.fromModel}.<strong>{edge.pairs && edge.pairs.length > 1 ? `(${edge.pairs.map((p) => p.fromColumn).join(', ')})` : edge.fromColumn}</strong>
           </span>
         </div>
         <div className="context-menu__row">
           <span className="context-menu__label">To</span>
           <span className="context-menu__value">
-            {edge.toModel}.<strong>{edge.toColumn}</strong>
+            {edge.toModel}.<strong>{edge.pairs && edge.pairs.length > 1 ? `(${edge.pairs.map((p) => p.toColumn).join(', ')})` : edge.toColumn}</strong>
           </span>
         </div>
 
