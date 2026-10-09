@@ -289,8 +289,10 @@ describe('doctor via main', () => {
       ].join('\n'),
     );
     const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    // `reason` has both keys: its data_type is ignored and never renamed, so it
+    // is listed apart from the columns the next write renames.
     expect(r.erd.dataTypeAliasFiles).toEqual([
-      { name: 'fct_refund', file: '.erd-studio/logical-models/gold/fct_refund.yml', columns: ['amount', 'reason'] },
+      { name: 'fct_refund', file: '.erd-studio/logical-models/gold/fct_refund.yml', columns: ['amount'], ignored: ['reason'] },
     ]);
     expect(r.erd.unreadableModelFiles).toEqual([]);
     expect(r.nextSteps).toEqual(before.nextSteps);
@@ -303,7 +305,52 @@ describe('doctor via main', () => {
       env: cleanEnv,
     });
     expect(code).toBe(0);
-    expect(out).toContain(".erd-studio/logical-models/gold/fct_refund.yml: amount, reason use dbt's data_type");
+    const lines = out.split('\n');
+    expect(lines).toContain(
+      "! .erd-studio/logical-models/gold/fct_refund.yml: amount uses dbt's data_type — read as dataType; "
+      + 'the next edit of this model on the canvas writes it back as dataType',
+    );
+    expect(lines).toContain(
+      '! .erd-studio/logical-models/gold/fct_refund.yml: reason has both dataType and data_type — data_type is ignored; delete it',
+    );
+    expect(out.split('Next steps:')[1]).not.toContain('data_type');
+  });
+
+  it('counts the data_type columns and shortens a long list (#144)', async () => {
+    const root = copyFixture('dbt-project');
+    const renamed = ['payment_id', 'customer_key', 'order_key', 'amount', 'fee', 'currency', 'paid_at', 'settled_at'];
+    fs.writeFileSync(
+      path.join(root, '.erd-studio/logical-models/fct_payment.yml'),
+      [
+        'name: fct_payment',
+        'columns:',
+        ...renamed.flatMap((c) => [`  - name: ${c}`, '    data_type: TEXT']),
+        ...['reason', 'note'].flatMap((c) => [`  - name: ${c}`, '    dataType: VARCHAR', '    data_type: TEXT']),
+        '',
+      ].join('\n'),
+    );
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', noDbt: true, env: cleanEnv, homeDir: home });
+    expect(r.erd.dataTypeAliasFiles).toEqual([
+      { name: 'fct_payment', file: '.erd-studio/logical-models/fct_payment.yml', columns: renamed, ignored: ['reason', 'note'] },
+    ]);
+
+    let out = '';
+    await main(['doctor', '--project', root, '--no-dbt'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: root,
+      env: cleanEnv,
+    });
+    const lines = out.split('\n');
+    expect(lines).toContain(
+      "! .erd-studio/logical-models/fct_payment.yml: 8 columns use dbt's data_type "
+      + '(payment_id, customer_key, order_key, amount, fee and 3 more) — read as dataType; '
+      + 'the next edit of this model on the canvas writes them back as dataType',
+    );
+    expect(lines).toContain(
+      '! .erd-studio/logical-models/fct_payment.yml: 2 columns have both dataType and data_type (reason, note) '
+      + '— each data_type is ignored; delete them',
+    );
   });
 
   it('prints JSON and exits 0, also for a folder with no project', async () => {

@@ -1271,7 +1271,7 @@ describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
   ].join('\n');
   const RENAMED = DBT_SPELLED.split('data_type:').join('dataType:');
 
-  it('renames every column\'s data_type to dataType in place on the next save, keeping its comment', () => {
+  it('renames every column\'s data_type to dataType in place on the next write, keeping its comment', () => {
     fs.writeFileSync(file, DBT_SPELLED);
     const model = service.getModel('fct_order')!;
     expect(model.columns!.map((c) => c.dataType)).toEqual(['INT', 'DECIMAL(18,2)']);
@@ -1315,13 +1315,27 @@ describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
     expect(fs.readFileSync(file, 'utf-8')).toBe(`${yml}description: Orders\n`);
   });
 
+  it('renames a data_type the reader uses when the dataType beside it is empty, dropping the empty key', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: status\n    # typed by dbt\n    dataType:\n    data_type: TEXT\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns![0].dataType).toBe('TEXT');
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: ['status'], ignored: [] });
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(
+      'name: fct_order\ncolumns:\n  - name: status\n    # typed by dbt\n    dataType: TEXT\ndescription: Orders\n',
+    );
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: [] });
+  });
+
   it('leaves a file already spelled dataType byte-identical on a save that changes nothing', () => {
     fs.writeFileSync(file, RENAMED);
     service.saveModel(service.getModel('fct_order')!);
     expect(fs.readFileSync(file, 'utf-8')).toBe(RENAMED);
   });
 
-  it('names the columns that use data_type, in file order, for doctor', () => {
+  it('names the columns that use data_type, in file order, apart from the ones whose data_type is ignored, for doctor', () => {
     fs.writeFileSync(file, [
       'name: fct_order',
       'columns:',
@@ -1334,13 +1348,20 @@ describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
       '    data_type: DECIMAL(18,2)',
       '',
     ].join('\n'));
-    expect(service.dataTypeAliasColumns('fct_order')).toEqual(['status', 'amount']);
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: ['amount'], ignored: ['status'] });
 
+    // A write renames exactly the listed columns; the ignored one stays listed.
+    const model = service.getModel('fct_order')!;
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: ['status'] });
+
+    const none = { columns: [], ignored: [] };
     fs.writeFileSync(file, RENAMED);
-    expect(service.dataTypeAliasColumns('fct_order')).toEqual([]);
-    expect(service.dataTypeAliasColumns('no_such_model')).toEqual([]);
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual(none);
+    expect(service.dataTypeAliasColumns('no_such_model')).toEqual(none);
     fs.writeFileSync(file, 'name: fct_order\ncolumns:\n  - name: a\n    data_type: [INT\n');
-    expect(service.dataTypeAliasColumns('fct_order')).toEqual([]);
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual(none);
   });
 });
 

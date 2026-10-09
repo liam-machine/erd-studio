@@ -1053,17 +1053,28 @@ export class LogicalModelService {
   }
 
   /**
-   * Turn dbt's `data_type:` into `dataType:` on a column that has no
-   * `dataType` key (#144). The reader takes the type from `data_type` then,
-   * so renaming the key where it stands — same position, value, style and
-   * comments — is what lets the sync that follows find the type it is about
-   * to write instead of adding a second key beside it. A `data_type` next to
-   * a `dataType` is left alone: the reader ignores it, and it is the user's.
+   * Turn dbt's `data_type:` into `dataType:` on a column whose type the reader
+   * takes from `data_type` (#144) — see {@link dataTypeAliasFate}. Renaming
+   * the key where it stands — same position, value, style and comments — is
+   * what lets the sync that follows find the type it is about to write
+   * instead of adding a second key beside it. An empty `dataType:` beside it
+   * holds nothing, so it gives way (any comment on it moves to the renamed
+   * key). A `data_type` next to a `dataType` that holds a value is left
+   * alone: the reader ignores it, and it is the user's.
    */
   private renameDataTypeAlias(node: YAMLMap): void {
-    if (node.has('dataType')) return;
-    const pair = node.items.find((p) => keyIs(p, DATA_TYPE_ALIAS));
-    if (!pair) return;
+    if (this.dataTypeAliasFate(node) !== 'rename') return;
+    const pair = node.items.find((p) => keyIs(p, DATA_TYPE_ALIAS))!;
+    const empty = node.items.findIndex((p) => keyIs(p, 'dataType'));
+    if (empty !== -1) {
+      const [gone] = node.items.splice(empty, 1);
+      if (isScalar(gone.key) && gone.key.commentBefore && isScalar(pair.key) && !pair.key.commentBefore) {
+        pair.key.commentBefore = gone.key.commentBefore;
+      }
+      if (isScalar(gone.value) && gone.value.comment && isScalar(pair.value) && !pair.value.comment) {
+        pair.value.comment = gone.value.comment;
+      }
+    }
     if (isScalar(pair.key)) {
       pair.key.value = 'dataType';
     } else {
@@ -1072,27 +1083,44 @@ export class LogicalModelService {
   }
 
   /**
-   * The columns of `name`'s file that spell their type dbt's way
-   * (`data_type:`), in file order (#144); `erd-studio doctor` lists them. Read
-   * from the same YAML document a save edits, so it names every key
-   * {@link renameDataTypeAlias} would rename, plus any `data_type` sitting
-   * beside a `dataType` (kept, and ignored by the reader). Empty for a
-   * missing, unparseable or unsafe file — those are reported elsewhere.
+   * What a write of this column does with its `data_type:` key (#144) — the
+   * one rule {@link renameDataTypeAlias} and doctor share, matching core's
+   * reader: `'rename'` when the reader takes the type from it (no `dataType`,
+   * or an empty one), `'ignored'` when a `dataType` holding a value (even
+   * `''`) wins and the key is kept as written, null with no `data_type`.
    */
-  dataTypeAliasColumns(name: string): string[] {
+  private dataTypeAliasFate(node: YAMLMap): 'rename' | 'ignored' | null {
+    if (!node.items.some((p) => keyIs(p, DATA_TYPE_ALIAS))) return null;
+    const own = node.items.find((p) => keyIs(p, 'dataType'));
+    const empty = !own || own.value === null || own.value === undefined || (isScalar(own.value) && own.value.value === null);
+    return empty ? 'rename' : 'ignored';
+  }
+
+  /**
+   * The columns of `name`'s file that spell their type dbt's way
+   * (`data_type:`), in file order (#144); `erd-studio doctor` lists them.
+   * Read from the same YAML document a write edits: `columns` are the keys
+   * {@link renameDataTypeAlias} renames the next time ERD Studio writes this
+   * file, `ignored` the `data_type` keys beside a `dataType` that wins (kept
+   * as written, so they stay listed until the user deletes them). Both empty
+   * for a missing, unparseable or unsafe file — those are reported elsewhere.
+   */
+  dataTypeAliasColumns(name: string): { columns: string[]; ignored: string[] } {
+    const found = { columns: [] as string[], ignored: [] as string[] };
     const filePath = this.resolveModelPath(name);
     const doc = filePath === null ? null : this.loadEditableDocument(filePath);
-    if (!doc || !isMap(doc.contents)) return [];
+    if (!doc || !isMap(doc.contents)) return found;
     const resolve = (node: unknown): unknown => (isAlias(node) ? node.resolve(doc) : node);
     const columns = resolve(doc.contents.get('columns', true));
-    if (!isSeq(columns)) return [];
-    const found: string[] = [];
+    if (!isSeq(columns)) return found;
     columns.items.forEach((item, i) => {
       const col = resolve(item);
-      if (!isMap(col) || !col.items.some((p) => keyIs(p, DATA_TYPE_ALIAS))) return;
+      const fate = isMap(col) ? this.dataTypeAliasFate(col) : null;
+      if (!isMap(col) || fate === null) return;
       const nameNode = col.get('name', true);
       const value = isScalar(nameNode) ? this.scalarValue(nameNode) : nameNode;
-      found.push(value === undefined || value === null || value === '' ? `#${i + 1}` : String(value));
+      const label = value === undefined || value === null || value === '' ? `#${i + 1}` : String(value);
+      (fate === 'rename' ? found.columns : found.ignored).push(label);
     });
     return found;
   }

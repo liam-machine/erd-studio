@@ -87,7 +87,7 @@ interface YamlColumn {
   /**
    * dbt's spelling of `dataType` (a schema.yml column's `data_type:`), read as
    * an alias (#144). `dataType` wins whenever it holds a value; the extension
-   * writes the key back as `dataType` on its next save.
+   * renames the key `dataType` the next time it writes this model's file.
    */
   data_type?: unknown;
   description?: string;
