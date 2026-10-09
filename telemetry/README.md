@@ -100,7 +100,13 @@ in the same PR as the extension change, or before it.
 
 Every PR also runs the `telemetry` job in `ci.yml`: the tests, a
 `wrangler deploy --dry-run` that validates `wrangler.toml`, and the migrations
-against a throwaway local D1. Neither needs credentials.
+against a throwaway local D1. Neither needs credentials. On pushes to
+`develop` and PRs from this repository it then runs a read-only **Cloudflare
+preflight** with the secrets below: the token is active and can reach the
+Worker, the database and the Workers Routes of every zone in `wrangler.toml`,
+and it lists the live database's pending migrations. A broken or under-scoped
+token therefore fails CI long before a release depends on it. Fork and
+Dependabot runs get no secrets, so it skips there.
 
 **Repository secrets** (Settings → Secrets and variables → Actions). A missing
 one fails the job with its name, and so blocks the release; it is never
