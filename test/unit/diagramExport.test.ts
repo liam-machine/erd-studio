@@ -6,7 +6,7 @@
  * every core fixture project, and the real parsers accept it.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -17,7 +17,10 @@ import { DomainService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import { buildLogicalDisplayDomain } from '../../src/services/stageDisplay';
-import { parseMermaid, readDbmlEverywhere } from '../../packages/core/test/exportParsers';
+import { MERMAID_LOAD_TIMEOUT_MS, loadMermaidParsers, parseMermaid, readDbmlEverywhere } from '../../packages/core/test/exportParsers';
+
+// Load both Mermaid releases here, outside any test's timeout (#152).
+beforeAll(loadMermaidParsers, MERMAID_LOAD_TIMEOUT_MS);
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const DBT_PROJECT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');

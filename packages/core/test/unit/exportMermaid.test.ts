@@ -5,11 +5,14 @@
  * oldest 10.x (10.0.0) and the current release (12.0.0).
  */
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 import { toMermaid, mermaidName, mermaidType } from '../../src/exportMermaid';
 import type { DisplayDomain } from '../../src/types/display';
-import { col, deepFreeze, domain, model, parseMermaid, parseMermaidOldest, rel } from '../exportParsers';
+import { MERMAID_LOAD_TIMEOUT_MS, col, deepFreeze, domain, loadMermaidParsers, model, parseMermaid, parseMermaidOldest, rel } from '../exportParsers';
+
+// Load both Mermaid releases here, outside any test's timeout (#152).
+beforeAll(loadMermaidParsers, MERMAID_LOAD_TIMEOUT_MS);
 
 async function exportAndParse(d: DisplayDomain) {
   const text = toMermaid(deepFreeze(d));

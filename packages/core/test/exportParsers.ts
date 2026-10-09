@@ -9,11 +9,15 @@
  *   a schema-qualified table name, which nearly every model has, and 2.4.0
  *   and 2.4.1 a many-to-many `<>` Ref. `parseDbml` reads with the current
  *   one; `readDbmlEverywhere` reads with all four into one shape, so a test
- *   can assert that every parser reads the same thing.
+ *   can assert that every parser reads the same thing. They are imported
+ *   statically, so they load while vitest collects the file, outside any
+ *   test's timeout; the first read then costs only ~15 ms.
  * - Mermaid: `mermaid-current` (the current release) reads the diagram;
  *   `mermaid` is pinned to 10.0.0, the oldest 10.x, and must accept it too
  *   (`parseMermaidOldest`). Mermaid needs a DOM, so a test file that calls
- *   either runs under `// @vitest-environment jsdom`. Mermaid 12.0.0 declares
+ *   either runs under `// @vitest-environment jsdom`, and loads both first
+ *   with `beforeAll(loadMermaidParsers, MERMAID_LOAD_TIMEOUT_MS)` — see
+ *   {@link loadMermaidParsers}. Mermaid 12.0.0 declares
  *   `engines.node >= 22.12`, but CI runs these tests on Node 20, where it
  *   parses correctly (npm only warns, EBADENGINE). If a later
  *   `mermaid-current` bump really needs Node 22, move CI's test jobs to 22
@@ -167,10 +171,43 @@ export interface MermaidResult {
   relationships: Array<{ from: string; to: string; label: string; cardA: string; cardB: string }>;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MermaidApi = any;
+
+let mermaidParsers: Promise<{ oldest: MermaidApi; current: MermaidApi }> | undefined;
+
+/**
+ * Load both Mermaid releases once per test file and warm them up. A cold load
+ * takes about 1–1.5 s on an idle machine (importing each release ~0.3–0.6 s,
+ * plus 10.0.0's first parse ~0.3–0.6 s, which is when it lazily loads its ER
+ * grammar) and 9–18 s during a full `npm test`, which is longer than vitest's
+ * 5 s test timeout (#152). So every file that parses Mermaid calls this in a
+ * `beforeAll` with a timeout of its own ({@link MERMAID_LOAD_TIMEOUT_MS}), and
+ * no single test pays for the load. Memoised: later calls, including the
+ * ones inside {@link parseMermaid}, cost nothing. A load that fails is
+ * forgotten, so the next call tries again.
+ */
+export function loadMermaidParsers(): Promise<{ oldest: MermaidApi; current: MermaidApi }> {
+  mermaidParsers ??= (async () => {
+    const [{ default: oldest }, { default: current }] = await Promise.all([import('mermaid'), import('mermaid-current')]);
+    const warmUp = 'erDiagram\n  "a" {\n    int id\n  }\n';
+    await oldest.parse(warmUp);
+    await current.parse(warmUp);
+    return { oldest, current };
+  })().catch((err: unknown) => {
+    mermaidParsers = undefined;
+    throw err;
+  });
+  return mermaidParsers;
+}
+
+/** The `beforeAll` timeout for {@link loadMermaidParsers}: generous, because it only bounds a load that is stuck. */
+export const MERMAID_LOAD_TIMEOUT_MS = 60_000;
+
 /** Parse with Mermaid 10.0.0, the oldest 10.x; throws Mermaid's own error when it refuses the text. */
 export async function parseMermaidOldest(text: string): Promise<void> {
-  const { default: mermaid } = await import('mermaid');
-  await mermaid.parse(text);
+  const { oldest } = await loadMermaidParsers();
+  await oldest.parse(text);
 }
 
 /**
@@ -180,7 +217,7 @@ export async function parseMermaidOldest(text: string): Promise<void> {
  */
 export async function parseMermaid(text: string): Promise<MermaidResult> {
   await parseMermaidOldest(text);
-  const { default: mermaid } = await import('mermaid-current');
+  const { current: mermaid } = await loadMermaidParsers();
   await mermaid.parse(text);
   const diagram = await mermaid.mermaidAPI.getDiagramFromText(text);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

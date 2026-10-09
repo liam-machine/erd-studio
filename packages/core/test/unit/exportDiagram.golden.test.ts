@@ -14,13 +14,16 @@
  * relationships, …) are exported too.
  */
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
 import { loadDisplayDomain } from '../../src/loadDisplayDomain';
 import { DIAGRAM_EXPORT_FILE_EXTENSIONS, DIAGRAM_EXPORT_FORMATS, exportDiagram } from '../../src/exportDiagram';
-import { parseMermaid, readDbmlEverywhere } from '../exportParsers';
+import { MERMAID_LOAD_TIMEOUT_MS, loadMermaidParsers, parseMermaid, readDbmlEverywhere } from '../exportParsers';
+
+// Load both Mermaid releases here, outside any test's timeout (#152).
+beforeAll(loadMermaidParsers, MERMAID_LOAD_TIMEOUT_MS);
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const GOLDEN_DIR = path.join(FIXTURES, 'golden');
