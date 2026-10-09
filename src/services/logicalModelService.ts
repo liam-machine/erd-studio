@@ -216,6 +216,13 @@ export class LogicalModelService {
   private readonly failedPaths = new Map<string, ModelFileError>();
   /** Paths already reported to {@link onParseFailure}; never cleared in a session. */
   private readonly reportedPaths = new Set<string>();
+  /**
+   * While a pass over many aliases runs (see {@link withAliasTargets}), every
+   * alias in the document mapped to the node its anchor names. `Alias.resolve`
+   * walks the whole document on each call, so a file with thousands of aliases
+   * made a save quadratic. Never held across a change to the document.
+   */
+  private aliasTargets: Map<Alias, Node | undefined> | null = null;
 
   constructor(
     workspaceRoot: string,
@@ -856,7 +863,9 @@ export class LogicalModelService {
     // follows an anchor this save rewrites or removes (#157). The sync below
     // re-keeps a managed alias as it judges it, or replaces it.
     const kept = new Map<Alias, Node>();
-    visit(doc, { Alias: (_, alias) => { kept.set(alias, this.detach(doc, alias)); } });
+    this.withAliasTargets(doc, () => {
+      visit(doc, { Alias: (_, alias) => { kept.set(alias, this.detach(doc, alias)); } });
+    });
     KEPT_ALIASES.set(doc, kept);
     try {
       this.syncMap(doc, root, plain, MODEL_KEYS);
@@ -902,9 +911,12 @@ export class LogicalModelService {
     if (!kept || kept.size === 0) return;
     const reads = (node: unknown): string => JSON.stringify(this.plainOf(doc, node)) ?? 'undefined';
     const changed = new Map<Alias, Node>();
-    for (const [alias, was] of kept) {
-      if (alias.resolve(doc) === undefined || reads(alias) !== reads(was)) changed.set(alias, was);
-    }
+    this.withAliasTargets(doc, (targets) => {
+      for (const [alias, was] of kept) {
+        if (!targets.has(alias)) continue; // replaced or removed by this save
+        if (targets.get(alias) === undefined || reads(alias) !== reads(was)) changed.set(alias, was);
+      }
+    });
     if (changed.size === 0) return;
     visit(doc, {
       Alias: (_, alias) => {
@@ -915,6 +927,35 @@ export class LogicalModelService {
   }
 
   /**
+   * Run `pass` with every alias of `doc` resolved up front, in one walk of the
+   * document (see {@link aliasTargets}). `pass` must not change the document.
+   */
+  private withAliasTargets(doc: Document, pass: (targets: Map<Alias, Node | undefined>) => void): void {
+    const targets = new Map<Alias, Node | undefined>();
+    const anchors = new Map<string, Node>();
+    // The rule `Alias.resolve` applies: the last node with that anchor before
+    // the alias, in document order.
+    visit(doc, {
+      Node: (_, node) => {
+        if (isAlias(node)) targets.set(node, anchors.get(node.source));
+        else if (node.anchor) anchors.set(node.anchor, node);
+      },
+    });
+    const outer = this.aliasTargets;
+    this.aliasTargets = targets;
+    try {
+      pass(targets);
+    } finally {
+      this.aliasTargets = outer;
+    }
+  }
+
+  /** The node `alias` points at, from {@link aliasTargets} while a pass has them. */
+  private resolveAlias(doc: Document, alias: Alias): unknown {
+    return this.aliasTargets?.has(alias) ? this.aliasTargets.get(alias) : alias.resolve(doc);
+  }
+
+  /**
    * A copy of what `node` reads as, sharing nothing with the document: aliases
    * resolved into copies, anchors and the top node's comments left out, and a
    * number keeps its source text (`007`), which it prints as in a document
@@ -922,7 +963,7 @@ export class LogicalModelService {
    */
   private detach(doc: Document, node: unknown, top = true, path = new Set<unknown>()): Node {
     if (isAlias(node)) {
-      const target = node.resolve(doc);
+      const target = this.resolveAlias(doc, node);
       if (target === undefined || path.has(target)) return doc.createNode(null) as Node;
       return this.detach(doc, target, top, path);
     }
@@ -1110,7 +1151,7 @@ export class LogicalModelService {
         // `value`: `description: true` is the text "true", `name: 007` is
         // "007" (a number prints as its own text, see keepNumberText), so
         // neither is quoted by a save that did not change it (#157).
-        if (existing.value === value || this.readsAs(this.scalarValue(existing), value)) continue;
+        if (existing.value === value || this.readsAs(key, this.scalarValue(existing), value)) continue;
         if (this.isScalarLike(value)) {
           setScalarValue(existing, value);
           continue;
@@ -1185,16 +1226,19 @@ export class LogicalModelService {
       const was = read(this.plainOf(doc, target));
       return was !== undefined && was === read(value);
     }
-    return isScalar(target) && this.readsAs(this.scalarValue(target), value);
+    return isScalar(target) && this.readsAs(key, this.scalarValue(target), value);
   }
 
   /**
    * Whether a scalar core's reader sees as `read` ({@link scalarValue}) reads
-   * as the managed value `value`: text as `String()`, flags by the reader's
-   * `bool()`, `scdType` by `Number()`. An empty value never does.
+   * as the managed value `value` of `key`: text as `String()`, flags by the
+   * reader's `bool()`, `scdType` by `Number()` — except a relationship
+   * entry's keys, which the reader takes only as text (`role: true` is no
+   * role at all), so they must be that very text. An empty value never does.
    */
-  private readsAs(read: unknown, value: unknown): boolean {
+  private readsAs(key: string, read: unknown, value: unknown): boolean {
     if (read === null || read === undefined) return false;
+    if ((RELATIONSHIP_KEYS as readonly string[]).includes(key)) return read === value;
     if (typeof value === 'boolean') {
       return value === (read === true || (typeof read === 'string' && /^(true|yes|on)$/i.test(read.trim())));
     }
@@ -1208,7 +1252,7 @@ export class LogicalModelService {
    */
   private plainOf(doc: Document, node: unknown, path = new Set<unknown>()): unknown {
     if (isAlias(node)) {
-      const target = node.resolve(doc);
+      const target = this.resolveAlias(doc, node);
       return path.has(target) ? null : this.plainOf(doc, target, path);
     }
     if (isMap(node)) {

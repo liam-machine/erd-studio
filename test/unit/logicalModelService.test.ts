@@ -1737,6 +1737,27 @@ describe('LogicalModelService — YAML anchors, aliases and text a save did not 
       .toBe('name: fct_order\nmeta:\n  owners:\n    # who\n    - ana\n    - bo\n');
   });
 
+  it('writes a role the reader did not take as text, though it looks the same', () => {
+    // `role: true` is a YAML boolean: core reads no role from it. Setting the
+    // role "true" on the canvas must write the text, not leave the boolean.
+    const rel = 'relationships:\n  - fromColumn: a\n    toModel: dim_customer\n    toColumn: id\n    cardinality: many-to-one\n';
+    const yml = `name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n${rel}    role: true\n`;
+    expect(read(yml).relationships![0].role).toBeUndefined();
+    const out = save(yml, (m) => { m.relationships![0].role = 'true'; });
+    expect(out).toBe(yml.replace('role: true', 'role: "true"'));
+    expect(read(out).relationships![0].role).toBe('true');
+  });
+
+  it('saves a file with thousands of aliases in linear time', () => {
+    const cols = Array.from({ length: 2000 }, (_, i) => `  - name: c${i}\n    dataType: &t${i} int\n    x-copy: *t${i}\n`).join('');
+    const many = `name: fct_order\nx-defs:\n  d: &d shared\nx-uses: [ ${Array.from({ length: 3000 }, () => '*d').join(', ')} ]\ncolumns:\n${cols}`;
+    const started = Date.now();
+    const out = save(many, (m) => { m.grain = 'g'; });
+    // Quadratic, this took over 10 s; linear, well under one.
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(out).toBe(`${many}grain: g\n`);
+  }, 30_000);
+
   it('settles a reused number written into a text field in one save', () => {
     const cols = '  - name: a\n    dataType: INT\n    scdType: &s 2\n';
     const once = save(`name: fct_order\ncolumns:\n${cols}description: *s # why\n`, (m) => { m.columns![0].scdType = 1; });
