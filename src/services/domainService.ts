@@ -16,19 +16,24 @@ import {
   DomainFileError,
   NON_DOMAIN_DIRS,
   buildUnifiedDomain,
+  compositeGroupProblem,
+  groupKey,
+  linkKey,
   parseDomainJson,
   toLogicalStage,
   validateDomainDocument,
 } from '@erd-studio/core';
+import type { DbtKeyIndex } from '@erd-studio/core';
 import type { DomainSummary, SemanticDomain, UnifiedDomain } from '../types/semantic';
 import type { DisplayDomain, DisplayModel, DisplayColumn, DisplayRelationship, PhysicalColumnSource } from '../types/display';
-import type { ManifestData } from '../types/manifest';
+import type { CompositeForeignKey, ManifestData } from '../types/manifest';
 import type { CatalogData, CatalogColumn } from '../types/catalog';
 import type { YmlData } from '../types/ymlData';
 import type { Cardinality } from '../types/semantic';
 import type { LayerService } from './layerService';
 import type { LogicalModelService } from './logicalModelService';
 import { normaliseName } from './nameUtils';
+import { catalogNodeFor, resolveColumnType } from './columnTypes';
 
 // The pure domain parsing lives in @erd-studio/core; these are re-exported so
 // existing imports of this module keep working.
@@ -167,17 +172,25 @@ export class DomainService {
    * How many relationships the project's domain files hold between them
    * (`logical.relationships` entries, read raw). Zero means no domain keeps
    * its own, which is what makes the model library the default home for new
-   * ones (#126, `usesLibraryRelationships`). Unreadable files count as none.
+   * ones (#126, `usesLibraryRelationships`). A file that does not parse (a
+   * merge conflict) but whose text shows a non-empty `"relationships": [`
+   * counts as one, so a broken file cannot switch the project's mode.
    */
   countDomainFileRelationships(projectPath: string, semanticDir = DEFAULT_SEMANTIC_DIR): number {
     let count = 0;
     for (const summary of this.listDomains(projectPath, semanticDir)) {
+      let text: string;
       try {
-        const raw = JSON.parse(fs.readFileSync(summary.filePath, 'utf-8')) as { logical?: { relationships?: unknown } } | null;
+        text = fs.readFileSync(summary.filePath, 'utf-8');
+      } catch {
+        continue; // Nothing we could keep in step with.
+      }
+      try {
+        const raw = JSON.parse(text) as { logical?: { relationships?: unknown } } | null;
         const relationships = raw?.logical?.relationships;
         if (Array.isArray(relationships)) count += relationships.length;
       } catch {
-        // Nothing we could keep in step with.
+        if (/"relationships"\s*:\s*\[\s*[^\s\]]/.test(text)) count += 1;
       }
     }
     return count;
@@ -190,8 +203,12 @@ export class DomainService {
    * callers can tell a file that is momentarily unreadable (empty or truncated
    * because something is writing it right now) from one that is genuinely
    * wrong. See `DomainFileError` for why that distinction is load-bearing.
+   *
+   * `dbtKeyIndex` is dbt's key evidence (#133 L1): with it, a link stored
+   * twice with no key flagged is drawn from the copy dbt's tests orient. The
+   * canvas and the diff pass it; callers that only list or count need not.
    */
-  getDomain(filePath: string): UnifiedDomain {
+  getDomain(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex } = {}): UnifiedDomain {
     if (!fs.existsSync(filePath)) {
       throw new DomainFileError('missing', filePath, `Domain file not found: ${filePath}`);
     }
@@ -219,11 +236,16 @@ export class DomainService {
         ? (name) => {
           const error = this.logicalModelService!.getModelFileError(name);
           return error
-            ? { kind: error.kind, ...(error.line !== undefined ? { line: error.line } : {}) }
+            ? {
+              kind: error.kind,
+              ...(error.line !== undefined ? { line: error.line } : {}),
+              ...(error.mergeConflict ? { mergeConflict: true as const } : {}),
+            }
             : null;
         }
         : undefined,
       warn: (message) => console.warn(`[DomainService] ${message}`),
+      ...(options.dbtKeyIndex ? { dbtKeyIndex: options.dbtKeyIndex } : {}),
     });
   }
 
@@ -232,8 +254,8 @@ export class DomainService {
    *
    * Physical stage is not supported here — use buildPhysicalDomain() instead.
    */
-  getDomainStage(filePath: string): SemanticDomain {
-    return DomainService.toLogicalStage(this.getDomain(filePath));
+  getDomainStage(filePath: string, options: { dbtKeyIndex?: DbtKeyIndex } = {}): SemanticDomain {
+    return DomainService.toLogicalStage(this.getDomain(filePath, options));
   }
 
   /**
@@ -359,13 +381,10 @@ export class DomainService {
         // only: a disabled model still declared in a yml keeps what the yml says,
         // because that is a different question.
         const disabled = manifest?.disabledModels.has(key) ?? false;
-        // unique_id FIRST: catalog keys ARE manifest unique_ids, so when a
-        // manifest resolved the model that join is exact and already knows which
-        // version dbt marks latest. byName is a best-effort index for the
-        // manifest-absent case (highest version wins, first entry on a tie).
-        const catalogNode =
-          (manifestModel ? catalog?.byUniqueId.get(manifestModel.uniqueId) : undefined)
-          ?? catalog?.byName.get(key)
+        // unique_id first, then the short-name index (catalogNodeFor — the
+        // same lookup Draw from dbt seeds types through); the relation index
+        // only when no manifest resolved the model.
+        const catalogNode = catalogNodeFor(catalog, manifestModel, key)
           ?? (manifestModel ? undefined : catalogByRelation?.get(relationKey(model.schema, model.alias ?? model.name)));
         // Seed / snapshot documentation: DESCRIPTIONS ONLY. It never decides
         // existence, adds a column or pulls in an edge — those stay the job of
@@ -448,16 +467,13 @@ export class DomainService {
 
           // Ordered fallthrough — what the warehouse reports, then the declared
           // assertion, then the manifest's compiled copy of it, then ''.
-          let dataType = '';
-          if (entry.observed?.dataType) {
-            dataType = entry.observed.dataType;
-            typeSources.add('catalog');
-          } else if (entry.declared?.dataType) {
-            dataType = entry.declared.dataType;
+          const { dataType, source: typeSource } = resolveColumnType(
+            entry.observed?.dataType, entry.declared?.dataType, manifestCol?.data_type,
+          );
+          if (typeSource === 'declared') {
             if (declaredSource) { typeSources.add(declaredSource); }
-          } else if (manifestCol?.data_type) {
-            dataType = manifestCol.data_type;
-            typeSources.add('manifest');
+          } else if (typeSource) {
+            typeSources.add(typeSource);
           }
 
           return {
@@ -543,11 +559,16 @@ export class DomainService {
       manifest?.compositeUniqueGroups,
     );
 
+    // Composite foreign keys dbt declares (#133 L2): constraints and
+    // dbt_constraints tests, yml ∪ manifest.
+    const mergedForeignKeys = mergeCompositeForeignKeys(ymlData.compositeForeignKeys, manifest?.compositeForeignKeys);
+
     const relationships = derivePhysicalRelationships(
       renameTestModels(mergedRelationshipTests, resolvedViaRelation),
       physicalModelNames,
       renameMapKeys(mergedUniqueColumns, resolvedViaRelation),
       renameMapKeys(mergedCompositeGroups, resolvedViaRelation),
+      renameTestModels(mergedForeignKeys, resolvedViaRelation),
     );
 
     return {
@@ -591,12 +612,20 @@ export class DomainService {
  * outside the current domain. Model and column names are matched
  * case-insensitively; emitted edges use the spelling from `physicalModelNames`
  * so they line up with the physical DisplayModels.
+ *
+ * A composite foreign key dbt declares (#133 L2) adds one edge per column
+ * pair, sharing `compositeKey` (its name, else `fk_<toModel>`) when the pairs
+ * form a valid composite. Its "to" side is unique by definition: each member
+ * is many-to-one, or one-to-one when the from columns are a declared unique
+ * combination. A pair a relationships test also declares is drawn once, as
+ * the composite's member.
  */
 export function derivePhysicalRelationships(
   relationshipTests: RelationshipTest[],
   physicalModelNames: Set<string>,
   uniqueColumns: Map<string, Set<string>>,
   compositeUniqueGroups: Map<string, string[][]>,
+  compositeForeignKeys: readonly CompositeForeignKey[] = [],
 ): DisplayRelationship[] {
   // normalised name → display name (as used by the physical DisplayModels)
   const canonicalModelNames = new Map<string, string>();
@@ -650,32 +679,74 @@ export function derivePhysicalRelationships(
     group.push(test);
   }
 
-  return domainTests.map(rel => ({
-    fromModel: rel.fromModel,
-    fromColumn: rel.fromColumn,
-    toModel: rel.toModel,
-    toColumn: rel.toColumn,
-    cardinality: deriveCardinality(
-      rel,
-      testsByPair.get(pairKey(rel.fromModel, rel.toModel)) ?? [],
-      normalisedUnique,
-      normalisedComposite,
-    ),
-  }));
+  const composites: DisplayRelationship[] = [];
+  for (const fk of compositeForeignKeys) {
+    const fromModel = canonicalModelNames.get(normaliseName(fk.fromModel));
+    const toModel = canonicalModelNames.get(normaliseName(fk.toModel));
+    if (!fromModel || !toModel || fk.fromColumns.length !== fk.toColumns.length) continue;
+    const fromSet = fk.fromColumns.map(normaliseName);
+    const oneToOne = (normalisedComposite.get(normaliseName(fromModel)) ?? [])
+      .some((group) => group.length === fromSet.length && fromSet.every((c) => group.includes(c)));
+    const members: DisplayRelationship[] = fk.fromColumns.map((fromColumn, i) => ({
+      fromModel, fromColumn, toModel, toColumn: fk.toColumns[i], cardinality: oneToOne ? 'one-to-one' : 'many-to-one',
+    }));
+    const compositeKey = fk.name ?? `fk_${toModel}`;
+    composites.push(...(compositeGroupProblem(members) ? members : members.map((m) => ({ ...m, compositeKey }))));
+  }
+  const declared = new Set(composites.map(linkKey));
+
+  return [
+    ...domainTests.filter((rel) => !declared.has(linkKey(rel))).map(rel => ({
+      fromModel: rel.fromModel,
+      fromColumn: rel.fromColumn,
+      toModel: rel.toModel,
+      toColumn: rel.toColumn,
+      cardinality: deriveCardinality(
+        rel,
+        testsByPair.get(pairKey(rel.fromModel, rel.toModel)) ?? [],
+        normalisedUnique,
+        normalisedComposite,
+      ),
+    })),
+    ...composites,
+  ];
 }
 
 /**
- * True if a relationship references the given (model, column) on either endpoint.
- * Used to cascade-delete relationships when a column is removed.
+ * Composite foreign keys from the yml (primary) and the manifest, one per
+ * composite (`groupKey`: the same members, whatever the name).
+ */
+export function mergeCompositeForeignKeys(
+  primary: readonly CompositeForeignKey[] = [],
+  secondary: readonly CompositeForeignKey[] = [],
+): CompositeForeignKey[] {
+  const seen = new Set<string>();
+  const merged: CompositeForeignKey[] = [];
+  for (const fk of [...primary, ...secondary]) {
+    const key = groupKey(fk.fromColumns.map((fromColumn, i) => ({
+      fromModel: fk.fromModel, fromColumn, toModel: fk.toModel, toColumn: fk.toColumns[i] ?? '', cardinality: 'many-to-one' as const,
+    })));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(fk);
+  }
+  return merged;
+}
+
+/**
+ * True if a relationship references the given (model, column) on either
+ * endpoint, matched without case (#133 L4). Used to cascade-delete
+ * relationships when a column is removed.
  */
 export function relationshipReferencesColumn(
   rel: { fromModel?: unknown; fromColumn?: unknown; toModel?: unknown; toColumn?: unknown },
   modelName: string,
   columnName: string,
 ): boolean {
+  const same = (a: unknown, b: string): boolean => typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
   return (
-    (rel.fromModel === modelName && rel.fromColumn === columnName) ||
-    (rel.toModel === modelName && rel.toColumn === columnName)
+    (same(rel.fromModel, modelName) && same(rel.fromColumn, columnName)) ||
+    (same(rel.toModel, modelName) && same(rel.toColumn, columnName))
   );
 }
 
@@ -798,7 +869,7 @@ function physicalAlias(
 }
 
 /** Rewrite relationship test endpoints named in `renames` (normalised dbt name → logical name). */
-function renameTestModels(tests: RelationshipTest[], renames: Map<string, string>): RelationshipTest[] {
+function renameTestModels<T extends { fromModel: string; toModel: string }>(tests: T[], renames: Map<string, string>): T[] {
   if (renames.size === 0) { return tests; }
   return tests.map(t => ({
     ...t,

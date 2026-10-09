@@ -15,6 +15,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Document, parseDocument, isSeq, isMap, isScalar, YAMLMap, YAMLSeq } from 'yaml';
 
+import { keepLineEndings } from './lineEndings';
+
 const DOMAIN_TAG_PREFIX = 'domain:';
 
 /** dbt's default when `model-paths` is not set in dbt_project.yml. */
@@ -97,7 +99,7 @@ export class LegacyTagCleanupService {
 
       if (fileTagsRemoved > 0) {
         try {
-          fs.writeFileSync(filePath, doc.toString(STRINGIFY_OPTIONS), 'utf-8');
+          fs.writeFileSync(filePath, keepLineEndings(doc.toString(STRINGIFY_OPTIONS), raw), 'utf-8');
           result.filesModified++;
           result.tagsRemoved += fileTagsRemoved;
           result.modifiedPaths.push(filePath);

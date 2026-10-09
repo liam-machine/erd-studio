@@ -73,3 +73,25 @@
 .editor-message__button:hover {
   background: var(--button-hover-bg);
 }
+
+/* Merge-conflict screen (#145): a plain explanation rather than an error dump. */
+.editor-message__title {
+  margin: 0;
+  color: var(--editor-fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.editor-message__detail {
+  max-width: 560px;
+  margin: 0;
+  color: var(--editor-fg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.editor-message__detail--dim {
+  color: var(--dim-fg);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

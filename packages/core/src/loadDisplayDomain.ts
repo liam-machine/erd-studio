@@ -459,7 +459,7 @@ function parseModel(
     if (err instanceof YamlNodeLimitError || err instanceof YamlCharLimitError) {
       return NO_MODEL;
     }
-    const { kind, line } = classifyModelLoadError(err);
-    return { ...NO_MODEL, loadError: { kind, ...(line !== undefined ? { line } : {}) } };
+    const { kind, line, mergeConflict } = classifyModelLoadError(err);
+    return { ...NO_MODEL, loadError: { kind, ...(line !== undefined ? { line } : {}), ...(mergeConflict ? { mergeConflict } : {}) } };
   }
 }

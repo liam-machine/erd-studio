@@ -6,9 +6,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { parseLogicalModelText } from '@erd-studio/core';
 import { LogicalModelService } from '../../src/services/logicalModelService';
 import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import type { ManifestData, ManifestModelInfo } from '../../src/types/manifest';
+import type { SemanticModel } from '../../src/types/semantic';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -407,16 +409,14 @@ describe('LogicalModelService', () => {
       expect(model.columns![0].scdType).toBe(2);
       expect(model.columns![1].name).toBe('on');
 
-      // Re-saving an unchanged model must not coerce anything. The
-      // numeric-looking name is pinned as an explicit string (quoted) rather
-      // than being written back as `7`.
+      // Re-saving an unchanged model must not coerce anything: the
+      // numeric-looking name stays `007` as written (#157), neither written
+      // back as `7` nor quoted, and the file is left byte for byte.
+      const before = fs.readFileSync(filePath, 'utf-8');
       service.saveModel(model);
       const after = fs.readFileSync(filePath, 'utf-8');
-      expect(after).toContain('description: 2024-01-01');
-      expect(after).not.toContain('T00:00:00');
-      expect(after).toMatch(/name: ["']007["']/);
+      expect(after).toBe(before);
       expect(after).not.toMatch(/name: 7\b/);
-      expect(after).toContain('scdType: 2');
       expect(service.getModel('dim_date')!.columns![0].name).toBe('007');
     });
 
@@ -999,5 +999,820 @@ describe('LogicalModelService layer folders', () => {
       service.invalidateCache('rpt_cache');
       expect(service.getModel('rpt_cache')!.description).toBe('bbb');
     });
+  });
+});
+
+describe('LogicalModelService — a save keeps the relationships: list it did not change', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  let file: string;
+
+  const YML = [
+    'name: fct_order',
+    'description: Old',
+    'columns:',
+    '  - name: customer_key',
+    '    dataType: string',
+    '  - name: date_key',
+    '    dataType: date',
+    'relationships:',
+    '  # to the customer',
+    '  - fromColumn: customer_key',
+    '    toModel: dim_customer',
+    '    toColumn: customer_key',
+    '    cardinality: one_to_many # typo, read as many-to-one',
+    '    role: billing',
+    '  - fromColumn: date_key # no toModel yet, so the reader skips it',
+    '    toColumn: date_key',
+    '  - fromColumn: date_key',
+    '    toModel: dim_date',
+    '    toColumn: date_key',
+    '    cardinality: many-to-one',
+    '',
+  ].join('\n');
+  const listText = (text: string): string => text.slice(text.indexOf('relationships:'));
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    file = service.modelPath('fct_order');
+    fs.writeFileSync(file, YML);
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  it('leaves the list untouched when the save changes something else', () => {
+    const model = service.getModel('fct_order')!;
+    model.description = 'Orders';
+    service.saveModel(model);
+    const text = fs.readFileSync(file, 'utf-8');
+    expect(text).toMatch(/^description: Orders$/m);
+    expect(listText(text)).toBe(listText(YML));
+  });
+
+  it('a respelled entry keeps its comment and unknown keys, changing only the spelling (#133 L4)', () => {
+    fs.writeFileSync(file, YML.replace('    toModel: dim_customer\n    toColumn: customer_key', '    toModel: Dim_Customer # mis-cased\n    toColumn: CUSTOMER_KEY\n    note: kept'));
+    service.invalidateCache();
+    const model = service.getModel('fct_order')!;
+    model.relationships = model.relationships!.map((r) => (r.toModel === 'Dim_Customer' ? { ...r, toModel: 'dim_customer', toColumn: 'customer_key' } : r));
+    // A second change in the same save, so only a match by ends (not by position) can keep the node.
+    model.relationships.push({ fromColumn: 'customer_key', toModel: 'dim_region', toColumn: 'region_key', cardinality: 'many-to-one' });
+    service.saveModel(model);
+    const text = fs.readFileSync(file, 'utf-8');
+    expect(listText(text)).toBe(listText(YML)
+      .replace('    toModel: dim_customer\n', '    toModel: dim_customer # mis-cased\n')
+      .replace('    toColumn: customer_key\n    cardinality: one_to_many', '    toColumn: customer_key\n    note: kept\n    cardinality: one_to_many')
+      + '  - fromColumn: customer_key\n    toModel: dim_region\n    toColumn: region_key\n    cardinality: many-to-one\n');
+  });
+
+  it('compositeKey is written, kept on its node, and removed when cleared (#133 L2)', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships = model.relationships!.map((r) => (r.toModel === 'dim_date' ? { ...r, compositeKey: 'fk_dim_date' } : r));
+    service.saveModel(model);
+    let text = fs.readFileSync(file, 'utf-8');
+    expect(listText(text)).toBe(listText(YML).replace('    toModel: dim_date\n    toColumn: date_key\n    cardinality: many-to-one\n', '    toModel: dim_date\n    toColumn: date_key\n    cardinality: many-to-one\n    compositeKey: fk_dim_date\n'));
+    // A description change leaves it alone.
+    service.invalidateCache();
+    const again = service.getModel('fct_order')!;
+    expect(again.relationships!.find((r) => r.toModel === 'dim_date')!.compositeKey).toBe('fk_dim_date');
+    service.saveModel({ ...again, description: 'Orders' });
+    expect(listText(fs.readFileSync(file, 'utf-8'))).toBe(listText(text));
+    // Cleared: only that key goes.
+    service.invalidateCache();
+    const cleared = service.getModel('fct_order')!;
+    cleared.relationships = cleared.relationships!.map(({ compositeKey: _k, ...r }) => r);
+    service.saveModel(cleared);
+    text = fs.readFileSync(file, 'utf-8');
+    expect(listText(text)).toBe(listText(YML));
+  });
+
+  it('edits only the entry that changed, keeping comments, unknown keys and skipped entries', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships = model.relationships!.filter((r) => r.toModel !== 'dim_date');
+    model.relationships.push({ fromColumn: 'date_key', toModel: 'dim_calendar', toColumn: 'date_key', cardinality: 'many-to-one' });
+    service.saveModel(model);
+    const text = fs.readFileSync(file, 'utf-8');
+    expect(text).toContain('# to the customer');
+    expect(text).toContain('cardinality: one_to_many # typo, read as many-to-one');
+    expect(text).toContain('role: billing');
+    expect(text).toContain('fromColumn: date_key # no toModel yet, so the reader skips it');
+    expect(text).not.toContain('toModel: dim_date');
+    expect(text).toContain('toModel: dim_calendar');
+  });
+
+  it('saves a role-only change in place, and clearing the role removes the key (#133)', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships![1] = { ...model.relationships![1], role: 'order date' };
+    service.saveModel(model);
+    expect(listText(fs.readFileSync(file, 'utf-8'))).toBe(`${listText(YML)}    role: order date\n`);
+
+    const saved = service.getModel('fct_order')!;
+    const { role: _role, ...cleared } = saved.relationships![1];
+    service.saveModel({ ...saved, relationships: [saved.relationships![0], cleared] });
+    expect(listText(fs.readFileSync(file, 'utf-8'))).toBe(listText(YML));
+  });
+
+  it('keeps a renamed entry\'s node, and a skipped entry when every readable one is removed', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships![0] = { ...model.relationships![0], fromColumn: 'cust_key' };
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toMatch(/# to the customer\n\s+- fromColumn: cust_key[\s\S]*role: billing/);
+
+    const emptied = service.getModel('fct_order')!;
+    delete emptied.relationships;
+    service.saveModel(emptied);
+    const text = fs.readFileSync(file, 'utf-8');
+    expect(text).toMatch(/^relationships:/m);
+    expect(text).toContain('fromColumn: date_key # no toModel yet');
+    expect(text).not.toContain('toModel: dim_customer');
+  });
+
+  it('never hands a removed entry\'s comments or unknown keys to another one', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships = [{ fromColumn: 'date_key', toModel: 'dim_date', toColumn: 'date_key', cardinality: 'one-to-one' }];
+    service.saveModel(model);
+    const text = fs.readFileSync(file, 'utf-8');
+    expect(text).not.toContain('role: billing');
+    expect(listText(text)).toBe([
+      'relationships:',
+      '  # to the customer', // yaml attaches a comment above the first entry to the list
+      '  - fromColumn: date_key # no toModel yet, so the reader skips it',
+      '    toColumn: date_key',
+      '  - fromColumn: date_key',
+      '    toModel: dim_date',
+      '    toColumn: date_key',
+      '    cardinality: one-to-one',
+      '',
+    ].join('\n'));
+  });
+
+  it('gives a new link no comment or unknown key from a removed link that shares neither end', () => {
+    const model = service.getModel('fct_order')!;
+    model.relationships = [
+      { fromColumn: 'order_key', toModel: 'dim_store', toColumn: 'store_key', cardinality: 'many-to-one' },
+      model.relationships![1],
+    ];
+    service.saveModel(model);
+    const text = fs.readFileSync(file, 'utf-8');
+    expect(text).not.toContain('role: billing');
+    expect(text).not.toContain('# typo');
+    expect(text).not.toContain('toModel: dim_customer');
+    const saved = service.getModel('fct_order')!.relationships!;
+    expect(saved).toHaveLength(2);
+    expect(saved).toEqual(expect.arrayContaining(model.relationships));
+  });
+
+  it('writes no cardinality into a renamed entry that had none', () => {
+    fs.writeFileSync(file, [
+      'name: fct_order',
+      'relationships:',
+      '  - fromColumn: customer_key # no cardinality: read as many-to-one',
+      '    toModel: dim_customer',
+      '    toColumn: customer_key',
+      '',
+    ].join('\n'));
+    const model = service.getModel('fct_order')!;
+    expect(model.relationships![0].cardinality).toBe('many-to-one');
+    model.relationships![0] = { ...model.relationships![0], fromColumn: 'cust_key' };
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe([
+      'name: fct_order',
+      'relationships:',
+      '  - fromColumn: cust_key # no cardinality: read as many-to-one',
+      '    toModel: dim_customer',
+      '    toColumn: customer_key',
+      '',
+    ].join('\n'));
+  });
+
+  it('refuses an edit to a relationships: value it cannot read, naming the file and line', () => {
+    fs.writeFileSync(file, 'name: fct_order\nrelationships: see the wiki\n');
+    const model = service.getModel('fct_order')!;
+    model.relationships = [{ fromColumn: 'a', toModel: 'b', toColumn: 'c', cardinality: 'many-to-one' }];
+    expect(() => service.saveModel(model)).toThrow(/logical-models\/fct_order\.yml, line 2/);
+    expect(fs.readFileSync(file, 'utf-8')).toContain('see the wiki');
+  });
+
+  it('reports a model file that fails to parse but still lists relationships', () => {
+    expect(service.hasUnreadableRelationships()).toBe(false);
+    fs.writeFileSync(file, `${YML}\n<<<<<<< HEAD\n`);
+    expect(service.hasUnreadableRelationships()).toBe(true);
+    fs.writeFileSync(file, 'name: fct_order\n  bad: indent\n');
+    expect(service.hasUnreadableRelationships()).toBe(false);
+  });
+});
+
+describe('LogicalModelService — a save adds nothing the user did not change', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  let file: string;
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    file = service.modelPath('dim_customer');
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  it('does not write dataType: unknown into a column that has no type', () => {
+    const yml = [
+      'name: dim_customer',
+      'columns:',
+      '  - name: customer_key',
+      '  - name: region # typed later',
+      '    dataType:',
+      '  - name: email',
+      '    dataType: string',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('dim_customer')!;
+    expect(model.columns!.map((c) => c.dataType)).toEqual(['unknown', 'unknown', 'string']);
+
+    model.description = 'Customers';
+    service.saveModel(model);
+
+    expect(fs.readFileSync(file, 'utf-8')).toBe(`${yml}description: Customers\n`);
+  });
+
+  it('still writes a type the user gives a column that had none', () => {
+    fs.writeFileSync(file, 'name: dim_customer\ncolumns:\n  - name: customer_key\n');
+    const model = service.getModel('dim_customer')!;
+    model.columns![0].dataType = 'integer';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe('name: dim_customer\ncolumns:\n  - name: customer_key\n    dataType: integer\n');
+  });
+});
+
+describe('LogicalModelService — dbt\'s data_type spelling (#144)', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  let file: string;
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    file = service.modelPath('fct_order');
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  const DBT_SPELLED = [
+    'name: fct_order',
+    'columns:',
+    '  - name: order_id',
+    '    data_type: INT',
+    '    isPrimaryKey: true',
+    '  - name: amount',
+    '    data_type: DECIMAL(18,2) # money',
+    '    description: Order total',
+    '',
+  ].join('\n');
+  const RENAMED = DBT_SPELLED.split('data_type:').join('dataType:');
+
+  it('renames every column\'s data_type to dataType in place on the next write, keeping its comment', () => {
+    fs.writeFileSync(file, DBT_SPELLED);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns!.map((c) => c.dataType)).toEqual(['INT', 'DECIMAL(18,2)']);
+
+    model.description = 'Orders';
+    expect(service.serializeModel(model)).toBe(`${RENAMED}description: Orders\n`);
+    service.saveModel(model);
+
+    const after = fs.readFileSync(file, 'utf-8');
+    expect(after).toBe(`${RENAMED}description: Orders\n`);
+    expect(after).toContain('    dataType: DECIMAL(18,2) # money\n');
+    expect(after).not.toContain('data_type');
+    expect(service.getModel('fct_order')!.columns!.map((c) => c.dataType)).toEqual(['INT', 'DECIMAL(18,2)']);
+  });
+
+  it('writes an edited type into the renamed key, not beside it', () => {
+    fs.writeFileSync(file, DBT_SPELLED);
+    const model = service.getModel('fct_order')!;
+    model.columns![1].dataType = 'NUMERIC(20,4)';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(RENAMED.replace('DECIMAL(18,2)', 'NUMERIC(20,4)'));
+  });
+
+  it('renames an empty data_type without filling in a type nobody typed', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: note\n    data_type: ~\n  - name: memo # later\n    data_type:\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns!.map((c) => c.dataType)).toEqual(['unknown', 'unknown']);
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(`${yml.split('data_type:').join('dataType:')}description: Orders\n`);
+  });
+
+  it('keeps both keys when a column has dataType and data_type', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: status\n    data_type: TEXT # from dbt\n    dataType: VARCHAR\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns![0].dataType).toBe('VARCHAR');
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(`${yml}description: Orders\n`);
+  });
+
+  it('renames a data_type the reader uses when the dataType beside it is empty, dropping the empty key', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: status\n    # typed by dbt\n    dataType:\n    data_type: TEXT\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns![0].dataType).toBe('TEXT');
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: ['status'], ignored: [], anchored: [] });
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(
+      'name: fct_order\ncolumns:\n  - name: status\n    # typed by dbt\n    dataType: TEXT\ndescription: Orders\n',
+    );
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: [], anchored: [] });
+  });
+
+  it('keeps every comment of a dropped empty dataType, its own first, with no blank line left behind', () => {
+    const yml = [
+      'name: fct_order',
+      'columns:',
+      '  - name: status',
+      '    # about dataType',
+      '    dataType: # TODO fill',
+      '    # about data_type',
+      '    data_type: INT # from dbt',
+      '    description: Status',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns![0].dataType).toBe('INT');
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe([
+      'name: fct_order',
+      'columns:',
+      '  - name: status',
+      '    # about dataType',
+      '    # TODO fill',
+      '    # about data_type',
+      '    dataType: INT # from dbt',
+      '    description: Status',
+      'description: Orders',
+      '',
+    ].join('\n'));
+  });
+
+  it('keeps the trailing comment of an empty dataType written after data_type', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: status\n    data_type: INT # dbt\n    dataType: # empty\n    description: Status\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(
+      'name: fct_order\ncolumns:\n  - name: status\n    # empty\n    dataType: INT # dbt\n    description: Status\ndescription: Orders\n',
+    );
+  });
+
+  it('moves a lone trailing comment onto the renamed line, and keeps a blank line the file really had', () => {
+    const yml = 'name: fct_order\ncolumns:\n  - name: status\n    dataType: # TODO\n\n    data_type: INT\n    description: Status\n';
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(
+      'name: fct_order\ncolumns:\n  - name: status\n\n    dataType: INT # TODO\n    description: Status\ndescription: Orders\n',
+    );
+  });
+
+  it('reads a dataType alias of an empty value as empty, as the reader does', () => {
+    const yml = [
+      'name: fct_order',
+      'meta:',
+      '  n: &n ~',
+      'columns:',
+      '  - name: status',
+      '    dataType: *n',
+      '    data_type: INT',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    expect(model.columns![0].dataType).toBe('INT');
+    // Doctor lists it as one a write renames, not as an ignored key to delete.
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: ['status'], ignored: [], anchored: [] });
+
+    model.description = 'Orders';
+    service.saveModel(model);
+    const after = fs.readFileSync(file, 'utf-8');
+    expect(after).toBe('name: fct_order\nmeta:\n  n: &n ~\ncolumns:\n  - name: status\n    dataType: INT\ndescription: Orders\n');
+    expect(service.getModel('fct_order')!.columns![0].dataType).toBe('INT');
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: [], anchored: [] });
+
+    // An alias of a value still wins, so data_type beside it stays ignored.
+    fs.writeFileSync(file, yml.replace('&n ~', '&n VARCHAR'));
+    expect(service.getModel('fct_order')!.columns![0].dataType).toBe('VARCHAR');
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: ['status'], anchored: [] });
+  });
+
+  it('never drops an empty dataType that carries an anchor an alias refers to, and keeps the type in data_type', () => {
+    const yml = [
+      'name: fct_order',
+      'columns:',
+      '  - name: a',
+      '    dataType: &x',
+      '    data_type: INT',
+      '  - name: b',
+      '    dataType: *x',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, yml);
+    const read = (): string[] => parseLogicalModelText(fs.readFileSync(file, 'utf-8'), 'fct_order')!
+      .columns!.map((c) => c.dataType);
+    // The yaml library writes an anchored empty value as `&x ` (trailing space), which reads the same.
+    const text = (): string => fs.readFileSync(file, 'utf-8').replace(/ +$/gm, '');
+    expect(read()).toEqual(['INT', 'unknown']);
+    // Doctor: neither renamed nor ignored — kept as written.
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: [], anchored: ['a'] });
+
+    const model = service.getModel('fct_order')!;
+    model.description = 'Orders';
+    service.saveModel(model);
+    // Both keys stay exactly as written, so *x still has its anchor and b still reads as before.
+    expect(text()).toBe(`${yml}description: Orders\n`);
+    expect(read()).toEqual(['INT', 'unknown']);
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: [], anchored: ['a'] });
+
+    // An edited type goes into data_type, where the reader takes it from — never into the anchored node.
+    const edited = service.getModel('fct_order')!;
+    edited.columns![0].dataType = 'BIGINT';
+    service.saveModel(edited);
+    expect(text()).toBe(`${yml.replace('data_type: INT', 'data_type: BIGINT')}description: Orders\n`);
+    expect(read()).toEqual(['BIGINT', 'unknown']);
+
+    // An anchor on the empty dataType's key, or on the data_type key, is kept the same way.
+    for (const keyed of [
+      'name: fct_order\ncolumns:\n  - name: a\n    &k dataType:\n    data_type: INT\nx-notes:\n  ? *k\n  : x\n',
+      'name: fct_order\ncolumns:\n  - name: a\n    &k data_type: INT\nx-notes:\n  ? *k\n  : x\n',
+    ]) {
+      fs.writeFileSync(file, keyed);
+      expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: [], anchored: ['a'] });
+      const m = service.getModel('fct_order')!;
+      m.description = 'Orders';
+      service.saveModel(m);
+      expect(text()).toBe(`${keyed}description: Orders\n`);
+      expect(read()).toEqual(['INT']);
+    }
+  });
+
+  it('leaves a file already spelled dataType byte-identical on a save that changes nothing', () => {
+    fs.writeFileSync(file, RENAMED);
+    service.saveModel(service.getModel('fct_order')!);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(RENAMED);
+  });
+
+  it('names the columns that use data_type, in file order, apart from the ones whose data_type is ignored, for doctor', () => {
+    fs.writeFileSync(file, [
+      'name: fct_order',
+      'columns:',
+      '  - name: order_id',
+      '    dataType: INT',
+      '  - name: status',
+      '    dataType: VARCHAR',
+      '    data_type: TEXT',
+      '  - name: amount',
+      '    data_type: DECIMAL(18,2)',
+      '',
+    ].join('\n'));
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: ['amount'], ignored: ['status'], anchored: [] });
+
+    // A write renames exactly the listed columns; the ignored one stays listed.
+    const model = service.getModel('fct_order')!;
+    model.description = 'Orders';
+    service.saveModel(model);
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual({ columns: [], ignored: ['status'], anchored: [] });
+
+    const none = { columns: [], ignored: [], anchored: [] };
+    fs.writeFileSync(file, RENAMED);
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual(none);
+    expect(service.dataTypeAliasColumns('no_such_model')).toEqual(none);
+    fs.writeFileSync(file, 'name: fct_order\ncolumns:\n  - name: a\n    data_type: [INT\n');
+    expect(service.dataTypeAliasColumns('fct_order')).toEqual(none);
+  });
+
+  describe('a YAML alias (*x) as the value', () => {
+    const DEFS = 'name: fct_order\nx-defs:\n  t: &tv INT\n  b: &tv2 BOOLEAN\n';
+    const save = (yml: string, edit?: (m: SemanticModel) => void): string => {
+      fs.writeFileSync(file, yml);
+      const model = service.getModel('fct_order')!;
+      model.description = 'Orders';
+      edit?.(model);
+      service.saveModel(model);
+      return fs.readFileSync(file, 'utf-8');
+    };
+
+    it('renames data_type: *x and keeps the alias and its comment as written', () => {
+      expect(save(`${DEFS}columns:\n  - name: a\n    data_type: *tv2 # ct-dt\n`))
+        .toBe(`${DEFS}columns:\n  - name: a\n    dataType: *tv2 # ct-dt\ndescription: Orders\n`);
+    });
+
+    it('keeps the comment of a dropped empty dataType above a data_type alias, where it was', () => {
+      expect(save(`${DEFS}columns:\n  - name: a\n    dataType:\n    # cb-dt\n    data_type: *tv2\n`))
+        .toBe(`${DEFS}columns:\n  - name: a\n    # cb-dt\n    dataType: *tv2\ndescription: Orders\n`);
+      // A comment on the dropped key's own line stays on the line.
+      expect(save(`${DEFS}columns:\n  - name: a\n    dataType: # TODO\n    data_type: *tv2\n`))
+        .toBe(`${DEFS}columns:\n  - name: a\n    dataType: *tv2 # TODO\ndescription: Orders\n`);
+    });
+
+    it('leaves dataType: *x # comment alone on an unrelated edit', () => {
+      const yml = `${DEFS}columns:\n  - name: a\n    dataType: *tv # c\n`;
+      expect(save(yml)).toBe(`${yml}description: Orders\n`);
+    });
+
+    it('leaves aliased flags, scdType, meta and rationale alone when they read the same', () => {
+      const yml = [
+        'name: fct_order',
+        'x-defs:',
+        '  y: &yes yes',
+        '  two: &two 2',
+        '  m: &m {tier: gold}',
+        '  r: &r {purpose: Track orders}',
+        'rationale: *r # why',
+        'meta: *m # shared',
+        'columns:',
+        '  - name: a',
+        '    dataType: INT',
+        '    isPrimaryKey: *yes # pk',
+        '    scdType: *two # scd',
+        '    meta: *m # cm',
+        '',
+      ].join('\n');
+      const out = save(yml);
+      expect(out).toContain('rationale: *r # why\nmeta: *m # shared\n');
+      expect(out).toContain('    isPrimaryKey: *yes # pk\n    scdType: *two # scd\n    meta: *m # cm\n');
+    });
+
+    it('writes an edited type over the alias, keeping the line\'s comments', () => {
+      const out = save(`${DEFS}columns:\n  - name: a\n    # above\n    dataType: *tv # c\n  - name: b\n    dataType: *tv\n`, (m) => {
+        m.columns![0].dataType = 'BIGINT';
+      });
+      expect(out).toBe(`${DEFS}columns:\n  - name: a\n    # above\n    dataType: BIGINT # c\n  - name: b\n    dataType: *tv\ndescription: Orders\n`);
+      expect(parseLogicalModelText(out, 'fct_order')!.columns!.map((c) => c.dataType)).toEqual(['BIGINT', 'INT']);
+
+      // The same for a renamed data_type alias.
+      expect(save(`${DEFS}columns:\n  - name: a\n    data_type: *tv2 # ct-dt\n`, (m) => { m.columns![0].dataType = 'TEXT'; }))
+        .toBe(`${DEFS}columns:\n  - name: a\n    dataType: TEXT # ct-dt\ndescription: Orders\n`);
+    });
+
+    it('never lets a kept alias follow an anchor the same save rewrites', () => {
+      // Keys are synced in a fixed order, not file order: whichever comes first,
+      // an alias of a key the canvas rewrote keeps what it read, and its comments.
+      const edit = (yml: string, change: (m: SemanticModel) => void): string => {
+        fs.writeFileSync(file, yml);
+        const model = service.getModel('fct_order')!;
+        change(model);
+        service.saveModel(model);
+        return fs.readFileSync(file, 'utf-8');
+      };
+      expect(edit('name: fct_order\ngrain: &g foo\ndescription: *g # same\n', (m) => { m.grain = 'bar'; }))
+        .toBe('name: fct_order\ngrain: &g bar\ndescription: foo # same\n');
+      expect(edit('name: fct_order\ncolumns:\n  - name: a\n    description: &d INT\n    dataType: *d # dt\n', (m) => {
+        m.columns![0].description = 'Order id';
+      })).toBe('name: fct_order\ncolumns:\n  - name: a\n    description: &d Order id\n    dataType: INT # dt\n');
+      expect(edit('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t X\ngrain: *t\n', (m) => { m.columns![0].dataType = 'Y'; }))
+        .toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t Y\ngrain: X\n');
+      // The anchor's own column edited: the other column's alias keeps its type and both comments.
+      const out = edit(
+        'name: fct_order\ncolumns:\n  - name: a\n    dataType: &t X # a type\n  - name: b\n    # above b\n    dataType: *t # b type\n',
+        (m) => { m.columns![0].dataType = 'Y'; },
+      );
+      expect(out).toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t Y # a type\n  - name: b\n    # above b\n    dataType: X # b type\n');
+      expect(parseLogicalModelText(out, 'fct_order')!.columns!.map((c) => c.dataType)).toEqual(['Y', 'X']);
+    });
+
+    it('reads a number changed in place as its new value when settling the aliases kept beside it', () => {
+      const edit = (yml: string): string => {
+        fs.writeFileSync(file, yml);
+        const model = service.getModel('fct_order')!;
+        model.columns![0].scdType = 1;
+        service.saveModel(model);
+        return fs.readFileSync(file, 'utf-8');
+      };
+      const cols = '  - name: a\n    dataType: INT\n    scdType: &s 2 # a scd\n';
+      const other = edit(`name: fct_order\ncolumns:\n${cols}  - name: b\n    dataType: INT\n    scdType: *s # b scd\n`);
+      expect(other).toBe(`name: fct_order\ncolumns:\n${cols.replace('&s 2', '&s 1')}  - name: b\n    dataType: INT\n    scdType: 2 # b scd\n`);
+      expect(parseLogicalModelText(other, 'fct_order')!.columns!.map((c) => c.scdType)).toEqual([1, 2]);
+
+      const later = edit(`name: fct_order\ncolumns:\n${cols}description: *s # why\n`);
+      expect(later).toBe(`name: fct_order\ncolumns:\n${cols.replace('&s 2', '&s 1')}description: 2 # why\n`);
+      expect(parseLogicalModelText(later, 'fct_order')!.description).toBe('2');
+    });
+  });
+});
+
+describe('LogicalModelService — YAML anchors, aliases and text a save did not change (#157)', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  let file: string;
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    file = service.modelPath('fct_order');
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  /** Write `yml`, apply `change` to the model as read, save, and return the file. */
+  const save = (yml: string, change: (m: SemanticModel) => void = () => {}): string => {
+    fs.writeFileSync(file, yml);
+    const model = service.getModel('fct_order')!;
+    change(model);
+    service.saveModel(model);
+    return fs.readFileSync(file, 'utf-8');
+  };
+  const read = (yml: string): SemanticModel => parseLogicalModelText(yml, 'fct_order')!;
+
+  describe('an alias inside a relationships: entry', () => {
+    const DEFS = 'name: fct_order\nx-defs:\n  r: &r buyer\ncolumns:\n  - name: cust_id\n    dataType: INT\n';
+    const REL = 'relationships:\n  - fromColumn: cust_id\n    toModel: dim_customer\n    toColumn: id\n    cardinality: many-to-one\n    role: *r # who\n';
+
+    it('no longer blocks a save that changes nothing, or changes something else', () => {
+      expect(save(DEFS + REL)).toBe(DEFS + REL);
+      expect(save(DEFS + REL, (m) => { m.description = 'Orders'; })).toBe(`${DEFS}${REL}description: Orders\n`);
+      // An alias for an end of the link, or for the whole entry, reads too.
+      const ends = 'name: fct_order\nx-defs:\n  m: &m dim_customer\ncolumns:\n  - name: cust_id\n    dataType: INT\n'
+        + 'relationships:\n  - fromColumn: cust_id\n    toModel: *m\n    toColumn: id\n';
+      expect(save(ends, (m) => { m.description = 'Orders'; })).toBe(`${ends}description: Orders\n`);
+      const whole = 'name: fct_order\nx-defs:\n  e: &e { fromColumn: cust_id, toModel: dim_customer, toColumn: id }\n'
+        + 'relationships:\n  - *e\n';
+      expect(save(whole, (m) => { m.description = 'Orders'; })).toBe(`${whole}description: Orders\n`);
+    });
+
+    it('writes a changed role over the alias, keeping the line\'s comment, and leaves the anchor alone', () => {
+      const out = save(DEFS + REL, (m) => { m.relationships![0].role = 'seller'; });
+      expect(out).toBe(DEFS + REL.replace('role: *r # who', 'role: seller # who'));
+      expect(read(out).relationships![0].role).toBe('seller');
+    });
+
+    it('keeps the alias when the link changes in another field', () => {
+      const out = save(DEFS + REL, (m) => { m.relationships![0].cardinality = 'one-to-one'; });
+      expect(out).toBe(DEFS + REL.replace('many-to-one', 'one-to-one'));
+    });
+  });
+
+  describe('an alias under a key ERD Studio does not manage', () => {
+    it('keeps what it read when the canvas rewrites the anchor', () => {
+      const out = save('name: fct_order\ngrain: &g one row per order\nx-note: *g # same grain\n', (m) => { m.grain = 'one row per line'; });
+      expect(out).toBe('name: fct_order\ngrain: &g one row per line\nx-note: one row per order # same grain\n');
+      // Inside a column too: the column's own unknown key keeps its type.
+      const col = save('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t INT\n    x-source-type: *t\n', (m) => {
+        m.columns![0].dataType = 'BIGINT';
+      });
+      expect(col).toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: &t BIGINT\n    x-source-type: INT\n');
+    });
+
+    it('is written out as the value it read when the canvas removes the anchor, rather than failing the save', () => {
+      expect(save('name: fct_order\ngrain: &g one row per order\nx-note: *g\n', (m) => { delete m.grain; }))
+        .toBe('name: fct_order\nx-note: one row per order\n');
+      // An anchor in a removed relationship entry, too.
+      const out = save(
+        'name: fct_order\ncolumns:\n  - name: cust_id\n    dataType: INT\nrelationships:\n'
+        + '  - fromColumn: cust_id\n    toModel: dim_customer\n    toColumn: id\n    role: &r buyer\nx-who: *r\n',
+        (m) => { m.relationships = []; },
+      );
+      expect(out).toBe('name: fct_order\ncolumns:\n  - name: cust_id\n    dataType: INT\nx-who: buyer\n');
+    });
+
+    it('stays an alias when its anchor did not change', () => {
+      const yml = 'name: fct_order\ngrain: &g one row per order\nx-note: *g\n';
+      expect(save(yml, (m) => { m.description = 'Orders'; })).toBe(`${yml}description: Orders\n`);
+    });
+
+    it('keeps an alias used as a key reading what it read', () => {
+      const out = save('name: fct_order\ngrain: &g order\nx-by-grain:\n  *g : 1\n', (m) => { m.grain = 'line'; });
+      expect(out).toBe('name: fct_order\ngrain: &g line\nx-by-grain:\n  order: 1\n');
+    });
+  });
+
+  it('never quotes text a save did not change: true stays true, a number keeps its own text', () => {
+    const yml = [
+      'name: fct_order',
+      'description: true',
+      'grain: 007',
+      'meta:',
+      '  a: 007',
+      '  b: 1e3',
+      '  c: .5',
+      '  d: +1',
+      '  e: 0x1F',
+      'x-weights: [ 007, 1e3, .5, +1 ]',
+      'columns:',
+      '  - name: a',
+      '    dataType: INT',
+      '    isPrimaryKey: yes',
+      '    scdType: 2.0',
+      '',
+    ].join('\n');
+    expect(save(yml)).toBe(yml);
+    expect(save(yml, (m) => { m.schema = 'sales'; })).toBe(`${yml}schema: sales\n`);
+    const model = read(yml);
+    expect([model.description, model.grain, model.meta]).toEqual(['true', '007', { a: '007', b: '1e3', c: '.5', d: '+1', e: '0x1F' }]);
+  });
+
+  it('writes a number the canvas changed as usual', () => {
+    expect(save('name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n    scdType: 02\n', (m) => { m.columns![0].scdType = 1; }))
+      .toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n    scdType: 1\n');
+    expect(save('name: fct_order\ncolumns:\n  - name: 007\n    dataType: INT\n', (m) => { m.columns![0].name = '008'; }))
+      .toBe('name: fct_order\ncolumns:\n  - name: "008"\n    dataType: INT\n');
+  });
+
+  it('keeps the line\'s comment when a plain value becomes a map', () => {
+    expect(save('name: fct_order\nmeta: ~ # team tags\n', (m) => { m.meta = { tier: 'gold' }; }))
+      .toBe('name: fct_order\nmeta:\n  # team tags\n  tier: gold\n');
+    expect(save('name: fct_order\nrationale: tbd # ask finance\n', (m) => { m.rationale = { purpose: 'Track orders' }; }))
+      .toBe('name: fct_order\nrationale:\n  # ask finance\n  purpose: Track orders\n');
+    // A column's meta, and a meta key the canvas turns into a list, the same way.
+    expect(save('name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n    meta: ~ # later\n', (m) => {
+      m.columns![0].meta = { pii: 'no' };
+    })).toBe('name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n    meta:\n      # later\n      pii: no\n');
+    expect(save('name: fct_order\nmeta:\n  owners: tbd # who\n', (m) => { m.meta = { owners: ['ana', 'bo'] }; }))
+      .toBe('name: fct_order\nmeta:\n  owners:\n    # who\n    - ana\n    - bo\n');
+  });
+
+  it('writes a role the reader did not take as text, though it looks the same', () => {
+    // `role: true` is a YAML boolean: core reads no role from it. Setting the
+    // role "true" on the canvas must write the text, not leave the boolean.
+    const rel = 'relationships:\n  - fromColumn: a\n    toModel: dim_customer\n    toColumn: id\n    cardinality: many-to-one\n';
+    const yml = `name: fct_order\ncolumns:\n  - name: a\n    dataType: INT\n${rel}    role: true\n`;
+    expect(read(yml).relationships![0].role).toBeUndefined();
+    const out = save(yml, (m) => { m.relationships![0].role = 'true'; });
+    expect(out).toBe(yml.replace('role: true', 'role: "true"'));
+    expect(read(out).relationships![0].role).toBe('true');
+  });
+
+  it('saves a file with thousands of aliases in linear time', () => {
+    const cols = Array.from({ length: 2000 }, (_, i) => `  - name: c${i}\n    dataType: &t${i} int\n    x-copy: *t${i}\n`).join('');
+    const many = `name: fct_order\nx-defs:\n  d: &d shared\nx-uses: [ ${Array.from({ length: 3000 }, () => '*d').join(', ')} ]\ncolumns:\n${cols}`;
+    const started = Date.now();
+    const out = save(many, (m) => { m.grain = 'g'; });
+    // Quadratic, this took over 10 s; linear, well under one.
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(out).toBe(`${many}grain: g\n`);
+  }, 30_000);
+
+  it('settles a reused number written into a text field in one save', () => {
+    const cols = '  - name: a\n    dataType: INT\n    scdType: &s 2\n';
+    const once = save(`name: fct_order\ncolumns:\n${cols}description: *s # why\n`, (m) => { m.columns![0].scdType = 1; });
+    expect(once).toBe(`name: fct_order\ncolumns:\n${cols.replace('&s 2', '&s 1')}description: 2 # why\n`);
+    expect(save(once)).toBe(once);
+    expect(read(once).description).toBe('2');
+  });
+});
+
+describe('LogicalModelService — a direct write keeps the file\'s line endings', () => {
+  let tempDir: string;
+  let service: LogicalModelService;
+  const CRLF = ['# kept', 'name: dim_customer', 'columns:', '  - name: customer_key', '    dataType: string', ''].join('\r\n');
+  const isCrlfOnly = (text: string): boolean => text.includes('\r\n') && !/(?<!\r)\n/.test(text);
+
+  beforeEach(() => {
+    tempDir = createTempWorkspace();
+    service = new LogicalModelService(tempDir);
+    service.ensureDir();
+    fs.writeFileSync(service.modelPath('dim_customer'), CRLF);
+  });
+  afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+  it('saveModel keeps CRLF', () => {
+    const model = service.getModel('dim_customer')!;
+    model.description = 'Customers';
+    service.saveModel(model);
+    const text = fs.readFileSync(service.modelPath('dim_customer'), 'utf-8');
+    expect(text).toContain('description: Customers\r\n');
+    expect(isCrlfOnly(text)).toBe(true);
+  });
+
+  it('renameModel carries CRLF to the new file', () => {
+    service.renameModel('dim_customer', 'dim_client');
+    const text = fs.readFileSync(service.modelPath('dim_client'), 'utf-8');
+    expect(text).toContain('name: dim_client\r\n');
+    expect(isCrlfOnly(text)).toBe(true);
+  });
+
+  it('renameModel keeps CRLF when it has to regenerate the file', () => {
+    const spy = service as unknown as { loadEditableDocument: (p: string) => unknown };
+    const original = spy.loadEditableDocument.bind(service);
+    spy.loadEditableDocument = () => null;
+    try {
+      service.renameModel('dim_customer', 'dim_client');
+    } finally {
+      spy.loadEditableDocument = original;
+    }
+    const text = fs.readFileSync(service.modelPath('dim_client'), 'utf-8');
+    expect(text).toContain('name: dim_client\r\n');
+    expect(isCrlfOnly(text)).toBe(true);
+  });
+
+  it('serializeModel renders a CRLF file with CRLF, and a new file with LF', () => {
+    expect(isCrlfOnly(service.serializeModel(service.getModel('dim_customer')!))).toBe(true);
+    expect(service.serializeModel({ name: 'dim_new', columns: [] })).toBe('name: dim_new\n');
   });
 });

@@ -4,7 +4,7 @@
 
 ## File Layout
 
-ERD Studio uses a **central model store**. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level or one folder down); domain JSON files reference models **by name** and hold the layout. Relationships are defined once in the from-model's YAML and drawn by every domain holding both models — or, in a project that keeps them per domain, in each domain JSON (see [Where relationships live](#where-relationships-live)).
+ERD Studio uses a **central model store**. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level or one folder down); domain JSON files reference models **by name** and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key, and drawn by every domain holding both models — or, in a project that keeps them per domain, in each domain JSON (see [Where relationships live](#where-relationships-live)).
 
 ```
 .erd-studio/
@@ -138,7 +138,7 @@ columns:
 | `columns` | array | No | Array of `ColumnDef`. |
 | `rationale` | object | No | Design rationale. Omit entirely if empty. |
 | `meta` | map | No | Free-form, dbt-style metadata (owner, source system, lineage…). See [Metadata](#metadata-meta). Omit entirely if empty. |
-| `relationships` | array | No | Relationships leaving this model: `Relationship` objects without `fromModel` (it is this model). Shared by every domain holding both ends. See [Where relationships live](#where-relationships-live). Omit entirely if empty. |
+| `relationships` | array | No | Relationships leaving this model — it holds the foreign key: `Relationship` objects without `fromModel` (it is this model). Shared by every domain holding both ends. See [Where relationships live](#where-relationships-live). Omit entirely if empty. |
 
 Models are defined once and can be referenced from several domains. Editing a model from any domain canvas updates the shared YAML.
 
@@ -157,6 +157,8 @@ Models are defined once and can be referenced from several domains. Editing a mo
 | `scdType` | `0` \| `1` \| `2` | No | Dimension columns: 0 = never changes, 1 = overwrite, 2 = track history. |
 | `additiveType` | string | No | Fact measures: `"additive"`, `"semi-additive"`, or `"non-additive"`. |
 | `meta` | map | No | Free-form, dbt-style metadata for this column. See [Metadata](#metadata-meta). Omit entirely if empty. |
+
+**`data_type` (still read).** A column whose type is spelled the way dbt's schema.yml spells it, `data_type:`, is read as `dataType` (#144). When a column has both keys, `dataType` wins whenever it holds a value (even `""`); `data_type` is used only when `dataType` is absent or null. ERD Studio writes `dataType` only: the next time it writes that model's file — any canvas edit to that model or to a relationship stored in it (including one Draw from dbt or Add Existing Model adds there, and a rename elsewhere that reaches it); moving nodes and **Move Relationships to Model Library** leave the file's columns as written — it renames each `data_type` the reader used to `dataType` in place (its value and comment unchanged; an empty `dataType:` beside it is dropped), and leaves a `data_type` that sits beside a `dataType` holding a value alone. When the empty `dataType` (its key or value) or the `data_type` key carries a YAML anchor (`dataType: &x`), neither key is renamed or dropped — an alias such as `*x` would lose its anchor or change meaning — and the column's type is written to `data_type`, where the reader takes it from. `erd-studio doctor` lists the files and columns that use it (`erd.dataTypeAliasFiles[].columns`), and separately the columns where `data_type` sits beside a winning `dataType` and is ignored (`.ignored`) — those stay listed until the `data_type` is deleted — and the anchored ones kept as written (`.anchored`). Write `dataType`; the JSON schema still flags `data_type` as an unknown key.
 
 ### ModelRole Enum
 
@@ -198,7 +200,7 @@ Optional map on a model and on any column, named after and shaped like dbt's `me
 
 ## Relationships
 
-A relationship is stored in exactly one place: its from-model's YAML (`relationships:`) or a domain JSON (`logical.relationships`). See [Where relationships live](#where-relationships-live).
+A relationship is stored in exactly one place: the YAML of the model holding its foreign key (`relationships:`) or a domain JSON (`logical.relationships`). See [Where relationships live](#where-relationships-live).
 
 ```jsonc
 {
@@ -214,19 +216,67 @@ A relationship is stored in exactly one place: its from-model's YAML (`relations
 |-------|------|----------|-------------|
 | `fromModel` | string | Yes | Model containing the FK (the "many" side for many-to-one). |
 | `fromColumn` | string | Yes | FK column name on the from model. |
-| `toModel` | string | Yes | Referenced model (PK side). |
+| `toModel` | string | Yes | Referenced model (PK side). A relationship whose `toModel` has no model file is not drawn. |
 | `toColumn` | string | Yes | Referenced PK column on the to model. |
-| `cardinality` | string | Yes | One of `"many-to-one"`, `"one-to-one"`, `"one-to-many"`, `"many-to-many"`. |
+| `cardinality` | string | Yes | One of `"many-to-one"`, `"one-to-one"`, `"one-to-many"`, `"many-to-many"`. `"one-to-many"` is deprecated in a model YAML: still read, but ERD Studio never writes it there (see the direction convention), and the JSON schema marks it. |
+| `role` | string | No | A label for what the link means, e.g. `"order date"` and `"ship date"` for two columns pointing at the same date dimension. Trimmed, at most 60 characters, drawn on the line. A label only: not part of the identity. |
+| `compositeKey` | string | No | Groups entries into one composite foreign key (see [Composite foreign keys](#composite-foreign-keys)). Trimmed, 1–64 characters, compared without case. A blank or non-string value is ignored (the entry reads as a single link and the bytes stay). Grouping only: not part of the identity. |
 
-**Identity key:** the composite `(fromModel, fromColumn, toModel, toColumn)` must be unique within the domain.
+**Spelling:** model and column names in a relationship match the models' and columns' real names ignoring case, and are drawn with the real spelling; ERD Studio writes the real spelling the next time it changes that entry.
 
-**Direction convention:** `fromModel` holds the FK, `toModel` holds the PK.
+**Identity key:** the composite `(fromModel, fromColumn, toModel, toColumn)` must be unique within the domain — and the same two columns may not be joined twice in opposite directions either: that is one link, drawn once.
+
+**Direction convention:** `fromModel` holds the FK (the "many" side), `toModel` holds the PK. A `one-to-many` is the same relationship read from the other end, so it is stored with its ends swapped as `many-to-one` (`canonicalRelationship` in `@erd-studio/core`, issue #133). `one-to-one` and `many-to-many` keep the direction they were drawn in. **Keys win:** a `many-to-one` whose `fromColumn` is its model's whole primary or natural key, pointing at a column of a model whose own whole key is a different column, contradicts the keys (that column holds each value once, so it cannot be the many side). The canvas refuses a ⇄ that would write one and the New Relationship dialog warns before creating one (**Create anyway**); the move command turns one round. Without a key flagged on the target there is no certainty, and nothing is turned round.
+
+**Which side holds the key** comes from evidence, never from the order a line was drawn in: first the models' own key flags (a column set equal to a model's full `isPrimaryKey` set, or its full `isNaturalKey` set, is its whole key; in a model that flags any key, any other set is not), then — only for a model that flags no key — dbt's tests (a `unique` test, a `unique_combination_of_columns` equal to the set, a column a `relationships` test leaves). Flags always win over dbt. With neither, the New Relationship dialog asks which side holds the foreign key.[^winner]
 
 Entries missing any of the four string endpoints are dropped on read with a console warning; an unrecognised `cardinality` falls back to `many-to-one`.
 
+[^winner]: When the same link is stored twice, the copy drawn is chosen with the same evidence (the canvas and `erd-studio diff` pass dbt's tests; the read-only viewer cannot). The only state where they can differ is a link stored twice in the model library, with neither end flagged, in disagreeing directions — an ERD Studio 1.6.7 leftover that **Move Relationships to Model Library** settles.
+
+### Self-references
+
+A model may point at itself, e.g. an employee's manager. It is stored in the model's own file, and a column never points at itself:
+
+```yaml
+# logical-models/employee.yml
+relationships:
+  - fromColumn: manager_id
+    toModel: employee
+    toColumn: employee_id
+    cardinality: many-to-one
+    role: manager
+```
+
+### Composite foreign keys
+
+A foreign key over several columns (a Data Vault PIT or bridge, a multi-column natural key) is one entry per column pair, all sharing one `compositeKey`, stored together on the FK side like any relationship:
+
+```yaml
+# logical-models/gold/pit_customer.yml
+relationships:
+  - fromColumn: customer_hk
+    toModel: sat_customer
+    toColumn: customer_hk
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+  - fromColumn: as_of_date
+    toModel: sat_customer
+    toColumn: load_date
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+    role: as of          # the group's role is the first entry's, and is written on every entry
+```
+
+Entries sharing a `compositeKey` (without case) form one composite — in one model file from one model, or in one domain file from one `fromModel` — when there are 2–8 of them, all point at the same `toModel`, all have the same cardinality (`many-to-one` or `one-to-one`, never `many-to-many`), and no column is used twice at either end. A valid composite is drawn as one line listing its pairs; otherwise each entry is drawn as a single link and a warning is logged. ERD Studio names a new one `fk_<toModel>` (then `_2`, `_3`, … in that file). An edit, ⇄ or delete of the line acts on every entry; removing one of its columns removes the whole composite.
+
+**Older versions.** ERD Studio 1.6.7 and earlier read each entry as a separate relationship, and drop `compositeKey` and `role` when they save that model — every column pair is kept. Editing one of those links and adding the other pairs back groups them again.
+
+**dbt.** The physical stage reads a composite foreign key from a dbt ≥ 1.9 model-level `foreign_key` constraint (`columns`, `to: ref(...)`, `to_columns`) or a `dbt_constraints.foreign_key` test (`fk_column_names`, `pk_table_name`, `pk_column_names`), from schema yml and the manifest. Compare to Physical matches each pair as its own link; a composite dbt does not declare is one informational difference, and `erd-studio diff` reports it as an advisory `declare-composite-foreign-key` fix (blocking only with `--strict`).
+
 ### Where relationships live
 
-**In the model library (the default for a new project, issue #126).** A relationship is written once, into the YAML of its `fromModel`, with the same fields minus `fromModel`:
+**In the model library (the default for a new project, issue #126).** A relationship is written once, into the YAML of its `fromModel` — the model holding the foreign key — with the same fields minus `fromModel`. Adding a new fact therefore only ever changes the fact's own file:
 
 ```yaml
 # logical-models/gold/fct_order_line.yml
@@ -237,15 +287,20 @@ relationships:
     toModel: dim_customer
     toColumn: customer_id
     cardinality: many-to-one
+  - fromColumn: ship_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
+    role: ship date
 ```
 
-Every domain whose `logical.models` holds both `fct_order_line` and `dim_customer` draws it; a domain missing either does not. Editing it on any canvas changes every diagram that shows it, and deleting it deletes it everywhere. Renaming a model or column, or removing a column, rewrites the entries in other model files that point at it. Removing a model from one domain leaves its relationships in the library.
+Every domain whose `logical.models` holds both `fct_order_line` and `dim_customer` draws it; a domain missing either does not. Editing it on any canvas changes every diagram that shows it, and deleting it deletes it everywhere. The same two columns stored in both models' files (either way round, as ERD Studio 1.6.7 could leave them), or twice in one file, are drawn once, from the copy on the many side; an edit, ⇄ or delete acts on the link, folding every copy into one entry in its home with the line's role (⇄ is refused while two copies carry different roles). Deleting a link another diagram still draws from a copy of its own names that diagram; its copy is left for you. Renaming a model or column, or removing a column, rewrites the entries in other model files that point at it. Removing a model from one domain leaves its relationships in the library.
 
-**Per domain.** A project whose domain files already hold relationships keeps adding them there, so teammates on a version before this one go on seeing every edge. It opts in with **ERD Studio: Move Relationships to Model Library**: every v5 domain's relationships are stored once in their from-models' YAML and taken out of the domain files, in one undoable edit. Opening a diagram in such a project offers the move (once a session, with **Don't Ask Again**) when at least one relationship's two models sit together in more than one diagram. Before writing, the command explains why and where each relationship goes; a relationship the domains define with different cardinalities is a **conflict**, and the user picks the cardinality every diagram will use (naming the diagrams behind each) or leaves it in the domain files for a later run.
+**Per domain.** A project whose domain files already hold relationships keeps adding them there, so teammates on a version before this one go on seeing every edge. It opts in with **ERD Studio: Move Relationships to Model Library**: every v5 domain's relationships are stored once in the YAML of the model holding each one's foreign key and taken out of the domain files, writing the files directly (undo with source control). The same command moves a library entry stored on its "one" side (a `one-to-many`, written before issue #133, or a `many-to-one` ERD Studio 1.6.7 saved backwards: from its model's whole primary or natural key to a column of a model whose own whole key is a different column — see "Keys win") to the model on its many side, as `many-to-one`, keeping its role. It moves that one entry, never another copy of the link in the same file. When another copy of the link, in either file, disagrees, both are left in place and listed; a model file whose `relationships:` list has comments, YAML anchors or aliases, or entries ERD Studio cannot read is not rewritten, and is named instead. Opening a diagram in such a project offers the move (once a session, with **Don't Ask Again**) when at least one relationship's two models sit together in more than one diagram. Before writing, the command explains why and where each relationship goes; a relationship the domains define with different cardinalities is a **conflict**, and the user picks the cardinality every diagram will use (naming the diagrams behind each) or leaves it in the domain files for a later run. A definition is the cardinality, the role, and — for a `one-to-one` — which end holds the foreign key, so two diagrams labelling a link differently, or drawing a one-to-one from opposite ends, is a conflict too; a `many-to-many` drawn opposite ways round is one link, stored from its lower `model.column` end. Diagram copies the keys contradict are stored turned round, so a second run has nothing to do. A diagram copy of a link the model library already defines is taken out, and listed when it says something different (the library's version is the one every diagram already draws); a role only a diagram gives it moves onto the library entry. Every entry turned round is listed in the preview.
 
 **Which one applies** is decided by what is on disk, like layer folders: the library is used once **any** model file holds a `relationships:` list, or when **no** domain file holds a `logical.relationships` entry.
 
-**Reading.** A domain draws its own `logical.relationships` first, in order, then the library relationships between its models. When both define the same endpoints (ignoring case) it is drawn once, with the library's cardinality, and a warning names the disagreement.
+**Reading.** A domain draws its own `logical.relationships` first, in order, then the library relationships between its models. When both define the same endpoints (ignoring case) it is drawn once, with the library's cardinality, and a warning names the disagreement. A domain file holding the same link twice draws it once, from the same copy whatever the entry order. When they join the same two columns in opposite directions, it is drawn once, as the library stores it.
 
 ## View Config (`viewConfig`)
 
@@ -282,7 +337,7 @@ Persisted UI layout state. Safe to leave as `{}` — the extension auto-position
 | Change grain, modelRole, description, rationale, meta | the model's yml |
 | Add a model to a domain diagram | Domain `.json` → append the name to `logical.models` **and**, if no file for the name exists in any folder, create `logical-models/{layer}/{name}.yml` for the domain's layer |
 | Remove a model from a domain | Domain `.json` → remove the name from `logical.models` and its relationships from `logical.relationships` |
-| Add/remove/edit a relationship | The from-model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships` |
+| Add/remove/edit a relationship | The FK model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships` |
 | Rename a domain | Rewrite `domain` in the raw JSON and rename the file; never re-serialise a resolved domain (that inlines model bodies and produces a hybrid file) |
 
 ## Layers File (`.erd-studio/layers.json`)
@@ -440,7 +495,7 @@ AI Helper**) is read-only. `erd-studio diff --domain .erd-studio/{layer}/{domain
 or `--all`, builds both stages exactly as described above and runs the same comparison
 as the canvas, because both call the same code. It reports each difference as a fix
 that brings the logical side in line with dbt, naming the file to change: the model's
-`logical-models/{name}.yml` for columns and types, and for relationships the from-model's yml or the domain file, wherever the project keeps them. It exits `0` when there are no blocking differences and `1` when there are.
+`logical-models/{name}.yml` for columns and types, and for relationships the FK model's yml or the domain file, wherever the project keeps them. A relationship matches whichever end dbt tests it from. It exits `0` when there are no blocking differences and `1` when there are.
 A column that dbt has no type for yet is advisory, not blocking, unless you pass
 `--strict`. `erd-studio inventory --models a,b --json` prints the physical shape of the
 named models, as a starting point for new model files. The `/erd-studio-setup` Claude Code
@@ -483,8 +538,10 @@ Red Hat YAML matches paths with dot-folders skipped, so a project inside a hidde
 2. `layer` must match an `id` in `layers.json`.
 3. Every entry in `logical.models` must be a string. Mixed string/object arrays are rejected.
 4. Each referenced model should have a `logical-models/{name}.yml` or `logical-models/{folder}/{name}.yml`; a missing file renders as a placeholder with a warning.
-5. Relationship identity `(fromModel, fromColumn, toModel, toColumn)` must be unique, and both models should be in `logical.models`.
+5. Relationship identity `(fromModel, fromColumn, toModel, toColumn)` must be unique, in either direction, and both models should be in `logical.models`.
 6. `viewConfig` must be at the root of the document.
+
+**Unresolved git merge conflicts.** A domain or model file that still holds git's conflict markers — a `<<<<<<<` line, then `=======`, then `>>>>>>>` (a diff3 `|||||||` section between the first two is fine) — and so does not parse is reported as a merge conflict, with the line of the first `<<<<<<<`, rather than as invalid JSON or a YAML error: the canvas says so (and loads by itself once the file is resolved and saved), a model file's node reads "Unresolved git merge conflict on line N", `erd-studio diff` / `export` report the error code `merge-conflict`, and `erd-studio doctor` lists the file under `conflictedDomainFiles` (a model file under `unreadableModelFiles`, with `mergeConflict: true`). A file that parses is never reported, whatever its text contains. Keep one side of each conflict, save, then `git add` the file; when only `viewConfig.positions` conflicts, either side is safe to keep.
 
 ## Complete Example
 

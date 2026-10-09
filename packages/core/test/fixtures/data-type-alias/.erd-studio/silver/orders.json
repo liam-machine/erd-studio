@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 5,
+  "domain": "orders",
+  "layer": "silver",
+  "description": "A model file that spells column types data_type (#144)",
+  "logical": {
+    "models": [
+      "fct_order",
+      "dim_customer"
+    ],
+    "relationships": [
+      {
+        "fromModel": "fct_order",
+        "fromColumn": "customer_id",
+        "toModel": "dim_customer",
+        "toColumn": "customer_id",
+        "cardinality": "many-to-one"
+      }
+    ]
+  },
+  "viewConfig": {
+    "positions": {
+      "fct_order": { "x": 0, "y": 0 },
+      "dim_customer": { "x": 400, "y": 0 }
+    }
+  }
+}

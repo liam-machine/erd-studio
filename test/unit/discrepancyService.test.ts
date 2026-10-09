@@ -309,6 +309,66 @@ describe('DiscrepancyService.compare', () => {
       expect(report.relationships[0].sourceCardinality).toBe('many-to-one');
       expect(report.relationships[0].targetCardinality).toBe('one-to-one');
     });
+
+    describe('composite foreign keys (#133 L2)', () => {
+      const member = (fc: string, tc: string, card: DisplayRelationship['cardinality'] = 'many-to-one', key?: string): DisplayRelationship =>
+        ({ ...makeRel(['pit', fc], ['sat', tc], card), ...(key ? { compositeKey: key } : {}) });
+      const group = (key = 'fk_sat', card: DisplayRelationship['cardinality'] = 'many-to-one') =>
+        [member('hk', 'hk', card, key), member('as_of', 'load_date', card, key)];
+      const PAIRS = [{ fromColumn: 'hk', toColumn: 'hk' }, { fromColumn: 'as_of', toColumn: 'load_date' }];
+
+      it('an undeclared composite is one informational extra entry, and raises no missing', () => {
+        const source = makeDomain({ relationships: group() });
+        const target = makeDomain({ relationships: [member('hk', 'hk')] });
+        expect(compare(source, target).relationships).toEqual([{
+          fromModel: 'pit', fromColumn: 'hk', toModel: 'sat', toColumn: 'hk', pairs: PAIRS, compositeKey: 'fk_sat',
+          status: 'extra', sourceCardinality: 'many-to-one', composite: true, undeclaredPairs: [PAIRS[1]],
+        }]);
+      });
+
+      it('a composite dbt declares the same way matches, whatever its name or the end it is read from', () => {
+        const target = makeDomain({ relationships: [
+          { ...makeRel(['sat', 'load_date'], ['pit', 'as_of'], 'one-to-many'), compositeKey: 'other' },
+          { ...makeRel(['sat', 'hk'], ['pit', 'hk'], 'one-to-many'), compositeKey: 'other' },
+        ] });
+        expect(compare(makeDomain({ relationships: group() }), target).relationships)
+          .toEqual([expect.objectContaining({ status: 'matched', pairs: PAIRS, compositeKey: 'fk_sat' })]);
+      });
+
+      it('singles a 1.6.7 save left match a dbt composite pair by pair, with no missing entry', () => {
+        const source = makeDomain({ relationships: [member('hk', 'hk'), member('as_of', 'load_date')] });
+        const target = makeDomain({ relationships: group('fk_dbt') });
+        expect(compare(source, target).relationships.map((r) => r.status)).toEqual(['matched', 'matched']);
+      });
+
+      it('a cardinality difference is one entry for the composite', () => {
+        const target = makeDomain({ relationships: [member('hk', 'hk', 'one-to-one', 'k'), member('as_of', 'load_date', 'one-to-one', 'k')] });
+        expect(compare(makeDomain({ relationships: group() }), target).relationships).toEqual([expect.objectContaining({
+          status: 'cardinality-mismatch', pairs: PAIRS, sourceCardinality: 'many-to-one', targetCardinality: 'one-to-one',
+        })]);
+      });
+
+      it('a composite only the target declares is one missing entry with all its pairs', () => {
+        expect(compare(makeDomain(), makeDomain({ relationships: group('fk_dbt') })).relationships).toEqual([{
+          fromModel: 'pit', fromColumn: 'hk', toModel: 'sat', toColumn: 'hk', pairs: PAIRS, compositeKey: 'fk_dbt',
+          status: 'missing', targetCardinality: 'many-to-one',
+        }]);
+      });
+    });
+
+    it('a self-reference matches dbt\'s, read from either column (#133 L3)', () => {
+      const source = makeDomain({ relationships: [makeRel(['employee', 'manager_id'], ['employee', 'employee_id'])] });
+      const target = makeDomain({ relationships: [makeRel(['employee', 'employee_id'], ['employee', 'manager_id'], 'one-to-many')] });
+      expect(compare(source, target).relationships.map((r) => r.status)).toEqual(['matched']);
+    });
+
+    it('matches a link whose model and column differ only in case (#133 L4)', () => {
+      const source = makeDomain({ relationships: [makeRel(['Fct_Orders', 'Customer_ID'], ['DIM_CUSTOMER', 'id'])] });
+      const target = makeDomain({ relationships: [makeRel(['fct_orders', 'customer_id'], ['dim_customer', 'ID'])] });
+
+      const report = compare(source, target);
+      expect(report.relationships.map((r) => r.status)).toEqual(['matched']);
+    });
   });
 
   describe('report metadata', () => {
@@ -596,6 +656,31 @@ describe('DiscrepancyService.compare', () => {
 // ---------------------------------------------------------------------------
 // normaliseDataType unit tests
 // ---------------------------------------------------------------------------
+
+describe('DiscrepancyService.compare — a link matches whichever end each stage reads it from (#133)', () => {
+  const models = [makeModel('fct_order', [makeColumn('customer_key')]), makeModel('dim_customer', [makeColumn('customer_key')])];
+  const fromFact = (c: DisplayRelationship['cardinality']) => makeRel(['fct_order', 'customer_key'], ['dim_customer', 'customer_key'], c);
+  const fromDim = (c: DisplayRelationship['cardinality']) => makeRel(['dim_customer', 'customer_key'], ['fct_order', 'customer_key'], c);
+  const run = (logical: DisplayRelationship, physical: DisplayRelationship) => compare(
+    makeDomain({ models, relationships: [logical] }),
+    makeDomain({ stage: 'physical', models, relationships: [physical] }),
+  ).relationships;
+
+  it('matches the many-side logical entry with dbt\'s test from the other end', () => {
+    expect(run(fromFact('many-to-one'), fromDim('one-to-many'))).toEqual([
+      { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', status: 'matched' },
+    ]);
+  });
+
+  it('reports a real cardinality difference once, in the source\'s direction', () => {
+    expect(run(fromFact('one-to-one'), fromDim('one-to-many'))).toEqual([
+      {
+        fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key',
+        status: 'cardinality-mismatch', sourceCardinality: 'one-to-one', targetCardinality: 'many-to-one',
+      },
+    ]);
+  });
+});
 
 describe('normaliseDataType', () => {
   it('lowercases everything', () => {

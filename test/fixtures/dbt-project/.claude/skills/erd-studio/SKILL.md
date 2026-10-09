@@ -15,7 +15,7 @@ description: >-
 
 # ERD Studio — AI Data Modeling Guide
 
-ERD Studio uses a **central model store** architecture. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and hold the layout. Relationships are defined once, in the from-model's YAML, and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see `Where relationships live`).
+ERD Studio uses a **central model store** architecture. Model definitions are YAML files in `.erd-studio/logical-models/` (at the top level, or one folder down in a per-layer folder). Domain JSON files reference models by name and hold the layout. Relationships are defined once, in the YAML of the model holding the foreign key (the "many" side), and every domain holding both models draws them — or, in a project that still keeps them per domain, in each domain JSON (see `Where relationships live`).
 
 ## Architecture Overview
 
@@ -118,10 +118,10 @@ Annotations are temporary build notes — visible on the canvas while constructi
 | Change grain, modelRole, description, rationale, meta | the model's `.yml` |
 | Add a model to a domain diagram | Domain `.json` → add name to `logical.models[]` AND, if no file for that name exists in any folder, create it — `logical-models/{layer}/{name}.yml` (the domain's layer) when the project uses layer folders, else `logical-models/{name}.yml` |
 | Remove a model from a domain | Domain `.json` → remove name from `logical.models[]` AND remove its relationships from `logical.relationships[]` (relationships in model YAML stay — the domain just stops drawing them) |
-| Add/remove/edit a relationship | The from-model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships[]` — see "Where relationships live" |
+| Add/remove/edit a relationship | The many-side (FK) model's `.yml` → `relationships:` when the project keeps relationships in the model library, else domain `.json` → `logical.relationships[]` — see "Where relationships live" |
 | Change layout positions | Domain `.json` → `viewConfig.positions` |
 
-> **Common mistake:** Editing the `.yml` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the `.yml` AND adding the name string to the domain `.json`. A relationship is stored in exactly one place — the from-model's `.yml` or the domain `.json`, never both (see `Where relationships live`).
+> **Common mistake:** Editing the `.yml` file alone is sufficient for column and model property changes — the extension picks up YAML changes automatically. But adding a model to the **diagram** requires BOTH creating the `.yml` AND adding the name string to the domain `.json`. A relationship is stored in exactly one place — the FK (many-side) model's `.yml` or the domain `.json`, never both (see `Where relationships live`).
 
 ---
 
@@ -162,7 +162,7 @@ columns:
     scdType: 2
 ```
 
-**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes (escape an inner `"` as `\"`), or use a `|` block for multi-line text. Always quote a value that contains `: ` or ` #`, or starts with any of `` ` @ * & ! % [ { - | > ' " ``. Indent with spaces, never tabs. One YAML document per file: no `---` separators, no markdown code fences, no `{{ doc() }}` — paste the text itself. `erd-studio doctor` and `erd-studio diff` report a file that does not parse as `fix-model-yaml` with its line — fix that before anything else.
+**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes (escape an inner `"` as `\"`), or use a `|` block for multi-line text. Always quote a value that contains `: ` or ` #`, or starts with any of `` ` @ * & ! % [ { - | > ' " ``. Indent with spaces, never tabs. One YAML document per file: no `---` separators, no markdown code fences, no `{{ doc() }}` — paste the text itself. `erd-studio doctor` and `erd-studio diff` report a file that does not parse as `fix-model-yaml` with its line — fix that before anything else, unless that file's entry in their `unreadableModelFiles` list has `mergeConflict: true` (the fix itself carries no such field): git left two versions in that file after a merge, so show the user the file and line and ask which side to keep — never pick a side yourself or run git commands. A diagram file with conflict markers gets doctor's `resolve-merge-conflicts` step instead; handle it the same way.
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -175,7 +175,7 @@ columns:
 | `columns` | No | Array of column definitions |
 | `rationale` | No | Design rationale object (omit if empty) |
 | `meta` | No | Free-form metadata map (see "Metadata" below) |
-| `relationships` | No | Relationships leaving this model, shared by every domain (see "Where relationships live") |
+| `relationships` | No | Relationships leaving this model (it holds the foreign key), shared by every domain (see "Where relationships live") |
 
 ### modelRole Values
 
@@ -327,13 +327,17 @@ Every entry in "in source but not in YAML" must have a specific reason. A class-
 | `fromColumn` | Yes | FK column name |
 | `toModel` | Yes | PK side model name |
 | `toColumn` | Yes | PK column name |
-| `cardinality` | Yes | `many-to-one`, `one-to-one`, `one-to-many`, or `many-to-many` |
+| `cardinality` | Yes | `many-to-one`, `one-to-one`, or `many-to-many` (`one-to-many` is still read, but never write it — see Direction) |
+| `role` | No | A label for what the link means, e.g. `order date` and `ship date` for two columns pointing at the same date dimension. At most 60 characters. A label only — not part of the relationship's identity |
+| `compositeKey` | No | Groups entries into one composite foreign key (see below). At most 64 characters |
 
-**Direction:** `fromModel` is always the FK side, `toModel` is the PK side. FK column names should match the PK column name of the referenced table.
+**Spelling:** always spell `fromModel`, `toModel` and the columns exactly as the model and column are named. ERD Studio matches them ignoring case, but writes the real spelling the next time it changes that entry.
+
+**Direction:** `fromModel` is always the many (FK) side, `toModel` the side it points at (PK). Never write `one-to-many`: swap the ends and write `many-to-one`, in the other model's file — it is the same relationship. `one-to-one` and `many-to-many` keep the direction they were drawn in. Keys win: the many side is never its model's whole primary or natural key while the other end is a column of a model with a different key — ERD Studio reads such a `many-to-one` the other way round (**Move Relationships to Model Library** stores it so), and the canvas refuses a ⇄ that would write it. FK column names should match the PK column name of the referenced table.
 
 ### Where relationships live
 
-A relationship is defined **once** for the whole project, in the YAML of its `fromModel` (the FK side), under `relationships:` — the same fields without `fromModel`, which is the file's own model. Every domain whose `logical.models` holds both ends draws it; a domain missing either end does not. Changing it changes every diagram that shows it.
+A relationship is defined **once** for the whole project, in the YAML of its `fromModel`, the model holding the foreign key (the many side), under `relationships:` — the same fields without `fromModel`, which is the file's own model. Every domain whose `logical.models` holds both ends draws it; a domain missing either end does not. Changing it changes every diagram that shows it.
 
 ```yaml
 # logical-models/gold/fct_orders.yml
@@ -344,9 +348,47 @@ relationships:
     toModel: dim_customer
     toColumn: customer_id
     cardinality: many-to-one
+  - fromColumn: ship_date_key
+    toModel: dim_date
+    toColumn: date_key
+    cardinality: many-to-one
+    role: ship date
 ```
 
-**Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` list, or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]`, and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same relationship in both places; if they disagree, the model YAML wins.
+So adding a new fact only ever changes the fact's own file; its dimensions never list who points at them.
+
+**Mark the keys.** Direction comes from keys: when you add a relationship, mark the referenced column with `isPrimaryKey: true` (or `isNaturalKey`) on the model it points at, unless that model already marks a key. Without a key marked, ERD Studio falls back to dbt's `unique` tests, and with neither the user has to say which side holds the foreign key.
+
+**Self-references** (`employee.manager_id → employee.employee_id`) are stored in the model's own file with `toModel` set to the model itself. A column never points at itself.
+
+```yaml
+# logical-models/employee.yml
+relationships:
+  - fromColumn: manager_id
+    toModel: employee
+    toColumn: employee_id
+    cardinality: many-to-one
+    role: manager
+```
+
+**Composite foreign keys** (several columns together, e.g. a Data Vault PIT or bridge, a multi-column natural key) are one entry per column pair, all sharing the same `compositeKey` value, stored together on the FK side. Every entry points at the same `toModel` with the same cardinality (`many-to-one` or `one-to-one`, never `many-to-many`), and no column appears twice. ERD Studio draws them as one line. Name the key `fk_<toModel>` (`fk_<toModel>_2` for a second one in the same file). Never use array forms such as `fromColumns: [...]` — older ERD Studio versions would delete them.
+
+```yaml
+# logical-models/gold/pit_customer.yml
+relationships:
+  - fromColumn: customer_hk
+    toModel: sat_customer
+    toColumn: customer_hk
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+  - fromColumn: as_of_date
+    toModel: sat_customer
+    toColumn: load_date
+    cardinality: many-to-one
+    compositeKey: fk_sat_customer
+```
+
+**Which to use:** put new relationships in the model YAML when **any** model file already has a `relationships:` list, or **no** domain file has a `logical.relationships` entry (a new project). Otherwise the project keeps relationships per domain: add them to the domain JSON's `logical.relationships[]`, and leave that choice to the user (the **ERD Studio: Move Relationships to Model Library** command moves them). Never define the same two columns twice — not in both places, and not once in each direction; if a domain and the model YAML disagree, the model YAML wins.
 
 ---
 
@@ -416,4 +458,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 25 -->
+<!-- erd-studio-harness: 29 -->

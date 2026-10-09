@@ -1,0 +1,24 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: orders (layer silver, logical stage)
+%% Description: A hand-edited v4 file: columns without a text name, and relationship ends spelled in another case
+
+  %% Model stg_orders
+  %%   column 1 has no name; not exported
+  "stg_orders" {
+    INT _123 "A column named by a number; name 123"
+    BIGINT order_id PK
+    INT customer_key FK
+  }
+
+  %% Model stg_customers
+  %%   column 1 has no name; not exported
+  "stg_customers" {
+    INT Customer_Key PK
+  }
+
+  %% stg_orders.customer_key -> stg_customers.Customer_Key, many-to-one
+  "stg_orders" }o--|| "stg_customers" : "customer_key"
+  %% Not exported: stg_orders.dropped_column -> stg_customers.Customer_Key (stg_orders has no column dropped_column).

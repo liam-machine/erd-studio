@@ -19,9 +19,19 @@ import { ColumnEditor } from './ColumnEditor';
 import { MetaEditor } from './MetaEditor';
 import { useEditorStore } from '../../store/editorStore';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
-import type { DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
+import type { ColumnPair, DisplayRelationship, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
 import type { FkEdgeData } from '../../types/graph';
+import { columnPairs, foldComposites, relationshipEdgeId } from '../../lib/relationshipDisplayKey';
 import './DetailPanel.css';
+
+/** A relationship row: a composite foreign key carries all its column pairs. */
+type PanelRelationship = DisplayRelationship & { pairs?: ColumnPair[] };
+
+/** One end's columns: `customer_key`, or `(customer_hk, as_of_date)` for a composite. */
+function columnsText(rel: PanelRelationship, end: 'from' | 'to'): string {
+  const cols = columnPairs(rel).map((p) => (end === 'from' ? p.fromColumn : p.toColumn));
+  return cols.length === 1 ? cols[0] : `(${cols.join(', ')})`;
+}
 
 // ---------------------------------------------------------------------------
 // Physical provenance
@@ -188,7 +198,8 @@ export function DetailPanel() {
   }, [selectedNode, host, handleClose]);
 
   const handleDeleteRelationship = useCallback(
-    (rel: DisplayRelationship) => {
+    // A composite sends its first pair; the host removes the whole group (#133 L2).
+    (rel: PanelRelationship) => {
       host.postMessage({
         type: 'removeRelationship',
         payload: {
@@ -204,13 +215,16 @@ export function DetailPanel() {
 
   // Open context menu when clicking a relationship row (for cardinality editing)
   const handleRelationshipClick = useCallback(
-    (x: number, y: number, rel: DisplayRelationship) => {
+    (x: number, y: number, rel: PanelRelationship) => {
       const edgeData: FkEdgeData = {
         fromModel: rel.fromModel,
         fromColumn: rel.fromColumn,
         toModel: rel.toModel,
         toColumn: rel.toColumn,
         cardinality: rel.cardinality,
+        // Carried so Edit opens with it — the dialog saves what it shows.
+        ...(rel.role ? { role: rel.role } : {}),
+        ...(rel.pairs ? { pairs: rel.pairs, ...(rel.compositeKey ? { compositeKey: rel.compositeKey } : {}) } : {}),
       };
       openEdgeContextMenu(x, y, edgeData);
     },
@@ -226,10 +240,13 @@ export function DetailPanel() {
   // Find relationships (both directions)
   const relationships = useMemo(() => {
     if (!domain || !selectedNode) {
-      return { outgoing: [] as DisplayRelationship[], incoming: [] as DisplayRelationship[] };
+      return { outgoing: [] as PanelRelationship[], incoming: [] as PanelRelationship[] };
     }
-    const outgoing = domain.relationships.filter((r) => r.fromModel === selectedNode);
-    const incoming = domain.relationships.filter((r) => r.toModel === selectedNode);
+    // One row per composite foreign key (#133 L2).
+    const rels: PanelRelationship[] = foldComposites(domain.relationships);
+    const outgoing = rels.filter((r) => r.fromModel === selectedNode);
+    // A self-reference is listed once, under outgoing (#133 L3).
+    const incoming = rels.filter((r) => r.toModel === selectedNode && r.fromModel !== selectedNode);
     return { outgoing, incoming };
   }, [domain, selectedNode]);
 
@@ -435,7 +452,7 @@ export function DetailPanel() {
             {/* Outgoing: this model references others */}
             {outgoing.map((rel) => (
               <div
-                key={`out-${rel.fromColumn}-${rel.toModel}-${rel.toColumn}`}
+                key={`out-${relationshipEdgeId(rel)}`}
                 className={viewer ? 'detail-panel__relationship' : 'detail-panel__relationship detail-panel__relationship--clickable'}
                 onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
                 role={viewer ? undefined : 'button'}
@@ -449,16 +466,16 @@ export function DetailPanel() {
                 }}
                 title={viewer ? undefined : 'Click to edit cardinality'}
               >
-                <span className="detail-panel__rel-direction" title="Outgoing FK">
-                  →
+                <span className="detail-panel__rel-direction" title={rel.toModel === rel.fromModel ? 'Self-reference' : 'Outgoing FK'}>
+                  {rel.toModel === rel.fromModel ? '↻' : '→'}
                 </span>
                 <span className="detail-panel__rel-columns">
-                  <span className="detail-panel__rel-local" title={rel.fromColumn}>
-                    {rel.fromColumn}
+                  <span className="detail-panel__rel-local" title={columnsText(rel, 'from')}>
+                    {columnsText(rel, 'from')}
                   </span>
                   <span className="detail-panel__rel-arrow">→</span>
-                  <span className="detail-panel__rel-target" title={`${rel.toModel}.${rel.toColumn}`}>
-                    {rel.toModel}.{rel.toColumn}
+                  <span className="detail-panel__rel-target" title={`${rel.toModel}.${columnsText(rel, 'to')}`}>
+                    {rel.toModel}.{columnsText(rel, 'to')}
                   </span>
                 </span>
                 <span className="detail-panel__rel-cardinality">
@@ -482,7 +499,7 @@ export function DetailPanel() {
             {/* Incoming: others reference this model */}
             {incoming.map((rel) => (
               <div
-                key={`in-${rel.fromModel}-${rel.fromColumn}-${rel.toColumn}`}
+                key={`in-${relationshipEdgeId(rel)}`}
                 className={viewer ? 'detail-panel__relationship' : 'detail-panel__relationship detail-panel__relationship--clickable'}
                 onClick={viewer ? undefined : (e) => handleRelationshipClick(e.clientX, e.clientY, rel)}
                 role={viewer ? undefined : 'button'}
@@ -500,12 +517,12 @@ export function DetailPanel() {
                   ←
                 </span>
                 <span className="detail-panel__rel-columns">
-                  <span className="detail-panel__rel-target" title={`${rel.fromModel}.${rel.fromColumn}`}>
-                    {rel.fromModel}.{rel.fromColumn}
+                  <span className="detail-panel__rel-target" title={`${rel.fromModel}.${columnsText(rel, 'from')}`}>
+                    {rel.fromModel}.{columnsText(rel, 'from')}
                   </span>
                   <span className="detail-panel__rel-arrow">→</span>
-                  <span className="detail-panel__rel-local" title={rel.toColumn}>
-                    {rel.toColumn}
+                  <span className="detail-panel__rel-local" title={columnsText(rel, 'to')}>
+                    {columnsText(rel, 'to')}
                   </span>
                 </span>
                 <span className="detail-panel__rel-cardinality">

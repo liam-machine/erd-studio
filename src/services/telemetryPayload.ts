@@ -139,6 +139,59 @@ export const FEATURES = [
   'relMoveNothingToMove',
   'relMoveCompleted',
   'relMoveLeftover',
+  // Relationship rework (#133). Use of the new behaviour, one per action:
+  // a drag from the "one" side stored turned round on the many side; ⇄ moved
+  // the record to the other model's file; ⇄ refused because it would make a
+  // whole key the many side; a delete removed more than one stored copy; the
+  // notice that another diagram still draws its own copy of a deleted link; a
+  // role set or changed; the New Relationship dialog's "Create anyway"
+  // against key evidence; the dialog asked for the direction (no evidence);
+  // "Mark as key" used; a composite link or a self-reference created; and
+  // (once a day, on canvas open) a link drawn whose ends are spelled in
+  // another case than the real names.
+  'relDragTurned',
+  'relSwapMoved',
+  'relSwapRefusedKey',
+  'relDeleteCopies',
+  'relDeleteStillDrawn',
+  'relRoleSet',
+  'relCreateAnyway',
+  'relDirectionAsked',
+  'relMarkKey',
+  'relComposite',
+  'relSelfReference',
+  'relCaseRespelled',
+  // Move Relationships (#133), once per completed run that did each: moved a
+  // one-to-many to its many side, turned a backwards many-to-one round, showed
+  // a conflict picker, left two disagreeing model-file copies, left a model
+  // file alone (it would lose a comment or an unreadable entry), kept the
+  // model library's version over a diagram copy that differed, left a
+  // composite key whole in the diagrams because it could not move.
+  'relMoveRehomed',
+  'relMoveTurned',
+  'relMoveConflictShown',
+  'relMoveDisagreementLeft',
+  'relMoveFileLocked',
+  'relMoveKeptLibrary',
+  'relMoveGroupLeft',
+  // The state of the user's relationships, once a day each, on canvas open
+  // (relationshipHealth.surveyLibrary). Their files, not our failures — a
+  // write that produces one of these is caught by a relInv* error instead.
+  'relStateStoredTwice',
+  'relStateOneToMany',
+  'relStateBackwards',
+  'relStateDanglingModel',
+  'relStateDanglingColumn',
+  'relStateUnreadable',
+  'relStatePartialComposite',
+  'relStateDomainCopy',
+  // Export Diagram… (Mermaid / DBML): one per completed export, by format,
+  // and a cancel at any step. A failure is the `exportFailed` error.
+  'exportMermaid',
+  'exportDbml',
+  'exportCancelled',
+  // A project state, not a cancel: run with no canvas focused and no diagram to pick.
+  'exportNoDiagrams',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -211,6 +264,35 @@ export const ERROR_CODES = [
   'relMoveFailed',
   // A canvas edit (or the duplicate-model rename) could not save a file.
   'saveFailed',
+  // Relationship rework (#133). A relationship write whose edit or save
+  // failed; a relationship handler threw something other than a refusal it
+  // explains; a model file's relationships: list could not be rewritten in
+  // place, so the edit was refused; a Move write failed and some file could
+  // not be put back.
+  'relWriteFailed',
+  'relHandlerFailed',
+  'relSyncRefused',
+  'relMoveRestoreFailed',
+  // A relationship write broke an invariant (relationshipHealth
+  // .checkRelationshipWrite). Recorded, logged, never blocking: the written
+  // link is not one canonical copy in its home, not the cardinality or
+  // direction asked for, lost its role; a deleted (or re-keyed) link left a
+  // copy; another link vanished or changed; a file gained a duplicate entry;
+  // the canvas draws a link twice; a composite key is no longer one valid
+  // group; "Mark as primary key" did not flag the key; the check itself threw.
+  'relInvNotCanonical',
+  'relInvNotAsIntended',
+  'relInvRoleLost',
+  'relInvCopyLeft',
+  'relInvOtherLost',
+  'relInvOtherChanged',
+  'relInvDuplicateInFile',
+  'relInvDrawnTwice',
+  'relInvGroupBroken',
+  'relInvKeyNotMarked',
+  'relInvCheckFailed',
+  // Export Diagram… could not read the domain or write the chosen file.
+  'exportFailed',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

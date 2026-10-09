@@ -50,8 +50,8 @@ behalf (its `telemetry.json` lists every field):
    numbers only; the tests capture every log line and search it for canaries.
 
 If you change what is collected, change the contract in the extension, this
-Worker, `schema.sql`, the extension's `telemetry.json` and the local archive
-together.
+Worker, a new migration plus `schema.sql`, the extension's `telemetry.json` and
+the local archive together.
 
 ---
 
@@ -61,8 +61,10 @@ together.
   (another path) or `405` (another method on this path). No CORS headers: the
   caller is the VS Code extension host, not a browser.
 - `KILL_SWITCH` truthy → every request `503` before any D1 access.
-- Body over **2,048 bytes** → `413`, counted while streaming, so a missing or
-  lying `Content-Length` does not help.
+- Body over **8,192 bytes** → `413`, counted while streaming, so a missing or
+  lying `Content-Length` does not help. (A heartbeat with every feature and
+  error key at its cap is about 4.5 KB; the extension's `telemetryPayload`
+  test reads this limit and fails if that ever stops fitting.)
 - A known field with a wrong type or out-of-range value → `400`, nothing
   written. `day` must be a real calendar date, not in the future and at most 7
   days before today (UTC). Unknown top-level keys and unknown `features` /
@@ -73,43 +75,97 @@ together.
 
 ## Deploy
 
+### Automatically, on merge to `main`
+
+`.github/workflows/deploy.yml` deploys this Worker whenever `telemetry/`
+(anything but `*.md`) on `main` differs from the commit it last deployed, which
+the `telemetry-worker-deployed` tag records. Comparing with the tag rather than
+with one PR means a run GitHub cancelled, or a deploy that failed, is picked up
+by the next merge. The `telemetry-worker` job:
+
+1. runs `npm test && npm run check`;
+2. applies the D1 migrations: `wrangler d1 migrations apply erd-studio-telemetry --remote`
+   runs each file in `migrations/` once and records it in the `d1_migrations`
+   table, so a new column exists before the Worker that writes it;
+3. runs `wrangler deploy`, which also re-applies the custom domains, the cron
+   and `[vars]`;
+4. moves the tag.
+
+The extension release (`deploy` job) runs only after that job succeeded or had
+nothing to do, so **a failed Worker deploy blocks the release**, and a merge
+that changes only `telemetry/` (plus docs) deploys the Worker and releases no
+extension. "Worker before the extension that sends new keys or bigger
+heartbeats" therefore holds by itself — as long as the Worker change is merged
+in the same PR as the extension change, or before it.
+
+Every PR also runs the `telemetry` job in `ci.yml`: the tests, a
+`wrangler deploy --dry-run` that validates `wrangler.toml`, and the migrations
+against a throwaway local D1. Neither needs credentials. On pushes to
+`develop` and PRs from this repository it then runs a read-only **Cloudflare
+preflight** with the secrets below: the token is active and can reach the
+Worker, the database and the Workers Routes of every zone in `wrangler.toml`,
+and it lists the live database's pending migrations. A broken or under-scoped
+token therefore fails CI long before a release depends on it. Fork and
+Dependabot runs get no secrets, so it skips there.
+
+**Repository secrets** (Settings → Secrets and variables → Actions). A missing
+one fails the job with its name, and so blocks the release; it is never
+skipped.
+
+- `CLOUDFLARE_ACCOUNT_ID` — the account that holds the Worker and the database.
+- `CLOUDFLARE_API_TOKEN` — a custom API token limited to that account, with:
+  - Account › **Workers Scripts** › Edit (upload, cron, observability);
+  - Account › **D1** › Edit (the migrations);
+  - Zone › **Workers Routes** › Edit, on the zones `w2solutions.ai` **and**
+    `liam-is-an.ai`: every deploy re-applies both custom domains in
+    `wrangler.toml` (wrangler `PUT`s `…/workers/scripts/<name>/domains/records`),
+    and that needs Workers Routes write on each affected zone.
+
+### One-time: baseline the live database
+
+Until migrations were tracked, `schema.sql` and `0002` were applied by hand, so
+the live database has no `d1_migrations` table and the first automated run
+would re-run `0002` and fail with `duplicate column name: host` (blocking the
+release, changing nothing). Before merging the change that introduced tracked
+migrations, run this once from `telemetry/`:
+
+```bash
+npx --yes wrangler@4 d1 execute erd-studio-telemetry --remote --command "CREATE TABLE IF NOT EXISTS d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL); INSERT OR IGNORE INTO d1_migrations (name) SELECT '0001_initial.sql' WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'heartbeats'); INSERT OR IGNORE INTO d1_migrations (name) SELECT '0002_host_assistants_retention.sql' WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'heartbeats' AND sql LIKE '%first_canvas%'); SELECT id, name, applied_at FROM d1_migrations ORDER BY id;"
+npx --yes wrangler@4 d1 migrations list erd-studio-telemetry --remote   # ✅ No migrations to apply!
+```
+
+The table is wrangler 4's own (`CREATE TABLE IF NOT EXISTS`, same shape), and
+each file is marked applied only if its change is already in the database, so
+the command is safe to repeat and does nothing harmful on a database in any
+other state: whatever it does not mark stays pending for the workflow.
+
+### Adding a migration
+
+`npx --yes wrangler@4 d1 migrations create erd-studio-telemetry <what_it_does>`
+creates the next `NNNN_<what_it_does>.sql`. Keep it additive (the old Worker
+serves between the migration and the deploy), update `schema.sql` to match —
+`test/schema.test.mjs` fails until you do, and also when the Worker writes a
+column no migration creates — and never change the SQL of a migration that has
+been applied: wrangler tracks files by name only. A change that only adds
+`features` / `errors` keys needs no migration (they are JSON text columns).
+
+### First setup, or deploying by hand
+
+A brand-new database needs only its id; the migrations build the tables.
+
 ```bash
 cd telemetry
-
-# 1. Authenticate (opens a browser, stores the token locally).
-npx wrangler login
-
-# 2. Create the database, then paste the printed database_id into
-#    wrangler.toml (d1_databases[0].database_id, replacing REPLACE_WITH_D1_ID).
+npx wrangler login                         # opens a browser, stores a token locally
 npx wrangler d1 create erd-studio-telemetry
-
-# 3. Create the table and indexes.
-npx wrangler d1 execute erd-studio-telemetry --remote --file schema.sql
-
-# 4. Deploy. This also registers the custom domain and the retention cron.
-npx wrangler deploy
+# paste the printed database_id into wrangler.toml (d1_databases[0].database_id)
+npm test && npm run check
+npm run migrate                            # wrangler d1 migrations apply … --remote
+npm run deploy                             # also the custom domains and the cron
 ```
 
-### Upgrading an existing database
-
-`schema.sql` creates a fresh table with every column. An existing database gets
-new columns from `migrations/`, applied once each, **before** deploying the
-Worker that writes them (a Worker binding a column that does not exist fails
-every insert with a 503):
-
-```bash
-npx wrangler d1 execute erd-studio-telemetry --remote --file migrations/0002_host_assistants_retention.sql
-npm test && npm run deploy
-```
-
-The same order applies to a release that only adds `features` or `errors`
-keys (no migration then): `npm test && npm run deploy` here first, because
-an older Worker drops every key it does not list.
-
-Deploy the Worker **before** the extension release that sends the new fields.
-An older Worker would still accept the new heartbeats (it drops unknown
-top-level and feature keys) but the new data would be lost, and the body cap
-was raised from 2 KB to 4 KB for the longer feature list.
+The same last three commands are the manual fallback when the workflow cannot
+run. A manual deploy does not move the `telemetry-worker-deployed` tag, so the
+next merge redeploys the same Worker, which is harmless.
 
 The custom domain `erd-studio-telemetry.w2solutions.ai` needs the
 `w2solutions.ai` zone on the same Cloudflare account; `wrangler deploy` creates
@@ -129,11 +185,12 @@ curl -si -X POST https://erd-studio-telemetry.w2solutions.ai/v1/heartbeat \
 `wrangler.toml`'s `[vars]` is the source of truth for `KILL_SWITCH`; every
 `wrangler deploy` re-applies it over the dashboard value.
 
-- **Durable** — set `KILL_SWITCH = "on"` in `wrangler.toml` and
-  `npx wrangler deploy`.
+- **Durable** — set `KILL_SWITCH = "on"` in `wrangler.toml` and merge it to
+  `main` (the workflow deploys it), or `npm run deploy`.
 - **Fast** — dashboard → Workers & Pages → `erd-studio-telemetry` → Settings →
   Variables → `KILL_SWITCH = on`. Mirror it into `wrangler.toml` straight away
-  or the next deploy undoes it.
+  or the next deploy undoes it — including the automatic one after any merge
+  that touches `telemetry/`.
 - **Stop collecting and delete everything** — `npx wrangler delete` removes the
   Worker; `npx wrangler d1 delete erd-studio-telemetry` removes the data.
 
@@ -170,6 +227,170 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 Prefer aggregates. There is rarely a reason to look at individual rows, and
 none to copy `install_id` anywhere.
 
+### Relationship health (#133)
+
+The relationship code reports three kinds of key, all under a `rel` prefix:
+
+- **`errors.relInv*`** — a relationship write broke one of the invariants the
+  exhaustive checker holds the code to (`src/services/relationshipHealth.ts`).
+  Recorded after the write, never blocking it. **Each one is a bug in ERD
+  Studio**; the expected count on every version is zero.
+- **`errors.relWriteFailed` / `relHandlerFailed` / `relSyncRefused` /
+  `relMoveRestoreFailed`**, plus the older `relMove*` errors — a relationship
+  edit or a Move that did not complete.
+- **`features.relState*`** (and `relCaseRespelled`) — at most once per install
+  per day, what the user's files held when a diagram opened: a link stored
+  twice, a one-to-many in a model file, a many-to-one stored backwards, a
+  dangling model or column, an unreadable entry, a partial composite, a
+  diagram copy of a library link. These are the user's files, not failures,
+  which is why they are features; what matters is their **trend by version**.
+
+No D1 migration is needed for any of them: `features` and `errors` are JSON
+text columns. Every query below leaves out development hosts (`dev`) and
+counts rows, and a row is one install on one day — so "installs" below means
+install-days, and no query needs `install_id`.
+
+```bash
+# 0. Which versions are reporting, newest first (pick the two to compare).
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT ext_version, MIN(day) AS first_day, COUNT(*) AS install_days, SUM(canvas_opens > 0) AS canvas_days
+   FROM heartbeats WHERE COALESCE(dev, 0) = 0 GROUP BY ext_version ORDER BY first_day DESC LIMIT 6"
+
+# 1. Relationship error codes per extension version per day.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.day, h.ext_version, j.key AS code, COUNT(*) AS installs, SUM(j.value) AS total
+   FROM heartbeats h, json_each(h.errors) j
+   WHERE j.key LIKE 'rel%' AND h.day >= date('now', '-14 days') AND COALESCE(h.dev, 0) = 0
+   GROUP BY h.day, h.ext_version, j.key ORDER BY h.day DESC, h.ext_version DESC, installs DESC"
+
+# 2. Each relationship error as a share of the installs active on that version
+#    (per day, then averaged over the last 7 days), beside the canvas installs.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH active AS (
+     SELECT day, ext_version, COUNT(*) AS installs, SUM(canvas_opens > 0) AS canvas
+     FROM heartbeats WHERE day >= date('now', '-7 days') AND COALESCE(dev, 0) = 0 GROUP BY day, ext_version),
+   hit AS (
+     SELECT h.day, h.ext_version, j.key AS code, COUNT(*) AS installs
+     FROM heartbeats h, json_each(h.errors) j
+     WHERE j.key LIKE 'rel%' AND h.day >= date('now', '-7 days') AND COALESCE(h.dev, 0) = 0
+     GROUP BY h.day, h.ext_version, j.key)
+   SELECT hit.ext_version, hit.code, SUM(hit.installs) AS installs_hit, SUM(a.installs) AS installs_active,
+     ROUND(100.0 * SUM(hit.installs) / SUM(a.installs), 2) AS pct_of_active,
+     ROUND(100.0 * SUM(hit.installs) / MAX(SUM(a.canvas), 1), 2) AS pct_of_canvas
+   FROM hit JOIN active a ON a.day = hit.day AND a.ext_version = hit.ext_version
+   GROUP BY hit.ext_version, hit.code ORDER BY hit.ext_version DESC, pct_of_active DESC"
+
+# 3. Invariant violations per 1,000 relationship edits, by version.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH edits AS (
+     SELECT h.ext_version, SUM(j.value) AS n FROM heartbeats h, json_each(h.features) j
+     WHERE j.key IN ('addRelationship', 'editRelationship') AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
+     GROUP BY h.ext_version),
+   broken AS (
+     SELECT h.ext_version, SUM(j.value) AS n FROM heartbeats h, json_each(h.errors) j
+     WHERE j.key LIKE 'relInv%' AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0
+     GROUP BY h.ext_version)
+   SELECT e.ext_version, e.n AS relationship_edits, COALESCE(b.n, 0) AS violations,
+     ROUND(1000.0 * COALESCE(b.n, 0) / MAX(e.n, 1), 2) AS per_1000_edits
+   FROM edits e LEFT JOIN broken b USING (ext_version) ORDER BY e.ext_version DESC"
+
+# 4. Data-state signals: share of canvas installs whose files show each state,
+#    per version and week. A state that grows on a new version is being written.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH canvas AS (
+     SELECT strftime('%Y-W%W', day) AS week, ext_version, COUNT(*) AS n
+     FROM heartbeats WHERE canvas_opens > 0 AND day >= date('now', '-56 days') AND COALESCE(dev, 0) = 0
+     GROUP BY week, ext_version),
+   seen AS (
+     SELECT strftime('%Y-W%W', h.day) AS week, h.ext_version, j.key AS state, COUNT(*) AS n
+     FROM heartbeats h, json_each(h.features) j
+     WHERE (j.key LIKE 'relState%' OR j.key = 'relCaseRespelled') AND h.day >= date('now', '-56 days') AND COALESCE(h.dev, 0) = 0
+     GROUP BY week, h.ext_version, j.key)
+   SELECT s.week, s.ext_version, s.state, s.n AS installs, c.n AS canvas_installs, ROUND(100.0 * s.n / c.n, 1) AS pct
+   FROM seen s JOIN canvas c ON c.week = s.week AND c.ext_version = s.ext_version
+   ORDER BY s.state, s.week DESC, s.ext_version DESC"
+
+# 5. Move Relationships funnel (28 days), every step in order, errors included.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH steps(ord, step) AS (VALUES
+     (1, 'relMoveOffered'), (2, 'relMoveReview'), (3, 'relMoveNotNow'), (4, 'relMoveDeclined'),
+     (5, 'relMoveStarted'), (6, 'relMoveDirtyFiles'), (7, 'relMoveCancelled'), (8, 'relMoveNothingToMove'),
+     (9, 'relMoveConflictShown'), (10, 'relMoveRehomed'), (11, 'relMoveTurned'), (12, 'relMoveKeptLibrary'),
+     (13, 'relMoveDisagreementLeft'), (14, 'relMoveFileLocked'), (15, 'relMoveGroupLeft'), (16, 'relMoveWriteFailed'),
+     (17, 'relMoveRestoreFailed'), (18, 'relMoveFailed'), (19, 'relMoveCompleted'), (20, 'relMoveLeftover')),
+   used AS (
+     SELECT j.key AS step, COUNT(*) AS installs, SUM(j.value) AS times FROM heartbeats h, json_each(h.features) j
+     WHERE j.key LIKE 'relMove%' AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0 GROUP BY j.key
+     UNION ALL
+     SELECT j.key, COUNT(*), SUM(j.value) FROM heartbeats h, json_each(h.errors) j
+     WHERE j.key LIKE 'relMove%' AND h.day >= date('now', '-28 days') AND COALESCE(h.dev, 0) = 0 GROUP BY j.key)
+   SELECT s.ord, s.step, COALESCE(u.installs, 0) AS install_days, COALESCE(u.times, 0) AS times
+   FROM steps s LEFT JOIN used u ON u.step = s.step ORDER BY s.ord"
+
+# 6. New since the last release: relationship errors and states seen on the new
+#    version that the previous one never reported. Edit the two versions first.
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH v(new_version, old_version) AS (VALUES ('1.6.9', '1.6.8')),
+   codes AS (
+     SELECT h.ext_version, 'error' AS kind, j.key AS code FROM heartbeats h, json_each(h.errors) j
+     WHERE j.key LIKE 'rel%' AND COALESCE(h.dev, 0) = 0
+     UNION ALL
+     SELECT h.ext_version, 'state', j.key FROM heartbeats h, json_each(h.features) j
+     WHERE (j.key LIKE 'relState%' OR j.key = 'relCaseRespelled') AND COALESCE(h.dev, 0) = 0)
+   SELECT c.kind, c.code, COUNT(*) AS install_days
+   FROM codes c, v
+   WHERE c.ext_version = v.new_version
+     AND NOT EXISTS (SELECT 1 FROM codes o WHERE o.ext_version = v.old_version AND o.code = c.code)
+   GROUP BY c.kind, c.code ORDER BY c.kind, install_days DESC"
+```
+
+`LIKE 'rel%'` also matches the older `relMove*` keys (#126); that is intended.
+
+### Watching a release
+
+A heartbeat describes the *previous* UTC day and is sent on the next
+activation, so a release shipped on day D has its first rows on D+1 and most of
+them by D+2. Numbers are small: read `installs`, not `total`, because one
+install can fire the same code a hundred times.
+
+The day after shipping (and again a week later):
+
+1. Run query 0 and check the new version is reporting at all. No rows after
+   two days with the old version still reporting means the heartbeat broke.
+2. Run query 1 for the new version, then query 3.
+3. Run query 6 against the previous version.
+4. Glance at query 5 if the release touched the Move command, and at query 4
+   weekly.
+
+Investigate when:
+
+- **Any `relInv*` on a non-dev install.** Each is a write that did something
+  the invariants forbid. `relInvOtherLost`, `relInvCopyLeft`,
+  `relInvNotCanonical`, `relInvRoleLost` and `relInvGroupBroken` mean a user's
+  data was lost or stored wrongly: top priority. `relInvCheckFailed` means the check itself
+  met input it could not read. Reproduce with the exhaustive checker over the
+  operation the release changed.
+- **Any `relMoveRestoreFailed`.** A user has files half moved.
+- `relWriteFailed` or `relHandlerFailed` on more than 1% of canvas installs on
+  the new version (query 2), or more than on the previous version.
+- `relSyncRefused` rising: users have hand-written `relationships:` lists the
+  editor cannot rewrite, so their edits are refused.
+- A `relState*` share (query 4) **rising** on the new version compared with
+  the previous one: stored-twice, one-to-many or backwards entries should only
+  fall as people run Move; growth means a writer is producing them.
+  `relStateDanglingModel` / `relStateDanglingColumn` growing points at the
+  rename and remove cascades.
+- In the Move funnel, `relMoveCompleted` well below `relMoveStarted` minus
+  `relMoveCancelled`, or any `relMoveWriteFailed`.
+
+The local archive (below) already picks the new keys up: its per-day
+feature and error CSVs come from `json_each`, so `rel*` keys land there with no
+change. What it lacks is the **version**: to keep relationship health per
+version past the 90 days, add query 1's aggregate (day, version, code,
+installs, total; no install ids) to `.traffic/telemetry.mjs` as
+`telemetry-relationships.csv`, and have the `erd-traffic` report flag any
+`relInv*` row and the week-on-week change of each `relState*` share.
+
 ## The local archive
 
 Because D1 keeps raw rows for only 90 days, the operator's machine keeps
@@ -194,9 +415,11 @@ exist.
 ## Local development
 
 ```bash
-npx wrangler d1 execute erd-studio-telemetry --local --file schema.sql
+npx wrangler d1 migrations apply erd-studio-telemetry --local
 npx wrangler dev            # http://127.0.0.1:8787, local D1 simulation
 ```
+
+Local state lives in `.wrangler/` (gitignored).
 
 ## Checks
 
@@ -212,9 +435,12 @@ cover routing, the kill switch, the body cap (including a streamed body with no
 column binding. The last group checks the privacy promises across the whole
 run: no IP, user-agent, country or other header value is ever bound to SQL,
 and no payload, header or install id ever appears in a log line.
+`test/schema.test.mjs` holds `schema.sql`, `migrations/` and the Worker's
+`INSERT` to the same columns.
 
 They are invisible to the repo's vitest suite (whose `include` is
-`test/unit/**` at the root) and nothing at the root runs them.
+`test/unit/**` at the root); `ci.yml`'s `telemetry` job runs them on every PR,
+and `deploy.yml` before every Worker deploy.
 `telemetry/tsconfig.json` is local to this directory and not referenced by the
 root build. `npm run compile`, `npm run build` and `npm test` at the repo root
 must stay green in a clone that has never touched this directory.

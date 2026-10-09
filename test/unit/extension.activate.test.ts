@@ -167,6 +167,17 @@ describe('activate() without a dbt project', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), 'Open Settings');
   });
 
+  it('Export Diagram gets the no-project stub and no legacy alias', async () => {
+    expect(CONTRIBUTED).toContain('erdStudio.exportDiagram');
+    expect(NO_LEGACY_ALIAS.has('erdStudio.exportDiagram')).toBe(true);
+    await activate(context);
+    expect(count('erdStudio.exportDiagram')).toBe(1);
+    expect(count('dbtSemantic.exportDiagram')).toBe(0);
+
+    await vscode.commands.executeCommand('erdStudio.exportDiagram');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('No dbt project found'), 'Open Settings');
+  });
+
   it('registers a stub domain editor and no tree views (early return)', async () => {
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
@@ -265,6 +276,27 @@ describe('activate() with a dbt project', () => {
   beforeEach(() => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     openWorkspace(root);
+  });
+
+  it('selectors.yml regeneration finds its unsaved tab when VS Code spells the path in another case', async () => {
+    const { SelectorsService } = await import('../../src/services/selectorsService');
+    let service: { hooks?: { isFileDirtyInEditor?: (filePath: string) => boolean } } | undefined;
+    vi.spyOn(SelectorsService.prototype, 'scheduleRegenerate').mockImplementation(function (this: never) { service = this; });
+    await activate(context);
+
+    const selectorsPath = path.join(root, 'selectors.yml');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    try {
+      // e.g. a Windows drive letter `c:` against `C:`, or a folder typed in another case on macOS
+      const tab = vscode.createMockTextDocument(selectorsPath.toUpperCase(), 'selectors: []\n');
+      (vscode.workspace.textDocuments as unknown[]).push(tab);
+      expect(service!.hooks!.isFileDirtyInEditor!(selectorsPath)).toBe(false);
+      tab._setText('selectors: [] # unsaved\n');
+      expect(service!.hooks!.isFileDirtyInEditor!(selectorsPath)).toBe(true);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
   });
 
   it('registers every contributed command once, plus a code-only dbtSemantic.* alias for each', async () => {
@@ -1289,5 +1321,75 @@ describe('existing-diagrams notice', () => {
 
     expect(nudgeCalls(info)).toHaveLength(0);
     expect(workspaceState.get(DIAGRAMS_NUDGE_SHOWN_KEY)).toBeUndefined();
+  });
+});
+
+describe('erdStudio.exportDiagram', () => {
+  type Pick = { label: string; format?: string; action?: string; summary?: { filePath: string } };
+  const showcase = () => path.join(root, '.erd-studio', 'silver', 'showcase.json');
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+  });
+
+  /** Answer the format and action QuickPicks (and a domain pick by name); returns the spies. */
+  function answer(format: 'mermaid' | 'dbml', action: 'copy' | 'open' | 'save', domain?: string) {
+    const quickPick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Pick[]) =>
+      items.find((i) => i.format === format || i.action === action || (domain !== undefined && i.label === domain))) as never);
+    const clipboard = vi.spyOn(vscode.env.clipboard, 'writeText').mockResolvedValue(undefined);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    return { quickPick, clipboard, info };
+  }
+
+  it('is contributed for the palette and the domain tree\'s context menu, and registered once with no legacy alias', async () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')) as {
+      contributes: { commands: Array<{ command: string; title: string; category: string; icon?: string }>;
+        menus: Record<string, Array<{ command: string; when?: string }>> };
+    };
+    expect(pkg.contributes.commands.find((c) => c.command === 'erdStudio.exportDiagram'))
+      .toEqual({ command: 'erdStudio.exportDiagram', title: 'Export Diagram…', category: 'ERD Studio', icon: '$(export)' });
+    expect(pkg.contributes.menus['view/item/context'].find((m) => m.command === 'erdStudio.exportDiagram')?.when)
+      .toBe('view == erdStudio.domainTree && viewItem == domain');
+    // Nothing hides it from the command palette.
+    expect(pkg.contributes.menus.commandPalette?.find((m) => m.command === 'erdStudio.exportDiagram')).toBeUndefined();
+
+    await activate(context);
+    expect(count('erdStudio.exportDiagram')).toBe(1);
+    expect(count('dbtSemantic.exportDiagram')).toBe(0);
+  });
+
+  it('exports the domain the tree node names, as the canvas reads it', async () => {
+    await activate(context);
+    const { clipboard } = answer('mermaid', 'copy');
+
+    await vscode.commands.executeCommand('erdStudio.exportDiagram', {
+      type: 'domain', summary: { filePath: showcase(), domain: 'showcase', layer: 'silver' },
+    });
+
+    expect(clipboard).toHaveBeenCalledTimes(1);
+    const text = clipboard.mock.calls[0][0] as string;
+    expect(text.startsWith('erDiagram\n%% erd-studio mermaid-export v1\n')).toBe(true);
+  });
+
+  it('without an argument or a focused canvas, asks which diagram with the domain picker', async () => {
+    await activate(context);
+    const { quickPick, clipboard } = answer('dbml', 'copy', 'showcase');
+
+    await vscode.commands.executeCommand('erdStudio.exportDiagram');
+
+    expect((quickPick.mock.calls[0][1] as { placeHolder: string }).placeHolder).toBe('Export which diagram?');
+    expect(clipboard).toHaveBeenCalledTimes(1);
+    expect((clipboard.mock.calls[0][0] as string).startsWith('// erd-studio dbml-export v1')).toBe(true);
+  });
+
+  it('a domain that cannot be read shows its error', async () => {
+    await activate(context);
+    answer('dbml', 'copy');
+    const shown = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+
+    await vscode.commands.executeCommand('erdStudio.exportDiagram', vscode.Uri.file(path.join(root, '.erd-studio', 'silver', 'missing.json')));
+
+    expect(shown).toHaveBeenCalledWith(expect.stringMatching(/^Could not export the diagram: /));
   });
 });

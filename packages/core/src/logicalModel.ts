@@ -13,6 +13,8 @@ import type { Alias, Document, Node, Pair } from 'yaml';
 import type { Cardinality, ColumnDef, ModelRelationship, SemanticModel } from './types/semantic.js';
 import { readMeta } from './meta.js';
 import { checkLimit } from './limits.js';
+import { normaliseCompositeKey, normaliseRelationshipRole } from './relationships.js';
+import { findConflictMarkers } from './mergeConflict.js';
 
 /** Name of the model directory under the semantic dir (`.erd-studio/logical-models/`). */
 export const LOGICAL_MODELS_DIR = 'logical-models';
@@ -46,6 +48,23 @@ export class YamlCharLimitError extends Error {
   constructor(readonly maxChars: number) {
     super(`YAML document expands to more than ${maxChars} characters of text`);
     this.name = 'YamlCharLimitError';
+  }
+}
+
+/**
+ * A model file that does not parse because it holds unresolved git merge
+ * conflicts (#145). `line` is the first `<<<<<<<`, not where the YAML parser
+ * happened to stop; `classifyModelLoadError` turns it into a `ModelLoadError`
+ * with `mergeConflict` set. Not exported from the package: hosts see the flag.
+ */
+export class ModelMergeConflictError extends Error {
+  readonly mergeConflict = true;
+
+  constructor(readonly line: number, yamlError: unknown) {
+    super(`Unresolved git merge conflict (first at line ${line})`);
+    this.name = 'ModelMergeConflictError';
+    // As `new Error(message, { cause })` sets it (that form needs ES2022 lib typings).
+    Object.defineProperty(this, 'cause', { value: yamlError, writable: true, configurable: true });
   }
 }
 
@@ -83,6 +102,12 @@ interface YamlModel {
 interface YamlColumn {
   name: string;
   dataType: string;
+  /**
+   * dbt's spelling of `dataType` (a schema.yml column's `data_type:`), read as
+   * an alias (#144). `dataType` wins whenever it holds a value; the extension
+   * renames the key `dataType` the next time it writes this model's file.
+   */
+  data_type?: unknown;
   description?: string;
   isPrimaryKey?: boolean;
   isForeignKey?: boolean;
@@ -132,10 +157,14 @@ function aliasTargets(doc: Document): Map<Alias, unknown> {
  * Parse the text of a logical model file.
  *
  * Returns null for an empty file, a file whose root is not a mapping, or a
- * model with no `name`. Throws on YAML syntax errors (the first error yaml
- * reports), `YamlNodeLimitError` when `maxNodes` is set and exceeded, and
- * `YamlCharLimitError` when `maxChars` is. A limit that is not a number of at
- * least 0 (or Infinity) throws a TypeError.
+ * model with no `name`. Throws on YAML syntax errors: the first error yaml
+ * reports, except that text holding unresolved git merge conflicts throws an
+ * Error named `ModelMergeConflictError` instead, with `mergeConflict: true`,
+ * `line` (the 1-based line of the first `<<<<<<<`) and yaml's error as its
+ * `cause` — `classifyModelLoadError` turns it into a `loadError` with
+ * `mergeConflict` set. Also throws `YamlNodeLimitError` when `maxNodes` is
+ * set and exceeded, and `YamlCharLimitError` when `maxChars` is. A limit that
+ * is not a number of at least 0 (or Infinity) throws a TypeError.
  * `fallbackName` names the model when its `name` is not a usable string.
  */
 export function parseLogicalModelText(
@@ -223,7 +252,8 @@ export function isSafeModelName(name: unknown): name is string {
  * so every non-string scalar is read back from its original source text
  * instead of its resolved value. Booleans and nulls are kept as-is.
  * `raw` is null for an empty file or a file whose root is not a mapping;
- * `state` holds what is left of the budgets. Throws on YAML syntax errors.
+ * `state` holds what is left of the budgets. Throws on YAML syntax errors —
+ * a `ModelMergeConflictError` when the text holds git conflict markers.
  */
 function parseModelFile(
   content: string,
@@ -232,7 +262,10 @@ function parseModelFile(
 ): { raw: YamlModel | null; state: ToPlainState } {
   const doc = parseDocument(content);
   if (doc.errors.length > 0) {
-    throw doc.errors[0];
+    // Checked only once the parse has failed: a marker-like line inside a
+    // block scalar that parses is the user's text, not a conflict.
+    const conflictLine = findConflictMarkers(content);
+    throw conflictLine !== null ? new ModelMergeConflictError(conflictLine, doc.errors[0]) : doc.errors[0];
   }
   const state: ToPlainState = {
     aliases: aliasTargets(doc),
@@ -357,7 +390,9 @@ function yamlToModel(raw: YamlModel, fallbackName: string): SemanticModel {
       .map((col) => {
         const column: ColumnDef = {
           name: str(col.name) ?? '',
-          dataType: str(col.dataType) ?? 'unknown',
+          // `dataType` holding any value (even '') wins; an absent or null
+          // `dataType` falls back to dbt's `data_type` before the default (#144).
+          dataType: str(col.dataType) ?? str(col.data_type) ?? 'unknown',
           description: str(col.description) ?? '',
         };
         if (bool(col.isPrimaryKey)) column.isPrimaryKey = true;
@@ -397,6 +432,8 @@ function readRelationships(value: unknown): ModelRelationship[] {
     const { fromColumn, toModel, toColumn, cardinality } = r;
     if (typeof fromColumn !== 'string' || typeof toModel !== 'string' || typeof toColumn !== 'string') continue;
     if (!fromColumn || !toModel || !toColumn) continue;
+    const role = normaliseRelationshipRole(r.role);
+    const compositeKey = normaliseCompositeKey(r.compositeKey);
     relationships.push({
       fromColumn,
       toModel,
@@ -404,6 +441,8 @@ function readRelationships(value: unknown): ModelRelationship[] {
       cardinality: typeof cardinality === 'string' && CARDINALITIES.has(cardinality)
         ? cardinality as Cardinality
         : 'many-to-one',
+      ...(role ? { role } : {}),
+      ...(compositeKey ? { compositeKey } : {}),
     });
   }
   return relationships;

@@ -1,0 +1,37 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project orders {
+  Note: '''Layer: bronze
+Stage: logical
+
+Raw order capture, still in the inline v4 format'''
+}
+
+Table bronze.raw_orders {
+  order_line_id BIGINT [pk, note: 'Line identifier from the shop']
+  customer_ref VARCHAR [note: 'Customer reference, joined without a declared key']
+  shop_payload unknown
+  line_amount "DECIMAL(12,2)" [note: 'Line total (additive)']
+  order_number VARCHAR [note: 'Business order number (natural key)']
+  Note: '''Role: fact
+Grain: One row per order line
+
+Orders as they land from the shop API
+
+Purpose: Keeps the shop feed untouched for replay
+Measures: line_amount is additive'''
+}
+
+Table raw_customers {
+  customer_ref VARCHAR [pk, note: 'Customer reference (SCD type 2)']
+  email VARCHAR [note: 'Contact address']
+}
+
+// Table raw_refunds is not exported: it has no columns, and a DBML table needs at least one.
+
+Ref: bronze.raw_orders.customer_ref > raw_customers.customer_ref
+// Not exported: raw_refunds.order_line_id -> raw_orders.order_line_id (raw_refunds has no column order_line_id).
+
+// Sticky note 1: Replay source

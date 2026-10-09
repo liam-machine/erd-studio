@@ -1,7 +1,9 @@
--- ERD Studio usage telemetry — D1 schema (contract v1).
+-- ERD Studio usage telemetry — D1 schema (contract v1), current shape.
 --
--- Apply with:
---   npx wrangler d1 execute erd-studio-telemetry --remote --file schema.sql
+-- REFERENCE ONLY: do not apply this file. The database is built by
+-- migrations/, applied with `wrangler d1 migrations apply` (see README.md).
+-- This is what those migrations add up to, in one place to read;
+-- test/schema.test.mjs fails when the two disagree.
 --
 -- One row per install per UTC day. No IP, user-agent, geo or header is ever
 -- stored; `received_day` is the date the Worker received the row, and the daily

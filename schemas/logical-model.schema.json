@@ -53,7 +53,7 @@
     },
     "relationships": {
       "type": "array",
-      "description": "Relationships that leave this model, defined once for the whole project: every domain that holds both this model and toModel draws the edge. The same fields as a domain file's relationship, without fromModel (it is this model).",
+      "description": "Relationships that leave this model, defined once for the whole project: every domain that holds both this model and toModel draws the edge. They live with the model holding the foreign key (the \"many\" side), so a new fact never means editing its dimensions: ERD Studio stores a one-to-many the other way round, as many-to-one on the other model. The same fields as a domain file's relationship, without fromModel (it is this model).",
       "items": {
         "$ref": "#/definitions/relationship"
       }
@@ -199,7 +199,7 @@
         "toModel": {
           "type": "string",
           "minLength": 1,
-          "description": "Referenced model (PK side)."
+          "description": "Referenced model (PK side). A relationship whose toModel has no model file is not drawn."
         },
         "toColumn": {
           "type": "string",
@@ -208,13 +208,31 @@
         },
         "cardinality": {
           "type": "string",
-          "description": "Relationship cardinality, read from fromModel to toModel.",
+          "description": "Relationship cardinality, read from fromModel to toModel. In a model file, write many-to-one, one-to-one or many-to-many: one-to-many is deprecated here.",
           "enum": [
             "many-to-one",
             "one-to-one",
             "one-to-many",
             "many-to-many"
+          ],
+          "enumDescriptions": [
+            "Many rows of this model point at one row of toModel. This model holds the foreign key.",
+            "One row of this model points at one row of toModel. This model holds the foreign key.",
+            "Deprecated in model files: still read, but it is the same relationship as a many-to-one stored on toModel. ERD Studio writes it that way round, in toModel's file, and Move Relationships to Model Library moves it there.",
+            "Many rows on each side."
           ]
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Optional label for what this link means, e.g. \"order date\" and \"ship date\" for two columns pointing at the same date dimension. A label only; it is not part of the relationship's identity."
+        },
+        "compositeKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Entries of this file that share this value form one composite foreign key: one relationship over several column pairs, drawn as one line. Each entry is one column pair; all must point at the same toModel with the same cardinality (many-to-one or one-to-one). ERD Studio 1.6.7 and earlier read the entries as separate relationships and drop this key when they save the file."
         }
       }
     }

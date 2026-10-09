@@ -1,0 +1,38 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: orders (layer bronze, logical stage)
+%% Description: Raw order capture, still in the inline v4 format
+
+  %% Model raw_orders
+  %%   schema: bronze
+  %%   role: fact
+  %%   grain: One row per order line
+  %%   description: Orders as they land from the shop API
+  %%   Purpose: Keeps the shop feed untouched for replay
+  %%   Measures: line_amount is additive
+  "raw_orders" {
+    BIGINT order_line_id PK "Line identifier from the shop"
+    VARCHAR customer_ref FK "Customer reference, joined without a declared key"
+    unknown shop_payload
+    DECIMAL_12_2 line_amount "Line total; type DECIMAL(12,2); additive"
+    VARCHAR order_number UK "Business order number"
+  }
+
+  %% Model raw_customers
+  "raw_customers" {
+    VARCHAR customer_ref PK "Customer reference; SCD type 2"
+    VARCHAR email "Contact address"
+  }
+
+  %% Model raw_refunds
+  %%   no columns yet
+  "raw_refunds" {
+  }
+
+  %% raw_orders.customer_ref -> raw_customers.customer_ref, many-to-one
+  "raw_orders" }o--|| "raw_customers" : "customer_ref"
+  %% Not exported: raw_refunds.order_line_id -> raw_orders.order_line_id (raw_refunds has no column order_line_id).
+
+  %% Sticky note 1: Replay source

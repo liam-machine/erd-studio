@@ -3,7 +3,7 @@
  * CLI prints without `--json`). Colour only on a TTY and never with NO_COLOR.
  */
 
-import { describeUnreadable, type DiffResult, type DomainDiff, type Fix } from './diff';
+import { describeUnreadable, mergeConflictHumanHint, type DiffResult, type DomainDiff, type Fix } from './diff';
 import type { DoctorResult } from './doctor';
 import type { InventoryResult } from './inventory';
 
@@ -28,6 +28,25 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** Names listed in full before a doctor line shortens the rest to "and N more". */
+const NAMES_SHOWN = 5;
+
+/** `a, b, c` — or the first few and "and N more" (never "and 1 more"). */
+function nameList(names: string[]): string {
+  if (names.length <= NAMES_SHOWN + 1) return names.join(', ');
+  return `${names.slice(0, NAMES_SHOWN).join(', ')} and ${names.length - NAMES_SHOWN} more`;
+}
+
+/**
+ * `payment_id uses …` for one column, `4 columns use … (a, b, c, d)` for
+ * more: the subject of a doctor line about some of a model file's columns.
+ */
+function columnsSubject(names: string[], verbOne: string, verbMany: string, rest: string): string {
+  return names.length === 1
+    ? `${names[0]} ${verbOne} ${rest}`
+    : `${plural(names.length, 'column')} ${verbMany} ${rest} (${nameList(names)})`;
+}
+
 function fixLine(f: Fix, p: Paint): string {
   const mark = f.severity === 'blocking' ? p.red('✗') : p.yellow('!');
   const where = f.column ? `${f.model}.${f.column}` : f.model;
@@ -46,6 +65,11 @@ function fixLine(f: Fix, p: Paint): string {
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  not tested in dbt`;
     case 'set-cardinality':
       return `  ${mark} ${f.relationship!.fromModel} → ${f.relationship!.toModel} on ${f.relationship!.fromColumn}  cardinality: ${f.from} (logical) vs ${f.to} (dbt)`;
+    case 'declare-composite-foreign-key': {
+      const pairs = f.relationship!.pairs ?? [];
+      return `  ${mark} ${f.relationship!.fromModel} (${pairs.map((x) => x.fromColumn).join(', ')}) → ${f.relationship!.toModel} `
+        + `(${pairs.map((x) => x.toColumn).join(', ')})  composite foreign key dbt does not declare`;
+    }
     case 'resolve-phantom':
       return `  ${mark} ${f.model}  not a dbt model`;
     default:
@@ -67,7 +91,7 @@ function domainBlock(d: DomainDiff, p: Paint): string[] {
   const unreadable = new Map(d.unreadableModelFiles.map((u) => [u.name, u]));
   const lines = [`${head} — ${summary}`, ...d.fixes.map((f) => {
     const u = f.kind === 'fix-model-yaml' ? unreadable.get(f.model) : undefined;
-    return u ? `  ${p.red('✗')} ${describeUnreadable(u)}` : fixLine(f, p);
+    return u ? `  ${p.red('✗')} ${describeUnreadable(u, 'diff')}` : fixLine(f, p);
   })];
   if (d.modelsWithoutColumns.length > 0) {
     lines.push(p.dim(`  ${plural(d.modelsWithoutColumns.length, 'model')} with no column information in dbt yet: ${d.modelsWithoutColumns.join(', ')}`));
@@ -100,8 +124,26 @@ export function formatDoctor(r: DoctorResult, p: Paint): string {
     + (r.artifacts.manifest.models !== null ? ` (${plural(r.artifacts.manifest.models, 'model')})` : ''));
   lines.push(`${ok(r.artifacts.catalog.status === 'ok')} catalog ${r.artifacts.catalog.status}`);
   lines.push(`${ok(r.erd.semanticDirExists)} ERD Studio: ${plural(r.erd.domains, 'domain')}, ${plural(r.erd.logicalModels, 'logical model')}`);
+  for (const c of r.erd.conflictedDomainFiles) {
+    lines.push(`${p.red('✗')} ${c.file} line ${c.line}: ${mergeConflictHumanHint('doctor')}`);
+  }
   for (const u of r.erd.unreadableModelFiles) {
-    lines.push(`${p.red('✗')} ${describeUnreadable(u)}`);
+    lines.push(`${p.red('✗')} ${describeUnreadable(u, 'doctor')}`);
+  }
+  for (const a of r.erd.dataTypeAliasFiles) {
+    if (a.columns.length > 0) {
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.columns, 'uses', 'use', "dbt's data_type")}`
+        + ` — read as dataType; the next edit of this model on the canvas writes ${a.columns.length === 1 ? 'it' : 'them'} back as dataType`);
+    }
+    if (a.ignored.length > 0) {
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.ignored, 'has', 'have', 'both dataType and data_type')}`
+        + (a.ignored.length === 1 ? ' — data_type is ignored; delete it' : ' — each data_type is ignored; delete them'));
+    }
+    if (a.anchored.length > 0) {
+      lines.push(`${p.yellow('!')} ${a.file}: ${columnsSubject(a.anchored, 'uses', 'use', "dbt's data_type")}`
+        + ' — read as dataType, but kept as written: a YAML anchor sits on the empty dataType or the data_type key,'
+        + ' and renaming would break what refers to it');
+    }
   }
   lines.push(`${ok(r.harness.schemaSkill === 'current')} Claude skills: schema ${r.harness.schemaSkill}, setup ${r.harness.setupSkill}`);
   lines.push('', 'Next steps:');

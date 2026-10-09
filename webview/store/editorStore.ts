@@ -47,6 +47,12 @@ export interface FkDialogPrefill {
   toModel: string;
   /** Optional target column — set when user drags to a specific column handle. */
   toColumn?: string;
+  /** The cardinality key evidence suggests (#133 L1). */
+  cardinality?: 'many-to-one' | 'one-to-one' | 'many-to-many';
+  /** Whether key evidence decided which end holds the foreign key; undecided, the dialog asks. */
+  direction?: 'decided' | 'undecided';
+  /** What decided it: the models' key flags, dbt's tests, or nothing. */
+  basis?: 'keys' | 'dbt' | 'none';
 }
 
 /** Edit data for FK dialog when editing an existing relationship. */
@@ -56,6 +62,10 @@ export interface FkDialogEditData {
   toModel: string;
   toColumn: string;
   cardinality: import('../../src/types/semantic').Cardinality;
+  /** Optional label, e.g. `ship date`. */
+  role?: string;
+  /** A composite foreign key's column pairs, the first being fromColumn → toColumn (#133 L2). */
+  pairs?: import('@erd-studio/core').ColumnPair[];
 }
 
 export interface EditorState extends CanvasState {
@@ -79,6 +89,8 @@ export interface EditorState extends CanvasState {
    * are worth offering (see App.tsx). Null for an unclassified error.
    */
   errorKind: ErrorMessage['payload']['kind'] | null;
+  /** The domain file holds unresolved git merge conflicts (#145); false unless the host said so. */
+  errorMergeConflict: boolean;
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: ModelTemplate[];
   /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
@@ -173,7 +185,7 @@ export interface EditorActions extends CanvasActions {
   setManifestMissing: (missing: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
-  setError: (error: string | null, kind?: ErrorMessage['payload']['kind']) => void;
+  setError: (error: string | null, kind?: ErrorMessage['payload']['kind'], mergeConflict?: boolean) => void;
   setTemplates: (templates: ModelTemplate[]) => void;
   setManifestModels: (models: ManifestModelPreview[]) => void;
   /** Register a function to focus the search input (called by Toolbar on mount). */
@@ -260,6 +272,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   addExistingModelDialogOpen: false,
   error: null,
   errorKind: null,
+  errorMergeConflict: false,
   templates: [],
   manifestModels: [],
   _searchFocusFn: null,
@@ -301,7 +314,11 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   dismissPhysicalSourceNotice: () => set({ physicalSourceNoticeDismissed: true }),
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
-  setError: (error, kind) => set({ error, errorKind: error === null ? null : (kind ?? null) }),
+  setError: (error, kind, mergeConflict) => set({
+    error,
+    errorKind: error === null ? null : (kind ?? null),
+    errorMergeConflict: error !== null && mergeConflict === true,
+  }),
   setTemplates: (templates) => set({ templates }),
   setManifestModels: (models) => set({ manifestModels: models }),
   registerSearchFocus: (focusFn) => set({ _searchFocusFn: focusFn }),
@@ -375,6 +392,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     domain,
     error: null,
     errorKind: null,
+    errorMergeConflict: false,
     // The notice gets to speak again only when the artifacts behind the stage
     // actually changed. setDomain is NOT only a host payload — usePositionPersistence
     // calls it locally to merge optimistic positions after a drag — so resetting

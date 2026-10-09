@@ -8,6 +8,7 @@
 
 import type { Meta } from '../types/semantic';
 import type {
+  CompositeForeignKey,
   ManifestColumn,
   ManifestModelInfo,
   ManifestRelationshipTest,
@@ -45,6 +46,7 @@ export function extractManifestData(
       compositeUniqueGroups: {},
       disabledModels,
       resourceDocs: {},
+      compositeForeignKeys: [],
     };
   }
 
@@ -53,6 +55,9 @@ export function extractManifestData(
   const uniqueColumns: Record<string, string[]> = {};
   const compositeUniqueGroups: Record<string, string[][]> = {};
   const resourceDocs: Record<string, ManifestModelInfo> = {};
+  // Composite foreign keys, resolved once every model is known (a constraint's
+  // `to` may be a rendered relation named by its alias).
+  const declaredForeignKeys: Array<CompositeForeignKey & { to: string }> = [];
 
   for (const [nodeKey, nodeValue] of Object.entries(nodes)) {
     const node = nodeValue as Record<string, unknown>;
@@ -67,6 +72,7 @@ export function extractManifestData(
         if (!existing || isPreferredVersion(modelInfo, existing)) {
           models[modelInfo.name] = modelInfo;
         }
+        declaredForeignKeys.push(...extractForeignKeyConstraints(modelInfo.name, node.constraints));
       }
       continue;
     }
@@ -80,6 +86,12 @@ export function extractManifestData(
     }
 
     if (nodeKey.startsWith(TEST_KEY_PREFIX)) {
+      const constraintTest = extractConstraintsForeignKeyTest(node, nodes);
+      if (constraintTest) {
+        declaredForeignKeys.push(constraintTest);
+        continue;
+      }
+
       const relTest = extractRelationshipTest(node, nodes);
       if (relTest) {
         relationshipTests.push(relTest);
@@ -91,7 +103,97 @@ export function extractManifestData(
     }
   }
 
-  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs };
+  const compositeForeignKeys = resolveForeignKeyTargets(declaredForeignKeys, models);
+  return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, disabledModels, resourceDocs, compositeForeignKeys };
+}
+
+/** A list of column names, or null when it is not a list of strings. */
+function columnList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.every((c) => typeof c === 'string' && c.trim() !== '')) return null;
+  return (value as string[]).map((c) => c.trim());
+}
+
+/**
+ * A model's dbt ≥ 1.9 model-level `foreign_key` constraints over two or more
+ * columns (#133 L2): `columns`, `to` and `to_columns` of one length. `to` is
+ * resolved later (`resolveForeignKeyTargets`).
+ */
+function extractForeignKeyConstraints(fromModel: string, constraints: unknown): Array<CompositeForeignKey & { to: string }> {
+  if (!Array.isArray(constraints)) return [];
+  const out: Array<CompositeForeignKey & { to: string }> = [];
+  for (const raw of constraints) {
+    const c = raw as Record<string, unknown> | null;
+    if (!c || typeof c !== 'object' || c.type !== 'foreign_key' || typeof c.to !== 'string') continue;
+    const fromColumns = columnList(c.columns);
+    const toColumns = columnList(c.to_columns);
+    if (!fromColumns || !toColumns || fromColumns.length < 2 || fromColumns.length !== toColumns.length) continue;
+    out.push({
+      fromModel, fromColumns, toModel: '', toColumns, to: c.to,
+      ...(typeof c.name === 'string' && c.name.trim() ? { name: c.name.trim() } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * A `dbt_constraints.foreign_key` test over two or more columns (#133 L2):
+ * `fk_column_names` on the model the test is attached to, `pk_column_names`
+ * on `pk_table_name`. Null for any other test.
+ */
+function extractConstraintsForeignKeyTest(
+  node: Record<string, unknown>,
+  nodes: Record<string, unknown>,
+): (CompositeForeignKey & { to: string }) | null {
+  const meta = node.test_metadata as Record<string, unknown> | undefined;
+  if (!meta || meta.namespace !== 'dbt_constraints' || meta.name !== 'foreign_key') return null;
+  const kwargs = meta.kwargs as Record<string, unknown> | undefined;
+  const fromColumns = columnList(kwargs?.fk_column_names);
+  const toColumns = columnList(kwargs?.pk_column_names);
+  const to = kwargs?.pk_table_name;
+  if (!fromColumns || !toColumns || typeof to !== 'string') return null;
+  if (fromColumns.length < 2 || fromColumns.length !== toColumns.length) return null;
+  const toModel = parseRefModelName(to);
+  const attached = node.attached_node as string | undefined;
+  let fromModel: string | undefined;
+  if (attached && attached.startsWith(MODEL_KEY_PREFIX)) {
+    fromModel = resolveModelNameFromNodeId(attached, nodes);
+  } else {
+    const refs = (node.depends_on as { nodes?: string[] } | undefined)?.nodes ?? [];
+    fromModel = refs.filter((r) => r.startsWith(MODEL_KEY_PREFIX)).map((r) => resolveModelNameFromNodeId(r, nodes)).find((m) => m !== toModel);
+  }
+  if (!fromModel) return null;
+  return { fromModel, fromColumns, toModel: '', toColumns, to };
+}
+
+/**
+ * Resolve each declaration's `to` to a model: a `ref()` (versioned refs too),
+ * or a rendered relation (`"db"."schema"."x"`, `db.schema.x`) by its last
+ * identifier, against model names then aliases, without case. Declarations
+ * whose target cannot be resolved are dropped; one per (from, columns, to).
+ */
+function resolveForeignKeyTargets(
+  declared: ReadonlyArray<CompositeForeignKey & { to: string }>,
+  models: Record<string, ManifestModelInfo>,
+): CompositeForeignKey[] {
+  const infos = Object.values(models);
+  const target = (to: string): string | undefined => {
+    const ref = parseRefModelName(to);
+    if (ref) return ref;
+    const last = to.trim().split('.').pop()?.replace(/^["`[]|["`\]]$/g, '').trim().toLowerCase();
+    if (!last) return undefined;
+    return infos.find((m) => m.name.toLowerCase() === last)?.name ?? infos.find((m) => m.alias?.toLowerCase() === last)?.name;
+  };
+  const seen = new Set<string>();
+  const out: CompositeForeignKey[] = [];
+  for (const { to, ...fk } of declared) {
+    const toModel = target(to);
+    if (!toModel) continue;
+    const key = [fk.fromModel, fk.fromColumns.join('+'), toModel, fk.toColumns.join('+')].join('|').toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...fk, toModel });
+  }
+  return out;
 }
 
 /**

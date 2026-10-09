@@ -16,13 +16,16 @@
 
 import * as path from 'path';
 
+import { canonicalRelationship, linkKey } from '@erd-studio/core';
 import { CURRENT_SCHEMA_VERSION } from '../types/semantic';
-import type { Cardinality, ColumnDef, Relationship, SemanticModel } from '../types/semantic';
+import type { ColumnDef, Relationship, SemanticModel } from '../types/semantic';
 import type { YmlData } from '../types/ymlData';
 import type { ManifestData } from '../types/manifest';
+import type { CatalogColumn, CatalogData } from '../types/catalog';
 import { validateModelNameSafety } from '../providers/payloadValidation';
 import { derivePhysicalRelationships, mergeCompositeGroups, mergeUniqueMaps } from './domainService';
 import { normaliseName } from './nameUtils';
+import { catalogNodeFor, resolveColumnType } from './columnTypes';
 
 /** Most models one draft (or one batch add) will create — a readable first diagram. */
 export const DRAFT_MODEL_LIMIT = 15;
@@ -106,6 +109,8 @@ export interface BuildDbtDraftInput {
   modelNames: readonly string[];
   ymlData?: YmlData;
   manifest?: ManifestData;
+  /** `target/catalog.json`, when `dbt docs generate` has run: the warehouse's column types. */
+  catalog?: CatalogData;
   /** True when `logical-models/` already has this model — it is referenced, not re-created. */
   libraryHas: (name: string) => boolean;
   /** Seeds a new library model; defaults to {@link seedModelFromDbt}. */
@@ -427,10 +432,20 @@ export function customDraftScope(modelNames: readonly string[], models: readonly
 /**
  * A logical model copied from dbt: the schema yml first (as
  * `LogicalModelService.ymlToSemanticModel` does), with the manifest filling a
- * missing column type, description and the schema; the manifest alone when
- * no yml declares the model. Undefined when neither has it.
+ * missing description and the schema; the manifest alone when no yml declares
+ * the model. Undefined when neither has it.
+ *
+ * Column names and order are the declared ones (yml, else manifest); the
+ * catalog never adds or respells a column. Each TYPE resolves exactly as the
+ * physical stage resolves it (`resolveColumnType`: catalog, then the declared
+ * `data_type:`, then the manifest), and is empty when no source has one.
  */
-export function seedModelFromDbt(name: string, ymlData?: YmlData, manifest?: ManifestData): SemanticModel | undefined {
+export function seedModelFromDbt(
+  name: string,
+  ymlData?: YmlData,
+  manifest?: ManifestData,
+  catalog?: CatalogData,
+): SemanticModel | undefined {
   const key = normaliseName(name);
   const yml = ymlData?.models.get(name)
     ?? [...(ymlData?.models.values() ?? [])].find((m) => normaliseName(m.name) === key);
@@ -439,18 +454,29 @@ export function seedModelFromDbt(name: string, ymlData?: YmlData, manifest?: Man
   if (!yml && !man) { return undefined; }
 
   const manifestColumns = new Map((man?.columns ?? []).map((c) => [normaliseName(c.name), c]));
+  const observedColumns = new Map<string, CatalogColumn>();
+  for (const cc of catalogNodeFor(catalog, man, key)?.columns ?? []) {
+    // First wins, as on the physical stage.
+    if (!observedColumns.has(normaliseName(cc.name))) { observedColumns.set(normaliseName(cc.name), cc); }
+  }
+  const typeOf = (columnName: string, declared: string | null | undefined): string =>
+    resolveColumnType(
+      observedColumns.get(normaliseName(columnName))?.dataType,
+      declared,
+      manifestColumns.get(normaliseName(columnName))?.data_type,
+    ).dataType;
   const columns: ColumnDef[] = yml
     ? yml.columns.map((col) => {
       const mc = manifestColumns.get(normaliseName(col.name));
       return {
         name: col.name,
-        dataType: col.dataType ?? mc?.data_type ?? 'unknown',
+        dataType: typeOf(col.name, col.dataType),
         description: col.description || mc?.description || '',
       };
     })
     : man!.columns.map((col) => ({
       name: col.name,
-      dataType: col.data_type ?? 'unknown',
+      dataType: typeOf(col.name, col.data_type),
       description: col.description ?? '',
     }));
 
@@ -483,6 +509,7 @@ export function markDraftKeys(
   }
   const pk = !hasComposite && uniqueCols.size === 1 ? [...uniqueCols][0] : undefined;
   const fks = new Set(relationships
+    .map((r) => canonicalRelationship(r))
     .filter((r) => normaliseName(r.fromModel) === key)
     .map((r) => normaliseName(r.fromColumn)));
 
@@ -492,7 +519,8 @@ export function markDraftKeys(
       const col = { ...c };
       const name = normaliseName(c.name);
       if (pk === name && col.isPrimaryKey === undefined) { col.isPrimaryKey = true; }
-      if (fks.has(name) && col.isForeignKey === undefined) { col.isForeignKey = true; }
+      // A key is never flagged a foreign key here: it would turn later drags round.
+      if (fks.has(name) && col.isForeignKey === undefined && !col.isPrimaryKey) { col.isForeignKey = true; }
       return col;
     }),
   };
@@ -508,8 +536,9 @@ export function markDraftKeys(
  * domain (existing or added), deduped against the domain's relationships.
  *
  * Cardinality comes from `derivePhysicalRelationships()` (the physical stage's
- * inference from `unique` / `unique_combination_of_columns` tests), narrowed
- * to what a relationship test can mean for a draft: both ends unique is
+ * inference from `unique` / `unique_combination_of_columns` tests), so a test
+ * declared on the dimension reads as `one-to-many` and is stored on the fact
+ * (`canonicalRelationship`, #133). It is then narrowed: both ends unique is
  * `one-to-one`, anything else `many-to-one` (the test names the "one" side).
  * Endpoints use the spelling of the names passed in.
  */
@@ -522,7 +551,7 @@ export function relationshipsForAddedModels(
 ): Relationship[] {
   const added = new Set(addedNames.map(normaliseName));
   const domainNames = new Set<string>([...existingNamesInDomain, ...addedNames]);
-  const seen = new Set(existingRelationships.map(testKey));
+  const seen = new Set(existingRelationships.map(linkKey));
 
   const derived = derivePhysicalRelationships(
     [...tests],
@@ -534,16 +563,13 @@ export function relationshipsForAddedModels(
   const out: Relationship[] = [];
   for (const rel of derived) {
     if (!added.has(normaliseName(rel.fromModel)) && !added.has(normaliseName(rel.toModel))) { continue; }
-    const key = testKey(rel);
+    const key = linkKey(rel);
     if (seen.has(key)) { continue; }
     seen.add(key);
-    const cardinality: Cardinality = rel.cardinality === 'one-to-one' ? 'one-to-one' : 'many-to-one';
+    const { fromModel, fromColumn, toModel, toColumn, cardinality } = canonicalRelationship(rel);
     out.push({
-      fromModel: rel.fromModel,
-      fromColumn: rel.fromColumn,
-      toModel: rel.toModel,
-      toColumn: rel.toColumn,
-      cardinality,
+      fromModel, fromColumn, toModel, toColumn,
+      cardinality: cardinality === 'one-to-one' ? 'one-to-one' : 'many-to-one',
     });
   }
   return out;
@@ -561,7 +587,7 @@ export function relationshipsForAddedModels(
  */
 export function buildDbtDraft(input: BuildDbtDraftInput): DbtDraft {
   const limit = input.limit ?? DRAFT_MODEL_LIMIT;
-  const seed = input.seed ?? ((name: string) => seedModelFromDbt(name, input.ymlData, input.manifest));
+  const seed = input.seed ?? ((name: string) => seedModelFromDbt(name, input.ymlData, input.manifest, input.catalog));
   const disabled = input.manifest?.disabledModels ?? new Set<string>();
   const inDomain = new Set((input.existingModelNames ?? []).map(normaliseName));
 

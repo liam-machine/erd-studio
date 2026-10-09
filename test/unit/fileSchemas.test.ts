@@ -135,6 +135,12 @@ describe('schema enums match the runtime', () => {
     expect(new Set(cardinality)).toEqual(VALID_CARDINALITIES);
   });
 
+  it('a model file still reads one-to-many but marks it deprecated (#133)', () => {
+    const cardinality = modelSchema.definitions.relationship.properties.cardinality;
+    expect(cardinality.enum).toEqual([...CARDINALITIES]);
+    expect(cardinality.enumDescriptions[cardinality.enum.indexOf('one-to-many')]).toMatch(/^Deprecated in model files/);
+  });
+
   it('rationale keys are the ones the model reader keeps', () => {
     expect(schemaKeys(modelSchema.definitions.rationale)).toEqual([...RATIONALE_KEYS].sort());
   });

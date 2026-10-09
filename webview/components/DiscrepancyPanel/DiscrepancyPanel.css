@@ -540,3 +540,18 @@
 .disc-panel__staleness-btn:hover {
   background: rgba(204, 167, 0, 0.15);
 }
+
+/* A composite foreign key dbt does not declare (#133 L2): informational, not a difference to fix. */
+.disc-panel__model-status--advisory {
+  background: var(--dim-fg);
+}
+
+.disc-panel__model--advisory .disc-panel__model-name {
+  color: var(--dim-fg);
+}
+
+.disc-panel__advisory-note {
+  padding: 2px 8px 6px 24px;
+  font-size: 11px;
+  color: var(--dim-fg);
+}

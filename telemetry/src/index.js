@@ -61,8 +61,12 @@
 /** The one path this Worker serves. */
 const ROUTE = '/v1/heartbeat';
 
-/** Largest body accepted. A real heartbeat is under a kilobyte; every feature key at once is about 2 KB. */
-const MAX_BODY_BYTES = 4096;
+/**
+ * Largest body accepted. A real heartbeat is under a kilobyte; every feature
+ * and error key at once, each at its cap, is about 4.5 KB (the extension's
+ * telemetryPayload test holds that under this limit).
+ */
+const MAX_BODY_BYTES = 8192;
 
 /** A heartbeat may describe a day at most this many days before it is received. */
 const MAX_DAY_AGE_DAYS = 7;
@@ -204,6 +208,39 @@ const FEATURES = [
   'relMoveNothingToMove',
   'relMoveCompleted',
   'relMoveLeftover',
+  // Relationship rework (#133): use of the new behaviour, Move steps, and
+  // the state of the relationships found on canvas open.
+  'relDragTurned',
+  'relSwapMoved',
+  'relSwapRefusedKey',
+  'relDeleteCopies',
+  'relDeleteStillDrawn',
+  'relRoleSet',
+  'relCreateAnyway',
+  'relDirectionAsked',
+  'relMarkKey',
+  'relComposite',
+  'relSelfReference',
+  'relCaseRespelled',
+  'relMoveRehomed',
+  'relMoveTurned',
+  'relMoveConflictShown',
+  'relMoveDisagreementLeft',
+  'relMoveFileLocked',
+  'relMoveKeptLibrary',
+  'relMoveGroupLeft',
+  'relStateStoredTwice',
+  'relStateOneToMany',
+  'relStateBackwards',
+  'relStateDanglingModel',
+  'relStateDanglingColumn',
+  'relStateUnreadable',
+  'relStatePartialComposite',
+  'relStateDomainCopy',
+  'exportMermaid',
+  'exportDbml',
+  'exportCancelled',
+  'exportNoDiagrams',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -258,6 +295,23 @@ const ERROR_CODES = [
   'relMoveFailed',
   // A canvas edit (or the duplicate-model rename) could not save a file.
   'saveFailed',
+  // Relationship rework (#133): failed writes, and invariants a write broke.
+  'relWriteFailed',
+  'relHandlerFailed',
+  'relSyncRefused',
+  'relMoveRestoreFailed',
+  'relInvNotCanonical',
+  'relInvNotAsIntended',
+  'relInvRoleLost',
+  'relInvCopyLeft',
+  'relInvOtherLost',
+  'relInvOtherChanged',
+  'relInvDuplicateInFile',
+  'relInvDrawnTwice',
+  'relInvGroupBroken',
+  'relInvKeyNotMarked',
+  'relInvCheckFailed',
+  'exportFailed',
 ];
 
 /**

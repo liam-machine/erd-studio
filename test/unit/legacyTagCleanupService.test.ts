@@ -54,6 +54,21 @@ describe('LegacyTagCleanupService', () => {
     expect(after).not.toContain('domain:finance');
   });
 
+  it('keeps a CRLF schema file CRLF', () => {
+    const filePath = writeYaml(
+      tmpDir,
+      'models/silver/dim_customer.yml',
+      ['version: 2', 'models:', '  - name: dim_customer', '    tags:', '      - pii', '      - domain:finance', ''].join('\r\n'),
+    );
+
+    expect(new LegacyTagCleanupService(tmpDir).stripAll().tagsRemoved).toBe(1);
+
+    const after = fs.readFileSync(filePath, 'utf-8');
+    expect(after).not.toContain('domain:finance');
+    expect(after).toContain('- pii\r\n');
+    expect(after.replace(/\r\n/g, '')).not.toMatch(/\n/);
+  });
+
   it('removes emptied config.tags and config blocks', () => {
     const filePath = writeYaml(
       tmpDir,

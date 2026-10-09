@@ -57,9 +57,11 @@ import { WelcomeModal } from './components/WelcomeModal/WelcomeModal';
 import { FeedbackDialog } from './components/FeedbackDialog/FeedbackDialog';
 import { SyncMergeModal } from './components/SyncMergeModal/SyncMergeModal';
 import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay';
+import { useReconnectWatchdog } from './hooks/useReconnectWatchdog';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import type { DisplayDomain } from '../src/types/display';
 import { redactPaths } from '../src/types/feedback';
+import { orientDraggedRelationship } from './lib/relationshipDirection';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,6 +93,7 @@ function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
   const error = useEditorStore((s) => s.error);
   const errorKind = useEditorStore((s) => s.errorKind);
+  const errorMergeConflict = useEditorStore((s) => s.errorMergeConflict);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const setError = useEditorStore((s) => s.setError);
@@ -230,7 +233,7 @@ function EditorCanvas() {
           break;
         case 'error':
           useEditorStore.getState().recordError('extension', msg.payload.message);
-          setError(msg.payload.message, msg.payload.kind);
+          setError(msg.payload.message, msg.payload.kind, msg.payload.mergeConflict === true);
           break;
         case 'openFeedback':
           useEditorStore.getState().setFeedbackDialogOpen(true, msg.payload ?? null);
@@ -247,20 +250,11 @@ function EditorCanvas() {
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
 
-  // Detect orphaned-canvas state: if `domainLoaded` doesn't arrive within
-  // the boot grace period, the extension host probably can't reach this
-  // panel (typically because it was updated/restarted while the panel was
-  // open). Activation-time auto-recovery in the host should usually fix
-  // this before the overlay ever shows — this is a safety net for edge
-  // cases like extension disable/enable mid-session.
-  const [showReconnectOverlay, setShowReconnectOverlay] = useState(false);
-  useEffect(() => {
-    if (domain) return;
-    const overlayTimer = window.setTimeout(() => {
-      setShowReconnectOverlay(true);
-    }, 5000);
-    return () => clearTimeout(overlayTimer);
-  }, [domain]);
+  // Detect orphaned-canvas state: if neither `domainLoaded` nor `error`
+  // arrives within the boot grace period, the extension host probably can't
+  // reach this panel. An error is an answer, so it stops the timer; Retry
+  // clears it and starts a fresh grace period (see useReconnectWatchdog).
+  const showReconnectOverlay = useReconnectWatchdog(!domain && !error);
 
   const handleReconnect = useCallback(() => {
     vscode.postMessage({ type: 'requestReload' });
@@ -321,11 +315,14 @@ function EditorCanvas() {
 
     const handleColumnRelationshipDrop = (e: Event) => {
       const { fromModel, fromColumn, toModel, toColumn } = (e as CustomEvent).detail;
-      openFkDialogWithPrefill({ fromModel, fromColumn, toModel, toColumn });
+      // A drag that starts on a key is turned round, so the column pointing
+      // at the key is "from" — the many side, which stores it (#133).
+      const models = useEditorStore.getState().domain?.models ?? [];
+      openFkDialogWithPrefill(orientDraggedRelationship({ fromModel, fromColumn, toModel, toColumn }, models));
     };
 
     const handleColumnRelationshipSelfDrop = () => {
-      setToastMessage('Cannot create relationship from a model to itself');
+      setToastMessage("A column can't point at itself — drop it on another column of the same model to draw a self-reference.");
     };
 
     window.addEventListener('column-relationship-drop', handleColumnRelationshipDrop);
@@ -444,14 +441,31 @@ function EditorCanvas() {
     // reserved directory, and no amount of retrying turns it into a domain.
     // Offering Retry there would be an invitation to press a button that
     // cannot work. Opening it as text is the action that does.
-    const canRetry = errorKind !== 'not-a-domain';
+    // A domain file holding git conflict markers (#145) is not corrupt, and
+    // re-reading it cannot help either: someone has to keep one side. Say so
+    // plainly, and skip Retry — the host reloads the canvas by itself on the
+    // save that resolves it (every change to the document is re-read).
+    const mergeConflict = errorKind === 'domain-file' && errorMergeConflict;
+    const canRetry = errorKind !== 'not-a-domain' && !mergeConflict;
     // The user is the only one who can repair a domain file, so give them a
     // way to see it. Issue #64 dead-ended precisely here: an unparseable file,
     // named in the message, with no route to it.
     const canOpenFile = errorKind === 'domain-file' || errorKind === 'not-a-domain';
     return (
       <div className="editor-message editor-message--error" role="alert">
-        <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+        {mergeConflict ? (
+          <>
+            <p className="editor-message__title">This diagram has unresolved git merge conflicts</p>
+            <p className="editor-message__detail">
+              Git left conflict markers in the file when two changes to it were merged. Open it as text and keep
+              one side of each conflict — if only positions conflict, either side is safe. The diagram reloads by
+              itself as soon as the file is saved.
+            </p>
+            <p className="editor-message__detail editor-message__detail--dim">{error}</p>
+          </>
+        ) : (
+          <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+        )}
         {canRetry && (
           <button
             type="button"
@@ -467,7 +481,7 @@ function EditorCanvas() {
             className="editor-message__button"
             onClick={handleOpenFile}
           >
-            Open as Text
+            {mergeConflict ? 'Open as Text to Resolve' : 'Open as Text'}
           </button>
         )}
         <button

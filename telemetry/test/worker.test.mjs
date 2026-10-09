@@ -31,6 +31,12 @@ const WORKER_FEATURES = [
     .matchAll(/'([A-Za-z0-9]+)'/g),
 ].map((m) => m[1]);
 
+/** The Worker's ERROR_CODES list, read the same way. */
+const WORKER_ERROR_CODES = [
+  ...(/const ERROR_CODES = \[([\s\S]*?)\];/.exec(readFileSync(new URL('../src/index.js', import.meta.url), 'utf8'))?.[1] ?? '')
+    .matchAll(/'([A-Za-z0-9]+)'/g),
+].map((m) => m[1]);
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
@@ -231,18 +237,18 @@ describe('routing', () => {
 // ---------------------------------------------------------------------------
 
 describe('body size', () => {
-  it('accepts a body of exactly 4096 bytes', async () => {
+  it('accepts a body of exactly 8192 bytes', async () => {
     const base = JSON.stringify(heartbeat());
     // Pad with an unknown key (dropped) to hit the cap exactly.
-    const padding = 4096 - base.length - ',"pad":""'.length;
+    const padding = 8192 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
-    assert.equal(new TextEncoder().encode(body).byteLength, 4096);
+    assert.equal(new TextEncoder().encode(body).byteLength, 8192);
     assert.equal((await post(body)).status, 204);
   });
 
-  it('413s a body of 4097 bytes', async () => {
+  it('413s a body of 8193 bytes', async () => {
     const base = JSON.stringify(heartbeat());
-    const padding = 4097 - base.length - ',"pad":""'.length;
+    const padding = 8193 - base.length - ',"pad":""'.length;
     const body = base.slice(0, -1) + `,"pad":"${'x'.repeat(padding)}"}`;
     const { status, env } = await post(body);
     assert.equal(status, 413);
@@ -256,7 +262,7 @@ describe('body size', () => {
 
   it('counts the stream rather than trusting a missing Content-Length', async () => {
     const env = makeEnv();
-    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(5000), '"}']), env);
+    const response = await call(streamingRequest(['{"v":1,"pad":"', 'x'.repeat(9000), '"}']), env);
     assert.equal(response.status, 413);
     assert.equal(env.DB.statements.length, 0);
   });
@@ -524,6 +530,17 @@ describe('optional 1.6.3 fields', () => {
     const env = makeEnv();
     const response = await post(heartbeat({ ...NEW_FIELDS, features }), env);
     assert.equal(response.status, 204);
+  });
+
+  it('accepts a body carrying every feature and every error key at once, and stores them all', async () => {
+    const features = Object.fromEntries(WORKER_FEATURES.map((key) => [key, 100]));
+    const errors = Object.fromEntries(WORKER_ERROR_CODES.map((key) => [key, 100]));
+    const env = makeEnv();
+    const response = await post(heartbeat({ ...NEW_FIELDS, features, errors }), env);
+    assert.equal(response.status, 204);
+    const params = env.DB.statements[0].params;
+    assert.deepEqual(Object.keys(JSON.parse(params[17])), WORKER_FEATURES);
+    assert.deepEqual(Object.keys(JSON.parse(params[18])), WORKER_ERROR_CODES);
   });
 });
 

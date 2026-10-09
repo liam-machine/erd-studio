@@ -1,0 +1,25 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project orders {
+  Note: '''Layer: silver
+Stage: logical
+
+A hand-edited v4 file: columns without a text name, and relationship ends spelled in another case'''
+}
+
+// stg_orders: column 1 has no name; not exported
+Table stg_orders {
+  "123" INT [note: 'A column named by a number']
+  order_id BIGINT [pk]
+  customer_key INT
+}
+
+// stg_customers: column 1 has no name; not exported
+Table stg_customers {
+  Customer_Key INT [pk]
+}
+
+Ref: stg_orders.customer_key > stg_customers.Customer_Key
+// Not exported: stg_orders.dropped_column -> stg_customers.Customer_Key (stg_orders has no column dropped_column).

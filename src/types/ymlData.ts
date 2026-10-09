@@ -11,6 +11,7 @@
  */
 
 import type { Meta } from './semantic';
+import type { CompositeForeignKey } from './manifest';
 
 /** Column metadata from a dbt schema .yml file. */
 export interface YmlColumn {
@@ -126,4 +127,10 @@ export interface YmlData {
    * stay valid.
    */
   resourceDocs?: Map<string, YmlResourceDoc>;
+  /**
+   * Composite foreign keys declared by model-level `foreign_key` constraints
+   * (dbt ≥ 1.9) or `dbt_constraints.foreign_key` tests (#133 L2). Optional so
+   * hand-built literals stay valid.
+   */
+  compositeForeignKeys?: CompositeForeignKey[];
 }

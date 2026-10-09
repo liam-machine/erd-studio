@@ -110,6 +110,25 @@ describe('TelemetryService', () => {
     expect(body.installId).toMatch(UUID_V4);
   });
 
+  it('records relationship states once a day and every broken invariant', async () => {
+    startService();
+    useToday();
+    const clean = { storedTwice: 0, oneToManyInModelFile: 0, backwards: 0, danglingModel: 0, danglingColumn: 0, unreadable: 0, partialComposite: 0, caseRespelled: 0, domainCopyOfLibrary: 0 };
+    telemetry.relationshipState({ ...clean, storedTwice: 4, danglingModel: 1 });
+    telemetry.relationshipState({ ...clean, storedTwice: 2 });
+    telemetry.relationshipState(clean);
+    telemetry.relationshipInvariants(['otherLost', 'roleLost']);
+    telemetry.relationshipInvariants(['otherLost']);
+    telemetry.relationshipInvariants([]);
+
+    vi.setSystemTime(new Date('2026-09-25T00:30:00Z'));
+    await vi.advanceTimersByTimeAsync(HOUR);
+
+    const [body] = sentBodies();
+    expect(body.features).toEqual({ compare: 1, relStateStoredTwice: 1, relStateDanglingModel: 1 });
+    expect(body.errors).toEqual({ relInvOtherLost: 2, relInvRoleLost: 1 });
+  });
+
   it('sends the previous day on the next activation, then nothing more that day', async () => {
     const { context } = startService();
     useToday();

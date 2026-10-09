@@ -53,6 +53,23 @@ const CONFIG_TARGET_FIELD: Record<number, keyof MockConfigValues> = {
   [ConfigurationTarget.WorkspaceFolder]: 'workspaceFolderValue',
 };
 
+/** Listeners registered through workspace.onDidChangeTextDocument. */
+const _textDocumentChangeListeners: Array<(e: unknown) => unknown> = [];
+
+/**
+ * Fire workspace.onDidChangeTextDocument as VS Code does after a change to
+ * `document` — e.g. `reason: TextDocumentChangeReason.Undo` for the native
+ * undo Cmd+Z runs. Resolves once every (async) listener has finished.
+ */
+export async function _fireDidChangeTextDocument(document: unknown, reason?: TextDocumentChangeReason): Promise<void> {
+  await Promise.all([..._textDocumentChangeListeners].map((listener) => listener({ document, contentChanges: [], reason })));
+}
+
+export enum TextDocumentChangeReason {
+  Undo = 1,
+  Redo = 2,
+}
+
 export const workspace = {
   getConfiguration: (section?: string) => ({
     get: (key: string, defaultValue?: unknown) => {
@@ -92,7 +109,16 @@ export const workspace = {
     onDidDelete: () => ({ dispose: () => {} }),
     dispose: () => {},
   }),
-  onDidChangeTextDocument: () => ({ dispose: () => {} }),
+  /** Registers a listener; `_fireDidChangeTextDocument` calls it. */
+  onDidChangeTextDocument: (listener: (e: unknown) => unknown) => {
+    _textDocumentChangeListeners.push(listener);
+    return {
+      dispose: () => {
+        const idx = _textDocumentChangeListeners.indexOf(listener);
+        if (idx !== -1) _textDocumentChangeListeners.splice(idx, 1);
+      },
+    };
+  },
   onDidChangeConfiguration: () => ({ dispose: () => {} }),
   onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
   /** Mirrors VS Code: the folder whose path contains the uri, deepest first. */
@@ -680,6 +706,7 @@ export function _resetMockWorkspace(): void {
   _appliedEdits.length = 0;
   _mockWorkspaceState.applyEditResult = true;
   workspace.textDocuments = [];
+  _textDocumentChangeListeners.length = 0;
 }
 
 /**

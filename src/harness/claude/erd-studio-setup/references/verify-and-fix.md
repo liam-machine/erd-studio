@@ -38,14 +38,14 @@ Per domain (`domains[i]`):
 | Field | Meaning |
 |---|---|
 | `file`, `domain`, `layer` | Which diagram this is |
-| `error` | Set when this one domain could not be checked; explain it and move on |
+| `error` | Set when this one domain could not be checked; explain it and move on. Code `merge-conflict`: the diagram file holds git conflict markers — follow troubleshooting.md → "Merge conflicts" |
 | `needsMigration` | The domain uses the older (v4) format. There are no fixes; suggest **ERD Studio: Migrate to v5** from the Command Palette, then re-run |
 | `clean` | No blocking differences in this domain |
 | `counts.blocking` / `counts.advisory` | How many differences of each kind |
 | `counts.matchedModels` / `matchedColumns` / `matchedRelationships` | What matched — use these in the success line |
 | `phantoms[]` | Models in the diagram that dbt does not have: `reason` is `absent` (not in the project at all) or `disabled` (dbt has it switched off). They are left out of the comparison |
 | `missingModelFiles[]` | Names in `logical.models` with no model file (at the top of `logical-models/` or in any folder) |
-| `unreadableModelFiles[]` | Model files that exist but are not valid YAML: `name`, `file`, `line`, `code` (e.g. `BLOCK_AS_IMPLICIT_KEY`), `kind`, `message`. ERD Studio sees these models as empty, so each gets one `fix-model-yaml` fix instead of its column fixes |
+| `unreadableModelFiles[]` | Model files that exist but are not valid YAML: `name`, `file`, `line`, `code` (e.g. `BLOCK_AS_IMPLICIT_KEY`), `kind`, `message`. ERD Studio sees these models as empty, so each gets one `fix-model-yaml` fix instead of its column fixes. `mergeConflict: true` means the file holds git conflict markers (`line` is the first `<<<<<<<`) |
 | `fixes[]` | What to change, already sorted: blocking first, then by model and column |
 | `report` | The raw comparison — you rarely need it |
 | `plan` | The same content as a canvas sync plan, with dbt as the source of truth everywhere |
@@ -57,22 +57,23 @@ Each fix:
 | `severity` | `blocking` — must be fixed or explained for a clean result. `advisory` — dbt has no type for this column yet; not drift you can fix in ERD Studio |
 | `kind` | What to do (section 2) |
 | `model`, `column` | Where |
-| `file` | The file to edit, relative to the project folder: the model's yml under `logical-models/` (its real folder, when the library is grouped by layer) or the domain JSON. For a relationship it is wherever that relationship is defined — the from-model's yml when it is stored in the model library |
+| `file` | The file to edit, relative to the project folder: the model's yml under `logical-models/` (its real folder, when the library is grouped by layer) or the domain JSON. For a relationship it is wherever that relationship is defined — the yml of the model holding the foreign key when it is stored in the model library |
 | `from`, `to` | Current logical value and the dbt value, for types and cardinalities. **Write `to`** |
-| `relationship` | The connection, for relationship fixes |
+| `relationship` | The connection, for relationship fixes — the entry exactly as it belongs in `file` (in a yml, always on its many side, never `one-to-many`) |
+| `movesFrom` | `set-cardinality` only: the file the relationship is stored in now, when the fix moves it to `file` |
 | `explain` | One plain-English sentence — use it when describing the fix to the user |
 
 ## 2. Fix kinds → exact edits
 
 | kind | Edit |
 |---|---|
-| `fix-model-yaml` | **Fix these first.** The file at `file` does not parse (`line` says where). Almost always an unquoted value: wrap it in double quotes (see the quoting rule in building-the-model.md). A tab → spaces; a key twice → keep one; `---` or a code fence → remove it. Re-run the diff before any other fix — until the file parses, every other difference for that model is noise |
+| `fix-model-yaml` | **Fix these first.** The file at `file` does not parse (`line` says where). Almost always an unquoted value: wrap it in double quotes (see the quoting rule in building-the-model.md). A tab → spaces; a key written twice by hand → keep one; `---` or a code fence → remove it. Re-run the diff before any other fix — until the file parses, every other difference for that model is noise. **Except when the file's `unreadableModelFiles` entry has `mergeConflict: true`:** git left two versions in the file, and that is not a YAML slip — do not edit it; ask the user, as troubleshooting.md → "Merge conflicts" says |
 | `add-column` | Append `{ name, dataType, description }` to `columns` in `logical-models/<model>.yml`. `dataType` is `to` (the dbt type), in double quotes; if that is empty, use the SQL cast or `STRING` and add it to "types to confirm". Description: the inventory's text copied verbatim **inside double quotes** (escape any inner `"` as `\"`), or a draft ending in "(draft)" |
 | `remove-column` | Delete the column from the yml, **and** delete every relationship that names it: in the domain JSON (`fromModel`/`fromColumn` or `toModel`/`toColumn`), in this model's own `relationships:` (`fromColumn`), and in any other model yml's `relationships:` that points at it (`toModel`/`toColumn`) |
 | `set-type` | Set the column's `dataType` to `to` |
-| `add-relationship` | Add `relationship` (with its `cardinality`) where the project keeps relationships — the from-model's yml `relationships:` (without `fromModel`) or `logical.relationships` in the domain JSON, by the `/erd-studio` skill's "Where relationships live" — then set `isForeignKey: true` on the `fromColumn` in the from-model's yml if it is not already |
-| `remove-relationship` | Remove the matching entry from wherever it is defined — the from-model's yml `relationships:` or `logical.relationships`. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 |
-| `set-cardinality` | Set `cardinality` on the matching relationship to `to`, in the file `file` names — the from-model's yml `relationships:` or the domain JSON. A yml change shows in every diagram holding both models |
+| `add-relationship` | Add `relationship` (with its `cardinality`) where the project keeps relationships — the `fromModel`'s yml `relationships:` (without `fromModel`) or `logical.relationships` in the domain JSON, by the `/erd-studio` skill's "Where relationships live" — then set `isForeignKey: true` on the `fromColumn` in that yml if it is not already. `relationship` is already on its many side; if you ever see a `one-to-many`, swap the ends and write `many-to-one` in the other model's yml |
+| `remove-relationship` | Remove the entry `relationship` names from `file` — a model yml's `relationships:` or `logical.relationships` — and any other copy of the same two columns (either way round) in the other model's yml. A relationship in a yml is shared by every diagram holding both models, so say so. This is always a question first — see section 3 |
+| `set-cardinality` | Write `relationship` (its `cardinality` is the one to store) in `file`, replacing the entry for the same two columns there. When `movesFrom` is set, take the entry for those two columns out of that file too — the fix moves it to the model on its many side. A yml change shows in every diagram holding both models |
 | `resolve-phantom` | Always a question: rename it in `logical.models` (and its relationships — in the domain JSON and in any model yml's `relationships:` whose `toModel` names it) to the real dbt model name, or remove it from this domain. **Never** delete its `logical-models/*.yml` — other domains may use it |
 
 For `missingModelFiles`: if the model exists in dbt, write its yml from `inventory --models
@@ -116,6 +117,12 @@ and never apply the matching fix — whether the
 model was created this session or existed before, and whether the difference is a column, a
 relationship or a phantom. They count as "kept by choice", not against a clean result.
 
+**Merge conflicts** are always the user's: a `fix-model-yaml` whose file's entry in
+`unreadableModelFiles` has `mergeConflict: true`, or a `merge-conflict` error, means git left two
+versions of the file. Show the file and line, ask which
+side to keep, and never pick one or run a git command yourself (troubleshooting.md → "Merge
+conflicts").
+
 **Advisory fixes** are never applied. List them once at the end: "dbt doesn't know these column
 types yet. Generating the catalog (Stage 2) will fill them in."
 
@@ -123,7 +130,9 @@ types yet. Generating the catalog (Stage 2) will fill them in."
 
 1. Run the diff.
 2. Fix every `fix-model-yaml` first, then run the diff again — the other fixes for that model
-   only mean something once its file parses.
+   only mean something once its file parses. One whose `unreadableModelFiles` entry has
+   `mergeConflict: true` is a question for the user, not a fix (section 3): settle it with them
+   first, then run the diff again.
 3. Apply or ask about the fixes, following section 3.
 4. Run the diff again.
 5. Repeat — **at most 3 rounds.** Each round should shrink the list; if it does not, something

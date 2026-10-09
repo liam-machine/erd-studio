@@ -1,4 +1,12 @@
 {
+  "composite-and-self.host": [
+    "warn: [DomainService] Relationships in pit_customer's model file marked compositeKey \"fk_lonely\" do not form one composite key (it has only one column pair); drawn separately"
+  ],
+  "composite-and-self.unified": [
+    "warn: [DomainService] Relationships in pit_customer's model file marked compositeKey \"fk_lonely\" do not form one composite key (it has only one column pair); drawn separately"
+  ],
+  "data-type-alias.host": [],
+  "data-type-alias.unified": [],
   "dbt-project.physical.host": [],
   "dbt-project.stage-physical": [],
   "errors.array.host": [
@@ -6,6 +14,12 @@
   ],
   "errors.badlayer.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/platinum/badlayer.json has invalid layer \"diamond\". Expected one of: silver, gold"
+  ],
+  "errors.conflict-models.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/conflict-models.json has unresolved git merge conflicts (first at line 9). Resolve them in the file — if only positions conflict, either side is safe to keep."
+  ],
+  "errors.conflict-positions.host": [
+    "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/conflict-positions.json has unresolved git merge conflicts (first at line 12). Resolve them in the file — if only positions conflict, either side is safe to keep."
   ],
   "errors.empty.host": [
     "warn: [SemanticEditorProvider] <root>/.erd-studio/silver/empty.json is empty — re-reading in 150ms (likely mid-write)",
@@ -31,6 +45,8 @@
   "errors.noversion.host": [
     "error: [SemanticEditorProvider] Failed to load domain: Domain file <root>/.erd-studio/silver/noversion.json is missing a valid \"schemaVersion\" field"
   ],
+  "library-relationships.host": [],
+  "library-relationships.unified": [],
   "missing-model.host": [
     "warn: [DomainService] Model \"dim_missing\" not found in logical-models/",
     "error: [LogicalModelService] Failed to read model \"broken\": YAMLParseError: Flow sequence in block collection must be sufficiently indented and end with a ] at line 5, column 3:\n\n    dataType: [INT\n  - name: other\n  ^\n",
@@ -68,5 +84,7 @@
     "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: {\"fromModel\":\"raw_refunds\",\"fromColumn\":\"order_line_id\",\"toModel\":\"raw_orders\"}",
     "warn: [DomainService] Skipping malformed relationship entry in <root>/.erd-studio/bronze/orders.json: \"not-a-relationship\"",
     "warn: [DomainService] Skipping inline model without a string \"name\" in <root>/.erd-studio/bronze/orders.json"
-  ]
+  ],
+  "v4-nameless-column.host": [],
+  "v4-nameless-column.unified": []
 }

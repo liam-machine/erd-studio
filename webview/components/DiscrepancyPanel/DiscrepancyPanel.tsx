@@ -125,11 +125,15 @@ interface RelationshipEntryProps {
 }
 
 function RelationshipEntry({ rel, sourceStage, targetStage, onNavigate }: RelationshipEntryProps) {
-  const statusClass = rel.status === 'cardinality-mismatch' ? 'mismatch' : rel.status;
-  const relStatusLabel = statusLabel(rel.status, sourceStage, targetStage);
+  // A composite foreign key dbt does not declare as one (#133 L2) is
+  // informational: nothing in the logical model is wrong.
+  const advisory = rel.status === 'extra' && rel.composite === true;
+  const statusClass = advisory ? 'advisory' : rel.status === 'cardinality-mismatch' ? 'mismatch' : rel.status;
+  const relStatusLabel = advisory ? 'informational' : statusLabel(rel.status, sourceStage, targetStage);
+  const pairs = rel.pairs && rel.pairs.length > 1 ? rel.pairs : null;
 
   return (
-    <div className="disc-panel__model">
+    <div className={`disc-panel__model${advisory ? ' disc-panel__model--advisory' : ''}`}>
       <button
         className="disc-panel__model-header"
         onClick={() => onNavigate(rel.fromModel)}
@@ -137,10 +141,17 @@ function RelationshipEntry({ rel, sourceStage, targetStage, onNavigate }: Relati
       >
         <span className={`disc-panel__model-status disc-panel__model-status--${statusClass}`} />
         <span className="disc-panel__model-name">
-          {rel.fromModel}.{rel.fromColumn} &rarr; {rel.toModel}.{rel.toColumn}
+          {pairs
+            ? <>{rel.fromModel}.({pairs.map((p) => p.fromColumn).join(', ')}) &rarr; {rel.toModel}.({pairs.map((p) => p.toColumn).join(', ')})</>
+            : <>{rel.fromModel}.{rel.fromColumn} &rarr; {rel.toModel}.{rel.toColumn}</>}
         </span>
         <span className="disc-panel__model-label">{relStatusLabel}</span>
       </button>
+      {advisory && (
+        <div className="disc-panel__advisory-note">
+          dbt declares no composite foreign key for this — informational
+        </div>
+      )}
       {rel.status === 'cardinality-mismatch' && rel.sourceCardinality && rel.targetCardinality && (
         <div className="disc-panel__columns">
           <div className="disc-panel__column">

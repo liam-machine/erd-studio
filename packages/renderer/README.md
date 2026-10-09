@@ -8,7 +8,7 @@ Peer dependencies: `react` and `react-dom` 18.3+, `@xyflow/react` 12.4+.
 
 | Import | What it is for |
 |---|---|
-| `@erd-studio/renderer` | Showing a domain: the `ErdCanvas` viewer component (below), plus `transformDomain` (a `DisplayDomain` to React Flow nodes and edges), `pickHandleSides`, `repickHandleSides` / `nodeRect`, and the display, domain and graph types (`DisplayDomain`, `ModelFlowNode`, `FkFlowEdge`, …). |
+| `@erd-studio/renderer` | Showing a domain: the `ErdCanvas` viewer component (below), plus `transformDomain` (a `DisplayDomain` to React Flow nodes and edges), `pickHandleSides`, `repickHandleSides` / `nodeRect`, the diagram exporters re-exported from `@erd-studio/core` (below), and the display, domain and graph types (`DisplayDomain`, `ModelFlowNode`, `FkFlowEdge`, …). |
 | `@erd-studio/renderer/editor` | Everything above plus what a host needs to build a full editor around the canvas, as the extension's webview does: the store (below), the host adapter, `useCanvasGraph`, `CanvasBackdrop`, `canvasNodeTypes` / `canvasEdgeTypes`, the components (`ModelNode`, `FkEdge`, `AnnotationNode`, `AnnotationEdge`, `DetailPanel`, `Legend`, `KeyBadge`, `KeyBadgeGroup`, `DataTypeSelect`, `ColumnRowEditor`), the canvas hooks and the pure helpers. |
 | `@erd-studio/renderer/store` | The canvas store on its own, with no React Flow runtime: `createCanvasSlice`, `createCanvasStore`, `CanvasStoreProvider`, `useEditorStore`, `useEditorStoreApi` and their types. |
 | `@erd-studio/renderer/sizing` | Model node size estimation (`NODE_WIDTH`, `estimateNodeWidth`, `estimateNodeHeight`, `countVisibleColumnRows`, `resolveNodeDimensions`), for layout code that needs node sizes before React Flow has measured them. No components. |
@@ -48,6 +48,24 @@ function Diagram({ domain }: { domain: DisplayDomain }) {
 The ref exposes `resetLayout()`, which puts every node back at its position in the domain with its original edge sides.
 
 Each `ErdCanvas` has its own store, so several can share a page.
+
+## Exporting a diagram
+
+The `.` entry re-exports `@erd-studio/core`'s one-way exporters, so a page that shows a diagram with `ErdCanvas` can offer it as text without depending on core itself: `toMermaid`, `toDbml`, `exportDiagram`, `diagramExportFileName`, `DIAGRAM_EXPORT_FORMATS`, `DIAGRAM_EXPORT_FILE_EXTENSIONS` and the `DiagramExportFormat` type. They are pure functions with no React or DOM use; the same `DisplayDomain` gives the same text everywhere ERD Studio exports it.
+
+```ts
+import { exportDiagram, diagramExportFileName, type DisplayDomain } from '@erd-studio/renderer';
+
+function downloadDbml(domain: DisplayDomain) {
+  const text = exportDiagram(domain, 'dbml'); // or 'mermaid'
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  const link = Object.assign(document.createElement('a'), { href: url, download: diagramExportFileName(domain, 'dbml') });
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+```
+
+See the [`@erd-studio/core` README](https://github.com/liam-machine/erd-studio/blob/main/packages/core/README.md#exporting-a-diagram) for what each format carries.
 
 ## Editor: store and host
 

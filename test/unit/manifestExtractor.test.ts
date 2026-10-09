@@ -222,6 +222,54 @@ describe('manifestExtractor — disabled models', () => {
   });
 });
 
+describe('manifestExtractor — composite foreign keys (#133 L2)', () => {
+  const PIT = 'model.proj.pit_customer';
+  const SAT = 'model.proj.sat_customer';
+  const base = (pitExtra: Record<string, unknown> = {}, nodes: Record<string, unknown> = {}) => ({
+    nodes: {
+      [PIT]: modelNode(PIT, 'pit_customer', ['customer_hk', 'as_of_date', 'id'], pitExtra),
+      [SAT]: modelNode(SAT, 'sat_customer', ['customer_hk', 'load_date'], { alias: 'satellite_customer' }),
+      ...nodes,
+    },
+  });
+  const EXPECTED = { fromModel: 'pit_customer', fromColumns: ['customer_hk', 'as_of_date'], toModel: 'sat_customer', toColumns: ['customer_hk', 'load_date'] };
+
+  it('extracts a dbt ≥ 1.9 model-level foreign_key constraint, by ref() or by a rendered relation', () => {
+    const byRef = extractManifestData(base({ constraints: [
+      { type: 'foreign_key', name: 'fk_sat', columns: ['customer_hk', 'as_of_date'], to: "ref('sat_customer')", to_columns: ['customer_hk', 'load_date'] },
+    ] }));
+    expect(byRef.compositeForeignKeys).toEqual([{ ...EXPECTED, name: 'fk_sat' }]);
+    const rendered = extractManifestData(base({ constraints: [
+      { type: 'foreign_key', columns: ['customer_hk', 'as_of_date'], to: '"db"."vault"."SATELLITE_CUSTOMER"', to_columns: ['customer_hk', 'load_date'] },
+    ] }));
+    expect(rendered.compositeForeignKeys).toEqual([EXPECTED]);
+  });
+
+  it('extracts a dbt_constraints.foreign_key test', () => {
+    const data = extractManifestData(base({}, {
+      'test.proj.fk_pit_sat': {
+        test_metadata: { name: 'foreign_key', namespace: 'dbt_constraints', kwargs: {
+          fk_column_names: ['customer_hk', 'as_of_date'], pk_table_name: "ref('sat_customer')", pk_column_names: ['customer_hk', 'load_date'],
+        } },
+        attached_node: PIT,
+        depends_on: { nodes: [SAT, PIT] },
+      },
+    }));
+    expect(data.compositeForeignKeys).toEqual([EXPECTED]);
+    expect(data.relationshipTests).toEqual([]);
+  });
+
+  it('skips single-column declarations, mismatched lengths and targets it cannot resolve', () => {
+    const data = extractManifestData(base({ constraints: [
+      { type: 'foreign_key', columns: ['customer_hk'], to: "ref('sat_customer')", to_columns: ['customer_hk'] },
+      { type: 'foreign_key', columns: ['customer_hk', 'as_of_date'], to: "ref('sat_customer')", to_columns: ['customer_hk'] },
+      { type: 'foreign_key', columns: ['customer_hk', 'as_of_date'], to: 'db.vault.nowhere', to_columns: ['customer_hk', 'load_date'] },
+      { type: 'primary_key', columns: ['id'] },
+    ] }));
+    expect(data.compositeForeignKeys).toEqual([]);
+  });
+});
+
 describe('nameUtils', () => {
   describe('parseRefModelName', () => {
     it.each([

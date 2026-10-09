@@ -187,6 +187,12 @@ export interface ModelLoadError {
   kind: ModelLoadErrorKind;
   /** 1-based line of the error, when the parser reported one. */
   line?: number;
+  /**
+   * The file holds unresolved git merge conflicts (#145); `line` is then the
+   * first `<<<<<<<`. Absent otherwise, and from older cores — which read the
+   * same file as a YAML error on some line, still true.
+   */
+  mergeConflict?: true;
 }
 
 /**
@@ -219,11 +225,25 @@ export interface Relationship {
   toModel: string;
   toColumn: string;
   cardinality: Cardinality;
+  /**
+   * Optional label for what this link means, e.g. `order date` and `ship date`
+   * for two columns pointing at the same date dimension. A label only: it is
+   * not part of the relationship's identity, which the columns already give.
+   */
+  role?: string;
+  /**
+   * Entries sharing this value, in one file and from one model, form one
+   * composite foreign key: one relationship over several column pairs (#133
+   * L2). Grouping only, like `role`: each entry is still its own link.
+   */
+  compositeKey?: string;
 }
 
 /**
  * A relationship as stored in its from-model's library file: the same fields
  * as {@link Relationship} without `fromModel`, which is the file's own model.
+ * The from-model is the "many" (foreign-key) side — `canonicalRelationship`
+ * turns a `one-to-many` round before it is stored (issue #133).
  */
 export type ModelRelationship = Omit<Relationship, 'fromModel'>;
 

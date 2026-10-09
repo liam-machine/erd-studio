@@ -30,6 +30,7 @@
 import type { DisplayDomain } from './display';
 import type { DiscrepancyReport } from './discrepancy';
 import type { AnnotationColor, Cardinality, DesignModel, Stage } from './semantic';
+import type { ColumnPair } from '@erd-studio/core';
 import type { GroundTruth } from './syncPlan';
 import type {
   FeedbackAiProviderChoice,
@@ -140,6 +141,13 @@ export interface ErrorMessage {
      *   help; opening it as text is the only sensible action.
      */
     kind?: 'domain-file' | 'not-a-domain';
+    /**
+     * With `kind: 'domain-file'`: the file holds unresolved git merge
+     * conflicts (#145). Retrying cannot help — the screen drops Retry and
+     * offers to open the file as text, where VS Code shows the conflict. The
+     * canvas loads by itself once the file is resolved and saved.
+     */
+    mergeConflict?: true;
   };
 }
 
@@ -291,7 +299,29 @@ export interface AddRelationshipMessage {
     toModel: string;
     toColumn: string;
     cardinality: Cardinality;
+    /** Optional label, e.g. `ship date`. Blank or absent means none. */
+    role?: string;
+    /**
+     * Mark these columns of one end's model as its primary key in the same
+     * edit (#133 L1) — the New Relationship dialog's "Mark … as primary key".
+     * Refused when that model has a key flagged by then.
+     */
+    markKey?: MarkKeyPayload;
+    /**
+     * The other column pairs of a composite foreign key (#133 L2), in the
+     * dialog's order; `fromColumn` / `toColumn` are its first pair. Absent or
+     * [] is a single-column relationship.
+     */
+    extraPairs?: ColumnPair[];
   };
+}
+
+/** A key the New / Edit Relationship dialog asks to mark with the relationship (#133 L1). */
+export interface MarkKeyPayload {
+  /** One end's model. */
+  model: string;
+  /** That end's columns. */
+  columns: string[];
 }
 
 /**
@@ -335,6 +365,15 @@ export interface EditRelationshipMessage {
     toModel: string;
     toColumn: string;
     cardinality: Cardinality;
+    /** The label after the edit; '' or absent clears it. */
+    role?: string;
+    /** As on `addRelationship`. */
+    markKey?: MarkKeyPayload;
+    /**
+     * As on `addRelationship`: the pairs after the edit. The original ends
+     * may name any member of a composite; the host edits the whole group.
+     */
+    extraPairs?: ColumnPair[];
   };
 }
 
@@ -612,6 +651,18 @@ export interface OpenGettingStartedMessage {
   type: 'openGettingStarted';
 }
 
+/**
+ * Request to export this diagram as Mermaid or DBML — the canvas toolbar's
+ * **Export** button. No payload: the host runs `erdStudio.exportDiagram` with
+ * the panel's document, which asks for the format and what to do with the
+ * text. It always exports the logical (design) stage and writes no domain
+ * data, so it is on the physical-stage allowlist.
+ */
+export interface ExportDiagramMessage {
+  type: 'exportDiagram';
+  payload?: Record<string, never>;
+}
+
 // ---------------------------------------------------------------------------
 // Webview → Extension: Sync reconciliation messages
 // ---------------------------------------------------------------------------
@@ -725,6 +776,7 @@ export type WebviewMessage =
   | OpenFeedbackLinkMessage
   | RequestReloadMessage
   | OpenGettingStartedMessage
+  | ExportDiagramMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage
   | RunDbtParseMessage

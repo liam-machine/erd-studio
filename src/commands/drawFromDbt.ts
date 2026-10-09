@@ -28,13 +28,16 @@ import {
   type DraftSkipped,
 } from '../services/dbtDraft';
 import { pickDraftScope } from '../providers/dbtDraftPicker';
-import { routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
+import { dirtyFiles } from '../providers/dirtyDocuments';
+import { drawnDiagramCopies, routeToLibrary, usesLibraryRelationships } from '../services/libraryRelationships';
+import { readDomainRelationships } from './moveRelationshipsToLibrary';
 import { ownWrites } from '../services/ownWriteTracker';
 import { DOMAIN_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { telemetry } from '../services/telemetryService';
 import type { DomainService } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import type { LogicalModelService } from '../services/logicalModelService';
+import type { CatalogData } from '../types/catalog';
 import type { ManifestData } from '../types/manifest';
 import type { YmlData } from '../types/ymlData';
 
@@ -45,7 +48,8 @@ const TITLE = 'Draw from dbt';
 /**
  * Shown when no model has columns to draw. `listDraftModels` takes a model's
  * columns from its schema yml, else the manifest — which is a compiled copy
- * of the same yml, so running dbt adds none. catalog.json is not read here.
+ * of the same yml, so running dbt adds none. catalog.json only fills in the
+ * types of those columns, never adds one.
  */
 export const NO_DBT_MODELS_MESSAGE =
   'No dbt models with columns found. Draw from dbt reads the columns listed in your schema .yml files — ' +
@@ -58,9 +62,12 @@ export interface DrawFromDbtDeps {
   modelPaths: readonly string[];
   layerService: Pick<LayerService, 'getValidLayerIds' | 'getCreatableLayers' | 'getAllLayers' | 'saveConfig'>;
   domainService: Pick<DomainService, 'listDomains' | 'countDomainFileRelationships'>;
-  logicalModelService: Pick<LogicalModelService, 'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel'>;
-  /** Schema yml and manifest; either may be undefined (no yml, never compiled). */
-  loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData }>;
+  logicalModelService: Pick<
+    LogicalModelService,
+    'modelExists' | 'saveModel' | 'groupsByFolder' | 'deleteModel' | 'listModels' | 'getModel' | 'hasUnreadableRelationships' | 'modelPath' | 'getModelsDir'
+  >;
+  /** Schema yml, manifest and catalog; each may be undefined (no yml, never compiled, no `dbt docs generate`). */
+  loadDbt: () => Promise<{ ymlData?: YmlData; manifest?: ManifestData; catalog?: CatalogData }>;
   /** `createDomain`'s rule for a new domain slug in `layer` (undefined = valid). */
   validateDomainName: (value: string, layer: string) => string | undefined;
   /** Every file is written; refresh the tree, model library, context keys and selectors. */
@@ -90,7 +97,7 @@ export async function drawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtRes
 async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult | undefined> {
   const { workspaceRoot, semanticDir, layerService, domainService, logicalModelService } = deps;
 
-  const { ymlData, manifest } = await vscode.window.withProgress(
+  const { ymlData, manifest, catalog } = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Reading your dbt project…' },
     () => deps.loadDbt(),
   );
@@ -145,6 +152,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     modelNames: pick.modelNames,
     ymlData,
     manifest,
+    catalog,
     libraryHas: (n) => logicalModelService.modelExists(n),
   });
   if (draft.modelNames.length === 0) {
@@ -160,6 +168,46 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     return undefined;
   }
 
+  // Decided once, before the first file lands: an empty library would
+  // otherwise read as "flat" after one top-level write. A flat library stays
+  // flat; one already grouped by layer gets this layer's folder.
+  // Relationships go to their from-models' library files when the project
+  // keeps them there (#126) — decided, like the folder, before any write.
+  // A model file it would write that is open with unsaved edits stops the
+  // draw before anything is written, as a canvas edit does.
+  let folder: string | undefined;
+  let routed: { kept: DbtDraft['relationships']; changed: DbtDraft['newModels'] };
+  let dirty: string[];
+  try {
+    folder = logicalModelService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
+    routed = usesLibraryRelationships(
+      logicalModelService.listModels(),
+      domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
+      logicalModelService.hasUnreadableRelationships(),
+    )
+      ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n),
+        drawnDiagramCopies(readDomainRelationships(domainService, workspaceRoot, semanticDir)))
+      : { kept: draft.relationships, changed: [] };
+    dirty = dirtyFiles([
+      ...draft.newModels.map((m) => logicalModelService.modelPath(m.name, folder)),
+      ...routed.changed.map((m) => logicalModelService.modelPath(m.name)),
+    ]);
+  } catch (err) {
+    telemetry.error('drawFromDbtFailed');
+    void vscode.window.showErrorMessage(
+      `${TITLE} could not read the model library to plan the diagram: ${err instanceof Error ? err.message : String(err)}. Nothing was changed.`,
+    );
+    return undefined;
+  }
+  if (dirty.length > 0) {
+    const libraryRoot = path.dirname(logicalModelService.getModelsDir());
+    const file = path.relative(libraryRoot, dirty[0]).split(path.sep).join('/');
+    void vscode.window.showErrorMessage(
+      `${TITLE}: ${file} has unsaved changes. Save or revert it, then try again. Nothing was changed.`,
+    );
+    return undefined;
+  }
+
   // Writes start here. A project with no ERD folder yet gets the default
   // layers.json first, exactly as Set Up Semantic Domains Directory writes it.
   const written: string[] = [];
@@ -169,18 +217,6 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps): Promise<DrawFromDbtResult 
     }
     fs.mkdirSync(layerDir, { recursive: true });
 
-    // Decided once, before the first file lands: an empty library would
-    // otherwise read as "flat" after one top-level write. A flat library stays
-    // flat; one already grouped by layer gets this layer's folder.
-    const folder = logicalModelService.groupsByFolder(new Set(layerService.getValidLayerIds())) ? chosenLayer : undefined;
-    // Relationships go to their from-models' library files when the project
-    // keeps them there (#126) — decided, like the folder, before any write.
-    const routed = usesLibraryRelationships(
-      logicalModelService.listModels(),
-      domainService.countDomainFileRelationships(workspaceRoot, semanticDir),
-    )
-      ? routeToLibrary(draft.relationships, draft.newModels, (n) => logicalModelService.getModel(n))
-      : { kept: draft.relationships, changed: [] };
     for (const model of draft.newModels) {
       logicalModelService.saveModel(model, folder);
       written.push(model.name);

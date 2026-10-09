@@ -15,6 +15,8 @@ import type { FileState } from '../types/harness';
 import { redactPaths } from '../types/feedback';
 import { detectDomainFormat } from '../types/semantic';
 import { normaliseName } from '../services/nameUtils';
+import { DomainFileError } from '../services/domainService';
+import { parseDomainJson } from '@erd-studio/core';
 import {
   dbtCommands,
   dbtExecutableCandidates,
@@ -43,11 +45,11 @@ import {
   type CliContext,
   type Envelope,
 } from './context';
-import { MODEL_YAML_HINTS, toUnreadableModelFile, type UnreadableModelFile } from './diff';
+import { toUnreadableModelFile, unreadableHint, type UnreadableModelFile } from './diff';
 
 export type NextStepId =
   | 'install-dbt' | 'confirm-venv' | 'create-profile' | 'run-deps' | 'run-parse' | 'refresh-parse' | 'run-catalog'
-  | 'fix-model-yaml' | 'migrate-v5' | 'update-harness' | 'ready';
+  | 'resolve-merge-conflicts' | 'fix-model-yaml' | 'migrate-v5' | 'update-harness' | 'ready';
 
 export interface NextStep {
   id: NextStepId;
@@ -94,9 +96,53 @@ export interface DoctorResult extends Envelope {
     domainFormatIssues: Array<{ file: string; format: 'v4' | 'hybrid' | 'legacy' }>;
     /** Library model files that exist but do not parse (shadowed duplicates are never read, so never listed). */
     unreadableModelFiles: UnreadableModelFile[];
+    /**
+     * Domain files holding unresolved git merge conflicts (`<<<<<<<` …
+     * `=======` … `>>>>>>>`); `line` is the first `<<<<<<<`. These cannot load
+     * until the conflict is resolved and the file is saved.
+     */
+    conflictedDomainFiles: ConflictedDomainFile[];
+    /**
+     * Model files that spell a column type dbt's way (`data_type:`). They read
+     * as `dataType`, and the next time ERD Studio writes that model's file (a
+     * canvas edit to the model or a relationship stored in it) the key is
+     * renamed `dataType` — a warning, not a next step: nothing is broken.
+     */
+    dataTypeAliasFiles: DataTypeAliasFile[];
   };
   harness: { schemaSkill: FileState; setupSkill: FileState; version: string };
   nextSteps: NextStep[];
+}
+
+export interface ConflictedDomainFile {
+  /** Project-relative, forward slashes. */
+  file: string;
+  /** 1-based line of the first conflict marker. */
+  line: number;
+}
+
+export interface DataTypeAliasFile {
+  name: string;
+  /** Project-relative, forward slashes. */
+  file: string;
+  /**
+   * The columns whose type is read from `data_type`, in file order: the next
+   * write of this file renames each key to `dataType`, which clears them.
+   */
+  columns: string[];
+  /**
+   * The columns that have both keys, in file order: `dataType` wins, and the
+   * `data_type` beside it is ignored and kept as written, so only deleting it
+   * clears them.
+   */
+  ignored: string[];
+  /**
+   * The columns whose type is read from `data_type` but whose keys a write
+   * keeps as written, in file order: the empty `dataType` beside it (or the
+   * `data_type` key) carries a YAML anchor, and renaming would break or
+   * change what refers to it. Only a hand edit of the anchor clears them.
+   */
+  anchored: string[];
 }
 
 export interface DoctorOptions {
@@ -148,23 +194,37 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
   const semanticRoot = path.join(ctx.root, ctx.semanticDir);
   const exists = fs.existsSync(semanticRoot);
   if (!exists) {
-    return { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [] };
+    return {
+      semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
+      conflictedDomainFiles: [], dataTypeAliasFiles: [],
+    };
   }
   const domains = ctx.domainService.listDomains(ctx.root, ctx.semanticDir);
   const issues: DoctorResult['erd']['domainFormatIssues'] = [];
+  const conflicted: ConflictedDomainFile[] = [];
   for (const d of domains) {
     try {
-      const format = detectDomainFormat(JSON.parse(fs.readFileSync(d.filePath, 'utf-8')));
+      const format = detectDomainFormat(parseDomainJson(fs.readFileSync(d.filePath, 'utf-8'), d.filePath));
       if (format !== 'v5') { issues.push({ file: relPath(ctx.root, d.filePath), format }); }
-    } catch {
-      // Unreadable / invalid JSON is not a format issue; `diff --all` names it.
+    } catch (err) {
+      // A conflicted diagram cannot load at all, and git's own wording is the
+      // fix (#145). Any other unreadable / invalid JSON is not a format issue;
+      // `diff --all` names it.
+      if (err instanceof DomainFileError && err.mergeConflict && err.line !== undefined) {
+        conflicted.push({ file: relPath(ctx.root, d.filePath), line: err.line });
+      }
     }
   }
   const unreadable: UnreadableModelFile[] = [];
+  const aliased: DataTypeAliasFile[] = [];
   for (const entry of ctx.logicalModelService.listModelFiles()) {
     if (entry.shadowedBy) { continue; }
     const err = ctx.logicalModelService.getModelFileError(entry.name);
-    if (err) { unreadable.push(toUnreadableModelFile(ctx.root, err)); }
+    if (err) { unreadable.push(toUnreadableModelFile(ctx.root, err)); continue; }
+    const { columns, ignored, anchored } = ctx.logicalModelService.dataTypeAliasColumns(entry.name);
+    if (columns.length + ignored.length + anchored.length > 0) {
+      aliased.push({ name: entry.name, file: relPath(ctx.root, entry.filePath), columns, ignored, anchored });
+    }
   }
   return {
     semanticDirExists: true,
@@ -173,6 +233,8 @@ function erdSummary(ctx: CliContext): DoctorResult['erd'] {
     logicalModels: ctx.logicalModelService.listModelNames().length,
     domainFormatIssues: issues,
     unreadableModelFiles: unreadable,
+    conflictedDomainFiles: conflicted,
+    dataTypeAliasFiles: aliased,
   };
 }
 
@@ -186,6 +248,42 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       title: "Confirm the project's own dbt",
       why: `This project has its own dbt at ${dbt.untrustedVenvDbt}. It was not run, because a program inside a project `
         + 'folder could be anything. Show the user that path; only if they say it is theirs, re-run doctor with --trust-venv.',
+      command: null,
+    });
+  }
+  // Straight after the venv question and before every dbt step: a conflicted
+  // diagram cannot load whatever state dbt is in, and only the user can say
+  // which side to keep — an assistant working down this list must raise it
+  // before it installs dbt or runs anything against the warehouse.
+  if (r.erd.conflictedDomainFiles.length > 0) {
+    const n = r.erd.conflictedDomainFiles.length;
+    steps.push({
+      id: 'resolve-merge-conflicts',
+      title: `Resolve the git merge conflict${n === 1 ? ' in a diagram' : `s in ${n} diagrams`}`,
+      why: `${r.erd.conflictedDomainFiles.map((c) => `${c.file}:${c.line}`).join('; ')}. `
+        + `${n === 1 ? 'This file still holds' : 'Each of these files still holds'} git conflict markers `
+        + '(<<<<<<< … ======= … >>>>>>>), so the diagram cannot load. '
+        + `Show the user ${n === 1 ? 'the file and line' : 'each file and line'}: git left two versions there. `
+        + 'If only positions differ, tell them either side is safe to keep; otherwise ask the user which side to keep. '
+        + "Don't pick a side or run git commands yourself; "
+        + `once ${n === 1 ? 'the file is' : 'every file is'} saved and resolved, re-run doctor.`,
+      command: null,
+    });
+  }
+  // A model file that does not parse renders as an empty model whatever
+  // state dbt is in, so it comes before the dbt steps too — as the step's
+  // own why says, it is to be fixed before anything else.
+  if (r.erd.unreadableModelFiles.length > 0) {
+    const list = r.erd.unreadableModelFiles.map((u) =>
+      `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${unreadableHint(u)}`);
+    steps.push({
+      id: 'fix-model-yaml',
+      title: `Fix ${r.erd.unreadableModelFiles.length === 1 ? 'a model file that does' : `${r.erd.unreadableModelFiles.length} model files that do`} not parse`,
+      why: `${list.join('; ')}. `
+        + 'ERD Studio shows these models as empty until they parse; fix them before anything else.'
+        + (r.erd.unreadableModelFiles.some((u) => u.mergeConflict)
+          ? " A merge conflict is the user's to resolve; once they have saved the file, re-run doctor."
+          : ''),
       command: null,
     });
   }
@@ -243,17 +341,6 @@ function nextStepsFor(r: Omit<DoctorResult, 'nextSteps'>, deps: { needsDeps: boo
       command: dbt.commands.catalog,
     });
   }
-  if (r.erd.unreadableModelFiles.length > 0) {
-    const list = r.erd.unreadableModelFiles.map((u) =>
-      `${u.file}${u.line !== undefined ? `:${u.line}` : ''}${u.code ? ` (${u.code})` : ''} — ${MODEL_YAML_HINTS[u.kind]}`);
-    steps.push({
-      id: 'fix-model-yaml',
-      title: `Fix ${r.erd.unreadableModelFiles.length === 1 ? 'a model file that does' : `${r.erd.unreadableModelFiles.length} model files that do`} not parse`,
-      why: `${list.join('; ')}. `
-        + 'ERD Studio shows these models as empty until they parse; fix them before anything else.',
-      command: null,
-    });
-  }
   if (r.erd.domainFormatIssues.length > 0) {
     steps.push({
       id: 'migrate-v5',
@@ -298,7 +385,10 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorResult> {
         catalog: { status: 'missing', path: 'target/catalog.json', modifiedAt: null, nodes: null },
       },
       projectFiles: { schemaYmlFiles: 0, sourceFiles: 0, modelsDiscovered: 0 },
-      erd: { semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [] },
+      erd: {
+        semanticDirExists: false, layers: [], domains: 0, logicalModels: 0, domainFormatIssues: [], unreadableModelFiles: [],
+        conflictedDomainFiles: [], dataTypeAliasFiles: [],
+      },
       harness: { schemaSkill: 'missing', setupSkill: 'missing', version: harnessVersion },
     };
     return { ...base, nextSteps: [] };

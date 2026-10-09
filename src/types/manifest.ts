@@ -65,6 +65,22 @@ export interface ManifestModelInfo {
 }
 
 /**
+ * A composite foreign key dbt declares (#133 L2): a dbt ≥ 1.9 model-level
+ * `foreign_key` constraint, or a `dbt_constraints.foreign_key` test, over two
+ * or more columns. Single-column forms are left to relationships tests.
+ */
+export interface CompositeForeignKey {
+  /** The model the constraint (or test) is declared on: the foreign-key side. */
+  fromModel: string;
+  fromColumns: string[];
+  toModel: string;
+  /** Pairs with `fromColumns` by position; the same length. */
+  toColumns: string[];
+  /** The constraint's `name`, when it has one. */
+  name?: string;
+}
+
+/**
  * Serializable result from the manifest worker thread.
  * Uses plain objects/arrays instead of Maps/Sets because
  * structured clone (worker postMessage) cannot transfer them.
@@ -78,6 +94,8 @@ export interface ManifestWorkerResult {
   disabledModels: string[];
   /** Seed and snapshot nodes, keyed by short name (descriptions only — see ManifestData.resourceDocs) */
   resourceDocs?: Record<string, ManifestModelInfo>;
+  /** Composite foreign keys declared by constraints or dbt_constraints tests (#133 L2) */
+  compositeForeignKeys?: CompositeForeignKey[];
 }
 
 /** Error result from the manifest worker thread. */
@@ -115,4 +133,10 @@ export interface ManifestData {
    * Optional so hand-built literals stay valid.
    */
   resourceDocs?: Map<string, ManifestModelInfo>;
+  /**
+   * Composite foreign keys declared by model-level `foreign_key` constraints
+   * or `dbt_constraints.foreign_key` tests (#133 L2). Optional so hand-built
+   * literals stay valid.
+   */
+  compositeForeignKeys?: CompositeForeignKey[];
 }

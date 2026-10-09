@@ -26,6 +26,7 @@ import type {
   YmlRelationshipTest,
   YmlResourceDoc,
 } from '../types/ymlData';
+import type { CompositeForeignKey } from '../types/manifest';
 import { readMeta, type Meta } from '@erd-studio/core';
 import { normaliseName, parseRefModelName } from './nameUtils';
 import { defaultDbtProjectConfig, type DbtProjectConfig } from './dbtProjectConfig';
@@ -177,6 +178,7 @@ export class YmlParserService {
     const relationshipTests: YmlRelationshipTest[] = [];
     const uniqueColumns = new Map<string, Set<string>>();
     const compositeUniqueGroups = new Map<string, string[][]>();
+    const compositeForeignKeys: CompositeForeignKey[] = [];
 
     // One walk finds both the schema .yml files and the source files that
     // define models, seeds and snapshots.
@@ -190,6 +192,7 @@ export class YmlParserService {
           relationshipTests,
           uniqueColumns,
           compositeUniqueGroups,
+          compositeForeignKeys,
         );
       } catch (err) {
         console.warn(
@@ -224,7 +227,7 @@ export class YmlParserService {
       sourceFiles.set(stem, path.relative(projectPath, filePath).replace(/\\/g, '/'));
     }
 
-    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles, resourceDocs };
+    return { models, relationshipTests, uniqueColumns, compositeUniqueGroups, sourceFiles, resourceDocs, compositeForeignKeys };
   }
 
   /**
@@ -366,6 +369,7 @@ export class YmlParserService {
     relationshipTests: YmlRelationshipTest[],
     uniqueColumns: Map<string, Set<string>>,
     compositeUniqueGroups: Map<string, string[][]>,
+    compositeForeignKeys: CompositeForeignKey[] = [],
   ): void {
     const raw = fs.readFileSync(filePath, 'utf-8');
     // `merge`: dbt reads YAML 1.1, where `<<: *anchor` merges a map. Only
@@ -389,6 +393,7 @@ export class YmlParserService {
         relationshipTests,
         uniqueColumns,
         compositeUniqueGroups,
+        compositeForeignKeys,
       );
     }
   }
@@ -404,6 +409,7 @@ export class YmlParserService {
     relationshipTests: YmlRelationshipTest[],
     uniqueColumns: Map<string, Set<string>>,
     compositeUniqueGroups: Map<string, string[][]>,
+    compositeForeignKeys: CompositeForeignKey[],
   ): void {
     const name = modelNode.get('name');
     if (typeof name !== 'string' || !name) {
@@ -448,6 +454,7 @@ export class YmlParserService {
 
     // Extract model-level tests (unique_combination_of_columns)
     this.extractModelLevelTests(name, modelNode, compositeUniqueGroups);
+    compositeForeignKeys.push(...this.extractCompositeForeignKeys(name, modelNode));
 
     const meta = this.extractMeta(doc, modelNode);
     models.set(name, {
@@ -640,6 +647,52 @@ export class YmlParserService {
     }
   }
 
+  /**
+   * A model's composite foreign keys (#133 L2), two or more columns each: dbt
+   * ≥ 1.9 model-level `constraints:` of `type: foreign_key` (`columns`,
+   * `to: ref(...)`, `to_columns`), and `dbt_constraints.foreign_key` tests
+   * under `tests:` / `data_tests:` (`fk_column_names`, `pk_table_name`,
+   * `pk_column_names`, possibly nested under `arguments:`). Lists of unequal
+   * length, or a target that is not a `ref()`, are skipped.
+   */
+  private extractCompositeForeignKeys(modelName: string, modelNode: YAMLMap): CompositeForeignKey[] {
+    const list = (node: unknown): string[] | null => {
+      if (!isSeq(node)) return null;
+      const cols = (node as YAMLSeq).items.map((item) => this.resolveScalar(item));
+      return cols.every((c): c is string => typeof c === 'string' && c.trim() !== '') ? cols.map((c) => c.trim()) : null;
+    };
+    const out: CompositeForeignKey[] = [];
+    const add = (fromColumns: string[] | null, to: string, toColumns: string[] | null, name?: string): void => {
+      const toModel = parseRefModelName(to);
+      if (!toModel || !fromColumns || !toColumns || fromColumns.length < 2 || fromColumns.length !== toColumns.length) return;
+      out.push({ fromModel: modelName, fromColumns, toModel, toColumns, ...(name ? { name } : {}) });
+    };
+
+    const constraints = modelNode.get('constraints');
+    if (isSeq(constraints)) {
+      for (const item of (constraints as YAMLSeq).items) {
+        if (!isMap(item)) continue;
+        const c = item as YAMLMap;
+        if (this.getString(c, 'type') !== 'foreign_key') continue;
+        add(list(c.get('columns')), this.getString(c, 'to'), list(c.get('to_columns')), this.getString(c, 'name') || undefined);
+      }
+    }
+
+    for (const key of TEST_LIST_KEYS) {
+      const testsNode = modelNode.get(key);
+      if (!isSeq(testsNode)) continue;
+      for (const testItem of (testsNode as YAMLSeq).items) {
+        if (!isMap(testItem)) continue;
+        const fkNode = (testItem as YAMLMap).get('dbt_constraints.foreign_key');
+        if (!isMap(fkNode)) continue;
+        const args = (fkNode as YAMLMap).get('arguments');
+        const kwargs = isMap(args) ? (args as YAMLMap) : (fkNode as YAMLMap);
+        add(list(kwargs.get('fk_column_names')), this.getString(kwargs, 'pk_table_name'), list(kwargs.get('pk_column_names')));
+      }
+    }
+    return out;
+  }
+
   // ---------------------------------------------------------------------------
   // Folder filtering
   // ---------------------------------------------------------------------------
@@ -711,6 +764,9 @@ export class YmlParserService {
       compositeUniqueGroups: filteredCompositeGroups,
       sourceFiles: filteredSourceFiles,
       resourceDocs: filteredResourceDocs,
+      ...(data.compositeForeignKeys
+        ? { compositeForeignKeys: data.compositeForeignKeys.filter((fk) => modelNames.has(fk.fromModel) && modelNames.has(fk.toModel)) }
+        : {}),
     };
   }
 

@@ -13,7 +13,7 @@
 import type { Cardinality, ColumnDef, ModelRole, Stage } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, MODEL_NAME_PATTERN, MODEL_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
-import { MODEL_ALIAS_MAX_LENGTH, MODEL_ALIAS_RULE, isValidModelAlias } from '@erd-studio/core';
+import { MAX_COMPOSITE_PAIRS, MODEL_ALIAS_MAX_LENGTH, MODEL_ALIAS_RULE, RELATIONSHIP_ROLE_MAX_LENGTH, isValidModelAlias } from '@erd-studio/core';
 import { DUPLICATE_MODES, FEEDBACK_KINDS, isFeedbackAiProviderChoice } from '../types/feedback';
 
 // ---------------------------------------------------------------------------
@@ -219,6 +219,91 @@ export const CARDINALITIES: readonly Cardinality[] = [
 
 export function isValidCardinality(value: unknown): value is Cardinality {
   return typeof value === 'string' && (CARDINALITIES as readonly string[]).includes(value);
+}
+
+/**
+ * A relationship's optional `role` label from the New / Edit Relationship
+ * dialog: absent, or text of at most `RELATIONSHIP_ROLE_MAX_LENGTH` characters
+ * ('' clears it). The host trims it with `normaliseRelationshipRole`.
+ */
+export function isValidRelationshipRole(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === 'string' && value.trim().length <= RELATIONSHIP_ROLE_MAX_LENGTH);
+}
+
+/** The columns of each end of a relationship payload; `extraPairs` once validated by `validateExtraPairs`. */
+interface LinkPayloadEnds {
+  fromModel: string;
+  fromColumn: string;
+  toModel: string;
+  toColumn: string;
+  extraPairs?: unknown;
+}
+
+/** Every column pair of a payload: the first, then any `extraPairs` (assumed valid). */
+const pairsOfPayload = (link: LinkPayloadEnds): Array<{ fromColumn: string; toColumn: string }> => [
+  { fromColumn: link.fromColumn, toColumn: link.toColumn },
+  ...(Array.isArray(link.extraPairs) ? link.extraPairs as Array<{ fromColumn: string; toColumn: string }> : []),
+];
+
+/**
+ * A composite foreign key's other column pairs (#133 L2): absent, or at most
+ * `MAX_COMPOSITE_PAIRS - 1` pairs of valid column names; across every pair,
+ * the first included, no from column and no to column used twice (without
+ * case); and, with more than one pair, not many-to-many. Returns an error, or
+ * null.
+ */
+export function validateExtraPairs(extraPairs: unknown, link: LinkPayloadEnds & { cardinality?: unknown }): string | null {
+  if (extraPairs === undefined) return null;
+  if (!Array.isArray(extraPairs) || extraPairs.length > MAX_COMPOSITE_PAIRS - 1) {
+    return `a composite key has at most ${MAX_COMPOSITE_PAIRS} column pairs.`;
+  }
+  const valid = (p: unknown): p is { fromColumn: string; toColumn: string } => !!p && typeof p === 'object' && !Array.isArray(p)
+    && typeof (p as { fromColumn?: unknown }).fromColumn === 'string' && COLUMN_NAME_PATTERN.test((p as { fromColumn: string }).fromColumn)
+    && typeof (p as { toColumn?: unknown }).toColumn === 'string' && COLUMN_NAME_PATTERN.test((p as { toColumn: string }).toColumn);
+  if (!extraPairs.every(valid)) return 'each column pair needs two valid column names.';
+  const pairs = pairsOfPayload({ ...link, extraPairs });
+  const distinct = (cols: string[]): boolean => new Set(cols.map((c) => c.toLowerCase())).size === cols.length;
+  if (!distinct(pairs.map((p) => p.fromColumn)) || !distinct(pairs.map((p) => p.toColumn))) {
+    return 'a column is used twice in the composite key.';
+  }
+  if (pairs.length > 1 && link.cardinality === 'many-to-many') return 'a composite key can\'t be many-to-many.';
+  return null;
+}
+
+const sameText = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+const sameColumnSet = (a: readonly string[], b: readonly string[]): boolean => {
+  const x = [...new Set(a.map((c) => c.toLowerCase()))];
+  const y = [...new Set(b.map((c) => c.toLowerCase()))];
+  return x.length === a.length && x.length === y.length && x.every((c) => y.includes(c));
+};
+
+/**
+ * A relationship's ends (#133 L3): a self-reference joins two columns of one
+ * model, but a column can't point at itself. Returns an error, or null.
+ */
+export function validateRelationshipEnds(link: LinkPayloadEnds): string | null {
+  if (typeof link.fromModel !== 'string' || typeof link.toModel !== 'string' || !sameText(link.fromModel, link.toModel)) return null;
+  return pairsOfPayload(link).some((p) => typeof p.fromColumn === 'string' && typeof p.toColumn === 'string' && sameText(p.fromColumn, p.toColumn))
+    ? "a column can't point at itself."
+    : null;
+}
+
+/**
+ * The New / Edit Relationship dialog's `markKey` (#133 L1): absent, or one
+ * end of the link — its model and, as a set without case, exactly that end's
+ * columns (1–8, each a valid column name). For a self-reference either end
+ * may be named; the columns decide which. Returns an error, or null.
+ */
+export function validateMarkKey(markKey: unknown, link: LinkPayloadEnds): string | null {
+  if (markKey === undefined) return null;
+  const invalid = 'the key to mark must be one end of the relationship.';
+  if (!markKey || typeof markKey !== 'object' || Array.isArray(markKey)) return invalid;
+  const { model, columns } = markKey as { model?: unknown; columns?: unknown };
+  if (typeof model !== 'string' || !Array.isArray(columns) || columns.length < 1 || columns.length > 8) return invalid;
+  if (!columns.every((c): c is string => typeof c === 'string' && COLUMN_NAME_PATTERN.test(c))) return invalid;
+  const pairs = pairsOfPayload(link);
+  const ends: Array<[string, string[]]> = [[link.fromModel, pairs.map((p) => p.fromColumn)], [link.toModel, pairs.map((p) => p.toColumn)]];
+  return ends.some(([m, cols]) => sameText(m, model) && sameColumnSet(columns, cols)) ? null : invalid;
 }
 
 export const MODEL_ROLES: readonly ModelRole[] = [
@@ -545,6 +630,21 @@ export function validateDismissManifestHintPayload(value: unknown): string | nul
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
     return 'Dismissing the dbt parse hint takes no payload.';
+  }
+  return null;
+}
+
+/**
+ * Validate an `exportDiagram` payload. It carries nothing — the host asks for
+ * the format and the action — so only an absent payload or an empty object
+ * passes, like `addModelsFromDbt`.
+ */
+export function validateExportDiagramPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Export takes no payload.';
   }
   return null;
 }

@@ -9,6 +9,7 @@
 
 import type { Cardinality, Layer, Meta, ModelLoadError, ModelRole, ModelTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
 import type { LayerConfig } from './layer.js';
+import type { DbtKeyHint } from '../keyEvidence.js';
 
 // ---------------------------------------------------------------------------
 // Existing model preview (for Add Existing Model dialog)
@@ -56,6 +57,18 @@ export interface DisplayColumn {
   additiveType?: 'additive' | 'semi-additive' | 'non-additive';
   /** Structured metadata from the model file (logical stage only). */
   meta?: Meta;
+  /**
+   * The model file's own foreign-key flag, set only when true (logical stage
+   * only). `isForeignKey` is the badge, which a relationship leaving the
+   * column also shows; key evidence needs the flag the user set (#133 L1).
+   */
+  isForeignKeyDeclared?: boolean;
+  /**
+   * What dbt's tests say about the column (the editable logical payload
+   * only, never stored): how a new relationship is oriented when the model
+   * flags no key (#133 L1).
+   */
+  dbtKey?: DbtKeyHint;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +149,10 @@ export interface DisplayRelationship {
   toModel: string;
   toColumn: string;
   cardinality: Cardinality;
+  /** Optional label for the link, e.g. `ship date` (see `Relationship.role`). */
+  role?: string;
+  /** Set only on the members of a valid composite foreign key (see `Relationship.compositeKey`). */
+  compositeKey?: string;
 }
 
 // ---------------------------------------------------------------------------

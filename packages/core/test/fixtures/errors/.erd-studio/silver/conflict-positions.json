@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 5,
+  "domain": "conflict-positions",
+  "layer": "silver",
+  "description": "Two branches moved the same models",
+  "logical": {
+    "models": ["dim_customer", "fct_order"],
+    "relationships": []
+  },
+  "viewConfig": {
+    "positions": {
+<<<<<<< HEAD
+      "dim_customer": { "x": 120, "y": 80 },
+      "fct_order": { "x": 480, "y": 80 }
+=======
+      "dim_customer": { "x": 40, "y": 300 },
+      "fct_order": { "x": 420, "y": 260 }
+>>>>>>> feature/move-orders
+    }
+  }
+}

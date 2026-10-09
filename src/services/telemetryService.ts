@@ -52,6 +52,8 @@ import {
   type TelemetryAssistant,
   type TelemetryHarness,
 } from './telemetryPayload';
+import { invariantErrorCodes, surveyFeatures } from './relationshipHealth';
+import type { RelationshipInvariant, RelationshipSurvey } from './relationshipHealth';
 
 /** Where heartbeats go. Served by the Worker in `telemetry/`. */
 export const TELEMETRY_ENDPOINT = 'https://erd-studio-telemetry.w2solutions.ai/v1/heartbeat';
@@ -300,5 +302,19 @@ export const telemetry = {
   },
   error(code: TelemetryErrorCode): void {
     active?.update(s => recordError(s, code));
+  },
+  /** Canvas open: each relationship state found (`surveyLibrary`), at most once a day — counts only, never which links. */
+  relationshipState(survey: RelationshipSurvey): void {
+    const found = surveyFeatures(survey);
+    if (found.length > 0) active?.update(s => found.reduce(recordFeatureOnce, s));
+  },
+  /** A relationship write or Move that succeeded: each new behaviour it used (`relationshipWriteUsage`, `moveUsage`). */
+  relationshipUsage(used: readonly TelemetryFeature[]): void {
+    if (used.length > 0) active?.update(s => used.reduce(recordFeature, s));
+  },
+  /** After a relationship write: one error per invariant it broke (`checkRelationshipWrite`). */
+  relationshipInvariants(broken: readonly RelationshipInvariant[]): void {
+    const codes = invariantErrorCodes(broken);
+    if (codes.length > 0) active?.update(s => codes.reduce(recordError, s));
   },
 };

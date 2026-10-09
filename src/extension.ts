@@ -21,6 +21,7 @@ import { ownWrites } from './services/ownWriteTracker';
 import { MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import { hasErdStudioData, resolveDbtProject, samePath, type DbtProjectResolution } from './services/projectDiscovery';
 import { YmlParserService } from './services/ymlParserService';
+import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
 import { getErdStudioSetting } from './services/configService';
 import { manifestDisplayPath, readDbtProjectConfig, type DbtProjectConfig } from './services/dbtProjectConfig';
@@ -66,8 +67,11 @@ import { readManifestMtime } from './services/manifestStaleness';
 import { deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
 import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt } from './commands/drawFromDbt';
+import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
+import { exportDomainFile } from './services/diagramExport';
 import { moveRelationshipsToLibrary } from './commands/moveRelationshipsToLibrary';
 import { saveDocumentByUri } from './providers/documentSave';
+import { dirtyFiles } from './providers/dirtyDocuments';
 
 /**
  * globalState key for the last extension version this host activated under.
@@ -387,6 +391,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.selectDbtProject',
   'erdStudio.resolveDuplicateModel',
   'erdStudio.moveRelationshipsToLibrary',
+  'erdStudio.exportDiagram',
 ]);
 
 /**
@@ -817,6 +822,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Once per broken file per session (the service never re-reports a path, #113).
     notifyModelFileError(error);
   };
+  // A model file's relationships: list could not be rewritten in place, so an edit was refused.
+  logicalModelService.onSyncRefused = () => telemetry.error('relSyncRefused');
   domainService.setLogicalModelService(logicalModelService);
   // Set once a manifest's (re)appearance has been counted, cleared when it is
   // seen missing again, so a manifest with no canvas to reload it (isMissing
@@ -845,10 +852,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     workspaceRoot,
     semanticDir,
     {
-      isFileDirtyInEditor: (filePath) =>
-        vscode.workspace.textDocuments.some(
-          doc => doc.uri.fsPath === filePath && doc.isDirty,
-        ),
+      // Paths compared as the file system does (a `c:` drive letter, a folder in another case).
+      isFileDirtyInEditor: (filePath) => dirtyFiles([filePath]).length > 0,
       onSkipped: (info) => {
         const message = info.reason === 'unsaved-edits'
           ? 'selectors.yml has unsaved edits in your editor — ERD Studio won\'t overwrite to avoid losing your work. ' +
@@ -987,6 +992,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   refreshContextKeys();
 
+  // The one domain picker: straight to the only domain, a QuickPick when
+  // there are several. Shared by openCanvas and Export Diagram.
+  const pickDomainFile = async (
+    domains: ReturnType<DomainService['listDomains']>,
+    placeHolder: string,
+  ): Promise<string | undefined> => {
+    if (domains.length <= 1) { return domains[0]?.filePath; }
+    const picked = await vscode.window.showQuickPick(
+      domains.map((d) => ({ label: d.domain, description: d.layer, summary: d })),
+      { placeHolder },
+    );
+    return picked?.summary.filePath;
+  };
   // "Open a domain" (Welcome panel, status bar, palette): straight in when
   // there is one, a pick when there are several, the create flow when none.
   const openCanvas = async (): Promise<void> => {
@@ -997,16 +1015,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       return;
     }
-    let target = domains[0];
-    if (domains.length > 1) {
-      const picked = await vscode.window.showQuickPick(
-        domains.map((d) => ({ label: d.domain, description: d.layer, summary: d })),
-        { placeHolder: 'Open which domain?' },
-      );
-      if (!picked) { return; }
-      target = picked.summary;
-    }
-    await vscode.commands.executeCommand('erdStudio.openDomain', target.filePath);
+    const target = await pickDomainFile(domains, 'Open which domain?');
+    if (!target) { return; }
+    await vscode.commands.executeCommand('erdStudio.openDomain', target);
   };
   telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), domainService.listDomains(workspaceRoot, semanticDir).length);
   recordDetectedAssistants();
@@ -1533,6 +1544,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         semanticDir,
         domainService,
         logicalModelService,
+        loadDbtKeyIndex: async () => dbtKeyIndexOf(
+          await ymlParserService.loadYmlData(workspaceRoot, undefined),
+          await manifestService.loadManifest(workspaceRoot).catch(() => undefined),
+        ),
         onWritten: async (domainPaths) => {
           for (const domainPath of domainPaths) treeProvider.invalidateDomain(domainPath);
           modelLibraryProvider.refresh();
@@ -1564,6 +1579,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         editorProvider.switchStageForUri(fileUri, 'physical');
       }
     }),
+    // Export a domain's logical design as Mermaid or DBML. The argument is
+    // the canvas's document Uri, the domain tree's node, or nothing (the
+    // focused canvas, else the domain picker). Writes no ERD Studio file.
+    vscode.commands.registerCommand(EXPORT_DIAGRAM_COMMAND, (arg?: unknown) =>
+      exportDiagramCommand({
+        exportDomain: async (domainPath, format) => {
+          // dbt's key evidence, as the canvas reads the domain, so a link
+          // stored twice is exported from the copy the canvas draws.
+          const dbtKeyIndex = await Promise.resolve()
+            .then(async () => dbtKeyIndexOf(
+              await ymlParserService.loadYmlData(workspaceRoot, undefined),
+              await manifestService.loadManifest(workspaceRoot).catch(() => undefined),
+            ))
+            .catch(() => undefined);
+          return exportDomainFile(domainService, domainPath, format, dbtKeyIndex ? { dbtKeyIndex } : {});
+        },
+        activeDomainPath: () => editorProvider.activeDomainPath(),
+        hasDiagrams: () => domainService.listDomains(workspaceRoot, semanticDir).length > 0,
+        pickDomain: async () => pickDomainFile(domainService.listDomains(workspaceRoot, semanticDir), 'Export which diagram?'),
+        defaultSaveFolder: workspaceRoot,
+      }, arg)),
     vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async () => {
       const existingDomains = () => domainService.listDomains(workspaceRoot, semanticDir);
       await drawFromDbt({
@@ -1576,7 +1612,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         loadDbt: async () => {
           const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
           const manifest = await manifestService.loadManifest(workspaceRoot);
-          return { ymlData, manifest: manifestService.isMissing ? undefined : manifest };
+          // The catalog only fills column types; undefined when there is none.
+          const catalog = await catalogService.loadCatalog(workspaceRoot);
+          return { ymlData, manifest: manifestService.isMissing ? undefined : manifest, catalog };
         },
         validateDomainName: (value, layer) => validateDomainSlug(value, layer, existingDomains()),
         onWritten: ({ domainPath, modelNames }) => {

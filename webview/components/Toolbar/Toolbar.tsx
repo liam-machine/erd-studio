@@ -119,14 +119,17 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Corner actions (Send feedback / View File).
+  // Corner actions (Export / Send feedback / View File).
   //
-  // They are labelled buttons whenever there is room for them, and collapse to
-  // a single overflow glyph only when they would actually run into the
-  // top-centre toolbar — which is measured, not guessed at, because the
-  // toolbar's width depends on the domain name, the search box and which
-  // stage-specific controls are showing. A CSS breakpoint could only ever
-  // approximate that.
+  // Feedback and View File are labelled buttons whenever there is room for
+  // them; Export sits beside them as a glyph the size of the overflow trigger,
+  // because a third label would make the corner collapse about 155px of window
+  // sooner (the toolbar is centred, so every pixel the corner gains costs two
+  // of window). All three collapse to a single overflow glyph only when they
+  // would actually run into the top-centre toolbar — which is measured, not
+  // guessed at, because the toolbar's width depends on the domain name, the
+  // search box and which stage-specific controls are showing. A CSS
+  // breakpoint could only ever approximate that.
   const [cornerMenuOpen, setCornerMenuOpen] = useState(false);
   const [cornerCollapsed, setCornerCollapsed] = useState(false);
   const cornerMenuRef = useRef<HTMLDivElement>(null);
@@ -135,8 +138,8 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   /** The widest toolbar row; the container is centred, so this is its right edge. */
   const toolbarRowRef = useRef<HTMLDivElement>(null);
   /**
-   * Width of the corner with both labels showing, cached from a render where
-   * they actually were. Once collapsed the element is ~28px wide and can no
+   * Width of the corner in its labelled form, cached from a render where it
+   * actually was. Once collapsed the element is ~28px wide and can no
    * longer answer "would the full version fit?", so the last honest
    * measurement is what the comparison keeps using.
    */
@@ -540,6 +543,16 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
     vscode.postMessage(message);
   }, [vscode]);
 
+  // --- Export handler --------------------------------------------------------
+  // The host asks for the format and what to do with the text; it always
+  // exports the logical (design) stage, so the button shows on both stages.
+
+  const handleExport = useCallback(() => {
+    setCornerMenuOpen(false);
+    const message: WebviewMessage = { type: 'exportDiagram' };
+    vscode.postMessage(message);
+  }, [vscode]);
+
   const setFeedbackDialogOpen = useEditorStore((s) => s.setFeedbackDialogOpen);
   const handleSendFeedback = useCallback(() => {
     setCornerMenuOpen(false);
@@ -553,6 +566,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
   }
 
   const isReadOnly = domain.readOnly;
+  const exportTitle = domain.stage === 'physical'
+    ? 'Export the logical design as Mermaid or DBML (the physical stage is not exported)'
+    : 'Export as Mermaid or DBML';
 
   // Use layerConfig for dynamic abbreviation and color, with fallbacks
   const layerAbbrev = domain.layerConfig?.abbreviation
@@ -984,6 +1000,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
                 <div className="toolbar__dropdown-menu toolbar__corner-list" role="menu">
                   <button
                     className="toolbar__dropdown-item"
+                    onClick={handleExport}
+                    role="menuitem"
+                    title={exportTitle}
+                  >
+                    ⤓ Export as Mermaid or DBML…
+                  </button>
+                  <button
+                    className="toolbar__dropdown-item"
                     onClick={handleSendFeedback}
                     role="menuitem"
                   >
@@ -1002,6 +1026,14 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
             </div>
           ) : (
             <>
+              <button
+                className="toolbar__corner-button toolbar__corner-button--icon"
+                onClick={handleExport}
+                title={exportTitle}
+                aria-label="Export diagram as Mermaid or DBML"
+              >
+                ⤓
+              </button>
               <button
                 className="toolbar__corner-button"
                 onClick={handleSendFeedback}

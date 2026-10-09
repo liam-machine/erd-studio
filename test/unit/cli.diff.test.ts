@@ -3,15 +3,17 @@ import * as os from 'os';
 import * as path from 'path';
 import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { relationshipKey } from '@erd-studio/core';
+import { linkKey } from '@erd-studio/core';
 
 import { buildCliContext } from '../../src/cli/context';
 import { fixesFromPlan, runDiff, type DiffResult } from '../../src/cli/diff';
+import { canonicalRelationship } from '@erd-studio/core';
 import { main } from '../../src/cli/index';
 import type { InventoryResult } from '../../src/cli/inventory';
 import { computeDomainDiff } from '../../src/services/stageDiff';
 import { allSelections, buildSyncPlan } from '../../src/services/syncPlanBuilder';
 import type { SyncPlan } from '../../src/types/syncPlan';
+import type { Relationship } from '../../src/types/semantic';
 
 const FIXTURES = path.resolve(__dirname, '../fixtures');
 const PROJECT = path.join(FIXTURES, 'dbt-project');
@@ -112,6 +114,61 @@ describe('diff', () => {
     const missing = await run(['diff', '--json', '--domain', 'nope.json']);
     expect(missing.code).toBe(3);
     expect(JSON.parse(missing.out).error.code).toBe('domain-missing');
+  });
+
+  it('a diagram holding git merge conflicts is merge-conflict: its own error under --all, exit 3 for --domain and export (#145)', async () => {
+    const root = copyProject();
+    const file = path.join(root, '.erd-studio/silver/showcase.json');
+    const lines = fs.readFileSync(file, 'utf-8').split('\n');
+    const at = lines.findIndex((l) => l.includes('"viewConfig"'));
+    lines.splice(at + 1, 0, '<<<<<<< HEAD', '    "zoom": 1,', '=======', '    "zoom": 2,', '>>>>>>> feature');
+    fs.writeFileSync(file, lines.join('\n'));
+    const line = at + 2;
+
+    const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
+    const { result, exitCode } = runDiff(ctx, { all: true });
+    expect(exitCode).toBe(1);
+    const showcase = result.domains.find((d) => d.file === '.erd-studio/silver/showcase.json')!;
+    expect(showcase.error).toEqual({
+      code: 'merge-conflict',
+      message: `.erd-studio/silver/showcase.json has unresolved git merge conflicts (first at line ${line}): `
+        + 'git left two versions there. Show the user the file and line; if only positions differ either side is safe to keep, '
+        + "otherwise ask the user which side to keep. Don't pick a side or run git commands yourself.",
+    });
+
+    for (const argv of [
+      ['diff', '--json', '--domain', '.erd-studio/silver/showcase.json'],
+      ['export', '--json', '--domain', '.erd-studio/silver/showcase.json', '--format', 'mermaid'],
+    ]) {
+      const r = await run(argv, root);
+      expect(r.code, argv[0]).toBe(3);
+      expect(JSON.parse(r.out).error, argv[0]).toEqual(showcase.error);
+      expect(r.out).not.toContain(root);
+    }
+
+    // The terminal line carries the same advice: it never tells anyone to resolve it themselves.
+    const human = await run(['diff', '--all'], root);
+    expect(human.out).toContain(`showcase (silver) — could not be compared: ${showcase.error!.message}`);
+    expect(human.out).not.toMatch(/Resolve them in the file/);
+  });
+
+  it('reports a model file holding git merge conflicts as a flagged fix-model-yaml at its first marker (#145)', async () => {
+    const root = copyProject();
+    fs.writeFileSync(path.join(root, '.erd-studio/logical-models/fct_task_event.yml'),
+      'name: fct_task_event\n<<<<<<< HEAD\ndescription: a\n=======\ndescription: b\n>>>>>>> feature\ncolumns: []\n');
+    const r = await run(['diff', '--domain', '.erd-studio/silver/showcase.json', '--json'], root);
+    expect(r.code).toBe(1);
+    const d = (JSON.parse(r.out) as DiffResult).domains[0];
+    expect(d.unreadableModelFiles).toEqual([expect.objectContaining({ name: 'fct_task_event', kind: 'yamlOther', line: 2, mergeConflict: true })]);
+    const fixes = d.fixes.filter((f) => f.kind === 'fix-model-yaml');
+    expect(fixes).toEqual([expect.objectContaining({ line: 2 })]);
+    // An assistant reads the fix: it shows the conflict and asks, never picks a side.
+    expect(fixes[0].explain).toContain('.erd-studio/logical-models/fct_task_event.yml line 2: unresolved git merge conflict');
+    expect(fixes[0].explain).toContain("ask which side to keep (don't pick a side or run git commands yourself)");
+    expect(fixes[0].explain).not.toContain('git add');
+
+    const human = await run(['diff', '--domain', '.erd-studio/silver/showcase.json'], root);
+    expect(human.out).toContain('✗ fct_task_event.yml line 2: unresolved git merge conflict — resolve it (keep one side), save, then re-run diff');
   });
 
   it('a domain in a layer layers.json does not define: skipped by --all, unknown-layer for --domain', async () => {
@@ -216,6 +273,111 @@ describe('diff over a model file that does not parse', () => {
   });
 });
 
+describe('fixesFromPlan — a new relationship is written on its many side (#133)', () => {
+  it('turns a one-to-many round, naming the fact\'s file', () => {
+    const plan: SyncPlan = {
+      generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+      modelContext: {}, models: [], columns: [], requiresCompile: false,
+      relationships: [
+        { fromModel: 'dim_customer', fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-many' },
+      ],
+    };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Map(), addToLibrary: true });
+    expect(fix).toMatchObject({
+      kind: 'add-relationship', model: 'fct_order', column: 'customer_key', file: '.erd-studio/logical-models/fct_order.yml',
+      relationship: { fromModel: 'fct_order', fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' },
+    });
+  });
+});
+
+describe('fixesFromPlan — a self-reference (#133 L3)', () => {
+  it('add-relationship names the model\'s own file, on its many column', () => {
+    const plan: SyncPlan = {
+      generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+      modelContext: {}, models: [], columns: [], requiresCompile: false,
+      relationships: [
+        { fromModel: 'employee', fromColumn: 'employee_id', toModel: 'employee', toColumn: 'manager_id', discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-many' },
+      ],
+    };
+    const [fix] = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Map(), addToLibrary: true });
+    expect(fix).toMatchObject({
+      kind: 'add-relationship', model: 'employee', file: '.erd-studio/logical-models/employee.yml',
+      relationship: { fromModel: 'employee', fromColumn: 'manager_id', toModel: 'employee', toColumn: 'employee_id', cardinality: 'many-to-one' },
+    });
+  });
+});
+
+describe('fixesFromPlan — composite foreign keys (#133 L2)', () => {
+  const PAIRS = [{ fromColumn: 'customer_hk', toColumn: 'customer_hk' }, { fromColumn: 'as_of_date', toColumn: 'load_date' }];
+  const planOf = (relationships: SyncPlan['relationships']): SyncPlan => ({
+    generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
+    modelContext: {}, models: [], columns: [], requiresCompile: false, relationships,
+  });
+
+  it('a composite dbt does not declare is one advisory declare-composite-foreign-key fix, on the many side\'s yml', () => {
+    const [fix] = fixesFromPlan(planOf([{
+      fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', pairs: PAIRS, compositeKey: 'fk_sat_customer',
+      composite: true, discrepancyStatus: 'extra', groundTruth: 'physical', action: 'add-relationship-test-to-physical', sourceCardinality: 'many-to-one',
+    }]), '.erd-studio/silver/d.json', '.erd-studio', []);
+    expect(fix).toMatchObject({
+      severity: 'advisory', kind: 'declare-composite-foreign-key', model: 'pit_customer', file: '.erd-studio/logical-models/pit_customer.yml',
+      relationship: { fromModel: 'pit_customer', toModel: 'sat_customer', cardinality: 'many-to-one', pairs: PAIRS, compositeKey: 'fk_sat_customer' },
+    });
+    expect(fix.explain).toMatch(/^The logical model draws the composite foreign key pit_customer \(customer_hk, as_of_date\) → sat_customer \(customer_hk, load_date\), and dbt declares none\. Nothing to change in the logical model\./);
+    expect(fix.explain).toContain('`foreign_key` constraint to pit_customer');
+  });
+
+  it('a dbt composite the logical model lacks is a blocking add-relationship with its pairs, in the canonical file', () => {
+    const reversed = PAIRS.map((p) => ({ fromColumn: p.toColumn, toColumn: p.fromColumn }));
+    const [fix] = fixesFromPlan(planOf([{
+      fromModel: 'sat_customer', fromColumn: 'customer_hk', toModel: 'pit_customer', toColumn: 'customer_hk', pairs: reversed, compositeKey: 'fk_dbt',
+      discrepancyStatus: 'missing', groundTruth: 'physical', action: 'add-relationship-to-logical', targetCardinality: 'one-to-many',
+    }]), '.erd-studio/silver/d.json', '.erd-studio', [], [], { inLibrary: new Map(), addToLibrary: true });
+    expect(fix).toMatchObject({
+      severity: 'blocking', kind: 'add-relationship', model: 'pit_customer', file: '.erd-studio/logical-models/pit_customer.yml',
+      relationship: { fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', cardinality: 'many-to-one', pairs: PAIRS, compositeKey: 'fk_dbt' },
+    });
+    expect(fix.explain).toContain('add it to the logical model as 2 entries sharing `compositeKey: fk_dbt`');
+  });
+
+  it('a cardinality difference names every entry of the composite', () => {
+    const [fix] = fixesFromPlan(planOf([{
+      fromModel: 'pit_customer', fromColumn: 'customer_hk', toModel: 'sat_customer', toColumn: 'customer_hk', pairs: PAIRS, compositeKey: 'fk_sat',
+      discrepancyStatus: 'cardinality-mismatch', groundTruth: 'physical', action: 'update-cardinality-in-logical', sourceCardinality: 'many-to-one', targetCardinality: 'one-to-one',
+    }]), '.erd-studio/silver/d.json', '.erd-studio', []);
+    expect(fix).toMatchObject({ kind: 'set-cardinality', relationship: { pairs: PAIRS, compositeKey: 'fk_sat' } });
+    expect(fix.explain).toContain('set `cardinality` on every entry of compositeKey fk_sat');
+  });
+});
+
+describe('diff — an undeclared composite is advisory, blocking only under --strict (#133 L2)', () => {
+  it('dbt-project', async () => {
+    const root = copyProject('dbt-project');
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
+    const models = ['fct_order', 'dim_customer'];
+    const inventory = JSON.parse((await run(['inventory', '--models', models.join(','), '--json'], root)).out) as InventoryResult;
+    const file = writeModelFromInventory(root, inventory, 'silver', 'orders', 'library');
+    const ymlPath = path.join(root, '.erd-studio', 'logical-models', 'fct_order.yml');
+    const yml = parseYaml(fs.readFileSync(ymlPath, 'utf-8')) as { relationships: Array<Record<string, unknown>> };
+    yml.relationships = [
+      { fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one', compositeKey: 'fk_dim_customer' },
+      { fromColumn: 'order_date', toModel: 'dim_customer', toColumn: 'email', cardinality: 'many-to-one', compositeKey: 'fk_dim_customer' },
+    ];
+    fs.writeFileSync(ymlPath, toYaml(yml));
+
+    const plain = await run(['diff', '--domain', path.relative(root, file), '--json'], root);
+    const d = (JSON.parse(plain.out) as DiffResult).domains[0];
+    expect(d.fixes.filter((f) => f.kind === 'declare-composite-foreign-key')).toEqual([
+      expect.objectContaining({ severity: 'advisory', model: 'fct_order', file: '.erd-studio/logical-models/fct_order.yml' }),
+    ]);
+    expect(d.fixes.filter((f) => f.severity === 'blocking')).toEqual([]);
+    expect(plain.code).toBe(0);
+
+    const strict = await run(['diff', '--domain', path.relative(root, file), '--json', '--strict'], root);
+    expect(strict.code).toBe(1);
+  });
+});
+
 describe('fixesFromPlan', () => {
   const plan: SyncPlan = {
     generatedAt: '', domain: 'd', layer: 'silver', sourceStage: 'logical', targetStage: 'physical',
@@ -243,12 +405,42 @@ describe('fixesFromPlan', () => {
     expect(fixes[fixes.length - 1].severity).toBe('advisory');
   });
 
+  const F_TO_M = { fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' };
+  const stored = (rel: Relationship) => ({ inLibrary: new Map([[linkKey(rel), rel]]), addToLibrary: true });
+
   it('names the from-model yml for a relationship stored in the model library (#126)', () => {
-    const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], {
-      inLibrary: new Set([relationshipKey({ fromModel: 'f', fromColumn: 'k', toModel: 'm', toColumn: 'k' })]),
-      addToLibrary: true,
-    });
+    const fixes = fixesFromPlan(plan, '.erd-studio/silver/d.json', '.erd-studio', [], [], stored({ ...F_TO_M, cardinality: 'one-to-one' }));
     expect(fixes.find((f) => f.kind === 'set-cardinality')).toMatchObject({ file: '.erd-studio/logical-models/f.yml' });
+    expect(fixes.find((f) => f.kind === 'set-cardinality')).not.toHaveProperty('movesFrom');
+  });
+
+  it('never asks for a one-to-many in a yml: it names the canonical entry, its file and the file it moves from (D5)', () => {
+    const toOneToMany: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], sourceCardinality: 'many-to-one', targetCardinality: 'one-to-many' }] };
+    const [fix] = fixesFromPlan(toOneToMany, '.erd-studio/silver/d.json', '.erd-studio', [], [], stored({ ...F_TO_M, cardinality: 'many-to-one' }));
+    expect(fix).toMatchObject({
+      kind: 'set-cardinality', model: 'm', file: '.erd-studio/logical-models/m.yml', movesFrom: '.erd-studio/logical-models/f.yml',
+      relationship: { fromModel: 'm', fromColumn: 'k', toModel: 'f', toColumn: 'k', cardinality: 'many-to-one' },
+    });
+  });
+
+  it('names a backwards copy\'s file as the one to move from, and keeps a one-to-one where it is stored (D5)', () => {
+    const backwards = { fromModel: 'm', fromColumn: 'k', toModel: 'f', toColumn: 'k', cardinality: 'many-to-one' as const };
+    const toManyToOne: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], sourceCardinality: 'one-to-many', targetCardinality: 'many-to-one' }] };
+    expect(fixesFromPlan(toManyToOne, 'd.json', '.erd-studio', [], [], stored(backwards))[0]).toMatchObject({
+      file: '.erd-studio/logical-models/f.yml', movesFrom: '.erd-studio/logical-models/m.yml', relationship: { ...F_TO_M, cardinality: 'many-to-one' },
+    });
+    const toOneToOne: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], sourceCardinality: 'one-to-many', targetCardinality: 'one-to-one' }] };
+    const [fix] = fixesFromPlan(toOneToOne, 'd.json', '.erd-studio', [], [], stored(backwards));
+    expect(fix).toMatchObject({ file: '.erd-studio/logical-models/m.yml', relationship: { ...backwards, cardinality: 'one-to-one' } });
+    expect(fix).not.toHaveProperty('movesFrom');
+  });
+
+  it('names the stored entry and its file for a remove (D5)', () => {
+    const removing: SyncPlan = { ...plan, columns: [], relationships: [{ ...plan.relationships[0], discrepancyStatus: 'extra', action: 'remove-relationship-from-logical' }] };
+    const backwards = { fromModel: 'm', fromColumn: 'k', toModel: 'f', toColumn: 'k', cardinality: 'many-to-one' as const };
+    expect(fixesFromPlan(removing, 'd.json', '.erd-studio', [], [], stored(backwards))[0]).toMatchObject({
+      kind: 'remove-relationship', model: 'm', file: '.erd-studio/logical-models/m.yml', relationship: backwards,
+    });
   });
 });
 
@@ -281,9 +473,11 @@ function writeModelFromInventory(
         ...(pk.has(c.name) ? { isPrimaryKey: true } : {}),
         ...(fk.has(c.name) ? { isForeignKey: true } : {}),
       })),
-      ...(home === 'library' && inventory.relationships.some((r) => r.fromModel === m.name)
+      // As the setup skill writes them: each on its many side (#133).
+      ...(home === 'library' && inventory.relationships.map(canonicalRelationship).some((r) => r.fromModel === m.name)
         ? {
             relationships: inventory.relationships
+              .map(canonicalRelationship)
               .filter((r) => r.fromModel === m.name)
               .map(({ fromModel: _from, ...rest }) => rest),
           }
@@ -343,10 +537,11 @@ describe('end to end: inventory → logical model → diff exits 0', () => {
     fs.writeFileSync(file, JSON.stringify(doc, null, 2));
     const drift = await run(['diff', '--domain', path.relative(root, file), '--json'], root);
     expect(drift.code).toBe(1);
+    // The fix names it on its many side (#133), whichever end dbt tests it from.
     expect(JSON.parse(drift.out).domains[0].fixes).toContainEqual(expect.objectContaining({
       kind: 'add-relationship',
       severity: 'blocking',
-      relationship: dropped,
+      relationship: canonicalRelationship(dropped),
     }));
   });
 });
@@ -368,7 +563,7 @@ describe('end to end, relationships in the model library (#126): inventory → l
     expect(d.counts.matchedRelationships).toBe(inventory.relationships.length);
 
     // Drift in the library is caught, and the fix names the model file, not the domain.
-    const dropped = inventory.relationships[0];
+    const dropped = canonicalRelationship(inventory.relationships[0]);
     const ymlPath = path.join(root, '.erd-studio', 'logical-models', `${dropped.fromModel}.yml`);
     const yml = parseYaml(fs.readFileSync(ymlPath, 'utf-8')) as { relationships: unknown[] };
     yml.relationships = yml.relationships.filter((r) => (r as { toModel: string }).toModel !== dropped.toModel
@@ -380,5 +575,38 @@ describe('end to end, relationships in the model library (#126): inventory → l
       kind: 'add-relationship',
       file: `.erd-studio/logical-models/${dropped.fromModel}.yml`,
     }));
+  });
+});
+
+describe('the read winner sees dbt\'s key evidence in the CLI as on the canvas (#133 L1)', () => {
+  it('CLI diff and canvas diff agree when dbt decides which of two copies is drawn', async () => {
+    const root = copyProject('dbt-project');
+    const semantic = path.join(root, '.erd-studio');
+    for (const entry of fs.readdirSync(semantic)) if (entry !== 'layers.json') fs.rmSync(path.join(semantic, entry), { recursive: true, force: true });
+    fs.mkdirSync(path.join(semantic, 'logical-models'));
+    fs.mkdirSync(path.join(semantic, 'silver'));
+    // No key flagged; the link stored at both ends, both many-to-one (a 1.6.7 leftover).
+    const col = (name: string) => ({ name, dataType: 'INT', description: 'x' });
+    fs.writeFileSync(path.join(semantic, 'logical-models', 'dim_customer.yml'), toYaml({
+      name: 'dim_customer', description: 'x', columns: [col('customer_key')],
+      relationships: [{ fromColumn: 'customer_key', toModel: 'fct_order', toColumn: 'customer_key', cardinality: 'many-to-one' }],
+    }));
+    fs.writeFileSync(path.join(semantic, 'logical-models', 'fct_order.yml'), toYaml({
+      name: 'fct_order', description: 'x', columns: [col('order_id'), col('customer_key')],
+      relationships: [{ fromColumn: 'customer_key', toModel: 'dim_customer', toColumn: 'customer_key', cardinality: 'many-to-one' }],
+    }));
+    const file = path.join(semantic, 'silver', 'orders.json');
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 5, domain: 'orders', layer: 'silver', description: '', logical: { models: ['dim_customer', 'fct_order'], relationships: [] }, viewConfig: {} }));
+
+    const ctx = await buildCliContext({ project: root, semanticDir: '.erd-studio' });
+    // Flags alone draw the dimension's backwards copy; dbt's unique test on dim_customer.customer_key draws the fact's.
+    expect(ctx.domainService.getDomain(file).logical.relationships[0].fromModel).toBe('dim_customer');
+    const canvas = computeDomainDiff({ domainService: ctx.domainService, ymlData: ctx.ymlData, manifest: ctx.manifest, catalog: ctx.catalog }, file, 'logical');
+    expect(canvas.source.relationships).toEqual([expect.objectContaining({ fromModel: 'fct_order', toModel: 'dim_customer', cardinality: 'many-to-one' })]);
+    expect(canvas.report.relationships.map((r) => r.status)).toEqual(['matched']);
+
+    const { result } = runDiff(ctx, { domains: ['.erd-studio/silver/orders.json'] });
+    expect(result.domains[0].report).toEqual(canvas.report);
+    expect(result.domains[0].fixes.filter((f) => f.relationship)).toEqual([]);
   });
 });

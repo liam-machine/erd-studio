@@ -1,0 +1,36 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: accounts (layer gold, logical stage)
+
+  %% Model fct_txn
+  %%   role: fact
+  %%   description: Transactions
+  "fct_txn" {
+    BIGINT txn_id PK "Transaction id"
+    INT account_key FK "Account"
+    DECIMAL_18_2 amount "Signed amount; type DECIMAL(18,2); additive"
+    DECIMAL_18_2 balance_after "Running balance; type DECIMAL(18,2); semi-additive"
+  }
+
+  %% Model dim_account
+  %%   schema: 007
+  %%   role: dimension
+  %%   grain: One row per account
+  %%   description: Accounts, one row per account
+  %%   Purpose: Shared account reference
+  %%   Design: Shared account reference
+  %%   Role choice: Type 2 dimension
+  "dim_account" {
+    INT account_key PK "Surrogate key; SCD type 0"
+    VARCHAR_20 account_number UK "Business key; type VARCHAR(20); SCD type 1"
+    DATE opened_on "SCD type 2"
+    t_12_50 balance "1e3; type 12.50"
+  }
+  %% Not exported: fct_txn is listed more than once; exported once.
+
+  %% fct_txn.account_key -> dim_account.account_key, many-to-one
+  "fct_txn" }o--|| "dim_account" : "account_key"
+
+  %% Sticky note 1 (linked to dim_account): Linked note

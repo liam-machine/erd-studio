@@ -1,5 +1,11 @@
 name: Deploy to VS Code Marketplace and Open VSX
 
+# One workflow per merge to main, three jobs in order:
+#   changes          → what this merge releases (the two flags below)
+#   telemetry-worker → D1 migrations, then the telemetry Worker (telemetry/)
+#   deploy           → the extension, only after the Worker succeeded or had
+#                      nothing to deploy; a failed Worker blocks the release,
+#                      because an older Worker drops keys a new extension sends.
 on:
   pull_request:
     types: [closed]
@@ -8,6 +14,10 @@ on:
     # release (nothing under .github/ ships in the VSIX).
     # Every marketplace release triggers a save-all + window reload for users
     # with a canvas open, so avoid publishing when nothing shipped changes.
+    # telemetry/** is deliberately NOT here: a telemetry-only merge must start
+    # this workflow so the Worker deploys. The `changes` job below repeats this
+    # list (plus telemetry/**) as the "not the extension" filter;
+    # test/unit/deployWorkflow.test.ts fails when the two drift.
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -19,17 +29,183 @@ on:
       # npm package release tooling (publish-packages.yml); nothing in the VSIX.
       - 'scripts/release-packages.mjs'
       - 'test/unit/releasePackages.test.ts'
+      # Checks this workflow's own lists; nothing in the VSIX.
+      - 'test/unit/deployWorkflow.test.ts'
       # A sibling project, never in the VSIX. A change to the src/services it
       # imports still triggers a release through src/.
       - 'mcp-server/**'
+      # The feedback-analysis proxy (Cloudflare Worker), deployed by hand from
+      # proxy/README.md; never in the VSIX.
+      - 'proxy/**'
 
 concurrency:
   group: deploy-main
   cancel-in-progress: false
 
+# Each job asks for what it needs.
+permissions: {}
+
 jobs:
-  deploy:
+  # Two independent questions:
+  #   extension — did this PR change anything that ships in the VSIX?
+  #   worker    — does main's telemetry/ differ from the commit the Worker was
+  #               last deployed from (the telemetry-worker-deployed tag)? Asked
+  #               of main, not of this PR: GitHub cancels a run still pending in
+  #               the deploy-main group when a newer merge queues behind it, and
+  #               a deploy can fail. Either way the next run deploys the Worker
+  #               before it releases the extension, instead of the change being
+  #               lost. A manual deploy does not move the tag, so the next run
+  #               redeploys the same code, which is harmless.
+  changes:
     if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter lists the PR's files through the API
+    outputs:
+      extension: ${{ steps.filter.outputs.extension }}
+      worker: ${{ steps.worker.outputs.changed }}
+      sha: ${{ steps.worker.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0 # the tag and its history
+          filter: blob:none
+
+      # A file counts for the extension unless it matches a pattern below:
+      # `every` makes each pattern, negations included, have to match.
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          predicate-quantifier: every
+          filters: |
+            extension:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!test/fixtures/**'
+              - '!.planning/**'
+              - '!.github/**'
+              - '!social-video/**'
+              - '!.claude/**'
+              - '!scripts/release-packages.mjs'
+              - '!test/unit/releasePackages.test.ts'
+              - '!test/unit/deployWorkflow.test.ts'
+              - '!mcp-server/**'
+              - '!proxy/**'
+              - '!telemetry/**'
+
+      - name: Has the telemetry Worker changed since its last deploy?
+        id: worker
+        env:
+          TAG: telemetry-worker-deployed
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          if ! git rev-parse --quiet --verify "refs/tags/${TAG}^{commit}" > /dev/null; then
+            echo "No ${TAG} tag yet; deploying the Worker"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only --no-renames "refs/tags/${TAG}" "$SHA" -- telemetry ':(exclude,glob)telemetry/**/*.md')
+          if [ -n "$CHANGED" ]; then
+            echo "Changed since the last Worker deploy:"; echo "$CHANGED"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "telemetry/ unchanged since $(git rev-parse --short "refs/tags/${TAG}")"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  telemetry-worker:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    # deploy-main already serialises whole runs; this also keeps any future
+    # caller of this job from overlapping a deploy.
+    concurrency:
+      group: telemetry-worker
+      cancel-in-progress: false
+    permissions:
+      contents: write # move the telemetry-worker-deployed tag
+    env:
+      SHA: ${{ needs.changes.outputs.sha }}
+      TAG: telemetry-worker-deployed
+    steps:
+      # Fail loudly: a skipped Worker deploy would silently drop the data a new
+      # extension release sends.
+      - name: Check Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository secret ${name} is not set. The telemetry Worker cannot deploy, so the extension release is blocked. See telemetry/README.md → Deploy."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.changes.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Test
+        working-directory: telemetry
+        run: npm test && npm run check
+
+      # Tracked: wrangler records each file in d1_migrations and applies it once,
+      # BEFORE the Worker that writes its columns goes live.
+      - name: Apply D1 migrations
+        id: migrate
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          workingDirectory: telemetry
+          command: d1 migrations apply erd-studio-telemetry --remote
+
+      - name: Explain a failed migration
+        if: failure() && steps.migrate.outcome == 'failure'
+        run: |
+          echo "::error::D1 migrations failed, so neither the Worker nor the extension was released. 'duplicate column name' means the database has a migration applied by hand that d1_migrations does not record: run the one-time baseline in telemetry/README.md, then re-run this workflow."
+
+      - name: Deploy the Worker
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          workingDirectory: telemetry
+          command: deploy --message "deploy.yml from ${{ needs.changes.outputs.sha }}"
+
+      # Bookkeeping only: the Worker is live, so a failed push must not block the
+      # extension. Without it the next run redeploys the same Worker (harmless).
+      - name: Record the deployed commit
+        continue-on-error: true
+        run: |
+          if ! git push --force origin "${SHA}:refs/tags/${TAG}"; then
+            echo "::warning::Could not move the ${TAG} tag; the next merge will redeploy the Worker."
+            exit 1
+          fi
+
+  deploy:
+    needs: [changes, telemetry-worker]
+    # After the Worker, or when it had nothing to deploy (skipped) — never after
+    # it failed or was cancelled. `!cancelled()` is what lets a job run when one
+    # of its needs was skipped.
+    if: >-
+      !cancelled()
+      && needs.changes.result == 'success'
+      && needs.changes.outputs.extension == 'true'
+      && (needs.telemetry-worker.result == 'success' || needs.telemetry-worker.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write

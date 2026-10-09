@@ -240,14 +240,14 @@ describe('buildUnifiedDomain', () => {
         schemaVersion: 5,
         logical: {
           models: [],
-          relationships: [good, { ...good, cardinality: 'sometimes' }, { fromModel: 'a' }, 'nope'],
+          relationships: [good, { ...good, fromColumn: 'k2', cardinality: 'sometimes' }, { fromModel: 'a' }, 'nope'],
         },
       },
       { warn },
     );
-    expect(u.logical.relationships).toEqual([good, { ...good, cardinality: 'many-to-one' }]);
+    expect(u.logical.relationships).toEqual([good, { ...good, fromColumn: 'k2', cardinality: 'many-to-one' }]);
     expect(warn.mock.calls.map((c) => c[0])).toEqual([
-      `Relationship a.k → b.k in ${FILE} has invalid cardinality "sometimes"; defaulting to many-to-one`,
+      `Relationship a.k2 → b.k in ${FILE} has invalid cardinality "sometimes"; defaulting to many-to-one`,
       `Skipping malformed relationship entry in ${FILE}: {"fromModel":"a"}`,
       `Skipping malformed relationship entry in ${FILE}: "nope"`,
     ]);
@@ -356,5 +356,114 @@ describe('toLogicalStage', () => {
       relationships: [],
     });
     expect('modelFolder' in toLogicalStage(build({ schemaVersion: 5 }))).toBe(false);
+  });
+});
+
+describe('relationship ends spelled in another case are drawn (#133 L4)', () => {
+  const models: Record<string, SemanticModel> = {
+    dim_customer: { name: 'dim_customer', columns: [{ name: 'customer_id', dataType: 'int', description: '', isPrimaryKey: true }] },
+    fct_order: {
+      name: 'fct_order',
+      columns: [{ name: 'customer_id', dataType: 'int', description: '' }],
+      relationships: [{ fromColumn: 'Customer_ID', toModel: 'Dim_Customer', toColumn: 'CUSTOMER_ID', cardinality: 'many-to-one' }],
+    },
+  };
+  const getModel = (name: string): SemanticModel | null => models[name] ?? null;
+  const REAL = { fromModel: 'fct_order', fromColumn: 'customer_id', toModel: 'dim_customer', toColumn: 'customer_id' };
+
+  it('a library entry with toModel Dim_Customer is drawn as dim_customer, and badges the column', () => {
+    const u = build({ schemaVersion: 5, logical: { models: ['dim_customer', 'fct_order'] } }, { getModel });
+    expect(u.logical.relationships).toEqual([{ ...REAL, cardinality: 'many-to-one' }]);
+    const display = toDisplayDomain(toLogicalStage(u), { viewConfig: {}, layerConfig: undefined, readOnly: false });
+    expect(display.models.find((m) => m.name === 'fct_order')!.columns[0].isForeignKey).toBe(true);
+  });
+
+  it('a domain file\'s own mis-cased entry is drawn with the real names (no library entries)', () => {
+    const own = { fromModel: 'FCT_ORDER', fromColumn: 'customer_ID', toModel: 'dim_Customer', toColumn: 'Customer_id', cardinality: 'many-to-one' };
+    const u = build(
+      { schemaVersion: 5, logical: { models: ['dim_customer', 'fct_order'], relationships: [own, { ...own, fromColumn: 'CUSTOMER_ID' }] } },
+      { getModel: (n) => ({ ...getModel(n)!, relationships: undefined }) },
+    );
+    expect(u.logical.relationships).toEqual([{ ...REAL, cardinality: 'many-to-one' }]);
+  });
+
+  it('a v4 domain\'s inline relationships are respelled too', () => {
+    const u = build({
+      schemaVersion: 4,
+      logical: {
+        models: [models.dim_customer, { name: 'fct_order', columns: models.fct_order.columns }],
+        relationships: [{ fromModel: 'Fct_Order', fromColumn: 'CUSTOMER_ID', toModel: 'DIM_CUSTOMER', toColumn: 'Customer_Id', cardinality: 'many-to-one' }],
+      },
+    });
+    expect(u.logical.relationships).toEqual([{ ...REAL, cardinality: 'many-to-one' }]);
+  });
+});
+
+describe('the read winner reads dbt evidence when no key is flagged (#133 L1)', () => {
+  it('dbt-unique on dim.k makes fct\'s copy win, with no flags anywhere', async () => {
+    const { buildDbtKeyIndex } = await import('../../src/keyEvidence');
+    const dim: SemanticModel = { name: 'dim', columns: [{ name: 'k', dataType: 'int', description: '' }], relationships: [{ fromColumn: 'k', toModel: 'fct', toColumn: 'k', cardinality: 'many-to-one' }] };
+    const fct: SemanticModel = { name: 'fct', columns: [{ name: 'k', dataType: 'int', description: '' }], relationships: [{ fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'many-to-one', role: 'r' }] };
+    const getModel = (name: string): SemanticModel | null => ({ dim, fct } as Record<string, SemanticModel>)[name] ?? null;
+    const doc = { schemaVersion: 5, logical: { models: ['dim', 'fct'] } };
+    expect(build(doc, { getModel }).logical.relationships).toEqual([{ fromModel: 'dim', fromColumn: 'k', toModel: 'fct', toColumn: 'k', cardinality: 'many-to-one' }]);
+    const dbtKeyIndex = buildDbtKeyIndex([{ uniqueColumns: new Map([['dim', new Set(['k'])]]) }]);
+    expect(build(doc, { getModel, dbtKeyIndex }).logical.relationships).toEqual([{ fromModel: 'fct', fromColumn: 'k', toModel: 'dim', toColumn: 'k', cardinality: 'many-to-one', role: 'r' }]);
+  });
+});
+
+describe('composite foreign keys are drawn when they form one (#133 L2)', () => {
+  const col = (name: string) => ({ name, dataType: 'int', description: '' });
+  const sat: SemanticModel = { name: 'sat', columns: [col('hk'), col('load_date')] };
+  const other: SemanticModel = { name: 'hub', columns: [col('hk')] };
+  const m = (fromColumn: string, toColumn: string, extra: Record<string, unknown> = {}) =>
+    ({ fromColumn, toModel: 'sat', toColumn, cardinality: 'many-to-one' as const, compositeKey: 'FK_Sat', ...extra });
+  const pit = (relationships: SemanticModel['relationships']): SemanticModel => ({ name: 'pit', columns: [col('hk'), col('as_of'), col('x')], relationships });
+  const draw = (models: SemanticModel[], own: unknown[] = [], warn = vi.fn()) => {
+    const lookup = Object.fromEntries(models.map((x) => [x.name, x]));
+    const u = build({ schemaVersion: 5, logical: { models: models.map((x) => x.name), relationships: own } }, { getModel: (n) => lookup[n] ?? null, warn });
+    return u.logical.relationships;
+  };
+
+  it('a valid group keeps compositeKey, spelled as its first member, with the first member\'s role on every member', () => {
+    const rels = draw([pit([m('hk', 'hk', { role: 'as of' }), m('as_of', 'load_date', { compositeKey: 'fk_sat', role: 'other' })]), sat]);
+    expect(rels.map((r) => [r.fromColumn, r.compositeKey, r.role])).toEqual([['hk', 'FK_Sat', 'as of'], ['as_of', 'FK_Sat', 'as of']]);
+  });
+
+  it.each([
+    ['one member', [m('hk', 'hk')]],
+    ['mixed toModel', [m('hk', 'hk'), m('as_of', 'hk', { toModel: 'hub' })]],
+    ['mixed cardinality', [m('hk', 'hk'), m('as_of', 'load_date', { cardinality: 'one-to-one' })]],
+    ['many-to-many', [m('hk', 'hk', { cardinality: 'many-to-many' }), m('as_of', 'load_date', { cardinality: 'many-to-many' })]],
+    ['a repeated column', [m('hk', 'hk'), m('hk', 'load_date')]],
+  ])('an invalid group (%s) draws as singles, with one warning', (_name, entries) => {
+    const warn = vi.fn();
+    const rels = draw([pit(entries as SemanticModel['relationships']), sat, other], [], warn);
+    expect(rels.length).toBe(entries.length);
+    expect(rels.every((r) => r.compositeKey === undefined)).toBe(true);
+    expect(warn.mock.calls.filter(([msg]) => /do not form one composite key/.test(msg))).toHaveLength(1);
+  });
+
+  it('a 1.6.7 single copy elsewhere does not break the group in its home file', () => {
+    const stray: SemanticModel = { ...sat, relationships: [{ fromColumn: 'hk', toModel: 'pit', toColumn: 'hk', cardinality: 'one-to-many' }] };
+    const rels = draw([pit([m('hk', 'hk'), m('as_of', 'load_date')]), stray]);
+    expect(rels.map((r) => [r.fromModel, r.fromColumn, r.compositeKey])).toEqual([['pit', 'hk', 'FK_Sat'], ['pit', 'as_of', 'FK_Sat']]);
+  });
+
+  it('a domain file\'s own group is drawn too, by (fromModel, compositeKey)', () => {
+    const own = [
+      { fromModel: 'pit', fromColumn: 'hk', toModel: 'sat', toColumn: 'hk', cardinality: 'many-to-one', compositeKey: 'k' },
+      { fromModel: 'pit', fromColumn: 'as_of', toModel: 'sat', toColumn: 'load_date', cardinality: 'many-to-one', compositeKey: 'K' },
+    ];
+    expect(draw([{ ...pit(undefined) }, sat], own).map((r) => r.compositeKey)).toEqual(['k', 'k']);
+  });
+
+  it('file and model order do not change the result', () => {
+    const entries = [m('hk', 'hk', { role: 'r' }), m('as_of', 'load_date')];
+    const a = draw([pit(entries), sat]);
+    const b = draw([sat, pit(entries)]);
+    const sorted = (rels: typeof a) => rels.map((r) => JSON.stringify(r)).sort();
+    expect(sorted(b)).toEqual(sorted(a));
+    expect(a.map((r) => [r.compositeKey, r.role])).toEqual([['FK_Sat', 'r'], ['FK_Sat', 'r']]);
   });
 });
