@@ -365,4 +365,26 @@ describe('doctor via main', () => {
     expect(why).toContain("A merge conflict is the user's to resolve; once they have saved the file, re-run doctor.");
     expect(why).not.toContain('git add');
   });
+
+  it('puts a model file that does not parse right after a conflicted diagram, before every dbt step (#145)', async () => {
+    // No dbt on PATH, no manifest and no catalog: the model renders as empty
+    // whatever dbt's state, so fixing it must not wait behind the dbt steps.
+    const root = copyFixture('dbt-project-modern-tests');
+    writeConflictedDomain(root);
+    fs.mkdirSync(path.join(root, '.erd-studio', 'logical-models'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.erd-studio', 'logical-models', 'orders.yml'), [
+      'name: orders',
+      '<<<<<<< HEAD',
+      'description: ours',
+      '=======',
+      'description: theirs',
+      '>>>>>>> feature',
+      'columns: []',
+      '',
+    ].join('\n'));
+    const r = await runDoctor({ project: root, semanticDir: '.erd-studio', env: cleanEnv, homeDir: home });
+    expect(r.nextSteps.map((s) => s.id).slice(0, 5)).toEqual([
+      'resolve-merge-conflicts', 'fix-model-yaml', 'install-dbt', 'run-parse', 'run-catalog',
+    ]);
+  });
 });
