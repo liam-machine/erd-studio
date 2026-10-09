@@ -371,3 +371,60 @@ describe('setup skill: where relationships go (#126)', () => {
     expect(setCardinality).toMatch(/Write `relationship`.*in `file`.*`movesFrom`/);
   });
 });
+
+describe('setup skill: merge conflicts are the user\'s to settle (#150)', () => {
+  const ref = (name: string): string =>
+    fs.readFileSync(path.join(__dirname, '../../src/harness/claude/erd-studio-setup/references', name), 'utf-8');
+  const body = (): string => splitFrontmatter(skill.content)!.body;
+  const cli = (name: string): string => fs.readFileSync(path.resolve(__dirname, '../../src/cli', name), 'utf-8');
+
+  it('names the signals doctor and diff really emit', () => {
+    // The ids and fields the skill teaches must be the CLI's own spelling.
+    expect(cli('doctor.ts')).toContain("id: 'resolve-merge-conflicts'");
+    expect(cli('doctor.ts')).toContain('conflictedDomainFiles: ConflictedDomainFile[]');
+    expect(cli('diff.ts')).toContain("code: 'merge-conflict'");
+    expect(cli('diff.ts')).toContain('mergeConflict?: true');
+
+    expect(body()).toContain('`resolve-merge-conflicts`');
+    expect(body()).toContain('`mergeConflict: true`');
+    expect(body()).toContain('`merge-conflict` error');
+    const trouble = ref('troubleshooting.md');
+    for (const signal of ['`resolve-merge-conflicts`', '`erd.conflictedDomainFiles`', '`mergeConflict: true`',
+      '`erd.unreadableModelFiles`', 'code `merge-conflict`']) {
+      expect(trouble, signal).toContain(signal);
+    }
+  });
+
+  it('stops, shows the file and line, and asks rather than picking a side', () => {
+    expect(body()).toContain('Stop and follow `references/troubleshooting.md` → "Merge conflicts"; never pick a side or run git.');
+    const start = ref('troubleshooting.md').indexOf('## Merge conflicts');
+    expect(start).toBeGreaterThan(-1);
+    const section = ref('troubleshooting.md').slice(start, ref('troubleshooting.md').indexOf('\n## ', start + 1));
+    expect(section).toContain('Tell the user the file and line in plain words');
+    expect(section).toContain('**Only `viewConfig.positions` differ**');
+    expect(section).toContain('say either side is\n     safe');
+    expect(section).toContain('ask which to keep');
+    expect(section).toContain('Never pick a side unasked.');
+    for (const git of ['`git add`', '`git checkout --ours` / `--theirs`', '`git merge`', '`git commit`']) {
+      expect(section, git).toContain(git);
+    }
+    expect(section).toContain('re-run doctor');
+  });
+
+  it('never treats a merge conflict as a YAML fix', () => {
+    const fix = ref('verify-and-fix.md');
+    const row = fix.split('\n').find((l) => l.startsWith('| `fix-model-yaml`')) ?? '';
+    expect(row).toContain('**Except with `mergeConflict: true`:**');
+    expect(row).toContain('do not edit it; ask the user');
+    expect(fix).toContain('**Merge conflicts** are always the user\'s');
+    expect(ref('building-the-model.md')).toContain('`mergeConflict: true`: that file holds two versions from a git merge');
+    // Every place SKILL.md tells the assistant to fix a fix-model-yaml carves the conflict out.
+    expect(body()).toContain('except a merge conflict, which is the user\'s to settle (Stage 1)');
+    expect(body()).toContain('re-run the diff (a merge conflict: Stage 1)');
+  });
+
+  it('pre-approves no git command', () => {
+    const tools = frontmatter(skill.content)['allowed-tools'] as string[];
+    expect(tools.filter((t) => /^Bash\(git\b/.test(t))).toEqual([]);
+  });
+});

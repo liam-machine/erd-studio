@@ -110,7 +110,9 @@ double quotes**:
   paste the text itself.
 
 After writing model files, run `doctor` (or the Stage 5 `diff`): a `fix-model-yaml` entry names
-the file and line that does not parse. Fix it before anything else.
+the file and line that does not parse. Fix it before anything else — unless it has
+`mergeConflict: true`: that file holds two versions from a git merge, and only the user can say
+which to keep (troubleshooting.md → "Merge conflicts").
 
 dbt does not know `grain`, `modelRole`, `rationale`, `scdType`, `additiveType` or `isNaturalKey`.
 They come from the **modelling approach** agreed in Stage 3, applied as

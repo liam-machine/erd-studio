@@ -162,7 +162,7 @@ columns:
     scdType: 2
 ```
 
-**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes (escape an inner `"` as `\"`), or use a `|` block for multi-line text. Always quote a value that contains `: ` or ` #`, or starts with any of `` ` @ * & ! % [ { - | > ' " ``. Indent with spaces, never tabs. One YAML document per file: no `---` separators, no markdown code fences, no `{{ doc() }}` — paste the text itself. `erd-studio doctor` and `erd-studio diff` report a file that does not parse as `fix-model-yaml` with its line — fix that before anything else.
+**YAML quoting — the file must parse, or ERD Studio shows the model as empty.** Wrap every `description`, `grain`, `rationale` and `dataType` value in double quotes (escape an inner `"` as `\"`), or use a `|` block for multi-line text. Always quote a value that contains `: ` or ` #`, or starts with any of `` ` @ * & ! % [ { - | > ' " ``. Indent with spaces, never tabs. One YAML document per file: no `---` separators, no markdown code fences, no `{{ doc() }}` — paste the text itself. `erd-studio doctor` and `erd-studio diff` report a file that does not parse as `fix-model-yaml` with its line — fix that before anything else, unless it is marked `mergeConflict: true`: git left two versions in that file after a merge, so show the user the file and line and ask which side to keep — never pick a side yourself or run git commands. A diagram file with conflict markers gets doctor's `resolve-merge-conflicts` step instead; handle it the same way.
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -458,4 +458,4 @@ When asked to execute a sync plan, or when `.erd-studio/.sync-plan.json` exists:
 2. Read `.erd-studio/.sync-plan.json` for the specific actions to execute
 3. Follow the execution steps in SYNC.md to reconcile logical and physical models
 
-<!-- erd-studio-harness: 28 -->
+<!-- erd-studio-harness: 29 -->
