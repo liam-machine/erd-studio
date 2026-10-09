@@ -164,7 +164,7 @@ jobs:
       # BEFORE the Worker that writes its columns goes live.
       - name: Apply D1 migrations
         id: migrate
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -178,7 +178,7 @@ jobs:
           echo "::error::D1 migrations failed, so neither the Worker nor the extension was released. 'duplicate column name' means the database has a migration applied by hand that d1_migrations does not record: run the one-time baseline in telemetry/README.md, then re-run this workflow."
 
       - name: Deploy the Worker
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
