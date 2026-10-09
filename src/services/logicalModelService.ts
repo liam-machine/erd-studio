@@ -14,7 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Document, Pair, YAMLMap, YAMLSeq, parseDocument, isAlias, isMap, isNode, isPair, isScalar, isSeq, visit } from 'yaml';
-import type { Alias, Node, Scalar } from 'yaml';
+import type { Alias, Node, Scalar, ScalarTag, Tags } from 'yaml';
 
 import { LOGICAL_MODELS_DIR, RATIONALE_KEYS, classifyModelLoadError, parseLogicalModelText } from '@erd-studio/core';
 import type { ModelLoadErrorKind } from '@erd-studio/core';
@@ -41,6 +41,31 @@ interface CachedModel {
  * fields that actually changed.
  */
 const STRINGIFY_OPTIONS = { lineWidth: 0 } as const;
+
+/**
+ * The `yaml` library prints a number from its value, not from the text it was
+ * parsed from, so every save rewrote `007`, `1e3`, `.5` and `+1` as `7`,
+ * `1e+3`, `0.5` and `1` — though core's reader takes a number's text, so a
+ * `meta` value of `007` then read "7" (#157). A number that still holds the
+ * text it was parsed from, and that text reads as its value, prints as that
+ * text. One changed by {@link setScalarValue} has no text left, and prints as
+ * usual. Given to every document parsed for editing.
+ */
+function keepNumberText(tags: Tags): Tags {
+  const NUMBER_TAGS = new Set(['tag:yaml.org,2002:int', 'tag:yaml.org,2002:float']);
+  return tags.map((tag) => {
+    if (typeof tag === 'string' || !NUMBER_TAGS.has(tag.tag)) return tag;
+    const print = (tag as ScalarTag).stringify;
+    if (typeof print !== 'function') return tag;
+    const keep: ScalarTag['stringify'] = (item, ...rest) => {
+      const { value, source } = item as Scalar;
+      const asWritten = typeof value === 'number' && typeof source === 'string'
+        && source !== '' && source.trim() === source && Number(source) === value;
+      return asWritten ? source : print(item, ...rest);
+    };
+    return { ...tag, stringify: keep } as ScalarTag;
+  });
+}
 
 /**
  * Folders the extension itself may create under logical-models/: the layer id
@@ -808,7 +833,7 @@ export class LogicalModelService {
     }
     try {
       const text = fs.readFileSync(filePath, 'utf-8');
-      const doc = parseDocument(text);
+      const doc = parseDocument(text, { customTags: keepNumberText });
       if (doc.errors.length > 0 || !isMap(doc.contents)) {
         return null;
       }
@@ -826,7 +851,13 @@ export class LogicalModelService {
    */
   private applyModel(doc: Document, root: YAMLMap, model: SemanticModel, filePath: string): void {
     const plain = this.modelToPlain(model);
-    KEPT_ALIASES.set(doc, new Map());
+    // Every alias starts out kept as it reads now — under a key ERD Studio
+    // does not manage too (`x-note: *g`), and as a key (`*k: …`) — so none
+    // follows an anchor this save rewrites or removes (#157). The sync below
+    // re-keeps a managed alias as it judges it, or replaces it.
+    const kept = new Map<Alias, Node>();
+    visit(doc, { Alias: (_, alias) => { kept.set(alias, this.detach(doc, alias)); } });
+    KEPT_ALIASES.set(doc, kept);
     try {
       this.syncMap(doc, root, plain, MODEL_KEYS);
       this.syncRelationships(doc, root, (plain.relationships ?? []) as Record<string, unknown>[], filePath);
@@ -858,11 +889,13 @@ export class LogicalModelService {
   }
 
   /**
-   * After every write of a save: a kept alias (see {@link confirmAliases})
-   * that no longer reads what it read when it was kept — its anchor was
-   * rewritten, or dropped, by this same save — becomes a plain copy of that
-   * value, keeping the line's comments, so no key the canvas did not change
-   * reads differently. An alias whose anchor did not change stays an alias.
+   * After every write of a save: a kept alias (see {@link confirmAliases} and
+   * {@link applyModel}) that no longer reads what it read when it was kept —
+   * its anchor was rewritten, or dropped, by this same save, or no longer
+   * comes before it — becomes a plain copy of that value, keeping the line's
+   * comments, so no key the canvas did not change reads differently and no
+   * alias is left pointing at nothing. An alias whose anchor did not change
+   * stays an alias.
    */
   private settleKeptAliases(doc: Document): void {
     const kept = KEPT_ALIASES.get(doc);
@@ -870,14 +903,13 @@ export class LogicalModelService {
     const reads = (node: unknown): string => JSON.stringify(this.plainOf(doc, node)) ?? 'undefined';
     const changed = new Map<Alias, Node>();
     for (const [alias, was] of kept) {
-      if (reads(alias) !== reads(was)) changed.set(alias, was);
+      if (alias.resolve(doc) === undefined || reads(alias) !== reads(was)) changed.set(alias, was);
     }
     if (changed.size === 0) return;
     visit(doc, {
-      Alias: (key, alias) => {
+      Alias: (_, alias) => {
         const was = changed.get(alias);
-        if (key === 'key' || !was) return undefined;
-        return this.withCommentsOf(alias, was);
+        return was ? this.withCommentsOf(alias, was) : undefined;
       },
     });
   }
@@ -885,7 +917,8 @@ export class LogicalModelService {
   /**
    * A copy of what `node` reads as, sharing nothing with the document: aliases
    * resolved into copies, anchors and the top node's comments left out, and a
-   * number keeps its source text (`007`). A self-referencing alias reads null.
+   * number keeps its source text (`007`), which it prints as in a document
+   * parsed with {@link keepNumberText}. A self-referencing alias reads null.
    */
   private detach(doc: Document, node: unknown, top = true, path = new Set<unknown>()): Node {
     if (isAlias(node)) {
@@ -895,11 +928,7 @@ export class LogicalModelService {
     }
     let copy: Node;
     if (isScalar(node)) {
-      const scalar = node.clone() as Scalar;
-      if (typeof scalar.value === 'number' && scalar.source !== undefined && String(scalar.value) !== scalar.source) {
-        scalar.value = scalar.source;
-      }
-      copy = scalar;
+      copy = node.clone() as Scalar;
     } else if (isMap(node) || isSeq(node)) {
       path.add(node);
       const part = (n: unknown): unknown => (isNode(n) ? this.detach(doc, n, false, path) : n);
@@ -1014,13 +1043,15 @@ export class LogicalModelService {
   /**
    * What the reader makes of one `relationships:` entry — null when it skips
    * it, undefined when that cannot be told. Read through core's own parser so
-   * the answer is exactly what the canvas draws.
+   * the answer is exactly what the canvas draws. The entry is copied with its
+   * aliases resolved against this document: a plain copy took `role: *r`
+   * along with no anchor to point at, so it never read, and every save of
+   * the model was refused (#157).
    */
   private readRelationshipEntry(doc: Document, item: unknown): ModelRelationship | null | undefined {
     try {
-      const node = isAlias(item) ? item.resolve(doc) : item;
-      const probe = new Document({ name: 'probe', relationships: [] });
-      (probe.get('relationships', true) as YAMLSeq).items.push(isNode(node) ? node.clone() : node);
+      const probe = new Document({ name: 'probe', relationships: [] }, { customTags: keepNumberText });
+      (probe.get('relationships', true) as YAMLSeq).items.push(isNode(item) ? this.detach(doc, item) : item);
       return parseLogicalModelText(probe.toString(), 'probe')?.relationships?.[0] ?? null;
     } catch {
       return undefined;
@@ -1075,18 +1106,18 @@ export class LogicalModelService {
         continue;
       }
       if (isScalar(existing)) {
-        if (existing.value === value) continue;
-        if (this.scalarValue(existing) === value) {
-          // Same text, but the parser coerced it (e.g. `007` -> 7). Pin the
-          // node to the string the model actually uses so it is not written
-          // back as `7`; the node's comments are untouched.
-          setScalarValue(existing, value);
-          continue;
-        }
+        // Left exactly as written when core's reader already reads it as
+        // `value`: `description: true` is the text "true", `name: 007` is
+        // "007" (a number prints as its own text, see keepNumberText), so
+        // neither is quoted by a save that did not change it (#157).
+        if (existing.value === value || this.readsAs(this.scalarValue(existing), value)) continue;
         if (this.isScalarLike(value)) {
           setScalarValue(existing, value);
           continue;
         }
+        // A plain value becoming a map or list keeps the line's comments.
+        map.set(key, this.withCommentsOf(existing, doc.createNode(value) as Node));
+        continue;
       }
       map.set(key, this.isScalarLike(value) ? value : doc.createNode(value));
     }
@@ -1121,7 +1152,7 @@ export class LogicalModelService {
       if (isScalar(pair.value) && this.isScalarLike(value)) {
         // Keep the node, and with it any trailing comment on the line.
         setScalarValue(pair.value, value);
-      } else if (isAlias(pair.value)) {
+      } else if (isAlias(pair.value) || isScalar(pair.value)) {
         pair.value = this.withCommentsOf(pair.value, doc.createNode(value) as Node);
       } else {
         pair.value = doc.createNode(value);
@@ -1154,9 +1185,16 @@ export class LogicalModelService {
       const was = read(this.plainOf(doc, target));
       return was !== undefined && was === read(value);
     }
-    if (!isScalar(target)) return false;
-    const read = this.scalarValue(target);
-    if (read === null) return false;
+    return isScalar(target) && this.readsAs(this.scalarValue(target), value);
+  }
+
+  /**
+   * Whether a scalar core's reader sees as `read` ({@link scalarValue}) reads
+   * as the managed value `value`: text as `String()`, flags by the reader's
+   * `bool()`, `scdType` by `Number()`. An empty value never does.
+   */
+  private readsAs(read: unknown, value: unknown): boolean {
+    if (read === null || read === undefined) return false;
     if (typeof value === 'boolean') {
       return value === (read === true || (typeof read === 'string' && /^(true|yes|on)$/i.test(read.trim())));
     }
@@ -1195,8 +1233,8 @@ export class LogicalModelService {
     return node ?? null;
   }
 
-  /** `node`, to stand in place of the alias `old`, carrying the line's comments. */
-  private withCommentsOf(old: Alias, node: Node): Node {
+  /** `node`, to stand in place of the alias or plain value `old`, carrying the line's comments. */
+  private withCommentsOf(old: Alias | Scalar, node: Node): Node {
     if (isScalar(node)) {
       if (old.commentBefore) node.commentBefore = old.commentBefore;
       if (old.comment) node.comment = old.comment;

@@ -1143,7 +1143,7 @@ function planGroupMoves(
     const definitions = groupDefinitions(forms);
     if (definitions.length > 1) {
       if (isLocked(...new Set(definitions.map((d) => d.members[0].fromModel)), head[0].toModel)) {
-        leave('a model file it would go in has comments or entries ERD Studio cannot read');
+        leave('a model file it would go in has comments, YAML anchors or entries ERD Studio cannot read');
         continue;
       }
       const roles = [...new Set(definitions.map((d) => d.members[0].role).filter((r): r is string => !!r))];
@@ -1161,7 +1161,7 @@ function planGroupMoves(
       continue;
     }
     if (isLocked(owner.name)) {
-      leave('its model file has comments or entries ERD Studio cannot read');
+      leave('its model file has comments, YAML anchors or entries ERD Studio cannot read');
       continue;
     }
     const [{ members }] = definitions;
@@ -1465,7 +1465,7 @@ export function describeLeftAlone(
   if (plan.lockedFiles.length > 0) {
     lines.push(
       '',
-      `Left alone: the relationships list in ${plan.lockedFiles.map(fileOf).join(', ')} has comments or entries ` +
+      `Left alone: the relationships list in ${plan.lockedFiles.map(fileOf).join(', ')} has comments, YAML anchors or entries ` +
       'ERD Studio cannot read, which rewriting it would lose. Its relationships stay where they are; move them by hand.',
     );
   }

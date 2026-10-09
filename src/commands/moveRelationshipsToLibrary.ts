@@ -179,7 +179,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
   const libraryRoot = path.dirname(logicalModelService.getModelsDir());
   const relPath = (filePath: string): string => path.relative(libraryRoot, filePath).split(path.sep).join('/');
   const fileOf = (model: string): string => relPath(pathOf(model));
-  // A file whose relationships list holds comments or unreadable entries is
+  // A file whose relationships list holds comments, YAML anchors or unreadable entries is
   // never rewritten: re-rendering the list would lose them.
   const lockedFiles = new Map<string, boolean>();
   const locked = (name: string): boolean => {
@@ -295,7 +295,7 @@ async function runMove(deps: MoveRelationshipsDeps): Promise<void> {
     const filePath = logicalModelService.modelPath(name);
     const original = fs.readFileSync(filePath, 'utf-8');
     if (relationshipsRewriteLoses(original)) {
-      throw new Error(`${relPath(filePath)} changed while the dialog was open (its relationships list now has comments or entries it cannot read). Nothing was changed.`);
+      throw new Error(`${relPath(filePath)} changed while the dialog was open (its relationships list now has comments, YAML anchors or entries it cannot read). Nothing was changed.`);
     }
     const model = parseLogicalModelText(original, name);
     if (!model) throw new Error(`${relPath(filePath)} could not be read as a model file.`);

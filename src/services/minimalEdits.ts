@@ -7,7 +7,7 @@
  * moved entries of `logical.relationships`. Pure: no `vscode`, no `fs`.
  */
 
-import { isMap, isPair, isScalar, isSeq, parseDocument, stringify, visit } from 'yaml';
+import { isAlias, isMap, isPair, isScalar, isSeq, parseDocument, stringify, visit } from 'yaml';
 import type { Node, Pair } from 'yaml';
 
 import { VALID_CARDINALITIES, normaliseCompositeKey, normaliseRelationshipRole } from '@erd-studio/core';
@@ -84,16 +84,20 @@ const ENTRY_KEYS = new Set(['fromColumn', 'toModel', 'toColumn', 'cardinality', 
 
 /**
  * Whether re-rendering `text`'s `relationships:` block would lose something:
- * a comment in it, or an entry the reader skips, defaults or changes (an
- * unknown key, a typo'd cardinality). Such a file is left for the user.
+ * a comment in it, a YAML anchor or alias (#157 — the block is written anew,
+ * so an anchor something else points at would vanish and an alias would turn
+ * into a copy), or an entry the reader skips, defaults or changes (an unknown
+ * key, a typo'd cardinality). Such a file is left for the user.
  */
 export function relationshipsRewriteLoses(text: string): boolean {
   const doc = parseDocument(splitBom(text).body);
   if (doc.errors.length > 0 || !isMap(doc.contents)) return true;
   const pair = (doc.contents.items as Pair[]).find((p) => isScalar(p.key) && p.key.value === 'relationships');
   if (!pair?.value) return false;
-  let commented = Boolean((pair.key as Node).comment);
-  visit(pair.value as Node, { Node: (_, n) => { if (n.comment || n.commentBefore) commented = true; } });
+  let commented = Boolean((pair.key as Node).comment) || isAlias(pair.value) || Boolean((pair.value as Node).anchor);
+  visit(pair.value as Node, {
+    Node: (_, n) => { if (n.comment || n.commentBefore || isAlias(n) || n.anchor) commented = true; },
+  });
   const list: unknown = (pair.value as Node).toJSON() ?? [];
   return commented || !Array.isArray(list) || list.some((entry: Record<string, unknown> | null) =>
     !entry || typeof entry !== 'object' || Object.keys(entry).some((k) => !ENTRY_KEYS.has(k))
