@@ -102,6 +102,11 @@ browser; a preflight is not answered and no origin is blessed.
 
 ## Deploy
 
+This Worker is deployed by hand. A merge that changes only `proxy/` starts no
+release (`deploy.yml` ignores it); automating its deploy the way `telemetry/`
+is (a job in `deploy.yml` with its own Cloudflare token) is a possible
+follow-up.
+
 You need a Cloudflare account and an API key for the upstream provider.
 `npx wrangler` needs no global install.
 

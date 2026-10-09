@@ -130,3 +130,69 @@ jobs:
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
         working-directory: mcp-server
+
+  # The telemetry Worker (telemetry/) deploys automatically from deploy.yml, so
+  # its checks gate the PR. No npm install and no Cloudflare credentials: the
+  # dry run bundles and validates wrangler.toml, and the migrations are applied
+  # to a throwaway local D1 — the same path a brand-new database takes. Runs on
+  # every PR (about a minute, beside the longer jobs) so it is never "skipped".
+  telemetry:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: telemetry
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm test
+      - run: npm run check
+
+      - name: Validate the Worker config (dry run, no credentials)
+        run: npx --yes wrangler@4 deploy --dry-run --outdir "${RUNNER_TEMP}/telemetry-dry-run"
+
+      - name: Apply the migrations to a fresh local D1
+        run: npx --yes wrangler@4 d1 migrations apply erd-studio-telemetry --local --persist-to "${RUNNER_TEMP}/telemetry-d1"
+
+      # Read-only proof that deploy.yml's credentials work, long before a
+      # release depends on them: the token is active and holds every permission
+      # the Worker deploy uses, and the live database's pending migrations are
+      # listed. Changes nothing. Fork and Dependabot runs get no secrets, so it
+      # skips there; deploy.yml itself still fails loudly without them.
+      - name: Cloudflare preflight (read-only)
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::Cloudflare secrets are not available to this run; skipping the preflight."
+            exit 0
+          fi
+          api() { curl -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/$1"; }
+          fail=0
+          check() { # label, API path, jq test that must hold
+            if api "$2" | jq -e "$3" > /dev/null; then echo "ok: $1"
+            else echo "::error::Cloudflare preflight: $1"; fail=1; fi
+          }
+          acct="accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          check "token is active" "${acct}/tokens/verify" '.success and .result.status == "active"'
+          check "Workers Scripts: can see erd-studio-telemetry" "${acct}/workers/scripts" '.success and any(.result[]; .id == "erd-studio-telemetry")'
+          check "D1: can see erd-studio-telemetry" "${acct}/d1/database?name=erd-studio-telemetry" '.success and any(.result[]; .name == "erd-studio-telemetry")'
+          check "Workers custom domains readable" "${acct}/workers/domains?service=erd-studio-telemetry" '.success'
+          # Workers Routes on every zone wrangler.toml routes to (its last two labels).
+          for zone in $(grep -oE 'pattern = "[^"]+"' wrangler.toml | sed -E 's/.*"([^"]+)"/\1/' | awk -F. '{print $(NF-1)"."$NF}' | sort -u); do
+            id=$(api "zones?name=${zone}" | jq -r '.result[0].id // empty')
+            if [ -z "$id" ]; then echo "::error::Cloudflare preflight: zone ${zone} is not visible to the token"; fail=1; continue; fi
+            check "Workers Routes on ${zone}" "zones/${id}/workers/routes" '.success'
+          done
+          # Informational: a PR that adds a migration shows it here as pending.
+          npx --yes wrangler@4 d1 migrations list erd-studio-telemetry --remote || fail=1
+          exit "$fail"
